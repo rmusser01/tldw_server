@@ -88,7 +88,7 @@ vi.mock("@/hooks/chat/useHistorySelection", async () => {
   const ReactModule = await import("react")
   const Context = ReactModule.createContext<unknown>(null)
   type Live = {
-    owner: { kind: "native"; conversation_id: string; request_scope: unknown; validate_lease: () => boolean } | null
+    owner: { kind: "native"; conversation_id: string; request_scope: unknown; owner_key: string; validate_lease: () => boolean } | null
     capture: Capture | null
     view: Capture["view"] | null
     status: "idle" | "ready"
@@ -97,7 +97,7 @@ vi.mock("@/hooks/chat/useHistorySelection", async () => {
   return {
     HistorySelectionContext: Context,
     useHistorySelectionContext: () => ReactModule.useContext(Context),
-    useHistorySelection: (options: { onCapture?: (capture: Capture) => void }) => {
+    useHistorySelection: (options: { onCapture?: (capture: Capture) => void } = {}) => {
       const onCapture = ReactModule.useRef(options.onCapture)
       onCapture.current = options.onCapture
       const [controller] = ReactModule.useState(() => {
@@ -106,11 +106,11 @@ vi.mock("@/hooks/chat/useHistorySelection", async () => {
         let revision = 0
         const views = new Map<string, Live>()
         let active = "default"
-        const install = (chatId: string, cursorId: string | null) => {
+        const install = (chatId: string, cursorId: string | null, retainOwner = false) => {
           const capture = captureFor(chatId, cursorId, ++revision)
           io.bookmarks.set(chatId, cursorId)
           live = {
-            owner: { kind: "native", conversation_id: chatId, request_scope: {}, validate_lease: () => true },
+            owner: retainOwner && live.owner?.conversation_id === chatId ? live.owner : { kind: "native", conversation_id: chatId, owner_key: "owner", request_scope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" }, validate_lease: () => true },
             capture,
             view: capture.view,
             status: "ready"
@@ -142,17 +142,18 @@ vi.mock("@/hooks/chat/useHistorySelection", async () => {
             live.capture ? { owner_key: "owner", conversation_id: live.capture.chatId } : null,
           getCurrent: () => live,
           prepareExpansionPath: async () => null,
-          loadConversation: async (target: { serverChatId?: string | null }) => {
+          loadConversation: async (target: { serverChatId?: string | null; isCurrent?: () => boolean }, _reference?: unknown, onLoaded?: (receipt: { owner: NonNullable<Live["owner"]>; view: NonNullable<Live["view"]> }) => void) => {
             const chatId = target.serverChatId
             const token = ++epoch
             await Promise.resolve()
-            if (token !== epoch) return false
+            if (token !== epoch || target.isCurrent?.() === false) return false
             if (!chatId) {
               live = empty()
               return false
             }
             // Like the real hook, restore the bookmarked leaf, else start at the latest one.
             install(chatId, io.bookmarks.has(chatId) ? io.bookmarks.get(chatId)! : tipOf(chatId))
+            onLoaded?.({ owner: live.owner!, view: live.view! })
             return true
           },
           choose: async (cursor: { kind: string; message_id?: string }) => {
@@ -160,7 +161,7 @@ vi.mock("@/hooks/chat/useHistorySelection", async () => {
             const token = ++epoch
             await Promise.resolve()
             if (token !== epoch || !chatId || io.chooseFails) return false
-            install(chatId, cursor.kind === "after_message" ? cursor.message_id! : null)
+            install(chatId, cursor.kind === "after_message" ? cursor.message_id! : null, true)
             return true
           }
         }
@@ -206,10 +207,12 @@ vi.mock("@/utils/safe-storage", () => ({
 }))
 vi.mock("@/hooks/useMessage", async () => {
   const { useSelectedModel } = await import("@/hooks/chat/useSelectedModel")
+  const { useHistorySelectionContext } = await import("@/hooks/chat/useHistorySelection")
   return {
     useMessage: () => {
       const state = useStoreMessageOption()
       const selection = useSelectedModel()
+      const historySelection = useHistorySelectionContext()
       return new Proxy(state, {
         get: (target, key) =>
           key in selection
@@ -217,14 +220,13 @@ vi.mock("@/hooks/useMessage", async () => {
             : key in target
               ? Reflect.get(target, key)
               : key === "clearChat"
-                ? () =>
-                    useStoreMessageOption.setState({
-                      messages: [],
-                      history: [],
-                      historyId: null,
-                      serverChatId: null,
-                      queuedMessages: []
-                    })
+                ? (beforeReset?: () => void) => {
+                    beforeReset?.()
+                    useStoreMessageOption.getState().startNewChatDraft()
+                    historySelection?.reset()
+                    useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: null, queuedMessages: [] })
+                    return true
+                  }
                 : String(key).startsWith("set") ||
                     ["stopStreamingRequest", "onSubmit"].includes(String(key))
                   ? io.noop
@@ -528,8 +530,8 @@ describe("side-panel tabs that fall behind their server chat (XP-08)", () => {
       "chat-1 follow-up from the full page",
       "chat-1 reply from the full page"
     ])
-    // The panel says why its transcript changed.
-    expect(screen.getByText(STALE_NOTICE)).toBeInTheDocument()
+    // Choosing publishes the transcript before its awaited notice.
+    expect(await screen.findByText(STALE_NOTICE)).toBeInTheDocument()
     // The next send continues from the server's latest message.
     expect(io.bookmarks.get("chat-1")).toBe("chat-1-a2")
   })
@@ -693,7 +695,7 @@ describe("side-panel tabs that fall behind their server chat (XP-08)", () => {
       expect(io.bookmarks.get("chat-1")).toBe("chat-1-a1")
     })
 
-    it("holds the send, keeps the message and offers Refresh when the tab cannot be refreshed", async () => {
+    it("holds the send and offers Refresh without broadcasting the owned composer input", async () => {
       seedSavedPanel()
       render(<SidepanelChat />)
       await screen.findByText("chat-1 answer")
@@ -716,7 +718,7 @@ describe("side-panel tabs that fall behind their server chat (XP-08)", () => {
       expect(notice).toHaveTextContent(STALE_NOTICE)
       expect(notice).toHaveTextContent(/wasn't sent/i)
       expect(screen.getByRole("button", { name: /refresh/i })).toBeInTheDocument()
-      expect((restored.mock.calls[0]?.[0] as CustomEvent).detail).toMatchObject({ message: "next question" })
+      expect(restored).not.toHaveBeenCalled()
     })
   })
 })

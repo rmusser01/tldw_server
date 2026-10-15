@@ -90,6 +90,7 @@ const resolveVisibleMobilePanel = (
   leftRailVisible: boolean,
   rightRailVisible: boolean,
 ): PlaygroundCockpitMobilePanel => {
+  if (resolvedMobilePanel === null) return null;
   if (resolvedMobilePanel === "runtime" && rightRailVisible) return "runtime";
   if (resolvedMobilePanel === "context" && leftRailVisible) return "context";
   if (leftRailVisible) return "context";
@@ -131,8 +132,8 @@ export const PlaygroundCockpitShell = ({
   const [uncontrolledMobilePanel, setUncontrolledMobilePanel] =
     React.useState<PlaygroundCockpitMobilePanel>("context");
   const focusMode = mode === "focus";
-  const mobileContextTabId = "playground-cockpit-mobile-context-tab";
-  const mobileRuntimeTabId = "playground-cockpit-mobile-runtime-tab";
+  const mobileContextButtonId = "playground-cockpit-mobile-context-tab";
+  const mobileRuntimeButtonId = "playground-cockpit-mobile-runtime-tab";
   const mobileContextPanelId = "playground-cockpit-mobile-context-panel";
   const mobileRuntimePanelId = "playground-cockpit-mobile-runtime-panel";
   const mobilePanelSummaryId = "playground-cockpit-mobile-panel-summary";
@@ -186,10 +187,6 @@ export const PlaygroundCockpitShell = ({
     "cockpit.restoreRuntimeSidechannel",
     "Restore runtime sidechannel",
   );
-  const hideContextRailLabel = t("cockpit.hideContextRail", "Hide context rail");
-  const showContextRailLabel = t("cockpit.showContextRail", "Show context rail");
-  const hideRuntimeRailLabel = t("cockpit.hideRuntimeRail", "Hide runtime rail");
-  const showRuntimeRailLabel = t("cockpit.showRuntimeRail", "Show runtime rail");
   const contextRailTabLabel = t("cockpit.contextRailTab", "Context rail");
   const runtimeRailTabLabel = t("cockpit.runtimeRailTab", "Runtime rail");
   const modeSummaryKey = buildModeSummaryKey(
@@ -256,10 +253,7 @@ export const PlaygroundCockpitShell = ({
         themedBackdrop ? "backdrop-blur-[1px]" : "bg-bg"
       }`}
     >
-      <p
-        data-testid="playground-cockpit-mode-summary"
-        className="sr-only"
-      >
+      <p data-testid="playground-cockpit-mode-summary" className="sr-only">
         {modeSummary}
       </p>
 
@@ -271,18 +265,22 @@ export const PlaygroundCockpitShell = ({
           className="grid shrink-0 grid-cols-1 gap-2 border-b border-border bg-surface2/40 p-2 text-xs lg:hidden"
         >
           <div
-            role="tablist"
+            role="group"
             aria-label={t("cockpit.mobilePanelTabs", "Mobile cockpit panels")}
             className="grid grid-cols-2 gap-1 rounded-md border border-border bg-surface p-1"
           >
             <button
-              id={mobileContextTabId}
+              id={mobileContextButtonId}
               type="button"
-              role="tab"
-              aria-selected={leftRailVisible && visibleMobilePanel === "context"}
               aria-controls={mobileContextPanelId}
-              aria-expanded={leftRailVisible}
+              aria-expanded={
+                leftRailVisible && visibleMobilePanel === "context"
+              }
               onClick={() => {
+                if (visibleMobilePanel === "context") {
+                  setMobilePanel(null);
+                  return;
+                }
                 if (!leftRailVisible) {
                   onLeftRailVisibleChange?.(true);
                 }
@@ -294,18 +292,20 @@ export const PlaygroundCockpitShell = ({
                   : "text-text-muted hover:bg-bg"
               }`}
             >
-              {leftRailVisible
-                ? t("cockpit.context", "Context")
-                : restoreContextSidechannelLabel}
+              {t("cockpit.context", "Context")}
             </button>
             <button
-              id={mobileRuntimeTabId}
+              id={mobileRuntimeButtonId}
               type="button"
-              role="tab"
-              aria-selected={rightRailVisible && visibleMobilePanel === "runtime"}
               aria-controls={mobileRuntimePanelId}
-              aria-expanded={rightRailVisible}
+              aria-expanded={
+                rightRailVisible && visibleMobilePanel === "runtime"
+              }
               onClick={() => {
+                if (visibleMobilePanel === "runtime") {
+                  setMobilePanel(null);
+                  return;
+                }
                 if (!rightRailVisible) {
                   onRightRailVisibleChange?.(true);
                 }
@@ -317,43 +317,7 @@ export const PlaygroundCockpitShell = ({
                   : "text-text-muted hover:bg-bg"
               }`}
             >
-              {rightRailVisible
-                ? t("cockpit.runtime", "Runtime")
-                : restoreRuntimeSidechannelLabel}
-            </button>
-          </div>
-          <div className="grid grid-cols-2 gap-1">
-            <button
-              type="button"
-              aria-pressed={leftRailVisible}
-              aria-controls={mobileContextPanelId}
-              onClick={() => {
-                onLeftRailVisibleChange?.(!leftRailVisible);
-                if (leftRailVisible && visibleMobilePanel === "context") {
-                  setMobilePanel("runtime");
-                } else if (!leftRailVisible) {
-                  setMobilePanel("context");
-                }
-              }}
-              className="min-h-[36px] rounded-md border border-border bg-bg px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              {leftRailVisible ? hideContextRailLabel : showContextRailLabel}
-            </button>
-            <button
-              type="button"
-              aria-pressed={rightRailVisible}
-              aria-controls={mobileRuntimePanelId}
-              onClick={() => {
-                onRightRailVisibleChange?.(!rightRailVisible);
-                if (rightRailVisible && visibleMobilePanel === "runtime") {
-                  setMobilePanel("context");
-                } else if (!rightRailVisible) {
-                  setMobilePanel("runtime");
-                }
-              }}
-              className="min-h-[36px] rounded-md border border-border bg-bg px-2 py-1 text-xs font-medium text-text hover:bg-surface focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              {rightRailVisible ? hideRuntimeRailLabel : showRuntimeRailLabel}
+              {t("cockpit.runtime", "Runtime")}
             </button>
           </div>
           <p
@@ -365,26 +329,28 @@ export const PlaygroundCockpitShell = ({
           </p>
           <section
             id={mobileContextPanelId}
-            role="tabpanel"
-            aria-labelledby={mobileContextTabId}
+            aria-labelledby={mobileContextButtonId}
             aria-describedby={mobilePanelSummaryId}
             hidden={!leftRailVisible || visibleMobilePanel !== "context"}
             aria-hidden={!leftRailVisible || visibleMobilePanel !== "context"}
             className={`max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
-              !leftRailVisible || visibleMobilePanel !== "context" ? "hidden" : ""
+              !leftRailVisible || visibleMobilePanel !== "context"
+                ? "hidden"
+                : ""
             }`}
           >
             {leftRail}
           </section>
           <section
             id={mobileRuntimePanelId}
-            role="tabpanel"
-            aria-labelledby={mobileRuntimeTabId}
+            aria-labelledby={mobileRuntimeButtonId}
             aria-describedby={mobilePanelSummaryId}
             hidden={!rightRailVisible || visibleMobilePanel !== "runtime"}
             aria-hidden={!rightRailVisible || visibleMobilePanel !== "runtime"}
             className={`max-h-[30vh] overflow-y-auto rounded-md border border-border bg-surface p-2 ${
-              !rightRailVisible || visibleMobilePanel !== "runtime" ? "hidden" : ""
+              !rightRailVisible || visibleMobilePanel !== "runtime"
+                ? "hidden"
+                : ""
             }`}
           >
             {rightRail}
@@ -422,7 +388,7 @@ export const PlaygroundCockpitShell = ({
           </aside>
         )}
 
-        <main
+        <div
           key="main"
           data-testid="playground-cockpit-main"
           className={`min-h-0 min-w-0 overflow-hidden ${
@@ -433,10 +399,12 @@ export const PlaygroundCockpitShell = ({
               : !showLeftRail && !showRightRail
                 ? "w-full"
                 : ""
+          } ${showLeftRestore ? "lg:pl-8" : ""} ${
+            showRightRestore ? "lg:pr-9" : ""
           }`}
         >
           {children}
-        </main>
+        </div>
 
         {showRightRail && (
           <aside
@@ -507,7 +475,6 @@ export const PlaygroundCockpitShell = ({
           <PanelRightOpen className="h-3.5 w-3.5" aria-hidden="true" />
         </CockpitTooltipButton>
       </div>
-
     </div>
   );
 };

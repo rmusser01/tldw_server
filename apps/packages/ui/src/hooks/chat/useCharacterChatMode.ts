@@ -541,12 +541,14 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
 
     const flushStreamingUpdate = () => {
       if (pendingStreamingText.length === 0) return;
+      const text = pendingStreamingText;
+      const reasoningTime = pendingReasoningTime;
       setMessages((prev) =>
         prev.map((m) =>
           m.id === generateMessageId
             ? updateActiveVariant(m, {
-                message: pendingStreamingText,
-                reasoning_time_taken: pendingReasoningTime,
+                message: text,
+                reasoning_time_taken: reasoningTime,
               })
             : m,
         ),
@@ -1006,7 +1008,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
         apiReasoning = sanitizedChunkState.apiReasoning;
         applyEmoteEventsToMessage(sanitizedChunkState.emoteEvents);
 
-        if (chunkState.token && fullText !== previousFullText) {
+        if (fullText !== previousFullText) {
           scheduleStreamingUpdate(`${fullText}▋`, timetaken);
         }
         if (count === 0) {

@@ -74,11 +74,11 @@ describe("ChatHeader shortcut toggle", () => {
     vi.clearAllMocks()
   })
 
-  it("shows signpost button with 'Show shortcuts' when collapsed and requests expand", () => {
+  it("shows signpost button with 'Show pages' when collapsed and requests expand", () => {
     const props = createProps({ shortcutsExpanded: false })
     render(<ChatHeader {...props} />)
 
-    const toggleButton = screen.getByRole("button", { name: "Show shortcuts" })
+    const toggleButton = screen.getByRole("button", { name: "Show pages" })
     expect(toggleButton).toHaveAttribute("aria-expanded", "false")
     fireEvent.click(toggleButton)
 
@@ -89,11 +89,11 @@ describe("ChatHeader shortcut toggle", () => {
     )
   })
 
-  it("shows signpost button with 'Hide shortcuts' when expanded and requests collapse", () => {
+  it("shows signpost button with 'Hide pages' when expanded and requests collapse", () => {
     const props = createProps({ shortcutsExpanded: true })
     render(<ChatHeader {...props} />)
 
-    const toggleButton = screen.getByRole("button", { name: "Hide shortcuts" })
+    const toggleButton = screen.getByRole("button", { name: "Hide pages" })
     expect(toggleButton).toHaveAttribute("aria-expanded", "true")
     fireEvent.click(toggleButton)
 
@@ -109,7 +109,7 @@ describe("ChatHeader shortcut toggle", () => {
     render(<ChatHeader {...props} />)
 
     const homeButton = screen.getByRole("button", { name: "Companion Home" })
-    const signpostButton = screen.getByRole("button", { name: "Show shortcuts" })
+    const signpostButton = screen.getByRole("button", { name: "Show pages" })
     const headerBrand = homeButton.closest(".flex.items-center.gap-2.text-text")
     const headerButtons: HTMLElement[] = Array.from(
       headerBrand?.querySelectorAll("button") ?? []
@@ -133,10 +133,10 @@ describe("ChatHeader shortcut toggle", () => {
     const controls = [
       screen.getByRole("button", { name: "Collapse sidebar" }),
       screen.getByRole("button", { name: "Companion Home" }),
-      screen.getByRole("button", { name: "Show shortcuts" }),
-      screen.getByRole("button", { name: "Search - Open command palette" }),
+      screen.getByRole("button", { name: "Show pages" }),
+      screen.getByRole("button", { name: "Search commands - Open command palette" }),
       screen.getByRole("button", { name: "New saved chat" }),
-      screen.getByRole("button", { name: "Temporary chat (not saved)" }),
+      screen.getByRole("button", { name: "Temporary chat (on this device)" }),
       screen.getByRole("button", { name: "Character chat" }),
       screen.getByRole("button", { name: "Open settings" }),
       screen.getByRole("button", { name: "Switch to light theme" }),
@@ -156,11 +156,11 @@ describe("ChatHeader shortcut toggle", () => {
     render(<ChatHeader {...props} />)
 
     const trigger = screen.getByRole("button", {
-      name: "Search - Open command palette"
+      name: "Search commands - Open command palette"
     })
 
-    expect(trigger).toHaveAttribute("title", "Search")
-    expect(trigger).toHaveTextContent("Search")
+    expect(trigger).toHaveAttribute("title", "Search commands")
+    expect(trigger).toHaveTextContent("Search commands")
     expect(trigger).toHaveTextContent("Ctrl+K")
 
     fireEvent.click(trigger)
@@ -185,7 +185,7 @@ describe("ChatHeader shortcut toggle", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "New saved chat" }))
     fireEvent.click(
-      screen.getByRole("button", { name: "Temporary chat (not saved)" })
+      screen.getByRole("button", { name: "Temporary chat (on this device)" })
     )
     fireEvent.click(screen.getByRole("button", { name: "Character chat" }))
 
@@ -209,7 +209,7 @@ describe("ChatHeader shortcut toggle", () => {
       screen.queryByRole("button", { name: "New saved chat" })
     ).not.toBeInTheDocument()
     expect(
-      screen.queryByRole("button", { name: "Temporary chat (not saved)" })
+      screen.queryByRole("button", { name: "Temporary chat (on this device)" })
     ).not.toBeInTheDocument()
     expect(
       screen.queryByRole("button", { name: "Character chat" })
@@ -221,10 +221,10 @@ describe("ChatHeader shortcut toggle", () => {
     render(<ChatHeader {...props} />)
 
     expect(
-      screen.getByRole("button", { name: "Temporary chat (not saved)" }).className
+      screen.getByRole("button", { name: "Temporary chat (on this device)" }).className
     ).toContain("hidden")
     expect(
-      screen.getByRole("button", { name: "Temporary chat (not saved)" }).className
+      screen.getByRole("button", { name: "Temporary chat (on this device)" }).className
     ).toContain("sm:inline-flex")
     expect(screen.getByRole("button", { name: "Character chat" }).className).toContain(
       "hidden"
@@ -290,6 +290,13 @@ describe("ChatHeader shortcut toggle", () => {
     expect(screen.queryByText("Saved on server")).not.toBeInTheDocument()
   })
 
+  it.each(["server", "temporary", "serverFailed"] as const)("keeps %s status labels readable with semantic backgrounds", persistenceKind => {
+    render(<ChatHeader {...createProps({ temporaryChat: persistenceKind === "temporary", persistenceKind, themeMode: "light" })} />)
+    const badge = screen.getByTestId("chat-header-persistence-badge")
+    expect(badge.classList.contains("text-text")).toBe(true)
+    expect(badge.className).toContain(persistenceKind === "server" ? "bg-success/10" : "bg-warn/10")
+  })
+
   it("labels a chat whose server write was acknowledged as saved on server", () => {
     render(
       <ChatHeader
@@ -333,7 +340,7 @@ describe("ChatHeader shortcut toggle", () => {
     expect(badge).toHaveTextContent("Temporary")
     expect(badge).toHaveAttribute(
       "title",
-      "Temporary chat. Messages are not saved."
+      "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device."
     )
   })
 
@@ -380,4 +387,16 @@ describe("ChatHeader shortcut toggle", () => {
       "2 active link(s)"
     )
   })
+})
+
+
+it("labels history eligibility without claiming an acknowledged save", () => {
+  render(<ChatHeader {...createProps({ historyId: null, temporaryChat: false })} />)
+  expect(screen.getByText("History on")).toHaveAttribute("title", "New messages can be stored in chat history.")
+  expect(screen.queryByText("Saved")).not.toBeInTheDocument()
+})
+
+it("explains Temporary history without promising removal of retained local drafts", () => {
+  render(<ChatHeader {...createProps({ temporaryChat: true })} />)
+  expect(screen.getByText("Temporary")).toHaveAttribute("title", "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device.")
 })

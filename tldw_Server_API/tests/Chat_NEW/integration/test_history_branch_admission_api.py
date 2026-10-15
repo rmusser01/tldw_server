@@ -174,3 +174,209 @@ def test_completion_branch_field_requires_selection(history_api):
         "model": "gpt-4o-mini", "messages": [{"role": "user", "content": "plain"}], "tldw_history_branch": False})
     assert response.status_code == 422, response.text
     assert db.count_messages_for_conversation(cid) == 0
+
+
+# The edited target is intentionally absent from selection.messages.
+def protected_edit_selection(client, cid, headers, target="u2"):
+    response = client.post(
+        f"/api/v1/chat/conversations/{cid}/history/selection",
+        headers=headers,
+        json={
+            "purpose": "send",
+            "view": {
+                "view_session_id": "edit-view",
+                "conversation_id": cid,
+                "interpretation": {"kind": "parent_graph_v1"},
+                "cursor": {"kind": "before_message", "message_id": target},
+                "selection_revision": 2,
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    result = resolve_history_selection(body["snapshot"], body["view"], "send", "protected-edit")
+    assert result["status"] == "ready", result
+    original = next(row for row in body["snapshot"]["nodes"] if row["id"] == target)
+    return result["selection"], {"version": 1, "message_id": target, "message_revision": original["revision"]}
+
+
+@pytest.mark.parametrize("operation", ["messages", "completion"])
+@pytest.mark.parametrize("mutation", ["content", "undo", "metadata", "image", "parent", "deleted", "sender_metadata"])
+def test_protected_edit_refuses_excluded_target_change_before_any_write_or_provider(
+    history_api, monkeypatch, operation, mutation
+):
+    from tldw_Server_API.app.api.v1.endpoints import chat as endpoint
+
+    client, db, cid, headers = history_api
+    stale_tip(client, cid, headers)
+    if mutation == "metadata":
+        assert db.add_message_metadata("u2", extra={"sender_role": "user"})
+    selection, target = protected_edit_selection(client, cid, headers)
+    row = db.get_message_by_id("u2")
+    if mutation == "metadata":
+        assert db.add_message_metadata("u2", extra={"sender_role": "user", "changed": True})
+    elif mutation == "deleted":
+        assert db.soft_delete_message("u2", expected_version=row["version"])
+    elif mutation == "parent":
+        assert db.update_message("u2", {"parent_message_id": "u1"}, row["version"])
+    elif mutation == "sender_metadata":
+        assert db.add_message_metadata("u2", extra={"sender_role": "assistant"})
+    elif mutation == "image":
+        assert db.update_message(
+            "u2", {"image_data": b"new image bytes", "image_mime_type": "image/png"}, row["version"]
+        )
+    else:
+        assert db.update_message("u2", {"content": "other tab edited the excluded target"}, row["version"])
+        if mutation == "undo":
+            assert db.update_message("u2", {"content": row["content"]}, row["version"] + 1)
+    before = (db.count_messages_for_conversation(cid), db.get_conversation_by_id(cid)["history_version"])
+    provider_calls = []
+
+    def forbidden(*args, **kwargs):
+        provider_calls.append(True)
+        raise AssertionError("changed excluded target reached provider")
+
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", forbidden)
+    kwargs = {"tldw_history_branch": True, "tldw_history_edit_v1": target}
+    response = (
+        send(client, cid, headers, selection, "edit-input", **kwargs)
+        if operation == "messages"
+        else completion(client, cid, headers, selection, **kwargs)
+    )
+    assert provider_calls == []
+    assert (db.count_messages_for_conversation(cid), db.get_conversation_by_id(cid)["history_version"]) == before
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {
+        "status": "stale_selection",
+        "code": "history_edit_target_changed",
+        "conversation_id": cid,
+        "message_id": target["message_id"],
+        "message_revision": target["message_revision"],
+        "selection_digest": selection["selection_digest"],
+    }
+
+
+@pytest.mark.parametrize("operation", ["messages", "completion"])
+def test_protected_edit_unchanged_target_keeps_original_graph(history_api, operation):
+    client, db, cid, headers = history_api
+    stale_tip(client, cid, headers)
+    selection, target = protected_edit_selection(client, cid, headers)
+    original = [db.get_message_by_id(mid) for mid in ("u1", "a1", "u2", "a2")]
+    kwargs = {"tldw_history_branch": True, "tldw_history_edit_v1": target}
+    response = (
+        send(client, cid, headers, selection, "edit-input", **kwargs)
+        if operation == "messages"
+        else completion(client, cid, headers, selection, **kwargs)
+    )
+    assert response.status_code == (201 if operation == "messages" else 200), response.text
+    admission = response.json()["tldw_history_admission_v1"]
+    assert db.get_message_by_id(admission["input_message_id"])["parent_message_id"] == "a1"
+    assert [db.get_message_by_id(mid) for mid in ("u1", "a1", "u2", "a2")] == original
+
+
+@pytest.mark.parametrize("operation", ["messages", "completion"])
+@pytest.mark.parametrize(
+    "invalid",
+    [{"version": True}, {"version": 1.0}, {"version": "1"}, {"extra": "unexpected"}, {"message_revision": ""}],
+)
+def test_protected_edit_envelope_requires_exact_version_and_members(history_api, invalid, operation):
+    client, db, cid, headers = history_api
+    stale_tip(client, cid, headers)
+    selection, target = protected_edit_selection(client, cid, headers)
+    before = db.count_messages_for_conversation(cid)
+    kwargs = {"tldw_history_branch": True, "tldw_history_edit_v1": {**target, **invalid}}
+    response = (
+        send(client, cid, headers, selection, "edit-input", **kwargs)
+        if operation == "messages"
+        else completion(client, cid, headers, selection, **kwargs)
+    )
+    assert response.status_code == 422, response.text
+    assert db.count_messages_for_conversation(cid) == before
+
+
+@pytest.mark.parametrize("mutation", ["content", "deleted"])
+def test_committed_protected_edit_replay_retains_original_precondition(history_api, mutation):
+    client, db, cid, headers = history_api
+    stale_tip(client, cid, headers)
+    selection, target = protected_edit_selection(client, cid, headers)
+    kwargs = {"tldw_history_branch": True, "tldw_history_edit_v1": target}
+    first = send(client, cid, headers, selection, "edit-input", **kwargs)
+    assert first.status_code == 201, first.text
+    row = db.get_message_by_id("u2")
+    if mutation == "deleted":
+        assert db.soft_delete_message("u2", expected_version=row["version"])
+    else:
+        assert db.update_message("u2", {"content": "later independent edit"}, row["version"])
+    before = (db.count_messages_for_conversation(cid), db.get_conversation_by_id(cid)["history_version"])
+    replay = send(client, cid, headers, selection, "edit-input", **kwargs)
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["tldw_history_admission_v1"] == first.json()["tldw_history_admission_v1"]
+    changed = send(
+        client,
+        cid,
+        headers,
+        selection,
+        "edit-input",
+        tldw_history_branch=True,
+        tldw_history_edit_v1={**target, "message_revision": "different original"},
+    )
+    assert changed.status_code == 409, changed.text
+    assert changed.json()["detail"]["code"] == "message_id_conflict"
+    removed = send(client, cid, headers, selection, "edit-input", tldw_history_branch=True)
+    assert removed.status_code == 409, removed.text
+    assert removed.json()["detail"]["code"] == "message_id_conflict"
+    assert (db.count_messages_for_conversation(cid), db.get_conversation_by_id(cid)["history_version"]) == before
+
+
+def test_committed_protected_edit_replay_survives_later_explicit_parent_deletion(history_api):
+    client, db, cid, headers = history_api
+    stale_tip(client, cid, headers)
+    selection, target = protected_edit_selection(client, cid, headers)
+    kwargs = {"tldw_history_branch": True, "tldw_history_edit_v1": target, "parent_message_id": "a1"}
+    first = send(client, cid, headers, selection, "edit-input", **kwargs)
+    assert first.status_code == 201, first.text
+    assert db.soft_delete_message("a1", expected_version=1)
+    before = (db.count_messages_for_conversation(cid), db.get_conversation_by_id(cid)["history_version"])
+    replay = send(client, cid, headers, selection, "edit-input", **kwargs)
+    assert replay.status_code == 201, replay.text
+    assert replay.json()["tldw_history_admission_v1"] == first.json()["tldw_history_admission_v1"]
+    assert (db.count_messages_for_conversation(cid), db.get_conversation_by_id(cid)["history_version"]) == before
+
+
+@pytest.mark.parametrize("operation", ["messages", "completion"])
+@pytest.mark.parametrize(
+    "invalid", ["no branch", "false branch", "no selection", "wrong cursor", "wrong target", "multiple inputs"]
+)
+def test_protected_edit_requires_original_action_binding_before_writes(history_api, operation, invalid):
+    client, db, cid, headers = history_api
+    stale_tip(client, cid, headers)
+    selection, target = protected_edit_selection(client, cid, headers)
+    payload = {"tldw_history_selection_v1": selection, "tldw_history_branch": True, "tldw_history_edit_v1": target}
+    if invalid == "no branch":
+        del payload["tldw_history_branch"]
+    if invalid == "false branch":
+        payload["tldw_history_branch"] = False
+    if invalid == "no selection":
+        del payload["tldw_history_selection_v1"]
+    if invalid == "wrong cursor":
+        payload["tldw_history_selection_v1"] = {**selection, "cursor": {"kind": "after_message", "message_id": "a1"}}
+    if invalid == "wrong target":
+        payload["tldw_history_edit_v1"] = {**target, "message_id": "a1"}
+    before = (db.count_messages_for_conversation(cid), db.get_conversation_by_id(cid)["history_version"])
+    if operation == "messages":
+        payload.update(
+            id="invalid-edit", role="assistant" if invalid == "multiple inputs" else "user", content="proposed edit"
+        )
+        response = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json=payload)
+    else:
+        payload.update(
+            model="gpt-4o-mini",
+            conversation_id=cid,
+            save_to_db=True,
+            messages=[{"role": "user", "content": "proposal"}],
+        )
+        if invalid == "multiple inputs":
+            payload["messages"].append({"role": "user", "content": "second proposal"})
+        response = client.post("/api/v1/chat/completions", headers=headers, json=payload)
+    assert response.status_code == 422, response.text
+    assert (db.count_messages_for_conversation(cid), db.get_conversation_by_id(cid)["history_version"]) == before

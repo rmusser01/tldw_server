@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const calls = vi.hoisted(() => ({
   capture: vi.fn(),
+  spec: vi.fn(),
   create: vi.fn(),
   getSettings: vi.fn(),
+  detail: vi.fn(),
   updateSettings: vi.fn(),
   confirm: vi.fn(),
   append: vi.fn(),
@@ -13,7 +15,9 @@ const calls = vi.hoisted(() => ({
 }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    getOpenAPISpec: calls.spec,
     createChat: calls.create,
+    getChat: calls.detail,
     getChatSettings: calls.getSettings,
     updateChatSettings: calls.updateSettings,
     captureHistorySelection: calls.capture,
@@ -73,6 +77,7 @@ const capture = () => ({
 })
 beforeEach(() => {
   vi.clearAllMocks()
+  calls.spec.mockReset().mockResolvedValue(null)
   calls.pending.mockResolvedValue("view")
   calls.capture.mockResolvedValue(capture())
 })
@@ -133,6 +138,93 @@ it.each(["capture", "confirm", "admit", "settle"] as const)(
     expect(read).not.toHaveBeenCalled()
   }
 )
+describe("native completion capture capability", () => {
+  it.each([true, false, undefined])(
+    "preserves original owner capability %s without writes",
+    async (supported) => {
+      const native = owner()
+      const response = capture()
+      calls.capture.mockResolvedValue(
+        supported === undefined
+          ? response
+          : {
+              ...response,
+              native_completion_v1: {
+                policy: "selected_history_v1",
+                supported,
+                storage_context_digest: "storage"
+              }
+            }
+      )
+      const result = await service.captureHistorySnapshot(native, view, "send")
+      if (result.status !== "captured") throw Error(result.status)
+      expect(result.native_completion_v1?.supported).toBe(supported)
+      expect(calls.capture).toHaveBeenCalledWith(
+        "chat",
+        { view, purpose: "send" },
+        expect.objectContaining({
+          includeNativeCompletion: true,
+          requestScope: native.request_scope
+        })
+      )
+      expect(calls.append).not.toHaveBeenCalled()
+    }
+  )
+  it.each([
+    "wrong-policy",
+    "coerced",
+    "foreign-context",
+    "extra",
+    "null",
+    "foreign-owner",
+    "foreign-view"
+  ])("rejects %s capability before writes", async (kind) => {
+    const capability: Record<string, unknown> = {
+      policy: "selected_history_v1",
+      supported: true,
+      storage_context_digest: "storage"
+    }
+    const response = {
+      ...capture(),
+      native_completion_v1: capability as unknown
+    }
+    if (kind === "wrong-policy") capability.policy = "future_v2"
+    if (kind === "coerced") capability.supported = "true"
+    if (kind === "foreign-context") capability.storage_context_digest = "other"
+    if (kind === "extra") capability.owner_override = "foreign"
+    if (kind === "null") response.native_completion_v1 = null
+    if (kind === "foreign-owner") response.snapshot.owner_key = "foreign"
+    if (kind === "foreign-view")
+      response.view = { ...view, selection_revision: 2 }
+    calls.capture.mockResolvedValue(response)
+    await expect(
+      service.captureHistorySnapshot(owner(), view, "send")
+    ).rejects.toThrow()
+    expect(calls.append).not.toHaveBeenCalled()
+  })
+  it("does not request completion eligibility for a fork capture", async () => {
+    calls.capture.mockResolvedValue({ ...capture(), purpose: "fork" })
+    await service.captureHistorySnapshot(owner(), view, "fork")
+    expect(
+      calls.capture.mock.calls[0][2].includeNativeCompletion
+    ).toBeUndefined()
+  })
+  it("rejects an unsolicited completion capability on a fork", async () => {
+    calls.capture.mockResolvedValue({
+      ...capture(),
+      purpose: "fork",
+      native_completion_v1: {
+        policy: "selected_history_v1",
+        supported: true,
+        storage_context_digest: "storage"
+      }
+    })
+    await expect(
+      service.captureHistorySnapshot(owner(), view, "fork")
+    ).rejects.toThrow()
+  })
+})
+
 describe("history owner service", () => {
   it("returns capture before composition and freezes the exact explicit payload", async () => {
     const native = owner()
@@ -804,4 +896,618 @@ it("verified legacy ownership permits scoped settings without granting captured-
   await expect(service.captureNativeForkSelection(native, view)).rejects.toThrow("legacy_review_required")
   expect(calls.create).not.toHaveBeenCalled()
   await expect(service.readNativeForkSettings(owner())).rejects.toThrow("unsupported_history_capability")
+})
+
+
+it.each([
+  { metadata: [{ id: "tool", revision: "1", kind: "tool" }] },
+  { assets: [{ id: "file", revision: "1", kind: "document" }] },
+  { comparison: { cluster_id: "compare", model_id: "m", common: false } }
+])("edit-resend refuses unsupported canonical target state %j", (extra) => {
+  const origin = {
+    ...view,
+    cursor: { kind: "after_message" as const, message_id: "answer" }
+  }
+  const captured = {
+    ...capture(),
+    snapshot: {
+      ...capture().snapshot,
+      nodes: [
+        {
+          id: "original",
+          revision: "target-revision",
+          parent_id: null,
+          role: "user",
+          settled: true,
+          ...extra
+        }
+      ]
+    }
+  } as HistorySelectionCaptureV1
+  expect(() =>
+    service.nativeEditResendView(owner(), origin, captured, {
+      owner_key: view.owner_key,
+      conversation_id: "chat",
+      message_id: "original",
+      message_revision: "target-revision",
+      isCurrent: () => true,
+      isOriginCurrent: () => true
+    })
+  ).toThrow("unsupported_message_payload")
+})
+
+it("native edit captures a detached before-user view while leaving the original view immutable", () => {
+  const origin = {...view, cursor: {kind: "after_message" as const, message_id: "a"}}
+  const captured = {
+    ...capture(),
+    snapshot: {
+      ...capture().snapshot,
+      nodes: [
+        {
+          id: "u",
+          revision: "u1",
+          role: "user",
+          parent_id: null,
+          settled: true
+        }
+      ]
+    }
+  } as HistorySelectionCaptureV1
+  const intent = {
+    owner_key: view.owner_key,
+    conversation_id: "chat",
+    message_id: "u",
+    message_revision: "u1",
+    isCurrent: () => true,
+    isOriginCurrent: () => true
+  }
+  const before = structuredClone(origin)
+  expect(
+    service.nativeEditResendView(owner(), origin, captured, intent)
+  ).toEqual({
+    ...origin,
+    cursor: { kind: "before_message", message_id: "u" },
+    selection_revision: 2
+  })
+  expect(origin).toEqual(before)
+})
+
+it.each([
+  "changed revision",
+  "duplicate target",
+  "unsettled",
+  "wrong role",
+  "owner",
+  "editor",
+  "origin",
+  "overflow"
+])("native edit refuses %s before branch admission", (reason) => {
+  const origin = {
+    ...view,
+    ...(reason === "overflow"
+      ? { selection_revision: Number.MAX_SAFE_INTEGER }
+      : {})
+  }
+  const target = {
+    id: "u",
+    revision: reason === "changed revision" ? "u2" : "u1",
+    parent_id: null,
+    role: reason === "wrong role" ? "assistant" : "user",
+    settled: reason !== "unsettled"
+  }
+  const captured = {
+    ...capture(),
+    snapshot: {
+      ...capture().snapshot,
+      nodes: reason === "duplicate target" ? [target, target] : [target]
+    }
+  } as HistorySelectionCaptureV1
+  const intent = {
+    owner_key: reason === "owner" ? "foreign" : view.owner_key,
+    conversation_id: "chat",
+    message_id: "u",
+    message_revision: "u1",
+    isCurrent: () => reason !== "editor",
+    isOriginCurrent: () => reason !== "origin"
+  }
+  expect(() =>
+    service.nativeEditResendView(owner(), origin, captured, intent)
+  ).toThrow()
+  expect(calls.append).not.toHaveBeenCalled()
+})
+
+it.each([false, true])(
+  "native append includes the explicit branch flag only for an action (explicit=%s)",
+  async (explicit) => {
+    const native = owner()
+    const captured = await service.captureHistorySnapshot(native, view, "send")
+    if (captured.status !== "captured") throw new Error(captured.code)
+    const selected = service.finalizeHistorySelection(
+      native,
+      captured,
+      service.prepareHistoryContext({ model: "test" }, () => true),
+      view
+    )
+    calls.append.mockResolvedValueOnce({
+      id: "u",
+      tldw_history_admission_v1: {
+        version: 1,
+        owner_key: view.owner_key,
+        conversation_id: "chat",
+        input_message_id: "u",
+        input_message_revision: "u1",
+        selection_digest: selected.selection_digest,
+        messages: selected.messages,
+        originating_selection_revision: 1
+      }
+    })
+    await service.appendSelectedUser(
+      native,
+      selected,
+      {
+        id: "u",
+        history_id: "chat",
+        role: "user",
+        name: "You",
+        content: "Edited",
+        createdAt: 1
+      },
+      explicit ? { historyBranch: true } : undefined
+    )
+    const body = calls.append.mock.calls[0][1]
+    if (explicit) expect(body.tldw_history_branch).toBe(true)
+    else expect(body).not.toHaveProperty("tldw_history_branch")
+  }
+)
+
+
+it("native user payload accepts only a matching structural sender role", () => {
+  expect(
+    service.nativeHistoryMessagePayload({
+      id: "u",
+      history_id: "chat",
+      role: "user",
+      name: "You",
+      content: "Original",
+      createdAt: 0,
+      metadataExtra: { sender_role: "user" }
+    })
+  ).toEqual({ id: "u", role: "user", content: "Original" })
+})
+
+it.each([
+  { sender_role: "assistant" },
+  { sender_role: "user", note: "must retain" },
+  { note: "must retain" }
+])(
+  "native user payload refuses substantive or inconsistent metadata %j",
+  (metadataExtra) => {
+    expect(() =>
+      service.nativeHistoryMessagePayload({
+        id: "u",
+        history_id: "chat",
+        role: "user",
+        name: "You",
+        content: "Original",
+        createdAt: 0,
+        metadataExtra
+      })
+    ).toThrow("unsupported_message_payload")
+  }
+)
+
+it("detached native edit rechecks structural metadata against the original canonical capture", () => {
+  const origin = {
+    ...view,
+    cursor: { kind: "after_message" as const, message_id: "a" }
+  }
+  const user = {
+    id: "u",
+    revision: "u1",
+    role: "user",
+    parent_id: null,
+    settled: true,
+    metadata: [{ id: "u", revision: "m1", kind: "message_metadata" }],
+    assets: [],
+    comparison: null
+  }
+  const source = {
+    ...capture(),
+    view: origin,
+    snapshot: { ...capture().snapshot, nodes: [user] },
+    rows: [user],
+    selected_content: [
+      {
+        id: "u",
+        revision: "u1",
+        message: "Original",
+        images: [],
+        tool_calls: null,
+        extra_metadata: { sender_role: "user" }
+      }
+    ]
+  } as HistorySelectionCaptureV1
+  const fresh = { ...source, rows: [], selected_content: [] }
+  const intent = {
+    owner_key: view.owner_key,
+    conversation_id: "chat",
+    message_id: "u",
+    message_revision: "u1",
+    isCurrent: () => true,
+    isOriginCurrent: () => true
+  }
+  expect(
+    service.nativeEditResendView(owner(), origin, source, intent)
+  ).toMatchObject({ cursor: { kind: "before_message", message_id: "u" } })
+  expect(
+    service.nativeEditResendView(owner(), origin, fresh, intent, source)
+  ).toMatchObject({ cursor: { kind: "before_message", message_id: "u" } })
+  for (const invalid of [
+    { ...source, selected_content: [] },
+    { ...source, snapshot: { ...source.snapshot, owner_key: "other" } },
+    {
+      ...source,
+      selected_content: [
+        {
+          ...source.selected_content[0],
+          extra_metadata: { sender_role: "user", note: "must retain" }
+        }
+      ]
+    },
+    {
+      ...source,
+      selected_content: [{ ...source.selected_content[0], revision: "changed" }]
+    },
+    {
+      ...source,
+      selected_content: [
+        { ...source.selected_content[0], tool_calls: [{ id: "tool" }] }
+      ]
+    },
+    {
+      ...source,
+      snapshot: {
+        ...source.snapshot,
+        nodes: [
+          {
+            ...user,
+            metadata: [{ id: "u", revision: "other", kind: "message_metadata" }]
+          }
+        ]
+      }
+    }
+  ])
+    expect(() =>
+      service.nativeEditResendView(
+        owner(),
+        origin,
+        fresh,
+        intent,
+        invalid as HistorySelectionCaptureV1
+      )
+    ).toThrow("unsupported_message_payload")
+})
+
+
+describe("qualified native history version reads", () => {
+  it("binds the deployed detail version to the captured original scoped owner", async () => {
+    const native = {
+      ...owner(),
+      scope: { type: "workspace" as const, workspaceId: "original" }
+    }
+    calls.detail
+      .mockReset()
+      .mockResolvedValue({ id: "chat", history_version: 3 })
+    await service.captureHistorySnapshot(native, view, "send")
+    expect(await service.readNativeHistoryVersion(native)).toBe(3)
+    expect(calls.detail).toHaveBeenCalledWith(
+      "chat",
+      expect.objectContaining({
+        requireHistoryVersion: true,
+        scope: native.scope,
+        requestScope: native.request_scope
+      })
+    )
+  })
+  it("never uses route presence in place of a captured native owner", async () => {
+    const native = owner()
+    calls.detail.mockReset()
+    await expect(service.readNativeHistoryVersion(native)).rejects.toThrow(
+      "unsupported_history_capability"
+    )
+    expect(calls.detail).not.toHaveBeenCalled()
+  })
+  it("a held detail cannot survive an account lease change", async () => {
+    let current = true,
+      release!: () => void
+    const native = { ...owner(), validate_lease: () => current },
+      held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+    await service.captureHistorySnapshot(native, view, "send")
+    calls.detail.mockReset().mockImplementation(async () => {
+      await held
+      return { id: "chat", history_version: 3 }
+    })
+    const pending = service.readNativeHistoryVersion(native)
+    current = false
+    release()
+    await expect(pending).rejects.toThrow("request_config_scope_changed")
+  })
+})
+
+const strictAdmissionSpec = (operation: "messages" | "completion") => ({
+  paths: {
+    [operation === "messages"
+      ? "/api/v1/chats/{chat_id}/messages"
+      : "/api/v1/chat/completions"]: {
+      post: {
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                properties: { tldw_history_branch: { type: "boolean" } }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+})
+
+it.each(["messages", "completion"] as const)(
+  "uses only the captured %s operation contract before holding an older-server empty parent",
+  async (operation) => {
+    const native = owner()
+    const response = capture()
+    response.snapshot.nodes = [
+      {
+        id: "root",
+        revision: "1",
+        parent_id: null,
+        role: "user",
+        settled: true
+      }
+    ] as never
+    calls.capture.mockResolvedValue(response)
+    const result = await service.captureHistorySnapshot(native, view, "send")
+    if (result.status !== "captured") throw Error(result.status)
+    const check = service.nativeHistoryNeedsBranchChoice
+    const signal = new AbortController().signal
+    expect(
+      await check(native, result, operation, {
+        signal,
+        validate_lease: () => true
+      })
+    ).toBe(true)
+    expect(calls.spec).toHaveBeenCalledWith(
+      expect.objectContaining({ requestScope: native.request_scope, signal })
+    )
+    calls.spec.mockResolvedValue(
+      strictAdmissionSpec(operation === "messages" ? "completion" : "messages")
+    )
+    expect(await check(native, result, operation)).toBe(true)
+    calls.spec.mockResolvedValue(strictAdmissionSpec(operation))
+    expect(await check(native, result, operation)).toBe(false)
+    expect(calls.append).not.toHaveBeenCalled()
+  }
+)
+
+it("retires held deployed contract reads before they can authorize an older-server send", async () => {
+  const native = owner()
+  const result = await service.captureHistorySnapshot(native, view, "send")
+  if (result.status !== "captured") throw Error(result.status)
+  let current = true
+  calls.spec.mockImplementation(async () => {
+    current = false
+    return strictAdmissionSpec("messages")
+  })
+  const check = service.nativeHistoryNeedsBranchChoice
+  await expect(
+    check(native, result, "messages", { validate_lease: () => current })
+  ).rejects.toMatchObject({ code: "request_config_scope_changed" })
+  expect(calls.append).not.toHaveBeenCalled()
+})
+
+it.each(["current leaf", "sibling answer", "live child"])(
+  "older-server continuation treats %s according to the captured parent graph",
+  async (scenario) => {
+    const native = owner()
+    const root = {
+      id: "root",
+      revision: "1",
+      parent_id: null,
+      role: "user",
+      settled: true
+    }
+    const answer = {
+      id: "answer",
+      revision: "1",
+      parent_id: "root",
+      role: "assistant",
+      settled: true
+    }
+    const rows = [root, answer]
+    const nodes =
+      scenario === "sibling answer"
+        ? [...rows, { ...answer, id: "sibling" }]
+        : scenario === "live child"
+          ? [...rows, { ...root, id: "child", parent_id: "answer" }]
+          : rows
+    const selectedView = {
+      ...view,
+      cursor: { kind: "after_message" as const, message_id: "answer" }
+    }
+    const response = {
+      ...capture(),
+      view: selectedView,
+      rows,
+      selected_content: rows.map((row) => ({
+        id: row.id,
+        revision: row.revision,
+        message: row.id,
+        images: []
+      })),
+      snapshot: { ...capture().snapshot, nodes }
+    }
+    calls.capture.mockResolvedValue(response)
+    const result = await service.captureHistorySnapshot(
+      native,
+      selectedView,
+      "send"
+    )
+    if (result.status !== "captured") throw Error(result.status)
+    expect(
+      await service.nativeHistoryNeedsBranchChoice(native, result, "messages")
+    ).toBe(scenario === "live child")
+    expect(calls.append).not.toHaveBeenCalled()
+  }
+)
+
+it.each([false, true])(
+  "older-server reviewed linear selection respects projected continuation=%s",
+  async (continued) => {
+    const native = owner()
+    const projection = "reviewed"
+    const nodes = ["root", "answer", ...(continued ? ["next"] : [])].map(
+      (id, index) => ({
+        id,
+        revision: "1",
+        parent_id: null,
+        role: index % 2 ? "assistant" : "user",
+        settled: true,
+        legacy_projection_id: projection
+      })
+    )
+    const selectedView = {
+      ...view,
+      interpretation: {
+        kind: "legacy_linear_v1" as const,
+        projection_id: projection
+      },
+      cursor: { kind: "after_message" as const, message_id: "answer" }
+    }
+    const rows = nodes.slice(0, 2)
+    calls.capture.mockResolvedValue({
+      ...capture(),
+      view: selectedView,
+      rows,
+      selected_content: rows.map((row) => ({
+        id: row.id,
+        revision: row.revision,
+        message: row.id,
+        images: []
+      })),
+      snapshot: {
+        ...capture().snapshot,
+        nodes,
+        interpretation_status: {
+          kind: "legacy_linear_v1",
+          projection_id: projection,
+          ordered_path_ids: nodes.map((node) => node.id)
+        }
+      }
+    })
+    const result = await service.captureHistorySnapshot(
+      native,
+      selectedView,
+      "send"
+    )
+    if (result.status !== "captured") throw Error(result.status)
+    expect(
+      await service.nativeHistoryNeedsBranchChoice(native, result, "messages")
+    ).toBe(continued)
+    expect(calls.append).not.toHaveBeenCalled()
+  }
+)
+
+it("refuses local document files for a qualified native settlement before any server write", async () => {
+  const native = owner()
+  await service.captureHistorySnapshot(native, view, "send")
+  const reference = {
+    version: 1 as const, owner_key: "native-key", conversation_id: "chat",
+    input_message_id: "u", input_message_revision: "1", selection_digest: "digest"
+  }
+  const result = {
+    id: "file-reply", history_id: "chat", role: "assistant", name: "Assistant",
+    content: "Original answer", createdAt: 1
+  }
+  const file = {
+    id: "file", filename: "file.txt", type: "text/plain", content: "Original file",
+    size: 13, uploadedAt: 1, processed: true
+  }
+  await expect(service.settleAcceptedAssistant(native, reference, result, undefined, [file]))
+    .rejects.toMatchObject({ code: "unsupported_history_message_assets" })
+  expect(calls.append).not.toHaveBeenCalled()
+  calls.append.mockResolvedValueOnce({ id: result.id })
+  await expect(service.settleAcceptedAssistant(native, reference, result, undefined, []))
+    .resolves.toEqual({ id: result.id })
+  expect(calls.append).toHaveBeenCalledOnce()
+})
+
+
+it.each(["messages", "completion"] as const)(
+  "requires protected %s discovery on the captured owner, without an older fallback",
+  async (operation) => {
+    const { protectedEditRequestSchema } = await import(
+      "./history-edit-fixture"
+    )
+    const native = owner(),
+      signal = new AbortController().signal
+    const result = await service.captureHistorySnapshot(native, view, "send")
+    if (result.status !== "captured") throw new Error(result.status)
+    const spec = strictAdmissionSpec(operation)
+    Object.assign(
+      spec.paths[Object.keys(spec.paths)[0]].post.requestBody.content[
+        "application/json"
+      ].schema,
+      protectedEditRequestSchema()
+    )
+    calls.spec.mockResolvedValue(spec)
+    await service.requireNativeHistoryEditAdmission(native, result, operation, {
+      signal
+    })
+    expect(calls.spec).toHaveBeenCalledExactlyOnceWith({
+      requestScope: native.request_scope,
+      scope: undefined,
+      signal
+    })
+    calls.spec.mockRejectedValueOnce(new Error("discovery unavailable"))
+    await expect(
+      service.requireNativeHistoryEditAdmission(native, result, operation)
+    ).rejects.toThrow("native_history_edit_unsupported")
+    expect(calls.append).not.toHaveBeenCalled()
+  }
+)
+it("retired protected discovery never adopts a capable server as new authority", async () => {
+  const { protectedEditRequestSchema } = await import("./history-edit-fixture")
+  let current = true,
+    release!: () => void
+  const native = { ...owner(), validate_lease: () => current }
+  const result = await service.captureHistorySnapshot(native, view, "send")
+  if (result.status !== "captured") throw new Error(result.status)
+  const spec = strictAdmissionSpec("messages")
+  Object.assign(
+    spec.paths[Object.keys(spec.paths)[0]].post.requestBody.content[
+      "application/json"
+    ].schema,
+    protectedEditRequestSchema()
+  )
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  calls.spec.mockImplementationOnce(async () => {
+    await held
+    return spec
+  })
+  const pending = service.requireNativeHistoryEditAdmission(
+    native,
+    result,
+    "messages"
+  )
+  current = false
+  release()
+  await expect(pending).rejects.toThrow("request_config_scope_changed")
+  expect(calls.append).not.toHaveBeenCalled()
 })

@@ -18,6 +18,7 @@ import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import SidepanelChat from "../sidepanel-chat"
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 
 const io = vi.hoisted(() => ({
   noop: () => {},
@@ -30,7 +31,9 @@ const io = vi.hoisted(() => ({
   getChat: vi.fn(),
   updateHistory: vi.fn(),
   loadedTitle: undefined as string | null | undefined,
-  failCapture: new Set<string>()
+  failCapture: new Set<string>(),
+  manifest: vi.fn(),
+  load: vi.fn()
 }))
 
 /** The question and answer each fake server chat holds. */
@@ -49,19 +52,34 @@ const displayFor = (chatId: string) => {
   }
 }
 
+
+/** Declared native reader fixture; the real H1 controller is covered by ownership.test. */
+const captureFor = (chatId: string) => {
+  const display = displayFor(chatId)
+  const rows = display.messages.map((message, index) => ({ id: message.id, revision: "1", parent_id: index ? display.messages[index - 1].id : null, role: message.role, settled: true }))
+  return {
+    status: "captured" as const, chatId,
+    view: { owner_key: "owner", conversation_id: chatId, view_session_id: "view-" + chatId, interpretation: { kind: "parent_graph_v1" as const }, cursor: { kind: "after_message" as const, message_id: rows[1].id }, selection_revision: 0 },
+    snapshot: { owner_key: "owner", conversation_id: chatId, nodes: rows }, rows,
+    selected_content: display.messages.map(message => ({ id: message.id, revision: "1", message: message.message, images: [] }))
+  }
+}
+
 vi.mock("@/hooks/chat/useHistorySelection", async () => {
   const ReactModule = await import("react")
   const Context = ReactModule.createContext<unknown>(null)
-  type Capture = { status: "captured"; chatId: string }
+  type Capture = ReturnType<typeof captureFor>
   type Live = {
-    owner: { kind: "native"; conversation_id: string; request_scope: unknown; validate_lease: () => boolean } | null
+    owner: { kind: "native"; conversation_id: string; request_scope: unknown; owner_key: string; validate_lease: () => boolean } | null
     capture: Capture | null
+    view: Capture["view"] | null
+    status: "idle" | "ready"
   }
-  const empty = (): Live => ({ owner: null, capture: null })
+  const empty = (): Live => ({ owner: null, capture: null, view: null, status: "idle" })
   return {
     HistorySelectionContext: Context,
     useHistorySelectionContext: () => ReactModule.useContext(Context),
-    useHistorySelection: (options: { onCapture?: (capture: Capture) => void }) => {
+    useHistorySelection: (options: { onCapture?: (capture: Capture) => void } = {}) => {
       const onCapture = ReactModule.useRef(options.onCapture)
       onCapture.current = options.onCapture
       const [controller] = ReactModule.useState(() => {
@@ -94,23 +112,24 @@ vi.mock("@/hooks/chat/useHistorySelection", async () => {
             live.capture ? { owner_key: "owner", conversation_id: live.capture.chatId } : null,
           getCurrent: () => live,
           prepareExpansionPath: async () => null,
-          loadConversation: async (target: { serverChatId?: string | null }) => {
+          loadConversation: async (target: { serverChatId?: string | null; isCurrent?: () => boolean }, _reference?: unknown, onLoaded?: (receipt: { owner: NonNullable<Live["owner"]>; view: NonNullable<Live["view"]> }) => void) => {
             const chatId = target.serverChatId
             const token = ++epoch
             // The real hook reads its owner and history before it captures.
-            await Promise.resolve()
-            if (token !== epoch) return false
+            await io.load(chatId)
+            if (token !== epoch || target.isCurrent?.() === false) return false
             if (!chatId || io.failCapture.has(chatId)) {
               live = empty()
               return false
             }
-            const capture: Capture = { status: "captured", chatId }
+            const capture = captureFor(chatId)
             live = {
-              owner: { kind: "native", conversation_id: chatId, request_scope: {}, validate_lease: () => true },
-              capture
+              owner: { kind: "native", conversation_id: chatId, owner_key: "owner", request_scope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" }, validate_lease: () => true },
+              capture, view: capture.view, status: "ready"
             }
             // Like the real hook, publish the capture before the load resolves.
             onCapture.current?.(capture)
+            onLoaded?.({ owner: live.owner!, view: live.view! })
             return true
           }
         }
@@ -119,6 +138,10 @@ vi.mock("@/hooks/chat/useHistorySelection", async () => {
     }
   }
 })
+vi.mock("@/services/chat-history-selection", async original => ({
+  ...await original<typeof import("@/services/chat-history-selection")>(),
+  captureHistorySnapshot: (...args: unknown[]) => io.manifest(...args)
+}))
 vi.mock("@/hooks/useLoadLocalConversation", () => ({
   restoreReadableLocalComparison: async () => {}
 }))
@@ -148,10 +171,12 @@ vi.mock("@/utils/safe-storage", () => ({
 }))
 vi.mock("@/hooks/useMessage", async () => {
   const { useSelectedModel } = await import("@/hooks/chat/useSelectedModel")
+  const { useHistorySelectionContext } = await import("@/hooks/chat/useHistorySelection")
   return {
     useMessage: () => {
       const state = useStoreMessageOption()
       const selection = useSelectedModel()
+      const historySelection = useHistorySelectionContext()
       return new Proxy(state, {
         get: (target, key) =>
           key in selection
@@ -159,14 +184,13 @@ vi.mock("@/hooks/useMessage", async () => {
             : key in target
               ? Reflect.get(target, key)
               : key === "clearChat"
-                ? () =>
-                    useStoreMessageOption.setState({
-                      messages: [],
-                      history: [],
-                      historyId: null,
-                      serverChatId: null,
-                      queuedMessages: []
-                    })
+                ? (beforeReset?: () => void) => {
+                    beforeReset?.()
+                    useStoreMessageOption.getState().startNewChatDraft()
+                    historySelection?.reset()
+                    useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: null, queuedMessages: [] })
+                    return true
+                  }
                 : String(key).startsWith("set") ||
                     ["stopStreamingRequest", "onSubmit"].includes(String(key))
                   ? io.noop
@@ -263,8 +287,12 @@ vi.mock("@/components/Sidepanel/Chat/SidepanelHeaderSimple", () => ({
   SidepanelHeaderSimple: (props: {
     onRenameTitle?: (title: string) => void
     loadEditableTitle?: () => Promise<string | null>
-  }) => (
+  }) => {
+    const [editing, setEditing] = React.useState(false)
+    return (
     <>
+      <button onClick={() => setEditing(true)}>Edit header title</button>
+      {editing && <input aria-label="Header title draft" defaultValue="Uncommitted name" />}
       <button onClick={() => props.onRenameTitle?.("Renamed in header")}>Rename from header</button>
       <button
         onClick={() => {
@@ -276,6 +304,7 @@ vi.mock("@/components/Sidepanel/Chat/SidepanelHeaderSimple", () => ({
       </button>
     </>
   )
+  }
 }))
 vi.mock("@/components/Sidepanel/Chat/ConnectionBanner", () => ({
   ConnectionBanner: () => null
@@ -415,12 +444,23 @@ describe("side-panel tabs when opening a past chat (XS-01)", () => {
     io.sequence = 0
     io.data.clear()
     io.failCapture.clear()
+    io.load.mockReset().mockResolvedValue(undefined)
+    vi.restoreAllMocks()
+    io.manifest.mockReset().mockImplementation(async (owner: { conversation_id: string }) => captureFor(owner.conversation_id))
     io.server.mockReset().mockImplementation(async (chatId: string) => serverMessages(chatId))
     window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed"))
     useSidepanelChatTabsStore.getState().clear()
     useStoreMessageOption.setState({ messages: [], history: [], historyId: null, serverChatId: null })
     useStoreChatModelSettings.getState().reset()
     seedTabs()
+  })
+
+  it("loads a legacy saved tab without replaying its one-time insertion command", async () => {
+    const stored = io.data.get(storedKey) as { snapshotsById: Record<string, SidepanelChatSnapshot> }
+    stored.snapshotsById["tab-a"].selectedQuickPrompt = "old tab command"
+    render(<SidepanelChat />)
+    await screen.findByText("chat-1 answer")
+    expect(useStoreMessageOption.getState().selectedQuickPrompt).toBeNull()
   })
 
   it("keeps the current tab's conversation while the opened chat loads, then opens it in its own tab", async () => {
@@ -531,34 +571,81 @@ describe("side-panel tabs when opening a past chat (XS-01)", () => {
     expect(savedTabs().tabs.find((tab) => tab.id === "scratch")?.messages).toEqual([])
   })
 
-  it("keeps a half-opened tab the user went back to, bound to its chat", async () => {
+  it("reopens a cancelled preparation once without adopting its late result", async () => {
     render(<SidepanelChat />)
     await screen.findByText("chat-1 answer")
     const { gate, release } = held()
-    io.server.mockImplementationOnce(async (chatId: string) => {
-      await gate
-      return serverMessages(chatId)
-    })
+    io.server.mockImplementationOnce(async (chatId: string) => { await gate; return serverMessages(chatId) })
     fireEvent.click(await screen.findByRole("button", { name: "Open chat-2" }))
     await waitFor(() => expect(io.server).toHaveBeenCalled())
-    const pendingId = tabHolding("chat-2")[0].id
+    expect(tabHolding("chat-2")).toEqual([])
     fireEvent.click(screen.getByRole("button", { name: "Scratch" }))
-    fireEvent.click(screen.getByRole("button", { name: "Title chat-2" }))
-    await act(async () => {
-      release()
-      await new Promise((resolve) => setTimeout(resolve, 0))
-    })
-    act(() => {
-      window.dispatchEvent(new Event("beforeunload"))
-    })
-    expect(savedTabs().activeTabId).toBe(pendingId)
-    expect(tabHolding("chat-2")).toEqual([
-      { id: pendingId, serverChatId: "chat-2", messages: transcript("chat-2") }
-    ])
-    expect(tabHolding("chat-1")).toEqual([
-      { id: "tab-a", serverChatId: "chat-1", messages: transcript("chat-1") }
-    ])
-    expect(screen.getByText("chat-2 answer")).toBeInTheDocument()
+    await waitFor(() => expect(savedTabs().activeTabId).toBe("scratch"))
+    fireEvent.click(await screen.findByRole("button", { name: "Open chat-2" }))
+    await waitFor(() => expect(tabHolding("chat-2")).toHaveLength(1))
+    const openedId = tabHolding("chat-2")[0].id
+    await act(async () => { release() })
+    expect(savedTabs().activeTabId).toBe(openedId)
+    expect(tabHolding("chat-2")).toEqual([{ id: openedId, serverChatId: "chat-2", messages: transcript("chat-2") }])
+    expect(tabHolding("chat-1")[0].messages).toEqual(transcript("chat-1"))
+  })
+
+  it.each(["source", "failed replacement"])("releases a retired server opening's loading state after selecting %s", async target => {
+    if (target === "failed replacement") {
+      const stored = io.data.get(storedKey) as { tabs: SidepanelChatTab[]; snapshotsById: Record<string, SidepanelChatSnapshot> }
+      const address = { kind: "native" as const, id: "chat-3", ownerKey: "owner", scope: { type: "global" as const } }
+      stored.tabs.push(tabFor("tab-c", "chat-3"))
+      stored.snapshotsById["tab-c"] = { ...snapshotFor("chat-3"), chatDraftAddress: address, chatDraftHandle: { address, ownerHash: chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" }) } }
+      io.failCapture.add("chat-3")
+    }
+    render(<SidepanelChat />)
+    await screen.findByText("chat-1 answer")
+    const { gate, release } = held()
+    io.server.mockImplementationOnce(async (chatId: string) => { await gate; return serverMessages(chatId) })
+    fireEvent.click(await screen.findByRole("button", { name: "Open chat-2" }))
+    await waitFor(() => expect(io.server).toHaveBeenCalled())
+    expect(useStoreMessageOption.getState().isLoading).toBe(true)
+    fireEvent.click(screen.getByRole("button", { name: target === "source" ? "Title chat-1" : "Title chat-3" }))
+    await act(async () => { release() })
+    await waitFor(() => expect(useStoreMessageOption.getState().isLoading).toBe(false))
+    expect(savedTabs().activeTabId).toBe("tab-a")
+    expect(tabHolding("chat-2")).toEqual([])
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 60_000)
+    await act(async () => { window.dispatchEvent(new Event("focus")); await new Promise(resolve => setTimeout(resolve, 420)) })
+    expect(io.manifest).toHaveBeenCalledOnce()
+  })
+
+  it("suspends freshness through qualification of a saved target tab", async () => {
+    const stored = io.data.get(storedKey) as { tabs: SidepanelChatTab[]; snapshotsById: Record<string, SidepanelChatSnapshot> }
+    const address = { kind: "native" as const, id: "chat-2", ownerKey: "owner", scope: { type: "global" as const } }
+    stored.tabs.push(tabFor("tab-b", "chat-2"))
+    stored.snapshotsById["tab-b"] = { ...snapshotFor("chat-2"), chatDraftAddress: address, chatDraftHandle: { address, ownerHash: chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" }) } }
+    render(<SidepanelChat />)
+    await screen.findByText("chat-1 answer")
+    const { gate, release } = held()
+    io.load.mockImplementationOnce(async () => { await gate })
+    fireEvent.click(await screen.findByRole("button", { name: "Title chat-2" }))
+    await waitFor(() => expect(io.load).toHaveBeenCalledWith("chat-2"))
+    expect(savedTabs().activeTabId).toBe("tab-a")
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 60_000)
+    await act(async () => { window.dispatchEvent(new Event("focus")); await new Promise(resolve => setTimeout(resolve, 420)) })
+    expect(io.manifest).not.toHaveBeenCalled()
+    await act(async () => { release() })
+    await waitFor(() => expect(savedTabs().activeTabId).toBe("tab-b"))
+  })
+
+  it("suspends source freshness while an owned target prepares", async () => {
+    render(<SidepanelChat />)
+    await screen.findByText("chat-1 answer")
+    const { gate, release } = held()
+    io.server.mockImplementationOnce(async (chatId: string) => { await gate; return serverMessages(chatId) })
+    fireEvent.click(await screen.findByRole("button", { name: "Open chat-2" }))
+    await waitFor(() => expect(io.server).toHaveBeenCalled())
+    vi.spyOn(Date, "now").mockReturnValue(Date.now() + 60_000)
+    await act(async () => { window.dispatchEvent(new Event("focus")); await new Promise(resolve => setTimeout(resolve, 420)) })
+    expect(io.manifest).not.toHaveBeenCalled()
+    await act(async () => { release() })
+    await waitFor(() => expect(tabHolding("chat-2")).toHaveLength(1))
   })
 })
 
@@ -567,6 +654,9 @@ describe("side-panel header rename (XS-07)", () => {
     io.sequence = 0
     io.data.clear()
     io.failCapture.clear()
+    io.load.mockReset().mockResolvedValue(undefined)
+    vi.restoreAllMocks()
+    io.manifest.mockReset().mockImplementation(async (owner: { conversation_id: string }) => captureFor(owner.conversation_id))
     io.server.mockReset().mockImplementation(async (chatId: string) => serverMessages(chatId))
     io.updateChat.mockReset().mockImplementation(async (_id: string, data: { title: string }) => ({ title: data.title }))
     io.updateHistory.mockReset().mockResolvedValue(undefined)
@@ -606,42 +696,46 @@ describe("side-panel header rename (XS-07)", () => {
     expect(io.updateHistory).not.toHaveBeenCalled()
   })
 
-  it("keeps a rename made while the chat is still opening", async () => {
+  it("renames the still-visible source while another chat prepares", async () => {
     render(<SidepanelChat />)
     await screen.findByText("chat-1 answer")
     const { gate, release } = held()
-    io.server.mockImplementationOnce(async (chatId: string) => {
-      await gate
-      return serverMessages(chatId)
-    })
+    io.server.mockImplementationOnce(async (chatId: string) => { await gate; return serverMessages(chatId) })
     fireEvent.click(await screen.findByRole("button", { name: "Open chat-2" }))
-    await waitFor(() => expect(io.server).toHaveBeenCalledWith("chat-2", expect.anything(), expect.anything()))
-    const openingId = tabHolding("chat-2")[0].id
-
-    // Renamed before the chat finished opening: the server chat is renamed,
-    // and the tab has no local copy yet.
+    await waitFor(() => expect(io.server).toHaveBeenCalled())
     fireEvent.click(screen.getByRole("button", { name: "Rename from header" }))
-    await waitFor(() =>
-      expect(useSidepanelChatTabsStore.getState().tabs.find((tab) => tab.id === openingId)?.label).toBe(
-        "Renamed in header"
-      )
-    )
-    expect(io.updateChat).toHaveBeenCalledWith("chat-2", { title: "Renamed in header" }, expect.anything())
+    await waitFor(() => expect(io.updateChat).toHaveBeenCalledWith("chat-1", { title: "Renamed in header" }, expect.anything()))
+    expect(io.updateHistory).toHaveBeenCalledWith("local-chat-1", "Renamed in header")
+    await act(async () => { release() })
+    await waitFor(() => expect(tabHolding("chat-2")).toHaveLength(1))
+    expect(useSidepanelChatTabsStore.getState().tabs.find(tab => tab.serverChatId === "chat-2")?.label).not.toBe("Renamed in header")
+  })
 
-    await act(async () => {
-      release()
-    })
-    await waitFor(() =>
-      expect(useSidepanelChatTabsStore.getState().tabs.find((tab) => tab.id === openingId)?.historyId).toBe(
-        "local-chat-2"
-      )
-    )
-    await act(async () => {})
+  it("retires title editing when switching to a different tab with the same label", async () => {
+    const stored = io.data.get(storedKey) as { tabs: SidepanelChatTab[] }
+    stored.tabs[0].label = stored.tabs[1].label
+    render(<SidepanelChat />)
+    await screen.findByText("chat-1 answer")
+    fireEvent.click(screen.getByRole("button", { name: "Edit header title" }))
+    expect(screen.getByRole("textbox", { name: "Header title draft" })).toBeInTheDocument()
+    fireEvent.click(screen.getAllByRole("button", { name: "Title chat-1" })[0])
+    await waitFor(() => expect(savedTabs().activeTabId).toBe("scratch"))
+    expect(screen.queryByRole("textbox", { name: "Header title draft" })).not.toBeInTheDocument()
+    expect(io.updateChat).not.toHaveBeenCalled()
+  })
 
-    // Finishing the open kept the new name, on the tab and on its local copy.
-    const opened = useSidepanelChatTabsStore.getState().tabs.find((tab) => tab.id === openingId)
-    expect(opened).toMatchObject({ label: "Renamed in header", labelSource: "manual" })
-    expect(io.updateHistory).toHaveBeenCalledWith("local-chat-2", "Renamed in header")
+  it("refuses a source title read that finishes after switching tabs", async () => {
+    const { gate, release } = held()
+    io.getChat.mockImplementation(async () => { await gate; return { id: "chat-1", title: "Departed full title" } })
+    render(<SidepanelChat />)
+    await screen.findByText("chat-1 answer")
+    fireEvent.click(screen.getByRole("button", { name: "Load header title" }))
+    await waitFor(() => expect(io.getChat).toHaveBeenCalled())
+    fireEvent.click(screen.getByRole("button", { name: "Scratch" }))
+    await waitFor(() => expect(savedTabs().activeTabId).toBe("scratch"))
+    await act(async () => { release() })
+    await waitFor(() => expect(io.loadedTitle).toBeNull())
+    expect(io.updateChat).not.toHaveBeenCalled()
   })
 
   it("gives the header the active chat's full title to edit", async () => {

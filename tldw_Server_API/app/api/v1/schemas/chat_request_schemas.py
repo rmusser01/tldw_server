@@ -24,6 +24,8 @@ from pydantic_core import InitErrorDetails, PydanticCustomError
 
 from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
     HISTORY_BRANCH_FIELD_DESCRIPTION,
+    HISTORY_EDIT_FIELD_DESCRIPTION,
+    HistoryEditTargetV1,
     HistorySelectionV1,
 )
 from tldw_Server_API.app.core.LLM_Calls.payload_utils import (
@@ -1153,6 +1155,7 @@ class ChatCompletionRequest(BaseModel):
     conversation_id: Optional[str] = Field(None, description="Optional ID of the conversation to use for context.")
     tldw_history_selection_v1: HistorySelectionV1 | None = None
     tldw_history_branch: StrictBool | None = Field(None, description=HISTORY_BRANCH_FIELD_DESCRIPTION)
+    tldw_history_edit_v1: HistoryEditTargetV1 | None = Field(None, description=HISTORY_EDIT_FIELD_DESCRIPTION)
     tldw_continuation: Optional[TLDWContinuationSpec] = Field(
         None,
         description=(
@@ -1235,6 +1238,18 @@ class ChatCompletionRequest(BaseModel):
     def validate_history_selection_request(self) -> "ChatCompletionRequest":
         if self.tldw_history_branch is not None and self.tldw_history_selection_v1 is None:
             raise ValueError("tldw_history_branch requires tldw_history_selection_v1")
+        if self.tldw_history_edit_v1 is not None:
+            selection = self.tldw_history_selection_v1
+            if (
+                self.tldw_history_branch is not True
+                or selection is None
+                or selection.purpose != "send"
+                or selection.cursor.kind != "before_message"
+                or selection.cursor.message_id != self.tldw_history_edit_v1.message_id
+            ):
+                raise ValueError("Protected Edit requires an explicit branch and matching before-message selection")
+            if [message.role for message in self.messages if message.role != "system"] != ["user"]:
+                raise ValueError("Protected Edit requires one current user input")
         if self.tldw_history_selection_v1 is not None:
             if self.tldw_continuation is not None:
                 raise ValueError("Versioned selection cannot be combined with legacy continuation controls")

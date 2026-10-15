@@ -534,3 +534,207 @@ def test_real_cookie_session_activates_content_scope(single_user_cookie_client, 
     # A cookie cannot rescue an explicitly invalid header on this path.
     assert client.get("/api/v1/authnz/cookie-content-scope", headers={"X-API-KEY": ""}).status_code == 401
     assert get_scope() is None
+
+
+@pytest.fixture
+def cookie_scope_chat(single_user_cookie_client, tmp_path):
+    """Serve real Chat guards and data with the fixture's real cookie authority."""
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import (
+        get_chacha_db_for_user,
+    )
+    from tldw_Server_API.app.api.v1.endpoints import chat
+    from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+        create_character_conversation,
+    )
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+
+    client, api_key = single_user_cookie_client
+    for router, prefix in (
+        (chat.router, "/api/v1/chat"),
+        (chat.conversations_alias_router, "/api/v1/chats"),
+    ):
+        path = prefix + "/conversations"
+        if not any(route.path == path for route in iter_served_routes(client.app.routes)):
+            client.app.include_router(router, prefix=prefix)
+    db = CharactersRAGDB(str(tmp_path / "cookie-scope-chat.db"), client_id="1")
+    character_id = db.add_character_card({"name": "Cookie session guide", "client_id": "1"})
+    conversation_id = create_character_conversation(
+        db, conversation_data={"character_id": character_id, "client_id": "1", "title": "Native cookie search"}
+    )
+    db.add_message(
+        {
+            "conversation_id": conversation_id,
+            "sender": "user",
+            "content": "A memorable zebrafinch",
+            "client_id": "1",
+        }
+    )
+    client.app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    try:
+        yield client, api_key, conversation_id
+    finally:
+        client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        db.close_all_connections()
+
+
+@pytest.mark.parametrize("prefix", ["/api/v1/chat", "/api/v1/chats"])
+@pytest.mark.parametrize("action", ["search", "share_links"])
+def test_required_chat_scope_guard_accepts_real_cookie_owner(cookie_scope_chat, prefix, action):
+    """A minted cookie reaches actual search/share guards without an API-key header."""
+    client, api_key, conversation_id = cookie_scope_chat
+    assert _mint(client, api_key).status_code == 200
+    path = prefix + (
+        "/conversations?query=zebrafinch&search_in=title,content"
+        if action == "search"
+        else f"/conversations/{conversation_id}/share-links"
+    )
+    response = client.get(path)
+    assert response.status_code == 200, response.text
+    if action == "search":
+        assert [item["id"] for item in response.json()["items"]] == [conversation_id]
+        assert response.json()["items"][0]["matched_in"] == ["content"]
+    else:
+        assert response.json() == {"conversation_id": conversation_id, "links": []}
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [
+        {"Authorization": "Bearer invalid-key"},
+        {"Authorization": "Basic invalid"},
+        {"Authorization": ""},
+        {"X-API-KEY": "invalid-key"},
+        {"X-API-KEY": ""},
+    ],
+)
+def test_required_chat_scope_guard_keeps_explicit_header_precedence(cookie_scope_chat, headers):
+    """A valid cookie cannot rescue invalid or empty explicit credentials."""
+    client, api_key, conversation_id = cookie_scope_chat
+    assert _mint(client, api_key).status_code == 200
+    for path in (
+        "/api/v1/chats/conversations?query=zebrafinch&search_in=content",
+        f"/api/v1/chat/conversations/{conversation_id}/share-links",
+    ):
+        response = client.get(path, headers=headers)
+        assert response.status_code == 401, (path, response.text)
+
+
+@pytest.mark.parametrize("session_state", ["absent", "invalid", "expired", "revoked", "wrong_type"])
+def test_required_chat_scope_guard_rejects_unusable_sessions(cookie_scope_chat, monkeypatch, session_state):
+    """Only a live single-user session may satisfy a required scope guard."""
+    client, api_key, conversation_id = cookie_scope_chat
+    if session_state in {"expired", "wrong_type"}:
+        original_create = SessionManager.create_session
+
+        async def create_unusable_session(self, *args, **kwargs):
+            if session_state == "expired":
+                kwargs["expires_at_override"] = datetime.now(timezone.utc) - timedelta(days=1)
+            else:
+                kwargs["device_id"] = "ordinary-device"
+            return await original_create(self, *args, **kwargs)
+
+        monkeypatch.setattr(SessionManager, "create_session", create_unusable_session)
+    if session_state in {"expired", "revoked", "wrong_type"}:
+        assert _mint(client, api_key).status_code == 200
+    if session_state == "revoked":
+        cookie = client.cookies["tldw_single_user_session"]
+        assert (
+            client.delete(
+                "/api/v1/auth/single-user/session",
+                headers={
+                    "X-CSRF-Token": client.cookies["csrf_token"],
+                },
+            ).status_code
+            == 200
+        )
+        client.cookies.set("tldw_single_user_session", cookie, path="/api")
+    elif session_state == "invalid":
+        client.cookies.set("tldw_single_user_session", "invalid-cookie", path="/api")
+    for path in (
+        "/api/v1/chats/conversations?query=zebrafinch&search_in=content",
+        f"/api/v1/chat/conversations/{conversation_id}/share-links",
+    ):
+        response = client.get(path)
+        assert response.status_code == 401, (path, response.text)
+
+
+def test_required_chat_scope_guard_rejects_cookie_in_multi_user_mode(cookie_scope_chat, monkeypatch):
+    """Single-user sessions never become multi-user credentials."""
+    client, api_key, _conversation_id = cookie_scope_chat
+    assert _mint(client, api_key).status_code == 200
+    monkeypatch.setenv("AUTH_MODE", "multi_user")
+    monkeypatch.setenv("JWT_SECRET_KEY", "cookie-scope-wrong-mode-disposable-secret-13534")
+    reset_settings()
+    response = client.get("/api/v1/chats/conversations")
+    assert response.status_code == 401, response.text
+
+
+@pytest.mark.parametrize("action", ["search", "share_links"])
+def test_required_chat_scope_guard_fails_closed_when_session_store_fails(
+    cookie_scope_chat,
+    monkeypatch,
+    action,
+):
+    """A cookie cannot authorize a Chat data read when its store is unavailable."""
+    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
+
+    client, api_key, conversation_id = cookie_scope_chat
+    assert _mint(client, api_key).status_code == 200
+    validation_attempts = []
+
+    async def unavailable_session_store(self, *args, **kwargs):
+        validation_attempts.append(True)
+        raise SessionError("disposable session store unavailable")
+
+    def forbidden_chat_read():
+        pytest.fail("Chat data dependency ran before cookie authority was validated")
+
+    monkeypatch.setattr(SessionManager, "validate_session", unavailable_session_store)
+    client.app.dependency_overrides[get_chacha_db_for_user] = forbidden_chat_read
+    path = (
+        "/api/v1/chats/conversations?query=zebrafinch&search_in=content"
+        if action == "search"
+        else f"/api/v1/chat/conversations/{conversation_id}/share-links"
+    )
+    response = client.get(path)
+    assert response.status_code == 401, response.text
+    assert validation_attempts
+
+
+def _attach_resume_docs_handlers(app):
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions, character_messages
+
+    served = {route.path for route in iter_served_routes(app.routes)}
+    for path, router, prefix in [
+        ("/api/v1/chats/{chat_id}/roleplay/messages", character_messages.router, "/api/v1"),
+        ("/api/v1/chats/{chat_id}/complete-v2", character_chat_sessions.router, "/api/v1/chats"),
+    ]:
+        if path not in served:
+            app.include_router(router, prefix=prefix)
+
+
+def test_docs_info_resume_authenticates_real_headerless_cookie_and_revocation(single_user_cookie_client):
+    client, api_key = single_user_cookie_client
+    _attach_resume_docs_handlers(client.app)
+    assert _mint(client, api_key).status_code == 200
+    original_cookie = client.cookies["tldw_single_user_session"]
+    csrf = client.cookies["csrf_token"]
+    authenticated = client.get("/api/v1/config/docs-info")
+    assert authenticated.status_code == 200
+    assert authenticated.json()["capabilities"]["roleplay_resume_contract_version"] == 1
+    assert authenticated.headers["cache-control"] == "no-store"
+    logout = client.delete("/api/v1/auth/single-user/session", headers={"X-CSRF-Token": csrf})
+    assert logout.status_code == 200
+    client.cookies.set("tldw_single_user_session", original_cookie, path="/api")
+    revoked = client.get("/api/v1/config/docs-info")
+    assert revoked.status_code == 200
+    assert "roleplay_resume_contract_version" not in revoked.json()["capabilities"]
+
+
+@pytest.mark.parametrize("headers", [{"X-API-KEY": "invalid-key"}, {"Authorization": ""}])
+def test_docs_info_resume_does_not_replace_invalid_headers_with_valid_cookie(single_user_cookie_client, headers):
+    client, api_key = single_user_cookie_client
+    _attach_resume_docs_handlers(client.app)
+    assert _mint(client, api_key).status_code == 200
+    assert client.get("/api/v1/config/docs-info").json()["capabilities"]["roleplay_resume_contract_version"] == 1
+    assert client.get("/api/v1/config/docs-info", headers=headers).status_code == 401

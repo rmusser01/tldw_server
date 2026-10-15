@@ -380,13 +380,18 @@ def validate_image_url(url: str) -> tuple[bool, Optional[str], Optional[bytes]]:
 def validate_uploaded_image_bytes(
     image_bytes: bytes,
     mime_type: str,
+    *,
+    max_bytes: Optional[int] = None,
 ) -> tuple[bool, Optional[str], Optional[int], Optional[int]]:
     """Validate uploaded raster image bytes and return dimensions when possible."""
     normalized_mime = str(mime_type or "").lower().strip()
     if not validate_mime_type(normalized_mime):
         return False, f"Unsupported image MIME type: {mime_type}", None, None
 
-    max_bytes = get_max_flashcard_asset_bytes()
+    if max_bytes is None:
+        max_bytes = get_max_flashcard_asset_bytes()
+    if type(max_bytes) is not int or max_bytes < 1:
+        return False, "Invalid image byte limit", None, None
     if len(image_bytes) > max_bytes:
         return False, f"Image exceeds max size of {max_bytes} bytes", None, None
 
@@ -394,8 +399,13 @@ def validate_uploaded_image_bytes(
         validate_image_pixel_limit(image_bytes)
         with Image.open(io.BytesIO(image_bytes)) as img:
             width, height = img.size
+            if width * height > MAX_IMAGE_PIXELS:
+                raise Image.DecompressionBombError("Uploaded image exceeds pixel limit")
             detected_mime = Image.MIME.get(img.format or "")
             img.verify()
+        # JPEG verify does not decode scan data; decode under the same pixel ceiling.
+        with Image.open(io.BytesIO(image_bytes)) as img:
+            img.load()
     except _IMAGE_INTEGRITY_EXCEPTIONS as exc:
         logger.warning("Uploaded image failed integrity validation: {}", exc)
         return False, "Uploaded image failed integrity validation", None, None

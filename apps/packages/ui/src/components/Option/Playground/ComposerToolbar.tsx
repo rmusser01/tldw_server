@@ -1,8 +1,13 @@
 import { AssistantSelect } from "@/components/Common/AssistantSelect"
-import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
 import { Button as TldwButton } from "@/components/Common/Button"
+import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
 import { PromptSelect } from "@/components/Common/PromptSelect"
 import { ConnectionStatus } from "@/components/Layouts/ConnectionStatus"
+import {
+  getPersistenceModeControlLabel,
+  getPersistenceModePillLabel
+} from "@/hooks/playground/usePersistenceMode"
+import type { AssistantSelection } from "@/types/assistant-selection"
 import { PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY } from "@/utils/output-formatting-guide"
 import { Modal, Tooltip } from "antd"
 import {
@@ -24,15 +29,16 @@ import {
   ComposerToolbarOverflow,
   type ComposerToolbarRolePlayActions
 } from "./ComposerToolbarOverflow"
+import { useCasualComposerDisclosure } from "./hooks/useCasualComposerDisclosure"
+import { openModelSelector } from "./playground-cockpit-actions"
 import {
   ParameterPresets,
   ParameterPresetsDropdown,
   type PromptTemplate,
   SessionCostEstimation,
-  SystemPromptTemplatesModal,
-  SystemPromptTemplatesButton
+  SystemPromptTemplatesButton,
+  SystemPromptTemplatesModal
 } from "./playground-features"
-import { openModelSelector } from "./playground-cockpit-actions"
 
 export type ComposerToolbarProps = {
   isProMode: boolean
@@ -44,6 +50,10 @@ export type ComposerToolbarProps = {
   modeLauncherButton?: React.ReactNode
   compareControl?: React.ReactNode
   openUIRequestButton?: React.ReactNode
+  openUIRequestMode?: boolean
+  toolChoice?: "auto" | "none" | "required"
+  nestedDisclosureOpen?: boolean
+  focusFallbackRef?: React.RefObject<HTMLElement | null>
   // Row 1: primary selectors (pre-rendered by parent)
   modelSelectButton: React.ReactNode
   mcpControl: React.ReactNode
@@ -106,6 +116,11 @@ export type ComposerToolbarProps = {
   onFocusConnectionCard: () => void
   contextItems?: ComposerContextItem[]
   rolePlayActions?: ComposerToolbarRolePlayActions
+  trackedAssistantSelectionLoading?: boolean
+  onTrackedAssistantSelection?: (
+    selection: AssistantSelection,
+    isCurrent?: () => boolean
+  ) => boolean | Promise<boolean>
 }
 
 export type ComposerContextItem = {
@@ -119,7 +134,8 @@ export type ComposerContextItem = {
 /**
  * Unified toolbar for the chat composer.
  * Renders all controls once and uses `isProMode` for layout differences.
- * On mobile, secondary controls collapse into an overflow popover.
+ * Casual secondary controls share a task-based disclosure on every viewport.
+ * Pro keeps its direct controls and mobile overflow.
  */
 export const ComposerToolbar = React.memo(function ComposerToolbar(
   props: ComposerToolbarProps
@@ -147,6 +163,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     toolsButton,
     voiceChatButton,
     openUIRequestButton,
+    openUIRequestMode = false,
+    toolChoice = "none",
+    nestedDisclosureOpen = false,
     modelUsageBadge,
     selectedSystemPrompt,
     systemPrompt,
@@ -194,12 +213,56 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   const toolbarSendControl =
     sendControlPlacement === "toolbar" ? sendControl : null
   const ephemeralDisabled = privateChatLocked || isFireFoxPrivateMode
-  const [advancedControlsOpen, setAdvancedControlsOpen] = useStorage(
-    "playgroundComposerAdvancedControlsOpen",
-    false
-  )
-  const [casualAdvancedControlsOpen, setCasualAdvancedControlsOpen] =
-    useStorage("playgroundComposerCasualAdvancedControlsOpen", false)
+  const {
+    open: advancedControlsOpen,
+    setExplicitOpen: setAdvancedControlsOpen,
+    loading: advancedDisclosureLoading,
+    unavailable: advancedDisclosureUnavailable
+  } = useCasualComposerDisclosure("playgroundComposerAdvancedControlsOpen")
+  const {
+    open: casualAdvancedControlsOpen,
+    setExplicitOpen: setCasualAdvancedControlsOpen,
+    loading: casualDisclosureLoading,
+    unavailable: casualDisclosureUnavailable
+  } = useCasualComposerDisclosure()
+  const [assistantPickerOpen, setAssistantPickerOpen] = React.useState(false)
+  const [promptPickerOpen, setPromptPickerOpen] = React.useState(false)
+  const isProModeRef = React.useRef(isProMode)
+  isProModeRef.current = isProMode
+  const pendingCustomizationRevealRef = React.useRef(false)
+  const handleAssistantPickerOpen = React.useCallback((open: boolean) => {
+    setAssistantPickerOpen(open)
+    if (open && !isProModeRef.current)
+      pendingCustomizationRevealRef.current = true
+  }, [])
+  const handlePromptPickerOpen = React.useCallback((open: boolean) => {
+    setPromptPickerOpen(open)
+    if (open && !isProModeRef.current)
+      pendingCustomizationRevealRef.current = true
+  }, [])
+  React.useEffect(() => {
+    if (!assistantPickerOpen && !promptPickerOpen)
+      pendingCustomizationRevealRef.current = false
+    if (
+      !pendingCustomizationRevealRef.current ||
+      casualDisclosureLoading ||
+      isProMode
+    )
+      return
+    pendingCustomizationRevealRef.current = false
+    if (!casualAdvancedControlsOpen) void setCasualAdvancedControlsOpen(true)
+  }, [
+    assistantPickerOpen,
+    promptPickerOpen,
+    casualDisclosureLoading,
+    isProMode,
+    casualAdvancedControlsOpen,
+    setCasualAdvancedControlsOpen
+  ])
+  const toolbarRef = React.useRef<HTMLDivElement>(null)
+  const customizeTriggerRef = React.useRef<HTMLButtonElement>(null)
+  const lastFocusedControlRef = React.useRef<HTMLElement | null>(null)
+  const previousPickerOpenRef = React.useRef(false)
   const [appendFormattingGuidePrompt, setAppendFormattingGuidePrompt] =
     useStorage(PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY, false)
   const [systemPromptsOpen, setSystemPromptsOpen] = React.useState(false)
@@ -232,7 +295,107 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     [onTemplateSelect]
   )
 
+  // Retained hidden controls and detached portals are both invalid return targets.
+  // Repair only focus still owned by that disappearing control, never another task.
+  React.useLayoutEffect(() => {
+    const isVisible = (element: HTMLElement | null) => {
+      if (!element?.isConnected || ("disabled" in element && element.disabled))
+        return false
+      let ancestor: HTMLElement | null = element
+      while (ancestor) {
+        const style = window.getComputedStyle(ancestor)
+        if (
+          ancestor.hidden ||
+          ancestor.getAttribute("aria-hidden") === "true" ||
+          style.display === "none" ||
+          style.visibility === "hidden" ||
+          style.visibility === "collapse"
+        )
+          return false
+        ancestor = ancestor.parentElement
+      }
+      return true
+    }
+    const repairOwnedFocus = () => {
+      const previous = lastFocusedControlRef.current
+      if (!previous || isVisible(previous)) return
+      if (
+        document.activeElement !== document.body &&
+        document.activeElement !== previous
+      )
+        return
+      if (!isProMode) {
+        if (!casualDisclosureLoading && isVisible(customizeTriggerRef.current))
+          customizeTriggerRef.current?.focus()
+        return
+      }
+      const candidates =
+        toolbarRef.current?.querySelectorAll<HTMLButtonElement>(
+          "button:not(:disabled)"
+        )
+      const target = Array.from(candidates ?? []).find(isVisible)
+      if (target) target.focus()
+      else if (isVisible(props.focusFallbackRef?.current ?? null))
+        props.focusFallbackRef?.current?.focus()
+    }
+    const pickerOpen = assistantPickerOpen || promptPickerOpen
+    const pickerClosing = previousPickerOpenRef.current && !pickerOpen
+    previousPickerOpenRef.current = pickerOpen
+    // Let an existing picker return to its visible trigger before qualifying it.
+    if (!pickerClosing) repairOwnedFocus()
+    // Existing picker focus return is scheduled; qualify its eventual target too.
+    const frame = window.requestAnimationFrame(repairOwnedFocus)
+    return () => window.cancelAnimationFrame(frame)
+  }, [
+    isProMode,
+    isMobile,
+    optionsExpanded,
+    casualAdvancedControlsOpen,
+    casualDisclosureLoading,
+    assistantPickerOpen,
+    promptPickerOpen,
+    nestedDisclosureOpen,
+    props.focusFallbackRef
+  ])
+
+  const closeCasualCustomization = () => {
+    void setCasualAdvancedControlsOpen(false)
+    customizeTriggerRef.current?.focus()
+  }
+  const handleCustomizationKeyDown = (
+    event: React.KeyboardEvent<HTMLDivElement>
+  ) => {
+    if (
+      isProMode ||
+      !casualAdvancedControlsOpen ||
+      event.key !== "Escape" ||
+      event.defaultPrevented ||
+      event.nativeEvent.isComposing ||
+      nestedDisclosureOpen ||
+      assistantPickerOpen ||
+      promptPickerOpen ||
+      systemPromptsOpen ||
+      generationStyleOpen
+    )
+      return
+    if (
+      (event.target as HTMLElement).closest(
+        '[role="dialog"], [role="listbox"], [role="menu"]'
+      )
+    )
+      return
+    event.preventDefault()
+    event.stopPropagation()
+    closeCasualCustomization()
+    customizeTriggerRef.current?.focus()
+  }
+
   // --- Shared sub-elements ---
+  const persistenceChipLabel = getPersistenceModePillLabel(t, temporaryChat)
+  const persistenceControlLabel = getPersistenceModeControlLabel(
+    t,
+    temporaryChat
+  )
   const ephemeralToggle = React.useMemo(
     () => (
       <Tooltip title={persistenceTooltip}>
@@ -241,23 +404,14 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             type="button"
             onClick={() => onToggleTemporaryChat(!temporaryChat)}
             disabled={ephemeralDisabled}
-            aria-pressed={temporaryChat}
-            aria-label={
-              temporaryChat
-                ? (t(
-                    "playground:composer.ephemeralLabel",
-                    "Temporary"
-                  ) as string)
-                : (t("playground:composer.savedLabel", "Saved") as string)
-            }
+            aria-pressed={!temporaryChat}
+            aria-label={persistenceControlLabel}
             className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition hover:bg-surface2 hover:text-text ${
               temporaryChat
                 ? "bg-primary/10 text-primaryStrong"
                 : "text-text-muted"
             } ${ephemeralDisabled ? "cursor-not-allowed opacity-50" : ""}`}>
-            {temporaryChat
-              ? t("playground:composer.ephemeralLabel", "Temporary")
-              : t("playground:composer.savedLabel", "Saved")}
+            {persistenceChipLabel}
           </button>
         </span>
       </Tooltip>
@@ -266,7 +420,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       ephemeralDisabled,
       onToggleTemporaryChat,
       persistenceTooltip,
-      t,
+      persistenceChipLabel,
+      persistenceControlLabel,
       temporaryChat
     ]
   )
@@ -432,12 +587,12 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
           <TldwButton
             variant="outline"
             shape="pill"
-            iconOnly
+            size="sm"
             onClick={onOpenModelSettings}
             ariaLabel={t("common:currentChatModelSettings") as string}
             className="text-text-muted">
             <Gauge className="h-4 w-4" aria-hidden="true" />
-            <span className="sr-only">
+            <span>
               {t("playground:composer.chatSettings", "Chat Settings")}
             </span>
           </TldwButton>
@@ -531,6 +686,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         }
         promptAssistBackendKey={promptAssistBackendKey}
         promptAssistAuthorizationRevision={promptAssistAuthorizationRevision}
+        onOpenChange={handlePromptPickerOpen}
         onSelectModel={() =>
           openModelSelector({
             returnFocusSelector: "[data-testid='chat-prompt-select']"
@@ -551,7 +707,8 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       setSelectedQuickPrompt,
       setSelectedSystemPrompt,
       setSystemPrompt,
-      systemPrompt
+      systemPrompt,
+      handlePromptPickerOpen
     ]
   )
 
@@ -559,12 +716,15 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     () => (
       <AssistantSelect
         variant="dropdown"
-        showLabel={isProMode ? undefined : false}
+        onTrackedSelection={props.onTrackedAssistantSelection}
+        trackedSelectionLoading={props.trackedAssistantSelectionLoading}
+        showLabel
+        onOpenChange={handleAssistantPickerOpen}
         iconClassName="h-4 w-4"
         className="text-text-muted hover:text-text"
       />
     ),
-    [isProMode]
+    [props.onTrackedAssistantSelection, props.trackedAssistantSelectionLoading, handleAssistantPickerOpen]
   )
 
   const rolePlaySetupButton = React.useMemo(() => {
@@ -634,12 +794,17 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       </>
     )
 
-    if (item.onClick) {
+    const onClick =
+      !isProMode && (item.id === "rolePlayIdentity" || item.id === "character")
+        ? (providedRolePlayActions?.onOpenRolePlaySetup ?? item.onClick)
+        : item.onClick
+    if (onClick) {
       return (
         <button
           key={item.id}
           type="button"
-          onClick={item.onClick}
+          onClick={onClick}
+          aria-label={item.value ? `${item.label}: ${item.value}` : item.label}
           data-testid={dataTestId}
           className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition hover:bg-surface2 ${baseClasses}`}
           title={item.value ? `${item.label}: ${item.value}` : item.label}>
@@ -684,22 +849,27 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   const persistenceChipClass = temporaryChat
     ? "border-warn/40 bg-warn/10 text-warn"
     : "border-border bg-surface2 text-text-muted"
-  const persistenceChipLabel = temporaryChat
-    ? (t("playground:composer.ephemeralLabel", "Temporary") as string)
-    : (t("playground:composer.savedLabel", "Saved") as string)
   const advancedChipClass = casualAdvancedControlsOpen
-    ? "border-primary/40 bg-primary/10 text-primaryStrong"
+    ? "border-primary/40 bg-primary/10 text-text"
     : "border-border bg-surface2 text-text-muted"
   const formattingGuideToggleClass = appendFormattingGuidePrompt
     ? "bg-primary/10 text-primaryStrong"
     : "text-text-muted"
-  const casualModeContextGroupLabel = t(
-    "playground:composer.groups.modeAndContext",
-    "Mode and context controls"
+  const customizeLabel = t(
+    "playground:composer.customizeChat",
+    "Customize chat"
   ) as string
-  const runInputGroupLabel = t(
-    "playground:composer.groups.runInput",
-    "Run input controls"
+  const researchGroupLabel = t(
+    "playground:composer.groups.researchContext",
+    "Research & context"
+  ) as string
+  const characterGroupLabel = t(
+    "playground:composer.groups.characterRole",
+    "Character & your role"
+  ) as string
+  const responseGroupLabel = t(
+    "playground:composer.groups.responseSettings",
+    "Response settings"
   ) as string
   const mobileModeModelGroupLabel = t(
     "playground:composer.groups.mobileModeAndModel",
@@ -752,20 +922,24 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   )
   const casualAdvancedControlsToggle = (
     <button
+      ref={customizeTriggerRef}
       type="button"
-      onClick={() =>
-        setCasualAdvancedControlsOpen(!casualAdvancedControlsOpen)
-      }
+      onClick={() => {
+        if (casualDisclosureLoading) return
+        if (casualAdvancedControlsOpen) closeCasualCustomization()
+        else void setCasualAdvancedControlsOpen(true)
+      }}
+      disabled={casualDisclosureLoading}
+      aria-busy={casualDisclosureLoading}
       aria-expanded={casualAdvancedControlsOpen}
-      aria-pressed={casualAdvancedControlsOpen}
-      aria-controls={casualAdvancedControlsOpen ? casualAdvancedControlsId : undefined}
+      aria-controls={
+        casualAdvancedControlsOpen ? casualAdvancedControlsId : undefined
+      }
       data-testid="composer-casual-advanced-chip"
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition hover:bg-surface2 ${advancedChipClass}`}>
-      <span>{t("playground:composer.advancedControls", "Advanced controls")}</span>
+      className={`inline-flex min-h-[36px] items-center gap-1 rounded-md border px-2 py-1 text-xs font-medium transition hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:opacity-50 ${advancedChipClass}`}>
+      <span>{customizeLabel}</span>
       <ChevronDown
-        className={`h-3 w-3 transition-transform ${
-          casualAdvancedControlsOpen ? "rotate-180" : ""
-        }`}
+        className={`h-3 w-3 transition-transform ${casualAdvancedControlsOpen ? "rotate-180" : ""}`}
         aria-hidden="true"
       />
     </button>
@@ -775,18 +949,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     <div
       data-testid="composer-context-strip"
       aria-label={
-        t("playground:composer.activeContext", "Active context") as string
+        t("playground:composer.selectedContext", "Selected context") as string
       }
       className="flex flex-wrap items-center gap-1.5 border-t border-border/50 pt-2">
-      {modelSelectButton ? (
-        <span
-          data-testid="composer-casual-model-selector-chip"
-          className="inline-flex items-center">
-          {modelSelectButton}
-        </span>
-      ) : (
-        renderContextItem(casualModelItem)
-      )}
       {casualContextItems.map((item) =>
         renderContextItem(item, getContextItemTestId(item))
       )}
@@ -804,21 +969,40 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             onClick={() => onToggleTemporaryChat(!temporaryChat)}
             disabled={ephemeralDisabled}
             data-testid="composer-casual-persistence-chip"
-            aria-pressed={temporaryChat}
-            aria-label={
-              temporaryChat
-                ? (t(
-                    "playground:composer.ephemeralLabel",
-                    "Temporary"
-                  ) as string)
-                : (t("playground:composer.savedLabel", "Saved") as string)
-            }
+            aria-pressed={!temporaryChat}
+            aria-label={persistenceControlLabel}
             className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium transition hover:bg-surface2 ${persistenceChipClass} ${ephemeralDisabled ? "cursor-not-allowed opacity-50" : ""}`}>
             <span>{persistenceChipLabel}</span>
           </button>
         </span>
       </Tooltip>
-      {casualAdvancedControlsToggle}
+      {toolChoice !== "none" ? (
+        <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[11px] text-primaryStrong">
+          {t("playground:composer.mcpSelectedSummary", {
+            defaultValue: "MCP tools selected: {{choice}}",
+            choice:
+              toolChoice === "required"
+                ? t("playground:composer.toolChoiceRequired", "Required")
+                : t("playground:composer.toolChoiceAuto", "Auto")
+          })}
+        </span>
+      ) : null}
+      {appendFormattingGuidePrompt ? (
+        <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[11px] text-primaryStrong">
+          {t(
+            "playground:composer.formattingGuideActive",
+            "Formatting guide on"
+          )}
+        </span>
+      ) : null}
+      {openUIRequestMode ? (
+        <span className="rounded-full border border-primary/40 bg-primary/10 px-2 py-0.5 text-[11px] text-primaryStrong">
+          {t(
+            "playground:composer.interactiveResponseActive",
+            "Interactive response on"
+          )}
+        </span>
+      ) : null}
     </div>
   )
 
@@ -827,7 +1011,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       <div
         data-testid="composer-context-strip"
         aria-label={
-          t("playground:composer.activeContext", "Active context") as string
+          t("playground:composer.selectedContext", "Selected context") as string
         }
         className="flex flex-wrap items-center gap-1.5 border-t border-border/50 pt-2">
         {visibleContextItems.map((item) =>
@@ -835,17 +1019,20 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         )}
       </div>
     ) : null
-  const persistentContextStrip =
-    !isMobile && !isProMode ? casualContextStrip : contextStrip
+  const persistentContextStrip = !isProMode ? casualContextStrip : contextStrip
 
   const proAdvancedControls =
     isProMode && !isMobile ? (
       <div className="border-t border-border/50 pt-2">
         <button
           type="button"
-          onClick={() => setAdvancedControlsOpen(!advancedControlsOpen)}
+          onClick={() => void setAdvancedControlsOpen(!advancedControlsOpen)}
+          disabled={advancedDisclosureLoading}
+          aria-busy={advancedDisclosureLoading}
           aria-expanded={advancedControlsOpen}
-          aria-controls={advancedControlsOpen ? proAdvancedControlsId : undefined}
+          aria-controls={
+            advancedControlsOpen ? proAdvancedControlsId : undefined
+          }
           data-testid="composer-advanced-toggle"
           className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-xs font-medium text-text-muted transition hover:bg-surface2 hover:text-text">
           <span>
@@ -858,6 +1045,14 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             aria-hidden="true"
           />
         </button>
+        {advancedDisclosureUnavailable ? (
+          <p role="status" className="text-xs text-text-muted">
+            {t(
+              "playground:composer.advancedPreferenceUnavailable",
+              "Display preference unavailable. Advanced controls still work for this visit."
+            )}
+          </p>
+        ) : null}
         {advancedControlsOpen && (
           <div
             id={proAdvancedControlsId}
@@ -950,69 +1145,111 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     </div>
   )
 
+  const dictationActive =
+    (speechUsesServer && isServerDictating) ||
+    (!speechUsesServer && isListening)
   const casualToolbarLayout = (
     <div
       data-playground-toolbar-layout="casual"
-      className="flex flex-col gap-2">
+      className="flex min-w-0 flex-col gap-2">
       <div
-        data-playground-toolbar-row="actions"
-        className="flex flex-wrap items-center gap-2">
-        <div
-          role="group"
-          aria-label={casualModeContextGroupLabel}
-          className="flex min-w-0 flex-wrap items-center gap-2 text-text-muted [&>*]:shrink-0">
-          {modeLauncherButton}
-          {mcpControl}
-          {searchContextButton}
-          {promptSelectControl}
-          {characterSelectControl}
-          {rolePlaySetupButton}
-          <BuddyManagementButton
-            target={serverChatId ? { scope_type: "conversation", scope_id: serverChatId } : null}
-            onConversationSettings={providedRolePlayActions?.onOpenRolePlaySetup}
-          />
-        </div>
-        <div
-          role="group"
-          aria-label={runInputGroupLabel}
-          className="flex min-w-0 flex-wrap items-center gap-2 lg:ml-auto [&>*]:shrink-0">
-          {compareControl}
-          {openUIRequestButton}
-          {dictationButton}
-          {researchLaunchButton}
-          {voiceChatButton}
-          {attachmentButton}
-          {toolsButton}
-          {chatSettingsButton}
-          {toolbarSendControl}
-        </div>
+        role="group"
+        aria-label={
+          t(
+            "playground:composer.quickActions",
+            "Composer quick actions"
+          ) as string
+        }
+        data-playground-toolbar-row="primary"
+        className="flex min-w-0 flex-wrap items-center gap-2">
+        {modelSelectButton ? (
+          <span
+            data-testid="composer-casual-model-selector-chip"
+            className="inline-flex min-w-0 max-w-full items-center">
+            {modelSelectButton}
+          </span>
+        ) : (
+          renderContextItem(casualModelItem)
+        )}
+        {attachmentButton}
+        {casualAdvancedControlsToggle}
+        {dictationActive ? dictationButton : null}
+        {voiceChatEnabled ? voiceChatButton : null}
+        {toolbarSendControl}
       </div>
     </div>
   )
-  const casualAdvancedControlsPanel =
-    casualAdvancedControlsOpen && !isMobile && !isProMode ? (
-      <div
-        id={casualAdvancedControlsId}
-        role="group"
-        aria-label={advancedControlsGroupLabel}
-        data-playground-toolbar-row="advanced"
-        className="rounded-md border border-border/60 bg-surface2/60 p-2">
-        <div
-          data-testid="composer-casual-advanced-controls-row"
-          className="flex flex-nowrap items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-          <ConnectionStatus showLabel={false} className="px-1 py-0.5" />
-          {tabsCountBadge}
-          {filesCountBadge}
-          <ParameterPresets compact />
-          <SystemPromptTemplatesButton
-            onSelect={onTemplateSelect}
-            systemPrompt={systemPrompt}
-            onSystemPromptChange={setSystemPrompt}
-          />
-          {formattingGuideControl}
+  // Keep existing selector event listeners and editor drafts alive while hidden.
+  const casualAdvancedControlsPanel = !isProMode ? (
+    <section
+      id={casualAdvancedControlsId}
+      hidden={!casualAdvancedControlsOpen}
+      role="region"
+      aria-label={customizeLabel}
+      data-testid="composer-casual-advanced-controls-row"
+      data-playground-toolbar-row="advanced"
+      className={`min-w-0 gap-3 rounded-md border border-border/60 bg-surface2/60 p-2 lg:grid-cols-3 ${casualAdvancedControlsOpen ? "grid" : "hidden"}`}>
+      <div role="group" aria-label={researchGroupLabel} className="min-w-0">
+        <h3 className="mb-2 text-xs font-semibold text-text">
+          {researchGroupLabel}
+        </h3>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {modeLauncherButton}
+          {searchContextButton}
+          {webSearchButton}
+          {researchLaunchButton}
+          {mcpControl}
+          {toolsButton}
+          <ConnectionStatus showLabel className="px-1 py-0.5" />
         </div>
       </div>
-    ) : null
+      <div role="group" aria-label={characterGroupLabel} className="min-w-0">
+        <h3 className="mb-2 text-xs font-semibold text-text">
+          {characterGroupLabel}
+        </h3>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {characterSelectControl}
+          {rolePlaySetupButton}
+          <BuddyManagementButton
+            target={
+              serverChatId
+                ? { scope_type: "conversation", scope_id: serverChatId }
+                : null
+            }
+            onConversationSettings={
+              providedRolePlayActions?.onOpenRolePlaySetup
+            }
+          />
+        </div>
+      </div>
+      <div role="group" aria-label={responseGroupLabel} className="min-w-0">
+        <h3 className="mb-2 text-xs font-semibold text-text">
+          {responseGroupLabel}
+        </h3>
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {promptSelectControl}
+          {chatSettingsButton}
+          <button
+            type="button"
+            onClick={mobileRolePlayActions.onOpenGenerationStyle}
+            className="rounded-md px-2 py-1 text-xs text-text-muted hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus">
+            {t("playground:presets.generationStyle", "Generation style")}
+          </button>
+          <button
+            type="button"
+            onClick={mobileRolePlayActions.onOpenSystemPrompts}
+            className="rounded-md px-2 py-1 text-xs text-text-muted hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus">
+            {t("playground:templates.button", "System prompts")}
+          </button>
+          {compareControl}
+          {openUIRequestButton}
+          {formattingGuideControl}
+          {!dictationActive ? dictationButton : null}
+          {!voiceChatEnabled ? voiceChatButton : null}
+        </div>
+      </div>
+    </section>
+  ) : null
 
   const proSplitToolbarLayout = (
     <div
@@ -1048,8 +1285,14 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             {characterSelectControl}
             {rolePlaySetupButton}
             <BuddyManagementButton
-              target={serverChatId ? { scope_type: "conversation", scope_id: serverChatId } : null}
-              onConversationSettings={providedRolePlayActions?.onOpenRolePlaySetup}
+              target={
+                serverChatId
+                  ? { scope_type: "conversation", scope_id: serverChatId }
+                  : null
+              }
+              onConversationSettings={
+                providedRolePlayActions?.onOpenRolePlaySetup
+              }
             />
           </div>
         </section>
@@ -1094,7 +1337,10 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     <div
       role="group"
       aria-label={
-        t("playground:composer.quickActions", "Composer quick actions") as string
+        t(
+          "playground:composer.quickActions",
+          "Composer quick actions"
+        ) as string
       }
       data-playground-toolbar-row="collapsed-actions"
       className="flex items-center justify-end gap-2">
@@ -1104,8 +1350,13 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
 
   return (
     <div
+      ref={toolbarRef}
+      onFocusCapture={(event) => {
+        lastFocusedControlRef.current = event.target as HTMLElement
+      }}
+      onKeyDown={handleCustomizationKeyDown}
       data-testid="composer-options-panel"
-      className="mt-2 flex flex-col gap-1">
+      className="mt-2 flex min-w-0 flex-col gap-1">
       <SystemPromptTemplatesModal
         open={systemPromptsOpen}
         onClose={() => setSystemPromptsOpen(false)}
@@ -1120,15 +1371,27 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         footer={null}
         width={420}
         className="generation-style-modal">
-        <ParameterPresetsDropdown onChange={() => setGenerationStyleOpen(false)} />
+        <ParameterPresetsDropdown
+          onChange={() => setGenerationStyleOpen(false)}
+        />
       </Modal>
-      {optionsExpanded ? (
+      {!isProMode ? (
         <>
-          {isMobile
-            ? mobileToolbarLayout
-            : isProMode
-              ? proSplitToolbarLayout
-              : casualToolbarLayout}
+          {casualToolbarLayout}
+          {persistentContextStrip}
+          {casualAdvancedControlsPanel}
+          {casualDisclosureUnavailable ? (
+            <p role="status" className="text-xs text-text-muted">
+              {t(
+                "playground:composer.customizePreferenceUnavailable",
+                "Display preference unavailable. Customize chat still works for this visit."
+              )}
+            </p>
+          ) : null}
+        </>
+      ) : optionsExpanded ? (
+        <>
+          {isMobile ? mobileToolbarLayout : proSplitToolbarLayout}
 
           {/* Pro-only: persistence hints (desktop only) */}
           {!isMobile && isProMode && !temporaryChat && !isConnectionReady && (
@@ -1174,13 +1437,11 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
               </p>
             )}
           {persistentContextStrip}
-          {!isMobile && !isProMode ? casualAdvancedControlsPanel : null}
         </>
       ) : (
         <>
           {collapsedMobileToolbarLayout}
           {!isMobile ? persistentContextStrip : null}
-          {!isMobile && !isProMode ? casualAdvancedControlsPanel : null}
         </>
       )}
     </div>

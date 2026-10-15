@@ -21,6 +21,8 @@ class _Pool:
 
     async def fetchone(self, _sql: str, user_id: int):
         """Return the users row."""
+        if "native_chat_quota_reservations" in _sql:
+            return {"bytes": 0, "count": 0}  # Explicit empty ledger for these legacy-only cases.
         return self.rows.get(int(user_id))
 
 
@@ -143,6 +145,7 @@ async def test_user_quota_status_is_read_only_and_has_quota_means_set(service) -
     """user_quota_status reports has_quota only when a value is set, and leaves the usage cache untouched."""
     assert await service.user_quota_status(7) == {
         "quota_mb": None, "used_mb": 100.0, "remaining_mb": None, "usage_pct": 0.0, "has_quota": False,
+        "legacy_used_mb": 100.0, "native_used_mb": 0.0,
     }
     service.limits[7] = 400
     status = await service.user_quota_status(7)

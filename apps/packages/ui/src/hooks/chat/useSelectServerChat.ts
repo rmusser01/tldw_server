@@ -1,13 +1,16 @@
 import React from "react"
+import { captureChatDraftLoad, captureChatDraftSource, confirmTemporaryChatDiscard } from "@/hooks/chat/chat-draft-transition"
 import { useNavigate } from "react-router-dom"
 import { Modal } from "antd"
 import { shallow } from "zustand/shallow"
 import { useChatBaseState } from "@/hooks/chat/useChatBaseState"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { cleanupAntOverlays } from "@/utils/cleanup-ant-overlays"
 import { normalizeConversationState } from "@/utils/conversation-state"
 import { updatePageTitle } from "@/utils/update-page-title"
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
 import { resolveServerChatAssistantIdentity } from "@/hooks/chat/useServerChatLoader"
 
@@ -24,6 +27,7 @@ const resolveCharacterId = (value: unknown): string | number | null => {
 
 export const useSelectServerChat = () => {
   const navigate = useNavigate()
+  const captureSelectionFence = useHistorySelectionContext()?.fence
   const {
     setHistory,
     setHistoryId,
@@ -87,7 +91,41 @@ export const useSelectServerChat = () => {
   )
 
   return React.useCallback(
-    (chat: ServerChatSummary) => {
+    (chat: ServerChatSummary, options?: {
+      discardTemporaryConfirmed?: true
+      settingsNavigationConfirmed?: true
+      temporaryChat?: false
+      isCurrent?: () => boolean
+    }) => {
+      const callerIsCurrent = options?.isCurrent ?? (() => true)
+      if (!callerIsCurrent()) return false
+      const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
+      const source = captureChatDraftSource(selectionIsCurrent)
+      const chatPath = typeof window !== "undefined" &&
+        window.location.pathname.toLowerCase().endsWith("sidepanel.html") ? "/" : "/chat"
+      if (options?.settingsNavigationConfirmed !== true && !requestSettingsNavigation(chatPath)) return false
+      if (!source.isCurrent() || !callerIsCurrent()) return false
+      if (options?.discardTemporaryConfirmed !== true && !confirmTemporaryChatDiscard()) return false
+      if (!source.isCurrent() || !callerIsCurrent()) return false
+      // A mode publication must not adopt a New/load published by a synchronous subscriber.
+      if (options?.temporaryChat === false) {
+        const before = useStoreMessageOption.getState()
+        const session = usePlaygroundSessionStore.getState()
+        before.setTemporaryChat(false)
+        const after = useStoreMessageOption.getState()
+        const changed = before.temporaryChat !== false
+        const addressCurrent = !changed || before.chatDraftAddress?.kind !== "fresh"
+          ? after.chatDraftAddress === before.chatDraftAddress
+          : after.chatDraftAddress?.kind === "fresh" && after.chatDraftAddress.id === before.chatDraftAddress.id &&
+            after.chatDraftAddress.scope === before.chatDraftAddress.scope && after.chatDraftAddress.temporary === false
+        if (!callerIsCurrent() || !selectionIsCurrent() || !addressCurrent ||
+          after.chatDraftRevision !== before.chatDraftRevision + (changed ? 1 : 0) ||
+          after.historyId !== before.historyId || after.serverChatId !== before.serverChatId ||
+          usePlaygroundSessionStore.getState().restoreRevision !== session.restoreRevision ||
+          usePlaygroundSessionStore.getState().sourceSelectionRevision !== session.sourceSelectionRevision) return false
+      }
+      if (!callerIsCurrent()) return false
+      const acceptDraft = captureChatDraftLoad("switch")
       usePlaygroundSessionStore.getState().cancelPendingRestore()
       if (typeof window !== "undefined") {
         Modal.destroyAll()
@@ -126,17 +164,15 @@ export const useSelectServerChat = () => {
       setServerChatClusterId(chat.cluster_id ?? null)
       setServerChatSource(chat.source ?? null)
       setServerChatExternalRef(chat.external_ref ?? null)
-      setServerChatMetaLoaded(true)
-      usePlaygroundSessionStore.getState().requestServerChatSelection(chat.id)
+      setServerChatMetaLoaded(assistantIdentity.assistantKind !== "character")
+      usePlaygroundSessionStore.getState().requestServerChatSelection(chat.id, acceptDraft)
       updatePageTitle(chat.title)
-      const chatPath = typeof window !== "undefined" &&
-        window.location.pathname.toLowerCase().endsWith("sidepanel.html")
-        ? "/"
-        : "/chat"
       navigate(chatPath)
+      return true
     },
     [
       clearReplyTarget,
+      captureSelectionFence,
       navigate,
       setHistory,
       setHistoryId,

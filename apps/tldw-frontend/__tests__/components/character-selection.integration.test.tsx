@@ -14,6 +14,7 @@ import {
 } from '@/types/assistant-selection';
 import { selectedCharacterStorage } from '@/utils/selected-character-storage';
 import type { Character } from '@/types/character';
+import { deriveSingleUserApiKeyCredentialScope } from '@/services/chat-surface-scope';
 
 const mocks = vi.hoisted(() => ({
   apiKey: 'test-key' as string | null,
@@ -82,6 +83,19 @@ const deferred = <T,>() => {
   return { promise, resolve };
 };
 
+const expectCedarProfileRead = (id: '4' | 4) => {
+  expect(mocks.getCharacter).toHaveBeenCalledWith(id, expect.objectContaining({
+    signal: expect.any(AbortSignal),
+    requestScope: expect.objectContaining({
+      config: expect.objectContaining({
+        serverUrl: 'http://127.0.0.1:8000',
+        authMode: 'single-user',
+        expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope('single-user', 'test-key'),
+      }),
+    }),
+  }));
+};
+
 // Keep the actual picker, canonical selection, storage notifications, greeting
 // hydration, clear-chat and server loader together. Only I/O is controlled.
 function SelectionWorkspace() {
@@ -93,15 +107,13 @@ function SelectionWorkspace() {
     notification: mocks.notification,
     t: t as never,
   });
-  useCharacterGreeting({
+  const preview = useCharacterGreeting({
     playgroundReady: !meta?.isLoading,
     selectedCharacter: character,
     selectedCharacterMode: getAssistantSelectionMode(assistant),
     serverChatId: state.serverChatId,
     historyId: state.historyId,
     messagesLength: state.messages.length,
-    setMessages: state.setMessages,
-    setHistory: state.setHistory,
   });
   return (
     <>
@@ -116,6 +128,7 @@ function SelectionWorkspace() {
       </button>
       <output aria-label="Selected assistant">{assistant?.id ?? 'none'}</output>
       <output aria-label="Request system prompt">{assistant?.system_prompt}</output>
+      <output aria-label="Greeting preview">{preview.fresh && !preview.loading && !preview.unavailable ? preview.character?.greeting : ""}</output>
       <output aria-label="Conversation messages">
         {state.messages.map((m) => m.message).join('\n')}
       </output>
@@ -131,13 +144,13 @@ describe('character picker with greeting and server hydration', () => {
     useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true);
     mocks.listAllCharacters.mockResolvedValue([cedar, robot]);
     mocks.getCharacter.mockImplementation(async (id) => (String(id) === '4' ? cedar : robot));
-    mocks.getChat.mockResolvedValue({ id: 'cedar-chat', character_id: 4, name: 'Cedar chat' });
+    mocks.getChat.mockResolvedValue({ id: 'cedar-chat', character_id: 4, name: 'Cedar chat', scope_type: 'global', workspace_id: null, assistant_kind: 'character', assistant_id: '4' });
     mocks.listChatMessages.mockResolvedValue([]);
 
     const selection = renderHook(() => useSelectedAssistant());
     await waitFor(() => expect(selection.result.current[2].isLoading).toBe(false));
     await act(async () => {
-      await selection.result.current[1](characterToAssistantSelection(cedar));
+      await selection.result.current[1]({ ...characterToAssistantSelection(cedar), metadata: { selectionMode: "tracked" } });
     });
     selection.unmount();
   });
@@ -170,7 +183,9 @@ describe('character picker with greeting and server hydration', () => {
       expect(screen.getByLabelText('Request system prompt')).toHaveTextContent(
         'Always respond with exactly: BEEP BOOP.'
       );
-      expect(screen.getByLabelText('Conversation messages')).toHaveTextContent('BEEP BOOP.');
+      expect(screen.getByLabelText('Greeting preview')).toHaveTextContent('BEEP BOOP.');
+      expect(useStoreMessageOption.getState().messages).toEqual([]);
+      expect(useStoreMessageOption.getState().history).toEqual([]);
     });
     expect(screen.getByLabelText('Conversation messages')).not.toHaveTextContent(
       'Welcome to Cedar.'
@@ -205,7 +220,9 @@ describe('character picker with greeting and server hydration', () => {
       await oldProfile.promise;
     });
     expect(screen.getByLabelText('Selected assistant')).toHaveTextContent('4');
-    expect(screen.getByLabelText('Conversation messages')).toHaveTextContent('Welcome to Cedar.');
+    expect(screen.getByLabelText('Greeting preview')).toHaveTextContent('Welcome to Cedar.');
+    expect(useStoreMessageOption.getState().messages).toEqual([]);
+    expect(useStoreMessageOption.getState().history).toEqual([]);
     expect(screen.getByLabelText('Request system prompt')).toHaveTextContent(
       'Answer using Cedar facts.'
     );
@@ -218,16 +235,21 @@ describe('character picker with greeting and server hydration', () => {
     const oldProfile = deferred<Character>();
     mocks.getCharacter.mockReturnValue(oldProfile.promise);
     render(<SelectionWorkspace />);
-    await waitFor(() => expect(mocks.getCharacter).toHaveBeenCalledWith('4'));
+    await waitFor(() => expectCedarProfileRead('4'));
     await act(async () => {
       mocks.apiKey = apiKey;
       window.dispatchEvent(new CustomEvent(eventName, { detail }));
       oldProfile.resolve({ ...cedar, greeting: 'Previous account private greeting' });
       await oldProfile.promise;
     });
+    expect(screen.getByLabelText('Greeting preview')).not.toHaveTextContent(
+      'Previous account private greeting'
+    );
     expect(screen.getByLabelText('Conversation messages')).not.toHaveTextContent(
       'Previous account private greeting'
     );
+    expect(useStoreMessageOption.getState().messages).toEqual([]);
+    expect(useStoreMessageOption.getState().history).toEqual([]);
   });
 
   it('keeps Robot selected when the abandoned saved Cedar loader finishes', async () => {
@@ -245,7 +267,7 @@ describe('character picker with greeting and server hydration', () => {
     );
     const user = userEvent.setup();
     render(<SelectionWorkspace />);
-    await waitFor(() => expect(mocks.getCharacter).toHaveBeenCalledWith('4'));
+    await waitFor(() => expectCedarProfileRead(4));
     await user.click(screen.getByTestId('character-select'));
     await user.click(await screen.findByRole('button', { name: 'Cycle3 BEEP Robot', exact: true }));
     await waitFor(() => expect(screen.getByLabelText('Selected assistant')).toHaveTextContent('5'));
@@ -255,7 +277,9 @@ describe('character picker with greeting and server hydration', () => {
     });
     expect(screen.getByLabelText('Selected assistant')).toHaveTextContent('5');
     expect(useStoreMessageOption.getState().serverChatId).toBeNull();
-    expect(screen.getByLabelText('Conversation messages')).toHaveTextContent('BEEP BOOP.');
+    expect(screen.getByLabelText('Greeting preview')).toHaveTextContent('BEEP BOOP.');
+    expect(useStoreMessageOption.getState().messages).toEqual([]);
+    expect(useStoreMessageOption.getState().history).toEqual([]);
   });
 
   it('does not resurrect a cleared selection from its pending greeting', async () => {
@@ -263,7 +287,7 @@ describe('character picker with greeting and server hydration', () => {
     mocks.getCharacter.mockReturnValue(oldProfile.promise);
     const user = userEvent.setup();
     render(<SelectionWorkspace />);
-    await waitFor(() => expect(mocks.getCharacter).toHaveBeenCalledWith('4'));
+    await waitFor(() => expectCedarProfileRead('4'));
     await user.click(screen.getByRole('button', { name: 'Clear selection' }));
     await waitFor(() =>
       expect(screen.getByLabelText('Selected assistant')).toHaveTextContent('none')
@@ -273,16 +297,21 @@ describe('character picker with greeting and server hydration', () => {
       await oldProfile.promise;
     });
     expect(screen.getByLabelText('Selected assistant')).toHaveTextContent('none');
+    expect(screen.getByLabelText('Greeting preview')).not.toHaveTextContent(
+      'Late cleared greeting'
+    );
     expect(screen.getByLabelText('Conversation messages')).not.toHaveTextContent(
       'Late cleared greeting'
     );
+    expect(useStoreMessageOption.getState().messages).toEqual([]);
+    expect(useStoreMessageOption.getState().history).toEqual([]);
   });
 
   it('retains greeting hydration through a benign configuration update', async () => {
     const profile = deferred<Character>();
     mocks.getCharacter.mockReturnValue(profile.promise);
     render(<SelectionWorkspace />);
-    await waitFor(() => expect(mocks.getCharacter).toHaveBeenCalledWith('4'));
+    await waitFor(() => expectCedarProfileRead('4'));
     await act(async () => {
       window.dispatchEvent(
         new CustomEvent('tldw:config-updated', { detail: { authorityChanged: false } })
@@ -290,7 +319,7 @@ describe('character picker with greeting and server hydration', () => {
       profile.resolve({ ...cedar, greeting: 'Current hydrated greeting' });
       await profile.promise;
     });
-    expect(screen.getByLabelText('Conversation messages')).toHaveTextContent(
+    expect(screen.getByLabelText('Greeting preview')).toHaveTextContent(
       'Current hydrated greeting'
     );
   });

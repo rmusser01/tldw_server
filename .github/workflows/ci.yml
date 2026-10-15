@@ -703,6 +703,7 @@ jobs:
           - name: admin-backup-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-conflicts-data-admin
             paths: >-
@@ -756,6 +757,7 @@ jobs:
           - name: admin-llm-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+              tldw_Server_API/tests/Admin/test_admin_llm_usage_reads.py
           - name: admin-maintenance-misc
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
@@ -811,6 +813,7 @@ jobs:
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
+              tldw_Server_API/tests/Admin/test_admin_event_loop_offload.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
@@ -922,10 +925,15 @@ jobs:
           - name: db-management-d-l
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[d-l]*.py
+          - name: db-management-m-r
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[m-r]*.py
+          - name: db-management-s-z
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[s-z]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
               tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
@@ -1364,6 +1372,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_persona_exemplar_telemetry.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_png_export.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_postgres_backends.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
@@ -2358,6 +2367,7 @@ jobs:
           - name: admin-backup-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-conflicts-data-admin
             paths: >-
@@ -2411,6 +2421,7 @@ jobs:
           - name: admin-llm-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+              tldw_Server_API/tests/Admin/test_admin_llm_usage_reads.py
           - name: admin-maintenance-misc
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
@@ -2466,6 +2477,7 @@ jobs:
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
+              tldw_Server_API/tests/Admin/test_admin_event_loop_offload.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
@@ -2577,10 +2589,15 @@ jobs:
           - name: db-management-d-l
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[d-l]*.py
+          - name: db-management-m-r
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[m-r]*.py
+          - name: db-management-s-z
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[s-z]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
               tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
@@ -3022,6 +3039,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_persona_exemplar_telemetry.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_png_export.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_postgres_backends.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
@@ -3853,6 +3871,7 @@ jobs:
           - name: admin-backup-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-conflicts-data-admin
             paths: >-
@@ -3906,6 +3925,7 @@ jobs:
           - name: admin-llm-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+              tldw_Server_API/tests/Admin/test_admin_llm_usage_reads.py
           - name: admin-maintenance-misc
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
@@ -3961,6 +3981,7 @@ jobs:
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
+              tldw_Server_API/tests/Admin/test_admin_event_loop_offload.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
@@ -4072,10 +4093,15 @@ jobs:
           - name: db-management-d-l
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[d-l]*.py
+          - name: db-management-m-r
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[m-r]*.py
+          - name: db-management-s-z
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[s-z]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
               tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
@@ -4517,6 +4543,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_persona_exemplar_telemetry.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_png_export.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_postgres_backends.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
@@ -5259,6 +5286,7 @@ jobs:
           - name: admin-backup-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-conflicts-data-admin
             paths: >-
@@ -5312,6 +5340,7 @@ jobs:
           - name: admin-llm-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+              tldw_Server_API/tests/Admin/test_admin_llm_usage_reads.py
           - name: admin-maintenance-misc
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
@@ -5367,6 +5396,7 @@ jobs:
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
+              tldw_Server_API/tests/Admin/test_admin_event_loop_offload.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
@@ -5478,10 +5508,15 @@ jobs:
           - name: db-management-d-l
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[d-l]*.py
+          - name: db-management-m-r
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[m-r]*.py
+          - name: db-management-s-z
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[s-z]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
               tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
@@ -5923,6 +5958,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_persona_exemplar_telemetry.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_png_export.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_postgres_backends.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
@@ -6564,17 +6600,17 @@ jobs:
     name: Release Full Suite shard (${{ matrix.os }} / Python 3.13 / ${{ matrix.shard.name }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
-    needs: [lint, syntax-check]
-    if: >-
+    needs: &release_os_needs [lint, syntax-check]
+    if: &release_os_condition >-
       always() && !cancelled() &&
       needs.lint.result == 'success' && needs.syntax-check.result == 'success' &&
       github.event_name != 'pull_request' && github.event_name != 'workflow_run'
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 10
       matrix:
-        os: [windows-latest, macos-latest]
-        shard:
+        os: [macos-latest]
+        shard: &release_os_shards
           - name: core-server-smoke
             paths: >-
               tldw_Server_API/tests/test_*.py
@@ -6656,6 +6692,7 @@ jobs:
           - name: admin-backup-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
+              tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
           - name: admin-conflicts-data-admin
             paths: >-
@@ -6709,6 +6746,7 @@ jobs:
           - name: admin-llm-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_llm_usage_endpoints.py
+              tldw_Server_API/tests/Admin/test_admin_llm_usage_reads.py
           - name: admin-maintenance-misc
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_maintenance_*.py
@@ -6764,6 +6802,7 @@ jobs:
           - name: admin-system-usage
             paths: >-
               tldw_Server_API/tests/Admin/test_system_ops.py
+              tldw_Server_API/tests/Admin/test_admin_event_loop_offload.py
               tldw_Server_API/tests/Admin/test_usage_reporting*.py
           - name: auth-integration-admin-auth
             paths: >-
@@ -6875,10 +6914,15 @@ jobs:
           - name: db-management-d-l
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[d-l]*.py
+          - name: db-management-m-r
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[m-r]*.py
+          - name: db-management-s-z
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[s-z]*.py
           - name: db-privileges
             paths: >-
               tldw_Server_API/tests/DB
-              tldw_Server_API/tests/DB_Management/test_[m-z]*.py
               tldw_Server_API/tests/DB_Management/unit
               tldw_Server_API/tests/MediaDB2
               tldw_Server_API/tests/Media_DB/test_media_clone_snapshot_repository.py
@@ -7320,6 +7364,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_persona_exemplar_telemetry.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_png_export.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_postgres_backends.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
@@ -7765,7 +7810,7 @@ jobs:
               tldw_Server_API/tests/WebScraping
               tldw_Server_API/tests/Web_Scraping
               tldw_Server_API/tests/integration
-    env:
+    env: &release_os_env
       PYTHONPATH: .
       PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
       TEST_MODE: 'true'
@@ -7776,7 +7821,7 @@ jobs:
       SHARD_NAME: ${{ matrix.shard.name }}
       TEST_PATHS: ${{ matrix.shard.paths }}
       RESULTS_DIR: test-results-${{ matrix.os }}-3.13-${{ matrix.shard.name }}
-    steps:
+    steps: &release_os_steps
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
@@ -7920,6 +7965,21 @@ jobs:
         with:
           name: full-suite-${{ matrix.os }}-py3.13-${{ matrix.shard.name }}
           path: ${{ env.RESULTS_DIR }}
+
+  full-suite-windows-313-release-shards:
+    name: Release Full Suite shard (${{ matrix.os }} / Python 3.13 / ${{ matrix.shard.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    needs: *release_os_needs
+    if: *release_os_condition
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        os: [windows-latest]
+        shard: *release_os_shards
+    env: *release_os_env
+    steps: *release_os_steps
 
   character-chat-rate-limits:
     name: Character Chat Rate-Limits (TEST_MODE=0)

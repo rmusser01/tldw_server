@@ -23,6 +23,9 @@ import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { useTutorialStore } from "@/store/tutorials"
 import { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from "@/design-system"
 import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { captureChatDraftSource, confirmTemporaryChatDiscard } from "@/hooks/chat/chat-draft-transition"
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import { useSelectedAssistant } from "@/hooks/useSelectedAssistant"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { loadServicePromptSnapshot, type ServicePromptSnapshot } from "@/services/service-prompts"
@@ -224,6 +227,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     return rawConfirmDanger(options)
   }, [rawConfirmDanger])
   const selectServerChat = useSelectServerChat()
+  const captureSelectionFence = useHistorySelectionContext()?.fence
   const [, setSelectedAssistant] = useSelectedAssistant()
 
   const capabilityDisabled = !capsLoading && capabilities && !capabilities.hasNotes
@@ -2190,11 +2194,14 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       message.warning(t("option:notesSearch.finishChatBeforeOpening", { defaultValue: "Finish or save the current chat before opening the linked conversation." }))
       return
     }
+    const source = captureChatDraftSource(captureSelectionFence?.())
+    if (!requestSettingsNavigation("/chat") || !source.isCurrent()) return
+    if (!confirmTemporaryChatDiscard(chatState) || !source.isCurrent()) return
     linkedChatRequestRef.current?.abort()
     const controller = new AbortController()
     linkedChatRequestRef.current = controller
     const sourceKey = linkedChatSourceKey
-    const isCurrent = () => !controller.signal.aborted && linkedChatRequestRef.current === controller && linkedChatSourceRef.current === sourceKey
+    const isCurrent = () => source.isCurrent() && !controller.signal.aborted && linkedChatRequestRef.current === controller && linkedChatSourceRef.current === sourceKey
     const stopWatchingChat = useStoreMessageOption.subscribe((current, previous) => {
       if (current.serverChatId !== previous.serverChatId || current.historyId !== previous.historyId ||
         current.streaming || current.isProcessing ||
@@ -2222,10 +2229,10 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         metadata: { selectionMode: "tracked" }
       } : null
       const mappedMessages = mapServerChatMessagesToPlaygroundMessages({ serverMessages: rows, assistantName: selection?.name || "Assistant", characterId: identity.characterId })
-      usePlaygroundSessionStore.getState().cancelPendingRestore()
-      await setSelectedAssistant(selection, { isCurrent })
+      if (await setSelectedAssistant(selection, { isCurrent }) === false) return
       if (!isCurrent()) return
       stopWatchingChat()
+      if (selectServerChat(chat, { discardTemporaryConfirmed: true, settingsNavigationConfirmed: true, temporaryChat: false }) === false) return
       usePlaygroundSessionStore.getState().saveSession({
         historyId: null, serverChatId: String(chat.id), scopeKey: snapshot.scopeKey,
         trackedAssistantSelection: selection, trackedAssistantKind: selection?.kind ?? null,
@@ -2234,8 +2241,6 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         trackedAssistantDisplayName: selection?.name ?? null, trackedAssistantAvatarUrl: null,
         serverChatPersonaMemoryMode: identity.personaMemoryMode, queuedMessages: []
       })
-      useStoreMessageOption.getState().setTemporaryChat(false)
-      selectServerChat(chat)
       useStoreMessageOption.getState().setHistory(mappedMessages.map(row => ({ role: row.role, content: row.message })))
       useStoreMessageOption.getState().setMessages(mappedMessages)
       const resolvedLabel = toConversationLabel(chat)

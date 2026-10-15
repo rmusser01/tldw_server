@@ -536,7 +536,7 @@ openapi-fingerprint: ## Refresh the checked-in OpenAPI drift fingerprint
 	$(CI_LOCAL_PYTHON) Helper_Scripts/export_openapi_schema.py --fingerprint apps/packages/api-types/openapi.fingerprint.json
 
 openapi-drift-check: ## Fail if the OpenAPI contract drifted from the checked-in fingerprint
-	$(CI_LOCAL_PYTHON) Helper_Scripts/export_openapi_schema.py --check apps/packages/api-types/openapi.fingerprint.json
+	$(CI_LOCAL_PYTHON) Helper_Scripts/export_openapi_schema.py --check apps/packages/api-types/openapi.fingerprint.json --check-paths apps/packages/api-types/paths.d.ts
 
 # -----------------------------------------------------------------------------
 # Chat Streaming Load Harness (Scenario A starter)

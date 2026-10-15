@@ -137,6 +137,22 @@ describe("OptionSetup readiness route", () => {
     mocks.useSetupOnboarding.mockReturnValue(setupReturn())
   })
 
+  it("opens connection settings from an unconfigured route without a backend retry or recovery panel", () => {
+    mocks.useSetupOnboarding.mockReturnValue({
+      ...setupReturn({ state: null }), connectionConfigured: false, connectionChecking: false
+    })
+    mocks.useConnectionState.mockReturnValue({ serverUrl: null })
+    renderRoute()
+    expect(screen.getByRole("heading", { level: 1, name: "Connect your tldw server" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Open connection settings" }))
+    expect(mocks.navigate).toHaveBeenCalledWith("/settings/tldw")
+    expect(mocks.refresh).not.toHaveBeenCalled()
+    expect(mocks.setConfigPartial).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("setup-required-panel")).not.toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "I finished API server setup" })).not.toBeInTheDocument()
+  })
+
   it("exposes a route heading when setup does not require the wizard", () => {
     renderRoute()
 

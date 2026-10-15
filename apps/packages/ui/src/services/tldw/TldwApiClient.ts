@@ -1,3 +1,9 @@
+import type {
+  RoleplayResumeMetadata,
+  RoleplayResumeUserAppendRequest,
+  RoleplayResumeUserAppendReceipt
+} from "./roleplay-resume"
+import type { InitialChatSetupAttempt } from "@/utils/settings-return"
 import { knowledgeNoteWriteFields, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { BoundedTtlCache } from "./bounded-ttl-cache"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"
@@ -35,7 +41,7 @@ import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { createJsonResponseLike } from "@/services/tldw/json-response-like"
 import type { AllowedPath, PathOrUrl } from "@/services/tldw/openapi-guard"
 import { tldwRequest } from "@/services/tldw/request-core"
-import { createServicePromptScopeChangedError, servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
+import { createServicePromptScopeChangedError, isRequestConfigScopeChangedError, servicePromptTargetsMatch } from "@/services/tldw/service-prompt-scope-error"
 import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { appendPathQuery } from "@/services/tldw/path-utils"
@@ -45,6 +51,11 @@ import {
   type ChatRequestDebugMetadata
 } from "@/services/tldw/chat-request-debug"
 import { isHostedTldwDeployment } from "@/services/tldw/deployment-mode"
+import {
+  cancelRuntimeAuthBootstrapRecovery,
+  recoverRuntimeAuthBootstrap
+} from "./runtime-bootstrap-recovery"
+
 import { getNormalizedTldwModels } from "@/services/tldw/model-normalization"
 import { getTldwTTSModel, getTldwTTSVoice } from "@/services/tts"
 import {
@@ -76,6 +87,7 @@ import {
   invalidateRefreshSessionIfCurrent,
   isCompleteDeviceCredential,
   MANUAL_SESSION_KEY,
+  REFRESH_ROTATION_KEY,
   normalizeServerOrigin,
   resolveEffectiveTldwConfig,
   resolveManualCredential,
@@ -862,6 +874,7 @@ export type UserProfileUpdateResponse = {
 
 export interface TldwModel {
   id: string
+  is_server_default?: boolean
   name: string
   provider: string
   description?: string
@@ -1039,6 +1052,8 @@ export interface ResearchRunResponse {
 
 export interface ChatCompletionRequest {
   tldw_history_selection_v1?: import("@/types/history-selection").HistorySelectionV1
+  tldw_history_branch?: boolean
+  tldw_history_edit_v1?: import("@/types/history-selection").HistoryEditTargetV1
   messages: ChatMessage[]
   model: string
   routing?: {
@@ -1091,10 +1106,11 @@ export type ChatCompletionRequestOptions = {
 }
 
 export type ChatCompletionStreamOptions = ChatCompletionRequestOptions & {
+  onDispatch?: () => void
   streamIdleTimeoutMs?: number
 }
 
-export interface ServerChatSummary {
+export interface ServerChatSummary extends RoleplayResumeMetadata {
   id: string
   title: string
   created_at: string
@@ -1117,6 +1133,7 @@ export interface ServerChatSummary {
   root_id?: string | null
   forked_from_message_id?: string | null
   version?: number | null
+  history_version?: number | null
   scope_type?: "global" | "workspace" | null
   workspace_id?: string | null
   /** Where the search query matched. Set only by a search that includes message content. */
@@ -1816,7 +1833,7 @@ export class TldwApiClientBase {
     }
   }
 
-  private publishConfigUpdated(previousConfig: TldwConfig | null, onlyIfAuthorityChanged = false): void {
+  private publishConfigUpdated(previousConfig: TldwConfig | null, onlyIfAuthorityChanged = false, initialSetupToken?: object): void {
     const authorityChanged = !connectionAuthoritiesMatch(this.config, previousConfig)
     if (onlyIfAuthorityChanged && !authorityChanged) return
     if (authorityChanged) {
@@ -1824,7 +1841,7 @@ export class TldwApiClientBase {
     }
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("tldw:config-updated", {
-        detail: { authorityChanged }
+        detail: { authorityChanged, ...(initialSetupToken ? { initialSetupToken } : {}) }
       }))
     }
   }
@@ -2155,6 +2172,7 @@ export class TldwApiClientBase {
   }
 
   async initialize(): Promise<void> {
+    await recoverRuntimeAuthBootstrap()
     const initialization = ++this.configInitialization
     let storedManual = await this.storage.get<TldwConfig>("tldwConfig")
     if (!storedManual) {
@@ -2309,17 +2327,19 @@ export class TldwApiClientBase {
     this.applyConfigState()
   }
 
-  private async activateManualConfig(config: TldwConfig, previousConfig: TldwConfig | null): Promise<void> {
+  private async activateManualConfig(config: TldwConfig, previousConfig: TldwConfig | null, initialSetup?: InitialChatSetupAttempt): Promise<void> {
     this.config = config
     this.applyConfigState()
-    this.publishConfigUpdated(previousConfig, true)
+    this.publishConfigUpdated(previousConfig, true, initialSetup?.token)
+    initialSetup?.afterBoundary(config)
     await this.syncConnectionServerUrl(config.serverUrl)
-    this.publishConfigUpdated(config)
+    this.publishConfigUpdated(config, false, initialSetup?.token)
   }
 
   private async writeSessionOrMemoryUnlocked(
     input: { serverUrl: string; apiKey: string },
-    serverOrigin: string
+    serverOrigin: string,
+    assertCurrent?: () => void
   ): Promise<{ persistence: "session" | "memory"; config: TldwConfig }> {
     const persisted: TldwConfig = {
       authMode: "single-user",
@@ -2338,10 +2358,14 @@ export class TldwApiClientBase {
     const hydrated = { ...persisted, apiKey: input.apiKey }
 
     try {
+      assertCurrent?.()
       await this.storage.set("tldwConfig", persisted)
+      assertCurrent?.()
       await this.sessionStorage.set(MANUAL_SESSION_KEY, record)
+      assertCurrent?.()
       return { persistence: "session", config: hydrated }
-    } catch {
+    } catch (error) {
+      if (isRequestConfigScopeChangedError(error)) throw error
       await clearManualCredentials(this.storage, this.sessionStorage).catch(
         async () => {
           await this.sessionStorage
@@ -2365,6 +2389,8 @@ export class TldwApiClientBase {
     serverUrl: string
     apiKey: string
     persistence: ApiKeyPersistence
+    assertCurrent?: (current: TldwConfig | null) => void
+    initialSetup?: InitialChatSetupAttempt
   }): Promise<"device" | "session" | "memory"> {
     const serverUrl = String(input.serverUrl || "").trim()
     const apiKey = String(input.apiKey || "").trim()
@@ -2372,39 +2398,77 @@ export class TldwApiClientBase {
     if (!serverOrigin) throw new Error("Invalid server URL")
     if (!apiKey) throw new Error("API key is required")
 
+    cancelRuntimeAuthBootstrapRecovery()
+    const initialSetup = input.initialSetup
+    if (initialSetup) {
+      initialSetup.assertCurrent()
+      if (!hasManualSessionCredentialLock() || !(await this.hasNoWebUiConnectionConfiguration())) throw createServicePromptScopeChangedError()
+      initialSetup.assertCurrent()
+    }
     const previousConfig = await this.getConfig()
+    input.assertCurrent?.(previousConfig)
+    let qualifiedInitialSetup = initialSetup
     const saved = await withManualSessionCredentialLock(async () => {
-      await this.clearManualSingleUserCredentialsUnlocked()
+      if (initialSetup) {
+        initialSetup.assertCurrent()
+        if (!(await this.hasNoWebUiConnectionConfiguration())) throw createServicePromptScopeChangedError()
+        initialSetup.assertCurrent()
+      }
+      if (input.assertCurrent) {
+        // Initialization can acquire this same credential lock for session cleanup.
+        const current = await resolveEffectiveTldwConfig({ persistent: this.storage, session: this.sessionStorage },
+          this.config?.authSource === "cookie-session"
+            ? { cookieSession: this.config, expectedCookieOrigin: getQuickstartWebUiServerUrl() }
+            : undefined)
+        input.assertCurrent(current)
+      }
+      // Strict first configuration has no previous credentials to clear.
+      if (!initialSetup) await this.clearManualSingleUserCredentialsUnlocked()
+      let saved: { persistence: ApiKeyPersistence | "memory"; config: TldwConfig }
       if (input.persistence !== "device") {
-        return await this.writeSessionOrMemoryUnlocked(
-          { serverUrl, apiKey },
-          serverOrigin
+        saved = await this.writeSessionOrMemoryUnlocked(
+          { serverUrl, apiKey }, serverOrigin, initialSetup?.assertCurrent
         )
+      } else {
+        const deviceConfig: TldwConfig = {
+          authMode: "single-user",
+          authSource: "manual",
+          serverUrl,
+          apiKey,
+          credentialSource: "manual",
+          apiKeyPersistence: "device",
+          apiKeyServerOrigin: serverOrigin
+        }
+        try {
+          initialSetup?.assertCurrent()
+          await this.storage.set("tldwConfig", deviceConfig)
+          initialSetup?.assertCurrent()
+          await this.sessionStorage
+            .remove(MANUAL_SESSION_KEY)
+            .catch(() => undefined)
+          initialSetup?.assertCurrent()
+          saved = { persistence: "device", config: deviceConfig }
+        } catch (error) {
+          if (isRequestConfigScopeChangedError(error)) throw error
+          qualifiedInitialSetup?.cancel()
+          qualifiedInitialSetup = undefined
+          saved = await this.writeSessionOrMemoryUnlocked({ serverUrl, apiKey }, serverOrigin)
+        }
       }
-
-      const deviceConfig: TldwConfig = {
-        authMode: "single-user",
-        authSource: "manual",
-        serverUrl,
-        apiKey,
-        credentialSource: "manual",
-        apiKeyPersistence: "device",
-        apiKeyServerOrigin: serverOrigin
+      if (qualifiedInitialSetup) {
+        if (saved.persistence === "memory") {
+          qualifiedInitialSetup.cancel()
+          qualifiedInitialSetup = undefined
+        } else {
+          qualifiedInitialSetup.assertCurrent()
+          if (!(await this.verifyInitialWebUiConfiguration(saved.config))) throw createServicePromptScopeChangedError()
+          qualifiedInitialSetup.assertCurrent()
+          await this.activateManualConfig(saved.config, previousConfig, qualifiedInitialSetup)
+        }
       }
-      try {
-        await this.storage.set("tldwConfig", deviceConfig)
-        await this.sessionStorage
-          .remove(MANUAL_SESSION_KEY)
-          .catch(() => undefined)
-        return { persistence: "device" as const, config: deviceConfig }
-      } catch {
-        return await this.writeSessionOrMemoryUnlocked(
-          { serverUrl, apiKey },
-          serverOrigin
-        )
-      }
+      return saved
     })
-    await this.activateManualConfig(saved.config, previousConfig)
+    if (!qualifiedInitialSetup) await this.activateManualConfig(saved.config, previousConfig)
     return saved.persistence
   }
 
@@ -2414,6 +2478,7 @@ export class TldwApiClientBase {
   }
 
   async clearManualSingleUserCredentials(): Promise<void> {
+    cancelRuntimeAuthBootstrapRecovery()
     const stored = await withManualSessionCredentialLock(async () =>
       await this.clearManualSingleUserCredentialsUnlocked()
     )
@@ -2424,6 +2489,8 @@ export class TldwApiClientBase {
   }
 
   async clearCookieSingleUserSession(): Promise<void> {
+    cancelRuntimeAuthBootstrapRecovery()
+    invalidateCookieSessionConfig()
     const previousConfig = this.config
     let failure: unknown
     try {
@@ -2431,7 +2498,6 @@ export class TldwApiClientBase {
     } catch (error) {
       failure = error
     }
-    invalidateCookieSessionConfig()
     this.config = null
     this.applyConfigState()
     this.publishConfigUpdated(previousConfig, true)
@@ -2442,6 +2508,55 @@ export class TldwApiClientBase {
     }
     this.publishConfigUpdated(null)
     if (failure) throw failure
+  }
+
+  /** Strict admission for an explicit initial WebUI Save; never initializes or migrates. */
+  async hasNoWebUiConnectionConfiguration(): Promise<boolean> {
+    return this.verifyInitialWebUiConfiguration()
+  }
+
+  private async verifyInitialWebUiConfiguration(expected?: TldwConfig): Promise<boolean> {
+    try {
+      const persisted = expected ? toPersistedTldwConfig(expected) : undefined
+      const session = expected?.apiKeyPersistence === "session" ? {
+        credentialSource: "manual", apiKeyPersistence: "session", apiKeyServerOrigin: expected.apiKeyServerOrigin, apiKey: expected.apiKey
+      } : undefined
+      const sync = createSafeStorage({ area: "sync", serde: safeStorageSerde })
+      const rawAbsent = () => {
+        const env = (import.meta as unknown as { env?: Record<string, unknown> }).env || {}
+        const processEnv: Record<string, string | undefined> = typeof process === "undefined" ? {} : process.env
+        if (getCurrentBrowserSurface() !== "webui-page" ||
+          (this.config !== null && (!expected || !connectionAuthoritiesMatch(this.config, expected))) ||
+          isHostedTldwDeployment() || getRuntimeSingleUserApiKeyOverride() ||
+          getQuickstartWebUiServerUrl() ||
+          [env.VITE_TLDW_API_KEY, env.VITE_TLDW_DEFAULT_API_KEY,
+            processEnv.VITE_TLDW_API_KEY, processEnv.VITE_TLDW_DEFAULT_API_KEY,
+            processEnv.NEXT_PUBLIC_X_API_KEY, processEnv.NEXT_PUBLIC_API_BEARER]
+            .some(value => value !== undefined && value !== "") ||
+          (window as Window & { __tldwRuntimeApiKey?: unknown }).__tldwRuntimeApiKey != null) return false
+        // The WebUI shim may fall back to memory; that cannot prove disk absence.
+        if ((this.storage as Storage & { hasPersistentBackend?: boolean }).hasPersistentBackend === false ||
+          (sync as Storage & { hasPersistentBackend?: boolean }).hasPersistentBackend === false) return false
+        return window.localStorage.getItem("tldwConfig") === (persisted ? JSON.stringify(persisted) : null) &&
+          [COOKIE_SESSION_CONFIG_KEY, REFRESH_ROTATION_KEY,
+          "plasmo-sync:tldwConfig", "apiKey", "accessToken", "access_token",
+          "tldwRuntimeSessionSingleUserApiKey", "tldwRuntimeAuthMetadata"]
+          .every(key => window.localStorage.getItem(key) === null) &&
+          window.sessionStorage.getItem(MANUAL_SESSION_KEY) === (session ? JSON.stringify(session) : null)
+      }
+      if (!rawAbsent()) return false
+      const values = await Promise.all([
+        this.storage.get("tldwConfig"), sync.get("tldwConfig"),
+        this.storage.get(COOKIE_SESSION_CONFIG_KEY), this.storage.get(REFRESH_ROTATION_KEY),
+        this.sessionStorage.get(MANUAL_SESSION_KEY)
+      ])
+      return JSON.stringify(values[0]) === JSON.stringify(persisted) &&
+        values.slice(1, 4).every(value => value === undefined) &&
+        JSON.stringify(values[4]) === JSON.stringify(session) && rawAbsent()
+    } catch {
+      // Failure or malformed authority retires only the initial-input exception.
+      return false
+    }
   }
 
   async getConfig(): Promise<TldwConfig | null> {
@@ -2502,8 +2617,10 @@ export class TldwApiClientBase {
   async updateConfig(
     config: Partial<TldwConfig>,
     assertCurrent?: (current: Partial<TldwConfig>) => void,
-    assertCommitted?: (current: Partial<TldwConfig>) => void
+    assertCommitted?: (current: Partial<TldwConfig>) => void,
+    initialSetupToken?: object
   ): Promise<void> {
+    cancelRuntimeAuthBootstrapRecovery()
     await this.initialize()
     let currentConfig = (await this.getConfig()) || ({} as TldwConfig)
     assertCurrent?.(currentConfig)
@@ -2520,8 +2637,10 @@ export class TldwApiClientBase {
       await this.saveManualSingleUserCredential({
         serverUrl: config.serverUrl || currentConfig.serverUrl,
         apiKey: submittedApiKey,
-        persistence: config.apiKeyPersistence || "device"
+        persistence: config.apiKeyPersistence || "device",
+        ...(assertCurrent ? { assertCurrent: (current: TldwConfig | null) => assertCurrent(current || {}) } : {})
       })
+      assertCommitted?.((await this.getConfig()) || {})
       return
     }
 
@@ -2573,30 +2692,34 @@ export class TldwApiClientBase {
           // A delayed own notification may be older or newer than this read.
           // Read again instead of treating the notification as authoritative.
         } while (readRevision !== revision)
+        const hydrated = committed.apiKeyPersistence === "session" && committed.credentialSource === "manual"
+          ? { ...committed, apiKey: await resolveManualCredential(committed, { session: this.sessionStorage }) || undefined }
+          : committed
+        if (invalidated || !connectionAuthoritiesMatch(hydrated, newConfig)) throw createServicePromptScopeChangedError()
         try {
-          assertCommitted?.(committed)
+          assertCommitted?.(hydrated)
         } catch (error) {
           this.config = null
           throw error
         }
-        this.config = committed
+        this.config = hydrated
         this.applyConfigState()
       } finally {
         unwatch()
       }
-      this.publishConfigUpdated(previousConfig, true)
-      this.publishConfigUpdated(committed)
+      this.publishConfigUpdated(previousConfig, true, initialSetupToken)
+      this.publishConfigUpdated(this.config, false, initialSetupToken)
       return
     }
     await this.storage.set("tldwConfig", persisted)
-    this.config = persisted
+    this.config = newConfig
     this.applyConfigState()
     this.publishConfigUpdated(previousConfig, true)
     if (Object.prototype.hasOwnProperty.call(config, "serverUrl")) {
       await this.syncConnectionServerUrl(config.serverUrl)
     }
     await this.initialize().catch(() => null)
-    this.publishConfigUpdated(persisted)
+    this.publishConfigUpdated(newConfig)
   }
 
   async healthCheck(): Promise<boolean> {
@@ -2844,16 +2967,31 @@ export class TldwApiClientBase {
     return query ? `?${query}` : ''
   }
 
-  async getOpenAPISpec(): Promise<any | null> {
+  async getOpenAPISpec(
+    options?: ScopedRequestOptions & { configSnapshot?: TldwConfig | null }
+  ): Promise<any | null> {
     try {
-      if (!this.baseUrl) await this.initialize()
-      if (!this.baseUrl) return null
-      const baseUrl = this.baseUrl.replace(/\/$/, '')
-      if (isQuickstartWebUiSameOriginServerUrl(baseUrl)) return null
-      return await this.requestWithCurrentConfig<any>({
-        path: `${baseUrl}/openapi.json` as any,
-        method: 'GET' as any
-      }, false)
+      if (options?.signal?.aborted) return null
+      if (options?.requestScope || options?.configSnapshot !== undefined) {
+        if (!options.requestScope && !options.configSnapshot?.serverUrl)
+          return null
+        return await bgRequest<unknown>({
+          path: "/openapi.json",
+          method: "GET",
+          ...(options.requestScope
+            ? requestScopeFields(options.requestScope)
+            : { configSnapshot: options.configSnapshot }),
+          abortSignal: options.signal
+        })
+      }
+      return await this.requestWithCurrentConfig<any>(
+        (config) => ({
+          path: `${config.serverUrl.replace(/\/$/, "")}/openapi.json`,
+          method: "GET",
+          abortSignal: options?.signal
+        }),
+        false
+      )
     } catch {
       return null
     }
@@ -3568,6 +3706,7 @@ export class TldwApiClientBase {
       },
       body: request,
       abortSignal: options?.signal,
+      onDispatch: options?.onDispatch,
       streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
       ...(scopeFields.servicePromptConfig
         ? { servicePromptConfig: scopeFields.servicePromptConfig }
@@ -5718,9 +5857,9 @@ export class TldwApiClientBase {
         : null,
       source: input?.source ?? null,
       state: state ? String(state) : null,
-      topic_label: input?.topic_label ?? input?.topicLabel ?? null,
-      cluster_id: input?.cluster_id ?? input?.clusterId ?? null,
-      external_ref: input?.external_ref ?? input?.externalRef ?? null,
+      topic_label: Object.prototype.hasOwnProperty.call(input ?? {}, "topic_label") ? input.topic_label ?? null : input?.topicLabel ?? null,
+      cluster_id: Object.prototype.hasOwnProperty.call(input ?? {}, "cluster_id") ? input.cluster_id ?? null : input?.clusterId ?? null,
+      external_ref: Object.prototype.hasOwnProperty.call(input ?? {}, "external_ref") ? input.external_ref ?? null : input?.externalRef ?? null,
       bm25_norm:
         typeof input?.bm25_norm === "number"
           ? input?.bm25_norm
@@ -5757,6 +5896,10 @@ export class TldwApiClientBase {
           : typeof input?.expected_version === "number"
             ? input.expected_version
             : null,
+      history_version:
+        Number.isSafeInteger(input?.history_version) && input.history_version >= 0
+          ? input.history_version
+          : null,
       scope_type,
       workspace_id,
       matched_in: Array.isArray(input?.matched_in)
@@ -5820,44 +5963,7 @@ export class TldwApiClientBase {
     params?: Record<string, any>,
     options?: { signal?: AbortSignal; scope?: ChatScope; requestScope?: ServicePromptRequestScope }
   ): Promise<{ chats: ServerChatSummary[]; total: number }> {
-    const scopeFields = requestScopeFields(options?.requestScope)
-    const query = this.buildQuery({ ...params, ...toChatScopeParams(options?.scope) })
-    const data = await bgRequest<any>({
-      path: `/api/v1/chats/${query}`,
-      method: "GET",
-      abortSignal: options?.signal,
-      headers: scopeFields.headers,
-      ...(scopeFields.servicePromptConfig ? { servicePromptConfig: scopeFields.servicePromptConfig } : {})
-    })
-
-    let list: any[] = []
-    let total: number | null = null
-
-    if (Array.isArray(data)) {
-      list = data
-    } else if (data && typeof data === "object") {
-      const obj: any = data
-      if (typeof obj.total === "number") {
-        total = obj.total
-      } else if (typeof obj.count === "number") {
-        total = obj.count
-      }
-      if (Array.isArray(obj.chats)) {
-        list = obj.chats
-      } else if (Array.isArray(obj.items)) {
-        list = obj.items
-      } else if (Array.isArray(obj.results)) {
-        list = obj.results
-      } else if (Array.isArray(obj.data)) {
-        list = obj.data
-      }
-    }
-
-    const chats = list.map((c) => this.normalizeChatSummary(c))
-    return {
-      chats,
-      total: typeof total === "number" ? total : chats.length
-    }
+    return chatRagMethods.listChatsWithMeta.call(this as unknown as TldwApiClientCore, params, options)
   }
 
   async createChat(
@@ -5866,52 +5972,45 @@ export class TldwApiClientBase {
       scope?: ChatScope
       signal?: AbortSignal
       requestScope?: ServicePromptRequestScope
+      seedFirstMessage?: boolean
+      greetingStrategy?: "default" | "alternate_random" | "alternate_index"
+      alternateIndex?: number
     }
   ): Promise<ServerChatSummary> {
-    const scopeFields = requestScopeFields(options?.requestScope)
-    const res = await bgRequest<any>({
-      path: "/api/v1/chats/",
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...scopeFields.headers },
-      body: { ...payload, ...toChatScopeParams(options?.scope) },
-      abortSignal: options?.signal,
-      ...(scopeFields.servicePromptConfig
-        ? { servicePromptConfig: scopeFields.servicePromptConfig }
-        : {})
-    })
-    return this.normalizeChatSummary(res)
+    return chatRagMethods.createChat.call(this as unknown as TldwApiClientCore, payload, options)
+  }
+
+  async appendRoleplayResumeInput(
+    chat_id: string | number,
+    payload: RoleplayResumeUserAppendRequest,
+    options: ScopedRequestOptions & {onDispatch?: () => void}
+  ): Promise<RoleplayResumeUserAppendReceipt> {
+    return chatRagMethods.appendRoleplayResumeInput.call(
+      this as unknown as TldwApiClientCore,
+      chat_id,
+      payload,
+      options
+    )
   }
 
   async completeCharacterChatTurn(
     chat_id: string | number,
-    payload: Record<string, any>
-  ): Promise<any> {
-    const cid = String(chat_id)
-    return await bgRequest<any>({
-      path: `/api/v1/chats/${cid}/complete-v2`,
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+    payload: Record<string, unknown>,
+    options?: ScopedRequestOptions & {onDispatch?: () => void}
+  ): Promise<Record<string, unknown>> {
+    return chatRagMethods.completeCharacterChatTurn.call(
+      this as unknown as TldwApiClientCore,
+      chat_id,
+      payload,
+      options
+    )
   }
 
   async getChat(
     chat_id: string | number,
-    options?: { scope?: ChatScope } & ScopedRequestOptions
+    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean; requireRoleplayResume?: boolean } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
-    const scopeFields = requestScopeFields(options?.requestScope)
-    const cid = String(chat_id)
-    const query = this.buildQuery(toChatScopeParams(options?.scope))
-    const res = await bgRequest<any>({
-      ...scopeFields,
-      ...(options?.signal ? { abortSignal: options.signal } : {}),
-      path: appendPathQuery(`/api/v1/chats/${cid}`, query),
-      method: "GET",
-      headers: scopeFields.headers,
-      abortSignal: options?.signal,
-      ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {})
-    })
-    return this.normalizeChatSummary(res)
+    return chatRagMethods.getChat.call(this as unknown as TldwApiClientCore, chat_id, options)
   }
 
   async listChatResearchRuns(
@@ -6011,7 +6110,7 @@ export class TldwApiClientBase {
   async updateChat(
     chat_id: string | number,
     payload: Record<string, any>,
-    options?: { expectedVersion?: number } & ScopedRequestOptions
+    options?: { expectedVersion?: number; scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
     const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
@@ -6026,10 +6125,10 @@ export class TldwApiClientBase {
         // ignore and fall back to unversioned update
       }
     }
-    const qp =
-      typeof expectedVersion === "number"
-        ? `?expected_version=${encodeURIComponent(String(expectedVersion))}`
-        : ""
+    const qp = this.buildQuery({
+      ...toChatScopeParams(options?.scope),
+      ...(typeof expectedVersion === "number" ? {expected_version:expectedVersion} : {})
+    })
     const res = await bgRequest<any>({
       ...scopeFields,
       ...(options?.signal ? { abortSignal: options.signal } : {}),
@@ -6048,11 +6147,13 @@ export class TldwApiClientBase {
       requestScope?: ServicePromptRequestScope
       expectedVersion?: number
       hardDelete?: boolean
+      scope?: ChatScope
     }
   ): Promise<void> {
     const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     const query = this.buildQuery({
+      ...toChatScopeParams(options?.scope),
       ...(typeof options?.expectedVersion === "number"
         ? { expected_version: options.expectedVersion }
         : {}),
@@ -6068,15 +6169,17 @@ export class TldwApiClientBase {
 
   async restoreChat(
     chat_id: string | number,
-    options?: { expectedVersion?: number }
+    options?: { expectedVersion?: number; scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
-    const query = this.buildQuery(
-      typeof options?.expectedVersion === "number"
-        ? { expected_version: options.expectedVersion }
-        : {}
-    )
+    const query = this.buildQuery({
+      ...toChatScopeParams(options?.scope),
+      ...(typeof options?.expectedVersion === "number" ? {expected_version:options.expectedVersion} : {})
+    })
     const res = await bgRequest<any>({
+      ...scopeFields,
+      ...(options?.signal ? {abortSignal:options.signal} : {}),
       path: `/api/v1/chats/${cid}/restore${query}`,
       method: "POST"
     })
@@ -6387,33 +6490,19 @@ export class TldwApiClientBase {
   async *streamCharacterChatCompletion(
     chat_id: string | number,
     payload?: Record<string, any>,
-    options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number; scope?: ChatScope }
-  ): AsyncGenerator<any> {
-    const cid = String(chat_id)
-    const body = { ...(payload || {}), stream: true }
-    const query = this.buildQuery(toChatScopeParams(options?.scope))
-    captureChatRequestDebugSnapshot({
-      endpoint: appendPathQuery(`/api/v1/chats/${cid}/complete-v2`, query),
-      method: "POST",
-      mode: "stream",
-      body
-    })
-    for await (const line of bgStream({
-      path: appendPathQuery(`/api/v1/chats/${cid}/complete-v2`, query),
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body,
-      abortSignal: options?.signal,
-      streamIdleTimeoutMs: options?.streamIdleTimeoutMs
-    })) {
-      if (!line) continue
-      try {
-        const parsed = JSON.parse(line)
-        yield parsed
-      } catch {
-        yield line
-      }
+    options?: {
+      signal?: AbortSignal
+      streamIdleTimeoutMs?: number
+      scope?: ChatScope
+      requestScope?: ServicePromptRequestScope
+      onDispatch?: () => void
     }
+  ): AsyncGenerator<any> {
+    yield* chatRagMethods.streamCharacterChatCompletion(
+      chat_id,
+      payload,
+      options
+    )
   }
 
   async searchChatMessages(chat_id: string | number, query: string, limit?: number): Promise<any> {
@@ -6449,9 +6538,11 @@ export class TldwApiClientBase {
   }
 
   // Message (single) APIs
-  async getMessage(message_id: string | number): Promise<any> {
-    const mid = String(message_id)
-    return await bgRequest<any>({ path: `/api/v1/messages/${mid}`, method: 'GET' })
+  async getMessage(
+    message_id: string | number,
+    options?: { scope?: ChatScope } & ScopedRequestOptions
+  ): Promise<any> {
+    return chatRagMethods.getMessage.call(this as unknown as TldwApiClientCore, message_id, options)
   }
 
   async editMessage(
@@ -6459,40 +6550,18 @@ export class TldwApiClientBase {
     content: string,
     expectedVersion: number,
     chatId?: string | number,
-    options?: { pinned?: boolean }
+    options?: { pinned?: boolean; scope?: ChatScope } & ScopedRequestOptions
   ): Promise<any> {
-    const mid = String(message_id)
-    const qp = `?expected_version=${encodeURIComponent(String(expectedVersion))}`
-    const body: Record<string, unknown> = { content }
-    if (typeof options?.pinned === "boolean") {
-      body.pinned = options.pinned
-    }
-    const res = await bgRequest<any>({
-      path: `/api/v1/messages/${mid}${qp}`,
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body
-    })
-    if (chatId != null) {
-      this.invalidateChatMessagesCache(chatId)
-    }
-    return res
+    return chatRagMethods.editMessage.call(this as unknown as TldwApiClientCore, message_id, content, expectedVersion, chatId, options)
   }
 
   async deleteMessage(
     message_id: string | number,
     expectedVersion: number,
-    chatId?: string | number
+    chatId?: string | number,
+    options?: { scope?: ChatScope; requireLeaf?: boolean; expectedRevision?: string } & ScopedRequestOptions
   ): Promise<void> {
-    const mid = String(message_id)
-    const qp = `?expected_version=${encodeURIComponent(String(expectedVersion))}`
-    await bgRequest<void>({
-      path: `/api/v1/messages/${mid}${qp}`,
-      method: 'DELETE'
-    })
-    if (chatId != null) {
-      this.invalidateChatMessagesCache(chatId)
-    }
+    return chatRagMethods.deleteMessage.call(this as unknown as TldwApiClientCore, message_id, expectedVersion, chatId, options)
   }
 
   async saveChatKnowledge(payload: {
@@ -6658,12 +6727,8 @@ export class TldwApiClientBase {
     return await bgRequest<any>({ path: '/api/v1/chat/dictionaries', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
   }
 
-  async listDictionaries(include_inactive?: boolean, include_usage?: boolean): Promise<any> {
-    const params = new URLSearchParams()
-    if (include_inactive) params.set('include_inactive', 'true')
-    if (include_usage) params.set('include_usage', 'true')
-    const qp = params.toString()
-    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries${qp ? `?${qp}` : ''}`, method: 'GET' })
+  async listDictionaries(include_inactive?: boolean, include_usage?: boolean, options?: ScopedRequestOptions): Promise<any> {
+    return chatRagMethods.listDictionaries.call(this as unknown as TldwApiClientCore, include_inactive, include_usage, options)
   }
 
   async getDictionary(dictionary_id: number | string): Promise<any> {
@@ -7870,46 +7935,11 @@ export class TldwApiClientBase {
   // File Artifacts
   // ─────────────────────────────────────────────────────────────────────────────
 
-  async createImageArtifact(request: ImageArtifactRequest): Promise<FileCreateResponse> {
-    const payload: Record<string, unknown> = {
-      backend: request.backend,
-      prompt: request.prompt
-    }
-    if (request.negativePrompt) payload.negative_prompt = request.negativePrompt
-    if (typeof request.referenceFileId === "number") {
-      payload.reference_file_id = request.referenceFileId
-    }
-    if (typeof request.width === "number") payload.width = request.width
-    if (typeof request.height === "number") payload.height = request.height
-    if (typeof request.steps === "number") payload.steps = request.steps
-    if (typeof request.cfgScale === "number") payload.cfg_scale = request.cfgScale
-    if (typeof request.seed === "number") payload.seed = request.seed
-    if (request.sampler) payload.sampler = request.sampler
-    if (request.model) payload.model = request.model
-    if (request.extraParams) payload.extra_params = request.extraParams
-
-    const body: Record<string, unknown> = {
-      file_type: "image",
-      payload,
-      export: {
-        format: request.format || "png",
-        mode: "inline",
-        async_mode: "sync"
-      },
-      options: {
-        persist: typeof request.persist === "boolean" ? request.persist : true
-      }
-    }
-    if (request.title) {
-      body.title = request.title
-    }
-
-    return await this.request<FileCreateResponse>({
-      path: "/api/v1/files/create",
-      method: "POST",
-      body,
-      timeoutMs: request.timeoutMs
-    })
+  async createImageArtifact(
+    request: ImageArtifactRequest,
+    options?: ScopedRequestOptions & { onDispatch?: () => void }
+  ): Promise<FileCreateResponse> {
+    return await mediaMethods.createImageArtifact(request, options)
   }
 
   // ─────────────────────────────────────────────────────────────────────────────

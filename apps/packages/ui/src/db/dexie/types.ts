@@ -16,6 +16,9 @@ export type HistoryInfo = {
   model_id?: string;
   server_chat_id?: string;
   server_scope_key?: string;
+  /** Captured chat namespace of a verified mirror; absent on older copies. */
+  server_scope_type?: "global" | "workspace";
+  server_workspace_id?: string;
   local_owner_key?: string;
   // External settings writers register before writing; abandoned tokens block fork certification.
   local_settings_guard?: {
@@ -271,6 +274,8 @@ export type HistoryBookmarkScope = { profile_id: string; client_session_id: stri
 export type HistoryTurnOutcome = "complete" | "interrupted" | "stopped";
 /** Recovery text is never a message, selected history, or persisted write capability. */
 export type HistoryTurnRecovery = {
+  /** Explicit alternatives remain in review until the user opens their result. */
+  action?: 'edit_resend' | 'regenerate';
   operation_id: string;
   origin_view: HistoryViewSelectionV1;
   selection_digest: string;
@@ -281,8 +286,17 @@ export type HistoryTurnRecovery = {
   input_text: string;
   input_images: string[];
   result_text: string;
-  state: "dispatching" | "unknown" | "accepted_unsent" | "generated_unsaved";
+  /** Earlier returned replies remain copyable across an explicit original-request retry. */
+  retained_result_texts?: string[];
+  recovery_storage?: "memory";
+  state:
+    | "dispatching"
+    | "unknown"
+    | "accepted_unsent"
+    | "generated_unsaved"
+    | "refused";
   admission?: import("@/types/history-selection").HistoryAdmissionReferenceV1;
+  roleplay_resume?: import("@/services/tldw/roleplay-resume").RoleplayResumeRecovery;
   /**
    * Set when the reply belongs back in the transcript rather than in review
    * (CS-04, #3104): "complete" (it finished but its view was gone),

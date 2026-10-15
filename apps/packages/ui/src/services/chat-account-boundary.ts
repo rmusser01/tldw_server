@@ -6,23 +6,23 @@ import { MANUAL_SESSION_KEY, manualSessionCredentialsMatch } from "@/services/tl
 
 /** Observe account boundaries even when the Chat route is not mounted. */
 export const watchChatAccountChanges = (
-  changed: (invalidated: boolean, currentConfig?: TldwConfig | null) => void
+  changed: (invalidated: boolean, currentConfig?: TldwConfig | null, source?: Event) => void
 ): (() => void) => {
   if (typeof window === "undefined") return () => {}
-  const principalChanged = () => changed(true)
+  const principalChanged = (event: Event) => changed(true, undefined, event)
   const configChanged = (event: Event) => {
-    changed(Boolean((event as CustomEvent<{ authorityChanged?: boolean }>).detail?.authorityChanged))
+    changed(Boolean((event as CustomEvent<{ authorityChanged?: boolean }>).detail?.authorityChanged), undefined, event)
   }
-  const compare = (previous: unknown, current: unknown) => {
+  const compare = (previous: unknown, current: unknown, source?: Event) => {
     const currentConfig = safeStorageSerde.deserializer(current) as TldwConfig | null
     changed(!current || !connectionAuthoritiesMatch(
       currentConfig, safeStorageSerde.deserializer(previous)
-    ), currentConfig)
+    ), currentConfig, source)
   }
   const configKey = (key: string) => key === "tldwConfig" || key === "tldwCookieSessionConfig"
   const storageChanged = (event: StorageEvent) => {
-    if (event.key === null) changed(true)
-    else if (configKey(event.key)) compare(event.oldValue, event.newValue)
+    if (event.key === null) changed(true, undefined, event)
+    else if (configKey(event.key)) compare(event.oldValue, event.newValue, event)
   }
   const extensionChanged = (changes: Record<string, { oldValue?: unknown; newValue?: unknown }>, area: string) => {
     if (area === "session") {

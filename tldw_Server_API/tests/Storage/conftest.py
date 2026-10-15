@@ -63,7 +63,7 @@ def mock_files_repo():
     repo.soft_delete_file = AsyncMock(return_value=True)
     repo.hard_delete_file = AsyncMock(return_value=True)
     repo.restore_file = AsyncMock(return_value=True)
-    repo.bulk_soft_delete = AsyncMock(return_value=0)
+    repo.bulk_soft_delete = AsyncMock(return_value=[])
     repo.bulk_move_to_folder = AsyncMock(return_value=0)
     repo.list_folders = AsyncMock(return_value=[])
     repo.list_trashed_files = AsyncMock(return_value=([], 0))

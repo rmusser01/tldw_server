@@ -1,4 +1,7 @@
+import React from "react"
+import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import type { Message } from "@/store/option"
 
 const mocks = vi.hoisted(() => ({
   addChatMessageMock: vi.fn(),
@@ -145,6 +148,134 @@ describe("createCharacterChatMode contract", () => {
       confidence: 0.2,
       topic: "reply"
     })
+  })
+
+  it("publishes reusable character Thinking progress before any answer or persistence", async () => {
+    const accumulator = await vi.importActual<typeof import("@/utils/streaming-chunks")>("@/utils/streaming-chunks")
+    mocks.consumeStreamingChunkMock.mockImplementation(accumulator.consumeStreamingChunk)
+    const setters = createSetterBundle()
+    let visible: Array<{ isBot: boolean; message: string }> = []
+    setters.setMessages.mockImplementation(next => { visible = typeof next === "function" ? next(visible) : next })
+    let release!: () => void, entered = false
+    const held = new Promise<void>(resolve => { release = resolve })
+    mocks.streamCharacterChatCompletionMock.mockImplementationOnce(async function* () {
+      yield { choices: [{ delta: { reasoning_content: "Plan the reusable reply" } }] }
+      entered = true
+      await held
+      yield { choices: [{ delta: { content: "Reusable answer" } }] }
+    })
+    const save = vi.fn(async () => "history-1")
+    const mode = createCharacterChatMode({ ...setters, t: translate, notification: { error: vi.fn() },
+      selectedCharacter: { id: 42, name: "Mira" }, temporaryChat: false, historyId: "history-1", serverChatId: "chat-77", serverChatCharacterId: 42,
+      currentChatModelSettings: { apiProvider: "openai", setSystemPrompt: vi.fn() }, invalidateServerChatHistory: vi.fn(),
+      greetingEnabled: false, greetingSelectionId: null, greetingsChecksum: null, useCharacterDefault: false,
+      directedCharacterId: null, resolvedMessageSteeringPrompts: null, getEffectiveSelectedModel: () => "test-model",
+      saveMessageOnSuccess: save, saveMessageOnError: vi.fn(), discardCurrentTurnOnAbortRef: { current: false }
+    } as unknown as Parameters<typeof createCharacterChatMode>[0])
+    const controller = new AbortController()
+    const pending = mode({ message: "One question", image: "", isRegenerate: false, messages: [], history: [], signal: controller.signal,
+      model: "test-model", controller, messageSteering: { continueAsUser: false, impersonateUser: false, forceNarrate: false }
+    } as unknown as Parameters<typeof mode>[0])
+    void pending.catch(() => {})
+    try {
+      await vi.waitFor(() => expect(entered).toBe(true))
+      await vi.waitFor(() => expect(visible.find(row => row.isBot)?.message).toContain("<think>Plan the reusable reply"))
+      expect(mocks.persistCharacterCompletionMock).not.toHaveBeenCalled()
+      expect(save).not.toHaveBeenCalled()
+      release()
+      await pending
+      expect(visible.find(row => row.isBot)?.message).toBe("<think>Plan the reusable reply</think>Reusable answer")
+      expect(mocks.persistCharacterCompletionMock).toHaveBeenCalledOnce()
+    } finally { release(); await pending.catch(() => {}) }
+  })
+
+  it("retains reusable character Thinking text and time when React applies a queued updater after flush", async () => {
+    const accumulator = await vi.importActual<typeof import("@/utils/streaming-chunks")>("@/utils/streaming-chunks")
+    mocks.consumeStreamingChunkMock.mockImplementation(accumulator.consumeStreamingChunk)
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date("2026-10-10T12:00:00.000Z"))
+    const view = renderHook(() => React.useState<Message[]>([]))
+    const setters = createSetterBundle()
+    const queued: Array<React.SetStateAction<Message[]>> = []
+    let deferPublication = false
+    // Keep the real React state consumer, but hold only stream updater delivery
+    // until the scheduler callback has returned and cleared its buffers.
+    setters.setMessages.mockImplementation(next => {
+      if (deferPublication && typeof next === "function") {
+        queued.push(next)
+      } else {
+        act(() => view.result.current[1](next))
+      }
+    })
+    let reasoningConsumed!: () => void
+    const reasoningEntered = new Promise<void>(resolve => { reasoningConsumed = resolve })
+    let releaseAnswer!: () => void
+    const answerGate = new Promise<void>(resolve => { releaseAnswer = resolve })
+    let answerConsumed!: () => void
+    const answerEntered = new Promise<void>(resolve => { answerConsumed = resolve })
+    let releaseCompletion!: () => void
+    const completionGate = new Promise<void>(resolve => { releaseCompletion = resolve })
+    mocks.streamCharacterChatCompletionMock.mockImplementationOnce(async function* () {
+      yield { choices: [{ delta: { reasoning_content: "Plan the queued reply" } }] }
+      deferPublication = true
+      reasoningConsumed()
+      await answerGate
+      yield { choices: [{ delta: { content: "Queued" } }] }
+      yield { choices: [{ delta: { content: " answer" } }] }
+      answerConsumed()
+      await completionGate
+    })
+    const notification = { error: vi.fn() }
+    const save = vi.fn(async () => "history-1")
+    const mode = createCharacterChatMode({ ...setters, t: translate, notification,
+      selectedCharacter: { id: 42, name: "Mira" }, temporaryChat: false, historyId: "history-1", serverChatId: "chat-77", serverChatCharacterId: 42,
+      currentChatModelSettings: { apiProvider: "openai", setSystemPrompt: vi.fn() }, invalidateServerChatHistory: vi.fn(),
+      greetingEnabled: false, greetingSelectionId: null, greetingsChecksum: null, useCharacterDefault: false,
+      directedCharacterId: null, resolvedMessageSteeringPrompts: null, getEffectiveSelectedModel: () => "test-model",
+      saveMessageOnSuccess: save, saveMessageOnError: vi.fn(), discardCurrentTurnOnAbortRef: { current: false }
+    } as unknown as Parameters<typeof createCharacterChatMode>[0])
+    const controller = new AbortController()
+    const pending = mode({ message: "One question", image: "", isRegenerate: false, messages: [], history: [], signal: controller.signal,
+      model: "test-model", controller, messageSteering: { continueAsUser: false, impersonateUser: false, forceNarrate: false }
+    } as unknown as Parameters<typeof mode>[0])
+    void pending.catch(() => {})
+    const turnEndedBefore = (boundary: string) => pending.then(() => {
+      throw new Error(`Character turn ended before ${boundary}`)
+    })
+    try {
+      await Promise.race([reasoningEntered, turnEndedBefore("reasoning publication")])
+      expect(view.result.current[0].find(row => !row.isBot)?.serverMessageId).toBe("msg-user-1")
+      expect(view.result.current[0].find(row => row.isBot)?.message).toBe("▋")
+      expect(controller.signal.aborted).toBe(false)
+      expect(notification.error).not.toHaveBeenCalled()
+      await act(async () => { await vi.advanceTimersByTimeAsync(25) })
+      expect(queued).toHaveLength(1)
+      const thinkingUpdater = queued.shift()!
+      act(() => view.result.current[1](thinkingUpdater))
+      expect(view.result.current[0].find(row => row.isBot)).toMatchObject({
+        message: "<think>Plan the queued reply▋",
+        reasoning_time_taken: 0
+      })
+      releaseAnswer()
+      await Promise.race([answerEntered, turnEndedBefore("answer publication")])
+      await act(async () => { await vi.advanceTimersByTimeAsync(80) })
+      expect(queued).toHaveLength(1)
+      const answerUpdater = queued.shift()!
+      act(() => view.result.current[1](answerUpdater))
+      expect(view.result.current[0].find(row => row.isBot)).toMatchObject({
+        message: "<think>Plan the queued reply</think>Queued answer▋",
+        reasoning_time_taken: 25
+      })
+      expect(mocks.persistCharacterCompletionMock).not.toHaveBeenCalled()
+      expect(save).not.toHaveBeenCalled()
+      expect(controller.signal.aborted).toBe(false)
+    } finally {
+      releaseAnswer()
+      releaseCompletion()
+      await pending.catch(() => {})
+      view.unmount()
+      vi.useRealTimers()
+    }
   })
 
   it.each(["messages", "history", "saved-greeting", "new-chat"] as const)("preserves existing greeting provenance for %s", async kind => {

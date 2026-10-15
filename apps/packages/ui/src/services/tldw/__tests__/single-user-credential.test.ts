@@ -11,6 +11,7 @@ import {
   normalizeServerOrigin,
   resolveEffectiveTldwConfig,
   resolveManualCredential,
+  refreshSessionInvalidationKey,
   storeRefreshRotationIfCurrent,
   toPersistedTldwConfig,
   waitForNewerCurrentAccessToken,
@@ -733,5 +734,153 @@ describe("scoped refresh-token rotation", () => {
       { accessToken: "access-1", refreshToken: "refresh-1" }
     )).resolves.toBe(false)
     await expect(persistent.get(REFRESH_ROTATION_KEY)).resolves.toBeUndefined()
+  })
+})
+
+describe("refresh rotation mutation lifetime guard", () => {
+  it.each(["tldwConfig", REFRESH_ROTATION_KEY])("does not write a retired account's rotation after a held %s read and raw account ABA", async key => {
+    let entered!: () => void, release!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    class HeldReadStorage extends MemoryStorage {
+      held = false
+      rotationWrites = 0
+
+      override async get<T>(readKey: string): Promise<T | undefined> {
+        const value = await super.get<T>(readKey)
+        if (!this.held && readKey === key) {
+          this.held = true
+          entered()
+          await gate
+        }
+        return value
+      }
+
+      override async set<T>(writeKey: string, value: T): Promise<void> {
+        if (writeKey === REFRESH_ROTATION_KEY) this.rotationWrites += 1
+        await super.set(writeKey, value)
+      }
+    }
+    const persistent = new HeldReadStorage()
+    const accountController = new AbortController()
+    await persistent.set("tldwConfig", multiUserConfig)
+    const pending = storeRefreshRotationIfCurrent(
+      persistent,
+      multiUserConfig,
+      multiUserConfig.refreshToken,
+      { accessToken: "guarded-access-1", refreshToken: "guarded-refresh-1" },
+      () => accountController.signal.throwIfAborted()
+    ).catch(error => error)
+    try {
+      await started
+      persistent.values.set("tldwConfig", {
+        ...multiUserConfig, serverUrl: "https://replacement.example.test", accessToken: "other-access", refreshToken: "other-refresh"
+      })
+      accountController.abort()
+      persistent.values.set("tldwConfig", multiUserConfig)
+      expect(persistent.rotationWrites).toBe(0)
+      release()
+      expect(await pending).toBe(accountController.signal.reason)
+      expect(persistent.rotationWrites).toBe(0)
+      expect(persistent.values.get(REFRESH_ROTATION_KEY)).toBeUndefined()
+      expect(persistent.values.get("tldwConfig")).toEqual(multiUserConfig)
+    } finally {
+      release()
+      await pending
+    }
+  })
+
+  it("stores a current account's rotation through the optional live mutation guard", async () => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    const accountController = new AbortController()
+    await persistent.set("tldwConfig", multiUserConfig)
+    const tokens = { accessToken: "guarded-access-1", refreshToken: "guarded-refresh-1" }
+    await expect(storeRefreshRotationIfCurrent(
+      persistent,
+      multiUserConfig,
+      multiUserConfig.refreshToken,
+      tokens,
+      () => accountController.signal.throwIfAborted()
+    )).resolves.toBe(true)
+    expect(await persistent.get(REFRESH_ROTATION_KEY)).toMatchObject({
+      sourceAccessToken: multiUserConfig.accessToken,
+      sourceRefreshToken: multiUserConfig.refreshToken,
+      ...tokens
+    })
+    expect(await resolveEffectiveTldwConfig({ persistent, session })).toEqual({ ...multiUserConfig, ...tokens })
+    expect(await persistent.get("tldwConfig")).toEqual(multiUserConfig)
+  })
+})
+
+describe("terminal refresh invalidation mutation lifetime guard", () => {
+  it.each(["tldwConfig", REFRESH_ROTATION_KEY])("does not publish a retired account's terminal marker after a held %s read and raw account ABA", async key => {
+    const markerKey = refreshSessionInvalidationKey(multiUserConfig)
+    expect(markerKey).toEqual(expect.any(String))
+    let entered!: () => void, release!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const gate = new Promise<void>(resolve => { release = resolve })
+    class HeldInvalidationStorage extends MemoryStorage {
+      held = false
+      markerWrites = 0
+
+      override async get<T>(readKey: string): Promise<T | undefined> {
+        const value = await super.get<T>(readKey)
+        if (!this.held && readKey === key) {
+          this.held = true
+          entered()
+          await gate
+        }
+        return value
+      }
+
+      override async set<T>(writeKey: string, value: T): Promise<void> {
+        if (writeKey === markerKey) this.markerWrites += 1
+        await super.set(writeKey, value)
+      }
+    }
+    const persistent = new HeldInvalidationStorage()
+    const accountController = new AbortController()
+    await persistent.set("tldwConfig", multiUserConfig)
+    const pending = invalidateRefreshSessionIfCurrent(
+      persistent,
+      multiUserConfig,
+      () => accountController.signal.throwIfAborted()
+    ).catch(error => error)
+    try {
+      await started
+      persistent.values.set("tldwConfig", {
+        ...multiUserConfig, serverUrl: "https://replacement.example.test", accessToken: "other-access", refreshToken: "other-refresh"
+      })
+      accountController.abort()
+      persistent.values.set("tldwConfig", multiUserConfig)
+      expect(persistent.markerWrites).toBe(0)
+      release()
+      expect(await pending).toBe(accountController.signal.reason)
+      expect(persistent.markerWrites).toBe(0)
+      expect(persistent.values.get(markerKey!)).toBeUndefined()
+      expect(await resolveEffectiveTldwConfig({ persistent, session: new MemoryStorage() })).toEqual(multiUserConfig)
+    } finally {
+      release()
+      await pending
+    }
+  })
+
+  it("publishes a current account's terminal marker through the optional live mutation guard", async () => {
+    const persistent = new MemoryStorage()
+    const session = new MemoryStorage()
+    const accountController = new AbortController()
+    await persistent.set("tldwConfig", multiUserConfig)
+    await expect(invalidateRefreshSessionIfCurrent(
+      persistent,
+      multiUserConfig,
+      () => accountController.signal.throwIfAborted()
+    )).resolves.toBe(true)
+    expect(await persistent.get(refreshSessionInvalidationKey(multiUserConfig)!)).toBe(true)
+    const effective = await resolveEffectiveTldwConfig({ persistent, session })
+    expect(effective).toMatchObject({ serverUrl: multiUserConfig.serverUrl, authMode: "multi-user", orgId: 7 })
+    expect(effective).not.toHaveProperty("accessToken")
+    expect(effective).not.toHaveProperty("refreshToken")
+    expect(await persistent.get("tldwConfig")).toEqual(multiUserConfig)
   })
 })

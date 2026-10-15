@@ -114,10 +114,17 @@ vi.mock("../playground-features", () => ({
   SessionCostEstimation: () => <div data-testid="session-cost" />
 }))
 
+vi.mock("../hooks/useCasualComposerDisclosure", () => ({
+  useCasualComposerDisclosure: () => {
+    const [open, setExplicitOpen] = React.useState(false)
+    return { open, setExplicitOpen, loading: false, unavailable: false }
+  }
+}))
+
 const createToolbarProps = (
   overrides: Partial<React.ComponentProps<typeof ComposerToolbar>> = {}
 ): React.ComponentProps<typeof ComposerToolbar> => ({
-  isProMode: false,
+  isProMode: true,
   isMobile: true,
   isConnectionReady: true,
   isSending: false,

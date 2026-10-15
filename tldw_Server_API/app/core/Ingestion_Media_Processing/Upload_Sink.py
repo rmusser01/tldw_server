@@ -96,10 +96,15 @@ def _is_epub_archive(file_path: Path) -> bool:
     """Return True when a ZIP-shaped file has the required EPUB marker."""
     try:
         with zipfile.ZipFile(file_path, "r") as archive:
-            marker = archive.read("mimetype", pwd=None)
+            expected = b"application/epub+zip"
+            entry = archive.getinfo("mimetype")
+            if entry.file_size != len(expected):
+                return False
+            with archive.open(entry, "r", pwd=None) as handle:
+                marker = handle.read(len(expected) + 1)
     except (OSError, KeyError, RuntimeError, zipfile.BadZipFile, zipfile.LargeZipFile):
         return False
-    return marker.strip() == b"application/epub+zip"
+    return marker == expected
 
 
 class FileValidationError(Exception):
@@ -116,11 +121,13 @@ class ValidationResult:
     def __init__(self, is_valid: bool, issues: Optional[list[str]] = None,
                  file_path: Optional[Path] = None,
                  detected_mime_type: Optional[str] = None,
-                 detected_extension: Optional[str] = None):
+                 detected_extension: Optional[str] = None,
+                 mime_detection_source: str = "unavailable"):
         self.is_valid = is_valid
         self.issues = issues or []
         self.file_path = file_path
         self.detected_mime_type = detected_mime_type
+        self.mime_detection_source = mime_detection_source
         self.detected_extension = detected_extension  # Extension of the file on disk
 
     def __bool__(self):
@@ -748,11 +755,13 @@ class FileValidator:
 
         if issues:
             logging.warning("File validation rejected upload (issue_count={})", len(issues))
-            return ValidationResult(False, issues, current_file_path, detected_mime_type, disk_file_ext)
+            return ValidationResult(False, issues, current_file_path, detected_mime_type, disk_file_ext,
+                                    mime_detection_source=mime_detection_source)
 
         logging.info("File validation succeeded")
         return ValidationResult(True, file_path=current_file_path,
-                                detected_mime_type=detected_mime_type, detected_extension=disk_file_ext)
+                                detected_mime_type=detected_mime_type, detected_extension=disk_file_ext,
+                                mime_detection_source=mime_detection_source)
 
     def validate_archive_contents(
         self,

@@ -741,7 +741,6 @@ def _local_llm_request(
     )
 
 
-
 def _llama_request(
         input_data: list[dict[str, Any]],
         api_key: str | None = None, # from map
@@ -901,33 +900,33 @@ def _llama_request(
     )
 
 
-
 # System prompts not supported through API requests.
 # https://lite.koboldai.net/koboldcpp_api#/api%2Fv1/post_api_v1_generate
 def _kobold_request(
-        input_data: list[dict[str, Any]],
-        api_key: str | None = None,
-        custom_prompt_input: str | None = None, # Mapped from 'prompt'
-        temp: float | None = None, # Mapped from 'temp'
-        system_message: str | None = None, # Mapped
-        streaming: bool | None = False, # Mapped
-        model: str | None = None, # Mapped
-        top_k: int | None = None, # Mapped
-        top_p: float | None = None, # Mapped
-        max_length: int | None = None, # Mapped from 'max_tokens'
-        stop_sequence: str | list[str] | None = None, # Mapped from 'stop'
-        num_responses: int | None = None, # Mapped from 'n'
-        seed: int | None = None, # Mapped from 'seed'
-        app_config: dict[str, Any] | None = None,
-        http_client_factory: Callable[[int], Any] | None = None,
-        http_fetcher: Callable[..., Any] | None = None,
-        http_streamer: Callable[..., Any] | None = None,
-        configured_endpoint_base_url: str | None = None,
-        configured_endpoint_scope: ConfiguredEndpointScope | None = None,
-        extra_headers: dict[str, str] | None = None,
-        extra_body: dict[str, Any] | None = None,
-        credentials_resolved: bool = False,
-        timeout: float | None = None,
+    input_data: list[dict[str, Any]],
+    api_key: str | None = None,
+    custom_prompt_input: str | None = None,  # Mapped from 'prompt'
+    temp: float | None = None,  # Mapped from 'temp'
+    system_message: str | None = None,  # Mapped
+    streaming: bool | None = False,  # Mapped
+    model: str | None = None,  # Mapped
+    top_k: int | None = None,  # Mapped
+    top_p: float | None = None,  # Mapped
+    max_length: int | None = None,  # Mapped from 'max_tokens'
+    stop_sequence: str | list[str] | None = None,  # Mapped from 'stop'
+    num_responses: int | None = None,  # Mapped from 'n'
+    seed: int | None = None,  # Mapped from 'seed'
+    app_config: dict[str, Any] | None = None,
+    http_client_factory: Callable[[int], Any] | None = None,
+    http_fetcher: Callable[..., Any] | None = None,
+    http_streamer: Callable[..., Any] | None = None,
+    configured_endpoint_base_url: str | None = None,
+    configured_endpoint_scope: ConfiguredEndpointScope | None = None,
+    extra_headers: dict[str, str] | None = None,
+    extra_body: dict[str, Any] | None = None,
+    credentials_resolved: bool = False,
+    timeout: float | None = None,
+    repetition_penalty: float | None = None,
 ):
     if model and (model.lower() == "none" or model.strip() == ""):
         model = None
@@ -938,7 +937,7 @@ def _kobold_request(
     )
     cfg = loaded_config_data.get('kobold_api', {})
 
-    current_api_key = api_key or cfg.get('api_key')
+    current_api_key = api_key or cfg.get("api_key")
     api_url = configured_endpoint_base_url or cfg.get('api_ip')
     # Kobold's native /api/v1/generate doesn't take 'model' in payload, it's server-fixed.
     # The 'model' param from chat_api_call is noted here if cfg needs it for other reasons.
@@ -947,13 +946,13 @@ def _kobold_request(
     if not api_url:
         raise ChatConfigurationError(provider="kobold", message="KoboldAI API URL (api_ip) is required but not found.")
 
-    current_temp = temp if temp is not None else float(cfg.get('temperature', 0.7)) # Kobold native 'temp'
-    current_top_k = top_k if top_k is not None else cfg.get('top_k')
-    current_top_p = top_p if top_p is not None else cfg.get('top_p')
+    current_temp = temp if temp is not None else float(cfg.get("temperature", 0.7))  # Kobold native 'temp'
+    current_top_k = top_k if top_k is not None else cfg.get("top_k")
+    current_top_p = top_p if top_p is not None else cfg.get("top_p")
     current_max_length = max_length if max_length is not None else int(cfg.get('max_length', 200))
     current_stop_sequence = stop_sequence if stop_sequence is not None else cfg.get('stop_sequence')
     current_num_responses = num_responses if num_responses is not None else cfg.get('num_responses')
-    current_seed = seed if seed is not None else cfg.get('seed')
+    current_seed = seed if seed is not None else cfg.get("seed")
 
     # Kobold native streaming for /generate is not standard SSE and can be complex.
     # Original code forced it to False. Maintaining that unless KoboldCPP has improved this significantly
@@ -988,10 +987,9 @@ def _kobold_request(
         logging.warning("Kobold: Failed to coerce seed='%s' to int; sending as-is", current_seed)
 
     max_context_length = int(cfg.get('max_context_length', 2048)) # Kobold uses max_context_length for context window
-    effective_timeout = timeout if timeout is not None else int(cfg.get('api_timeout', 180))
+    effective_timeout = timeout if timeout is not None else int(cfg.get("api_timeout", 180))
     api_retries = int(cfg.get('api_retries', 1))
     api_retry_delay = int(cfg.get('api_retry_delay', 1))
-
 
     # Construct a single prompt string from messages_payload for Kobold's native API
     full_prompt_parts = []
@@ -1039,8 +1037,9 @@ def _kobold_request(
     payload = merge_extra_body(payload, {"extra_body": extra_body})
 
     # Kobold specific params (can be added from cfg if needed and supported)
-    if cfg.get('rep_pen') is not None:
-        payload['rep_pen'] = float(cfg['rep_pen'])
+    rep_pen = repetition_penalty if repetition_penalty is not None else cfg.get("rep_pen")
+    if rep_pen is not None:
+        payload["rep_pen"] = float(rep_pen)
     # Other kobold params: typical_p, tfs, top_a, etc. could be added from cfg
 
     logging.debug(
@@ -1053,7 +1052,6 @@ def _kobold_request(
         text_keys=("prompt",),
     )
     logging.debug(f"KoboldAI (Native) payload metadata: {payload_metadata}")
-
 
     try:
         policy = _HC_RetryPolicy(attempts=max(1, int(api_retries) + 1), backoff_base_ms=max(50, int(api_retry_delay * 1000)))
@@ -2187,6 +2185,7 @@ class KoboldAdapter(_LocalAdapterBase):
             "model": request.get("model"),
             "top_k": request.get("top_k"),
             "top_p": request.get("top_p"),
+            "repetition_penalty": request.get("repetition_penalty"),
             "max_length": request.get("max_tokens"),
             "stop_sequence": request.get("stop"),
             "num_responses": request.get("n"),

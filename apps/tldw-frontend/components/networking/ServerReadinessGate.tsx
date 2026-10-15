@@ -1,9 +1,11 @@
+import { requestSettingsNavigation } from "@/utils/settings-return"
 import React from "react"
 
 import { resolvePublicApiOrigin, type DeploymentEnv } from "@web/lib/api-base"
 import { useConnectionStore } from "@tldw/ui/store/connection"
 import {
   StatePanel,
+  ActionGroup,
   type StatePanelDiagnostic,
 } from "@tldw/ui/components/ui/state"
 import { ServerHealthWarningBanner } from "./ServerHealthWarningBanner"
@@ -350,7 +352,7 @@ function emitServerReadinessState(detail: ServerReadinessPublishedState) {
 }
 
 function navigateTo(path: string): void {
-  if (typeof window === "undefined") return
+  if (typeof window === "undefined" || !requestSettingsNavigation(path)) return
   window.location.assign(path)
 }
 
@@ -358,11 +360,31 @@ function ReadinessRecoveryPanel({
   diagnostics,
   healthUrl,
   onRetry,
+  inline = false,
 }: {
   diagnostics: ServerReadinessPublishedState | null
   healthUrl: string
   onRetry: () => void
+  inline?: boolean
 }) {
+  const primaryAction = { label: "Retry", onClick: onRetry }
+  const secondaryActions = [
+    { label: "Health & diagnostics", onClick: () => navigateTo("/settings/health") },
+    { label: "Server settings", onClick: () => navigateTo("/settings/tldw") },
+  ]
+  if (inline) {
+    return (
+      <div role="status" aria-live="polite" data-testid="server-readiness-chat-recovery" className="border-b border-border bg-surface px-4 py-3 text-text">
+        <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold">Server connection unavailable</p>
+            <p className="text-sm text-text-muted">Chat stays open while you fix the connection. Connect your tldw server before sending.</p>
+          </div>
+          <ActionGroup primaryAction={primaryAction} secondaryActions={secondaryActions} />
+        </div>
+      </div>
+    )
+  }
   const panelDiagnostics: StatePanelDiagnostic[] = [
     {
       label: "Health endpoint",
@@ -401,17 +423,8 @@ function ReadinessRecoveryPanel({
         title="Backend readiness check failed"
         message="The WebUI could not confirm that the tldw server is ready. You can retry the health check, inspect diagnostics, or update server settings before continuing."
         diagnostics={panelDiagnostics}
-        primaryAction={{ label: "Retry", onClick: onRetry }}
-        secondaryActions={[
-          {
-            label: "Health & diagnostics",
-            onClick: () => navigateTo("/settings/health"),
-          },
-          {
-            label: "Server settings",
-            onClick: () => navigateTo("/settings/tldw"),
-          },
-        ]}
+        primaryAction={primaryAction}
+        secondaryActions={secondaryActions}
         role="alert"
         aria-live="assertive"
         className="w-full max-w-3xl"
@@ -424,6 +437,8 @@ function ReadinessRecoveryPanel({
 export const ServerReadinessGate: React.FC<{
   children: React.ReactNode
   allowDegraded?: boolean
+  /** Keep locally usable routes mounted while still checking and reporting readiness. */
+  blocking?: boolean
   bypass?: boolean
   configuredServerUrl?: string | null
   /**
@@ -438,6 +453,7 @@ export const ServerReadinessGate: React.FC<{
 }> = ({
   children,
   allowDegraded = false,
+  blocking = true,
   bypass = false,
   configuredServerUrl = null,
   nonBlocking = false
@@ -586,6 +602,19 @@ export const ServerReadinessGate: React.FC<{
       window.clearTimeout(emitTimer)
     }
   }, [bypass, degradedChecks, gate, healthUrl, lastReadinessState])
+
+  if (!blocking) {
+    return (
+      <div className="server-readiness-degraded-shell" data-testid="server-readiness-chat-shell">
+        {gate === "timeout" ? (
+          <ReadinessRecoveryPanel inline diagnostics={lastReadinessState} healthUrl={healthUrl} onRetry={retryNow} />
+        ) : gate === "degraded" ? (
+          <ServerHealthWarningBanner degradedChecks={degradedChecks} />
+        ) : null}
+        <div className="server-readiness-degraded-content">{children}</div>
+      </div>
+    )
+  }
 
   if (bypass || gate === "ready") {
     return <>{children}</>

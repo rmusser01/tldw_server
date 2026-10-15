@@ -23,8 +23,8 @@ vi.mock("@/utils/safe-storage", () => ({
 }))
 
 // The retired useConfig provider was removed in 661b76c144. Public docs discovery
-// now lives in server-capabilities and uses the shared noAuth request contract.
-describe("public docs-info bootstrap fetch mode", () => {
+// now lives in server-capabilities and distinguishes public from configured discovery.
+describe("docs-info discovery fetch mode", () => {
   beforeEach(() => {
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "advanced")
     vi.stubEnv("NEXT_PUBLIC_API_URL", undefined)
@@ -45,26 +45,52 @@ describe("public docs-info bootstrap fetch mode", () => {
 
   afterEach(() => vi.unstubAllEnvs())
 
-  it.each([
-    { authMode: "single-user", apiKey: "private-api-key" },
-    { authMode: "multi-user", accessToken: "private-access-token" },
-  ])("does not send $authMode credentials to cross-origin docs discovery", async (auth) => {
-    mocks.getConfig.mockResolvedValue({ serverUrl: "https://api.example.test", ...auth })
-
-    await getServerCapabilities({ forceRefresh: true })
-
-    expect(mocks.bgRequest).toHaveBeenCalledWith({
-      path: "/api/v1/config/docs-info",
-      method: "GET",
-      noAuth: true,
-    })
+  const expectPublicFetch = () => {
     expect(mocks.fetch).toHaveBeenCalledTimes(1)
     const [url, init] = mocks.fetch.mock.calls[0]
     expect(url).toBe("https://api.example.test/api/v1/config/docs-info")
-    // Fetch's default same-origin mode also omits cross-origin cookies.
     expect(init?.credentials ?? "same-origin").not.toBe("include")
     const headers = new Headers(init?.headers)
     expect(headers.has("authorization")).toBe(false)
     expect(headers.has("x-api-key")).toBe(false)
+  }
+
+  it("bootstraps public docs without usable credentials", async () => {
+    const config = { serverUrl: "https://api.example.test", authMode: "single-user", apiKey: "" }
+    mocks.getConfig.mockResolvedValue(config)
+    await getServerCapabilities({ forceRefresh: true })
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/config/docs-info", method: "GET", noAuth: true, configSnapshot: config,
+    })
+    expectPublicFetch()
+  })
+
+  it.each([
+    { authMode: "single-user", apiKey: "private-api-key", header: "x-api-key", value: "private-api-key" },
+    { authMode: "multi-user", accessToken: "private-access-token", header: "authorization", value: "Bearer private-access-token" },
+  ])("authenticates configured $authMode discovery", async ({ header, value, ...auth }) => {
+    const config = { serverUrl: "https://api.example.test", ...auth }
+    mocks.getConfig.mockResolvedValue(config)
+    await getServerCapabilities({ forceRefresh: true })
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/config/docs-info", method: "GET", noAuth: false, configSnapshot: config,
+    })
+    expect(mocks.fetch).toHaveBeenCalledTimes(1)
+    const [url, init] = mocks.fetch.mock.calls[0]
+    expect(url).toBe("https://api.example.test/api/v1/config/docs-info")
+    expect(new Headers(init?.headers).get(header)).toBe(value)
+    expect(init?.credentials ?? "same-origin").not.toBe("include")
+  })
+
+  it.each([
+    { authMode: "single-user", apiKey: "private-api-key" },
+    { authMode: "multi-user", accessToken: "private-access-token" },
+  ])("omits configured $authMode credentials for explicitly public requests", async (auth) => {
+    mocks.getConfig.mockResolvedValue({ serverUrl: "https://api.example.test", ...auth })
+    const result = await tldwRequest({ path: "/api/v1/config/docs-info", method: "GET", noAuth: true }, {
+      getConfig: () => mocks.getConfig(), fetchFn: mocks.fetch,
+    })
+    expect(result.ok).toBe(true)
+    expectPublicFetch()
   })
 })

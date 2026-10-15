@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PlaygroundMessage } from "../Message"
 import { CompactMessage } from "../CompactMessage"
 import { ReasoningBlock } from "../ReasoningBlock"
+import { formatSelectedHistory } from "@/db/dexie/helpers"
+import { resolveCharacterMessageType } from "@/utils/character-greetings"
 
+const reasoningPresentation = vi.hoisted(() => ({ actual: false }))
 const markdownCalls = vi.hoisted(() => [] as Array<Record<string, unknown>>)
 const storageState = vi.hoisted(() => ({
   values: new Map<string, unknown>()
@@ -22,7 +25,8 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
-vi.mock("antd", () => {
+vi.mock("antd", async importOriginal => {
+  const actual = await importOriginal<typeof import("antd")>()
   const ModalMock = ({
     open,
     children
@@ -46,22 +50,16 @@ vi.mock("antd", () => {
       <img src={src || ""} alt={alt || ""} />
     ),
     Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    Collapse: ({
-      children,
-      items
-    }: {
-      children?: React.ReactNode
-      items?: Array<{ children?: React.ReactNode; label?: React.ReactNode }>
-    }) => (
-      <div>
-        {items?.map((item, index) => (
-          <section key={index}>
-            <div>{item.label}</div>
-            {item.children}
-          </section>
-        )) ?? children}
-      </div>
-    ),
+    Collapse: (props: React.ComponentProps<typeof actual.Collapse>) => reasoningPresentation.actual
+      ? <actual.Collapse {...props} />
+      : <div>
+          {props.items?.map((item, index) => (
+            <section key={index}>
+              <div>{item.label}</div>
+              {item.children}
+            </section>
+          )) ?? props.children}
+        </div>,
     Avatar: ({ src, alt }: { src?: string; alt?: string }) => (
       <img src={src || ""} alt={alt || ""} />
     ),
@@ -91,7 +89,7 @@ vi.mock("../ActionInfo", () => ({
 }))
 
 vi.mock("../EditMessageForm", () => ({
-  EditMessageForm: () => <div data-testid="edit-form" />
+  EditMessageForm: ({ value }: { value: string }) => <textarea aria-label="Edit canonical message" defaultValue={value} />
 }))
 
 vi.mock("../PlaygroundUserMessage", () => ({
@@ -113,7 +111,7 @@ vi.mock("@/components/Sidepanel/Chat/ToolCallBlock", () => ({
 }))
 
 vi.mock("../MessageActionsBar", () => ({
-  MessageActionsBar: () => null
+  MessageActionsBar: ({ onEdit }: { onEdit?: () => void }) => <button type="button" onClick={onEdit}>Edit canonical message</button>
 }))
 
 vi.mock("../DiscoSkillAnnotation", () => ({
@@ -264,7 +262,9 @@ vi.mock("@/utils/character-mood", () => ({
   resolveCharacterMoodImageUrl: () => ""
 }))
 
-vi.mock("@/db/dexie/helpers", () => ({
+vi.mock("@/db/dexie/chat", () => ({ PageAssistDatabase: class {} }))
+vi.mock("@/db/dexie/helpers", async importOriginal => ({
+  ...await importOriginal<typeof import("@/db/dexie/helpers")>(),
   updateMessageDiscoSkillComment: vi.fn(async () => undefined)
 }))
 
@@ -303,6 +303,45 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
     parseReasoningMock.mockImplementation((content: string) => [
       { type: "message", content }
     ])
+  })
+
+  it("projects saved raw greetings with distinct names and keeps canonical content unchanged on reload", async () => {
+    const raw = "{{user}} meets {{char}}\n  exact  "
+    storageState.values.set("chatUserDisplayName", "Viewer $&")
+    const capture = {
+      status: "captured", view: { conversation_id: "saved-chat" },
+      snapshot: { nodes: [{ id: "saved-root", role: "assistant", parent_id: null }] },
+      rows: [{ id: "saved-root", role: "assistant", parent_id: null }],
+      selected_content: [{ id: "saved-root", message: raw, images: [] }]
+    } as unknown as import("@/types/history-selection").HistorySelectionCaptureV1
+    const display = formatSelectedHistory(capture)
+    const root = display.messages[0]
+    const props = { ...baseProps, message: root.message,
+      message_type: resolveCharacterMessageType(root, 0, true), serverChatId: "saved-chat",
+      characterIdentityEnabled: true, characterIdentity: { id: "12", name: "Guide $'" } }
+    const view = render(<PlaygroundMessage {...props} />)
+    await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe("Viewer $& meets Guide $'\n  exact  "))
+    storageState.values.set("chatUserDisplayName", "")
+    view.rerender(<PlaygroundMessage {...props} characterIdentity={{ id: "12", name: "Updated Guide" }} />)
+    await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe("User meets Updated Guide\n  exact  "))
+    expect(props.message).toBe(raw)
+    expect(capture.selected_content[0].message).toBe(raw)
+    expect(display.history[0].content).toBe(raw)
+    fireEvent.click(screen.getByRole("button", { name: "Edit canonical message" }))
+    expect(screen.getByRole("textbox", { name: "Edit canonical message" })).toHaveValue(raw)
+    expect(root.serverMessageId).toBeUndefined()
+    expect(root.serverMessageVersion).toBeUndefined()
+  })
+
+  it("keeps a mismatched character name unresolved in a saved greeting", async () => {
+    render(<PlaygroundMessage {...baseProps} message="{{user}} meets {{char}}" message_type="character:greeting"
+      characterIdentityEnabled characterIdentity={{ id: "12", name: "Other Guide" }} speakerCharacterId="34" />)
+    await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe("User meets {{char}}"))
+  })
+  it("does not substitute placeholders in ordinary assistant content", async () => {
+    const raw = "{{user}} meets {{char}}"
+    render(<PlaygroundMessage {...baseProps} message={raw} characterIdentityEnabled characterIdentity={{ id: "12", name: "Guide" }} />)
+    await waitFor(() => expect(markdownCalls.at(-1)?.message).toBe(raw))
   })
 
   it("enables Mermaid for a completed assistant markdown message by default", async () => {
@@ -509,5 +548,65 @@ describe("PlaygroundMessage Mermaid rendering gates", () => {
       })
     )
     expect(markdownCalls[0]?.artifactContextId).toBeUndefined()
+  })
+})
+
+
+describe("TASK-13274 actual streaming reasoning disclosure", () => {
+  beforeEach(async () => {
+    reasoningPresentation.actual = true
+    markdownCalls.length = 0
+    storageState.values.clear()
+    const actual = await vi.importActual<typeof import("@/libs/reasoning")>("@/libs/reasoning")
+    parseReasoningMock.mockImplementation(actual.parseReasoning)
+  })
+  afterEach(() => { reasoningPresentation.actual = false })
+
+  it("shows Thinking before the first answer with actual Collapse closed by default", async () => {
+    render(<PlaygroundMessage {...baseProps} message="<think>Original thought" isStreaming />)
+    const disclosure = await screen.findByRole("button", { name: /Thinking…$/ })
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByText("Original thought")).toBeNull()
+    expect(screen.queryByTestId("playground-streaming-plain-text")).toBeNull()
+    expect(markdownCalls).toHaveLength(0)
+  })
+
+  it("keeps the user's disclosure choice while reasoning grows and answer streaming starts", async () => {
+    const mounted = render(<PlaygroundMessage {...baseProps} message="<think>Original thought" isStreaming />)
+    const disclosure = await screen.findByRole("button", { name: /Thinking…$/ })
+    fireEvent.click(disclosure)
+    await screen.findByText("Original thought")
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    expect(markdownCalls.every(call => call.enableMermaidDiagrams !== true)).toBe(true)
+    mounted.rerender(<PlaygroundMessage {...baseProps} message="<think>Original thought then more" isStreaming />)
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    fireEvent.click(disclosure)
+    mounted.rerender(<PlaygroundMessage {...baseProps} message="<think>Original thought then more</think>Final answer" isStreaming />)
+    const completedDisclosure = screen.getByRole("button", { name: /Model's reasoning \(optional\)$/ })
+    expect(completedDisclosure).toHaveAttribute("aria-expanded", "false")
+    expect(screen.getByTestId("playground-streaming-plain-text")).toHaveTextContent("Final answer")
+    expect(screen.getByTestId("playground-streaming-plain-text").textContent).toBe("Final answer")
+    expect(markdownCalls.every(call => call.message !== "Final answer")).toBe(true)
+  })
+
+  it("respects opt-in open reasoning and still lets the user collapse active progress", async () => {
+    const props = { content: "Original thought", isStreaming: true, reasoningRunning: true,
+      openReasoning: true, assistantTextClass: "", markdownBaseClasses: "",
+      t: ((_key: string, fallback?: string) => fallback || _key) as React.ComponentProps<typeof ReasoningBlock>["t"] }
+    const mounted = render(<ReasoningBlock {...props} />)
+    const disclosure = screen.getByRole("button", { name: /Thinking…$/ })
+    expect(disclosure).toHaveAttribute("aria-expanded", "true")
+    fireEvent.click(disclosure)
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+    mounted.rerender(<ReasoningBlock {...props} content="Original thought then more" />)
+    expect(disclosure).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("keeps a plain answer's exact lightweight renderer without an empty disclosure", () => {
+    render(<PlaygroundMessage {...baseProps} message={"  Plain answer\n"} isStreaming />)
+    expect(screen.getByTestId("playground-streaming-plain-text").textContent).toBe("  Plain answer\n")
+    expect(screen.queryByRole("button", { name: /Thinking…$/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: /Model's reasoning \(optional\)$/ })).toBeNull()
+    expect(markdownCalls).toHaveLength(0)
   })
 })

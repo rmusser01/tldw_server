@@ -111,6 +111,12 @@ const renderNotices = (props: Partial<PlaygroundComposerNoticesProps> = {}) =>
   )
 
 describe("PlaygroundComposerNotices first-run banner", () => {
+  it("names the startup template launcher for assistive technology", () => {
+    mockNoFirstRunBanner()
+    renderNotices({ isProMode: true })
+    expect(screen.getByRole("combobox", { name: "Launch saved template" })).toBeVisible()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
@@ -255,6 +261,16 @@ describe("PlaygroundComposerNotices first-run banner", () => {
       "href",
       "/characters?from=chat-emote-nudge&focus=expressions&characterId=42"
     )
+  })
+
+  it("defers expression setup while the character opening is pending", () => {
+    mockNoFirstRunBanner()
+    renderNotices({
+      selectedCharacter: { id: 42, name: "Ada", extensions: {} },
+      selectedCharacterName: "Ada",
+      deferCharacterAppearanceSetup: true
+    })
+    expect(screen.queryByRole("link", { name: "Edit expressions" })).not.toBeInTheDocument()
   })
 
   it("does not show the expression nudge when mood images are configured", () => {

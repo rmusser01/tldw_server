@@ -43,7 +43,10 @@
       "promptTitle": "System Prompts",
       "promptContent": "Select a system prompt to guide how the AI responds. You can create custom prompts in the Prompts workspace.",
       "newChatTitle": "Start Fresh",
-      "newChatContent": "Click here to start a new conversation. Your previous chats are saved in the sidebar for easy access."
+      "newChatContent": "Click here to start a new conversation. Your previous chats are saved in the sidebar for easy access.",
+      "customizeTitle": "Customize Responses",
+      "customizeContent": "A system prompt guides how the assistant replies. Use chat customization controls to choose one or adjust the response; create reusable prompts in the Prompts workspace.",
+      "newChatContentV2": "Start a new conversation from the sidebar or with the New chat shortcut listed in keyboard help. Saved conversations can be reopened with Find conversations. A Temporary conversation asks before you discard it."
     },
     "tools": {
       "label": "Tools & Attachments",
@@ -227,9 +230,9 @@
       "searchTitle": "Search World Books",
       "searchContent": "Search by title, metadata, and content to quickly locate the right world book.",
       "filtersTitle": "Status Filters",
-      "filtersContent": "Filter by enabled/disabled state and attachment status before editing or exporting.",
+      "filtersContent": "Filter by status and attachment before editing or exporting. On smaller screens, open Filters to show these controls.",
       "tableTitle": "World Book Library",
-      "tableContent": "Select a row to manage entries, attachments, and advanced actions for each world book.",
+      "tableContent": "Select a saved world book to manage entries and attachments. If the library is empty, create or import your first world book.",
       "actionsTitle": "Create and Import",
       "actionsContent": "Create a new world book or import an existing JSON bundle to seed your knowledge base."
     }

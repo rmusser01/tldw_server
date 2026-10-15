@@ -169,7 +169,7 @@ export const createIngestJobsTracker = <TMeta>() => {
 
 type LegacyPerJobFetch = {
   /**
-   * Per-job status fetch (legacy N+1 path). Exactly one of `fetchJob` /
+   * Per-job status fetch (legacy N+1 path). At least one of `fetchJob` /
    * `fetchJobs` must be provided; `fetchJob` is ignored when `fetchJobs` is
    * present. Omitting both is a caller bug that previously spun silently to
    * the poll timeout (PR #3210 review follow-up).
@@ -179,7 +179,7 @@ type LegacyPerJobFetch = {
 }
 
 type BatchedJobsFetch = {
-  fetchJob?: never
+  fetchJob?: LegacyPerJobFetch["fetchJob"]
   /**
    * Batched status fetch: ONE request per tracked batch per poll cycle. The
    * returned response is expected to carry the reconciled status of every
@@ -231,7 +231,7 @@ type PollTrackedIngestJobsBase<TMeta, TResult> = {
 }
 
 /**
- * Exactly one fetch strategy is required — the union makes omitting both a
+ * At least one fetch strategy is required; batching takes priority. Omitting both is a
  * compile error instead of a silent spin to the poll timeout (PR #3210
  * review follow-up).
  */

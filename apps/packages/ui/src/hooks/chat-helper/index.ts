@@ -506,6 +506,7 @@ export const saveMessageOnSuccess = async ({
   fullText,
   source,
   assistantImages,
+  resolveAssistantMedia,
   message_source = "web-ui",
   message_type,
   userMessageType,
@@ -547,6 +548,7 @@ export const saveMessageOnSuccess = async ({
   fullText: string
   source: any[]
   assistantImages?: string[]
+  resolveAssistantMedia?: () => { assistantImages?: string[]; generationInfo?: unknown }
   message_source?: "copilot" | "web-ui" | "server" | "branch"
   message_type?: string
   userMessageType?: string
@@ -576,7 +578,12 @@ export const saveMessageOnSuccess = async ({
   sessionFilesToAdd?: UploadedFile[]
 }) => {
   if (historyTurn) {
-    if (!historyTurn.admission) throw new Error("missing_history_admission")
+    if (!historyTurn.admission) throw new Error('missing_history_admission');
+    if (historyTurn.persistence === 'server') {
+      if (!historyTurn.resultId) throw new Error('missing_native_completion_receipt');
+      await historyTurn.complete?.(fullText);
+      return historyId ?? historyTurn.admission.conversation_id;
+    }
     const native = historyTurn.owner.kind === "native"
     // ponytail: native history retains full reasoning text, not client elapsed-time telemetry.
     // Add a negotiated metadata field if cross-client timing becomes required.
@@ -584,7 +591,7 @@ export const saveMessageOnSuccess = async ({
       native &&
       (source?.length ||
         assistantMetadataExtra ||
-        generationInfo)
+        generationInfo || sessionFilesToAdd.length)
     ) {
       throw new Error("unsupported_history_native_result_metadata")
     }
@@ -619,10 +626,12 @@ export const saveMessageOnSuccess = async ({
     await settleAcceptedAssistant(
       historyTurn.owner,
       historyTurn.admission,
-      assistant
+      assistant,
+      undefined,
+      sessionFilesToAdd
     )
-    await historyTurn.complete?.()
     historyTurn.resultId = assistant.id
+    await historyTurn.complete?.(assistant.content)
     return historyId ?? assistant.history_id
   }
   if (scopeInvalidatedSignal?.aborted) {
@@ -680,6 +689,7 @@ export const saveMessageOnSuccess = async ({
         const lastMessage = await getLastChatHistory(targetHistoryId)
         await updateMessage(targetHistoryId, lastMessage.id, fullText)
       } else {
+        const media = resolveAssistantMedia?.()
         await saveMessage({
           id: assistantMessageId,
           serverMessageId: assistantServerMessageId,
@@ -687,14 +697,14 @@ export const saveMessageOnSuccess = async ({
           name: selectedModel,
           role: "assistant",
           content: fullText,
-          images: assistantImages ?? [],
+          images: media?.assistantImages ?? assistantImages ?? [],
           source,
           time: 2,
           message_type: assistantMessageType ?? message_type,
           clusterId,
           modelId,
           parent_message_id: assistantParentMessageId ?? null,
-          generationInfo,
+          generationInfo: media?.generationInfo ?? generationInfo,
           metadataExtra: assistantMetadataExtra,
           reasoning_time_taken
         })

@@ -1,4 +1,9 @@
 {
+  "assistant": {
+    "trackedPersonaUnavailable": "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.",
+    "usePersonaOverlay": "Use a persona prompt overlay",
+    "trackedModelsLoading": "Loading models before tracked chat selection. Wait for discovery to finish, or retry in the model picker."
+  },
   "newChat": "New Chat",
   "selectAPrompt": "Select a Prompt",
   "githubRepository": "GitHub Repository",
@@ -235,7 +240,10 @@
     "quickIngestQueuedAria": "{{label}} — {{count}} items queued — click to review and process",
     "writingPlayground": "Writing Playground",
     "documentWorkspace": "Document Workspace",
-    "modeRepo2txt": "Repo2Txt"
+    "modeRepo2txt": "Repo2Txt",
+    "showPages": "Show pages",
+    "hidePages": "Hide pages",
+    "pageNavigator": "Pages"
   },
   "skills": {
     "activeModeFilter": "Mode: {{value}}",
@@ -929,7 +937,7 @@
   "validationSelectModel": "Please select a model to continue",
   "deleteHistoryConfirmation": "Are you sure you want to delete this history?",
   "editHistoryTitle": "Enter a new title",
-  "temporaryChat": "Temporary chat (not saved)",
+  "temporaryChat": "Temporary chat (on this device)",
   "more": {
     "copy": {
       "group": "Copy",
@@ -1567,6 +1575,9 @@
     "filteringBy": "Filtering by:",
     "searchError": "Search failed. Please try again."
   },
+  "worldBooks": {
+    "filtersToggle": "Filters"
+  },
   "worldBooksEmpty": {
     "demoTitle": "Explore World Books in demo mode",
     "demoDescription": "This demo shows how World Books can organize structured knowledge about your worlds, settings, or products.",
@@ -1702,7 +1713,9 @@
     "confirmTitle": "Use prompt in chat?",
     "confirmDescription": "Your message already has text. Do you want to overwrite it with this prompt or append the prompt below it?",
     "overwrite": "Overwrite message",
-    "append": "Append"
+    "append": "Append",
+    "reviewDescription": "Your draft remains here. Review this prompt, then overwrite your message, append it, or cancel.",
+    "preview": "Prompt preview"
   },
   "flashcards": {
     "studyPackJobAccepted": "Study pack request accepted. Waiting for a status update.",

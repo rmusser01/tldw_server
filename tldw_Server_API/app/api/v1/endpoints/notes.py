@@ -3934,6 +3934,7 @@ async def import_notes(
 
 @router.get(
     "/keywords",
+    dependencies=[Depends(require_expected_user)],
     response_model=list[KeywordResponse],
     summary="List all keywords for the current user",
     tags=["Keywords (for Notes)"],
@@ -3965,12 +3966,14 @@ async def list_keywords_endpoint_no_trailing_slash(
 
 @router.get(
     "/collections",
+    dependencies=[Depends(require_expected_user)],
     response_model=KeywordCollectionsListResponse,
     summary="List keyword collections for the current user",
     tags=["Notes Collections"],
 )
 @router.get(
     "/collections/",
+    dependencies=[Depends(require_expected_user)],
     response_model=KeywordCollectionsListResponse,
     summary="List keyword collections for the current user",
     tags=["Notes Collections"],
@@ -4032,6 +4035,7 @@ async def list_keyword_collections_endpoint(
 
 @router.post(
     "/collections",
+    dependencies=[Depends(require_expected_user)],
     response_model=KeywordCollectionResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a keyword collection",
@@ -4039,6 +4043,7 @@ async def list_keyword_collections_endpoint(
 )
 @router.post(
     "/collections/",
+    dependencies=[Depends(require_expected_user)],
     response_model=KeywordCollectionResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a keyword collection",
@@ -4121,6 +4126,7 @@ async def create_keyword_collection_endpoint(
 
 @router.get(
     "/collections/keyword-links",
+    dependencies=[Depends(require_expected_user)],
     response_model=CollectionKeywordLinksResponse,
     summary="List collection-keyword links",
     tags=["Notes Collections"],
@@ -4176,6 +4182,7 @@ async def list_collection_keyword_links_endpoint(
 
 @router.patch(
     "/collections/{collection_id}",
+    dependencies=[Depends(require_expected_user)],
     response_model=KeywordCollectionResponse,
     summary="Update a keyword collection",
     tags=["Notes Collections"],
@@ -4324,6 +4331,7 @@ async def update_keyword_collection_endpoint(
 
 @router.delete(
     "/collections/{collection_id}",
+    dependencies=[Depends(require_expected_user)],
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     summary="Soft-delete a keyword collection",
@@ -4416,6 +4424,7 @@ async def delete_keyword_collection_endpoint(
 
 @router.post(
     "/collections/{collection_id}/keywords/{keyword_id}",
+    dependencies=[Depends(require_expected_user)],
     response_model=CollectionKeywordLinkResponse,
     summary="Link a keyword to a collection",
     tags=["Notes Collections"],
@@ -4481,6 +4490,7 @@ async def link_collection_to_keyword_endpoint(
 
 @router.delete(
     "/collections/{collection_id}/keywords/{keyword_id}",
+    dependencies=[Depends(require_expected_user)],
     response_model=CollectionKeywordLinkResponse,
     summary="Unlink a keyword from a collection",
     tags=["Notes Collections"],
@@ -4543,12 +4553,14 @@ async def unlink_collection_from_keyword_endpoint(
 
 @router.get(
     "/collections/{collection_id}/keywords",
+    dependencies=[Depends(require_expected_user)],
     response_model=list[KeywordResponse],
     summary="List keywords linked to a collection",
     tags=["Notes Collections"],
 )
 @router.get(
     "/collections/{collection_id}/keywords/",
+    dependencies=[Depends(require_expected_user)],
     response_model=list[KeywordResponse],
     summary="List keywords linked to a collection",
     tags=["Notes Collections"],
@@ -4582,6 +4594,7 @@ async def list_keywords_for_collection_endpoint(
 
 @router.get(
     "/conversations/keyword-links",
+    dependencies=[Depends(require_expected_user)],
     response_model=ConversationKeywordLinksResponse,
     summary="List conversation-keyword links",
     tags=["Notes Linking"],
@@ -4666,6 +4679,7 @@ async def list_conversation_keyword_links_endpoint(
 
 @router.post(
     "/conversations/{conversation_id}/keywords/{keyword_id}",
+    dependencies=[Depends(require_expected_user)],
     response_model=ConversationKeywordLinkResponse,
     summary="Link a keyword to a conversation",
     tags=["Notes Linking"],
@@ -4733,6 +4747,7 @@ async def link_conversation_to_keyword_endpoint(
 
 @router.delete(
     "/conversations/{conversation_id}/keywords/{keyword_id}",
+    dependencies=[Depends(require_expected_user)],
     response_model=ConversationKeywordLinkResponse,
     summary="Unlink a keyword from a conversation",
     tags=["Notes Linking"],
@@ -4796,12 +4811,14 @@ async def unlink_conversation_from_keyword_endpoint(
 
 @router.get(
     "/conversations/{conversation_id}/keywords",
+    dependencies=[Depends(require_expected_user)],
     response_model=list[KeywordResponse],
     summary="List keywords linked to a conversation",
     tags=["Notes Linking"],
 )
 @router.get(
     "/conversations/{conversation_id}/keywords/",
+    dependencies=[Depends(require_expected_user)],
     response_model=list[KeywordResponse],
     summary="List keywords linked to a conversation",
     tags=["Notes Linking"],
@@ -7891,6 +7908,7 @@ async def bulk_create_notes(
 
 @router.post(
     "/keywords/",
+    dependencies=[Depends(require_expected_user)],
     response_model=KeywordResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new keyword",
@@ -8036,6 +8054,7 @@ async def get_keyword_by_text(
 
 @router.get(
     "/keywords/",
+    dependencies=[Depends(require_expected_user)],
     response_model=list[KeywordResponse],
     summary="List all keywords for the current user",
     tags=["Keywords (for Notes)"]
@@ -8235,6 +8254,7 @@ async def merge_keyword(
 
 @router.delete(
     "/keywords/{keyword_id}",
+    dependencies=[Depends(require_expected_user)],
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     summary="Soft-delete a keyword",

@@ -1,5 +1,8 @@
+import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
+import { resolveCharacterMessageType } from "@/utils/character-greetings"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
+import { useTranslation } from "react-i18next"
 import { PlaygroundMessage } from "~/components/Common/Playground/Message"
 import { useMessage } from "~/hooks/useMessage"
 import { EmptySidePanel } from "../Chat/empty"
@@ -12,7 +15,7 @@ import { generateID } from "@/db/dexie/helpers"
 import { useSelectedCharacter } from "@/hooks/useSelectedCharacter"
 import { useStoreMessageOption } from "@/store/option"
 import type { Character } from "@/types/character"
-import { ChatGreetingPicker } from "@/components/Common/ChatGreetingPicker"
+import { characterToAssistantSelection, getAssistantSelectionMode, isProtectedTrackedPersonaUnavailable } from "@/types/assistant-selection"
 import {
   EDIT_MESSAGE_EVENT,
   type TimelineActionDetail
@@ -26,27 +29,7 @@ type Props = {
   inputRef?: React.RefObject<HTMLTextAreaElement>
 }
 
-// Stable empty-array fallback so `images={message.images || EMPTY_IMAGES}`
-// keeps prop identity stable for memoized rows without images.
 const EMPTY_IMAGES: string[] = []
-
-/**
- * Get-or-create a cached per-row handler. Handlers are keyed by message id
- * and close only over stable refs, so PlaygroundMessage's memo comparator
- * sees identical callbacks across renders while the handler still reads the
- * latest store state at click time.
- */
-const getStableRowHandler = <T extends (...args: never[]) => unknown>(
-  cache: React.MutableRefObject<Map<string, unknown>>,
-  key: string,
-  factory: () => T
-): T => {
-  const existing = cache.current.get(key) as T | undefined
-  if (existing) return existing
-  const handler = factory()
-  cache.current.set(key, handler)
-  return handler
-}
 
 export const SidePanelBody = ({
   scrollParentRef,
@@ -59,10 +42,10 @@ export const SidePanelBody = ({
   const {
     messages,
     setMessages,
-    setHistory,
     streaming,
     isProcessing,
     regenerateLastMessage,
+    effectiveAssistantState,
     editMessage,
     deleteMessage,
     isSearchingInternet,
@@ -73,6 +56,12 @@ export const SidePanelBody = ({
     serverChatId,
     isEmbedding
   } = useMessage()
+  const { t } = useTranslation(["option"])
+  const regenerateDisabledReason = isProtectedTrackedPersonaUnavailable(
+    Boolean(historySelection), effectiveAssistantState?.kind,
+    effectiveAssistantState?.mode === "overlay" ? "overlay" : "tracked"
+  ) ? t("assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.") : null
+  const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest)
   const { ttsEnabled } = useWebUI()
   const [openReasoning] = useStorage("openReasoning", false)
   const [selectedCharacter] = useSelectedCharacter<Character | null>(null)
@@ -131,110 +120,35 @@ export const SidePanelBody = ({
     [historySelection, messages, setMessages]
   )
 
-  // Stable callbacks for PlaygroundMessage rows. The underlying handlers are
-  // recreated every render (they close over the latest `messages`), so rows
-  // receive stable callbacks that read the latest handlers/messages through
-  // refs at invocation time. This keeps PlaygroundMessage's memo comparator
-  // effective: non-streaming rows skip re-render during streaming flushes.
-  const latestRowHandlers = React.useRef({
-    editMessage,
-    deleteMessage,
-    createChatBranch,
-    handleVariantSwipe,
-    regenerateLastMessage,
-    stopStreamingRequest
-  })
-  latestRowHandlers.current = {
-    editMessage,
-    deleteMessage,
-    createChatBranch,
-    handleVariantSwipe,
-    regenerateLastMessage,
-    stopStreamingRequest
-  }
-  const handleRegenerateRow = React.useCallback(
-    (...args: Parameters<typeof regenerateLastMessage>) => {
-      latestRowHandlers.current.regenerateLastMessage(...args)
-    },
-    []
+  // Stable callbacks for PlaygroundMessage
+  const handleEditMessage = React.useCallback(
+    (
+      index: number,
+      value: string,
+      isUser: boolean,
+      isSend: boolean,
+      editIsCurrent?: () => boolean,
+                          editOriginIsCurrent?: () => boolean
+    ) => editMessage(index, value, isUser, isSend, editIsCurrent, editOriginIsCurrent),
+    [editMessage]
   )
-  const handleStopStreamingRow = React.useCallback(
-    (...args: Parameters<typeof stopStreamingRequest>) => {
-      latestRowHandlers.current.stopStreamingRequest(...args)
-    },
-    []
+  const handleDeleteMessage = React.useCallback(
+    (index: number) => deleteMessage(index),
+    [deleteMessage]
   )
-  // Per-row handler cache keyed by message id; cleared when the conversation
-  // instance changes so it cannot grow unbounded across conversations.
-  const rowHandlerCache = React.useRef(new Map<string, unknown>())
-  React.useEffect(() => {
-    rowHandlerCache.current.clear()
-  }, [conversationInstanceId])
-  const getRowEditSubmitHandler = React.useCallback(
-    (messageId: string | undefined) =>
-      getStableRowHandler(
-        rowHandlerCache,
-        `edit:${messageId ?? ""}`,
-        () => (value: string, isSend: boolean) => {
-          const index = messagesRef.current.findIndex(
-            (row) => row.id === messageId
-          )
-          const row = index >= 0 ? messagesRef.current[index] : null
-          if (!row) return
-          void latestRowHandlers.current.editMessage(
-            index,
-            value,
-            !row.isBot,
-            isSend
-          )
-        }
-      ),
-    []
+  const handleNewBranch = React.useCallback(
+    (index: number) => createChatBranch(messagesRef.current[index]?.id ?? ""),
+    [createChatBranch]
   )
-  const getRowDeleteHandler = React.useCallback(
-    (messageId: string | undefined) =>
-      getStableRowHandler(
-        rowHandlerCache,
-        `delete:${messageId ?? ""}`,
-        () => () => {
-          const index = messagesRef.current.findIndex(
-            (row) => row.id === messageId
-          )
-          if (index < 0) return
-          void latestRowHandlers.current.deleteMessage(index)
-        }
-      ),
-    []
+  const handleSwipePrev = React.useCallback(
+    (id: string) => handleVariantSwipe(id, "prev"),
+    [handleVariantSwipe]
   )
-  const getRowNewBranchHandler = React.useCallback(
-    (messageId: string | undefined) =>
-      getStableRowHandler(
-        rowHandlerCache,
-        `branch:${messageId ?? ""}`,
-        () => () => {
-          void latestRowHandlers.current.createChatBranch(messageId ?? "")
-        }
-      ),
-    []
-  )
-  const getRowSwipeHandler = React.useCallback(
-    (messageId: string | undefined, direction: "prev" | "next") =>
-      getStableRowHandler(
-        rowHandlerCache,
-        `swipe:${direction}:${messageId ?? ""}`,
-        () => () => {
-          latestRowHandlers.current.handleVariantSwipe(messageId, direction)
-        }
-      ),
-    []
-  )
-  const rowSwipeDisabled = Boolean(
-    historySelection &&
-      (!historySelection.view || historySelection.status === "loading")
+  const handleSwipeNext = React.useCallback(
+    (id: string) => handleVariantSwipe(id, "next"),
+    [handleVariantSwipe]
   )
 
-  // Previous user message per index, precomputed in one forward pass so row
-  // rendering is O(1) per row instead of an O(n) backward scan per row.
   const previousUserMessageByIndex = React.useMemo(() => {
     const map = new Map<number, (typeof messages)[number] | null>()
     let previous: (typeof messages)[number] | null = null
@@ -368,16 +282,7 @@ export const SidePanelBody = ({
         aria-live="polite"
         className={`relative flex w-full flex-col items-center ${topPaddingClass} pb-4`}
       >
-        {messages.length === 0 && <EmptySidePanel inputRef={inputRef} />}
-        <ChatGreetingPicker
-          selectedCharacter={selectedCharacter}
-          messages={messages}
-          historyId={historyId}
-          serverChatId={serverChatId}
-          setMessages={setMessages}
-          setHistory={setHistory}
-          className="mb-4"
-        />
+        {messages.length === 0 && !(selectedCharacter && getAssistantSelectionMode(characterToAssistantSelection(selectedCharacter)) === "tracked" && !historyId && !serverChatId) && <EmptySidePanel inputRef={inputRef} />}
         <div style={{ height: rowVirtualizer.getTotalSize(), width: '100%', position: 'relative' }}>
           {rowVirtualizer.getVirtualItems().map((vr) => {
             const index = vr.index
@@ -393,14 +298,28 @@ export const SidePanelBody = ({
                   images={message.images || EMPTY_IMAGES}
                   currentMessageIndex={index}
                   totalMessages={messages.length}
-                  onRegenerate={handleRegenerateRow}
-                  message_type={message.messageType}
+                  onRegenerate={regenerateLastMessage}
+                  regenerateDisabledReason={regenerateDisabledReason}
+                  message_type={resolveCharacterMessageType(message, index, Boolean(serverChatId && characterIdentityEnabled))}
                   isProcessing={isProcessing}
                   isSearchingInternet={isSearchingInternet}
                   sources={message.sources}
-                  onEditFormSubmit={getRowEditSubmitHandler(message.id)}
-                  onDeleteMessage={getRowDeleteHandler(message.id)}
-                  onNewBranch={getRowNewBranchHandler(message.id)}
+                  onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
+                    return handleEditMessage(
+                      index,
+                      value,
+                      !message.isBot,
+                      isSend,
+                      editIsCurrent,
+                      editOriginIsCurrent
+                    )
+                  }}
+                  onDeleteMessage={() => {
+                    return handleDeleteMessage(index)
+                  }}
+                  onNewBranch={() => {
+                    void handleNewBranch(index)
+                  }}
                   isTTSEnabled={ttsEnabled}
                   generationInfo={message?.generationInfo}
                   toolCalls={message?.toolCalls}
@@ -412,7 +331,7 @@ export const SidePanelBody = ({
                   modelName={message?.modelName}
                   createdAt={message?.createdAt}
                   temporaryChat={temporaryChat}
-                  onStopStreaming={handleStopStreamingRow}
+                  onStopStreaming={stopStreamingFromUi}
                   serverChatId={serverChatId}
                   serverMessageId={message.serverMessageId}
                   messageId={message.id}
@@ -433,8 +352,8 @@ export const SidePanelBody = ({
                   activeVariantIndex={message.activeVariantIndex}
                   metadataExtra={message.metadataExtra}
                   dynamicUISurface="extension-sidepanel"
-                  onSwipePrev={rowSwipeDisabled ? undefined : getRowSwipeHandler(message.id, "prev")}
-                  onSwipeNext={rowSwipeDisabled ? undefined : getRowSwipeHandler(message.id, "next")}
+                  onSwipePrev={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleSwipePrev(message.id)}
+                  onSwipeNext={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleSwipeNext(message.id)}
                 />
               </div>
             )

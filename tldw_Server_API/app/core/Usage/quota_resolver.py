@@ -96,6 +96,13 @@ async def user_quota(
     return limits.get(key)
 
 
+async def uncached_user_quota(user_id: int, key: str, *, db_pool: DatabasePool) -> int | float | None:
+    """Read the current native admission allowance; failed lookup cannot prove unlimited."""
+    if not usage_quotas_enabled():
+        return None
+    return (await _load_limits(user_id, db_pool=db_pool)).get(key)
+
+
 def cached_limits(user_id: int) -> dict[str, int | float] | None:
     """The user's cached limits, read without I/O; None when not cached or expired (LLM usage accounting spec §4b)."""
     hit = _cache.get(user_id)

@@ -3,7 +3,7 @@ import path from "node:path"
 import { describe, expect, it } from "vitest"
 
 const source = (relativePath: string) =>
-  readFileSync(path.resolve(process.cwd(), relativePath), "utf8")
+  readFileSync(path.resolve(__dirname, "../../../../..", relativePath), "utf8");
 
 const composerInputSource = source(
   "src/components/Option/Playground/hooks/useComposerInput.tsx"
@@ -114,10 +114,10 @@ describe("PromptAssistComposerAction real shell wiring", () => {
 
   it("completes only the exact current submit attempt", () => {
     expect(playgroundSubmitSource).toMatch(
-      /const promptAssistAttemptId = beginPromptAssistReset\(\)[\s\S]*isChatSubmitSuccess[\s\S]*markPromptAssistAttemptSaved\(promptAssistAttemptId\)/
-    )
+      /let promptAssistAttemptId!:\s*number[\s\S]*beforeSend:\s*\(\)\s*=>\s*\{\s*promptAssistAttemptId = beginPromptAssistReset\(\)[\s\S]*afterSend:\s*\(result\)[\s\S]*isChatSubmitSuccess[\s\S]*markPromptAssistAttemptSaved\(promptAssistAttemptId, result !== undefined\)/,
+    );
     expect(sidepanelFormSource).toMatch(
-      /promptAssistAttemptId = beginPromptAssistReset\(\)[\s\S]*afterSend: \(result\)[\s\S]*isChatSubmitSuccess[\s\S]*markPromptAssistAttemptSaved\(promptAssistAttemptId\)/
+      /promptAssistAttemptId = beginPromptAssistReset\(\)[\s\S]*afterSend: \(result\)[\s\S]*isChatSubmitSuccess[\s\S]*markPromptAssistAttemptSaved\(promptAssistAttemptId, result !== undefined\)/
     )
     expect(playgroundFormSource).not.toContain("markPromptAssistSaved")
     expect(sidepanelFormSource).not.toContain("markPromptAssistSaved")
@@ -210,9 +210,9 @@ describe("PromptAssistComposerAction real shell wiring", () => {
     expect(sidepanelRouteRegistrySource).toMatch(
       /path:\s*"\/chat"[\s\S]*element:\s*<SidepanelChat\s*\/>/
     )
-    expect(sidepanelChatSource).toContain(
-      'import { SidepanelForm } from "~/components/Sidepanel/Chat/form"'
-    )
+    expect(sidepanelChatSource).toMatch(
+      /import\s*\{\s*SidepanelForm,\s*type\s*SidepanelWebUiOpenSource\s*\}\s*from\s*["']~\/components\/Sidepanel\/Chat\/form["']/,
+    );
     expect(
       occurrences(sidepanelFormSource, "<PromptAssistComposerAction")
     ).toBe(1)
@@ -228,8 +228,9 @@ describe("PromptAssistComposerAction real shell wiring", () => {
       "onSelectModel={() => setOpenModelSettings(true)}"
     )
     expect(sidepanelFormSource).toMatch(
-      /\{openModelSettings && \([\s\S]*<CurrentChatModelSettings/
+      /\{modelSettingsPresent && \([\s\S]*<CurrentChatModelSettings/
     )
+    expect(sidepanelFormSource).toContain("afterClose={completeModelSettingsClose}")
     expect(currentChatModelSettingsSource).toContain("<ModelBasicsTab")
     expect(modelBasicsTabSource).toContain('defaultValue: "API / model"')
   })

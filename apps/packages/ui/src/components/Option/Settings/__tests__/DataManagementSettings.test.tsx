@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { DataManagementSettings } from "../system-settings"
@@ -66,6 +66,7 @@ vi.mock("@/utils/is-private-mode", () => ({
 describe("DataManagementSettings", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.clearChat.mockReset().mockReturnValue(true)
     mocks.clearDB.mockResolvedValue(undefined)
     mocks.storageClear.mockResolvedValue(undefined)
     vi.stubGlobal("browser", {
@@ -78,6 +79,7 @@ describe("DataManagementSettings", () => {
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.useRealTimers()
     vi.unstubAllGlobals()
   })
@@ -137,4 +139,16 @@ describe("DataManagementSettings", () => {
 
     expect(clearTimeoutSpy).toHaveBeenCalledWith(reloadTimer)
   })
+  it("admits the confirmed reset before deleting data and stops when navigation is refused", async () => {
+    mocks.clearChat.mockReturnValue(false)
+    render(<DataManagementSettings />)
+    fireEvent.click(screen.getByRole("button", { name: /reset all/i }))
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "RESET" } })
+    fireEvent.click(screen.getByRole("button", { name: "Reset" }))
+    await waitFor(() => expect(mocks.clearChat).toHaveBeenCalledWith({ discardTemporaryConfirmed: true }))
+    expect(mocks.clearDB).not.toHaveBeenCalled()
+    expect(mocks.storageClear).not.toHaveBeenCalled()
+    expect(mocks.notificationSuccess).not.toHaveBeenCalled()
+  })
+
 })

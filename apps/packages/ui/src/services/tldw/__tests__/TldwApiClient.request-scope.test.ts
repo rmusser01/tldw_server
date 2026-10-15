@@ -50,9 +50,64 @@ const expectedScopeFields = {
 }
 
 describe("TldwApiClient captured request scope", () => {
+  it("pins dictionary source reads to the captured owner before catalogue display", async () => {
+    const client = new TldwApiClient()
+    const signal = new AbortController().signal
+    mocks.bgRequest.mockResolvedValue({ dictionaries: [] })
+    await (client.listDictionaries as unknown as (inactive: boolean, usage: boolean, options: { requestScope: typeof requestScope; signal: AbortSignal }) => Promise<unknown>)(true, true, { requestScope, signal })
+    expect(mocks.bgRequest.mock.calls[0][0]).toMatchObject({ path: "/api/v1/chat/dictionaries?include_inactive=true&include_usage=true", method: "GET", abortSignal: signal, headers: { "X-TLDW-Expected-User-ID": "42" }, servicePromptConfig: expectedScopeFields.servicePromptConfig })
+  })
+
   beforeEach(() => {
     mocks.bgRequest.mockReset()
     mocks.bgStream.mockReset()
+  })
+
+  it("reads deployed OpenAPI from the captured native owner without consulting a replacement connection", async () => {
+    const client = new TldwApiClient()
+    const getConfig = vi
+      .spyOn(client, "getConfig")
+      .mockResolvedValue({
+        serverUrl: "https://replacement.test",
+        authMode: "single-user"
+      })
+    const initialize = vi.spyOn(client, "initialize").mockResolvedValue(undefined)
+    const signal = new AbortController().signal
+    const spec = { paths: { "/api/v1/chats/{chat_id}/messages": { post: {} } } }
+    mocks.bgRequest.mockResolvedValue(spec)
+    const read = client.getOpenAPISpec
+    expect(await read.call(client, { requestScope, signal })).toBe(spec)
+    expect(mocks.bgRequest).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/openapi.json",
+        method: "GET",
+        abortSignal: signal,
+        headers: { "X-TLDW-Expected-User-ID": "42" },
+        servicePromptConfig: expectedScopeFields.servicePromptConfig
+      })
+    )
+    expect(getConfig).not.toHaveBeenCalled()
+    expect(initialize).not.toHaveBeenCalled()
+  })
+
+  it("does not begin retired scoped OpenAPI discovery", async () => {
+    const client = new TldwApiClient()
+    const signal = AbortSignal.abort()
+    const initialize = vi.spyOn(client, "initialize").mockResolvedValue(undefined)
+    const read = client.getOpenAPISpec
+    expect(await read.call(client, { requestScope, signal })).toBeNull()
+    expect(mocks.bgRequest).not.toHaveBeenCalled()
+    expect(initialize).not.toHaveBeenCalled()
+  })
+
+  it.each([null, {}, { chats: {} }])("does not manufacture empty chats from an unknown list response %j", async response => {
+    mocks.bgRequest.mockResolvedValue(response)
+    await expect(new TldwApiClient().listChatsWithMeta({}, { requestScope })).rejects.toThrow(/chat.*list|list.*chat/i)
+  })
+
+  it.each([null, {}, "saved", { id: "" }, { id: {} }, { id: Number.MAX_SAFE_INTEGER + 1 }])("rejects malformed chat rows before normalization %j", async row => {
+    mocks.bgRequest.mockResolvedValue({ chats: [row] })
+    await expect(new TldwApiClient().listChatsWithMeta({}, { requestScope })).rejects.toThrow(/chat.*list|list.*chat/i)
   })
 
   it("pins default Character reads and writes to the captured account", async () => {
@@ -174,7 +229,12 @@ describe("TldwApiClient captured request scope", () => {
     const client = new TldwApiClient()
     vi.spyOn(client, "ensureConfigForRequest").mockResolvedValue({ ...requestScope.config, accessToken: "token" })
     vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
-    mocks.bgRequest.mockResolvedValue({ ok: true, data: new ArrayBuffer(0), id: "owned" })
+    if (method === "updateChat") {
+      mocks.bgRequest.mockImplementation(async request => ({
+        id: "owned", version: request.method === "GET" ? 4 : 5,
+        title: request.method === "GET" ? "Own title" : "Own renamed title"
+      }))
+    } else mocks.bgRequest.mockResolvedValue({ ok: true, data: new ArrayBuffer(0), id: "owned" })
     const signal = new AbortController().signal
     await (client[method as keyof typeof client] as (...args: unknown[]) => Promise<unknown>)(...args, { requestScope, signal })
     const outbound = mocks.bgRequest.mock.calls.at(-1)?.[0]
@@ -364,6 +424,22 @@ describe("TldwApiClient captured request scope", () => {
     })
   })
 
+  it.each(["public", "base", "domain"])("keeps %s greeting seed options out of JSON while retaining captured account, workspace and cancellation", async (implementation) => {
+    mocks.bgRequest.mockResolvedValueOnce({id: "greeting-chat", title: "Opening"})
+    const signal = new AbortController().signal
+    const body = {character_id: 42, provider: "openai", model: "configured-model", temperature: 0, top_p: 0}
+    const client = implementation === "public" ? new TldwApiClient() : new TldwApiClientBase()
+    const options = {requestScope, signal, scope: {type: "workspace" as const, workspaceId: "owned-workspace"},
+      seedFirstMessage: true, greetingStrategy: "alternate_index" as const, alternateIndex: 0}
+    if (implementation === "domain") await chatRagMethods.createChat.call(client, body, options)
+    else await client.createChat(body, options)
+    expect(mocks.bgRequest).toHaveBeenCalledWith({
+      path: "/api/v1/chats/?seed_first_message=true&greeting_strategy=alternate_index&alternate_index=0",
+      method: "POST", body: {...body, scope_type: "workspace", workspace_id: "owned-workspace"},
+      abortSignal: signal, ...expectedScopeFields
+    })
+  })
+
   it("reads fresh promotion messages with captured scope without joining cached or pending reads", async () => {
     const client = new TldwApiClient()
     vi.spyOn(client, "ensureConfigForRequest").mockResolvedValue({ ...requestScope.config, accessToken: "token" })
@@ -419,6 +495,50 @@ describe('H1 native owner scope', () => {
     }
   })
 })
+
+it.each([
+  ["composed", TldwApiClient],
+  ["domain-on-base", TldwApiClientBase]
+] as const)(
+  "%s opts in to native completion capture without replacing original scope",
+  async (_name, Client) => {
+    mocks.bgRequest.mockResolvedValue({})
+    const client = new Client()
+    const capture =
+      _name === "composed"
+        ? (client as TldwApiClient).captureHistorySelection.bind(client)
+        : chatRagMethods.captureHistorySelection.bind(client)
+    const signal = new AbortController().signal
+    const request = {
+      view: {
+        view_session_id: "view-one",
+        conversation_id: "chat/one",
+        interpretation: { kind: "parent_graph_v1" as const },
+        cursor: { kind: "empty" as const },
+        selection_revision: 1
+      },
+      purpose: "send" as const
+    }
+    await capture("chat/one", request, {
+      requestScope,
+      signal,
+      scope: { type: "workspace", workspaceId: "7" },
+      includeNativeCompletion: true
+    })
+    expect(mocks.bgRequest.mock.lastCall?.[0]).toMatchObject({
+      ...expectedScopeFields,
+      abortSignal: signal,
+      body: request,
+      path: "/api/v1/chat/conversations/chat%2Fone/history/selection?scope_type=workspace&workspace_id=7&include_native_completion=true"
+    })
+    await capture("chat/one", request, {
+      requestScope
+    })
+    expect(mocks.bgRequest.mock.lastCall?.[0].path).toBe(
+      "/api/v1/chat/conversations/chat%2Fone/history/selection?scope_type=global"
+    )
+  }
+)
 
 it.each([['composed', TldwApiClient], ['base', TldwApiClientBase]] as const)(
   '%s streaming accepts frozen selected-history payload without mutating its request',
@@ -497,4 +617,42 @@ it("preserves default version URLs and forwards native page parameters and rows"
     servicePromptConfig: expectedScopeFields.servicePromptConfig,
     headers: { "X-TLDW-Expected-User-ID": "42" }
   })
+})
+
+
+it.each([TldwApiClientBase, TldwApiClient])(
+  "native message reads and edits preserve captured workspace, principal and cancellation through %s",
+  async (Client) => {
+    mocks.bgRequest.mockReset()
+    const client = new Client()
+    const signal = new AbortController().signal
+    const options = { requestScope, signal, scope: { type: "workspace" as const, workspaceId: "original" } }
+    mocks.bgRequest.mockResolvedValue({ id: "m1", version: 2 })
+    await (client.getMessage as any)("m1", options)
+    await (client.editMessage as any)("m1", "Exact  \n", 1, "chat", options)
+    expect(mocks.bgRequest.mock.calls.map(([request]) => request)).toEqual([
+      expect.objectContaining({
+        path: "/api/v1/messages/m1?scope_type=workspace&workspace_id=original", method: "GET",
+        abortSignal: signal, headers: expect.objectContaining({ "X-TLDW-Expected-User-ID": "42" }),
+        servicePromptConfig: expectedScopeFields.servicePromptConfig
+      }),
+      expect.objectContaining({
+        path: "/api/v1/messages/m1?expected_version=1&scope_type=workspace&workspace_id=original", method: "PUT",
+        body: { content: "Exact  \n" }, abortSignal: signal,
+        headers: expectedScopeFields.headers, servicePromptConfig: expectedScopeFields.servicePromptConfig
+      })
+    ])
+  }
+)
+
+it.each(["getMessage", "editMessage"])("native %s refuses pre-aborted owner requests before transport", async method => {
+  mocks.bgRequest.mockReset()
+  const client = new TldwApiClient()
+  const controller = new AbortController()
+  controller.abort()
+  const options = { requestScope, signal: controller.signal }
+  const pending = method === "getMessage" ? (client.getMessage as any)("m1", options)
+    : (client.editMessage as any)("m1", "Exact", 1, "chat", options)
+  await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+  expect(mocks.bgRequest).not.toHaveBeenCalled()
 })

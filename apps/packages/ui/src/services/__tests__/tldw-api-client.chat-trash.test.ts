@@ -182,3 +182,20 @@ describe("TldwApiClient chat trash operations", () => {
     expect(result.version).toBe(5)
   })
 })
+
+
+it("keeps restore version-conflict recovery bound to its captured account and signal", async () => {
+  mocks.bgRequest.mockReset()
+  const requestScope={userId:"A",config:{serverUrl:"https://account-a.test",authMode:"multi-user" as const,accessToken:"test-token"}}
+  const signal=new AbortController().signal
+  mocks.bgRequest.mockImplementation(async (request:{path:string;method:string})=> {
+    if(request.method==="POST" && request.path.includes("expected_version=4")) throw Object.assign(new Error("Version conflict"),{status:409})
+    return {id:"abc",version:7,title:"Restored"}
+  })
+  const client=new TldwApiClient()
+  await client.restoreChat("abc",{expectedVersion:4,scope:{type:"global"},requestScope,signal})
+  expect(mocks.bgRequest).toHaveBeenCalledTimes(3)
+  for(const [request] of mocks.bgRequest.mock.calls) {
+    expect(request).toEqual(expect.objectContaining({servicePromptConfig:expect.objectContaining({serverUrl:"https://account-a.test"}),abortSignal:signal}))
+  }
+})

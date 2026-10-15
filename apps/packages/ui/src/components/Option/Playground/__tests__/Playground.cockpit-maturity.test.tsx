@@ -110,7 +110,7 @@ describe("Playground mature cockpit surfaces", () => {
     expect(within(inventory).getByText("Mature cockpit study")).toBeInTheDocument()
     expect(within(inventory).getByText("Run research-run-1")).toBeInTheDocument()
     expect(within(inventory).getByText("brief.pdf")).toBeInTheDocument()
-    expect(screen.getByText("2 active sources")).toBeInTheDocument()
+    expect(screen.getByText("2 selected sources")).toBeInTheDocument()
 
     fireEvent.click(
       within(inventory).getByRole("button", {
@@ -228,82 +228,136 @@ describe("Playground mature cockpit surfaces", () => {
     expect(screen.getByText("Chat transcript")).toBeInTheDocument()
   })
 
-  it("uses a controlled mobile cockpit panel instead of independent details", () => {
+  it("uses controlled mobile disclosures with actual expanded state and local close", () => {
     const onMobilePanelChange = vi.fn()
-
-    render(
-      <PlaygroundCockpitShell
-        mode="cockpit"
-        leftRailVisible
-        rightRailVisible
-        mobilePanel={"context" satisfies PlaygroundCockpitMobilePanel}
-        onMobilePanelChange={onMobilePanelChange}
-        leftRail={<div>Context controls</div>}
-        rightRail={<div>Runtime controls</div>}
-      >
-        <div>Chat transcript</div>
-      </PlaygroundCockpitShell>
-    )
+    const onLeftRailVisibleChange = vi.fn()
+    const onRightRailVisibleChange = vi.fn()
+    function ControlledShell() {
+      const [mobilePanel, setMobilePanel] =
+        React.useState<PlaygroundCockpitMobilePanel>("context")
+      return (
+        <PlaygroundCockpitShell
+          mode="cockpit"
+          leftRailVisible
+          rightRailVisible
+          onLeftRailVisibleChange={onLeftRailVisibleChange}
+          onRightRailVisibleChange={onRightRailVisibleChange}
+          mobilePanel={mobilePanel}
+          onMobilePanelChange={(panel) => {
+            onMobilePanelChange(panel)
+            setMobilePanel(panel)
+          }}
+          leftRail={<div>Context controls</div>}
+          rightRail={<div>Runtime controls</div>}
+        >
+          <div>Chat transcript</div>
+        </PlaygroundCockpitShell>
+      )
+    }
+    render(<ControlledShell />)
 
     const mobilePanels = screen.getByTestId("playground-cockpit-mobile-rails")
-    const contextTab = within(mobilePanels).getByRole("tab", { name: "Context" })
-    const runtimeTab = within(mobilePanels).getByRole("tab", { name: "Runtime" })
+    const panels = within(mobilePanels)
+    const contextButton = panels.getByRole("button", { name: "Context" })
+    const runtimeButton = panels.getByRole("button", { name: "Runtime" })
     const contextPanel = document.getElementById(
-      contextTab.getAttribute("aria-controls") ?? ""
+      contextButton.getAttribute("aria-controls") ?? "",
     )
     const runtimePanel = document.getElementById(
-      runtimeTab.getAttribute("aria-controls") ?? ""
+      runtimeButton.getAttribute("aria-controls") ?? "",
     )
 
-    expect(contextTab).toBeInTheDocument()
-    expect(contextPanel).not.toBeNull()
-    expect(runtimePanel).not.toBeNull()
+    expect(panels.getAllByRole("button")).toHaveLength(2)
+    expect(panels.queryByRole("tablist")).not.toBeInTheDocument()
+    expect(contextPanel).toBe(panels.getByRole("region", { name: "Context" }))
+    expect(contextPanel).toHaveAttribute("aria-labelledby", contextButton.id)
+    expect(runtimePanel).toHaveAttribute("aria-labelledby", runtimeButton.id)
     expect(contextPanel).toHaveTextContent("Context controls")
     expect(contextPanel).toBeVisible()
     expect(runtimePanel).toHaveTextContent("Runtime controls")
     expect(runtimePanel).not.toBeVisible()
-    expect(runtimeTab).toHaveAttribute(
-      "aria-selected",
-      "false"
-    )
+    expect(contextButton).toHaveAttribute("aria-expanded", "true")
+    expect(runtimeButton).toHaveAttribute("aria-expanded", "false")
 
-    fireEvent.click(runtimeTab)
-    expect(onMobilePanelChange).toHaveBeenCalledWith("runtime")
+    fireEvent.click(runtimeButton)
+    expect(onMobilePanelChange).toHaveBeenLastCalledWith("runtime")
+    expect(runtimePanel).toBe(panels.getByRole("region", { name: "Runtime" }))
+    expect(contextPanel).not.toBeVisible()
+    expect(runtimePanel).toBeVisible()
+    expect(contextButton).toHaveAttribute("aria-expanded", "false")
+    expect(runtimeButton).toHaveAttribute("aria-expanded", "true")
+
+    fireEvent.click(runtimeButton)
+    expect(onMobilePanelChange).toHaveBeenLastCalledWith(null)
+    expect(mobilePanels).toHaveAttribute("data-mobile-panel", "none")
+    expect(panels.queryAllByRole("region")).toHaveLength(0)
+    expect(contextButton).toHaveAttribute("aria-expanded", "false")
+    expect(runtimeButton).toHaveAttribute("aria-expanded", "false")
+    expect(onLeftRailVisibleChange).not.toHaveBeenCalled()
+    expect(onRightRailVisibleChange).not.toHaveBeenCalled()
   })
 
-  it("keeps mobile cockpit panel state explicit while preserving the draft surface", () => {
-    render(
+  it("keeps mobile cockpit panel state explicit while preserving the edited draft surface", () => {
+    const shell = (mobilePanel: PlaygroundCockpitMobilePanel) => (
       <PlaygroundCockpitShell
         mode="cockpit"
         leftRailVisible
         rightRailVisible
-        mobilePanel={"context" satisfies PlaygroundCockpitMobilePanel}
+        mobilePanel={mobilePanel}
         leftRail={<div>Context controls</div>}
         rightRail={<div>Runtime controls</div>}
       >
         <label htmlFor="mobile-draft">Message</label>
-        <textarea id="mobile-draft" data-testid="mobile-draft" defaultValue="Draft stays here" />
+        <textarea
+          id="mobile-draft"
+          data-testid="mobile-draft"
+          defaultValue="Draft stays here"
+        />
       </PlaygroundCockpitShell>
     )
-
+    const { rerender } = render(shell("context"))
     const mobilePanels = screen.getByTestId("playground-cockpit-mobile-rails")
+    const panels = within(mobilePanels)
+    const draft = screen.getByRole("textbox", { name: "Message" })
     expect(mobilePanels).toHaveAttribute("data-mobile-panel", "context")
-    expect(screen.getByTestId("mobile-draft")).toHaveValue("Draft stays here")
+    expect(draft).toHaveValue("Draft stays here")
     expect(
-      within(mobilePanels).getByTestId("playground-cockpit-mobile-panel-summary")
-    ).toHaveTextContent("Context panel active. Composer draft remains available below.")
-
-    expect(within(mobilePanels).getByRole("tab", { name: "Context" })).toHaveClass(
-      "min-h-[44px]"
+      panels.getByTestId("playground-cockpit-mobile-panel-summary"),
+    ).toHaveTextContent(
+      "Context panel active. Composer draft remains available below.",
     )
-    expect(within(mobilePanels).getByRole("tab", { name: "Runtime" })).toHaveClass(
-      "min-h-[44px]"
-    )
+    for (const name of ["Context", "Runtime"]) {
+      expect(panels.getByRole("button", { name })).toHaveClass("min-h-[44px]")
+    }
 
+    fireEvent.change(draft, { target: { value: "Edited draft stays here" } })
+    draft.focus()
+    rerender(shell("runtime"))
+    expect(mobilePanels).toHaveAttribute("data-mobile-panel", "runtime")
+    expect(panels.getByRole("region", { name: "Runtime" })).toBeVisible()
+    expect(panels.getByRole("button", { name: "Runtime" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    )
     expect(
-      within(mobilePanels).queryByRole("button", {
-        name: "Return to focus chat",
-      })
+      panels.getByTestId("playground-cockpit-mobile-panel-summary"),
+    ).toHaveTextContent(
+      "Runtime panel active. Composer draft remains available below.",
+    )
+
+    rerender(shell(null))
+    expect(mobilePanels).toHaveAttribute("data-mobile-panel", "none")
+    expect(panels.queryAllByRole("region")).toHaveLength(0)
+    expect(
+      panels.getByTestId("playground-cockpit-mobile-panel-summary"),
+    ).toHaveTextContent(
+      "Cockpit panels hidden. Composer draft remains available below.",
+    )
+    expect(screen.getByRole("textbox", { name: "Message" })).toBe(draft)
+    expect(draft).toHaveValue("Edited draft stays here")
+    expect(draft).toHaveFocus()
+    expect(
+      panels.queryByRole("button", { name: "Return to focus chat" }),
     ).not.toBeInTheDocument()
   })
 })

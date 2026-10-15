@@ -1,3 +1,4 @@
+import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import React from "react"
 import {
   Button,
@@ -13,8 +14,6 @@ import {
   message
 } from "antd"
 import { useTranslation } from "react-i18next"
-import { useQuery } from "@tanstack/react-query"
-import { fetchChatModels } from "@/services/tldw-server"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useUiModeStore } from "@/store/ui-mode"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
@@ -56,11 +55,7 @@ type GeneratedDocument = {
   token_count?: number
 }
 
-type ChatModel = {
-  model: string
-  nickname?: string
-  provider?: string
-}
+
 
 const DOCUMENT_TYPES = [
   "summary",
@@ -161,11 +156,7 @@ export const DocumentGeneratorDrawer: React.FC<DocumentGeneratorDrawerProps> = (
     asyncGeneration
   } = formState
 
-  const { data: composerModels = [] } = useQuery<ChatModel[]>({
-    queryKey: ["document-generator:models"],
-    queryFn: () => fetchChatModels({ returnEmpty: true }),
-    enabled: open
-  })
+  const { data: composerModels = EMPTY_CHAT_MODELS } = useChatModelCatalog(open)
 
   const modelOptions = React.useMemo(() => {
     return composerModels

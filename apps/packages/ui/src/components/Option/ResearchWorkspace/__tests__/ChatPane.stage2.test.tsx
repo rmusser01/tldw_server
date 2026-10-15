@@ -185,7 +185,12 @@ vi.mock("@/store/option", () => ({
 }))
 
 vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => messageOptionState
+  useMessageOption: () => ({
+    ...messageOptionState,
+    selectedModel: messageOptionStoreState.selectedModel,
+    setSelectedModel: hoistedMocks.setSelectedModel,
+    selectedModelIsLoading: false
+  })
 }))
 
 vi.mock("@/components/Common/Playground/Message", () => ({

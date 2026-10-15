@@ -1,6 +1,10 @@
 {
   "chat": {
-    "restoreFailed": "Could not restore your saved chat. Retry to load it."
+    "restoreFailed": "Could not restore your saved chat. Retry to load it.",
+    "verificationFailed": "We couldn’t verify the chat connection",
+    "verificationHelp": "Retry or open server settings.",
+    "verifying": "Checking the chat connection…",
+    "serverSettings": "Server settings"
   },
   "tooltip": {
     "embed": "It may take a few minutes to embed the page. Please wait...",
@@ -38,7 +42,10 @@
     "modeKnowledge": "Knowledge",
     "modeNotes": "Notes",
     "modePrompts": "Prompts",
-    "modeFlashcards": "Flashcards"
+    "modeFlashcards": "Flashcards",
+    "openFullChatExtension": "Open full extension chat",
+    "openFullChatExtensionDescription": "Opens /chat in the extension full page. Use Copy draft & page references in composer tools to carry a bounded copy.",
+    "openFullChatWebuiHandoffDescription": "Opens the configured WebUI with a draft and selected chat options. Device-local history may be unavailable there."
   },
   "flashcards": {
     "opening": "Opening Flashcards",
@@ -77,7 +84,17 @@
     "modeFlashcards": "Flashcards",
     "knowledgeSearch": "Open knowledge search",
     "knowledge": "Knowledge search",
-    "moreTools": "More tools"
+    "moreTools": "More tools",
+    "openCharacterChatInFullExtension": "Open Character Chat in full extension",
+    "openCharacterChatExtensionDescription": "Opens the character route in the extension full page. Use Copy draft & page references to carry a bounded copy; history and chat settings are not included.",
+    "copyDraftContext": "Copy draft & page references",
+    "copyDraftContextExtensionDescription": "Opens the extension full page with a short-lived copy of your draft and page titles and URLs. Page content, character choices, history, and chat settings are not included. Choose a character there if needed. Review the copy in the destination.",
+    "copyDraftContextWebuiDescription": "Opens /chat in this WebUI with a short-lived copy of your draft and page titles and URLs. Page content, character choices, history, and chat settings are not included. Choose a character there if needed. Review the copy in the destination.",
+    "copyDraftNothingToSend": "No draft or page references to copy",
+    "copyDraftFailed": "Could not open the full chat page. Your source draft remains here.",
+    "copyDraftOpened": "Full chat page opened. Review the copy there. Your source draft remains here.",
+    "copyDraftOpenedPartial": "Opened with a partial copy: some draft or page references were shortened or unavailable. Review the copy there. Your source draft remains here.",
+    "copyDraftPageReferencesUnavailable": "Page references could not be read. Try again. Your source draft remains here."
   },
   "toolbar": {
     "knowledgeSearch": "Knowledge Search"
@@ -90,9 +107,9 @@
     "generateImageDesc": "Generate an image via /generate-image:<provider>",
     "generateImageDescDefault": "Generate an image (default: {{backend}}). Use /generate-image:<provider> to override.",
     "tempChatConfirmTitle": "Enable temporary mode?",
-    "tempChatConfirmContent": "This will clear your current conversation. Messages won't be saved.",
+    "tempChatConfirmContent": "This will clear your current conversation. New Temporary messages can remain on this device across reloads until you close or clear the chat. They will not be added to server history.",
     "tempChatDisableConfirmTitle": "Disable temporary mode?",
-    "tempChatDisableConfirmContent": "This will clear your current conversation. Messages will start saving again.",
+    "tempChatDisableConfirmContent": "This will clear your current Temporary conversation. New messages can be stored in chat history.",
     "tempChatDisabledClearedMessages": "Temporary chat disabled. Previous messages cleared.",
     "tempChatClearedMessages": "Temporary chat enabled. Previous messages cleared.",
     "clearQueueConfirmTitle": "Clear message queue?",
@@ -506,11 +523,16 @@
     "serverOnlyWarning": "Select chats saved on the server to apply this action.",
     "deleteConfirmTitle": "Move chats to trash?",
     "deleteConfirmBody": "This will hide the selected chats by tagging them as Trash.",
+    "deleteAndCloseConfirmBody": "Saved chats go to Trash. Selected tabs close on this device. Closing a Temporary tab discards its messages.",
     "deleteConfirmOk": "Move to trash",
     "deleteFailed": "Unable to move chats to trash.",
     "deletePartial": "Some chats could not be moved to trash.",
     "deleteSuccess": "Chats moved to trash.",
-    "localOnlyClosed": "{{count}} local chat(s) were closed."
+    "localOnlyClosed": "{{count}} local chat(s) were closed.",
+    "organizationLoadError": "Unable to load folders and tags for this account.",
+    "organizationRefreshRequired": "Refresh folders and tags for this account.",
+    "tagsApplyPartialError": "Some tags could not be created or applied. Your selection is kept so you can try again.",
+    "folderApplyPartialError": "Some chats could not be added to folders. Your selection is kept so you can try again."
   },
   "contextMenu": {
     "status": "Status"
@@ -825,5 +847,29 @@
     "resetPosition": "Reset position",
     "manage": "Manage Buddy & Persona",
     "detach": "Detach Buddy"
+  },
+  "folderPicker": {
+    "createError": "Unable to create the folder. Try again."
+  },
+  "greetingPicker": {
+    "opening": "{{name}} opening",
+    "character": "AI character",
+    "previewHelp": "Choose who begins. Previewing an opening does not add a message.",
+    "start": "Start with this greeting",
+    "starting": "Saving opening…",
+    "ownMessage": "Start with your message",
+    "firstMessage": "Write the first message",
+    "loading": "Loading character opening…",
+    "retry": "Retry loading opening",
+    "unavailable": "Could not refresh this card. Review the connection before saving an opening.",
+    "unsupported": "This opening cannot be saved with the server’s greeting options. Write your message or review the character card.",
+    "alternates": "Alternate greetings",
+    "choose": "Choose greeting",
+    "reroll": "Reroll",
+    "startingHelp": "Saving the character’s opening. Your message has not been sent.",
+    "startFailed": "Could not save the opening. Your draft is still here. Review the connection and retained drafts before starting again.",
+    "changed": "The character opening changed",
+    "changedHelp": "The saved opening differs from the preview. Review the opening shown in this chat before sending your message.",
+    "reviewCreation": "Review the previous save in Recover drafts before saving another opening."
   }
 }

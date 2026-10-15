@@ -31,13 +31,11 @@ export function ReasoningBlock({
   enableMermaidDiagrams
 }: ReasoningBlockProps) {
   const isReasoningStreaming = isStreaming && Boolean(reasoningRunning)
-  const shouldExpand = Boolean(openReasoning) || isReasoningStreaming
 
   return (
     <Collapse
       className="border-none text-text-muted !mb-3 "
-      defaultActiveKey={shouldExpand ? "reasoning" : undefined}
-      activeKey={isReasoningStreaming ? "reasoning" : undefined}
+      defaultActiveKey={openReasoning ? "reasoning" : undefined}
       items={[
         {
           key: "reasoning",

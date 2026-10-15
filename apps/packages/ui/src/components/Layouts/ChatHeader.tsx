@@ -25,6 +25,8 @@ import {
   type ChatPersistenceKind
 } from "@/utils/chat-persistence-status"
 
+import { getPersistenceModeLabel, getPersistenceModePillLabel } from "@/hooks/playground/usePersistenceMode"
+
 type HeaderNotificationState = NotificationLifecycleState
 
 type ChatHeaderProps = {
@@ -119,8 +121,8 @@ export function ChatHeader({
     ? toText(t("common:chatSidebar.expand", "Expand sidebar"))
     : toText(t("common:chatSidebar.collapse", "Collapse sidebar"))
   const shortcutsToggleLabel = shortcutsExpanded
-    ? toText(t("option:header.hideShortcuts", "Hide shortcuts"))
-    : toText(t("option:header.showShortcuts", "Show shortcuts"))
+    ? toText(t("option:header.hidePages", "Hide pages"))
+    : toText(t("option:header.showPages", "Show pages"))
   const companionHomeLabel = toText(
     t("option:header.companionHome", "Companion Home")
   )
@@ -130,23 +132,21 @@ export function ChatHeader({
       ? persistenceKind
       : "local"
   const persistenceCopy = getChatPersistenceCopy(t, resolvedPersistenceKind)
-  const persistenceBadgeLabel = temporaryChat
-    ? toText(t("playground:header.modeTemporary", "Temporary"))
+  const showHistoryMode = temporaryChat || (resolvedPersistenceKind === "local" && !historyId)
+  const persistenceBadgeLabel = showHistoryMode
+    ? getPersistenceModePillLabel(t, temporaryChat)
     : persistenceCopy.pill
-  const persistenceBadgeHelp = temporaryChat
-    ? toText(
-        t(
-          "playground:header.modeTemporaryHelp",
-          "Temporary chat. Messages are not saved."
-        )
-      )
+  const persistenceBadgeHelp = showHistoryMode
+    ? getPersistenceModeLabel(t, temporaryChat)
     : persistenceCopy.description
   const persistenceBadgeClass =
     resolvedPersistenceKind === "server"
-      ? "border-success/40 bg-success/10 text-success"
+      ? "border-success/40 bg-success/10 text-text"
+      : resolvedPersistenceKind === "serverUnconfirmed"
+        ? "border-warn/50 bg-warn/10 text-text"
       : resolvedPersistenceKind === "temporary" ||
           resolvedPersistenceKind === "serverFailed"
-        ? "border-warn/50 bg-warn/10 text-warn"
+        ? "border-warn/50 bg-warn/10 text-text"
         : "border-border bg-surface2 text-text-muted"
   const canEditTitle =
     showChatTitle && !temporaryChat && historyId && historyId !== "temp"
@@ -157,7 +157,7 @@ export function ChatHeader({
   const commandPaletteLabel = toText(
     t("common:shortcuts.openCommandPalette", "Open command palette")
   )
-  const commandPaletteTitle = toText(t("common:search", "Search"))
+  const commandPaletteTitle = toText(t("common:commandPalette.searchCommands", "Search commands"))
   const commandPaletteAccessibleLabel =
     `${commandPaletteTitle} - ${commandPaletteLabel}`
   const showSavedChatAction = Boolean(onStartSavedChat)
@@ -265,7 +265,7 @@ export function ChatHeader({
     <header
       data-istemporary-chat={temporaryChat}
       data-ischat-route="true"
-      className="z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur data-[istemporary-chat='true']:bg-purple-900 data-[ischat-route='true']:bg-surface/95"
+      className="z-20 flex w-full flex-col border-b border-border bg-surface/95 backdrop-blur"
     >
       <div className="flex w-full flex-wrap items-center justify-between gap-2 px-4 py-2">
         <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
@@ -402,7 +402,7 @@ export function ChatHeader({
           >
             <Search className="size-4" aria-hidden="true" />
             <span>{commandPaletteTitle}</span>
-            <span className="rounded border border-border px-1.5 py-0.5 text-xs text-text-subtle">
+            <span className="rounded border border-border px-1.5 py-0.5 text-xs text-text-muted">
               {commandKeyLabel}K
             </span>
           </button>
@@ -421,13 +421,13 @@ export function ChatHeader({
             </Tooltip>
           ) : null}
           {showTemporaryChatAction ? (
-            <Tooltip title={t("playground:header.newTemporaryChat", "Temporary chat (not saved)")}>
+            <Tooltip title={t("playground:header.newTemporaryChat", "Temporary chat (on this device)")}>
               <button
                 type="button"
                 onClick={onStartTemporaryChat}
-                aria-label={t("playground:header.newTemporaryChat", "Temporary chat (not saved)") as string}
+                aria-label={t("playground:header.newTemporaryChat", "Temporary chat (on this device)") as string}
                 className={`hidden items-center justify-center rounded-md px-2 py-1.5 text-[11px] font-medium text-text-muted hover:bg-surface2 hover:text-text sm:inline-flex ${focusRingClasses}`}
-                title={t("playground:header.newTemporaryChat", "Temporary chat (not saved)")}
+                title={t("playground:header.newTemporaryChat", "Temporary chat (on this device)")}
               >
                 {t("playground:header.temporaryShort", "Temp")}
               </button>

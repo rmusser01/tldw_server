@@ -1,9 +1,13 @@
+import "./native-plasmo-storage-fixture"
 // @vitest-environment jsdom
 import React from "react"
-import { act, renderHook, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { useChatActions } from "../useChatActions"
+import { MemoryRouter } from "react-router-dom"
+import { PlaygroundChat } from "@/components/Option/Playground/PlaygroundChat"
+import { useStoreMessageOption } from "@/store/option"
+import { useOriginalSdkSceneFixture } from "./sdk-original-scene-fixture"
 import {
   IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
   IMAGE_GENERATION_EVENT_MIRROR_PREFIX,
@@ -11,6 +15,61 @@ import {
   PLAYGROUND_IMAGE_EVENT_SYNC_DEFAULT_STORAGE_KEY,
   parseImageGenerationEventMirrorContent
 } from "@/utils/image-generation-chat"
+
+const playgroundState = vi.hoisted(() => ({
+  options: {} as Record<string, unknown>
+}))
+vi.mock("@/hooks/useMessageOption", () => ({
+  useMessageOption: () => ({
+    ...playgroundState.options,
+    messages: useStoreMessageOption.getState().messages,
+    compareMode: false,
+    compareSelectionByCluster: {},
+    compareActiveModelsByCluster: {},
+    compareCanonicalByCluster: {},
+    compareContinuationModeByCluster: {},
+    compareSplitChats: {}
+  })
+}))
+vi.mock("@tanstack/react-query", async (original) => {
+  const actual = await original<typeof import("@tanstack/react-query")>()
+  const queryClient = new actual.QueryClient()
+  return { ...actual, useQuery: () => ({ data: [] }), useQueryClient: () => queryClient }
+})
+vi.mock("@/components/Common/Playground/Message", () => ({
+  PlaygroundMessage: (props: {
+    messageId?: string
+    onSelectImageVariant?: (payload: {
+      messageId?: string
+      variantIndex: number
+    }) => void
+    onDeleteImageVariant?: (payload: {
+      messageId?: string
+      variantIndex: number
+    }) => void
+  }) => (
+    <div>
+      <button
+        onClick={() =>
+          props.onSelectImageVariant?.({
+            messageId: props.messageId,
+            variantIndex: 0
+          })
+        }>
+        Select older variant
+      </button>
+      <button
+        onClick={() =>
+          props.onDeleteImageVariant?.({
+            messageId: props.messageId,
+            variantIndex: 1
+          })
+        }>
+        Delete latest variant
+      </button>
+    </div>
+  )
+}))
 
 const {
   addChatMessageMock,
@@ -38,7 +97,11 @@ const {
   chatSettingsState: {
     value: { imageEventSyncMode: "off" as "off" | "on" }
   },
-  scopeState: { invalidatedSignal: undefined as AbortSignal | undefined },
+  scopeState: {
+    invalidatedSignal: undefined as AbortSignal | undefined,
+    requestScope: { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" as "single-user" | "multi-user" }, userId: null as number | null },
+    originalSignal: new AbortController().signal
+  },
   storageValues: new Map<string, unknown>(),
   storeOptionState: {
     value: { selectedModel: "deepseek-chat" as string | null }
@@ -47,12 +110,13 @@ const {
 
 vi.mock("@/services/service-prompts", () => ({
   loadServicePromptSnapshot: async (_ids: unknown, { signal }: { signal: AbortSignal }) => ({
-    scopeKey: "scope:test-chat", requestScope: { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: null },
-    scopeSignal: signal, scopeInvalidatedSignal: scopeState.invalidatedSignal ?? signal, definitions: {}, capability: "unchecked", release: vi.fn()
+    scopeKey: "scope:test-chat", requestScope: scopeState.requestScope,
+    scopeSignal: signal, scopeInvalidatedSignal: scopeState.invalidatedSignal ?? scopeState.originalSignal, definitions: {}, capability: "unchecked", release: vi.fn()
   })
 }))
 
-vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
+vi.mock("@/hooks/chat-modes/normalChatMode", async original => ({
+  ...await original<typeof import("@/hooks/chat-modes/normalChatMode")>(),
   normalChatMode: normalChatModeMock
 }))
 
@@ -89,6 +153,7 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
 }))
 
 vi.mock("@/hooks/handlers/messageHandlers", () => ({
+  createNativeDeleteMessage: vi.fn(() => vi.fn(async () => false)),
   createRegenerateLastMessage: vi.fn(() => vi.fn()),
   createEditMessage: vi.fn(() => vi.fn()),
   createStopStreamingRequest: vi.fn(() => vi.fn()),
@@ -117,8 +182,8 @@ vi.mock("@/db/dexie/branch", () => ({
   generateBranchFromMessageIds: vi.fn(async () => null)
 }))
 
-vi.mock("@/services/actor-settings", () => ({
-  getActorSettingsForChat: vi.fn(async () => null)
+vi.mock("@/services/actor-settings", async original => ({
+  ...await original<typeof import("@/services/actor-settings")>()
 }))
 
 vi.mock("@/utils/selected-character-storage", () => ({
@@ -135,7 +200,7 @@ vi.mock("@/utils/selected-character-storage", () => ({
 
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
   useChatSettingsRecord: () => ({
-    chatSettings: chatSettingsState.value,
+    settings: chatSettingsState.value,
     updateChatSettings: vi.fn()
   })
 }))
@@ -149,11 +214,24 @@ vi.mock("@plasmohq/storage/hook", () => ({
   }
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: {
-    getState: () => storeOptionState.value
+vi.mock("@/store/option", async (original) => {
+  const actual = await original<typeof import("@/store/option")>()
+  return {
+    ...actual,
+    useStoreMessageOption: Object.assign(
+      (...args: Parameters<typeof actual.useStoreMessageOption>) =>
+        actual.useStoreMessageOption(...args),
+      {
+        getState: () => ({
+          ...actual.useStoreMessageOption.getState(),
+          ...storeOptionState.value
+        }),
+        setState: actual.useStoreMessageOption.setState,
+        subscribe: actual.useStoreMessageOption.subscribe
+      }
+    )
   }
-}))
+})
 
 vi.mock("@/services/tldw/server-capabilities", () => ({
   getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false }))
@@ -210,6 +288,7 @@ const createHookOptions = (
   const setMessages = vi.fn((next: any[] | ((prev: any[]) => any[])) => {
     currentMessages =
       typeof next === "function" ? (next as (prev: any[]) => any[])(currentMessages) : next
+    useStoreMessageOption.setState({ messages: currentMessages })
   })
 
   const options: any = {
@@ -333,6 +412,10 @@ const invokeImageSubmit = async (
   })
 }
 
+const useChatActions = (options: Parameters<typeof useOriginalSdkSceneFixture>[0]) =>
+  useOriginalSdkSceneFixture(options, () => ({ requestScope: scopeState.requestScope,
+    scopeInvalidatedSignal: scopeState.invalidatedSignal ?? scopeState.originalSignal }))
+
 describe("useChatActions image event sync integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -340,6 +423,8 @@ describe("useChatActions image event sync integration", () => {
     storageValues.set(PLAYGROUND_IMAGE_EVENT_SYNC_DEFAULT_STORAGE_KEY, "off")
     chatSettingsState.value = { imageEventSyncMode: "off" }
     scopeState.invalidatedSignal = undefined
+    scopeState.originalSignal = new AbortController().signal
+    scopeState.requestScope = { config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" }, userId: null }
     storeOptionState.value = { selectedModel: "deepseek-chat" }
     savedSuccessPayloads.length = 0
 
@@ -357,6 +442,9 @@ describe("useChatActions image event sync integration", () => {
           historyId: "history-image-sync",
           conversationId: "server-chat-1",
           saveToDb: false,
+          requestScope: params.servicePromptSnapshot?.requestScope,
+          scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+          scopeInvalidatedSignal: params.servicePromptSnapshot?.scopeInvalidatedSignal,
           message: "sunlit city skyline",
           fullText: "",
           assistantMessageId: "assistant-image-1",
@@ -464,7 +552,8 @@ describe("useChatActions image event sync integration", () => {
       expect.objectContaining({
         role: "assistant",
         content: expect.stringContaining(IMAGE_GENERATION_EVENT_MIRROR_PREFIX)
-      })
+      }),
+      { requestScope: scopeState.requestScope, signal: normalChatModeMock.mock.calls[0][6].servicePromptSnapshot.scopeSignal }
     )
     const mirroredContent = addChatMessageMock.mock.calls[0]?.[1]?.content as
       | string
@@ -489,6 +578,397 @@ describe("useChatActions image event sync integration", () => {
     )
   })
 
+  it.each([false, true])(
+    "a held image mirror retains original metadata after same-ID reopen=%s",
+    async (retired) => {
+      let finish!: (value: { id: string }) => void
+      const held = new Promise<{ id: string }>((resolve) => {
+        finish = resolve
+      })
+      addChatMessageMock.mockReturnValueOnce(held)
+      const { options, getCurrentMessages, setMessages } = createHookOptions()
+      const hook = renderHook(() => useChatActions(options))
+      let submission!: Promise<unknown>
+      act(() => {
+        submission = hook.result.current.onSubmit({
+          message: "Original image question",
+          image: "",
+          imageBackendOverride: "comfyui",
+          imageEventSyncPolicy: "on",
+          userMessageType: IMAGE_GENERATION_USER_MESSAGE_TYPE,
+          assistantMessageType: IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
+          imageGenerationRequest:
+            defaultInitialMessages[0].generationInfo.image_generation.request,
+          imageGenerationSource: "generate-modal"
+        })
+      })
+      try {
+        await waitFor(() => expect(addChatMessageMock).toHaveBeenCalledOnce())
+        const params = normalChatModeMock.mock.calls[0][6]
+        expect(params.actorSceneSend.isCurrent()).toBe(true)
+        const replacement = [
+          {
+            ...defaultInitialMessages[0],
+            message: "Replacement display",
+            generationInfo: {
+              image_generation: {
+                request: { prompt: "Replacement prompt" },
+                sync: { status: "replacement" }
+              }
+            }
+          }
+        ]
+        if (retired) {
+          useStoreMessageOption.getState().startNewChatDraft(false)
+          useStoreMessageOption.setState({
+            historyId: options.historyId,
+            serverChatId: options.serverChatId
+          })
+          setMessages(replacement)
+          expect(params.actorSceneSend.isCurrent()).toBe(false)
+        }
+        expect(scopeState.originalSignal.aborted).toBe(false)
+        await act(async () => {
+          finish({ id: "original-mirror-ack" })
+          await submission
+        })
+        if (retired) expect(getCurrentMessages()).toEqual(replacement)
+        else
+          expect(
+            getCurrentMessages()[0].generationInfo.image_generation.sync.status
+          ).toBe("synced")
+        const persisted = savedSuccessPayloads[0] as {
+          assistantImages: string[]
+          generationInfo: {
+            image_generation: {
+              request: unknown
+              sync: { serverMessageId: string }
+            }
+          }
+        }
+        expect(persisted.generationInfo.image_generation.request).toEqual(
+          defaultInitialMessages[0].generationInfo.image_generation.request
+        )
+        expect(
+          persisted.generationInfo.image_generation.sync.serverMessageId
+        ).toBe("original-mirror-ack")
+      } finally {
+        finish({ id: "original-mirror-ack" })
+        await submission
+        hook.unmount()
+      }
+    }
+  )
+
+  it.each([
+    { edit: "select", retired: false },
+    { edit: "delete", retired: false },
+    { edit: "select", retired: true },
+    { edit: "delete", retired: true }
+  ])(
+    "preserves a later owned image $edit while its mirror is held (retired=$retired)",
+    async ({ edit, retired }) => {
+      let finish!: (value: { id: string }) => void
+      const held = new Promise<{ id: string }>((resolve) => {
+        finish = resolve
+      })
+      addChatMessageMock.mockReturnValueOnce(held)
+      const { options, getCurrentMessages, setMessages } = createHookOptions()
+      const hook = renderHook(() => useChatActions(options))
+      let submission!: Promise<unknown>
+      act(() => {
+        submission = hook.result.current.onSubmit({
+          message: "Original image question",
+          image: "",
+          imageBackendOverride: "comfyui",
+          imageEventSyncPolicy: "on",
+          userMessageType: IMAGE_GENERATION_USER_MESSAGE_TYPE,
+          assistantMessageType: IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
+          imageGenerationRequest:
+            defaultInitialMessages[0].generationInfo.image_generation.request
+        })
+      })
+      try {
+        await waitFor(() => expect(addChatMessageMock).toHaveBeenCalledOnce())
+        const params = normalChatModeMock.mock.calls[0][6]
+        const images =
+          edit === "delete"
+            ? []
+            : ["data:image/png;base64,AAAA", "data:image/png;base64,BBBB"]
+        const imageGeneration = {
+          ...getCurrentMessages()[0].generationInfo.image_generation,
+          variant_count: images.length,
+          active_variant_index: images.length - 1
+        }
+        setMessages([
+          {
+            ...getCurrentMessages()[0],
+            images,
+            generationInfo: { image_generation: imageGeneration }
+          }
+        ])
+        expect(params.actorSceneSend.isCurrent()).toBe(true)
+        const replacement = [
+          {
+            ...defaultInitialMessages[0],
+            images: ["replacement"],
+            generationInfo: { replacement: true }
+          }
+        ]
+        if (retired) {
+          useStoreMessageOption.getState().startNewChatDraft(false)
+          useStoreMessageOption.setState({
+            historyId: options.historyId,
+            serverChatId: options.serverChatId
+          })
+          setMessages(replacement)
+        }
+        await act(async () => {
+          finish({ id: "edited-image-ack" })
+          await submission
+        })
+        if (retired) expect(getCurrentMessages()).toEqual(replacement)
+        else
+          expect(
+            getCurrentMessages()[0].generationInfo.image_generation
+              .active_variant_index
+          ).toBe(images.length - 1)
+        expect(updateMessageMediaMock.mock.calls.at(-1)[1].images).toEqual(images)
+        expect(
+          (
+            savedSuccessPayloads[0] as {
+              assistantImages: string[]
+              generationInfo: {
+                image_generation: {
+                  request: unknown
+                  sync: { serverMessageId: string }
+                }
+              }
+            }
+          ).assistantImages
+        ).toEqual(images)
+        expect(
+          (
+            savedSuccessPayloads[0] as {
+              assistantImages: string[]
+              generationInfo: {
+                image_generation: {
+                  request: unknown
+                  sync: { serverMessageId: string }
+                }
+              }
+            }
+          ).generationInfo.image_generation.sync.serverMessageId
+        ).toBe("edited-image-ack")
+      } finally {
+        finish({ id: "edited-image-ack" })
+        await submission
+        hook.unmount()
+      }
+    }
+  )
+
+  it.each(
+    ["select", "delete"].flatMap((edit) =>
+      ["current", "new", "same-id"].map((boundary) => ({ edit, boundary }))
+    )
+  )(
+    "retains an owned image $edit during the final media write across $boundary",
+    async ({ edit, boundary }) => {
+      let release!: () => void
+      const held = new Promise<null>((resolve) => {
+        release = () => resolve(null)
+      })
+      updateMessageMediaMock.mockResolvedValueOnce(null).mockReturnValueOnce(held)
+      addChatMessageMock.mockResolvedValueOnce({ id: "final-media-ack" })
+      const { options, setMessages } = createHookOptions()
+      const hook = renderHook(() => useChatActions(options))
+      let pending!: Promise<unknown>
+      act(() => {
+        pending = hook.result.current.onSubmit({
+          message: "Original image question",
+          image: "",
+          imageBackendOverride: "comfyui",
+          imageEventSyncPolicy: "on",
+          userMessageType: IMAGE_GENERATION_USER_MESSAGE_TYPE,
+          assistantMessageType: IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
+          imageGenerationRequest:
+            defaultInitialMessages[0].generationInfo.image_generation.request
+        })
+      })
+      try {
+        await waitFor(() =>
+          expect(updateMessageMediaMock).toHaveBeenCalledTimes(2)
+        )
+        const row = useStoreMessageOption.getState().messages[0]
+        const images = edit === "delete" ? [] : ["data:image/png;base64,LATEST"]
+        setMessages([
+          {
+            ...row,
+            images,
+            generationInfo: {
+              image_generation: {
+                ...row.generationInfo.image_generation,
+                active_variant_index: images.length - 1,
+                variant_count: images.length
+              }
+            }
+          }
+        ])
+        const replacement = [
+          {
+            ...row,
+            images: ["replacement-image"],
+            generationInfo: { replacement: true }
+          }
+        ]
+        if (boundary !== "current") {
+          useStoreMessageOption.getState().startNewChatDraft(false)
+          if (boundary === "same-id")
+            useStoreMessageOption.setState({
+              historyId: options.historyId,
+              serverChatId: options.serverChatId
+            })
+          setMessages(replacement)
+        }
+        await act(async () => {
+          release()
+          await pending
+        })
+        if (boundary !== "current")
+          expect(useStoreMessageOption.getState().messages).toEqual(replacement)
+        const persisted = savedSuccessPayloads[0] as Record<string, unknown>
+        expect(persisted.assistantImages).toEqual(images)
+        expect(persisted.generationInfo).toMatchObject({
+          image_generation: {
+            active_variant_index: images.length - 1,
+            sync: { serverMessageId: "final-media-ack" }
+          }
+        })
+      } finally {
+        release()
+        await pending
+        hook.unmount()
+      }
+    }
+  )
+
+  it.each(
+    ["select", "delete"].flatMap((edit) =>
+      ["sdk", "media"].flatMap((stage) =>
+        [false, true].map((retired) => ({ edit, stage, retired }))
+      )
+    )
+  )(
+    "actual image $edit preserves its original event during $stage wait (retired=$retired)",
+    async ({ edit, stage, retired }) => {
+      let releaseSdk!: (value: { id: string }) => void
+      let releaseMedia!: () => void
+      const sdk = new Promise<{ id: string }>((resolve) => {
+        releaseSdk = resolve
+      })
+      const media = new Promise<null>((resolve) => {
+        releaseMedia = () => resolve(null)
+      })
+      if (stage === "sdk") addChatMessageMock.mockReturnValueOnce(sdk)
+      else {
+        addChatMessageMock.mockResolvedValueOnce({ id: "group-ack" })
+        updateMessageMediaMock
+          .mockResolvedValueOnce(null)
+          .mockReturnValueOnce(media)
+      }
+      const original = {
+        ...defaultInitialMessages[0],
+        activeVariantIndex: 1,
+        variants: [
+          {
+            id: "older-variant",
+            message: "",
+            images: ["data:image/png;base64,OLDER"],
+            generationInfo: defaultInitialMessages[0].generationInfo
+          },
+          {
+            id: "assistant-image-1",
+            message: "",
+            images: ["data:image/png;base64,AAAA"],
+            generationInfo: defaultInitialMessages[0].generationInfo
+          }
+        ]
+      }
+      const { options } = createHookOptions([original])
+      playgroundState.options = options
+      const hook = renderHook(() => useChatActions(options))
+      const display = render(
+        <MemoryRouter>
+          <PlaygroundChat />
+        </MemoryRouter>
+      )
+      let pending!: Promise<unknown>
+      act(() => {
+        pending = hook.result.current.onSubmit({
+          message: "Original image question",
+          image: "",
+          imageBackendOverride: "comfyui",
+          imageEventSyncPolicy: "on",
+          userMessageType: IMAGE_GENERATION_USER_MESSAGE_TYPE,
+          assistantMessageType: IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE,
+          imageGenerationRequest:
+            defaultInitialMessages[0].generationInfo.image_generation.request
+        })
+      })
+      try {
+        await waitFor(() =>
+          expect(
+            stage === "sdk"
+              ? addChatMessageMock.mock.calls.length
+              : updateMessageMediaMock.mock.calls.length
+          ).toBe(stage === "sdk" ? 1 : 2)
+        )
+        fireEvent.click(
+          screen.getByRole("button", {
+            name:
+              edit === "select" ? "Select older variant" : "Delete latest variant"
+          })
+        )
+        const selected = useStoreMessageOption.getState().messages[0]
+        expect(selected.id).toBe("older-variant")
+        expect(selected.generationInfo.image_generation.event_id).toBe(
+          "assistant-image-1"
+        )
+        if (retired) {
+          useStoreMessageOption.getState().startNewChatDraft(false)
+          options.setMessages([{ ...original, images: ["replacement"] }])
+        }
+        await act(async () => {
+          releaseSdk({ id: "group-ack" })
+          releaseMedia()
+          await pending
+        })
+        const persisted = savedSuccessPayloads[0] as {
+          assistantMessageId: string
+          assistantImages: string[]
+        }
+        expect(persisted.assistantMessageId).toBe("assistant-image-1")
+        expect(persisted.assistantImages).toEqual(["data:image/png;base64,OLDER"])
+        if (retired)
+          expect(useStoreMessageOption.getState().messages[0].images).toEqual([
+            "replacement"
+          ])
+        else
+          expect(
+            useStoreMessageOption.getState().messages[0].generationInfo
+              .image_generation.sync.status
+          ).toBe("synced")
+      } finally {
+        releaseSdk({ id: "group-ack" })
+        releaseMedia()
+        await pending
+        display.unmount()
+        hook.unmount()
+      }
+    }
+  )
+
   it("includes scoped image sync metadata in the deferred local save", async () => {
     addChatMessageMock.mockResolvedValueOnce({ id: "server-message-42" })
     const scopeController = new AbortController()
@@ -499,6 +979,8 @@ describe("useChatActions image event sync integration", () => {
       }),
       userId: 7
     })
+    scopeState.requestScope = requestScope
+    scopeState.invalidatedSignal = scopeController.signal
     normalChatModeMock.mockImplementationOnce(
       async (
         _message: string,
@@ -513,6 +995,9 @@ describe("useChatActions image event sync integration", () => {
           historyId: "history-image-sync",
           conversationId: "server-chat-1",
           saveToDb: false,
+          requestScope: params.servicePromptSnapshot?.requestScope,
+          scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+          scopeInvalidatedSignal: params.servicePromptSnapshot?.scopeInvalidatedSignal,
           message: "sunlit city skyline",
           fullText: "",
           assistantMessageId: "assistant-image-1",
@@ -521,9 +1006,6 @@ describe("useChatActions image event sync integration", () => {
           assistantImages: ["data:image/png;base64,AAAA"],
           generationInfo: defaultInitialMessages[0].generationInfo,
           imageEventSyncPolicy: params.imageEventSyncPolicy,
-          scopeSignal: scopeController.signal,
-          scopeInvalidatedSignal: scopeController.signal,
-          requestScope
         })
       }
     )
@@ -533,7 +1015,7 @@ describe("useChatActions image event sync integration", () => {
     await invokeImageSubmit(result.current.onSubmit, "on")
 
     expect(savedSuccessPayloads).toHaveLength(1)
-    const persisted = savedSuccessPayloads[0] as any
+    const persisted = savedSuccessPayloads[0] as { assistantImages: string[]; generationInfo: { image_generation: { request: unknown; sync: { serverMessageId: string } } } }
     expect(persisted.generationInfo.image_generation.sync).toEqual(
       expect.objectContaining({
         status: "synced",

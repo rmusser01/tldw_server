@@ -1,3 +1,13 @@
+import { useModelSettingsOverlayState } from "@/hooks/useModelSettingsOverlayState"
+import { shallow } from "zustand/shallow";
+import { SelectedModelSaveFeedback } from "@/components/Common/SelectedModelSaveFeedback";
+import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
+import { captureChatDraftSource, hasTemporaryChatContent } from "@/hooks/chat/chat-draft-transition";
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
+import { ChatGreetingPicker } from "@/components/Common/ChatGreetingPicker";
+import { useCharacterGreetingStart } from "@/hooks/useCharacterGreetingStart";
+import { ChatDraftRecovery, type RestoreChatDraft } from "@/components/Chat/composer/ChatDraftRecovery";
 import { watchChatAccountChanges } from "@/services/chat-account-boundary";
 import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection";
 import {
@@ -23,6 +33,38 @@ import type {
   UploadedFile,
 } from "@/db/dexie/types";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
+import { validateNativeCharacterConfiguration, nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-preflight";
+import { useMcpToolsStore } from "@/store/mcp-tools";
+import {
+  getActorSceneForChat,
+  type ActorSceneRead
+} from "@/services/actor-settings"
+import { captureCurrentActorSceneTarget } from "@/hooks/chat/actor-scene-source"
+import {
+  captureActorSettingsTarget,
+  type ActorSettingsTarget
+} from "@/utils/actor-settings-target"
+import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
+import { freshChatDraftAddress } from "@/utils/chat-draft-address"
+import { loadServicePromptSnapshot } from "@/services/service-prompts";
+import { requestSettingsNavigation } from "@/utils/settings-return";
+import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent";
+import { buildChatModelUsability } from "@/utils/chat-model-availability";
+import {
+  captureModelSettingsOperation,
+  type ModelSettingsOperation
+} from "@/hooks/chat/model-settings-operation"
+import { resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils"
+import { resolveExplicitProviderForSelectedModel } from "@/utils/resolve-api-provider"
+import { PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY, resolveOutputFormattingGuideSuffix } from "@/utils/output-formatting-guide";
+import { resolveMessageSteering } from "@/utils/message-steering";
+import type { AssistantSetupApplyOptions } from "./hooks/usePromptTemplates";
+import { captureSelectedModelGuard, createSelectedModelGuard } from "@/hooks/chat/useSelectedModel";
+import type {
+  RolePlayApplyContext,
+  RolePlayApplyGuard
+} from "./RolePlaySetupDrawer"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
 import {
   type CollapsedRange,
@@ -52,7 +94,8 @@ import type { DictationModePreference } from "@/hooks/useDictationStrategy";
 import { useMcpTools } from "@/hooks/useMcpTools";
 import { useMobile } from "@/hooks/useMediaQuery";
 // isMac moved to PlaygroundSendControl
-import { useSelectedAssistant } from "@/hooks/useSelectedAssistant";
+import { hasAcknowledgedServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror";
+import { getSelectedAssistantOperationRevision, useSelectedAssistant } from "@/hooks/useSelectedAssistant";
 import { useServerCapabilities } from "@/hooks/useServerCapabilities";
 import { useTldwAudioStatus } from "@/hooks/useTldwAudioStatus";
 import { useVoiceChatMessages } from "@/hooks/useVoiceChatMessages";
@@ -72,7 +115,7 @@ import {
   isChatSubmitSuccess,
   normalizeChatSubmitResult,
 } from "@/hooks/chat/chat-action-utils";
-import { fetchChatModels, fetchImageModels } from "@/services/tldw-server";
+import { fetchImageModels } from "@/services/tldw-server";
 import {
   type ResearchRunCreateRequest,
   type ResearchRunFollowUpBackground,
@@ -117,6 +160,7 @@ import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
 import {
   assistantSelectionToCharacter,
   characterToAssistantSelection,
+  isProtectedTrackedPersonaUnavailable,
   getAssistantSelectionMode,
   type AssistantSelection,
 } from "@/types/assistant-selection";
@@ -124,6 +168,7 @@ import { ConnectionPhase, deriveConnectionUxState } from "@/types/connection";
 import { PASTED_TEXT_CHAR_LIMIT } from "@/utils/constant";
 import {
   normalizeFocusSelector,
+  focusFirstVisibleElement,
   scheduleFocusFirstVisibleElement,
 } from "@/utils/focus-return";
 // resolveApiProviderForModel moved to usePlaygroundRawPreview and usePlaygroundImageGen
@@ -150,7 +195,7 @@ import { resolveStartupSelectedModel } from "@/utils/model-startup-selection";
 import { trackOnboardingChatSubmitSuccess } from "@/utils/onboarding-ingestion-telemetry";
 import type { ChatModelUsability } from "@/utils/chat-model-availability";
 import { getProviderDisplayName } from "@/utils/provider-registry";
-import { getVariable } from "@/utils/select-variable";
+import { QuickPromptInsertionReview } from "@/components/Chat/composer/QuickPromptInsertionReview";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Button,
@@ -180,7 +225,6 @@ import { useStorage } from "@plasmohq/storage/hook";
 
 import { useFocusShortcuts } from "~/hooks/keyboard";
 import { isFreshChatSelectionPending } from "~/hooks/chat/fresh-chat-selection";
-import { useHistorySelectionContext } from "~/hooks/chat/useHistorySelection";
 import { useMessageOption } from "~/hooks/useMessageOption";
 import { useTabMentions } from "~/hooks/useTabMentions";
 import { useWebUI } from "~/store/webui";
@@ -234,7 +278,7 @@ import { deriveRolePlayState, type RolePlayIdentity } from "./role-play-state";
 import { summarizeRolePlayScene } from "./role-play-scene";
 import { getPromptTemplateById } from "./SystemPromptTemplates";
 // buildImagePromptRefineMessages, extractImagePromptRefineCandidate moved to usePlaygroundImageGen
-// QueuedRequest moved to usePlaygroundQueueManagement
+import { blockQueuedRequest } from "@/utils/chat-request-queue";
 // WeightedImagePromptContextEntry moved to usePlaygroundImageGen
 // CompareResponseDiff moved to usePlaygroundImageGen
 import {
@@ -271,8 +315,11 @@ import {
 } from "./startup-template-bundles";
 import { useMobileComposerViewport } from "./useMobileComposerViewport";
 
+export type ApplyCharacterRoute = (characterId: string, isCurrent: () => boolean) => Promise<"applied" | "missing" | "load-error" | "failed" | "retired">;
+
 type Props = {
   droppedFiles: File[];
+  onCharacterRouteApplyReady?: (apply: ApplyCharacterRoute | null) => void;
   attachedResearchContext?: AttachedResearchContext | null;
   attachedResearchContextBaseline?: AttachedResearchContext | null;
   attachedResearchContextPinned?: AttachedResearchContext | null;
@@ -474,6 +521,7 @@ const useIsomorphicLayoutEffect =
 
 export const PlaygroundForm = ({
   droppedFiles,
+  onCharacterRouteApplyReady,
   attachedResearchContext = null,
   attachedResearchContextBaseline = null,
   attachedResearchContextPinned = null,
@@ -543,15 +591,18 @@ export const PlaygroundForm = ({
     [attachedResearchContext],
   );
   const {
-    onSubmit,
+    onSubmit: submitMessageAction,
     regenerateLastMessage,
     messages,
     setMessages,
     selectedModel,
     selectedModelIsLoading,
+    selectedModelSaveFailed,
+    retrySelectedModelSave,
     selectedAssistant: resolvedAssistantSelection,
     effectiveAssistantState,
     setSelectedModel,
+    beginSelectedModelSave,
     chatMode,
     setChatMode,
     compareMode,
@@ -618,6 +669,22 @@ export const PlaygroundForm = ({
       inflightToolCallIds: [],
     },
   } = useMessageOption();
+  const greetingSubmitGateRef = React.useRef<() => boolean>(() => false);
+  const personaSubmitDisabledReasonRef = React.useRef<string | null>(null);
+  const characterSubmitBlockerRef = React.useRef(characterChatSendBlocker);
+  characterSubmitBlockerRef.current = characterChatSendBlocker;
+  React.useLayoutEffect(() => {
+    if (!characterChatSendBlocker?.active || !queuedMessages.some(item => item.status === "queued")) return;
+    setQueuedMessages(previous => previous.map(item => item.status === "queued"
+      ? blockQueuedRequest(item, "chat_setup_changed") : item));
+  }, [characterChatSendBlocker?.active, queuedMessages, setQueuedMessages]);
+  const getSubmitDisabledReason = React.useCallback(() => personaSubmitDisabledReasonRef.current ?? (characterSubmitBlockerRef.current?.active
+    ? characterSubmitBlockerRef.current.title
+    : greetingSubmitGateRef.current() ? t("sidepanel:greetingPicker.startingHelp", "Saving the character’s opening. Your message has not been sent.") : null), [t]);
+  const onSubmit = React.useCallback((input: Parameters<typeof submitMessageAction>[0]) => {
+    const reason = getSubmitDisabledReason();
+    return reason ? Promise.resolve({ status: "skipped" as const, reason }) : submitMessageAction(input);
+  }, [getSubmitDisabledReason, submitMessageAction]);
   const setUploadedFiles = useStoreMessageOption((s) => s.setUploadedFiles);
   const setRagMediaIds = useStoreMessageOption((s) => s.setRagMediaIds);
   const setRagPinnedResults = useStoreMessageOption(
@@ -665,17 +732,28 @@ export const PlaygroundForm = ({
 
   const [autoSubmitVoiceMessage] = useStorage("autoSubmitVoiceMessage", false);
   const isMobileViewport = useMobile();
-  const suppressComposerToolbarForMobileCockpit =
-    mobileCockpitModeActive && isMobileViewport;
   const mobileComposerViewport = useMobileComposerViewport(isMobileViewport);
   const [viewportHeightPx, setViewportHeightPx] = React.useState(() =>
     typeof window === "undefined" ? 0 : window.innerHeight,
   );
-  const [openModelSettings, setOpenModelSettings] = React.useState(false);
+  const modelSettingsDialog = useModelSettingsOverlayState();
+  const { open: openModelSettings, setOpen: setModelSettingsOpen, afterClose: finishModelSettingsClose, isCurrent: modelSettingsCloseIsCurrent } = modelSettingsDialog;
   const [modelSettingsScopeOverride, setModelSettingsScopeOverride] =
     React.useState<string | null>(null);
-  const modelSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
+  const modelSettingsReturnFocusRef = React.useRef<{ selector: string; isCurrent: () => boolean } | null>(null);
+  const captureModelSettingsFocusSourceRef = React.useRef<(() => (() => boolean)) | null>(null);
+  const setOpenModelSettings = React.useCallback<React.Dispatch<React.SetStateAction<boolean>>>((requested) => {
+    setModelSettingsOpen(current => {
+      const nextOpen = typeof requested === "function" ? requested(current) : requested;
+      if (nextOpen) {
+        setModelSettingsScopeOverride(null);
+        modelSettingsReturnFocusRef.current = null;
+      }
+      return nextOpen;
+    });
+  }, [setModelSettingsOpen]);
   const modelSelectorReturnFocusSelectorRef = React.useRef<string | null>(null);
+  const modelSelectorFocusFrameRef = React.useRef<number | null>(null);
   const mcpSettingsReturnFocusSelectorRef = React.useRef<string | null>(null);
   const [openActorSettings, setOpenActorSettings] = React.useState(false);
   const [rolePlaySetupOpen, setRolePlaySetupOpen] = React.useState(false);
@@ -693,16 +771,14 @@ export const PlaygroundForm = ({
         document.querySelector<HTMLElement>(
           '[data-testid="composer-role-play-setup"]',
         ) ??
+        document.querySelector<HTMLElement>('[data-testid="composer-casual-advanced-chip"]') ??
         textareaRef.current;
     }
     setRolePlaySetupOpen(true);
   }, [textareaRef]);
   const [noticesExpanded, setNoticesExpanded] = React.useState(false);
   const actorSettings = useActorStore((state) => state.settings);
-  const setActorSettings = useActorStore((state) => state.setSettings);
-  const setActorPreviewAndTokens = useActorStore(
-    (state) => state.setPreviewAndTokens,
-  );
+  const applyActorScene = useActorStore((state) => state.applyScene);
   const systemPrompt = useStoreChatModelSettings((state) => state.systemPrompt);
   const setSystemPrompt = useStoreChatModelSettings(
     (state) => state.setSystemPrompt,
@@ -729,7 +805,7 @@ export const PlaygroundForm = ({
     llamaGrammarOverride: state.llamaGrammarOverride,
     jsonMode: state.jsonMode,
     systemPromptTemplateId: state.systemPromptTemplateId,
-  }));
+  }), shallow);
   const numCtx = useStoreChatModelSettings((state) => state.numCtx);
   const updateChatModelSetting = useStoreChatModelSettings(
     (state) => state.updateSetting,
@@ -818,9 +894,6 @@ export const PlaygroundForm = ({
   );
   const audioHealthEnabled = useChatSurfaceCoordinatorStore((state) =>
     shouldEnableOptionalResource(state, "audio-health"),
-  );
-  const modelCatalogEnabled = useChatSurfaceCoordinatorStore((state) =>
-    shouldEnableOptionalResource(state, "model-catalog"),
   );
   const isConnectionReady = isConnected && phase === ConnectionPhase.CONNECTED;
   const { capabilities, loading: capsLoading } = useServerCapabilities();
@@ -1018,6 +1091,8 @@ export const PlaygroundForm = ({
     React.useState(false);
   const [modeLauncherOpen, setModeLauncherOpen] = React.useState(false);
   const [openUIRequestMode, setOpenUIRequestMode] = React.useState(false);
+  const openUIRequestRevisionRef = React.useRef(0);
+  const openUIRequestRevision = openUIRequestRevisionRef.current;
   const [modeAnnouncement, setModeAnnouncement] = React.useState<string | null>(
     null,
   );
@@ -1116,6 +1191,8 @@ export const PlaygroundForm = ({
   // showServerPersistenceHint and serverSaveInFlightRef moved to usePlaygroundPersistence
   const uiMode = useUiModeStore((state) => state.mode);
   const isProMode = uiMode === "pro";
+  const suppressComposerToolbarForMobileCockpit =
+    mobileCockpitModeActive && isMobileViewport && isProMode;
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1271,23 +1348,19 @@ export const PlaygroundForm = ({
   ]);
 
   const restoreModelSettingsFocus = React.useCallback(() => {
-    const returnFocusSelector = modelSettingsReturnFocusSelectorRef.current;
-    if (!returnFocusSelector) return;
-    modelSettingsReturnFocusSelectorRef.current = null;
+    const target = modelSettingsReturnFocusRef.current;
+    if (!target) return;
+    modelSettingsReturnFocusRef.current = null;
+    const closeIsCurrent = modelSettingsCloseIsCurrent;
+    scheduleFocusFirstVisibleElement(target.selector, undefined, () =>
+      closeIsCurrent() && target.isCurrent());
+  }, [modelSettingsCloseIsCurrent]);
 
-    scheduleFocusFirstVisibleElement(returnFocusSelector);
-  }, []);
-
-  const setOpenModelSettingsWithFocusRestore = React.useCallback(
-    (nextOpen: boolean) => {
-      setOpenModelSettings(nextOpen);
-      if (!nextOpen) {
-        setModelSettingsScopeOverride(null);
-        restoreModelSettingsFocus();
-      }
-    },
-    [restoreModelSettingsFocus],
-  );
+  const completeModelSettingsClose = React.useCallback(() => {
+    if (!finishModelSettingsClose()) return;
+    setModelSettingsScopeOverride(null);
+    restoreModelSettingsFocus();
+  }, [finishModelSettingsClose, restoreModelSettingsFocus]);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1302,21 +1375,21 @@ export const PlaygroundForm = ({
     if (typeof window === "undefined") return;
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<ModelSettingsOpenDetail>).detail;
-      modelSettingsReturnFocusSelectorRef.current = normalizeFocusSelector(
-        detail?.returnFocusSelector,
-      );
+      const selector = normalizeFocusSelector(detail?.returnFocusSelector);
+      const isCurrent = captureModelSettingsFocusSourceRef.current?.();
+      modelSettingsReturnFocusRef.current = selector && isCurrent ? { selector, isCurrent } : null;
       setModelSettingsScopeOverride(
         typeof detail?.settingsScope === "string" && detail.settingsScope.trim()
           ? detail.settingsScope.trim()
           : null,
       );
-      setOpenModelSettings(true);
+      setModelSettingsOpen(true);
     };
     window.addEventListener(OPEN_MODEL_SETTINGS_EVENT, handler);
     return () => {
       window.removeEventListener(OPEN_MODEL_SETTINGS_EVENT, handler);
     };
-  }, []);
+  }, [setModelSettingsOpen]);
 
   React.useEffect(() => {
     if (!modeAnnouncement) return;
@@ -1362,15 +1435,11 @@ export const PlaygroundForm = ({
     handleMentionsOpen,
   } = useTabMentions(textareaRef);
 
-  const { data: composerModels, isFetching: composerModelsFetching } = useQuery({
-    queryKey: ["playground:chatModels"],
-    queryFn: () => fetchChatModels({ returnEmpty: true }),
-    enabled: modelCatalogEnabled,
-  });
+  const { data: composerModels, isFetching: composerModelsFetching, isError: composerModelsFailed, refetch: retryComposerModels } = useChatModelCatalog(isConnectionReady);
   // True while the catalog is actively being fetched and none have arrived yet.
   // Used to show a loading affordance instead of a "connect your server" error.
   const composerModelsLoading =
-    modelCatalogEnabled &&
+    isConnectionReady &&
     composerModelsFetching &&
     ((composerModels as any[] | undefined)?.length ?? 0) === 0;
   const { data: imageModels = [] } = useQuery({
@@ -1389,7 +1458,7 @@ export const PlaygroundForm = ({
     modelListScope = "configured",
     setModelListScope = () => undefined,
     selectedModelMeta,
-    selectedModelKey,
+    selectedModelSettingsScope,
     modelContextLength,
     modelCapabilities,
     resolvedMaxContext,
@@ -1411,26 +1480,41 @@ export const PlaygroundForm = ({
     setSelectedModel,
     navigate,
     modelsLoading: composerModelsLoading,
+    modelsError: composerModelsFailed,
+    onRetryModels: () => { void retryComposerModels() },
   });
-  const restoreModelSelectorFocus = React.useCallback(() => {
+  const cancelModelSelectorFocus = React.useCallback(() => {
+    if (modelSelectorFocusFrameRef.current == null) return;
+    window.cancelAnimationFrame(modelSelectorFocusFrameRef.current);
+    modelSelectorFocusFrameRef.current = null;
+  }, []);
+  React.useEffect(() => cancelModelSelectorFocus, [cancelModelSelectorFocus]);
+  const restoreModelSelectorFocus = React.useCallback((restoreFocus = true) => {
     const returnFocusSelector = modelSelectorReturnFocusSelectorRef.current;
     if (!returnFocusSelector) return;
     modelSelectorReturnFocusSelectorRef.current = null;
-
-    scheduleFocusFirstVisibleElement(returnFocusSelector);
-  }, []);
+    cancelModelSelectorFocus();
+    if (!restoreFocus) return;
+    const closingFocus = document.activeElement;
+    if (closingFocus !== document.body &&
+      !(closingFocus instanceof HTMLElement && closingFocus.matches("[data-testid='model-selector']"))) return;
+    modelSelectorFocusFrameRef.current = window.requestAnimationFrame(() => {
+      modelSelectorFocusFrameRef.current = null;
+      if (document.activeElement !== closingFocus && document.activeElement !== document.body) return;
+      focusFirstVisibleElement(returnFocusSelector);
+    });
+  }, [cancelModelSelectorFocus]);
   const setModelDropdownOpenWithFocusRestore = React.useCallback(
-    (nextOpen: boolean) => {
+    (nextOpen: boolean, restoreFocus = true) => {
+      if (nextOpen) cancelModelSelectorFocus();
       setModelDropdownOpen(nextOpen);
-      if (!nextOpen) {
-        restoreModelSelectorFocus();
-      }
+      if (!nextOpen) restoreModelSelectorFocus(restoreFocus);
     },
-    [restoreModelSelectorFocus, setModelDropdownOpen],
+    [cancelModelSelectorFocus, restoreModelSelectorFocus, setModelDropdownOpen],
   );
   React.useEffect(() => {
-    setActiveChatModelSettingsScope(selectedModelKey ?? null);
-  }, [selectedModelKey, setActiveChatModelSettingsScope]);
+    setActiveChatModelSettingsScope(selectedModelSettingsScope ?? null);
+  }, [selectedModelSettingsScope, setActiveChatModelSettingsScope]);
 
   const closeComposerPopoversExcept = React.useCallback(
     (activePopover: ComposerPopoverKey) => {
@@ -1527,7 +1611,7 @@ export const PlaygroundForm = ({
   }, [markOptionalPanelEngaged, setOptionalPanelVisible, voiceChatEnabled]);
 
   // Auto-select model on initial load when no model is selected
-  // Priority: 1) First favorite model, 2) First available model
+  // Priority: available favorite, verified server default, then available fallback.
   React.useEffect(() => {
     const nextModel = resolveStartupSelectedModel({
       currentModel: selectedModel,
@@ -1551,9 +1635,8 @@ export const PlaygroundForm = ({
   const hasPromptContext = React.useMemo(
     () =>
       Boolean(selectedSystemPrompt) ||
-      Boolean(selectedQuickPrompt) ||
       String(systemPrompt || "").trim().length > 0,
-    [selectedQuickPrompt, selectedSystemPrompt, systemPrompt],
+    [selectedSystemPrompt, systemPrompt],
   );
 
   const modelComparison = useModelComparison({
@@ -1611,60 +1694,617 @@ export const PlaygroundForm = ({
   }, [composerModels, t]);
 
   const assistantActionMountedRef = React.useRef(true);
+  const composerImageRef = React.useRef("");
+  const assistantComposerRef = React.useRef<{
+    getRevision: () => number
+    getSetupInputRevision: () => number
+    retainCurrentDraft: () => Promise<boolean>
+    draftReady: boolean
+  } | null>(null)
+  const assistantConnectionRevisionRef = React.useRef(0);
+  React.useLayoutEffect(() => { assistantConnectionRevisionRef.current++; }, [phase, isConnected, canonicalConnectionConfig, canonicalConnectionLoading]);
+  const [appendFormattingGuidePrompt] = useStorage(PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY, false);
+  const assistantPreparationViewRef = React.useRef({ researchContext, openUIRequestMode, appendFormattingGuidePrompt, isConnectionReady, composerModels, composerModelsLoading });
+  React.useLayoutEffect(() => {
+    assistantPreparationViewRef.current = { researchContext, openUIRequestMode, appendFormattingGuidePrompt, isConnectionReady, composerModels, composerModelsLoading };
+  }, [researchContext, openUIRequestMode, appendFormattingGuidePrompt, isConnectionReady, composerModels, composerModelsLoading]);
+  const historySelection = useHistorySelectionContext();
+  const personaHistoryUnavailable = isProtectedTrackedPersonaUnavailable(Boolean(historySelection),
+    effectiveAssistantState?.mode === "tracked_persona" ? "persona" : null, "tracked");
+  const personaSubmitDisabledReason = personaHistoryUnavailable
+    ? t("option:assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.") : null;
+  personaSubmitDisabledReasonRef.current = personaSubmitDisabledReason;
+  const captureSelectionFence = historySelection?.fence;
+  const resetSelectedHistory = historySelection?.reset;
+  const assistantOwnerIsCurrent = assistantMeta?.isCurrent;
+  captureModelSettingsFocusSourceRef.current = () => {
+    const historyIsCurrent = captureSelectionFence?.() ?? (() => true);
+    const owner = historySelection?.getCurrent().owner;
+    const modelRevision = useStoreMessageOption.getState().selectedModelRevision;
+    return captureChatDraftSource(() => assistantActionMountedRef.current &&
+      historyIsCurrent() && (assistantOwnerIsCurrent?.() ?? true) &&
+      (owner?.kind !== "native" || owner.validate_lease()) &&
+      useStoreMessageOption.getState().selectedModelRevision === modelRevision).isCurrent;
+  }
   const assistantActionRevisionRef = React.useRef(0);
+  React.useLayoutEffect(() => {
+    if (characterChatSendBlocker?.active) assistantActionRevisionRef.current++;
+  }, [characterChatSendBlocker?.active]);
   React.useEffect(() => {
     assistantActionMountedRef.current = true;
     return () => { assistantActionMountedRef.current = false; };
   }, []);
-  const captureAssistantActionGuard = React.useCallback(() => {
-    const actionRevision = assistantActionRevisionRef.current;
-    const expected = useStoreMessageOption.getState();
-    const targetId = expected.serverChatId;
-    const historyId = expected.historyId;
-    const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision;
-    return () => {
-      const current = useStoreMessageOption.getState();
-      return assistantActionMountedRef.current &&
-        assistantActionRevisionRef.current === actionRevision &&
-        usePlaygroundSessionStore.getState().restoreRevision === restoreRevision &&
-        current.serverChatId === targetId && current.historyId === historyId;
-    };
+  const captureAssistantActionGuard =
+    React.useCallback((): RolePlayApplyGuard => {
+      const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
+      let actionRevision = assistantActionRevisionRef.current
+      const address = useStoreMessageOption.getState().chatDraftAddress
+      const source = captureChatDraftSource(
+        () =>
+          assistantActionMountedRef.current &&
+          selectionIsCurrent() &&
+          (assistantOwnerIsCurrent?.() ?? true),
+        (current, original) => address?.kind === "native" || current === original
+      )
+      return Object.assign(
+        () =>
+          assistantActionRevisionRef.current === actionRevision &&
+          source.isCurrent(),
+        {
+          acceptNextAction: (revision: number) => {
+            if (
+              !Number.isSafeInteger(revision) ||
+              revision !== actionRevision + 1 ||
+              assistantActionRevisionRef.current !== revision ||
+              !source.isCurrent()
+            )
+              return false
+            actionRevision = revision
+            return true
+          },
+          acceptRestoreCancelled: (revision: number) =>
+            assistantActionRevisionRef.current === actionRevision &&
+            source.acceptRestoreCancelled(revision)
+        }
+      )
+    }, [captureSelectionFence, assistantOwnerIsCurrent])
+  const captureAssistantPreparationGuard = React.useCallback(() => {
+    const sourceIsCurrent = captureAssistantActionGuard()
+    const inputRevision = assistantComposerRef.current?.getRevision()
+    const connectionRevision = assistantConnectionRevisionRef.current
+    const inputsAreCurrent = () =>
+      assistantComposerRef.current?.getRevision() === inputRevision &&
+      assistantConnectionRevisionRef.current === connectionRevision
+    return Object.assign(() => inputsAreCurrent() && sourceIsCurrent(), {
+      acceptRestoreCancelled: (revision: number) =>
+        inputsAreCurrent() &&
+        sourceIsCurrent.acceptRestoreCancelled?.(revision) === true
+    })
+  }, [captureAssistantActionGuard])
+  const readAssistantPreparationInputs = React.useCallback(() => {
+    const chat = useStoreMessageOption.getState();
+    const view = assistantPreparationViewRef.current;
+    return [chat.selectedModel, chat.toolChoice, chat.temporaryChat, chat.history, chat.messages, chat.webSearch,
+      chat.selectedSystemPrompt, chat.uploadedFiles, chat.contextFiles, chat.documentContext, chat.selectedKnowledge,
+      chat.ragMediaIds, chat.ragPinnedResults, chat.replyTarget, chat.messageSteeringMode, chat.messageSteeringForceNarrate, chat.messageSteeringRevision,
+      chat.isProcessing, chat.isLoading, chat.streaming, composerImageRef.current, view.researchContext, view.openUIRequestMode,
+      view.appendFormattingGuidePrompt, view.isConnectionReady, view.composerModels, view.composerModelsLoading];
   }, []);
   const applyAssistantSelection = React.useCallback(
-    async (selection: AssistantSelection | null): Promise<boolean> => {
-      assistantActionRevisionRef.current++;
-      const activeChat = useStoreMessageOption.getState();
-      const matchesActiveChat = selection?.kind === "character"
-        ? activeChat.serverChatAssistantKind === "character" &&
-          String(activeChat.serverChatCharacterId) === selection.id
-        : selection?.kind === "persona"
-          ? activeChat.serverChatAssistantKind === "persona" &&
-            String(activeChat.serverChatAssistantId) === selection.id
-          : activeChat.serverChatMetaLoaded &&
-            (activeChat.serverChatAssistantKind === null || activeChat.serverChatAssistantKind === undefined) &&
-            (activeChat.serverChatAssistantId === null || activeChat.serverChatAssistantId === undefined) &&
-            (activeChat.serverChatCharacterId === null || activeChat.serverChatCharacterId === undefined);
+    async (
+      selection: AssistantSelection | null,
+      options: AssistantSetupApplyOptions = {}
+    ): Promise<boolean> => {
+      const settingsOperation =
+        options.settingsOperation ?? captureModelSettingsOperation()
+      if (options.isCurrent?.() === false || !settingsOperation.isCurrent())
+        return false
+      if (options.applyIdentity !== false && isProtectedTrackedPersonaUnavailable(
+        Boolean(historySelection), selection?.kind, getAssistantSelectionMode(selection)
+      )) throw new Error("native_history_persona_unsupported")
+      const activeChat = useStoreMessageOption.getState()
+      let modelIsCurrent = captureSelectedModelGuard()
+      const toolsState = useMcpToolsStore.getState()
+      const toolChoice = activeChat.toolChoice
+      const configurationIsCurrent = () =>
+        useStoreMessageOption.getState().toolChoice === toolChoice &&
+        useMcpToolsStore.getState() === toolsState
+      const publicationInputsAreCurrent = () =>
+        modelIsCurrent() && configurationIsCurrent()
+      const initialSceneTarget = captureCurrentActorSceneTarget(historySelection)
+      const savedSettingsOnly = options.applyIdentity === false && initialSceneTarget?.address?.kind === "native"
+      const mirrorOwnerKey = savedSettingsOnly && initialSceneTarget.account ? serverChatMirrorOwnerKey({ requestScope: initialSceneTarget.account.requestScope }) : null
+      const sourceHistoryIdCurrent = (current: string | null, original: string | null) => current === original || Boolean(mirrorOwnerKey && initialSceneTarget?.address?.kind === "native" && hasAcknowledgedServerChatMirror({ historyId: current, ownerKey: mirrorOwnerKey, chatId: initialSceneTarget.address.id, scope: initialSceneTarget.address.scope }))
+      const entrySource = captureChatDraftSource(undefined, sourceHistoryIdCurrent)
+      const actionRevision = ++assistantActionRevisionRef.current
       if (
-        activeChat.serverChatId &&
-        !matchesActiveChat &&
-        getAssistantSelectionMode(selection) !== "overlay"
-      ) {
-        activeChat.setHistoryId(null, { preserveServerChatId: false });
-        activeChat.setHistory([]);
-        activeChat.setMessages([]);
-        activeChat.setServerChatCharacterId(null);
-        activeChat.setServerChatAssistantKind(null);
-        activeChat.setServerChatAssistantId(null);
-        activeChat.setServerChatPersonaMemoryMode(null);
-        activeChat.setServerChatMetaLoaded(false);
-        activeChat.setServerChatId(null);
+        options.onActionStarted?.(actionRevision) === false ||
+        assistantActionRevisionRef.current !== actionRevision ||
+        !entrySource.isCurrent() ||
+        !publicationInputsAreCurrent() ||
+        !settingsOperation.isCurrent() ||
+        options.isCurrent?.() === false
+      )
+        return false
+      const sourceAddress = activeChat.chatDraftAddress
+      const sourceRevision = activeChat.chatDraftRevision
+      const originalSceneTarget = savedSettingsOnly ? captureCurrentActorSceneTarget(historySelection, () => true, sourceHistoryIdCurrent) : initialSceneTarget
+      const savedSettingsAreCurrent = () => !savedSettingsOnly || Boolean(
+        originalSceneTarget?.address?.kind === "native" &&
+        originalSceneTarget.isCurrent() &&
+        historySelection?.settingsMode(activeChat.serverChatId,
+          originalSceneTarget.address?.scope) !== "pending"
+      )
+      const draftAccount = historySelection?.draftAccount
+      const originalAccount =
+        draftAccount?.requestScope && draftAccount.isCurrent()
+          ? {
+              requestScope: structuredClone(draftAccount.requestScope),
+              isCurrent: draftAccount.isCurrent
+            }
+          : !draftAccount
+            ? originalSceneTarget?.account
+            : undefined
+      const explicitScene = options.sceneSettings
+        ? structuredClone(options.sceneSettings)
+        : undefined
+      const inputRevision = assistantComposerRef.current?.getSetupInputRevision()
+      const connectionRevision = assistantConnectionRevisionRef.current
+      const sourceSession = usePlaygroundSessionStore.getState()
+      const sourcePreparationIsCurrent = captureAssistantPreparationGuard()
+      let sourceRestoreRevision = sourceSession.restoreRevision
+      let routeReceiptRejected = false
+      const sourceIsCurrent = () =>
+        settingsOperation.isCurrent() &&
+        savedSettingsAreCurrent() &&
+        !routeReceiptRejected &&
+        sourcePreparationIsCurrent() &&
+        publicationInputsAreCurrent() &&
+        originalAccount?.isCurrent() !== false
+      let destinationIsCurrent = () =>
+        settingsOperation.isCurrent() &&
+        savedSettingsAreCurrent() &&
+        !routeReceiptRejected &&
+        sourcePreparationIsCurrent() &&
+        configurationIsCurrent() &&
+        originalAccount?.isCurrent() !== false
+      const publicationIsCurrent = () =>
+        destinationIsCurrent() && publicationInputsAreCurrent()
+      let sceneTarget = originalSceneTarget
+      let destinationHistoryId = activeChat.historyId
+      let destinationServerChatId = activeChat.serverChatId
+      const matchesActiveChat =
+        selection?.kind === "character"
+          ? activeChat.serverChatAssistantKind === "character" &&
+            String(activeChat.serverChatCharacterId) === selection.id
+          : selection?.kind === "persona"
+            ? activeChat.serverChatAssistantKind === "persona" &&
+              String(activeChat.serverChatAssistantId) === selection.id
+            : activeChat.serverChatMetaLoaded &&
+              (activeChat.serverChatAssistantKind === null ||
+                activeChat.serverChatAssistantKind === undefined) &&
+              (activeChat.serverChatAssistantId === null ||
+                activeChat.serverChatAssistantId === undefined) &&
+              (activeChat.serverChatCharacterId === null ||
+                activeChat.serverChatCharacterId === undefined)
+      const nativeCharacter = Boolean(
+        !savedSettingsOnly && historySelection &&
+          selection?.kind === "character" &&
+          getAssistantSelectionMode(selection) !== "overlay"
+      )
+      const replacing = !savedSettingsOnly && (
+        Boolean(
+          nativeCharacter &&
+            (options.freshCharacterRoute ||
+              activeChat.temporaryChat ||
+              historySelection?.getCurrent().owner?.kind === "local")
+        ) ||
+        (!matchesActiveChat &&
+          getAssistantSelectionMode(selection) !== "overlay" &&
+          Boolean(
+            activeChat.serverChatId ||
+              (nativeCharacter &&
+                (activeChat.historyId || historySelection?.getCurrent().owner))
+          )))
+      let snapshot:
+        | Awaited<ReturnType<typeof loadServicePromptSnapshot>>
+        | undefined
+      let preparationIsCurrent = () =>
+        sourceIsCurrent() && options.isCurrent?.() !== false
+      let preparedModelScope: string | null = null
+      const proposedModel = options.model || activeChat.selectedModel || ""
+      const replaceRoute = (
+        detail: Parameters<typeof dispatchChatRouteReplacement>[0]
+      ) => {
+        let receiving = true
+        let accepted = false
+        try {
+          dispatchChatRouteReplacement({
+            ...detail,
+            onRestoreCancelled: (revision) => {
+              if (!receiving || accepted) return false
+              if (
+                revision !== sourceRestoreRevision + 1 ||
+                !sourcePreparationIsCurrent.acceptRestoreCancelled(revision) ||
+                options.onRestoreCancelled?.(revision) === false
+              ) {
+                routeReceiptRejected = true
+                return false
+              }
+              sourceRestoreRevision = revision
+              accepted = true
+              if (!preparationIsCurrent()) {
+                routeReceiptRejected = true
+                return false
+              }
+              return true
+            }
+          })
+        } finally {
+          receiving = false
+        }
       }
-      const isCurrent = captureAssistantActionGuard();
-      await setSelectedAssistant(selection, { isCurrent });
-      return isCurrent();
+      try {
+        if (nativeCharacter) {
+          if (
+            activeChat.isProcessing ||
+            activeChat.isLoading ||
+            activeChat.streaming
+          )
+            throw new Error("native_history_response_pending")
+          const settingsState = useStoreChatModelSettings.getState()
+          const capturedInputs = readAssistantPreparationInputs()
+          const sourceAssistantRevision = getSelectedAssistantOperationRevision()
+          let writingIdentity = false
+          preparationIsCurrent = () =>
+            sourceIsCurrent() &&
+            options.isCurrent?.() !== false &&
+            (getSelectedAssistantOperationRevision() ===
+              sourceAssistantRevision ||
+              (writingIdentity &&
+                getSelectedAssistantOperationRevision() ===
+                  sourceAssistantRevision + 1)) &&
+            !snapshot?.scopeSignal.aborted &&
+            !snapshot?.scopeInvalidatedSignal.aborted &&
+            useStoreChatModelSettings.getState() === settingsState &&
+            useMcpToolsStore.getState() === toolsState &&
+            readAssistantPreparationInputs().every(
+              (value, index) => value === capturedInputs[index]
+            )
+          const proposedProvider = resolveExplicitProviderForSelectedModel({
+            currentSelectedModel: activeChat.selectedModel,
+            requestedSelectedModel: proposedModel,
+            explicitProvider:
+              options.settings?.apiProvider ?? settingsState.apiProvider
+          })
+          preparedModelScope = resolveModelSelectorSelection(
+            composerModels,
+            proposedModel,
+            proposedProvider,
+            {
+              scope: settingsState.activeSettingsScope,
+              providerOverride: settingsState.activeSettingsScope
+                ? settingsState.scopedSettingsByModelKey[
+                    settingsState.activeSettingsScope
+                  ]?.apiProvider
+                : undefined
+            }
+          ).settingsScope
+          const proposedSettings = settingsState.getEffectiveSettings(
+            preparedModelScope,
+            options.settings
+          )
+          if (!explicitScene && !replacing && !originalSceneTarget)
+            throw new Error("actor_settings_unavailable")
+          let actor = explicitScene ?? createDefaultActorSettings()
+          if (!explicitScene && !replacing) {
+            try {
+              actor = (
+                await getActorSceneForChat({
+                  target: originalSceneTarget!,
+                  validate_lease: preparationIsCurrent
+                })
+              ).settings
+            } catch (error) {
+              if (!preparationIsCurrent()) return false
+              throw error
+            }
+          }
+          if (!preparationIsCurrent()) return false
+          const steering = resolveMessageSteering({
+            mode: activeChat.messageSteeringMode,
+            forceNarrate: activeChat.messageSteeringForceNarrate
+          })
+          const prepared = validateNativeCharacterConfiguration({
+            temporary:
+              Boolean(
+                activeChat.temporaryChat &&
+                  (activeChat.history.length || activeChat.messages.length)
+              ) || activeChat.historyId === "temp",
+            image: composerImageRef.current,
+            unsupportedContext: Boolean(
+              activeChat.webSearch ||
+                (options.selectedSystemPrompt !== undefined
+                  ? options.selectedSystemPrompt
+                  : activeChat.selectedSystemPrompt) ||
+                activeChat.uploadedFiles?.length ||
+                activeChat.contextFiles?.length ||
+                activeChat.documentContext?.length ||
+                activeChat.selectedKnowledge ||
+                activeChat.ragMediaIds?.length ||
+                (options.hasExplicitContext ??
+                  Boolean(activeChat.ragPinnedResults?.length)) ||
+                activeChat.replyTarget ||
+                steering.continueAsUser ||
+                steering.impersonateUser ||
+                steering.forceNarrate ||
+                researchContext ||
+                openUIRequestMode ||
+                resolveOutputFormattingGuideSuffix(
+                  Boolean(appendFormattingGuidePrompt)
+                )
+            ),
+            toolChoice: activeChat.toolChoice,
+            clientToolCount: toolsState.tools.length,
+            actorEnabled: actor?.isEnabled,
+            model: proposedModel,
+            currentModel: activeChat.selectedModel,
+            settings: proposedSettings
+          })
+          if (!isConnectionReady)
+            throw new Error("native_history_server_unavailable")
+          const usability = buildChatModelUsability({
+            selectedModel: `${prepared.provider}:${prepared.model}`,
+            availableModels: composerModels,
+            modelsLoading: composerModelsLoading,
+            isServerConnected: isConnectionReady
+          })
+          if (!usability.canSend)
+            throw new Error("native_history_model_unavailable")
+          const owner = historySelection?.getCurrent().owner
+          snapshot = await loadServicePromptSnapshot([], {
+            requestScope:
+              originalAccount?.requestScope ??
+              (!replacing && owner?.kind === "native"
+                ? owner.request_scope
+                : undefined)
+          })
+          if (!preparationIsCurrent()) return false
+          if (!(await assistantComposerRef.current?.retainCurrentDraft()))
+            throw new Error("native_history_draft_not_retained")
+          if (
+            !preparationIsCurrent() ||
+            (replacing && !requestSettingsNavigation("/chat"))
+          )
+            return false
+          if (!preparationIsCurrent()) return false
+          writingIdentity = options.applyIdentity !== false
+          // A failed identity write must not release the acknowledged source owner.
+          if (
+            options.applyIdentity !== false &&
+            !(await setSelectedAssistant(selection, {
+              isCurrent: preparationIsCurrent
+            }))
+          )
+            return false
+          if (!preparationIsCurrent()) return false
+        }
+        if (replacing) {
+          if (!preparationIsCurrent()) return false
+          if (!nativeCharacter || !options.freshCharacterRoute)
+            replaceRoute({
+              serverChatId: activeChat.serverChatId,
+              historyId: activeChat.historyId,
+              restoreRevision:
+                usePlaygroundSessionStore.getState().restoreRevision,
+              characterId:
+                selection?.kind === "character" ? String(selection.id) : null
+            })
+          if (
+            !preparationIsCurrent() ||
+            (nativeCharacter && !originalAccount?.isCurrent())
+          )
+            return false
+          const address = freshChatDraftAddress(
+            nativeCharacter ? false : activeChat.temporaryChat
+          )
+          const revision = sourceRevision + 1
+          if (
+            !activeChat.setChatDraftAddress(address, {
+              sourceAddress,
+              expectedRevision: sourceRevision
+            })
+          )
+            return false
+          let restoreRevision = sourceRestoreRevision
+          let selectionIsCurrent = () => true
+          destinationIsCurrent = () => {
+            const current = useStoreMessageOption.getState()
+            const session = usePlaygroundSessionStore.getState()
+            return (
+              assistantActionMountedRef.current &&
+              settingsOperation.isCurrent() &&
+              configurationIsCurrent() &&
+              assistantActionRevisionRef.current === actionRevision &&
+              (assistantOwnerIsCurrent?.() ?? true) &&
+              originalAccount?.isCurrent() !== false &&
+              selectionIsCurrent() &&
+              assistantComposerRef.current?.getSetupInputRevision() ===
+                inputRevision &&
+              assistantConnectionRevisionRef.current === connectionRevision &&
+              current.chatDraftAddress === address &&
+              current.chatDraftRevision === revision &&
+              current.historyId === destinationHistoryId &&
+              current.serverChatId === destinationServerChatId &&
+              session.restoreRevision === restoreRevision &&
+              session.sourceSelectionRevision ===
+                sourceSession.sourceSelectionRevision &&
+              !snapshot?.scopeSignal.aborted &&
+              !snapshot?.scopeInvalidatedSignal.aborted
+            )
+          }
+          if (!publicationIsCurrent()) return false
+          if (nativeCharacter)
+            activeChat.setQueuedMessages((previous) =>
+              previous.map((item) =>
+                blockQueuedRequest(item, "chat_setup_changed")
+              )
+            )
+          if (!publicationIsCurrent()) return false
+          resetSelectedHistory?.()
+          if (!publicationIsCurrent()) return false
+          selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
+          restoreRevision++
+          usePlaygroundSessionStore.getState().clearSession()
+          if (!publicationIsCurrent()) return false
+          destinationHistoryId = null
+          activeChat.setHistoryId(null, { preserveServerChatId: false })
+          if (!publicationIsCurrent()) return false
+          destinationServerChatId = null
+          activeChat.setServerChatId(null)
+          if (!publicationIsCurrent()) return false
+          for (const publish of [
+            () => activeChat.setHistory([]),
+            () => activeChat.setMessages([]),
+            () => activeChat.setServerChatCharacterId(null),
+            () => activeChat.setServerChatAssistantKind(null),
+            () => activeChat.setServerChatAssistantId(null),
+            () => activeChat.setServerChatPersonaMemoryMode(null),
+            () => activeChat.setServerChatMetaLoaded(false)
+          ]) {
+            if (!publicationIsCurrent()) return false
+            publish()
+          }
+          if (!publicationIsCurrent()) return false
+          sceneTarget = captureActorSettingsTarget({
+            address,
+            requestScope: originalAccount?.requestScope,
+            accountIsCurrent: originalAccount?.isCurrent,
+            isCurrent: () => {
+              const current = useStoreMessageOption.getState()
+              return (
+                current.chatDraftAddress === address &&
+                current.chatDraftRevision === revision &&
+                current.historyId === null &&
+                current.serverChatId === null
+              )
+            }
+          })
+        }
+        if (nativeCharacter && !replacing && !options.freshCharacterRoute) {
+          const target = useStoreMessageOption.getState()
+          const owner = historySelection?.getCurrent().owner
+          replaceRoute({
+            serverChatId: target.serverChatId,
+            historyId: target.historyId,
+            restoreRevision: usePlaygroundSessionStore.getState().restoreRevision,
+            characterId: String(selection!.id),
+            nextChatId:
+              owner?.kind === "native" &&
+              owner.conversation_id === target.serverChatId
+                ? target.serverChatId
+                : null
+          })
+        }
+        if (!publicationIsCurrent()) return false
+        if (nativeCharacter) {
+          activeChat.setTemporaryChat(false)
+          if (!publicationIsCurrent()) return false
+          if (options.model) {
+            const revision =
+              useStoreMessageOption.getState().selectedModelRevision + 1
+            modelIsCurrent = createSelectedModelGuard(options.model, revision)
+            activeChat.setSelectedModel(options.model)
+          }
+          if (!publicationIsCurrent() || !modelIsCurrent()) return false
+          if (
+            !settingsOperation.write(() =>
+              useStoreChatModelSettings
+                .getState()
+                .setActiveSettingsScope(preparedModelScope)
+            )
+          )
+            return false
+          if (!publicationIsCurrent() || !modelIsCurrent()) return false
+        }
+        if (!publicationIsCurrent() || !modelIsCurrent()) return false
+        const actionIsCurrent = captureAssistantActionGuard()
+        const isCurrent = () => destinationIsCurrent() && actionIsCurrent()
+        options.onDestination?.({
+          historyId: destinationHistoryId,
+          serverChatId: destinationServerChatId,
+          sceneTarget: sceneTarget ?? undefined,
+          settingsOperation,
+          isCurrent
+        })
+        if (
+          !nativeCharacter &&
+          options.applyIdentity !== false &&
+          !(await setSelectedAssistant(selection, {
+            isCurrent: () => isCurrent() && publicationInputsAreCurrent()
+          }))
+        )
+          return false
+        return (
+          isCurrent() &&
+          publicationInputsAreCurrent() &&
+          options.isCurrent?.() !== false
+        )
+      } finally {
+        snapshot?.release()
+      }
     },
-    [captureAssistantActionGuard, setSelectedAssistant],
-  );
+    [
+      appendFormattingGuidePrompt,
+      assistantOwnerIsCurrent,
+      captureSelectionFence,
+      captureAssistantActionGuard,
+      captureAssistantPreparationGuard,
+      composerModels,
+      composerModelsLoading,
+      historySelection,
+      isConnectionReady,
+      openUIRequestMode,
+      readAssistantPreparationInputs,
+      researchContext,
+      resetSelectedHistory,
+      setSelectedAssistant
+    ]
+  )
+  const applyTrackedAssistantSelection = React.useCallback(async (selection: AssistantSelection, callerIsCurrent?: () => boolean) => {
+    try { return await applyAssistantSelection(selection, { isCurrent: callerIsCurrent }); }
+    catch (error) {
+      notificationApi.error({ message: t("common:error", "Error"),
+        description: nativeCharacterPreflightMessage(error, t) ?? t("playground:composer.rolePlayApplyError", "Settings could not be applied. Your draft is still here; retry Apply.") });
+      return false;
+    }
+  }, [applyAssistantSelection, notificationApi, t]);
+
+  const captureStartupTemplateSource = React.useCallback(() => {
+    const selectionIsCurrent = captureSelectionFence?.() ?? (() => true)
+    const inputRevision = assistantComposerRef.current?.getRevision()
+    const inputEditRevision =
+      assistantComposerRef.current?.getSetupInputRevision()
+    const connectionRevision = assistantConnectionRevisionRef.current
+    const source = captureChatDraftSource(
+      () =>
+        assistantActionMountedRef.current &&
+        selectionIsCurrent() &&
+        (assistantOwnerIsCurrent?.() ?? true) &&
+        assistantComposerRef.current?.getRevision() === inputRevision &&
+        assistantConnectionRevisionRef.current === connectionRevision
+    )
+    return {
+      isCurrent: source.isCurrent,
+      acceptRestoreCancelled: source.acceptRestoreCancelled,
+      continuationIsCurrent: () =>
+        assistantActionMountedRef.current &&
+        (assistantOwnerIsCurrent?.() ?? true) &&
+        assistantComposerRef.current?.getSetupInputRevision() ===
+          inputEditRevision &&
+        assistantConnectionRevisionRef.current === connectionRevision
+    }
+  }, [captureSelectionFence, assistantOwnerIsCurrent])
 
   const promptTemplates = usePromptTemplates({
     startupTemplatesRaw,
@@ -1677,7 +2317,10 @@ export const PlaygroundForm = ({
     selectedCharacter,
     ragPinnedResults,
     currentChatModelSettings,
+    composerModels,
+    captureStartupTemplateSource,
     setSelectedModel,
+    beginSelectedModelSave,
     setSelectedSystemPrompt,
     setSelectedQuickPrompt,
     setSystemPrompt,
@@ -1696,6 +2339,7 @@ export const PlaygroundForm = ({
     startupTemplateDraftName,
     setStartupTemplateDraftName,
     startupTemplatePreview,
+    startupTemplatePreviewLease,
     setStartupTemplatePreview,
     startupTemplateNameFallback,
     selectedSystemPromptRecord,
@@ -1707,6 +2351,7 @@ export const PlaygroundForm = ({
     promptSummaryLabel,
     handleSaveRolePlaySetup,
     handleApplySavedRolePlaySetup,
+    handleSavedRolePlaySetupApplied,
     handleRenameStartupTemplate,
   } = promptTemplates;
   React.useEffect(() => {
@@ -1914,7 +2559,7 @@ export const PlaygroundForm = ({
 
   const [pasteLargeTextAsFile] = useStorage("pasteLargeTextAsFile", false);
 
-  const msgCollapse = useMessageCollapse({ textareaRef });
+  const msgCollapse = useMessageCollapse();
   const {
     isMessageCollapsed,
     setIsMessageCollapsed,
@@ -1989,12 +2634,15 @@ export const PlaygroundForm = ({
     messageRevision,
     promptAssistMutation,
     beginPromptAssistReset,
+    restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
     promptAssistSavedAttemptId,
     typing,
+    getSetupInputRevision,
     setMessageValue,
     restoreMessageValue,
     messageDisplayValue,
+    attachTextarea,
     collapsedDisplayMeta,
     textAreaFocus,
     syncCollapsedCaret,
@@ -2012,22 +2660,152 @@ export const PlaygroundForm = ({
     wrapComposerProfile,
     draftSaved,
     draftReady,
+    draftOwnerVerificationState,
+    retryDraftOwnerVerification,
+    draftOwnerKey,
+    isDraftOwnerCurrent,
+    captureCompletionGuard,
+    captureStopGuard,
+    retainCurrentDraft,
+    creationRecovery,
+    reviewCreatedChat,
+    copyCreationText,
+    listRetainedDrafts,
+    copyRetainedDraft,
   } = composerInput;
+  const stopStreamingFromUi = useExplicitStopFocus(
+    stopStreamingRequest,
+    captureStopGuard
+  )
+  React.useLayoutEffect(() => {
+    composerImageRef.current = form.values.image
+    assistantComposerRef.current = {
+      getRevision: form.getRevision,
+      getSetupInputRevision: getSetupInputRevision ?? form.getRevision,
+      retainCurrentDraft,
+      draftReady
+    }
+  }, [
+    form.getRevision,
+    getSetupInputRevision,
+    form.values.image,
+    retainCurrentDraft,
+    draftReady
+  ])
 
+  const applyCharacterRoute = React.useCallback<ApplyCharacterRoute>(async (characterId, routeIsCurrent) => {
+    let sourceIsCurrent = captureAssistantPreparationGuard();
+    const selectionRevision = getSelectedAssistantOperationRevision();
+    const inputs = readAssistantPreparationInputs();
+    const settings = useStoreChatModelSettings.getState();
+    const tools = useMcpToolsStore.getState();
+    const sourceCurrent = () => sourceIsCurrent() && routeIsCurrent() &&
+      assistantComposerRef.current?.draftReady === true &&
+      useStoreChatModelSettings.getState() === settings && useMcpToolsStore.getState() === tools &&
+      readAssistantPreparationInputs().every((value, index) => value === inputs[index]);
+    let snapshot: Awaited<ReturnType<typeof loadServicePromptSnapshot>> | undefined;
+    const loadIsCurrent = () => sourceCurrent() && getSelectedAssistantOperationRevision() === selectionRevision &&
+      !snapshot?.scopeSignal.aborted && !snapshot?.scopeInvalidatedSignal.aborted;
+    let cardLoaded = false;
+    try {
+      if (!loadIsCurrent()) return "retired";
+      snapshot = await loadServicePromptSnapshot([]);
+      if (!loadIsCurrent()) return "retired";
+      const character = await tldwClient.getCharacter(characterId, { requestScope: snapshot.requestScope, signal: snapshot.scopeSignal });
+      if (!loadIsCurrent()) return "retired";
+      if (!character || String(character.id) !== characterId) return "missing";
+      cardLoaded = true;
+      const application = applyAssistantSelection(characterToAssistantSelection({ ...character, metadata: { ...character.metadata, selectionMode: "tracked" } }), {
+        freshCharacterRoute: true,
+        isCurrent: () => routeIsCurrent() && !snapshot?.scopeSignal.aborted && !snapshot?.scopeInvalidatedSignal.aborted,
+      });
+      // Apply starts its own action revision synchronously, before preparation awaits.
+      sourceIsCurrent = captureAssistantPreparationGuard();
+      const accepted = await application;
+      if (accepted) return "applied";
+      return sourceCurrent() ? "failed" : "retired";
+    } catch (error) {
+      if (!sourceCurrent()) return "retired";
+      if (!cardLoaded) return "load-error";
+      notificationApi.error({ message: t("common:error", "Error"),
+        description: nativeCharacterPreflightMessage(error, t) ?? t("playground:composer.rolePlayApplyError", "Settings could not be applied. Your draft is still here; retry Apply.") });
+      return "failed";
+    } finally { snapshot?.release(); }
+  }, [applyAssistantSelection, captureAssistantPreparationGuard, notificationApi, readAssistantPreparationInputs, t]);
+  const characterRouteApplyRef = React.useRef(applyCharacterRoute);
+  React.useLayoutEffect(() => { characterRouteApplyRef.current = applyCharacterRoute; }, [applyCharacterRoute]);
+  React.useEffect(() => {
+    if (!onCharacterRouteApplyReady || !draftReady) return;
+    onCharacterRouteApplyReady((...args) => characterRouteApplyRef.current(...args));
+    return () => onCharacterRouteApplyReady(null);
+  }, [onCharacterRouteApplyReady, draftReady]);
+
+  const restoreRetainedDraft: RestoreChatDraft = async (draft, copy) => {
+    const source = useStoreMessageOption.getState();
+    const current = () => useStoreMessageOption.getState().chatDraftAddress === source.chatDraftAddress &&
+      useStoreMessageOption.getState().chatDraftRevision === source.chatDraftRevision;
+    if (!requestSettingsNavigation("/") || !(await copy(draft.surfaceKey)) || !current()) return false;
+    if (clearChat() === false) return false;
+    return useStoreMessageOption.getState().setChatDraftAddress(draft.handle.address);
+  };
+
+  const receiverDraftAddress = useStoreMessageOption(state => state.chatDraftAddress);
+  const receiverDraftRevision = useStoreMessageOption(state => state.chatDraftRevision);
+  const handoffDestinationKey = JSON.stringify([draftOwnerKey, historyId, serverChatId, receiverDraftAddress, receiverDraftRevision]);
+  const captureHandoffGuard = React.useCallback(() => {
+    const selectionIsCurrent = historySelection?.fence() ?? (() => true);
+    const expected = useStoreMessageOption.getState();
+    return () => {
+      const current = useStoreMessageOption.getState();
+      return assistantActionMountedRef.current && isDraftOwnerCurrent() && selectionIsCurrent() &&
+        current.chatDraftAddress === expected.chatDraftAddress && current.chatDraftRevision === expected.chatDraftRevision &&
+        current.historyId === expected.historyId && current.serverChatId === expected.serverChatId;
+    };
+  }, [historySelection, isDraftOwnerCurrent]);
   const hasDraft = (form.values.message || "").trim().length > 0;
   const {
     importedContext: importedSidepanelContext,
     removeImportedContext: clearImportedSidepanelContext,
     conflict: sidepanelHandoffConflict,
+    importPending: sidepanelImportPending,
+    conflictFeedback: sidepanelImportFeedback,
+    skippedFeedback: sidepanelSkippedFeedback,
+    importReceipt: sidepanelImportReceipt,
+    dismissImportReceipt: dismissSidepanelImportReceipt,
+    literalOptionsReview: sidepanelOptionReview,
+    includeLiteralOptions: includeSidepanelOptions,
+    setIncludeLiteralOptions: setIncludeSidepanelOptions,
+    applyHandoffOptions: applySidepanelOptions,
     insertHandoffDraft,
     replaceWithHandoffDraft,
     cancelHandoffImport,
   } = useSidepanelChatHandoffImport({
+    ready: draftReady,
+    destinationKey: handoffDestinationKey,
+    captureGuard: captureHandoffGuard,
     draftValue: form.values.message || "",
+    getDraftRevision: form.getRevision,
+    literalOptions: {
+      current: { selectedModel, chatMode, webSearch, toolChoice, useOCR },
+      setSelectedModel, setChatMode, setWebSearch, setToolChoice, setUseOCR,
+      canApply: () => historySelection?.settingsMode(serverChatId) !== "pending",
+    },
     setMessageValue,
     notificationApi,
     t,
   });
+  const sidepanelContextOnlyCopy = Boolean(
+    sidepanelHandoffConflict?.handoff.pageContext &&
+    sidepanelHandoffConflict.handoff.hasText !== false &&
+    sidepanelHandoffConflict.handoff.draft.text.length === 0,
+  );
+  const sidepanelCopyShortened = Boolean(
+    sidepanelHandoffConflict?.handoff.draft.truncated ||
+    sidepanelHandoffConflict?.handoff.pageContext?.truncated ||
+    sidepanelHandoffConflict?.handoff.pageContext?.snippets.some(
+      (snippet) => snippet.truncated,
+    ),
+  );
   useIsomorphicLayoutEffect(() => {
     onDraftPresenceChange?.(hasDraft);
   }, [hasDraft, onDraftPresenceChange]);
@@ -2152,11 +2930,11 @@ export const PlaygroundForm = ({
     if (typeof window === "undefined") return;
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<ModelSelectorOpenDetail>).detail;
+      focusFirstVisibleElement("[data-testid='model-selector']");
       modelSelectorReturnFocusSelectorRef.current = normalizeFocusSelector(
         detail?.returnFocusSelector,
       );
       openModelApiSelector();
-      scheduleFocusFirstVisibleElement("[data-testid='model-selector']");
     };
     window.addEventListener(OPEN_MODEL_SELECTOR_EVENT, handler);
     return () => {
@@ -2187,17 +2965,36 @@ export const PlaygroundForm = ({
     },
     [t],
   );
-  const clearPromptContext = React.useCallback(() => {
-    setSelectedQuickPrompt(null);
-    setSelectedSystemPrompt("");
-    setSystemPrompt("");
-    updateChatModelSetting("systemPromptTemplateId", undefined);
-  }, [
-    setSelectedQuickPrompt,
-    setSelectedSystemPrompt,
-    setSystemPrompt,
-    updateChatModelSetting,
-  ]);
+  const clearPromptContext = React.useCallback(
+    (
+      isCurrent: () => boolean = () => true,
+      settingsOperation?: ModelSettingsOperation
+    ) => {
+      for (const clear of [
+        () => setSelectedQuickPrompt(null),
+        () => setSelectedSystemPrompt("")
+      ]) {
+        if (!isCurrent()) return false
+        clear()
+      }
+      for (const clear of [
+        () => setSystemPrompt(""),
+        () => updateChatModelSetting("systemPromptTemplateId", undefined)
+      ]) {
+        if (!isCurrent()) return false
+        if (settingsOperation) {
+          if (!settingsOperation.write(clear)) return false
+        } else clear()
+      }
+      return isCurrent()
+    },
+    [
+      setSelectedQuickPrompt,
+      setSelectedSystemPrompt,
+      setSystemPrompt,
+      updateChatModelSetting
+    ]
+  )
   const clearBehaviorTemplateIdentity = React.useCallback(() => {
     updateChatModelSetting("systemPromptTemplateId", undefined);
   }, [updateChatModelSetting]);
@@ -2225,90 +3022,369 @@ export const PlaygroundForm = ({
   const clearRolePlayIdentity = React.useCallback(() => {
     void applyAssistantSelection(null);
   }, [applyAssistantSelection]);
-  const resetRolePlayGenerationStyle = React.useCallback(() => {
-    const preset = getPresetByKey("balanced");
-    if (!preset) return;
-    updateChatModelSettings(preset.settings);
-  }, [updateChatModelSettings]);
+  const resetRolePlayGenerationStyle = React.useCallback(
+    (
+      isCurrent: () => boolean = () => true,
+      settingsOperation?: ModelSettingsOperation
+    ) => {
+      const preset = getPresetByKey("balanced")
+      if (!preset || !isCurrent()) return false
+      if (settingsOperation) {
+        if (
+          !settingsOperation.write(() => updateChatModelSettings(preset.settings))
+        )
+          return false
+      } else updateChatModelSettings(preset.settings)
+      return isCurrent()
+    },
+    [updateChatModelSettings]
+  )
   const handleApplyRolePlaySetup = React.useCallback(
-    async (payload: RolePlaySetupApplyPayload) => {
-      if (payload.clearIdentity) {
-        if (!await applyAssistantSelection(null)) return false;
-      } else if (payload.identitySelection) {
-        if (!await applyAssistantSelection(payload.identitySelection)) return false;
+    async (
+      original: RolePlaySetupApplyPayload,
+      context?: RolePlayApplyContext
+    ) => {
+      const payload = structuredClone(original)
+      let destination:
+        | Parameters<NonNullable<RolePlayApplyContext["onDestination"]>>[0]
+        | null = null
+      let modelIsCurrent = () => false
+      const isCurrent = () =>
+        destination?.isCurrent() === true &&
+        modelIsCurrent() &&
+        context?.isCurrent?.() !== false
+      const preset = payload.resetGenerationStyle
+        ? getPresetByKey("balanced")
+        : payload.generationPresetKey
+          ? getPresetByKey(payload.generationPresetKey)
+          : undefined
+      const settings = {
+        ...(preset && preset.key !== "custom" ? preset.settings : {}),
+        ...(payload.clearBehavior
+          ? { systemPrompt: "", systemPromptTemplateId: undefined }
+          : payload.behaviorTemplate
+            ? {
+                systemPrompt: payload.behaviorTemplate.content,
+                systemPromptTemplateId: payload.behaviorTemplate.id
+              }
+            : {})
       }
+      const active = useStoreMessageOption.getState()
+      const existingIdentity =
+        resolvedAssistantSelection ??
+        selectedAssistant ??
+        (active.serverChatAssistantKind === "character" &&
+        active.serverChatCharacterId != null
+          ? {
+              kind: "character" as const,
+              id: String(active.serverChatCharacterId),
+              name: String(active.serverChatCharacterId)
+            }
+          : null)
+      if (
+        !(await applyAssistantSelection(
+          payload.clearIdentity
+            ? null
+            : payload.identitySelection ?? existingIdentity,
+          {
+            ...context,
+            settings,
+            sceneSettings: payload.sceneSettings,
+            onDestination: (next) => {
+              modelIsCurrent = captureSelectedModelGuard()
+              destination = {
+                ...next,
+                isCurrent: () => next.isCurrent() && modelIsCurrent()
+              }
+              context?.onDestination?.(destination)
+            },
+            applyIdentity: Boolean(
+              payload.clearIdentity || payload.identitySelection
+            ),
+            ...(payload.clearBehavior || payload.behaviorTemplate
+              ? { selectedSystemPrompt: null }
+              : {})
+          }
+        ))
+      )
+        return false
+      if (!isCurrent()) return false
       if (payload.clearBehavior) {
-        clearPromptContext();
+        if (!clearPromptContext(isCurrent, destination?.settingsOperation))
+          return false
       } else if (payload.behaviorTemplate) {
-        handleTemplateSelect(payload.behaviorTemplate);
+        if (
+          !handleTemplateSelect(
+            payload.behaviorTemplate,
+            isCurrent,
+            destination?.settingsOperation
+          )
+        )
+          return false
       }
       if (payload.resetGenerationStyle) {
-        resetRolePlayGenerationStyle();
+        if (
+          !resetRolePlayGenerationStyle(isCurrent, destination?.settingsOperation)
+        )
+          return false
       } else if (payload.generationPresetKey) {
-        const preset = getPresetByKey(payload.generationPresetKey);
+        const preset = getPresetByKey(payload.generationPresetKey)
         if (preset && preset.key !== "custom") {
-          updateChatModelSettings(preset.settings);
+          if (!isCurrent()) return false
+          if (
+            !destination?.settingsOperation?.write(() =>
+              updateChatModelSettings(preset.settings)
+            )
+          )
+            return false
         }
       }
-      return true;
+      return isCurrent()
     },
     [
       clearPromptContext,
       handleTemplateSelect,
       resetRolePlayGenerationStyle,
       applyAssistantSelection,
-      updateChatModelSettings,
-    ],
-  );
+      resolvedAssistantSelection,
+      selectedAssistant,
+      updateChatModelSettings
+    ]
+  )
+  const startupTemplateProgressRef = React.useRef<{
+    leaseId: object
+    template: StartupTemplateBundle
+    originalScene: ActorSceneRead | null
+    originalAccount: ActorSettingsTarget["account"]
+    settingsOperation: ModelSettingsOperation
+    destination: {
+      historyId: string | null
+      serverChatId: string | null
+      isCurrent: () => boolean
+      sceneTarget: ActorSettingsTarget | null
+      expectedRecord: ActorSceneRead["originalRecord"] | undefined
+    }
+    settingsAccepted: boolean
+  } | null>(null)
+  const startupTemplateAttemptRef = React.useRef<{
+    leaseId: object
+    id: object
+  } | null>(null)
+  const [startupTemplateBusyLease, setStartupTemplateBusyLease] = React.useState<object | null>(null);
+  const startupTemplateApplying = Boolean(
+    startupTemplatePreviewLease &&
+      startupTemplateBusyLease === startupTemplatePreviewLease.id
+  )
   const handleApplyStartupTemplatePreview = React.useCallback(async () => {
-    if (!startupTemplatePreview) return;
-
-    const applied = applyStartupTemplateBundle(startupTemplatePreview);
-    const destination = useStoreMessageOption.getState();
-    const targetId = destination.serverChatId;
-    const targetHistoryId = destination.historyId;
-    const isCurrent = captureAssistantActionGuard();
-    let settingsAccepted = false;
-    try {
-      if (await applied === false || !isCurrent()) return;
-      settingsAccepted = true;
-      if (startupTemplatePreview.rolePlay) {
-        const nextScene = startupTemplatePreview.rolePlay.scene ?? createDefaultActorSettings();
-        const saved = await saveActorSettingsForChat({
-          historyId: targetHistoryId,
-          serverChatId: targetId,
-          settings: nextScene,
-        });
-        if (!isCurrent()) return;
-        if (!saved) throw new Error("Scene settings save failed");
-        setActorSettings(nextScene);
-        const preview = summarizeRolePlayScene(nextScene);
-        setActorPreviewAndTokens(preview.prompt, preview.tokenCount);
+    const lease = startupTemplatePreviewLease
+    if (
+      !startupTemplatePreview ||
+      !lease?.isCurrent() ||
+      startupTemplateAttemptRef.current?.leaseId === lease.id
+    )
+      return false
+    let progress = startupTemplateProgressRef.current
+    if (progress?.leaseId !== lease.id) {
+      if (!lease.sourceIsCurrent()) return false
+      const destination = useStoreMessageOption.getState()
+      const settingsOperation = captureModelSettingsOperation()
+      const modelIsCurrent = captureSelectedModelGuard()
+      const toolChoice = destination.toolChoice
+      const toolsState = useMcpToolsStore.getState()
+      const sceneTarget = startupTemplatePreview.rolePlay
+        ? captureCurrentActorSceneTarget(historySelection)
+        : null
+      const draftAccount = historySelection?.draftAccount
+      const originalAccount =
+        draftAccount?.requestScope &&
+        draftAccount.isCurrent() &&
+        chatDraftOwnerKey(draftAccount.requestScope) === sceneTarget?.accountKey
+          ? {
+              requestScope: structuredClone(draftAccount.requestScope),
+              isCurrent: draftAccount.isCurrent
+            }
+          : !draftAccount
+            ? sceneTarget?.account
+            : undefined
+      progress = {
+        leaseId: lease.id,
+        originalScene: null,
+        originalAccount,
+        settingsOperation,
+        template: JSON.parse(
+          JSON.stringify(startupTemplatePreview)
+        ) as StartupTemplateBundle,
+        destination: {
+          historyId: destination.historyId,
+          serverChatId: destination.serverChatId,
+          isCurrent: () =>
+            lease.sourceIsCurrent() &&
+            settingsOperation.isCurrent() &&
+            modelIsCurrent() &&
+            useStoreMessageOption.getState().toolChoice === toolChoice &&
+            useMcpToolsStore.getState() === toolsState,
+          sceneTarget,
+          expectedRecord: undefined
+        },
+        settingsAccepted: false
       }
-      setStartupTemplatePreview(null);
-      setModeAnnouncement(startupTemplatePreview.rolePlay
-        ? t("playground:composer.rolePlaySetupAppliedNotice", "Role-play setup applied.")
-        : t("playground:composer.startupTemplateAppliedNotice", "Startup template applied."));
-    } catch {
-      if (!isCurrent()) return;
+      startupTemplateProgressRef.current = progress
+    }
+    if (!progress.destination.isCurrent()) return false
+    const proposal = progress
+    const attempt = {}
+    startupTemplateAttemptRef.current = { leaseId: lease.id, id: attempt }
+    setStartupTemplateBusyLease(lease.id)
+    const isCurrent = () =>
+      assistantActionMountedRef.current &&
+      lease.isCurrent() &&
+      lease.continuationIsCurrent() &&
+      startupTemplateAttemptRef.current?.id === attempt &&
+      proposal.settingsOperation.isCurrent() &&
+      proposal.destination.isCurrent()
+    try {
+      if (proposal.template.rolePlay && !proposal.originalScene) {
+        const target = proposal.destination.sceneTarget
+        if (!target) throw new Error("actor_settings_unavailable")
+        const read = await getActorSceneForChat({
+          target,
+          validate_lease: isCurrent
+        })
+        if (!isCurrent()) return false
+        proposal.originalScene = read
+        proposal.destination.expectedRecord = read.originalRecord
+      }
+      if (!proposal.settingsAccepted) {
+        const applied = await applyStartupTemplateBundle(proposal.template, {
+          applicationId: lease.id,
+          settingsOperation: proposal.settingsOperation,
+          isCurrent,
+          onRestoreCancelled: (revision) => {
+            if (
+              !assistantActionMountedRef.current ||
+              !lease.isCurrent() ||
+              !lease.continuationIsCurrent() ||
+              startupTemplateAttemptRef.current?.id !== attempt ||
+              !proposal.settingsOperation.isCurrent() ||
+              proposal.originalAccount?.isCurrent() === false ||
+              proposal.destination.sceneTarget?.isCurrent() === false ||
+              lease.acceptRestoreCancelled?.(revision) !== true
+            )
+              return false
+            return isCurrent()
+          },
+          onDestination: (next) => {
+            const original = proposal.originalScene
+            const sameTarget =
+              !next.sceneTarget || next.sceneTarget.key === original?.target.key
+            const target = sameTarget
+              ? original?.target ?? null
+              : next.sceneTarget!
+            if (
+              original &&
+              (!target?.isCurrent() ||
+                (!sameTarget &&
+                  (target.address?.kind !== "fresh" ||
+                    proposal.originalAccount?.isCurrent() !== true ||
+                    target.accountKey !== original.target.accountKey)))
+            ) {
+              proposal.destination.isCurrent = () => false
+              return
+            }
+            proposal.destination = {
+              ...next,
+              sceneTarget: target,
+              expectedRecord: sameTarget ? original?.originalRecord : null,
+              isCurrent: () =>
+                lease.isCurrent() &&
+                next.isCurrent() &&
+                (!original || target?.isCurrent() === true) &&
+                proposal.originalAccount?.isCurrent() !== false
+            }
+          }
+        })
+        if (applied === false || !isCurrent()) return false
+        proposal.settingsAccepted = true
+      }
+      if (!isCurrent()) return false
+      if (proposal.template.rolePlay) {
+        const target = proposal.destination.sceneTarget
+        if (!target) throw new Error("actor_settings_unavailable")
+        const nextScene =
+          proposal.template.rolePlay.scene ?? createDefaultActorSettings()
+        const saved = await saveActorSettingsForChat({
+          historyId: proposal.destination.historyId,
+          serverChatId: proposal.destination.serverChatId,
+          settings: nextScene,
+          target,
+          expectedRecord: proposal.destination.expectedRecord,
+          validate_lease: isCurrent
+        })
+        if (!isCurrent()) return false
+        if (!saved) throw new Error("Scene settings save failed")
+        const preview = summarizeRolePlayScene(nextScene)
+        if (
+          !applyActorScene({
+            target,
+            settings: nextScene,
+            preview: preview.prompt,
+            tokenCount: preview.tokenCount
+          })
+        )
+          return false
+        if (!isCurrent()) return false
+      }
+      setModeAnnouncement(
+        proposal.template.rolePlay
+          ? t(
+              "playground:composer.rolePlaySetupAppliedNotice",
+              "Role-play setup applied."
+            )
+          : t(
+              "playground:composer.startupTemplateAppliedNotice",
+              "Startup template applied."
+            )
+      )
+      if (!isCurrent()) return false
+      setStartupTemplatePreview(null)
+      return true
+    } catch (error) {
+      if (!isCurrent()) return false
       notificationApi.error({
         message: t("common:error", "Error"),
-        description: settingsAccepted && startupTemplatePreview.rolePlay
-          ? t("playground:composer.rolePlayScenePartialSaveError", "Identity and behavior were applied, but scene settings could not be saved. Your draft is still here; retry Apply.")
-          : t("playground:composer.rolePlayApplyError", "Settings could not be applied. Your draft is still here; retry Apply."),
-      });
+        description:
+          nativeCharacterPreflightMessage(error, t) ??
+          (proposal.settingsAccepted && proposal.template.rolePlay
+            ? t(
+                "playground:composer.rolePlayScenePartialSaveError",
+                "Identity and behavior were applied, but scene settings could not be saved. Your draft is still here; retry Apply."
+              )
+            : t(
+                "playground:composer.rolePlayApplyError",
+                "Settings could not be applied. Your draft is still here; retry Apply."
+              ))
+      })
+      return false
+    } finally {
+      if (startupTemplateAttemptRef.current?.id === attempt) {
+        startupTemplateAttemptRef.current = null
+        if (assistantActionMountedRef.current)
+          setStartupTemplateBusyLease((current) =>
+            current === lease.id ? null : current
+          )
+      }
     }
   }, [
-    captureAssistantActionGuard,
     applyStartupTemplateBundle,
     notificationApi,
     setModeAnnouncement,
     setStartupTemplatePreview,
     t,
-    setActorPreviewAndTokens,
-    setActorSettings,
+    applyActorScene,
+    historySelection,
     startupTemplatePreview,
-  ]);
+    startupTemplatePreviewLease
+  ])
   const clearPinnedSourceContext = React.useCallback(() => {
     setRagPinnedResults([]);
   }, [setRagPinnedResults]);
@@ -2379,6 +3455,8 @@ export const PlaygroundForm = ({
   );
 
   const modelSelectButton = (
+    <>
+    <SelectedModelSaveFeedback failed={selectedModelSaveFailed} onRetry={retrySelectedModelSave} />
     <ChatModelSelectorDropdown
       apiModelLabel={apiModelLabel}
       catalogControls={modelCatalogControls}
@@ -2402,6 +3480,7 @@ export const PlaygroundForm = ({
       setModelSearchQuery={setModelSearchQuery}
       setModelSortMode={setModelSortMode}
     />
+    </>
   );
 
   const modelUsageBadge = wrapComposerProfile(
@@ -2968,76 +4047,6 @@ export const PlaygroundForm = ({
   } = voiceChatHook;
   const { sendWhenEnter, setSendWhenEnter } = useWebUI();
 
-  React.useEffect(() => {
-    if (!selectedQuickPrompt) {
-      return;
-    }
-
-    const currentMessage = form.values.message || "";
-    const promptText = selectedQuickPrompt;
-
-    const applyOverwrite = () => {
-      const word = getVariable(promptText);
-      setMessageValue(promptText, { collapseLarge: true });
-      if (word) {
-        textareaRef.current?.focus();
-        const interval = setTimeout(() => {
-          textareaRef.current?.setSelectionRange(word.start, word.end);
-          setSelectedQuickPrompt(null);
-        }, 100);
-        return () => {
-          clearInterval(interval);
-        };
-      }
-      setSelectedQuickPrompt(null);
-      return;
-    };
-
-    const applyAppend = () => {
-      const next =
-        currentMessage.trim().length > 0
-          ? `${currentMessage}\n\n${promptText}`
-          : promptText;
-      setMessageValue(next, { collapseLarge: true });
-      setSelectedQuickPrompt(null);
-    };
-
-    if (!currentMessage.trim()) {
-      applyOverwrite();
-      return;
-    }
-
-    Modal.confirm({
-      title: t("option:promptInsert.confirmTitle", {
-        defaultValue: "Use prompt in chat?",
-      }),
-      content: t("option:promptInsert.confirmDescription", {
-        defaultValue:
-          "Your message already has text. Do you want to overwrite it with this prompt or append the prompt below it?",
-      }),
-      okText: t("option:promptInsert.overwrite", {
-        defaultValue: "Overwrite message",
-      }),
-      cancelText: t("option:promptInsert.append", {
-        defaultValue: "Append",
-      }),
-      closable: false,
-      maskClosable: false,
-      onOk: () => {
-        applyOverwrite();
-      },
-      onCancel: () => {
-        applyAppend();
-      },
-    });
-  }, [
-    selectedQuickPrompt,
-    form.values.message,
-    setMessageValue,
-    setSelectedQuickPrompt,
-    t,
-    textareaRef,
-  ]);
 
   const queryClient = useQueryClient();
   const invalidateServerChatHistory = React.useCallback(() => {
@@ -3054,6 +4063,8 @@ export const PlaygroundForm = ({
     onMutate: () => ({
       errorKeyToDismiss: chatErrorBanner?.key ?? null,
       ownerScope: homeScope,
+      isCurrent: captureCompletionGuard(),
+      canFocus: captureCompletionGuard(true),
     }),
     onSuccess: (data, _variables, context) => {
       const result = normalizeChatSubmitResult(data);
@@ -3061,18 +4072,21 @@ export const PlaygroundForm = ({
         if (context?.ownerScope) {
           useMilestoneStore.getState().markScopedMilestone(context.ownerScope, "first_chat");
         }
+        if (!context?.isCurrent()) return;
         dismissChatErrorAfterSuccessfulSubmit(context?.errorKeyToDismiss ?? null);
         void trackOnboardingChatSubmitSuccess(
           typeof window !== "undefined" ? window.location.pathname : "/chat",
+          context.isCurrent,
         );
       }
-      textAreaFocus();
+      if (!context?.isCurrent()) return;
+      if (context.canFocus()) textAreaFocus();
       queryClient.invalidateQueries({
         queryKey: ["fetchChatHistory"],
       });
     },
-    onError: (error) => {
-      textAreaFocus();
+    onError: (_error, _variables, context) => {
+      if (context?.canFocus()) textAreaFocus();
     },
   });
 
@@ -3170,8 +4184,14 @@ export const PlaygroundForm = ({
     temporaryChat,
   ]);
 
+  const queuedCompletionIsCurrent = React.useMemo(captureCompletionGuard, [captureCompletionGuard]);
   const queueMgmt = usePlaygroundQueueManagement({
+    historySelection,
+    canCommitDispatchResult: queuedCompletionIsCurrent,
+    getDispatchDisabledReason: getSubmitDisabledReason,
+    captureDispatchFence: captureAssistantActionGuard,
     composerModels,
+    composerModelsLoading,
     isConnectionReady,
     isSending,
     selectedModel,
@@ -3205,7 +4225,6 @@ export const PlaygroundForm = ({
     setCompareMode,
     setCompareSelectedModels,
     setSelectedSystemPrompt,
-    setSelectedQuickPrompt,
     setToolChoice,
     setUseOCR,
     compareModelsSupportCapability,
@@ -3228,16 +4247,24 @@ export const PlaygroundForm = ({
     queuedRequestActions,
     queueSubmission,
     cancelCurrentAndRunDisabledReason,
-    handleRunQueuedRequest,
-    handleRunNextQueuedRequest,
+    handleRunQueuedRequest: runQueuedRequest,
+    handleRunNextQueuedRequest: runNextQueuedRequest,
     validateSelectedChatModelsAvailability,
   } = queueMgmt;
+  const handleRunQueuedRequest = (...args: Parameters<typeof runQueuedRequest>) => {
+    if (getSubmitDisabledReason()) return;
+    return runQueuedRequest(...args);
+  };
+  const handleRunNextQueuedRequest = () => {
+    if (getSubmitDisabledReason()) return;
+    return runNextQueuedRequest();
+  };
 
   const handleToggleWebSearch = React.useCallback(() => {
     setWebSearch(!webSearch);
   }, [setWebSearch, webSearch]);
   const handleOpenModelSettings = React.useCallback(() => {
-    modelSettingsReturnFocusSelectorRef.current = null;
+    modelSettingsReturnFocusRef.current = null;
     closeComposerPopoversExcept("model");
     setOpenModelSettings(true);
   }, [closeComposerPopoversExcept, setOpenModelSettings]);
@@ -3317,8 +4344,12 @@ export const PlaygroundForm = ({
   );
 
   const { submitForm, submitFormRef, isPreparingDocuments } = usePlaygroundSubmit({
+    historySelection,
+    captureCompletionGuard,
     form,
+    draftReady,
     beginPromptAssistReset,
+    restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
     isSending,
     isConnectionReady,
@@ -3343,7 +4374,11 @@ export const PlaygroundForm = ({
     importedSidepanelContext,
     clearImportedSidepanelContext,
     sendMessage,
-    clearOpenUIRequestMode: () => setOpenUIRequestMode(false),
+    clearOpenUIRequestMode: () => {
+      if (openUIRequestRevisionRef.current !== openUIRequestRevision) return;
+      openUIRequestRevisionRef.current++;
+      setOpenUIRequestMode(false);
+    },
     clearSelectedDocuments,
     clearUploadedFiles,
     reserveDocumentProcessingTurn,
@@ -3353,6 +4388,7 @@ export const PlaygroundForm = ({
     estimateTokensForText: estimateTokensForText as any,
     resolveSubmissionIntent,
     queueSubmission,
+    getSubmitDisabledReason,
     validateSelectedChatModelsAvailability,
     compareModelsSupportCapability,
     notificationApi,
@@ -3365,7 +4401,6 @@ export const PlaygroundForm = ({
   // CS-04: the same while any chat's selected history is loading, such as the
   // view that follows a stopped or interrupted reply. The send path refuses a
   // selection that is not ready, which used to drop the draft.
-  const historySelection = useHistorySelectionContext();
   const historySelectionPending =
     !isSending &&
     (historySelection?.status === "loading" ||
@@ -3379,19 +4414,32 @@ export const PlaygroundForm = ({
       characterChatSendBlocker.onAction();
     }
   }, [characterChatSendBlocker, stopListening]);
+  const greetingDraftAddress = useStoreMessageOption(state => state.chatDraftAddress);
+  const greetingDraftRevision = useStoreMessageOption(state => state.chatDraftRevision);
+  const { starting: greetingStarting, isPreparing: isGreetingPreparing, start: startCharacterGreeting } = useCharacterGreetingStart({
+    form, retainCurrentDraft, submit: submitMessageAction, controller: historySelection, focusComposer: () => textareaRef.current?.focus(),
+    ready: draftReady, isConnectionReady, busy: isSending || isPreparingDocuments,
+    readContext: () => [isConnectionReady, Boolean(characterSubmitBlockerRef.current?.active), composerModels, composerModelsLoading, JSON.stringify(activeAssistantSelection),
+      chatMode, compareModeActive, selectedDocuments, importedSidepanelContext, researchContext, openUIRequestMode, appendFormattingGuidePrompt],
+    preflight: () => {
+      if (!isConnectionReady) throw new Error("native_history_server_unavailable");
+      if (!buildChatModelUsability({ selectedModel, availableModels: composerModels,
+        modelsLoading: composerModelsLoading, isServerConnected: isConnectionReady }).canSend)
+        throw new Error("native_history_model_unavailable");
+      if (chatMode !== "normal" || compareModeActive || selectedDocuments.length || importedSidepanelContext ||
+          researchContext || openUIRequestMode || resolveOutputFormattingGuideSuffix(Boolean(appendFormattingGuidePrompt)))
+        throw new Error("native_history_explicit_context_unsupported");
+    },
+  });
+  greetingSubmitGateRef.current = isGreetingPreparing;
   const handleComposerSend = React.useCallback(() => {
-    if (historySelectionPending) return;
+    if (greetingStarting || historySelectionPending || personaSubmitDisabledReason) return;
     if (characterChatSendBlocker?.active) {
       runCharacterChatSendBlocker();
       return;
     }
     submitForm();
-  }, [
-    characterChatSendBlocker,
-    historySelectionPending,
-    runCharacterChatSendBlocker,
-    submitForm,
-  ]);
+  }, [personaSubmitDisabledReason, greetingStarting, historySelectionPending, characterChatSendBlocker, runCharacterChatSendBlocker, submitForm]);
   React.useEffect(() => {
     voiceChatSubmitFormRef.current = () => {
       handleComposerSend();
@@ -3463,7 +4511,6 @@ export const PlaygroundForm = ({
     showServerPersistenceHint,
     handleToggleTemporaryChat,
     handleSaveChatToServer,
-    persistChatMetadata,
     handleDismissServerPersistenceHint,
   } = persistence;
 
@@ -3495,6 +4542,24 @@ export const PlaygroundForm = ({
       return;
     }
 
+    const source = captureChatDraftSource(captureAssistantPreparationGuard());
+    const clear = () => {
+      if (!source.isCurrent()) return;
+      // CS-05 (#3106): reset both transcript and request history together.
+      if (clearChat() === false) return;
+      notificationApi.success({
+        message: t(
+          "playground:composer.clearContextSuccess",
+          "Conversation cleared",
+        ),
+        duration: 2,
+      });
+    };
+    if (hasTemporaryChatContent(useStoreMessageOption.getState())) {
+      clear();
+      return;
+    }
+
     Modal.confirm({
       title: t(
         "playground:composer.clearContextConfirmTitle",
@@ -3507,21 +4572,9 @@ export const PlaygroundForm = ({
       okText: t("common:confirm", "Confirm"),
       okButtonProps: { danger: true },
       cancelText: t("common:cancel", "Cancel"),
-      onOk: () => {
-        // CS-05 (#3106): clearing only `history` left the transcript and the
-        // history selection in place, so the next request still carried the
-        // old turns. Use the New chat reset, which clears both.
-        if (clearChat() === false) return;
-        notificationApi.success({
-          message: t(
-            "playground:composer.clearContextSuccess",
-            "Conversation cleared",
-          ),
-          duration: 2,
-        });
-      },
+      onOk: clear,
     });
-  }, [clearChat, history.length, notificationApi, t]);
+  }, [captureAssistantPreparationGuard, clearChat, history.length, notificationApi, t]);
 
   const requestKnowledgePanelTab = React.useCallback((tab: KnowledgeTab) => {
     setKnowledgePanelTab(tab);
@@ -3826,6 +4879,9 @@ export const PlaygroundForm = ({
     currentApiProvider: currentChatModelSettings.apiProvider,
     formMessage: form.values.message || "",
     sendMessage,
+    draftOwnerKey,
+    isDraftOwnerCurrent,
+    captureCompletionGuard,
     textAreaFocus,
     notificationApi,
     t,
@@ -3865,6 +4921,8 @@ export const PlaygroundForm = ({
     setImageGenerateSyncPolicy,
     referenceImageCandidates,
     referenceImageCandidatesLoading,
+    referenceImageCandidatesFailed,
+    retryReferenceImageCandidates,
     imagePromptContextBreakdown,
     imagePromptRefineSubmitting,
     imagePromptRefineBaseline,
@@ -4092,9 +5150,7 @@ export const PlaygroundForm = ({
     }
 
     if (!isConnectionReady) {
-      if (e.key === "Enter") {
-        e.preventDefault();
-      }
+      if (handleChatInputKeyDown({ e, sendWhenEnter, typing, isSending: false })) e.preventDefault();
       return;
     }
 
@@ -4476,8 +5532,8 @@ export const PlaygroundForm = ({
     rolePlayState,
     rolePlayCompatibility: rawPreview.rolePlayCompatibility,
     onClearRolePlayIdentity: clearRolePlayIdentity,
-    onClearRolePlayBehavior: clearPromptContext,
-    onResetRolePlayGenerationStyle: resetRolePlayGenerationStyle,
+    onClearRolePlayBehavior: () => { clearPromptContext(); },
+    onResetRolePlayGenerationStyle: () => { resetRolePlayGenerationStyle(); },
     onDisableCompareMode: compareModeActive ? toggleCompareMode : undefined,
     onOpenRolePlaySetup: openRolePlaySetup,
     t,
@@ -4552,8 +5608,7 @@ export const PlaygroundForm = ({
     />
   );
 
-  const externalPinSources =
-    contextToolsOpen ||
+  const composerOverlayOpen =
     contextWindowModalOpen ||
     sessionInsightsOpen ||
     imageGenerateModalOpen ||
@@ -4569,20 +5624,21 @@ export const PlaygroundForm = ({
     toolsPopoverOpen ||
     attachmentMenuOpen ||
     sendMenuOpen;
+  const externalPinSources = contextToolsOpen || composerOverlayOpen;
 
   const {
     actionBarVisible,
-    composerFocusWithin,
+    composerTextareaExpanded,
     actionBarVisibilityClass,
     handlers: actionBarHandlers,
   } = useActionBarVisibility({ externalPinSources });
-  const keepComposerToolbarVisible = !isMobileViewport;
+  const keepComposerToolbarVisible = !isMobileViewport || !isProMode;
   const [composerOptionsExpanded, setComposerOptionsExpanded] = useStorage(
     "playgroundComposerOptionsExpanded",
     true,
   );
   const shouldCompactComposerTextarea =
-    !composerFocusWithin &&
+    !composerTextareaExpanded &&
     !contextToolsOpen &&
     !showSlashMenu &&
     !showMentions &&
@@ -4591,53 +5647,24 @@ export const PlaygroundForm = ({
     messageDisplayValue.trim().length === 0;
   const composerShellRef = React.useRef<HTMLDivElement>(null);
 
-  const keepComposerBottomInView = React.useCallback(() => {
-    if (stickyDockEnabled) return;
-    if (typeof window === "undefined") return;
-    const composerEl = composerShellRef.current;
-    if (!composerEl) return;
-
-    const bottomPadding = 8;
-    const scrollingElement = document.scrollingElement as HTMLElement | null;
-
-    const adjustAncestor = (ancestor: HTMLElement | null) => {
-      if (!ancestor) return;
-      const composerRect = composerEl.getBoundingClientRect();
-
-      if (ancestor === scrollingElement) {
-        const viewportBottom = window.innerHeight - bottomPadding;
-        const overflow = composerRect.bottom - viewportBottom;
-        if (overflow > 0) {
-          window.scrollBy({ top: overflow, behavior: "auto" });
-        }
-        return;
-      }
-
-      const ancestorRect = ancestor.getBoundingClientRect();
-      const overflow =
-        composerRect.bottom - (ancestorRect.bottom - bottomPadding);
-      if (overflow > 0) {
-        ancestor.scrollTop += overflow;
-      }
-    };
-
-    let parent = composerEl.parentElement;
-    while (parent) {
-      const style = window.getComputedStyle(parent);
-      const allowsVerticalScroll = /(auto|scroll|overlay)/.test(
-        `${style.overflowY} ${style.overflow}`,
-      );
-      if (
-        allowsVerticalScroll &&
-        parent.scrollHeight > parent.clientHeight + 1
-      ) {
-        adjustAncestor(parent);
-      }
-      parent = parent.parentElement;
+  const keepComposerFocusInView = React.useCallback(() => {
+    if (typeof document === "undefined") return
+    const composerEl = composerShellRef.current
+    if (!composerEl) return
+    const focused = document.activeElement
+    const railHasFocus = isMobileViewport && mobileCockpitModeActive &&
+      focused instanceof HTMLElement && Boolean(focused.closest('[data-testid="playground-cockpit-mobile-rails"]'))
+    if (stickyDockEnabled && !railHasFocus) return
+    const target =
+      focused && composerEl.contains(focused)
+        ? focused
+        : !focused || focused === document.body || railHasFocus
+          ? textareaRef.current
+          : null
+    if (target && composerEl.contains(target)) {
+      target.scrollIntoView?.({ block: "nearest", inline: "nearest" })
     }
-
-    adjustAncestor(scrollingElement);
-  }, [stickyDockEnabled]);
+  }, [isMobileViewport, mobileCockpitModeActive, stickyDockEnabled, textareaRef])
 
   const notifyComposerLayoutChange = React.useCallback(() => {
     if (!onComposerLayoutChange) return;
@@ -4716,9 +5743,9 @@ export const PlaygroundForm = ({
 
     let timeoutId: number | null = null;
     const rafId = window.requestAnimationFrame(() => {
-      keepComposerBottomInView();
+      keepComposerFocusInView();
       timeoutId = window.setTimeout(() => {
-        keepComposerBottomInView();
+        keepComposerFocusInView();
       }, 220);
     });
 
@@ -4728,7 +5755,7 @@ export const PlaygroundForm = ({
         window.clearTimeout(timeoutId);
       }
     };
-  }, [actionBarVisible, keepComposerBottomInView]);
+  }, [actionBarVisible, keepComposerFocusInView]);
 
   const previousKeyboardOpenRef = React.useRef(false);
   React.useEffect(() => {
@@ -4744,9 +5771,9 @@ export const PlaygroundForm = ({
 
     let timeoutId: number | null = null;
     const rafId = window.requestAnimationFrame(() => {
-      keepComposerBottomInView();
+      keepComposerFocusInView();
       timeoutId = window.setTimeout(() => {
-        keepComposerBottomInView();
+        keepComposerFocusInView();
       }, 120);
     });
 
@@ -4758,7 +5785,7 @@ export const PlaygroundForm = ({
     };
   }, [
     isMobileViewport,
-    keepComposerBottomInView,
+    keepComposerFocusInView,
     mobileComposerViewport.keyboardInsetPx,
     mobileComposerViewport.keyboardOpen,
   ]);
@@ -4769,11 +5796,14 @@ export const PlaygroundForm = ({
     const handleFocusIn = (event: FocusEvent) => {
       const target = event.target;
       if (!(target instanceof Node)) return;
-      if (!composerShellRef.current?.contains(target)) return;
-      keepComposerBottomInView();
+      if (!composerShellRef.current?.contains(target) && !(
+        isMobileViewport && mobileCockpitModeActive && target instanceof HTMLElement &&
+        target.closest('[data-testid="playground-cockpit-mobile-rails"]')
+      )) return;
+      keepComposerFocusInView();
       if (typeof window !== "undefined") {
         window.setTimeout(() => {
-          keepComposerBottomInView();
+          keepComposerFocusInView();
         }, 80);
       }
     };
@@ -4782,7 +5812,7 @@ export const PlaygroundForm = ({
     return () => {
       document.removeEventListener("focusin", handleFocusIn);
     };
-  }, [keepComposerBottomInView]);
+  }, [isMobileViewport, mobileCockpitModeActive, keepComposerFocusInView]);
 
   const previousSendStateRef = React.useRef(isSending);
   React.useEffect(() => {
@@ -4804,9 +5834,9 @@ export const PlaygroundForm = ({
 
     let timeoutId: number | null = null;
     const rafId = window.requestAnimationFrame(() => {
-      keepComposerBottomInView();
+      keepComposerFocusInView();
       timeoutId = window.setTimeout(() => {
-        keepComposerBottomInView();
+        keepComposerFocusInView();
       }, 100);
     });
 
@@ -4816,7 +5846,7 @@ export const PlaygroundForm = ({
         window.clearTimeout(timeoutId);
       }
     };
-  }, [isMobileViewport, isSending, keepComposerBottomInView]);
+  }, [isMobileViewport, isSending, keepComposerFocusInView]);
 
   const toolRunStatusLabel = React.useMemo(() => {
     if (chatLoopState.pendingApprovals.length > 0) {
@@ -4908,7 +5938,7 @@ export const PlaygroundForm = ({
     >
       <button
         type="button"
-        onClick={() => setOpenUIRequestMode((current) => !current)}
+        onClick={() => { openUIRequestRevisionRef.current++; setOpenUIRequestMode((current) => !current); }}
         disabled={isSending}
         aria-pressed={openUIRequestMode}
         aria-label={t("playground:composer.openuiMode", "OpenUI") as string}
@@ -5009,6 +6039,9 @@ export const PlaygroundForm = ({
       t={t}
     />
   );
+  const modelCatalogSubmitDisabledReason = composerModelsLoading && !activeImageCommand &&
+    !isSavedRoleplayConversation(historySelection)
+    ? toText(t("playground:composer.modelsLoading", "Loading models…")) : null;
   const sendControl = (
     <PlaygroundSendControl
       isProMode={isProMode}
@@ -5019,12 +6052,13 @@ export const PlaygroundForm = ({
       isConnectionReady={isConnectionReady}
       sendWhenEnter={sendWhenEnter}
       onSendWhenEnterChange={setSendWhenEnter}
-      sendLabel={sendLabel}
+      sendLabel={modelCatalogSubmitDisabledReason ?? sendLabel}
       compareNeedsMoreModels={compareNeedsMoreModels}
-      onStopStreaming={stopStreamingRequest}
+      onStopStreaming={stopStreamingFromUi}
       onStopListening={stopListening}
       onSubmitForm={handleComposerSend}
       characterChatSendBlocker={characterChatSendBlocker}
+      submitDisabledReason={personaSubmitDisabledReason ?? modelCatalogSubmitDisabledReason}
       sendMenuOpen={sendMenuOpen}
       onSendMenuChange={handleSendMenuChange}
       t={t}
@@ -5186,6 +6220,16 @@ export const PlaygroundForm = ({
       onRender={onComposerRenderProfile}
     >
       <div className="flex w-full flex-col items-center px-2 pb-0 sm:px-4 sm:pb-0">
+        <div className="flex w-full justify-end"><ChatDraftRecovery creationRecovery={creationRecovery} onReviewCreatedChat={reviewCreatedChat} onCopyCreationText={copyCreationText} onFindConversations={() => window.dispatchEvent(new Event("tldw:open-chat-sidebar"))} listDrafts={listRetainedDrafts} copyDraft={copyRetainedDraft} onRestore={restoreRetainedDraft} disabled={!draftReady} draftOwnerVerificationState={draftOwnerVerificationState} retryDraftOwnerVerification={retryDraftOwnerVerification} /></div>
+        <ChatGreetingPicker selectedCharacter={selectedCharacter} selectedCharacterMode={getAssistantSelectionMode(activeAssistantSelection)}
+          messages={messages} historyId={historyId} serverChatId={serverChatId}
+          ready={draftReady && !assistantMeta?.isLoading && !temporaryChat && historySelection?.getCurrent().status === "idle" && !historySelection.getCurrent().owner}
+          scope={greetingDraftAddress?.kind === "fresh" ? greetingDraftAddress.scope : undefined}
+          viewKey={String(greetingDraftRevision)}
+          disabled={isSending || isPreparingDocuments || greetingStarting || Boolean(characterChatSendBlocker?.active)}
+          blockedReason={creationRecovery.unavailable || (creationRecovery.active && !["prepared", "settled"].includes(creationRecovery.active.state)) ? t("sidepanel:greetingPicker.reviewCreation", "Review the previous save in Recover drafts before saving another opening.") : null}
+          inputRevision={form.getRevision()} onStartGreeting={startCharacterGreeting} onStartWithMessage={() => textareaRef.current?.focus()}
+          className="mb-3 max-w-[64rem]" />
         <div
           data-checkwidemode={effectiveWideMode}
           data-ui-mode={uiMode}
@@ -5261,6 +6305,9 @@ export const PlaygroundForm = ({
                     />,
                   )
                 : null}
+              <QuickPromptInsertionReview form={form} ready={draftReady} destinationKey={handoffDestinationKey}
+                captureGuard={captureHandoffGuard} textareaRef={textareaRef}
+                setMessageValue={(value) => restoreMessageValue(value, { wasExpanded: true })} />
               {mediaHandoffConflict ? (
                 <div role="status" aria-label={t("mediaHandoff.conflictLabel", "Media handoff conflict")} className="mb-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text">
                   <p>{t("mediaHandoff.conflict", "Your composer already has a draft. Insert the media source, replace your draft, or cancel the import.")}</p>
@@ -5273,10 +6320,10 @@ export const PlaygroundForm = ({
               ) : null}
               {sidepanelHandoffConflict ? (
                 <div
-                  role="status"
+                  role="region"
                   aria-label={t(
                     "playground:sidepanelHandoff.conflictLabel",
-                    "Sidepanel handoff conflict",
+                    "Review copied chat",
                   )}
                   className="mb-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text"
                 >
@@ -5284,47 +6331,204 @@ export const PlaygroundForm = ({
                     <div className="min-w-0">
                       <div className="font-medium">
                         {t(
-                          "playground:sidepanelHandoff.conflictTitle",
-                          "Import sidepanel draft?",
+                          sidepanelHandoffConflict.handoff.hasText === false ? "playground:sidepanelHandoff.noTextTitle" : sidepanelContextOnlyCopy ? "playground:sidepanelHandoff.contextOnlyTitle" : "playground:sidepanelHandoff.conflictTitle",
+                          sidepanelHandoffConflict.handoff.hasText === false ? "Copy contains no draft text" : sidepanelContextOnlyCopy ? "Import page references?" : "Import sidepanel draft?",
                         )}
                       </div>
                       <div className="text-text-muted">
                         {t(
-                          "playground:sidepanelHandoff.conflictDescription",
-                          "Your composer already has a draft. Insert the sidepanel draft, replace yours, or cancel the import.",
+                          sidepanelHandoffConflict.handoff.hasText === false ? sidepanelOptionReview.length > 0 ? "playground:sidepanelHandoff.settingsOnlyDescription" : "playground:sidepanelHandoff.noTextDescription" : sidepanelContextOnlyCopy ? "playground:sidepanelHandoff.contextOnlyDescription" : "playground:sidepanelHandoff.conflictDescription",
+                          sidepanelHandoffConflict.handoff.hasText === false ? sidepanelOptionReview.length > 0 ? "Your draft remains here. Review the copied settings below, apply them if wanted, or dismiss this copy." : "Your draft remains here. Dismiss this copy, then choose the settings or attachments you need." : sidepanelContextOnlyCopy ? "Review the copied page references, add them to this chat, or cancel. Your current draft will be kept." : "Review the copied draft below. Insert it, replace your current draft, or cancel the import.",
                         )}
                       </div>
                     </div>
+                    {!sidepanelHandoffConflict.route.webUi ? (
+                      <p role="status" className="basis-full text-text-muted">
+                        {t(
+                          "playground:sidepanelHandoff.sourceAccountUnverified",
+                          "This copy does not identify its source account. Review the content before importing.",
+                        )}
+                      </p>
+                    ) : null}
+                    {sidepanelCopyShortened ? (
+                      <p className="basis-full text-text-muted">
+                        {t(
+                          "playground:sidepanelHandoff.copyShortened",
+                          "Some copied text or page references were shortened.",
+                        )}
+                      </p>
+                    ) : null}
+                    {sidepanelHandoffConflict.handoff.hasText !== false && !sidepanelContextOnlyCopy ? <div className="basis-full min-w-0">
+                      <p className="font-medium">{t("playground:sidepanelHandoff.copiedDraft", "Copied draft")}</p>
+                      <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-sans text-sm text-text">{sidepanelHandoffConflict.handoff.draft.text}</pre>
+                    </div> : null}
+                    {sidepanelHandoffConflict.handoff.pageContext ? (
+                      <details className="basis-full min-w-0">
+                        <summary className="min-h-11 cursor-pointer py-3 font-medium focus-visible:ring-2 focus-visible:ring-focus">
+                          {t(
+                            "playground:sidepanelHandoff.copiedPageReferences",
+                            "Copied page references",
+                          )}
+                        </summary>
+                        <div
+                          role="region"
+                          aria-label={t(
+                            "playground:sidepanelHandoff.copiedPageReferences",
+                            "Copied page references",
+                          )}
+                          tabIndex={0}
+                          className="mt-1 max-h-48 space-y-2 overflow-auto rounded border border-border p-2 focus-visible:ring-2 focus-visible:ring-focus"
+                        >
+                          {sidepanelHandoffConflict.handoff.pageContext.title ? (
+                            <p className="break-words font-medium">
+                              {sidepanelHandoffConflict.handoff.pageContext.title}
+                            </p>
+                          ) : null}
+                          {sidepanelHandoffConflict.handoff.pageContext.url ? (
+                            <p className="break-all text-text-muted">
+                              {sidepanelHandoffConflict.handoff.pageContext.url}
+                            </p>
+                          ) : null}
+                          {sidepanelHandoffConflict.handoff.pageContext.snippets.map(
+                            (snippet, index) => (
+                              <div key={index}>
+                                <p className="font-medium">
+                                  {snippet.label ||
+                                    t(
+                                      "playground:sidepanelHandoff.copiedSnippet",
+                                      "Snippet {{number}}",
+                                      { number: index + 1 },
+                                    )}
+                                </p>
+                                <pre className="whitespace-pre-wrap break-words font-sans text-sm">
+                                  {snippet.text}
+                                </pre>
+                              </div>
+                            ),
+                          )}
+                        </div>
+                      </details>
+                    ) : null}
+                    {sidepanelOptionReview.length > 0 ? (
+                      <div className="basis-full min-w-0 space-y-2">
+                        <table
+                          aria-label={t(
+                            "playground:sidepanelHandoff.copiedSettings",
+                            "Copied settings"
+                          )}
+                          className="w-full table-fixed text-left"
+                        >
+                          <thead>
+                            <tr>
+                              <th scope="col">
+                                {t("playground:sidepanelHandoff.setting", "Setting")}
+                              </th>
+                              <th scope="col">
+                                {t("playground:sidepanelHandoff.currentValue", "Current")}
+                              </th>
+                              <th scope="col">
+                                {t("playground:sidepanelHandoff.copiedValue", "Copied")}
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {sidepanelOptionReview.map((row) => (
+                              <tr key={row.key}>
+                                <th scope="row" className="py-1 pr-2 font-normal">
+                                  {row.label}
+                                </th>
+                                {[row.current, row.copied].map((value, index) => (
+                                  <td key={index} className="break-words py-1 pr-2">
+                                    {typeof value === "boolean"
+                                      ? value
+                                        ? t("common:on", "On")
+                                        : t("common:off", "Off")
+                                      : (value ?? t("common:none", "None"))}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <label className="flex min-h-11 items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={includeSidepanelOptions}
+                            disabled={sidepanelImportPending}
+                            onChange={(event) =>
+                              setIncludeSidepanelOptions(event.target.checked)
+                            }
+                          />
+                          {t(
+                            "playground:sidepanelHandoff.applySupportedSettings",
+                            "Apply supported settings"
+                          )}
+                        </label>
+                        <p className="text-text-muted">
+                          {t(
+                            "playground:sidepanelHandoff.settingsIntent",
+                            "These preferences do not copy prompts, chat privacy, attachments or retrieval sources. Availability is checked when sending."
+                          )}
+                        </p>
+                      </div>
+                    ) : null}
+                    {sidepanelSkippedFeedback ? <p className="basis-full text-text-muted">{sidepanelSkippedFeedback}</p> : null}
+                    {(sidepanelImportPending || sidepanelImportFeedback) ? (
+                      <p role="status" className="basis-full text-text-muted">
+                        {sidepanelImportPending
+                          ? t("playground:sidepanelHandoff.checkingCopy", "Checking the copy…")
+                          : sidepanelImportFeedback}
+                      </p>
+                    ) : null}
                     <div className="flex flex-wrap items-center gap-2">
+                      {sidepanelHandoffConflict.handoff.hasText !== false ? <>
                       <button
                         type="button"
                         onClick={insertHandoffDraft}
-                        className="min-h-7 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                        disabled={sidepanelImportPending}
+                        aria-busy={sidepanelImportPending || undefined}
+                        className="min-h-11 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                       >
                         {t(
-                          "playground:sidepanelHandoff.insert",
-                          "Insert handoff draft",
+                          sidepanelContextOnlyCopy ? "playground:sidepanelHandoff.addPageReferences" : "playground:sidepanelHandoff.insert",
+                          sidepanelContextOnlyCopy ? "Add page references" : "Insert handoff draft",
                         )}
                       </button>
-                      <button
+                      {!sidepanelContextOnlyCopy ? <button
                         type="button"
                         onClick={replaceWithHandoffDraft}
-                        className="min-h-7 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                        disabled={sidepanelImportPending}
+                        aria-busy={sidepanelImportPending || undefined}
+                        className="min-h-11 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                       >
                         {t(
                           "playground:sidepanelHandoff.replace",
                           "Replace current draft",
                         )}
-                      </button>
+                      </button> : null}
+                      </> : null}
+                      {sidepanelHandoffConflict.handoff.hasText === false && sidepanelOptionReview.length > 0 ? <button
+                        type="button" onClick={applySidepanelOptions} disabled={sidepanelImportPending || !includeSidepanelOptions}
+                        className="min-h-11 rounded border border-border bg-surface px-3 py-1 text-xs text-text focus-visible:ring-2 focus-visible:ring-focus">
+                        {t("playground:sidepanelHandoff.applySettings", "Apply settings")}
+                      </button> : null}
                       <button
                         type="button"
                         onClick={cancelHandoffImport}
-                        className="min-h-7 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+                        className="min-h-11 rounded border border-border bg-surface px-3 py-1 text-xs text-text hover:bg-surface3 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                       >
-                        {t("playground:sidepanelHandoff.cancel", "Cancel import")}
+                        {sidepanelHandoffConflict.handoff.hasText === false ? t("playground:sidepanelHandoff.dismissCopy", "Dismiss copy") : t("playground:sidepanelHandoff.cancel", "Cancel import")}
                       </button>
                     </div>
                   </div>
+                </div>
+              ) : null}
+              {sidepanelImportReceipt ? (
+                <div role="status" className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-surface2 px-3 py-2 text-xs text-text">
+                  <p className="min-w-0 flex-1">{sidepanelImportReceipt.description}</p>
+                  <button type="button" onClick={dismissSidepanelImportReceipt} className="min-h-7 rounded border border-border px-3 py-1 focus-visible:ring-2 focus-visible:ring-focus">
+                    {t("playground:sidepanelHandoff.dismissReceipt", "Dismiss notice")}
+                  </button>
                 </div>
               ) : null}
               {/* Attachments summary (collapsed context management) */}
@@ -5803,7 +7007,7 @@ export const PlaygroundForm = ({
                                   : "flex items-end gap-2"
                               }
                             >
-                              <button
+                              {isProMode && <button
                                 type="button"
                                 data-testid="composer-options-toggle"
                                 aria-controls="composer-options-panel"
@@ -5851,10 +7055,12 @@ export const PlaygroundForm = ({
                                   }`}
                                   aria-hidden="true"
                                 />
-                              </button>
+                              </button>}
                               <div
                                 className={
-                                  isMobileViewport
+                                  !isProMode
+                                    ? "min-w-0 flex-1 col-span-2"
+                                    : isMobileViewport
                                     ? suppressComposerToolbarForMobileCockpit
                                       ? "col-span-2 min-w-0"
                                       : "min-w-0"
@@ -5865,6 +7071,7 @@ export const PlaygroundForm = ({
                                   "composer-textarea",
                                   <ComposerTextarea
                                     textareaRef={textareaRef}
+                                    attachTextarea={attachTextarea}
                                     value={form.values.message}
                                     displayValue={messageDisplayValue}
                                     onChange={handleTextareaChange}
@@ -5884,7 +7091,6 @@ export const PlaygroundForm = ({
                                     isMobile={isMobileViewport}
                                     isConnectionReady={isConnectionReady}
                                     isCollapsed={isMessageCollapsed}
-                                    ariaExpanded={!isMessageCollapsed}
                                     compactWhenInactive={
                                       shouldCompactComposerTextarea
                                     }
@@ -5930,6 +7136,7 @@ export const PlaygroundForm = ({
 
                         const composerInlineMessagesNode = (
                           <>
+                            {personaSubmitDisabledReason && <p role="status" className="px-2 py-1 text-sm text-text-muted">{personaSubmitDisabledReason}</p>}
                             {form.errors.message && (
                               <div
                                 role="alert"
@@ -6091,6 +7298,7 @@ export const PlaygroundForm = ({
                             selectedModel={selectedModel}
                             systemPrompt={systemPrompt}
                             selectedCharacter={selectedCharacter}
+                            deferCharacterAppearanceSetup={Boolean(selectedCharacter && getAssistantSelectionMode(activeAssistantSelection) === "tracked" && !historyId && !serverChatId && messages.length === 0)}
                             serverScope={canonicalConnectionConfig?.serverUrl}
                             userScope={
                               canonicalConnectionConfig
@@ -6139,10 +7347,12 @@ export const PlaygroundForm = ({
                                 ? false
                                 : !actionBarVisible
                             }
-                            className={`w-full transition-all duration-200 overflow-hidden ${
-                              keepComposerToolbarVisible
-                                ? "max-h-[480px] opacity-100 visible"
-                                : actionBarVisibilityClass
+                            className={`w-full transition-all duration-200 ${
+                              !isProMode
+                                ? "opacity-100 visible"
+                                : keepComposerToolbarVisible
+                                  ? "max-h-[480px] overflow-hidden opacity-100 visible"
+                                  : `overflow-hidden ${actionBarVisibilityClass}`
                             }`}
                           >
                             {wrapComposerProfile(
@@ -6156,6 +7366,10 @@ export const PlaygroundForm = ({
                                 modeLauncherButton={modeLauncherButton}
                                 compareControl={compareControl}
                                 openUIRequestButton={openUIRequestButton}
+                                openUIRequestMode={openUIRequestMode}
+                                toolChoice={toolChoice}
+                                nestedDisclosureOpen={composerOverlayOpen}
+                                focusFallbackRef={textareaRef}
                                 modelSelectButton={modelSelectButton}
                                 mcpControl={mcpControl}
                                 sendControl={sendControl}
@@ -6235,6 +7449,8 @@ export const PlaygroundForm = ({
                                 rolePlayActions={{
                                   onOpenRolePlaySetup: openRolePlaySetup,
                                 }}
+                                onTrackedAssistantSelection={applyTrackedAssistantSelection}
+                                trackedAssistantSelectionLoading={Boolean(historySelection && composerModelsLoading)}
                               />,
                             )}
                           </div>
@@ -6353,7 +7569,7 @@ export const PlaygroundForm = ({
                                 }
                                 onSend={handleComposerSend}
                                 sending={isSending}
-                                stopStreaming={stopStreamingRequest}
+                                stopStreaming={stopStreamingFromUi}
                                 tokens={tokensProp}
                                 onPaletteTrigger={() => {
                                   // V5 design: ⌘K injects `/` into the
@@ -6382,7 +7598,7 @@ export const PlaygroundForm = ({
                                 }
                                 onSend={handleComposerSend}
                                 sending={isSending}
-                                stopStreaming={stopStreamingRequest}
+                                stopStreaming={stopStreamingFromUi}
                                 tokens={tokensProp}
                                 briefSections={briefSections}
                                 textareaSlot={composerTextareaNode}
@@ -6398,7 +7614,7 @@ export const PlaygroundForm = ({
                                 }
                                 onSend={handleComposerSend}
                                 sending={isSending}
-                                stopStreaming={stopStreamingRequest}
+                                stopStreaming={stopStreamingFromUi}
                                 tokens={tokensProp}
                                 textareaSlot={composerTextareaNode}
                                 bottomBarSlot={composerToolbarSlot}
@@ -6423,9 +7639,10 @@ export const PlaygroundForm = ({
                         );
                       })()}
                       <ChatQueuePanel
+                        dispatchDisabledReason={getSubmitDisabledReason()}
                         queue={queuedMessages}
                         isConnectionReady={isConnectionReady}
-                        isStreaming={isSending}
+                        isStreaming={isSending || greetingStarting}
                         onRunNext={handleRunNextQueuedRequest}
                         onRunNow={handleRunQueuedRequest}
                         onDelete={queuedRequestActions.remove}
@@ -6506,6 +7723,8 @@ export const PlaygroundForm = ({
               onReferenceFileIdChange={setImageGenerateReferenceFileId}
               referenceImageCandidates={referenceImageCandidates}
               referenceImageCandidatesLoading={referenceImageCandidatesLoading}
+              referenceImageCandidatesFailed={referenceImageCandidatesFailed}
+              onRetryReferenceImages={retryReferenceImageCandidates}
               submitting={imageGenerateSubmitting}
               onSubmit={submitImageGenerateModal}
               t={t}
@@ -6591,6 +7810,7 @@ export const PlaygroundForm = ({
               onClose={() => setStartupTemplatePreview(null)}
               onDelete={handleDeleteStartupTemplate}
               onApply={handleApplyStartupTemplatePreview}
+              busy={startupTemplateApplying}
               promptDescription={startupTemplatePromptDescription}
               promptResolution={startupTemplatePromptResolution}
               preset={startupTemplatePreset}
@@ -6618,7 +7838,7 @@ export const PlaygroundForm = ({
               tokenBudgetRisk={tokenBudgetRisk}
               contextFootprintRows={contextFootprintRows}
               formatContextWindowValue={formatContextWindowValue}
-              onClearPromptContext={clearPromptContext}
+              onClearPromptContext={() => { clearPromptContext(); }}
               onClearPinnedSourceContext={clearPinnedSourceContext}
               onClearHistoryContext={clearHistoryContext}
               onCreateSummaryCheckpoint={insertSummaryCheckpointPrompt}
@@ -6663,11 +7883,12 @@ export const PlaygroundForm = ({
             />
           </React.Suspense>
         )}
-        {openModelSettings && (
+        {modelSettingsDialog.present && (
           <React.Suspense fallback={null}>
             <LazyCurrentChatModelSettings
               open={openModelSettings}
-              setOpen={setOpenModelSettingsWithFocusRestore}
+              setOpen={setOpenModelSettings}
+              afterClose={completeModelSettingsClose}
               settingsScope={modelSettingsScopeOverride}
               isOCREnabled={useOCR}
             />
@@ -6709,6 +7930,7 @@ export const PlaygroundForm = ({
               onSaveRolePlaySetup={handleSaveRolePlaySetup}
               onPreviewSavedSetup={handleOpenStartupTemplatePreview}
               onApplySavedSetup={handleApplySavedRolePlaySetup}
+              onSavedSetupApplied={handleSavedRolePlaySetupApplied}
               onRenameSavedSetup={handleRenameStartupTemplate}
               onDeleteSavedSetup={handleDeleteStartupTemplate}
             />

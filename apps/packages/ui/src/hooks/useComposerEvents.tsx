@@ -1,4 +1,5 @@
 import React from "react"
+import { useModelSettingsOverlayState } from "./useModelSettingsOverlayState"
 import type { QuickIngestOpenDetail } from "@/utils/quick-ingest-open"
 
 export interface ComposerEventHandlers {
@@ -20,6 +21,8 @@ export interface UseComposerEventsResult {
   setOpenActorSettings: React.Dispatch<React.SetStateAction<boolean>>
   openModelSettings: boolean
   setOpenModelSettings: React.Dispatch<React.SetStateAction<boolean>>
+  modelSettingsPresent: boolean
+  completeModelSettingsClose: () => boolean
   documentGeneratorOpen: boolean
   setDocumentGeneratorOpen: React.Dispatch<React.SetStateAction<boolean>>
   documentGeneratorSeed: DocumentGeneratorSeed
@@ -41,7 +44,7 @@ export const useComposerEvents = (
   const { onFocusComposer, onOpenQuickIngest, serverChatId } = options
 
   const [openActorSettings, setOpenActorSettings] = React.useState(false)
-  const [openModelSettings, setOpenModelSettings] = React.useState(false)
+  const { open: openModelSettings, setOpen: setOpenModelSettings, present: modelSettingsPresent, afterClose: completeModelSettingsClose } = useModelSettingsOverlayState()
   const [documentGeneratorOpen, setDocumentGeneratorOpen] = React.useState(false)
   const [documentGeneratorSeed, setDocumentGeneratorSeed] = React.useState<DocumentGeneratorSeed>({})
 
@@ -63,7 +66,7 @@ export const useComposerEvents = (
     return () => {
       window.removeEventListener("tldw:open-model-settings", handler)
     }
-  }, [])
+  }, [setOpenModelSettings])
 
   // tldw:focus-composer
   React.useEffect(() => {
@@ -112,6 +115,8 @@ export const useComposerEvents = (
     setOpenActorSettings,
     openModelSettings,
     setOpenModelSettings,
+    modelSettingsPresent,
+    completeModelSettingsClose,
     documentGeneratorOpen,
     setDocumentGeneratorOpen,
     documentGeneratorSeed,

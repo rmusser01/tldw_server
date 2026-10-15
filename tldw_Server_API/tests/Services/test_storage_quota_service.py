@@ -58,6 +58,8 @@ class FakePool:
     async def fetchone(self, query: str, *args):
         # Return consistent shape expected by service
         self.fetchone_calls += 1
+        if "native_chat_quota_reservations" in query:
+            return {"bytes": 0, "count": 0}  # This legacy-only fixture owns no native reservations.
         return {"storage_used_mb": self._used_mb, "storage_quota_mb": self._quota_mb}
 
 

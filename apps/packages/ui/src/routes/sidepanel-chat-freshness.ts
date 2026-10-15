@@ -8,11 +8,13 @@
  * silently fork the chat. The panel therefore checks the server's message
  * manifest when it shows a tab, when it regains focus and before a send. When
  * the server has newer turns, it moves the tab's history selection to the
- * latest message (which reloads the transcript and re-parents the next send),
- * or shows an "updated elsewhere" notice when moving would discard messages
- * that exist only in this tab.
+ * latest message for legacy controllers, or shows an "updated elsewhere"
+ * notice when moving would discard local messages. Native H1 instead preserves
+ * the restored view and offers its guarded Load latest or Branch here choice.
  */
 import React from "react"
+import { useChatHistoryFreshness, FOCUS_CHECK_DEBOUNCE_MS, FOCUS_CHECK_MIN_INTERVAL_MS } from "@/hooks/chat/useChatHistoryFreshness"
+export { FOCUS_CHECK_DEBOUNCE_MS, FOCUS_CHECK_MIN_INTERVAL_MS } from "@/hooks/chat/useChatHistoryFreshness"
 
 import type { FreshnessNotice } from "@/components/Sidepanel/Chat/ServerChatFreshnessNotice"
 import type { SidepanelSendGateResult } from "@/hooks/chat/sidepanel-send-gate"
@@ -27,10 +29,6 @@ import type {
 } from "@/types/history-selection"
 import { latestHistoryTipId } from "@/utils/history-selection"
 
-/** Focus and visibility events arrive in bursts; check once they settle. */
-export const FOCUS_CHECK_DEBOUNCE_MS = 400
-/** At most one focus-triggered check per tab in this window. */
-export const FOCUS_CHECK_MIN_INTERVAL_MS = 5_000
 
 export type ServerTurnsComparison =
   | { status: "current"; latestId: string | null }
@@ -140,6 +138,7 @@ export const useSidepanelChatFreshness = ({
   selectionRef.current = historySelection
   const checkableRef = React.useRef(checkableTabId)
   checkableRef.current = checkableTabId
+  useChatHistoryFreshness(historySelection, () => !!checkableRef.current())
   const queueRef = React.useRef<Promise<unknown>>(Promise.resolve())
   const lastCheckAtRef = React.useRef(new Map<string, number>())
   const focusTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -157,10 +156,12 @@ export const useSidepanelChatFreshness = ({
   }, [])
 
   const check = React.useCallback(
-    async (mode: CheckMode): Promise<SidepanelSendGateResult> => {
+    async (mode: CheckMode, isCurrent: () => boolean = () => true): Promise<SidepanelSendGateResult> => {
+      if (!isCurrent()) return HOLD
       const tabId = checkableRef.current()
       if (!tabId) return PROCEED
       const selection = selectionRef.current
+      if (selection.branchPending || (selection.checkFreshness && mode === "focus")) return PROCEED
       const current = selection.getCurrent()
       const { owner, view, capture } = current
       if (
@@ -175,7 +176,8 @@ export const useSidepanelChatFreshness = ({
       // otherwise go to the tab the user switched to.
       const changed = mode === "send" ? HOLD : PROCEED
       const sameView = selection.fence()
-      const onTab = () => mountedRef.current && checkableRef.current() === tabId
+      const onTab = () => mountedRef.current && isCurrent() && checkableRef.current() === tabId &&
+        selection.getCurrent().owner === owner && owner.validate_lease()
       lastCheckAtRef.current.set(tabId, Date.now())
 
       let nodes: readonly HistoryNodeV1[]
@@ -192,7 +194,7 @@ export const useSidepanelChatFreshness = ({
           return onTab() ? PROCEED : changed
         }
         if (!onTab()) return changed
-        if (!sameView()) return mode === "send" ? check(mode) : PROCEED
+        if (!sameView()) return mode === "send" ? check(mode, isCurrent) : PROCEED
       }
 
       const messages = useStoreMessageOption.getState().messages
@@ -215,6 +217,11 @@ export const useSidepanelChatFreshness = ({
       }
 
       const { latestId, newCount } = comparison
+      if (mode === "show" && selection.checkFreshness) {
+        // A fresh capture can still restore an older bookmark; keep its parent until the user chooses.
+        selection.holdStaleSend(view, () => onTab() && sameView(), "freshness")
+        return PROCEED
+      }
       if ((mode === "show" || mode === "focus") && hasUnsentLocalMessages(messages, nodes)) {
         publish({ tabId, kind: "stale", newCount })
         return PROCEED
@@ -249,11 +256,10 @@ export const useSidepanelChatFreshness = ({
 
   /** Run checks one at a time, so a focus check and a send never race. */
   const enqueue = React.useCallback(
-    (mode: CheckMode): Promise<SidepanelSendGateResult> => {
-      const run = queueRef.current.then(
-        () => check(mode),
-        () => check(mode)
-      )
+    (mode: CheckMode, isCurrent: () => boolean = () => true): Promise<SidepanelSendGateResult> => {
+      const run = queueRef.current.catch(() => undefined)
+        .then(() => isCurrent() ? check(mode, isCurrent) : HOLD)
+        .then(result => isCurrent() ? result : HOLD)
       queueRef.current = run.catch(() => undefined)
       return run
     },
@@ -296,24 +302,21 @@ export const useSidepanelChatFreshness = ({
 
   /** The pre-send check `useMessage` runs through `SidepanelSendGateContext`. */
   const beforeSend = React.useCallback(
-    async ({ message }: { message: string }): Promise<SidepanelSendGateResult> => {
-      if (!checkableRef.current()) return PROCEED
-      const result = await enqueue("send")
-      if (!result.proceed) {
-        // The composer cleared itself when the send started; put the message back.
-        window.dispatchEvent(
-          new CustomEvent("tldw:set-composer-message", {
-            detail: { message, ifEmptyOnly: true }
-          })
-        )
-      }
-      return result
+    async (_input: { message: string }): Promise<SidepanelSendGateResult> => {
+      const tabId = checkableRef.current()
+      if (!tabId) return PROCEED
+      const owner = selectionRef.current.getCurrent().owner
+      const draftRevision = useStoreMessageOption.getState().chatDraftRevision
+      const current = () => mountedRef.current && checkableRef.current() === tabId &&
+        selectionRef.current.getCurrent().owner === owner && (!owner || owner.kind === "unavailable" || owner.validate_lease?.() !== false) &&
+        useStoreMessageOption.getState().chatDraftRevision === draftRevision
+      return enqueue("send", current)
     },
     [enqueue]
   )
 
   React.useEffect(() => {
-    if (typeof window === "undefined") return
+    if (typeof window === "undefined" || selectionRef.current.checkFreshness) return
     const schedule = () => {
       if (focusTimerRef.current) clearTimeout(focusTimerRef.current)
       focusTimerRef.current = setTimeout(() => {

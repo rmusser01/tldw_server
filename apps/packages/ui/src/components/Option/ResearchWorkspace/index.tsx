@@ -1,3 +1,4 @@
+import { useStartTutorial } from "@/hooks/useStartTutorial"
 import { useResearchWebCapture } from "@/utils/use-research-web-capture"
 import { WebArticleCaptureModal } from "./SourcesPane/WebArticleCaptureModal"
 import React, { Suspense, useEffect } from "react"
@@ -16,7 +17,6 @@ import {
   Loader2
 } from "lucide-react"
 import { createWorkspaceStorage, useWorkspaceStore } from "@/store/workspace"
-import { useTutorialStore } from "@/store/tutorials"
 import {
   WORKSPACE_CONFLICT_NOTICE_THROTTLE_MS,
   WORKSPACE_STORAGE_CHANNEL_NAME,
@@ -1268,7 +1268,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   const onboardingInitializedRef = React.useRef(false)
   const [showTutorialPrompt, setShowTutorialPrompt] = React.useState(false)
   const [showShortcutsModal, setShowShortcutsModal] = React.useState(false)
-  const startTutorial = useTutorialStore((s) => s.startTutorial)
+  const startTutorial = useStartTutorial()
 
   // Workspace store
   const workspaceId = useWorkspaceStore((s) => s.workspaceId)
@@ -2265,7 +2265,7 @@ const ResearchWorkspaceBody: React.FC = () => {
   }, [])
 
   const handleStartWorkspaceTour = React.useCallback(() => {
-    startTutorial("research-workspace-basics")
+    if (!startTutorial("research-workspace-basics")) return
     dismissOnboardingOverlay()
     setShowTutorialPrompt(false)
     messageApi.info(

@@ -171,20 +171,28 @@ async def test_over_quota_url_item_is_reported_as_that_items_error(
 
 
 @pytest.mark.asyncio
-async def test_upload_admitted_past_stale_column_when_quotas_off(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_upload_admitted_past_stale_column_when_quotas_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Quotas off: a real StorageQuotaService admits a 5 GB + 1 MB upload although users.storage_quota_mb says 5120."""
     from tldw_Server_API.app.core import config as config_module
 
     class _Pool:
         """One users row: used 100 MB, stale legacy column 5120."""
 
-        async def fetchone(self, _sql: str, _user_id: int):
-            """Return the users row."""
+        async def fetchone(self, sql: str, user_id: int):
+            """Keep legacy usage and the empty retained-storage ledger distinct."""
+            assert user_id == 1
+            if "native_chat_quota_reservations" in sql:
+                return {"bytes": 0, "count": 0}
+            assert "users" in sql
             return {"storage_used_mb": 100.0, "storage_quota_mb": 5120}
 
     monkeypatch.delenv("USAGE_QUOTAS_ENABLED", raising=False)
     monkeypatch.delenv("LIMIT_ENFORCEMENT_ENABLED", raising=False)
-    monkeypatch.setattr(config_module, "load_comprehensive_config", lambda *a, **k: None)
+    monkeypatch.setattr(
+        config_module, "load_comprehensive_config", lambda *a, **k: None
+    )
     svc = storage_quota_service.StorageQuotaService(db_pool=_Pool())
     svc._initialized = True
     processed = _patch_upload(monkeypatch, svc)

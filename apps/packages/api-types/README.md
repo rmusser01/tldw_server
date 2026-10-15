@@ -1,6 +1,6 @@
 # @tldw/api-types
 
-Single source of truth for the frontend API contract (ADR-065). Consumed by
+Single source of truth for the frontend API contract (ADR-069). Consumed by
 both frontend shells (`apps/tldw-frontend`, `apps/extension` via
 `apps/packages/ui`) — nothing else may introduce a second contract source.
 
@@ -20,13 +20,14 @@ bun run generate          # in apps/packages/api-types (needs server-importable 
 # or from the web shell:  bun run generate:api-types   (in apps/tldw-frontend)
 ```
 
-Run whenever the backend API contract changes; the fingerprint gate in
-`backend-required.yml` fails until the fingerprint (and `paths.d.ts`) are
-refreshed in the same PR.
+Run whenever the backend API contract changes. The existing backend drift gate
+checks both the fingerprint and the exact committed path union against the
+canonical schema. A fingerprint-only refresh cannot certify stale `paths.d.ts`.
+Package-only changes select both backend and frontend checks.
 
 ## Consumers
 
 - `apps/packages/ui` → `import type { ApiPath } from "@tldw/api-types"`
   (`ClientPath` in `services/tldw/openapi-guard.ts` is derived from it).
-- `apps/tldw-frontend/lib/api/generated/schema.d.ts` re-exports
-  `@tldw/api-types/schema`.
+- Rich-type consumers import from `@tldw/api-types/schema` after generation.
+  The legacy web `lib/api/generated/` output is retired.

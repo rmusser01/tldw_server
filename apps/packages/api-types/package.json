@@ -2,7 +2,7 @@
   "name": "@tldw/api-types",
   "version": "0.1.0",
   "private": true,
-  "description": "Shared OpenAPI contract artifacts for the tldw frontend shells (ADR-065). Owns the generation script, the committed drift fingerprint and path union, and the gitignored rich schema artifacts.",
+  "description": "Shared OpenAPI contract artifacts for the tldw frontend shells (ADR-069). Owns the generation script, the committed drift fingerprint and path union, and the gitignored rich schema artifacts.",
   "types": "./index.d.ts",
   "exports": {
     ".": "./index.d.ts",

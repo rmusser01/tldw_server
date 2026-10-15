@@ -199,29 +199,41 @@ describe("ModelDb storage efficiency", () => {
     area.__store.set("legacy-model-1", model("legacy-model-1"))
     const originalSet = area.set.bind(area)
     let failSets = true
+    let callbackError: { message: string } | undefined
+    const failedSet = vi.fn()
     area.set = ((items: Record<string, unknown>, callback: () => void) => {
       if (failSets) {
-        setTimeout(() => callback(), 0)
+        failedSet()
+        setTimeout(() => {
+          callbackError = { message: "QUOTA_BYTES exceeded" }
+          try {
+            callback()
+          } finally {
+            callbackError = undefined
+          }
+        }, 0)
         return
       }
       return originalSet(items, callback)
     }) as typeof area.set
-    ;(globalThis as any).chrome.runtime = {
-      ...(globalThis as any).chrome.runtime,
-      get lastError() {
-        return failSets ? { message: "QUOTA_BYTES exceeded" } : undefined
-      }
-    }
+    Object.defineProperty(globalThis.chrome.runtime, "lastError", {
+      configurable: true,
+      get: () => callbackError
+    })
 
     const { ModelDb } = await import("@/db/models")
     const db = new ModelDb()
 
     // getAll must reject (loud failure) rather than silently return [].
     await expect(db.getAll()).rejects.toThrow(/QUOTA_BYTES/)
+    expect(failedSet).toHaveBeenCalledOnce()
 
     // A later write on the same instance must also fail rather than persist
     // an index built from the cached empty migration result.
-    await expect(db.createMany([model("y-model-1")])).rejects.toThrow(/QUOTA_BYTES/)
+    await expect(db.createMany([model("y-model-1")])).rejects.toThrow(
+      /QUOTA_BYTES/
+    )
+    expect(failedSet).toHaveBeenCalledTimes(2)
     expect(area.__store.has("__tldwModelDbIndexV1")).toBe(false)
 
     // Once storage recovers, a fresh operation on a fresh instance migrates

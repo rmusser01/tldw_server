@@ -788,5 +788,63 @@ async def test_required_admin_audit_is_persisted_before_return(monkeypatch) -> N
         await finish_after_commit_scope(token, committed=False)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("committed", [True, False])
+async def test_deferred_admin_audit_keeps_entry_time_metadata(
+    monkeypatch, committed: bool
+) -> None:
+    events: list[dict[str, object]] = []
+
+    class _AuditService:
+        async def log_event(self, **kwargs) -> None:
+            events.append(kwargs["metadata"])
+
+        async def flush(self, *, raise_on_failure: bool) -> None:
+            assert raise_on_failure is False
+
+    async def _fake_get_service(_actor_id):
+        return _AuditService()
+
+    monkeypatch.setattr(
+        admin_audit_service,
+        "get_or_create_audit_service_for_user_id_optional",
+        _fake_get_service,
+    )
+    metadata = {"reason": "Original support request", "requested_role": "viewer"}
+    token = begin_after_commit_scope()
+    try:
+        await admin_audit_service.emit_admin_account_audit_event(
+            actor_id=7,
+            target_user_id=42,
+            event_type=AuditEventType.USER_UPDATED,
+            category=AuditEventCategory.AUTHORIZATION,
+            resource_type="user_account",
+            resource_id="42",
+            action="admin.user.update",
+            metadata=metadata,
+        )
+        assert events == []
+        metadata.clear()
+        metadata["reason"] = "A later unrelated request"
+    finally:
+        await finish_after_commit_scope(token, committed=committed)
+
+    assert events == (
+        [
+            {
+                "actor_id": 7,
+                "target_user_id": 42,
+                "resource_type": "user_account",
+                "resource_id": "42",
+                "action": "admin.user.update",
+                "reason": "Original support request",
+                "requested_role": "viewer",
+            }
+        ]
+        if committed
+        else []
+    )
+
+
 async def _false_async() -> bool:
     return False

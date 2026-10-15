@@ -38,6 +38,8 @@ type ServerChatRowCommonProps = {
   isPinned: boolean
   isActive: boolean
   /** Temporary mode: the row opens the chat but hides pin and management actions. */
+  showReference?: boolean
+  disabled?: boolean
   readOnly?: boolean
   openMenuFor: string | null
   setOpenMenuFor: (value: string | null) => void
@@ -49,7 +51,10 @@ type ServerChatRowCommonProps = {
   onEditTopic: (chat: ServerChatHistoryItem) => void
   onDeleteChat: (chat: ServerChatHistoryItem) => void | Promise<void>
   onRestoreChat: (chat: ServerChatHistoryItem) => void | Promise<void>
-  onUpdateState?: (chat: ServerChatHistoryItem, state: ConversationState) => void
+  onUpdateState?: (
+    chat: ServerChatHistoryItem,
+    state: ConversationState
+  ) => void
   t: TFunction
 }
 
@@ -72,6 +77,8 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
     chat,
     isTrashView,
     readOnly = false,
+    disabled = false,
+    showReference = false,
     isPinned,
     isActive,
     openMenuFor,
@@ -89,7 +96,13 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
   } = props
   const selectionMode = props.selectionMode
   const isSelected = props.selectionMode ? props.isSelected : false
-  const onToggleSelected = props.selectionMode ? props.onToggleSelected : undefined
+  const onToggleSelected = props.selectionMode
+    ? props.onToggleSelected
+    : undefined
+  const reference = t("common:chatSidebar.local.chatReference", {
+    defaultValue: "Chat {{id}}",
+    id: chat.id
+  })
   const lastModifiedMs = chat.updatedAtMs ?? chat.createdAtMs
   const lastModifiedLabel = Number.isNaN(lastModifiedMs)
     ? null
@@ -144,7 +157,10 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
     {
       key: "topic",
       icon: <Tag className="size-3" />,
-      label: t("playground:composer.topicPlaceholder", "Topic label (optional)"),
+      label: t(
+        "playground:composer.topicPlaceholder",
+        "Topic label (optional)"
+      ),
       onClick: () => {
         setOpenMenuFor(null)
         onEditTopic(chat)
@@ -195,8 +211,7 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
           title={t("common:serverChatForkedTooltip", {
             chatId: String(chat.parent_conversation_id).slice(0, 8),
             defaultValue: "Forked from chat {{chatId}}"
-          })}
-        >
+          })}>
           <span className="inline-flex items-center gap-1">
             <GitBranch className="size-3" />
             <span>
@@ -218,12 +233,13 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
   }
 
   const handleRowClick = React.useCallback(() => {
+    if (disabled || (selectionMode && readOnly)) return
     if (selectionMode && onToggleSelected) {
       onToggleSelected(chat.id)
       return
     }
     onSelectChat(chat)
-  }, [selectionMode, onToggleSelected, chat, onSelectChat])
+  }, [disabled, readOnly, selectionMode, onToggleSelected, chat, onSelectChat])
 
   return (
     <div
@@ -233,22 +249,23 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
           ? "bg-surface2 border-border-strong text-text"
           : "bg-surface text-text border-border hover:bg-surface2",
         selectionMode && isSelected && "border-primary/40"
-      )}
-    >
+      )}>
       {selectionMode ? (
         <input
           type="checkbox"
+          disabled={disabled || readOnly}
           checked={isSelected}
           onChange={() => onToggleSelected?.(chat.id)}
           onClick={(event) => event.stopPropagation()}
           className="size-3 rounded border-border text-primary accent-primary"
-          aria-label={t("sidepanel:multiSelect.toggle", "Toggle selection")}
+          aria-label={`${t("sidepanel:multiSelect.toggle", "Toggle selection")}: ${chat.title} · ${reference}`}
         />
       ) : null}
       <button
         className="flex flex-col overflow-hidden flex-1 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-1 rounded"
         onClick={handleRowClick}
-      >
+        aria-label={showReference ? `${chat.title} · ${reference}` : undefined}
+        disabled={disabled || (selectionMode && readOnly)}>
         <span className="truncate text-sm" title={chat.title}>
           {chat.title}
         </span>
@@ -267,8 +284,7 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
           {lastModifiedLabel && (
             <span
               className="text-[11px] text-text-subtle"
-              title={lastModifiedTitle}
-            >
+              title={lastModifiedTitle}>
               {t("common:updated", { defaultValue: "Updated" })}{" "}
               {lastModifiedLabel}
             </span>
@@ -276,12 +292,14 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
           {chat.topic_label && (
             <span
               className="truncate max-w-[12rem]"
-              title={String(chat.topic_label)}
-            >
+              title={String(chat.topic_label)}>
               {String(chat.topic_label)}
             </span>
           )}
         </div>
+        {showReference && (
+          <span className="text-xs text-text-subtle">{reference}</span>
+        )}
         <span className="flex items-center gap-1 text-xs text-text-subtle">
           {renderSourceInfo()}
         </span>
@@ -298,8 +316,7 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
                 }}
                 className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)] h-7 w-7 sm:min-w-0 sm:min-h-0"
                 aria-label={isPinned ? t("common:unpin") : t("common:pin")}
-                aria-pressed={isPinned}
-              >
+                aria-pressed={isPinned}>
                 {isPinned ? (
                   <PinOff className="size-3" />
                 ) : (
@@ -313,8 +330,7 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
             trigger={["click"]}
             placement="bottomRight"
             open={openMenuFor === chat.id}
-            onOpenChange={(open) => setOpenMenuFor(open ? chat.id : null)}
-          >
+            onOpenChange={(open) => setOpenMenuFor(open ? chat.id : null)}>
             <button
               type="button"
               onClick={(event) => event.stopPropagation()}
@@ -324,8 +340,7 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
               })}: ${chat.title}`}
               aria-haspopup="menu"
               aria-expanded={openMenuFor === chat.id}
-              aria-controls={`server-chat-actions-${chat.id}`}
-            >
+              aria-controls={`server-chat-actions-${chat.id}`}>
               <MoreHorizontal className="size-3.5" />
             </button>
           </Dropdown>

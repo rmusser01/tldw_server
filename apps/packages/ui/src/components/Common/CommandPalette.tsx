@@ -43,6 +43,12 @@ import { ADMIN_MODULES } from "@/components/Option/Admin/admin-modules"
 import { RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { searchSettings } from "@/data/settings-index"
 import { cn } from "@/libs/utils"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import {
+  capturePaletteFocusRequest,
+  type PaletteFocusRequest
+} from "./command-palette-focus"
+import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 import { requestSettingsNavigation } from "@/utils/settings-return"
 
 type CommandShortcut = { key: string; modifiers: ShortcutModifier[] }
@@ -100,6 +106,7 @@ export interface CommandPaletteProps {
   onQueryChange?: (query: string) => void
   scope?: "global" | "sidepanel"
   openSignal?: number
+  openRequest?: PaletteFocusRequest
   registerGlobalOpenShortcut?: boolean
   listenForOpenEvents?: boolean
 }
@@ -118,6 +125,7 @@ export function CommandPalette({
   onQueryChange,
   scope = "global",
   openSignal,
+  openRequest,
   registerGlobalOpenShortcut = true,
   listenForOpenEvents = true,
 }: CommandPaletteProps) {
@@ -127,7 +135,9 @@ export function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const lastOpenSignalRef = useRef(0)
-  const focusReturnRef = useRef<HTMLElement | null>(null)
+  const focusReturnRef = useRef<PaletteFocusRequest | null>(null)
+  const paletteRootRef = useRef<HTMLDivElement>(null)
+  const selection = useHistorySelectionContext()
   const wasOpenRef = useRef(false)
   const location = useLocation()
   const navigate = useNavigate()
@@ -136,25 +146,25 @@ export function CommandPalette({
   const shortcutEnabled = location.pathname !== RESEARCH_WORKSPACE_PATH
   const { shortcuts: configuredShortcuts } = useShortcutConfig()
 
-  const rememberFocusBeforeOpen = useCallback(() => {
-    if (typeof document === "undefined") {
-      focusReturnRef.current = null
-      return
-    }
-    const activeElement = document.activeElement
-    focusReturnRef.current =
-      activeElement instanceof HTMLElement && activeElement !== document.body
-        ? activeElement
-        : null
-  }, [])
-
-  const openPalette = useCallback(() => {
-    setOpen((currentOpen) => {
-      if (!currentOpen) {
-        rememberFocusBeforeOpen()
+  const rememberFocusBeforeOpen = useCallback(
+    (incoming?: PaletteFocusRequest) => {
+      if (typeof document === "undefined") return false
+      const request = incoming ?? capturePaletteFocusRequest(selection)
+      if (request !== focusReturnRef.current) focusReturnRef.current?.dispose()
+      focusReturnRef.current = request
+      if (!request.isCurrent()) {
+        request.dispose()
+        return false
       }
       return true
-    })
+    },
+    [selection]
+  )
+
+  const openPalette = useCallback(() => {
+    if (focusReturnRef.current?.isOpen() && focusReturnRef.current.isCurrent())
+      return
+    if (rememberFocusBeforeOpen()) setOpen(true)
   }, [rememberFocusBeforeOpen])
 
   const closePalette = useCallback(() => {
@@ -168,7 +178,7 @@ export function CommandPalette({
     action: openPalette,
     description: "Open command palette",
     enabled: registerGlobalOpenShortcut && shortcutEnabled,
-    allowInInput: true,
+    allowInInput: true
   })
 
   useShortcut({
@@ -177,7 +187,7 @@ export function CommandPalette({
     action: openPalette,
     description: "Open command palette",
     enabled: registerGlobalOpenShortcut && shortcutEnabled,
-    allowInInput: true,
+    allowInInput: true
   })
 
   // Also allow Escape to close — but only while the palette is open. useShortcut
@@ -185,14 +195,17 @@ export function CommandPalette({
   // an always-on Escape shortcut would swallow Escape app-wide and prevent antd
   // Drawer/Modal/Select from closing on Escape. Gating on `open` keeps Escape
   // working for every other overlay when the palette is closed.
-  useShortcut({
-    key: "Escape",
-    modifiers: [],
-    action: closePalette,
-    description: "Close command palette",
-    allowInInput: true,
-    enabled: open,
-  }, [closePalette, open])
+  useShortcut(
+    {
+      key: "Escape",
+      modifiers: [],
+      action: closePalette,
+      description: "Close command palette",
+      allowInInput: true,
+      enabled: open
+    },
+    [closePalette, open]
+  )
 
   useIsomorphicLayoutEffect(() => {
     if (!listenForOpenEvents) {
@@ -208,25 +221,52 @@ export function CommandPalette({
   useEffect(() => {
     const currentOpenSignal = openSignal ?? 0
     if (currentOpenSignal > lastOpenSignalRef.current) {
-      if (!open) {
-        rememberFocusBeforeOpen()
-      }
-      setOpen(true)
+      if (openRequest) setOpen(rememberFocusBeforeOpen(openRequest))
+      else if (!open && rememberFocusBeforeOpen()) setOpen(true)
     }
     lastOpenSignalRef.current = currentOpenSignal
-  }, [open, openSignal, rememberFocusBeforeOpen])
+  }, [open, openSignal, openRequest, rememberFocusBeforeOpen])
+
+  const route = JSON.stringify([
+    location.key,
+    location.pathname,
+    location.search,
+    location.hash
+  ])
+  useIsomorphicLayoutEffect(() => {
+    setOpen(false)
+    return () => {
+      focusReturnRef.current?.dispose()
+    }
+  }, [route])
+  useIsomorphicLayoutEffect(() => {
+    if (open) focusReturnRef.current?.setRoot(paletteRootRef.current)
+  }, [open, openRequest])
 
   useEffect(() => {
+    let timer: number | undefined
     if (wasOpenRef.current && !open) {
-      const focusTarget = focusReturnRef.current
-      focusReturnRef.current = null
-      window.setTimeout(() => {
-        if (focusTarget?.isConnected) {
-          focusTarget.focus()
-        }
+      const request = focusReturnRef.current
+      timer = window.setTimeout(() => {
+        const target = request?.target
+        const current =
+          request === focusReturnRef.current &&
+          request?.isCurrent() &&
+          target?.isConnected &&
+          !isHiddenBySelfOrAncestor(target) &&
+          !target.closest("[inert]") &&
+          !target.hasAttribute("disabled") &&
+          target.getAttribute("aria-disabled") !== "true" &&
+          document.activeElement === document.body
+        if (focusReturnRef.current === request) focusReturnRef.current = null
+        request?.dispose()
+        if (current) target.focus()
       }, 0)
     }
     wasOpenRef.current = open
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer)
+    }
   }, [open])
 
   // Build default commands
@@ -494,11 +534,11 @@ export function CommandPalette({
               id: "action-search-history",
               label: t(
                 "common:commandPalette.searchHistory",
-                "Search chat history"
+                "Find conversations"
               ),
               description: t(
                 "common:commandPalette.searchHistoryDesc",
-                "Focus the chat search input"
+                "Focus conversation history search"
               ),
               icon: <Search className="size-4" />,
               action: () => {
@@ -679,14 +719,18 @@ export function CommandPalette({
     onQueryChange?.(query)
   }, [onQueryChange, query])
 
-  // Focus input when opened
+  // A late opening timer must still own the explicit open request.
   useEffect(() => {
-    if (open) {
-      setQuery("")
-      setSelectedIndex(0)
-      setTimeout(() => inputRef.current?.focus(), 0)
-    }
-  }, [open])
+    if (!open) return
+    setQuery("")
+    setSelectedIndex(0)
+    const request = focusReturnRef.current
+    const timer = window.setTimeout(() => {
+      if (request === focusReturnRef.current && request?.isCurrent() && inputRef.current?.isConnected &&
+        !isHiddenBySelfOrAncestor(inputRef.current) && !inputRef.current.closest("[inert]")) inputRef.current.focus()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [open, openRequest])
 
   // Scroll selected item into view
   useEffect(() => {
@@ -787,7 +831,7 @@ export function CommandPalette({
   }
 
   const modalContent = (
-    <>
+    <div ref={paletteRootRef}>
       {/* Backdrop */}
       <div
         className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm"
@@ -799,7 +843,7 @@ export function CommandPalette({
         className="fixed left-1/2 top-[15%] sm:top-[20%] z-50 w-[calc(100%-2rem)] sm:w-full max-w-lg -translate-x-1/2 overflow-hidden rounded-xl border border-border bg-surface shadow-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={t("common:commandPalette.title", "Command Palette")}
+        aria-label={t("common:commandPalette.title", "Search commands")}
         onKeyDown={handleKeyDown}
       >
         {/* Search input */}
@@ -811,7 +855,7 @@ export function CommandPalette({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             aria-label={t("common:commandPalette.searchCommands", "Search commands")}
-            placeholder={t("common:commandPalette.placeholder", "Type a command or search...")}
+            placeholder={t("common:commandPalette.placeholder", "Search commands, settings, and prompts…")}
             className={cn(
               "flex-1 rounded-md bg-transparent text-base text-text placeholder:text-text-subtle",
               focusRingClasses
@@ -927,7 +971,7 @@ export function CommandPalette({
           </span>
         </div>
       </div>
-    </>
+    </div>
   )
 
   return createPortal(modalContent, document.body)

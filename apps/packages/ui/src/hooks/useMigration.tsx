@@ -95,7 +95,7 @@ export const useMigration = () => {
   }, [])
 
   return {
-    isLoading: migrationMutation.isPending,
+    isLoading: migrationMutation.isIdle || migrationMutation.isPending,
     isSuccess: migrationMutation.isSuccess && migrationMutation.data?.success,
     isError:
       migrationMutation.isError ||

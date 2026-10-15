@@ -30,6 +30,15 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
   className,
   emptyLabel = "No commands found"
 }) => {
+  const activeOptionRef = React.useRef<HTMLButtonElement>(null)
+  React.useEffect(() => {
+    if (open)
+      activeOptionRef.current?.scrollIntoView?.({
+        block: "nearest",
+        inline: "nearest"
+      })
+  }, [open, activeIndex, commands])
+
   if (!open) {
     return null
   }
@@ -43,6 +52,7 @@ export const SlashCommandMenu: React.FC<SlashCommandMenuProps> = ({
           commands.map((command, index) => (
             <button
               key={command.id}
+              ref={index === activeIndex ? activeOptionRef : undefined}
               type="button"
               role="option"
               aria-selected={index === activeIndex}

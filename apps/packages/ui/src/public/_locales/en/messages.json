@@ -2937,7 +2937,7 @@
     "message": "Live transcript will appear here while recording."
   },
   "playground_actions_temporaryOn": {
-    "message": "Temporary chat (not saved)"
+    "message": "Temporary chat (on this device)"
   },
   "playground_actions_temporaryOff": {
     "message": "Save chat to history"
@@ -3093,7 +3093,7 @@
     "message": "Close Knowledge search"
   },
   "playground_composer_persistence_ephemeral": {
-    "message": "Temporary chat: not saved in history and cleared when you close this window."
+    "message": "Temporary chat can stay on this device across reloads until closed or cleared. It is not added to server history."
   },
   "playground_composer_persistence_local": {
     "message": "Saved on this device only. This chat is not on your tldw server."
@@ -4228,5 +4228,29 @@
   },
   "quickIngest_wizard_results_savedReviewFailed": {
     "message": "Unable to open saved items. Try again."
+  },
+  "playground_header_newTemporaryChat": {
+    "message": "Temporary chat (on this device)"
+  },
+  "playground_composer_persistence_temporaryModeHelp": {
+    "message": "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device."
+  },
+  "sidepanel_composer_tempChatConfirmContent": {
+    "message": "This will clear your current conversation. New Temporary messages can remain on this device across reloads until you close or clear the chat. They will not be added to server history."
+  },
+  "sidepanel_composer_tempChatDisableConfirmContent": {
+    "message": "This will clear your current Temporary conversation. New messages can be stored in chat history."
+  },
+  "option_temporaryChat": {
+    "message": "Temporary chat (on this device)"
+  },
+  "temporaryChatDiscardConfirmation": {
+    "message": "Discard this Temporary conversation?\n\nCancel keeps it on this device so you can copy messages before continuing. OK discards its messages."
+  },
+  "multiSelect_deleteAndCloseConfirmBody": {
+    "message": "Saved chats go to Trash. Selected tabs close on this device. Closing a Temporary tab discards its messages."
+  },
+  "chatSidebar_deletedDeviceCopyRetained": {
+    "message": "Removed from server history. A cached copy remains on this device because it could not be removed."
   }
 }

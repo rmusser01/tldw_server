@@ -3,12 +3,12 @@ import type { ServerChatSaveStatus } from "@/store/server-chat-save-status"
 /**
  * Where a chat is saved, derived only from acknowledged state (CS-03 / XS-05,
  * #3104):
- * - "temporary": a temporary chat, which is not saved;
+ * - "temporary": an on-device Temporary chat outside server history;
  * - "local": saved on this device only (no server chat id);
  * - "serverSaving": a server chat whose latest write is still in flight;
  * - "serverFailed": a server chat whose latest write was not acknowledged;
- * - "server": a server chat whose latest write was acknowledged, or that was
- *   opened from the server and has not been written to since.
+ * - "serverUnconfirmed": latest turn or cold history evidence is unresolved;
+ * - "server": acknowledged write or current owned history/journal evidence.
  *
  * Server connectivity is deliberately not an input: being connected does not
  * mean a chat has been saved there.
@@ -18,6 +18,7 @@ export const CHAT_PERSISTENCE_KINDS = [
   "local",
   "serverSaving",
   "serverFailed",
+  "serverUnconfirmed",
   "server"
 ] as const
 
@@ -50,6 +51,7 @@ export const resolveChatPersistenceKind = ({
   }
   if (serverSaveStatus === "saving") return "serverSaving"
   if (serverSaveStatus === "failed") return "serverFailed"
+  if (serverSaveStatus === "unknown" || serverSaveStatus === "unconfirmed") return "serverUnconfirmed"
   return "server"
 }
 
@@ -69,7 +71,7 @@ export const getChatPersistenceCopy = (
         description: translate(
           t,
           "ephemeral",
-          "Temporary chat: not saved in history and cleared when you close this window."
+          "Temporary chat can stay on this device across reloads until closed or cleared. It is not added to server history."
         )
       }
     case "serverSaving":
@@ -89,6 +91,11 @@ export const getChatPersistenceCopy = (
           "serverFailed",
           "Saved on this device. Your tldw server didn't confirm the latest changes."
         )
+      }
+    case "serverUnconfirmed":
+      return {
+        pill: translate(t, "serverUnconfirmedPill", "Save status unconfirmed"),
+        description: translate(t, "serverUnconfirmed", "This chat is linked to server history. Review retained outcomes and reload history to confirm the latest turn before sending again.")
       }
     case "server":
       return {

@@ -1,13 +1,26 @@
-import { createEditMessage, historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers";
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
+import { captureActorSceneSend, type ActorSceneSend } from "@/hooks/chat/actor-scene-source";
+import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes";
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition";
+import { usePlaygroundSessionStore } from "@/store/playground-session";
+import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner";
+import type { GreetingSeed } from "@/utils/character-greetings";
+import { createEditMessage, createNativeDeleteMessage, historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers";
 import {
   captureLocalMutationOwner,
-  createSelectedForkAction
+  chatSubmitFailed,
+  chatSubmitSkipped,
+  chatSubmitSubmitted,
+  createSelectedForkAction,
+  withDetachedHistoryResponse
 } from "@/hooks/chat/chat-action-utils";
+import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./chat/native-character-preflight";
 import { sendNativeHistoryCharacter } from "./chat/native-history-character-send";
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
 import { SidepanelSendGateContext } from "@/hooks/chat/sidepanel-send-gate";
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { invalidateServerChatHistory as refreshServerChatHistory } from "@/services/query-client";
 import { systemPromptForNonRag } from "~/services/tldw-server";
 import { useStoreMessageOption, type Message } from "~/store/option";
 import { useStoreMessage } from "~/store";
@@ -20,11 +33,10 @@ import {
   removeMessageById,
   updateMessageById,
 } from "@/db/dexie/helpers";
-import { removeAcknowledgedServerMirrorMessage } from "@/db/dexie/server-chat-mirror";
 import { useTranslation } from "react-i18next";
 import { usePageAssist } from "@/context";
 import { buildAssistantErrorContent } from "@/utils/chat-error-message";
-import { buildCharacterChatAssistantErrorContent } from "@/hooks/chat/useCharacterChatMode";
+import { buildCharacterChatAssistantErrorContent, classifyCharacterChatFailureRecovery } from "@/hooks/chat/useCharacterChatMode";
 import { createCharacterEmoteStream } from "@/hooks/chat/character-emote-stream";
 import { detectCharacterMood } from "@/utils/character-mood";
 import { useStorage } from "@plasmohq/storage/hook";
@@ -62,24 +74,40 @@ import {
 } from "@/utils/streaming-update-scheduler";
 
 type StreamingTextUpdate = { text: string; reasoningTime: number };
+type CommandIdentityPublication = (field: "historyId" | "serverChatId", id: string, publish: () => void) => boolean;
+
+type CompactModeOptions = {
+  selectedModel: string;
+  useOCR: boolean;
+  selectedSystemPrompt?: string | null;
+  actorSceneSend: ActorSceneSend;
+  sourceIsCurrent: () => boolean;
+  publishIdentity?: CommandIdentityPublication;
+  scopeInvalidatedSignal?: AbortSignal;
+  historyParams?: Pick<Parameters<typeof normalChatMode>[6],
+    "surface" | "historyPreparation" | "historySelection" | "selectionSource" |
+    "ownsAbortController" | "releaseAbortControllerIfOwned" | "onServerChatMutated">;
+};
 
 const createStreamingTextScheduler = (
   generateMessageId: string,
   setMessages: (updater: (prev: Message[]) => Message[]) => void,
+  shouldFlush: () => boolean
 ): StreamingUpdateScheduler<StreamingTextUpdate> =>
   createStreamingUpdateScheduler<StreamingTextUpdate>({
+    shouldFlush,
     apply: ({ text, reasoningTime }) =>
       setMessages((prev) =>
         prev.map((message) =>
           message.id === generateMessageId
             ? updateActiveVariant(message, {
                 message: text,
-                reasoning_time_taken: reasoningTime,
+                reasoning_time_taken: reasoningTime
               })
-            : message,
-        ),
-      ),
-  });
+            : message
+        )
+      )
+  })
 import type { CharacterEmoteEvent } from "@/utils/character-emotes";
 import type { ToolCall } from "@/types/tool-calls";
 import {
@@ -94,7 +122,9 @@ import {
   updateActiveVariant,
 } from "@/utils/message-variants";
 import { resolveImageBackendCandidates } from "@/utils/image-backends";
-import { normalChatMode } from "./chat-modes/normalChatMode";
+import { captureNormalChatPreparation, normalChatMode, runChatModeWithHistory } from "./chat-modes/normalChatMode";
+import type { ChatModeContext } from "./chat-modes/chatModePipeline";
+import { maybeInjectActorMessage } from "@/utils/actor";
 import { tabChatMode } from "./chat-modes/tabChatMode";
 import { documentChatMode } from "./chat-modes/documentChatMode";
 import { updatePageTitle } from "@/utils/update-page-title";
@@ -145,6 +175,7 @@ import {
   type ServicePromptSnapshot,
 } from "@/services/service-prompts";
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error";
+import { requestSettingsNavigation } from "@/utils/settings-return";
 
 const extractToolCalls = (generationInfo: unknown): ToolCall[] | undefined => {
   if (!generationInfo || typeof generationInfo !== "object") return undefined;
@@ -165,11 +196,17 @@ export const useMessage = () => {
   const {
     controller: abortController,
     setController: setAbortController,
+    getController: getAbortController,
     embeddingController,
     setEmbeddingController,
   } = usePageAssist();
   const discardCurrentTurnOnAbortRef = React.useRef(false);
   const activeNormalControllerRef = React.useRef<AbortController | null>(null);
+  const actionsMountedRef = React.useRef(false);
+  React.useEffect(() => {
+    actionsMountedRef.current = true;
+    return () => { actionsMountedRef.current = false; };
+  }, []);
 
   // Messages now come from Zustand store (single source of truth)
   const messages = useStoreMessageOption((state) => state.messages);
@@ -177,9 +214,8 @@ export const useMessage = () => {
 
   const { t } = useTranslation("option");
   const queryClient = useQueryClient();
-  const invalidateServerChatHistory = React.useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] });
-  }, [queryClient]);
+  const invalidateServerChatHistory = React.useCallback((isCurrent?: () => boolean) =>
+    refreshServerChatHistory(queryClient, isCurrent), [queryClient]);
   const { selectedModel, setSelectedModel } = useSelectedModel();
   const currentChatModelSettings = useStoreChatModelSettings();
   const {
@@ -433,7 +469,11 @@ export const useMessage = () => {
 
   // Local embedding store removed; rely on tldw_server RAG
 
-  const clearChat = () => {
+  const clearChat = (beforeReset?: () => void) => {
+    if (!requestSettingsNavigation("/")) return false;
+    beforeReset?.();
+    useStoreMessageOption.getState().startNewChatDraft();
+    historySelection?.reset();
     stopStreamingRequest();
     setMessages([]);
     setHistory([]);
@@ -443,7 +483,7 @@ export const useMessage = () => {
     setIsProcessing(false);
     setStreaming(false);
     updatePageTitle();
-    currentChatModelSettings.reset();
+    currentChatModelSettings.reset(useStoreChatModelSettings.getState().apiProvider);
     setServerChatId(null);
     if (defaultInternetSearchOn) {
       setWebSearch(true);
@@ -455,30 +495,60 @@ export const useMessage = () => {
       setTemporaryChat(true);
     }
     clearReplyTarget();
+    return true;
   };
 
-  const historySetterForQueuedTurn = (guard?: QueuedDispatchGuard) =>
+  const renderedDraftRevision = useStoreMessageOption(
+    (state) => state.chatDraftRevision
+  )
+  const renderedSettingsDraft = useStoreMessageOption(
+    (state) => state.chatDraftAddress
+  )
+  const settingsDraftIsCurrent = () => {
+    const draft = useStoreMessageOption.getState();
+    return actionsMountedRef.current && draft.chatDraftRevision === renderedDraftRevision &&
+      draft.chatDraftAddress === renderedSettingsDraft;
+  };
+  const historySetterForQueuedTurn = (guard?: QueuedDispatchGuard, isCurrent = settingsDraftIsCurrent, publishIdentity?: CommandIdentityPublication) =>
     (id: string, options?: { preserveServerChatId?: boolean }) => {
-      if (guard) guard.publishHistoryId(id, () => setHistoryId(id, options));
-      else setHistoryId(id, options);
+      if (!isCurrent()) return;
+      const publish = () => {
+        if (guard) guard.publishHistoryId(id, () => setHistoryId(id, options));
+        else setHistoryId(id, options);
+      };
+      if (publishIdentity) publishIdentity("historyId", id, publish);
+      else publish();
     };
-  const saveSuccessForQueuedTurn = (guard?: QueuedDispatchGuard) => createSaveMessageOnSuccess(
+  const saveSuccessForQueuedTurn = (guard?: QueuedDispatchGuard, isCurrent = settingsDraftIsCurrent, publishIdentity?: CommandIdentityPublication) => createSaveMessageOnSuccess(
     temporaryChat,
-    historySetterForQueuedTurn(guard),
+    historySetterForQueuedTurn(guard, isCurrent, publishIdentity),
     {
-      onServerConversationLinked: (conversationId) => {
+      onServerConversationLinked: (conversationId, payload, linkedHistoryId) => {
+        const sourceIsCurrent = () => settingsDraftIsCurrent() && isCurrent() &&
+          !payload.scopeSignal?.aborted && !payload.scopeInvalidatedSignal?.aborted &&
+          (!guard || guard.isSourceCurrent?.() === true);
+        if (!sourceIsCurrent()) return;
         const publish = () => {
-          setServerChatId(conversationId);
-          setServerChatMetaLoaded(false);
-          invalidateServerChatHistory();
+          if (guard) guard.publishServerChatId(conversationId, () => setServerChatId(conversationId));
+          else setServerChatId(conversationId);
         };
-        if (guard) guard.publishServerChatId(conversationId, publish);
-        else publish();
-        if (!serverChatId) {
+        if (publishIdentity) {
+          if (!publishIdentity("serverChatId", conversationId, publish)) return;
+        } else publish();
+        if (!sourceIsCurrent()) return;
+        setServerChatMetaLoaded(false);
+        if (!sourceIsCurrent()) return;
+        invalidateServerChatHistory();
+        if (!serverChatId && sourceIsCurrent()) {
           void syncChatSettingsForServerChat({
-            historyId,
+            historyId: linkedHistoryId,
             serverChatId: conversationId,
             allowScratchFallback: true,
+            sourceDraftAddress: renderedSettingsDraft,
+            requestScope: payload.requestScope,
+            signal: payload.scopeSignal,
+            validate_lease: () => sourceIsCurrent() &&
+              useStoreMessageOption.getState().serverChatId === conversationId,
           }).catch(() => {
             // Best-effort scratch-to-server settings reconciliation.
           });
@@ -486,6 +556,25 @@ export const useMessage = () => {
       },
     }
   );
+  const settersForTurn = (isCurrent: () => boolean) => {
+    const guard =
+      <Args extends unknown[]>(setter: (...args: Args) => void) =>
+      (...args: Args) => {
+        if (isCurrent()) setter(...args)
+      }
+    return {
+      setMessages: guard(setMessages),
+      setHistory: guard(setHistory),
+      setStreaming: guard(setStreaming),
+      setIsProcessing: guard(setIsProcessing),
+      setAbortController: guard(setAbortController),
+      setEmbeddingController: guard(setEmbeddingController),
+      setIsEmbedding: guard(setIsEmbedding),
+      setCurrentURL: guard(setCurrentURL),
+      setIsSearchingInternet: guard(setIsSearchingInternet)
+    }
+  }
+
   const chatWithWebsiteMode = async (
     message: string,
     image: string,
@@ -495,11 +584,17 @@ export const useMessage = () => {
     signal: AbortSignal,
     embeddingSignal: AbortSignal,
     servicePromptSnapshot: ServicePromptSnapshot,
+    streamingSourceIsCurrent: () => boolean,
+    options: CompactModeOptions,
     regenerateFromMessage?: Message,
     queuedGuard?: QueuedDispatchGuard,
   ) => {
-    const setTurnHistoryId = historySetterForQueuedTurn(queuedGuard);
-    const saveMessageOnSuccess = saveSuccessForQueuedTurn(queuedGuard);
+    const preparationIsCurrent = () => !signal.aborted && options.actorSceneSend.isCurrent();
+    if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
+    const { setMessages, setHistory, setStreaming, setIsProcessing, setAbortController,
+      setEmbeddingController, setIsEmbedding, setCurrentURL } = settersForTurn(options.sourceIsCurrent);
+    const setTurnHistoryId = historySetterForQueuedTurn(queuedGuard, options.sourceIsCurrent, options.publishIdentity);
+    const saveMessageOnSuccess = saveSuccessForQueuedTurn(queuedGuard, options.sourceIsCurrent, options.publishIdentity);
     const saveMessageOnError = createSaveMessageOnError(temporaryChat, history, setHistory, setTurnHistoryId);
     const executionSignal = servicePromptSnapshot.scopeSignal;
     const scopeInvalidatedSignal = servicePromptSnapshot.scopeInvalidatedSignal;
@@ -513,7 +608,7 @@ export const useMessage = () => {
       throw new Error("The Sidepanel RAG Service Prompt snapshot is incomplete.");
     }
 
-    if (!selectedModel || selectedModel.trim().length === 0) {
+    if (!options.selectedModel || options.selectedModel.trim().length === 0) {
       notification.error({
         message: t("error"),
         description: t("validationSelectModel"),
@@ -521,14 +616,176 @@ export const useMessage = () => {
       return;
     }
 
-    const model = selectedModel.trim();
+    const model = options.selectedModel.trim();
+    const prepareWebsitePrompt = async (ctx: Pick<ChatModeContext<Parameters<typeof normalChatMode>[6]>,
+      "message" | "messages" | "history" | "selectedModel" | "useOCR" | "signal" |
+      "servicePromptSnapshot" | "actorSettings" | "historyTurn" | "isRegenerate" | "assertPreparationCurrent">) => {
+      const contextMessages = ctx.isRegenerate ? ctx.messages : [
+        ...ctx.messages,
+        { isBot: false, message: ctx.message } as Message,
+        { isBot: true, message: "▋" } as Message
+      ];
+      ctx.assertPreparationCurrent?.();
+    let embedURL = "";
+    let embedHTML = "";
+    let embedType = "html";
+    let embedPDF: { content: string; page: number }[] = [];
+    if (chatWithWebsiteEmbedding) {
+      const {
+        content: html,
+        url: websiteUrl,
+        type,
+        pdf,
+      } = await getContentFromCurrentTab(true);
+      ctx.assertPreparationCurrent?.();
+
+      embedHTML = html;
+      embedURL = websiteUrl;
+      embedType = type;
+      embedPDF = pdf;
+      if (ctx.messages.length === 0) {
+        setCurrentURL(websiteUrl);
+      } else if (currentURL !== websiteUrl) {
+        setCurrentURL(websiteUrl);
+      } else {
+        embedURL = currentURL;
+      }
+    }
+
+      let query = ctx.message;
+      if (contextMessages.length > 2) {
+        const lastTenMessages = contextMessages.slice(-10);
+        lastTenMessages.pop();
+        const chat_history = lastTenMessages
+          .map((message) => {
+            return `${message.isBot ? "Assistant: " : "Human: "}${message.message}`;
+          })
+          .join("\n");
+        const promptForQuestion = renderServicePromptPart(
+          rewritePrompt.definition,
+          "template",
+          rewritePrompt.parts.template,
+          { chat_history, question: ctx.message },
+        );
+        const questionOllama = await pageAssistModel({
+          model: ctx.selectedModel,
+          toolChoice: "none",
+          tools: [],
+          saveToDb: false,
+          requestScope: ctx.servicePromptSnapshot!.requestScope,
+        });
+      ctx.assertPreparationCurrent?.();
+        const questionMessage = await humanMessageFormatter({
+          content: [
+            {
+              text: promptForQuestion,
+              type: "text",
+            },
+          ],
+          model: ctx.selectedModel,
+          useOCR: ctx.useOCR,
+        });
+      ctx.assertPreparationCurrent?.();
+        const response = await questionOllama.invoke([questionMessage], {
+          signal: ctx.signal,
+        });
+      ctx.assertPreparationCurrent?.();
+        query = response.content.toString();
+        query = removeReasoning(query);
+      }
+
+      let context: string = "";
+      let source: {
+        name: any;
+        type: any;
+        mode: string;
+        url: string;
+        pageContent: string;
+        metadata: Record<string, any>;
+      }[] = [];
+
+      if (chatWithWebsiteEmbedding) {
+        const websiteContext = await resolveWebsiteChatContext({
+          client: tldwClient,
+          embedURL,
+          embedType,
+          embedHTML,
+          embedPDF,
+          maxWebsiteContext,
+          query,
+          signal: ctx.signal,
+          requestScope: ctx.servicePromptSnapshot!.requestScope,
+        });
+      ctx.assertPreparationCurrent?.();
+        context = websiteContext.context;
+        source = websiteContext.source;
+      }
+
+      let humanMessage = await humanMessageFormatter({
+        content: [
+          {
+            text: renderServicePromptPart(
+              answerPrompt.definition,
+              "template",
+              answerPrompt.parts.template,
+              { context, question: query },
+            ),
+            type: "text",
+          },
+        ],
+        model: ctx.selectedModel,
+        useOCR: ctx.useOCR,
+      });
+      ctx.assertPreparationCurrent?.();
+
+
+      const applicationChatHistory = await maybeInjectActorMessage(
+        generateHistory(ctx.history, ctx.selectedModel, ctx.historyTurn ? { versioned: true } : undefined),
+        ctx.actorSettings ?? null, false
+      );
+      ctx.assertPreparationCurrent?.();
+      return { chatHistory: applicationChatHistory, humanMessage, sources: source };
+    };
+
+    if (options.historyParams?.historySelection) {
+      return runChatModeWithHistory({
+        id: "sidepanel-website",
+        buildUserMessage: (ctx: ChatModeContext<Parameters<typeof normalChatMode>[6]>) => ({
+          isBot: false, name: "You", message: ctx.message, sources: [], images: [],
+          createdAt: ctx.createdAt, id: ctx.resolvedUserMessageId,
+          parentMessageId: ctx.userParentMessageId ?? null
+        }),
+        buildAssistantMessage: (ctx) => ({
+          isBot: true, name: ctx.selectedModel, message: "▋", sources: [],
+          createdAt: ctx.createdAt, id: ctx.resolvedAssistantMessageId,
+          modelImage: ctx.modelInfo?.model_avatar,
+          modelName: ctx.modelInfo?.model_name || ctx.selectedModel,
+          parentMessageId: ctx.resolvedAssistantParentMessageId ?? null
+        }),
+        preparePrompt: prepareWebsitePrompt
+      },
+        message, image, isRegenerate, messages, history, signal, {
+          ...options.historyParams,
+          selectedModel: model, useOCR: options.useOCR,
+          selectedSystemPrompt: options.selectedSystemPrompt ?? "",
+          currentChatModelSettings, servicePromptSnapshot,
+          actorSceneSend: options.actorSceneSend, actorScene: options.actorSceneSend.scene,
+          actorSettings: options.actorSceneSend.scene.settings,
+          setMessages, setHistory, setStreaming, setIsProcessing, setAbortController,
+          setHistoryId: setTurnHistoryId, historyId,
+          saveMessageOnSuccess, saveMessageOnError
+        });
+    }
+
     setStreaming(true);
     const userDefaultModelSettings = await getAllDefaultModelSettings();
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
 
     const ollama = await pageAssistModel({
       model,
       requestScope: servicePromptSnapshot.requestScope,
     });
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
 
     let newMessage: Message[] = [];
     const resolvedAssistantMessageId = generateID();
@@ -536,6 +793,7 @@ export const useMessage = () => {
     let generateMessageId = resolvedAssistantMessageId;
     const createdAt = Date.now();
     const modelInfo = await getModelNicknameByID(model);
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
     const fallbackParentMessageId = getLastUserMessageId(messages);
     const resolvedAssistantParentMessageId = isRegenerate
       ? (regenerateFromMessage?.parentMessageId ?? fallbackParentMessageId)
@@ -608,123 +866,31 @@ export const useMessage = () => {
     }
     let fullText = "";
     let contentToSave = "";
-    let embedURL = "";
-    let embedHTML = "";
-    let embedType = "html";
-    let embedPDF: { content: string; page: number }[] = [];
-    if (chatWithWebsiteEmbedding) {
-      const {
-        content: html,
-        url: websiteUrl,
-        type,
-        pdf,
-      } = await getContentFromCurrentTab(true);
-
-      embedHTML = html;
-      embedURL = websiteUrl;
-      embedType = type;
-      embedPDF = pdf;
-      if (messages.length === 0) {
-        setCurrentURL(websiteUrl);
-      } else if (currentURL !== websiteUrl) {
-        setCurrentURL(websiteUrl);
-      } else {
-        embedURL = currentURL;
-      }
-    }
     setMessages(newMessage);
     // Declared before the try so the catch can drop any pending trailing
     // flush when the turn is restored after an error.
     const streamingScheduler = createStreamingTextScheduler(
       generateMessageId,
       setMessages,
-    );
+      () =>
+        streamingSourceIsCurrent() &&
+        !executionSignal.aborted &&
+        !scopeInvalidatedSignal.aborted
+    )
     try {
-      let query = message;
-      if (newMessage.length > 2) {
-        const lastTenMessages = newMessage.slice(-10);
-        lastTenMessages.pop();
-        const chat_history = lastTenMessages
-          .map((message) => {
-            return `${message.isBot ? "Assistant: " : "Human: "}${message.message}`;
-          })
-          .join("\n");
-        const promptForQuestion = renderServicePromptPart(
-          rewritePrompt.definition,
-          "template",
-          rewritePrompt.parts.template,
-          { chat_history, question: message },
-        );
-        const questionOllama = await pageAssistModel({
-          model,
-          toolChoice: "none",
-          tools: [],
-          saveToDb: false,
-          requestScope: servicePromptSnapshot.requestScope,
-        });
-        const questionMessage = await humanMessageFormatter({
-          content: [
-            {
-              text: promptForQuestion,
-              type: "text",
-            },
-          ],
-          model,
-          useOCR,
-        });
-        const response = await questionOllama.invoke([questionMessage], {
-          signal: executionSignal,
-        });
-        query = response.content.toString();
-        query = removeReasoning(query);
-      }
-
-      let context: string = "";
-      let source: {
-        name: any;
-        type: any;
-        mode: string;
-        url: string;
-        pageContent: string;
-        metadata: Record<string, any>;
-      }[] = [];
-
-      if (chatWithWebsiteEmbedding) {
-        const websiteContext = await resolveWebsiteChatContext({
-          client: tldwClient,
-          embedURL,
-          embedType,
-          embedHTML,
-          embedPDF,
-          maxWebsiteContext,
-          query,
-          signal: executionSignal,
-          requestScope: servicePromptSnapshot.requestScope,
-        });
-        context = websiteContext.context;
-        source = websiteContext.source;
-      }
-
-      let humanMessage = await humanMessageFormatter({
-        content: [
-          {
-            text: renderServicePromptPart(
-              answerPrompt.definition,
-              "template",
-              answerPrompt.parts.template,
-              { context, question: query },
-            ),
-            type: "text",
-          },
-        ],
-        model,
-        useOCR,
+      const { chatHistory: applicationChatHistory, humanMessage, sources: source } = await prepareWebsitePrompt({
+        message, messages, history, selectedModel: model, useOCR: options.useOCR,
+        signal: executionSignal, servicePromptSnapshot, actorSettings: options.actorSceneSend.scene.settings,
+        isRegenerate,
+        assertPreparationCurrent: () => {
+          executionSignal.throwIfAborted();
+          if (!preparationIsCurrent()) throw new Error("actor_settings_scope_changed");
+        }
       });
-
-      const applicationChatHistory = generateHistory(history, model);
 
       let generationInfo: any | undefined = undefined;
 
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
       const chunks = await ollama.stream(
         [...applicationChatHistory, humanMessage],
         {
@@ -851,6 +1017,7 @@ export const useMessage = () => {
       // Drop any pending trailing flush so it cannot land on top of the
       // restored or error state written below.
       streamingScheduler.cancel();
+      if (!options.sourceIsCurrent()) return chatSubmitSkipped("Conversation changed");
       const scopeAborted = shouldAbortForScopeChange();
       if (scopeAborted || isRequestConfigScopeChangedError(e)) {
         setMessages(messages);
@@ -954,13 +1121,19 @@ export const useMessage = () => {
     messages: Message[],
     history: ChatHistory,
     signal: AbortSignal,
+    streamingSourceIsCurrent: () => boolean,
+    options: CompactModeOptions,
     regenerateFromMessage?: Message,
     queuedGuard?: QueuedDispatchGuard,
   ) => {
-    const setTurnHistoryId = historySetterForQueuedTurn(queuedGuard);
-    const saveMessageOnSuccess = saveSuccessForQueuedTurn(queuedGuard);
+    const preparationIsCurrent = () => !signal.aborted && options.actorSceneSend.isCurrent();
+    if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
+    const { setMessages, setHistory, setStreaming, setIsProcessing, setAbortController,
+      setEmbeddingController, setIsEmbedding } = settersForTurn(options.sourceIsCurrent);
+    const setTurnHistoryId = historySetterForQueuedTurn(queuedGuard, options.sourceIsCurrent, options.publishIdentity);
+    const saveMessageOnSuccess = saveSuccessForQueuedTurn(queuedGuard, options.sourceIsCurrent, options.publishIdentity);
     const saveMessageOnError = createSaveMessageOnError(temporaryChat, history, setHistory, setTurnHistoryId);
-    if (!selectedModel || selectedModel.trim().length === 0) {
+    if (!options.selectedModel || options.selectedModel.trim().length === 0) {
       notification.error({
         message: t("error"),
         description: t("validationSelectModel"),
@@ -968,9 +1141,10 @@ export const useMessage = () => {
       return;
     }
 
-    const model = selectedModel.trim();
+    const model = options.selectedModel.trim();
     setStreaming(true);
-    const ollama = await pageAssistModel({ model });
+    const ollama = await pageAssistModel({ model, requestScope: options.actorSceneSend.requestScope });
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
 
     let newMessage: Message[] = [];
     const resolvedAssistantMessageId = generateID();
@@ -978,6 +1152,7 @@ export const useMessage = () => {
     let generateMessageId = resolvedAssistantMessageId;
     const createdAt = Date.now();
     const modelInfo = await getModelNicknameByID(model);
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
     const fallbackParentMessageId = getLastUserMessageId(messages);
     const resolvedAssistantParentMessageId = isRegenerate
       ? (regenerateFromMessage?.parentMessageId ?? fallbackParentMessageId)
@@ -1054,11 +1229,14 @@ export const useMessage = () => {
     const streamingScheduler = createStreamingTextScheduler(
       generateMessageId,
       setMessages,
-    );
+      streamingSourceIsCurrent
+    )
 
     try {
       const prompt = await systemPromptForNonRag();
-      const selectedPrompt = await getPromptById(selectedSystemPrompt);
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
+      const selectedPrompt = await getPromptById(options.selectedSystemPrompt ?? selectedSystemPrompt);
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
 
       const applicationChatHistory = [];
       // Inject selected character's system prompt at highest priority
@@ -1068,9 +1246,11 @@ export const useMessage = () => {
             content: selectedCharacter.system_prompt,
           }),
         );
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
       }
 
       const data = await getScreenshotFromCurrentTab();
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
 
       const visionImage = data?.screenshot || "";
 
@@ -1087,6 +1267,7 @@ export const useMessage = () => {
             content: prompt,
           }),
         );
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
       }
       if (!selectedCharacter?.system_prompt && selectedPrompt) {
         const selectedPromptContent =
@@ -1096,6 +1277,7 @@ export const useMessage = () => {
             content: selectedPromptContent,
           }),
         );
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
       }
 
       let humanMessage = await humanMessageFormatter({
@@ -1110,13 +1292,21 @@ export const useMessage = () => {
           },
         ],
         model,
-        useOCR,
+        useOCR: options.useOCR,
       });
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
 
       let generationInfo: any | undefined = undefined;
 
-      const chunks = await ollama.stream(
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
+      const preparedMessages = await maybeInjectActorMessage(
         [...applicationChatHistory, humanMessage],
+        options.actorSceneSend.scene.settings,
+        false,
+      );
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
+      const chunks = await ollama.stream(
+        preparedMessages,
         {
           signal: signal,
           callbacks: [
@@ -1214,6 +1404,13 @@ export const useMessage = () => {
         userMessageId: resolvedUserMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+        requestScope: options.actorSceneSend.requestScope,
+        scopeSignal: signal,
+        scopeInvalidatedSignal: options.scopeInvalidatedSignal,
+        saveToDb: Boolean(ollama.saveToDb),
+        conversationId: ollama.conversationId,
+        userServerMessageId: ollama.userServerMessageId,
+        assistantServerMessageId: ollama.serverMessageId,
       });
 
       setIsProcessing(false);
@@ -1222,6 +1419,7 @@ export const useMessage = () => {
       // Drop any pending trailing flush so it cannot land on top of the
       // restored or error state written below.
       streamingScheduler.cancel();
+      if (!options.sourceIsCurrent()) return chatSubmitSkipped("Conversation changed");
       if (
         discardAbortedTurnIfRequested({
           discardRequested: discardCurrentTurnOnAbortRef.current,
@@ -1261,6 +1459,9 @@ export const useMessage = () => {
         userMessageId: resolvedUserMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+        requestScope: options.actorSceneSend.requestScope,
+        scopeSignal: signal,
+        scopeInvalidatedSignal: options.scopeInvalidatedSignal,
       });
 
       if (!errorSave) {
@@ -1287,6 +1488,7 @@ export const useMessage = () => {
     history: ChatHistory,
     signal: AbortSignal,
     model: string,
+    streamingSourceIsCurrent: () => boolean,
     characterOverride?: Character | null,
     regenerateFromMessage?: Message,
     serverChatIdOverride?: string | null,
@@ -1384,7 +1586,8 @@ export const useMessage = () => {
     const streamingScheduler = createStreamingTextScheduler(
       generateMessageId,
       setMessages,
-    );
+      streamingSourceIsCurrent
+    )
     const emoteStream = createCharacterEmoteStream();
     const getExplicitEmoteMoodLabel = () =>
       emoteStream.events.length > 0
@@ -1764,7 +1967,7 @@ export const useMessage = () => {
         apiReasoning = sanitizedChunkState.apiReasoning;
         applyEmoteEventsToMessage(sanitizedChunkState.emoteEvents);
 
-        if (chunkState.token && fullText !== previousFullText) {
+        if (fullText !== previousFullText) {
           streamingScheduler.schedule({
             text: fullText + "▋",
             reasoningTime: timetaken,
@@ -2151,15 +2354,16 @@ export const useMessage = () => {
     history: ChatHistory,
     signal: AbortSignal,
     messageType: string,
+    streamingSourceIsCurrent: () => boolean,
+    options: CompactModeOptions,
     regenerateFromMessage?: Message,
-    options?: {
-      selectedModel?: string | null;
-      useOCR?: boolean;
-    },
     queuedGuard?: QueuedDispatchGuard,
   ) => {
-    const setTurnHistoryId = historySetterForQueuedTurn(queuedGuard);
-    const saveMessageOnSuccess = saveSuccessForQueuedTurn(queuedGuard);
+    const preparationIsCurrent = () => !signal.aborted && options.actorSceneSend.isCurrent();
+    if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
+    const { setMessages, setHistory, setStreaming, setIsProcessing, setAbortController } = settersForTurn(options.sourceIsCurrent);
+    const setTurnHistoryId = historySetterForQueuedTurn(queuedGuard, options.sourceIsCurrent, options.publishIdentity);
+    const saveMessageOnSuccess = saveSuccessForQueuedTurn(queuedGuard, options.sourceIsCurrent, options.publishIdentity);
     const saveMessageOnError = createSaveMessageOnError(temporaryChat, history, setHistory, setTurnHistoryId);
     const resolvedPresetModel = (
       typeof options?.selectedModel === "string"
@@ -2189,7 +2393,8 @@ export const useMessage = () => {
       }
     }
 
-    const ollama = await pageAssistModel({ model });
+    const ollama = await pageAssistModel({ model, requestScope: options.actorSceneSend.requestScope });
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
 
     let newMessage: Message[] = [];
     const resolvedAssistantMessageId = generateID();
@@ -2197,6 +2402,7 @@ export const useMessage = () => {
     let generateMessageId = resolvedAssistantMessageId;
     const createdAt = Date.now();
     const modelInfo = await getModelNicknameByID(model);
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
     const fallbackParentMessageId = getLastUserMessageId(messages);
     const resolvedAssistantParentMessageId = isRegenerate
       ? (regenerateFromMessage?.parentMessageId ?? fallbackParentMessageId)
@@ -2274,10 +2480,12 @@ export const useMessage = () => {
     const streamingScheduler = createStreamingTextScheduler(
       generateMessageId,
       setMessages,
-    );
+      streamingSourceIsCurrent
+    )
 
     try {
       const prompt = await getPrompt(messageType);
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
       let humanMessage = await humanMessageFormatter({
         content: [
           {
@@ -2288,6 +2496,7 @@ export const useMessage = () => {
         model,
         useOCR: resolvedPresetUseOCR,
       });
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
       if (image.length > 0) {
         humanMessage = await humanMessageFormatter({
           content: [
@@ -2303,11 +2512,19 @@ export const useMessage = () => {
           model,
           useOCR: resolvedPresetUseOCR,
         });
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
       }
 
       let generationInfo: any | undefined = undefined;
 
-      const chunks = await ollama.stream([humanMessage], {
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
+      const preparedMessages = await maybeInjectActorMessage(
+        [humanMessage],
+        options.actorSceneSend.scene.settings,
+        false,
+      );
+      if (!preparationIsCurrent()) return chatSubmitSkipped("Conversation changed");
+      const chunks = await ollama.stream(preparedMessages, {
         signal: signal,
         callbacks: [
           {
@@ -2407,6 +2624,13 @@ export const useMessage = () => {
         userMessageId: resolvedUserMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+        requestScope: options.actorSceneSend.requestScope,
+        scopeSignal: signal,
+        scopeInvalidatedSignal: options.scopeInvalidatedSignal,
+        saveToDb: Boolean(ollama.saveToDb),
+        conversationId: ollama.conversationId,
+        userServerMessageId: ollama.userServerMessageId,
+        assistantServerMessageId: ollama.serverMessageId,
       });
 
       setIsProcessing(false);
@@ -2415,6 +2639,7 @@ export const useMessage = () => {
       // Drop any pending trailing flush so it cannot land on top of the
       // restored or error state written below.
       streamingScheduler.cancel();
+      if (!options.sourceIsCurrent()) return chatSubmitSkipped("Conversation changed");
       if (
         discardAbortedTurnIfRequested({
           discardRequested: discardCurrentTurnOnAbortRef.current,
@@ -2454,6 +2679,9 @@ export const useMessage = () => {
         userMessageId: resolvedUserMessageId,
         assistantMessageId: resolvedAssistantMessageId,
         assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
+        requestScope: options.actorSceneSend.requestScope,
+        scopeSignal: signal,
+        scopeInvalidatedSignal: options.scopeInvalidatedSignal,
       });
 
       if (!errorSave) {
@@ -2470,7 +2698,7 @@ export const useMessage = () => {
     }
   };
 
-  const onSubmit = async ({
+  const submitResponse = async ({
     message,
     image,
     isRegenerate,
@@ -2486,6 +2714,12 @@ export const useMessage = () => {
     serverChatIdOverride,
     historyIdOverride,
     assertQueuedDispatchCurrent,
+    greetingSeed: requestedGreetingSeed,
+    actorSceneSend: requestedActorSceneSend,
+    greetingIsCurrent,
+    historyEditResend,
+    historyRegenerate,
+    assertCurrent,
   }: {
     message: string;
     image: string;
@@ -2511,24 +2745,103 @@ export const useMessage = () => {
     serverChatIdOverride?: string | null;
     historyIdOverride?: string | null;
     assertQueuedDispatchCurrent?: QueuedDispatchGuard;
-  }) => {
-    // XP-08: a side-panel tab whose server chat changed elsewhere is refreshed
-    // onto the chat's latest message (or the send is held) before a new turn,
-    // so the turn never silently forks the conversation. This runs before the
-    // history fence below because a refresh moves the history selection.
-    if (sendGate?.current && !isRegenerate && !chatHistory && !memory) {
+    greetingSeed?: GreetingSeed;
+    actorSceneSend?: ActorSceneSend;
+    greetingIsCurrent?: () => boolean;
+    historyEditResend?: NativeHistoryEditResend;
+    historyRegenerate?: NativeHistoryRegenerate;
+    assertCurrent?: () => void;
+  }, beginResponse: () => boolean) => {
+    if (historySelection && resolveUseMessageSendMode({
+      effectiveMode: effectiveAssistantState.mode,
+      hasEffectiveAssistant: Boolean(effectiveSelectedAssistant),
+      draftAssistantKind: selectedAssistant?.kind ?? null,
+      draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant),
+    }) === "tracked_persona") {
+      assertQueuedDispatchCurrent?.();
+      assertCurrent?.();
+      if (historyRegenerate?.isOriginCurrent() === false ||
+          requestedActorSceneSend?.isCurrent() === false || !settingsDraftIsCurrent())
+        return chatSubmitSkipped("stale_selection");
+      notification.error({
+        message: t("error"),
+        description: nativeCharacterPreflightMessage(new Error("native_history_persona_unsupported"), t)
+      });
+      return chatSubmitSkipped("native_history_persona_unsupported");
+    }
+    const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined;
+    const historyOriginIsCurrent = historySelection?.fence();
+    const commandSession = usePlaygroundSessionStore.getState();
+    const commandSessionIsCurrent = () => {
+      const session = usePlaygroundSessionStore.getState()
+      return (
+        actionsMountedRef.current &&
+        session.restoreRevision === commandSession.restoreRevision &&
+        session.sourceSelectionRevision === commandSession.sourceSelectionRevision
+      )
+    }
+    const commandState = useStoreMessageOption.getState();
+    const capturedReplyTarget = commandState.replyTarget;
+    const consumeReplyTarget = () => {
+      if (
+        replyActive &&
+        capturedReplyTarget &&
+        useStoreMessageOption.getState().replyTarget === capturedReplyTarget
+      )
+        clearReplyTarget()
+    }
+    const commandViewSource = captureChatDraftSource(() => actionsMountedRef.current);
+    const commandIdentity = { historyId: commandState.historyId, serverChatId: commandState.serverChatId };
+    let identityPublished = false;
+    let identityRetired = false;
+    let ownIdentityIsCurrent = () => false;
+    let turnSourceIsCurrent = settingsDraftIsCurrent;
+    // This continuation changes dispatch metadata only; the scene locator stays original.
+    const publishCommandIdentity: CommandIdentityPublication = (field, id, publish) => {
+      if (identityRetired || !turnSourceIsCurrent() || !id) return false;
+      if (normalHistoryPreparation.acceptDraftBind?.isCurrent() === true && normalHistoryPreparation.draftIsCurrent() &&
+        useStoreMessageOption.getState().chatDraftAddress?.kind !== "fresh") {
+        publish();
+        return turnSourceIsCurrent();
+      }
+      if (commandIdentity[field] && commandIdentity[field] !== "temp" && commandIdentity[field] !== id) return false;
+      commandIdentity[field] = id;
+      try {
+        publish();
+      } catch (error) {
+        identityRetired = true;
+        throw error;
+      }
+      if (!ownIdentityIsCurrent()) {
+        identityRetired = true;
+        return false;
+      }
+      identityPublished = true;
+      return true;
+    };
+    let sceneCapture: ReturnType<typeof captureActorSceneSend> = null;
+    const originalSceneIsCurrent = () => requestedActorSceneSend?.isCurrent() ?? sceneCapture?.isCurrent() ?? false;
+    const selectionSource = { model: requestOverrides?.selectedModel?.trim() ? "explicit" as const : "global" as const,
+      toolChoice: requestOverrides?.toolChoice === "auto" || requestOverrides?.toolChoice === "required" || requestOverrides?.toolChoice === "none" ? "explicit" as const : "global" as const };
+    const normalHistoryPreparation = captureNormalChatPreparation({ selectedModel: requestOverrides?.selectedModel?.trim() || selectedModel || "", selectionSource,
+      toolChoice: requestOverrides?.toolChoice ?? toolChoice, historyId: historyIdOverride ?? historyId, serverChatId: serverChatIdOverride || serverChatId }, originalSceneIsCurrent);
+    sceneCapture = requestedActorSceneSend ? null : captureActorSceneSend(historySelection, () => settingsDraftIsCurrent() && (historyOriginIsCurrent?.() ?? true) && normalHistoryPreparation.dispatchIsCurrent());
+    // Native senders qualify strict admission or hold an older-server choice using their fresh capture.
+    if (sendGate?.current && historySelection?.getCurrent().owner?.kind !== "native" && !historyEditResend && !isRegenerate && !chatHistory && !memory) {
       const gate = await sendGate.current({ message });
-      if (!gate.proceed) return;
+      if (!gate.proceed) return { status: "skipped" as const, reason: "server_history_refresh_required" };
       if (gate.refreshed) {
         const refreshed = useStoreMessageOption.getState();
         chatHistory = refreshed.messages;
         memory = refreshed.history;
       }
     }
-    const historyOriginIsCurrent = historySelection?.fence();
+    if (requestedActorSceneSend?.isCurrent() === false || sceneCapture?.isCurrent() === false) return chatSubmitSkipped("Conversation changed");
     assertQueuedDispatchCurrent?.();
-    const setTurnHistoryId = historySetterForQueuedTurn(assertQueuedDispatchCurrent);
-    const saveMessageOnSuccess = saveSuccessForQueuedTurn(assertQueuedDispatchCurrent);
+    assertCurrent?.();
+    const identityPublication = publishCommandIdentity;
+    const setTurnHistoryId = historySetterForQueuedTurn(assertQueuedDispatchCurrent, () => turnSourceIsCurrent(), identityPublication);
+    const saveMessageOnSuccess = saveSuccessForQueuedTurn(assertQueuedDispatchCurrent, () => turnSourceIsCurrent(), identityPublication);
     const saveMessageOnError = createSaveMessageOnError(temporaryChat, history, setHistory, setTurnHistoryId);
     const trimmedImageBackendOverride =
       typeof imageBackendOverride === "string"
@@ -2570,6 +2883,104 @@ export const useMessage = () => {
       (temporaryChat && !currentHistorySelection?.owner)
         ? null
         : historySelection;
+    const contextSendMode = resolveUseMessageSendMode({
+      effectiveMode: effectiveAssistantState.mode,
+      hasEffectiveAssistant: Boolean(effectiveSelectedAssistant),
+      draftAssistantKind: selectedAssistant?.kind ?? null,
+      draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant),
+    });
+    if (
+      isSavedRoleplayConversation(historySelection) &&
+      !greetingSeed &&
+      !historyEditResend &&
+      !historyRegenerate &&
+      !isRegenerate
+    ) {
+      const activity = useStoreMessageOption.getState()
+      if (activity.streaming || activity.isProcessing || !beginResponse())
+        return chatSubmitSkipped("response_in_progress")
+      const activeController = controller ?? new AbortController()
+      const resumeSource = captureChatDraftSource(commandSessionIsCurrent)
+      activeNormalControllerRef.current = activeController
+      setAbortController(activeController)
+      setIsProcessing(true)
+      setStreaming(true)
+      try {
+        const { sendSavedRoleplay } = await import("./chat/roleplay-resume-send")
+        await sendSavedRoleplay({
+          controller: historySelection!,
+          signal: activeController.signal,
+          originIsCurrent: historyOriginIsCurrent!,
+          sourceIsCurrent: () =>
+            resumeSource.isCurrent() &&
+            (!assertQueuedDispatchCurrent ||
+              assertQueuedDispatchCurrent.isSourceCurrent?.() === true),
+          serverChatId: serverChatIdOverride || serverChatId,
+          historyId: historyIdOverride ?? historyId,
+          message,
+          image,
+          setMessages,
+          unsupportedContext: Boolean(
+            hasExplicitImageBackend ||
+              resolvedChatMode !== "normal" ||
+              uploadedFiles?.length ||
+              docs?.length ||
+              webSearch ||
+              selectedSystemPrompt ||
+              replyTarget ||
+              requestOverrides?.historyForModel ||
+              requestOverrides?.messageForModel ||
+              toolChoice === "required"
+          )
+        })
+        return chatSubmitSubmitted()
+      } catch (error) {
+        if (
+          resumeSource.isCurrent() &&
+          historyOriginIsCurrent?.() === true &&
+          currentHistorySelection?.owner?.kind === "native" &&
+          currentHistorySelection.owner.validate_lease() &&
+          !(
+            (error instanceof NativeHistoryBranchRefusal ||
+              error instanceof NativeHistoryContextRefusal ||
+              error instanceof NativeHistorySettingsReadError) &&
+            !error.isCurrent()
+          )
+        ) {
+          const preflightMessage = nativeCharacterPreflightMessage(error, t)
+          const recovery = preflightMessage ? null : classifyCharacterChatFailureRecovery(error, t)
+          notification.error({
+            message: recovery?.summary ?? t("error"),
+            description: preflightMessage ?? recovery?.message ??
+              (error instanceof Error ? error.message : "Saved roleplay could not be continued.")
+          })
+        }
+        return chatSubmitFailed(
+          error instanceof Error
+            ? error.message
+            : "Saved roleplay could not be continued."
+        )
+      } finally {
+        if (
+          activeNormalControllerRef.current === activeController &&
+          (!getAbortController || getAbortController() === activeController)
+        ) {
+          activeNormalControllerRef.current = null
+          setIsProcessing(false)
+          setStreaming(false)
+          setAbortController((current: AbortController | null) =>
+            current === activeController ? null : current
+          )
+        }
+      }
+    }
+    const selectedLocalContextTurn = selectedHistoryTurn && currentHistorySelection?.owner?.kind === "local" &&
+      (contextSendMode === "plain" || contextSendMode === "overlay");
+    const alternateHistorySelection = historySelection && !temporaryChat && !isRegenerate &&
+      !hasExplicitImageBackend && !imageBackendCandidates.length && !messageType &&
+      (selectedLocalContextTurn || (!selectedHistoryTurn && !historyId && !serverChatId &&
+        !historyIdOverride && !serverChatIdOverride && normalHistoryPreparation.sourceDraft?.kind === "fresh")) &&
+      (uploadedFiles?.length || docs?.length || resolvedChatMode === "rag") ? historySelection : null;
     const normalHistorySelection = selectedHistoryTurn ?? (
       historySelection && !temporaryChat && !isRegenerate &&
       !hasExplicitImageBackend && !imageBackendCandidates.length &&
@@ -2578,40 +2989,65 @@ export const useMessage = () => {
         ? historySelection
         : null
     );
+    if (historyRegenerate && (!isRegenerate || historyEditResend || !selectedHistoryTurn))
+      throw new Error("unsupported_history_regeneration");
     if (
       selectedHistoryTurn &&
-      (isRegenerate ||
+      ((isRegenerate && !historyRegenerate) ||
         hasExplicitImageBackend ||
         imageBackendCandidates.length ||
-        uploadedFiles?.length ||
-        docs?.length ||
         messageType ||
-        resolvedChatMode !== "normal")
+        (!alternateHistorySelection && (uploadedFiles?.length || docs?.length || resolvedChatMode !== "normal")))
     ) {
       throw new Error("unsupported_history_action_context");
     }
+    if (greetingSeed && (!historySelection || !greetingIsCurrent || !greetingIsCurrent() || message || isRegenerate ||
+        hasExplicitImageBackend || imageBackendCandidates.length || uploadedFiles?.length || docs?.length || messageType ||
+        resolvedChatMode !== "normal" || resolveUseMessageSendMode({ effectiveMode: effectiveAssistantState.mode,
+          hasEffectiveAssistant: Boolean(effectiveSelectedAssistant), draftAssistantKind: selectedAssistant?.kind ?? null,
+          draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant) }) !== "tracked_character"))
+      return chatSubmitFailed("native_history_greeting_requires_fresh");
     const activeController = controller ?? new AbortController();
     const signal = activeController.signal;
     const releaseActiveController = () =>
       setAbortController((current: AbortController | null) =>
         current === activeController ? null : current,
       );
+    let actorSceneSend: ActorSceneSend;
+    try {
+      if (!requestedActorSceneSend && !sceneCapture) throw new Error("actor_settings_unavailable");
+      const original = requestedActorSceneSend ?? await sceneCapture!.read();
+      actorSceneSend = Object.freeze({ ...original, isCurrent: () => original.isCurrent() && normalHistoryPreparation.dispatchIsCurrent() });
+      if (!actorSceneSend.isCurrent()) return chatSubmitSkipped("Conversation changed");
+    } catch (error) {
+      if ((requestedActorSceneSend?.isCurrent() ?? sceneCapture?.isCurrent()) !== false && settingsDraftIsCurrent())
+        notification.error({ message: t("error"), description: nativeCharacterPreflightMessage(error, t) ?? t("playground:composer.sceneLoadError", "Scene settings could not be loaded. Existing chat setup was left unchanged.") });
+      return chatSubmitFailed(error instanceof Error ? error.message : "actor_settings_unavailable");
+    }
+    const usesLegacyScopeLease = usesLegacySidepanelRag ||
+      (!hasExplicitImageBackend && !imageBackendCandidates.length &&
+        !uploadedFiles?.length && !docs?.length && (Boolean(messageType) || resolvedChatMode === "vision"));
     let servicePromptSnapshot: ServicePromptSnapshot | undefined;
-    if (usesLegacySidepanelRag) {
+    if (usesLegacyScopeLease) {
       setAbortController(activeController);
       try {
         servicePromptSnapshot = await loadServicePromptSnapshot(
-          ["chat.rag.answer", "chat.rag.question_rewrite"],
-          { signal },
+          usesLegacySidepanelRag ? ["chat.rag.answer", "chat.rag.question_rewrite"] : [],
+          { signal, requestScope: actorSceneSend.requestScope },
         );
+        if (chatDraftOwnerKey(servicePromptSnapshot.requestScope) !== chatDraftOwnerKey(actorSceneSend.requestScope)) {
+          servicePromptSnapshot.release();
+          throw new Error("request_config_scope_changed");
+        }
       } catch (error) {
         releaseActiveController();
+        if (!actorSceneSend.isCurrent()) return chatSubmitSkipped("Conversation changed");
         const errorName =
           typeof error === "object" && error !== null && "name" in error
             ? error.name
             : undefined;
         if (signal.aborted || errorName === "AbortError") {
-          return;
+          return chatSubmitSkipped("Submission preparation cancelled");
         }
         if (
           typeof error === "object" &&
@@ -2637,7 +3073,7 @@ export const useMessage = () => {
               </>
             ),
           });
-          return;
+          return chatSubmitSkipped("service_prompt_migration_required");
         }
         notification.error({
           message: t(
@@ -2649,13 +3085,16 @@ export const useMessage = () => {
             "Unable to load workflow prompts from your tldw server. Check the connection and try again.",
           ),
         });
-        return;
+        return chatSubmitFailed(error instanceof Error ? error.message : "Workflow prompts unavailable");
       }
     }
 
     let replyActive = false;
+    let finishOwnedActivity: (() => void) | undefined;
+    let ownedEmbeddingController: AbortController | undefined;
     try {
       assertQueuedDispatchCurrent?.();
+    assertCurrent?.();
       resetChatLoopState();
     const resolvedSelectedSystemPrompt =
       requestOverrides &&
@@ -2671,19 +3110,6 @@ export const useMessage = () => {
       requestOverrides?.toolChoice === "none"
         ? requestOverrides.toolChoice
         : toolChoice;
-    const selectionSource = {
-      model:
-        typeof requestOverrides?.selectedModel === "string" &&
-        requestOverrides.selectedModel.trim().length > 0
-          ? "explicit" as const
-          : "global" as const,
-      toolChoice:
-        requestOverrides?.toolChoice === "auto" ||
-        requestOverrides?.toolChoice === "required" ||
-        requestOverrides?.toolChoice === "none"
-          ? "explicit" as const
-          : "global" as const,
-    };
     const resolvedUseOCR =
       typeof requestOverrides?.useOCR === "boolean"
         ? requestOverrides.useOCR
@@ -2701,26 +3127,117 @@ export const useMessage = () => {
           ? requestOverrides.messageForModel
           : undefined,
     };
+    if (!actorSceneSend.isCurrent()) { if (usesLegacySidepanelRag) servicePromptSnapshot?.release(); return chatSubmitSkipped("Conversation changed"); }
     if (!hasExplicitImageBackend) {
       if (!validateBeforeSubmit(resolvedSelectedModel, t, notification)) {
-        return;
+        return chatSubmitSkipped(t("formError.noModel"));
       }
       let modelAvailable: boolean;
       modelAvailable = await ensureSelectedChatModelIsAvailable(
         resolvedSelectedModel,
       );
       assertQueuedDispatchCurrent?.();
+    assertCurrent?.();
+      if (!actorSceneSend.isCurrent()) { if (usesLegacySidepanelRag) servicePromptSnapshot?.release(); return chatSubmitSkipped("Conversation changed"); }
       if (!modelAvailable) {
-        return;
+        return chatSubmitSkipped(t("playground:composer.validationModelUnavailableInline", "Selected model is not available on this server. Refresh models or choose a different model."));
       }
     }
 
-    if (!usesLegacySidepanelRag) setAbortController(activeController);
+    const commandLifetimeIsCurrent = () => {
+      const session = usePlaygroundSessionStore.getState();
+      return actionsMountedRef.current && actorSceneSend.scene.target.account?.isCurrent() === true &&
+        session.restoreRevision === commandSession.restoreRevision &&
+        session.sourceSelectionRevision === commandSession.sourceSelectionRevision &&
+        (!assertQueuedDispatchCurrent || assertQueuedDispatchCurrent.isSourceCurrent?.() === true);
+    };
+    ownIdentityIsCurrent = () => {
+      const state = useStoreMessageOption.getState();
+      return !identityRetired && commandLifetimeIsCurrent() &&
+        (actorSceneSend.commandIsCurrent ?? actorSceneSend.isCurrent)() &&
+        normalHistoryPreparation.dispatchIsCurrent() &&
+        settingsDraftIsCurrent() &&
+        state.chatDraftAddress === commandState.chatDraftAddress &&
+        state.chatDraftRevision === commandState.chatDraftRevision &&
+        (historyOriginIsCurrent?.() ?? true) &&
+        state.historyId === commandIdentity.historyId &&
+        state.serverChatId === commandIdentity.serverChatId;
+    };
+    const sourceIsCurrent = () => {
+      const current = !identityRetired && commandLifetimeIsCurrent() &&
+        ((commandViewSource.isCurrent() && settingsDraftIsCurrent() && (historyOriginIsCurrent?.() ?? true)) ||
+          (normalHistoryPreparation.acceptDraftBind?.isCurrent() === true && normalHistoryPreparation.draftIsCurrent() &&
+            useStoreMessageOption.getState().chatDraftAddress?.kind !== "fresh") ||
+          (identityPublished && ownIdentityIsCurrent()));
+      if (!current) identityRetired = true;
+      return current;
+    };
+    turnSourceIsCurrent = sourceIsCurrent;
+    const turnSetters = {
+      ...settersForTurn(sourceIsCurrent),
+      setHistoryId: setTurnHistoryId,
+    };
+    const alternateHistoryParams: CompactModeOptions["historyParams"] = {
+      surface: "sidepanel", selectionSource, historyPreparation: normalHistoryPreparation,
+      onServerChatMutated: invalidateServerChatHistory,
+      historySelection: alternateHistorySelection ? {
+        controller: alternateHistorySelection, originIsCurrent: historyOriginIsCurrent!,
+        sourceIsCurrent: commandSessionIsCurrent, onResultFollow: consumeReplyTarget, createServerChat: false
+      } : undefined,
+      ownsAbortController: () => activeNormalControllerRef.current === activeController,
+      releaseAbortControllerIfOwned: () => releaseNormalControllerIfOwned()
+    };
+    const compactModeOptions: CompactModeOptions = {
+      historyParams: alternateHistoryParams,
+      selectedModel: model, useOCR: resolvedUseOCR,
+      selectedSystemPrompt: resolvedSelectedSystemPrompt, actorSceneSend, sourceIsCurrent,
+      publishIdentity: identityPublication,
+      scopeInvalidatedSignal: servicePromptSnapshot?.scopeInvalidatedSignal,
+    };
+
+    const nativeServerTurn = Boolean(historySelection) && resolvedChatMode === "normal" &&
+      (Boolean(historyRegenerate) || resolveUseMessageSendMode({ effectiveMode: effectiveAssistantState.mode,
+        hasEffectiveAssistant: Boolean(effectiveSelectedAssistant), draftAssistantKind: selectedAssistant?.kind ?? null,
+        draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant) }) === "tracked_character");
+    if (nativeServerTurn) {
+      const activity = useStoreMessageOption.getState();
+      if (activity.streaming || activity.isProcessing) return chatSubmitSkipped("response_in_progress");
+    }
+    if (!beginResponse()) return chatSubmitSkipped("stale_selection");
+    if (!usesLegacySidepanelRag || alternateHistorySelection) setAbortController(activeController);
     activeNormalControllerRef.current = activeController;
+    const streamingSourceIsCurrent = () =>
+      settingsDraftIsCurrent() &&
+      (!historyOriginIsCurrent || historyOriginIsCurrent()) &&
+      activeNormalControllerRef.current === activeController &&
+      (!getAbortController || getAbortController() === activeController) &&
+      !signal.aborted &&
+      (!assertQueuedDispatchCurrent ||
+        assertQueuedDispatchCurrent.isSourceCurrent?.() === true)
+    if (nativeServerTurn) { setIsProcessing(true); setStreaming(true); }
+    let activityWasReleased = false;
     const releaseNormalControllerIfOwned = () => {
-      if (activeNormalControllerRef.current !== activeController) return false;
+      if (activeNormalControllerRef.current !== activeController ||
+          (getAbortController && getAbortController() !== activeController)) return false;
       activeNormalControllerRef.current = null;
+      activityWasReleased = true;
       return true;
+    };
+    finishOwnedActivity = () => {
+      const ownsActivity =
+        (activeNormalControllerRef.current === activeController &&
+          (!getAbortController || getAbortController() === activeController)) ||
+        (activityWasReleased && activeNormalControllerRef.current === null &&
+          getAbortController?.() === activeController);
+      if (!ownsActivity) return;
+      activeNormalControllerRef.current = null;
+      setIsProcessing(false);
+      setStreaming(false);
+      setIsEmbedding(false);
+      setIsSearchingInternet(false);
+      setAbortController((current: AbortController | null) =>
+        current === activeController ? null : current,
+      );
     };
     replyActive =
       Boolean(replyTarget) &&
@@ -2741,8 +3258,36 @@ export const useMessage = () => {
         })()
       : {};
 
+      if (historyRegenerate) {
+        try {
+          await sendNativeHistoryCharacter({
+            surface: "sidepanel", t, controller: selectedHistoryTurn!, originIsCurrent: historyOriginIsCurrent!,
+            actorSceneSend,
+            sourceIsCurrent: commandSessionIsCurrent,
+            signal, temporary: temporaryChat, historyId, serverChatId: serverChatIdOverride || serverChatId,
+            model, currentModel: selectedModel, toolChoice: resolvedToolChoice, settings: currentChatModelSettings,
+            message, image, historyRegenerate, setServerChatId, setMessages,
+            unsupportedContext: Boolean(resolvedWebSearch || resolvedSelectedSystemPrompt || replyActive ||
+              conversationContextOverrides.historyForModel || conversationContextOverrides.messageForModel ||
+              (effectiveAssistantState.mode === "overlay" && effectiveSelectedAssistant)),
+            releaseActivity: () => {
+              if (releaseNormalControllerIfOwned()) {
+                setAbortController(null); setIsProcessing(false); setStreaming(false);
+              }
+            }
+          });
+          return chatSubmitSubmitted();
+        } catch (error) {
+          if (historyRegenerate.isOriginCurrent()) notification.error({ message: t("error"),
+            description: nativeRegenerationFeedback(error, t) });
+          if (releaseNormalControllerIfOwned()) {
+            setAbortController(null); setIsProcessing(false); setStreaming(false);
+          }
+          return chatSubmitFailed(error instanceof Error ? error.message : "Native history completion failed");
+        }
+      }
       if (hasExplicitImageBackend || imageBackendCandidates.length > 0) {
-        await normalChatMode(
+        return await normalChatMode(
           message,
           image,
           isRegenerate,
@@ -2775,12 +3320,15 @@ export const useMessage = () => {
             regenerateFromMessage,
             ...conversationContextOverrides,
             ...replyOverrides,
+            ...turnSetters,
+            actorScene: actorSceneSend.scene,
+            actorSceneSend,
+            actorSettings: actorSceneSend.scene.settings,
           },
         );
-        return;
       }
       if (uploadedFiles && uploadedFiles.length > 0) {
-        await documentChatMode(
+        return await documentChatMode(
           message,
           image,
           isRegenerate,
@@ -2806,12 +3354,16 @@ export const useMessage = () => {
             setActionInfo,
             regenerateFromMessage,
             ...replyOverrides,
+            ...turnSetters,
+            ...alternateHistoryParams,
+            actorScene: actorSceneSend.scene,
+            actorSceneSend,
+            actorSettings: actorSceneSend.scene.settings,
           },
         );
-        return;
       }
       if (docs && docs.length > 0) {
-        await tabChatMode(
+        return await tabChatMode(
           message,
           image,
           docs,
@@ -2835,13 +3387,17 @@ export const useMessage = () => {
             setHistoryId: setTurnHistoryId,
             regenerateFromMessage,
             ...replyOverrides,
+            ...turnSetters,
+            ...alternateHistoryParams,
+            actorScene: actorSceneSend.scene,
+            actorSceneSend,
+            actorSettings: actorSceneSend.scene.settings,
           },
         );
-        return;
       }
       // this means that the user is trying to send something from a selected text on the web
       if (messageType) {
-        await presetChatMode(
+        return await presetChatMode(
           message,
           image,
           isRegenerate,
@@ -2849,11 +3405,9 @@ export const useMessage = () => {
           memory || history,
           signal,
           messageType,
+          streamingSourceIsCurrent,
+          compactModeOptions,
           regenerateFromMessage,
-          {
-            selectedModel: resolvedSelectedModel,
-            useOCR: resolvedUseOCR,
-          },
           assertQueuedDispatchCurrent,
         );
       } else {
@@ -2864,21 +3418,6 @@ export const useMessage = () => {
             draftAssistantKind: selectedAssistant?.kind ?? null,
             draftAssistantSelectionMode: getAssistantSelectionMode(selectedAssistant),
           });
-          if (
-            selectedHistoryTurn &&
-            sendMode === "tracked_persona"
-          ) {
-            notification.error({
-              message: t("error"),
-              description: "native_history_persona_unsupported"
-            });
-            if (releaseNormalControllerIfOwned()) {
-              setAbortController(null);
-              setIsProcessing(false);
-              setStreaming(false);
-            }
-            return;
-          }
           const trackedCharacterForSend =
             sendMode === "tracked_character"
               ? (() => {
@@ -2897,10 +3436,13 @@ export const useMessage = () => {
           if (sendMode === "tracked_character" && trackedCharacterForSend?.id) {
             if (historySelection) {
               try {
-                await sendNativeHistoryCharacter({
+                const greeting = await sendNativeHistoryCharacter({
+                  surface: "sidepanel",
                   t,
                   controller: historySelection,
+                  actorSceneSend,
                   originIsCurrent: historyOriginIsCurrent!,
+                  sourceIsCurrent: commandSessionIsCurrent,
                   signal,
                   temporary: temporaryChat,
                   historyId,
@@ -2912,6 +3454,9 @@ export const useMessage = () => {
                   settings: currentChatModelSettings,
                   message,
                   image,
+                  greetingSeed,
+                  greetingIsCurrent,
+                  historyEditResend,
                   setServerChatId,
                   setMessages,
                   unsupportedContext: Boolean(
@@ -2934,18 +3479,27 @@ export const useMessage = () => {
                     }
                   }
                 });
-              } catch (error) {
-                notification.error({
-                  message: t("error"),
-                  description: error instanceof Error ? error.message : "Native history completion failed"
+                if (greeting && !greeting.matchesPreview) notification.info({
+                  message: t("sidepanel:greetingPicker.changed", "The character opening changed"),
+                  description: t("sidepanel:greetingPicker.changedHelp", "The saved opening differs from the preview. Review the opening shown in this chat before sending your message.")
                 });
+              } catch (error) {
+                if (!greetingSeed && !((error instanceof NativeHistoryBranchRefusal || error instanceof NativeHistoryContextRefusal || error instanceof NativeHistorySettingsReadError || error instanceof NativeHistoryRoleplaySendError) && !error.isCurrent())) {
+                  const preflightMessage = nativeCharacterPreflightMessage(error, t)
+                  const recovery = !preflightMessage && error instanceof NativeHistoryRoleplaySendError ? classifyCharacterChatFailureRecovery(error, t) : null
+                  notification.error({
+                    message: recovery?.summary ?? t("error"),
+                    description: preflightMessage ?? recovery?.message ?? (error instanceof Error ? error.message : "Native history completion failed")
+                  })
+                }
                 if (releaseNormalControllerIfOwned()) {
                   setAbortController(null);
                   setIsProcessing(false);
                   setStreaming(false);
                 }
+                return chatSubmitFailed(error instanceof Error ? error.message : "Native history completion failed");
               }
-              return;
+              return chatSubmitSubmitted();
             }
             const hydratedTrackedCharacter =
               await hydrateTrackedCharacterForSend(
@@ -2953,6 +3507,7 @@ export const useMessage = () => {
                 (characterId) => tldwClient.getCharacter(characterId),
               );
             assertQueuedDispatchCurrent?.();
+    assertCurrent?.();
             await characterChatMode(
               message,
               image,
@@ -2961,6 +3516,7 @@ export const useMessage = () => {
               memory || history,
               signal,
               model,
+              streamingSourceIsCurrent,
               hydratedTrackedCharacter,
               regenerateFromMessage,
               serverChatIdOverride,
@@ -2969,6 +3525,8 @@ export const useMessage = () => {
               historyIdOverride,
             );
           } else if (sendMode === "tracked_persona" && isPersonaAssistantSelection(effectiveSelectedAssistant)) {
+            const personaPreparationIsCurrent = () =>
+              sourceIsCurrent() && normalHistoryPreparation.dispatchIsCurrent()
             const personaServerChat = await ensurePersonaServerChat({
               assistant: effectiveSelectedAssistant,
               serverChatIdOverride,
@@ -2985,12 +3543,30 @@ export const useMessage = () => {
               serverChatExternalRef,
               historyId,
               temporaryChat,
-              createChat: (payload) => tldwClient.createChat(payload),
+              requestScope: actorSceneSend.requestScope,
+              signal,
+              isCurrent: personaPreparationIsCurrent,
+              createChat: (payload, options) => tldwClient.createChat(payload, options),
               ensureServerChatHistoryId: async () => historyId,
               invalidateServerChatHistory,
-              setServerChatId: assertQueuedDispatchCurrent
-                ? (id) => assertQueuedDispatchCurrent.publishServerChatId(id, setServerChatId)
-                : setServerChatId,
+              setServerChatId: (id) => {
+                signal.throwIfAborted()
+                if (!sourceIsCurrent() || !normalHistoryPreparation.dispatchIsCurrent()) throw new Error("actor_settings_scope_changed")
+                // Only this Persona operation can acknowledge its own reset or created ID.
+                commandIdentity.serverChatId = id
+                try {
+                  if (assertQueuedDispatchCurrent) assertQueuedDispatchCurrent.publishServerChatId(id, setServerChatId)
+                  else setServerChatId(id)
+                } catch (error) {
+                  identityRetired = true
+                  throw error
+                }
+                if (!ownIdentityIsCurrent()) {
+                  identityRetired = true
+                  throw new Error("actor_settings_scope_changed")
+                }
+                identityPublished = true
+              },
               setServerChatTitle,
               setServerChatCharacterId,
               setServerChatAssistantKind,
@@ -3005,7 +3581,12 @@ export const useMessage = () => {
               setServerChatExternalRef,
             });
             assertQueuedDispatchCurrent?.();
-            await normalChatMode(
+            assertCurrent?.();
+            signal.throwIfAborted();
+            if (!personaPreparationIsCurrent()) throw new Error("actor_settings_scope_changed");
+            const personaSceneSend: ActorSceneSend = Object.freeze({ ...actorSceneSend,
+              isCurrent: () => personaPreparationIsCurrent() && !signal.aborted });
+            return await normalChatMode(
               message,
               image,
               isRegenerate,
@@ -3046,10 +3627,14 @@ export const useMessage = () => {
                 regenerateFromMessage,
                 ...conversationContextOverrides,
                 ...replyOverrides,
+                ...turnSetters,
+                actorScene: actorSceneSend.scene,
+                actorSceneSend: personaSceneSend,
+                actorSettings: actorSceneSend.scene.settings,
               },
             );
           } else if (sendMode === "overlay" && effectiveSelectedAssistant) {
-            await normalChatMode(
+            return await normalChatMode(
               message,
               image,
               isRegenerate,
@@ -3060,15 +3645,20 @@ export const useMessage = () => {
                 ownsAbortController: () =>
                   activeNormalControllerRef.current === activeController,
                 releaseAbortControllerIfOwned: releaseNormalControllerIfOwned,
+                historyPreparation: normalHistoryPreparation,
                 historySelection: normalHistorySelection
                   ? {
                       controller: normalHistorySelection,
                       originIsCurrent: historyOriginIsCurrent!,
+                      sourceIsCurrent: commandSessionIsCurrent,
+                      onResultFollow: consumeReplyTarget,
                       temporary: temporaryChat
                     }
                   : undefined,
                 serverChatId,
                 setServerChatId,
+                surface: "sidepanel",
+                onServerChatMutated: invalidateServerChatHistory,
                 selectionSource,
                 toolChoice: resolvedToolChoice,
                 selectedModel: model,
@@ -3100,11 +3690,15 @@ export const useMessage = () => {
                 setIsSearchingInternet,
                 regenerateFromMessage,
                 ...conversationContextOverrides,
-                ...replyOverrides
+                ...replyOverrides,
+                ...turnSetters,
+                actorScene: actorSceneSend.scene,
+                actorSceneSend,
+                actorSettings: actorSceneSend.scene.settings
               }
             );
           } else {
-            await normalChatMode(
+            return await normalChatMode(
               message,
               image,
               isRegenerate,
@@ -3115,11 +3709,15 @@ export const useMessage = () => {
                 ownsAbortController: () =>
                   activeNormalControllerRef.current === activeController,
                 releaseAbortControllerIfOwned: releaseNormalControllerIfOwned,
+                historyPreparation: normalHistoryPreparation,
                 historySelection: normalHistorySelection
                   ? {
                       controller: normalHistorySelection,
                       originIsCurrent: historyOriginIsCurrent!,
+                      sourceIsCurrent: commandSessionIsCurrent,
+                      onResultFollow: consumeReplyTarget,
                       temporary: temporaryChat,
+                      editResend: historyEditResend,
                       createServerChat:
                         !image &&
                         !(chatHistory || messages).length && !(memory || history).length &&
@@ -3132,6 +3730,8 @@ export const useMessage = () => {
                   : undefined,
                 serverChatId,
                 setServerChatId,
+                surface: "sidepanel",
+                onServerChatMutated: invalidateServerChatHistory,
                 selectionSource,
                 toolChoice: resolvedToolChoice,
                 selectedModel: model,
@@ -3154,26 +3754,33 @@ export const useMessage = () => {
                 setIsSearchingInternet,
                 regenerateFromMessage,
                 ...conversationContextOverrides,
-                ...replyOverrides
+                ...replyOverrides,
+                ...turnSetters,
+                actorScene: actorSceneSend.scene,
+                actorSceneSend,
+                actorSettings: actorSceneSend.scene.settings
               }
             );
           }
         } else if (resolvedChatMode === "vision") {
-          await visionChatMode(
+          return await visionChatMode(
             message,
             image,
             isRegenerate,
             chatHistory || messages,
             memory || history,
             signal,
+            streamingSourceIsCurrent,
+            compactModeOptions,
             regenerateFromMessage,
             assertQueuedDispatchCurrent,
           );
         } else {
           const newEmbeddingController = new AbortController();
+          ownedEmbeddingController = newEmbeddingController;
           let embeddingSignal = newEmbeddingController.signal;
           setEmbeddingController(newEmbeddingController);
-          await chatWithWebsiteMode(
+          return await chatWithWebsiteMode(
             message,
             image,
             isRegenerate,
@@ -3182,21 +3789,31 @@ export const useMessage = () => {
             signal,
             embeddingSignal,
             servicePromptSnapshot!,
+            streamingSourceIsCurrent,
+            compactModeOptions,
             regenerateFromMessage,
             assertQueuedDispatchCurrent,
           );
         }
       }
+    } catch (error) {
+      if (!turnSourceIsCurrent()) return chatSubmitSkipped("Conversation changed");
+      throw error;
     } finally {
-      if (usesLegacySidepanelRag) {
-        servicePromptSnapshot!.release();
-        releaseActiveController();
-      }
-      if (replyActive) {
+      finishOwnedActivity?.();
+      if (ownedEmbeddingController) setEmbeddingController(current =>
+        current === ownedEmbeddingController ? null : current,
+      );
+      servicePromptSnapshot?.release();
+      if (usesLegacyScopeLease) releaseActiveController();
+      if (replyActive && turnSourceIsCurrent() &&
+          useStoreMessageOption.getState().replyTarget === capturedReplyTarget) {
         clearReplyTarget();
       }
     }
   };
+
+  const onSubmit = withDetachedHistoryResponse(submitResponse);
 
   const stopStreamingRequest = (options?: unknown) => {
     const discardTurn =
@@ -3204,9 +3821,10 @@ export const useMessage = () => {
       options !== null &&
       "discardTurn" in options &&
       options.discardTurn === true;
+    const currentController = getAbortController ? getAbortController() : abortController;
     if (
       discardTurn &&
-      (isEmbedding || abortController || embeddingController)
+      (isEmbedding || currentController || embeddingController)
     ) {
       discardCurrentTurnOnAbortRef.current = true;
     }
@@ -3216,16 +3834,17 @@ export const useMessage = () => {
         setEmbeddingController(null);
       }
     }
-    if (abortController) {
-      markChatTurnStoppedByUser(abortController.signal);
-      abortController.abort();
-      setAbortController(null);
+    if (currentController) {
+      markChatTurnStoppedByUser(currentController.signal);
+      currentController.abort();
     }
   };
 
   const ordinaryLocalMutation =
     !serverChatId && historySelection?.getCurrent().status === "idle";
   const editMessage = createEditMessage({
+    serverChatId,
+    historySelection,
     notification,
     messages,
     history,
@@ -3234,7 +3853,9 @@ export const useMessage = () => {
     setHistory,
     onSubmit,
     validateBeforeSubmitFn: () => true,
-    captureViewFence: ordinaryLocalMutation ? undefined : historySelection?.fence,
+    captureSourceFence: () => captureChatDraftSource(() => actionsMountedRef.current).isCurrent,
+    captureViewFence: () => captureChatDraftSource(historySelection?.fence()).isCurrent,
+    getMessages: () => useStoreMessageOption.getState().messages,
     mutate: ordinaryLocalMutation ? undefined : async (target, content) => {
       const owner = captureLocalMutationOwner(
         historySelection,
@@ -3245,98 +3866,157 @@ export const useMessage = () => {
     },
   });
 
+  const nativeDeleteOrigin =
+    historySelection?.getCurrent().owner?.kind === "native"
+  const nativeDeleteMessage = createNativeDeleteMessage({
+    messages,
+    getMessages: () => useStoreMessageOption.getState().messages,
+    historySelection,
+    historyId,
+    serverChatId,
+    notification,
+    invalidateServerChatHistory,
+    captureSourceFence: () =>
+      captureChatDraftSource(() => actionsMountedRef.current).isCurrent
+  })
+  const deleteViewCurrent = historySelection?.fence()
+  const deleteDraftCurrent = captureChatDraftSource(
+    () => actionsMountedRef.current
+  ).isCurrent
   const deleteMessage = React.useCallback(
     async (index: number) => {
-      const target = messages[index];
-      if (!target?.id) throw new Error("missing_message");
-      const origin = historySelection?.getCurrent();
-      const current = historySelection?.fence() ?? (() => true);
+      const deleteSourceCurrent = () =>
+        deleteDraftCurrent() && (deleteViewCurrent?.() ?? true)
+      const deleteCurrent = () => {
+        const state = useStoreMessageOption.getState()
+        return deleteSourceCurrent() && !state.streaming && !state.isProcessing
+      }
+      if (!deleteSourceCurrent()) return false
+      if (!deleteCurrent()) throw new Error("response_in_progress")
+      const target = messages[index]
+      if (!target?.id) throw new Error("missing_message")
+      if (nativeDeleteOrigin) return nativeDeleteMessage(index)
+      if (serverChatId) throw new Error("native_history_mutation_unavailable")
+      const targetCurrent = () => {
+        const liveTargets = useStoreMessageOption
+          .getState()
+          .messages.filter((row) => row.id === target.id)
+        return (
+          liveTargets.length === 1 &&
+          liveTargets[0].message === target.message &&
+          liveTargets[0].isBot === target.isBot &&
+          liveTargets[0].role === target.role &&
+          JSON.stringify(liveTargets[0].images ?? []) ===
+            JSON.stringify(target.images ?? [])
+        )
+      }
+      if (!targetCurrent()) throw new Error("message_changed")
+      const deletionCurrent = () => deleteCurrent() && targetCurrent()
+      const origin = historySelection?.getCurrent()
+      const current = deleteCurrent
       try {
-        if (serverChatId && origin?.capture?.status !== "captured") {
-          if (!target.serverMessageId) throw new Error("Missing server message ID");
-          await tldwClient.initialize().catch(() => null);
-          const serverMessage = target.serverMessageVersion === null || target.serverMessageVersion === undefined
-            ? await tldwClient.getMessage(target.serverMessageId)
-            : null;
-          const version = target.serverMessageVersion ?? serverMessage?.version;
-          if (version === null || version === undefined) throw new Error("Missing server message version");
-          await tldwClient.deleteMessage(target.serverMessageId, Number(version), serverChatId);
-          if (historyId) await removeAcknowledgedServerMirrorMessage({
-            historyId, chatId: serverChatId,
-            localMessageId: target.id, serverMessageId: target.serverMessageId,
-          });
-          if (!current()) return;
-          if (replyTarget?.id === target.id || replyTarget?.id === target.serverMessageId) clearReplyTarget();
-          const remaining = messages.filter((row) => row.id !== target.id);
-          setMessages(remaining);
-          setHistory(historyFromVisibleMessages(remaining));
-          invalidateServerChatHistory();
-          return;
-        }
-        if (ordinaryLocalMutation) {
+        if (ordinaryLocalMutation || (!historySelection && temporaryChat)) {
           if (historyId && historyId !== "temp")
-            await removeMessageById(historyId, target.id);
+            await removeMessageById(historyId, target.id, undefined, {
+              validate_lease: deletionCurrent
+            })
           else if (!temporaryChat)
-            throw new Error("history_selection_unavailable");
-          if (!current()) return;
-          if (replyTarget?.id === target.id) clearReplyTarget();
-          const remaining = messages.filter((row) => row.id !== target.id);
-          setMessages(remaining);
-          setHistory(historyFromVisibleMessages(remaining));
-          return;
+            throw new Error("history_selection_unavailable")
+          if (!deletionCurrent()) return false
+          const reply = useStoreMessageOption.getState().replyTarget
+          if (reply?.id === target.id) clearReplyTarget()
+          const remaining = useStoreMessageOption
+            .getState()
+            .messages.filter((row) => row.id !== target.id)
+          if (!current()) return false
+          setMessages(remaining)
+          if (!current()) return false
+          setHistory((previous) =>
+            current()
+              ? historyFromVisibleMessages(
+                  useStoreMessageOption
+                    .getState()
+                    .messages.filter((row) => row.id !== target.id)
+                )
+              : previous
+          )
+          return current()
         }
         const owner = captureLocalMutationOwner(
           historySelection,
           historyId,
           serverChatId
-        );
+        )
         const removed = await removeMessageById(
           owner.conversation_id,
           target.id,
-          owner
-        );
-        if (!current()) return;
-        if (replyTarget?.id === target.id) clearReplyTarget();
-        const remaining = messages.filter((row) => row.id !== target.id);
-        setMessages(remaining);
-        setHistory(historyFromVisibleMessages(remaining));
-        const view = origin?.view;
+          owner,
+          { validate_lease: deletionCurrent }
+        )
+        if (!deletionCurrent()) return false
+        const reply = useStoreMessageOption.getState().replyTarget
+        if (reply?.id === target.id) clearReplyTarget()
+        const remaining = useStoreMessageOption
+          .getState()
+          .messages.filter((row) => row.id !== target.id)
+        if (!current()) return false
+        setMessages(remaining)
+        if (!current()) return false
+        setHistory((previous) =>
+          current()
+            ? historyFromVisibleMessages(
+                useStoreMessageOption
+                  .getState()
+                  .messages.filter((row) => row.id !== target.id)
+              )
+            : previous
+        )
+        const view = origin?.view
         if (
           removed &&
           view?.interpretation.kind === "parent_graph_v1" &&
           view.cursor.kind !== "empty" &&
           view.cursor.message_id === target.id
         ) {
-          await historySelection?.choose(
+          if (!current()) return false
+          const following = historySelection?.choose(
             removed.parent_message_id
               ? { kind: "after_message", message_id: removed.parent_message_id }
-              : { kind: "empty" },
-          );
+              : { kind: "empty" }
+          )
+          const followingCurrent = historySelection?.fence() ?? (() => false)
+          const followed = await following
+          const state = useStoreMessageOption.getState()
+          return (
+            followed === true &&
+            followingCurrent() &&
+            deleteDraftCurrent() &&
+            !state.streaming &&
+            !state.isProcessing
+          )
         }
+        return current()
       } catch (error) {
-        notification.error({
-          message: "Message deletion failed",
-          description:
-            error instanceof Error ? error.message : "message_delete_failed",
-        });
-        throw error;
+        if (!deletionCurrent()) return false
+        throw error
       }
     },
     [
+      nativeDeleteMessage,
+      nativeDeleteOrigin,
+      deleteViewCurrent,
+      deleteDraftCurrent,
       historyId,
       serverChatId,
       messages,
       historySelection,
       ordinaryLocalMutation,
       temporaryChat,
-      replyTarget?.id,
       clearReplyTarget,
       setMessages,
-      setHistory,
-      notification,
-      invalidateServerChatHistory,
-    ],
-  );
+      setHistory
+    ]
+  )
 
   const branchHandler = createBranchMessage({
     historySelection,
@@ -3382,6 +4062,9 @@ export const useMessage = () => {
     notification,
     allowOrdinaryRetry: true,
     historySelection,
+    getMessages: () => useStoreMessageOption.getState().messages,
+    captureSourceFence: () => captureChatDraftSource(() => actionsMountedRef.current).isCurrent,
+    captureViewFence: () => captureChatDraftSource(historySelection?.fence()).isCurrent,
     validateBeforeSubmitFn: () => true,
     history,
     messages,
@@ -3392,6 +4075,8 @@ export const useMessage = () => {
 
   return {
     conversationMetadata,
+    effectiveAssistantState,
+    setSelectedAssistant,
     messages,
     setMessages,
     editMessage,

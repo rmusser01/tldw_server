@@ -1,9 +1,10 @@
 import React from "react"
 import fs from "node:fs"
 import path from "node:path"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import QuickChatPopout from "../option-quick-chat-popout"
 import { fetchChatModels } from "@/services/tldw-server"
@@ -12,11 +13,13 @@ vi.mock("antd", () => ({
   Select: ({
     "aria-label": ariaLabel,
     options = [],
+    disabled,
   }: {
     "aria-label"?: string
+    disabled?: boolean
     options?: Array<{ value: string; label: string }>
   }) => (
-    <select aria-label={ariaLabel}>
+    <select aria-label={ariaLabel} disabled={disabled}>
       {options.map((option) => (
         <option key={option.value} value={option.value}>
           {option.label}
@@ -46,24 +49,6 @@ vi.mock("antd", () => ({
       ))}
     </div>
   ),
-}))
-
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: ({
-    queryFn,
-    select,
-  }: {
-    queryFn: () => unknown
-    select?: (data: Array<{ model: string }>) => unknown
-  }) => {
-    void queryFn()
-    const models = [{ model: "local:test-model" }]
-    return {
-      data: select ? select(models) : models,
-      isLoading: false,
-      isError: false,
-    }
-  },
 }))
 
 vi.mock("react-i18next", () => ({
@@ -103,15 +88,6 @@ vi.mock("@/services/tldw-server", () => ({
   fetchChatModels: vi.fn(),
 }))
 
-vi.mock("@/hooks/useChatModelsSelect", () => ({
-  useChatModelsSelect: () => ({
-    allowClear: true,
-    modelOptions: [{ value: "local:test-model", label: "Local test model" }],
-    modelPlaceholder: "Select model",
-    handleModelChange: vi.fn(),
-  }),
-}))
-
 vi.mock("@/components/Common/QuickChatHelper/QuickChatInput", () => ({
   QuickChatInput: () => <textarea aria-label="Quick chat input" />,
 }))
@@ -124,13 +100,25 @@ vi.mock("@/components/Common/QuickChatHelper/QuickChatGuidesPanel", () => ({
   QuickChatGuidesPanel: () => <div data-testid="quick-chat-guides" />,
 }))
 
+const renderPopout = () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={["/quick-chat-popout"]}><QuickChatPopout /></MemoryRouter></QueryClientProvider>);
+}
+
 describe("QuickChatPopout route identity", () => {
-  it("presents quick chat as a helper surface", () => {
-    render(
-      <MemoryRouter initialEntries={["/quick-chat-popout"]}>
-        <QuickChatPopout />
-      </MemoryRouter>
-    )
+  beforeEach(() => { vi.mocked(fetchChatModels).mockReset().mockResolvedValue([{ model: "local:test-model", provider: "llama", nickname: "Local test model" }]) });
+  it("recovers a failed mounted catalog through Retry", async () => {
+    vi.mocked(fetchChatModels).mockRejectedValueOnce(new Error("Metadata unavailable"));
+    renderPopout();
+    await screen.findByText("Check your server connection, then try again.");
+    expect(screen.getByLabelText("Model")).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByRole("option", { name: /Local test model/ });
+    expect(screen.getByLabelText("Model")).toBeEnabled();
+    expect(fetchChatModels).toHaveBeenCalledTimes(2);
+  })
+  it("presents quick chat as a helper surface", async () => {
+    renderPopout()
 
     expect(
       screen.getByRole("heading", { name: "Quick Chat Helper" })
@@ -142,7 +130,7 @@ describe("QuickChatPopout route identity", () => {
     expect(
       screen.getByText("Start a quick side chat to keep your main thread clean.")
     ).toBeInTheDocument()
-    expect(fetchChatModels).toHaveBeenCalledWith({ returnEmpty: true })
+    await waitFor(() => expect(fetchChatModels).toHaveBeenCalledWith({ requireFresh: true }))
   })
 
   it("keeps the packaged extension on the shared route and model service", () => {

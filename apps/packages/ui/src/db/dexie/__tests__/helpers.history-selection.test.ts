@@ -131,3 +131,44 @@ it("does not read a server message version from the node revision digest", () =>
   expect(display.messages.map((row) => row.serverMessageId)).toEqual(["u", "a"])
   expect(display.messages.map((row) => row.serverMessageVersion)).toEqual([undefined, undefined])
 })
+
+
+it.each([`native-history-v1:sha256:${"c".repeat(64)}`, ""])(
+  "does not accept private local replay hints under owner %s",
+  (ownerKey) => {
+    const capture = ownedCapture(ownerKey)
+    capture.selected_content[1].extra_metadata = {
+      generation_status: "interrupted",
+      model_id: "recorded-model",
+      local_history: {
+        generationInfo: { interrupted: true, stopped: true },
+        messageType: "image-generation:assistant",
+        modelId: "private-local-model"
+      }
+    }
+    const before = structuredClone(capture)
+    const message = formatSelectedHistory(capture).messages[1]
+    expect(message.generationInfo).toBeUndefined()
+    expect(message.messageType).toBeUndefined()
+    expect(message.modelId).toBeUndefined()
+    expect(message.metadataExtra).toEqual(
+      capture.selected_content[1].extra_metadata
+    )
+    expect(message.message).toBe("Answer")
+    expect(capture).toEqual(before)
+  }
+)
+
+it("preserves genuine locally owned recovery and presentation hints", () => {
+  const capture = ownedCapture("local-history-v1:profile")
+  capture.selected_content[1].extra_metadata = {
+    local_history: {
+      generationInfo: { interrupted: true, stopped: true },
+      modelId: "local-model"
+    }
+  }
+  expect(formatSelectedHistory(capture).messages[1]).toMatchObject({
+    modelId: "local-model",
+    generationInfo: { interrupted: true, stopped: true }
+  })
+})

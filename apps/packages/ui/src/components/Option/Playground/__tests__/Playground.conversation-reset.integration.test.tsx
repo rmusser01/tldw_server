@@ -138,7 +138,8 @@ describe("Playground conversation reset (#3106)", { timeout: 60_000 }, () => {
     const view = await renderPlayground({ server })
     await sendFromComposer(view, "Sensitive first question")
 
-    await view.user.click(screen.getByRole("button", { name: "More tools" }))
+    await view.user.click(screen.getByRole("button", { name: "Customize chat" }))
+    await view.user.click(await screen.findByRole("button", { name: "More tools" }))
     await view.user.click(await screen.findByText("Clear conversation"))
     await view.user.click(await screen.findByRole("button", { name: "Confirm" }))
 
@@ -209,7 +210,8 @@ describe("Playground conversation reset (#3106)", { timeout: 60_000 }, () => {
     })
     await openSavedServerChat(view, { title: "Saved topic", lastMessage: "Saved answer" })
 
-    await view.user.click(screen.getByRole("button", { name: "More tools" }))
+    await view.user.click(screen.getByRole("button", { name: "Customize chat" }))
+    await view.user.click(await screen.findByRole("button", { name: "More tools" }))
     await view.user.click(await screen.findByText("Clear conversation"))
     // antd confirm dialogs live outside the React tree, and jsdom never finishes
     // their leave animation, so an earlier test's dialog can linger: use the newest.
@@ -262,15 +264,19 @@ describe("Playground conversation reset (#3106)", { timeout: 60_000 }, () => {
     try {
       await waitFor(() => expect(sendButton()).toBeDisabled(), HARNESS_WAIT)
       await view.user.click(view.composer)
-      await view.user.type(view.composer, "Unrelated question")
+      await view.user.type(view.composer, "Abandoned restore question")
       await view.user.keyboard("{Enter}")
-      expect(view.composer).toHaveValue("Unrelated question")
+      expect(view.composer).toHaveValue("Abandoned restore question")
 
       await clickHeaderNewChat(view)
       await waitFor(() => expect(sendButton()).toBeEnabled(), HARNESS_WAIT)
+      // New chat addresses its own empty draft, independently of the pending restore.
+      await waitFor(() => expect(view.composer).toHaveValue(""), HARNESS_WAIT)
+      await view.user.type(view.composer, "Unrelated question")
     } finally {
       capture.resolve()
     }
+    expect(view.composer).toHaveValue("Unrelated question")
     await view.user.click(sendButton())
     await waitFor(() => expect(server.completionRequests()).toHaveLength(1), HARNESS_WAIT)
     expect(completionMessages(server.completionRequests()[0])).toEqual([

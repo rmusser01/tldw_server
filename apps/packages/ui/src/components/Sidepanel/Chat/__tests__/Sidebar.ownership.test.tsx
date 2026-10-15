@@ -60,7 +60,9 @@ vi.mock("@/store/ui-mode", () => ({
     typeof selector === "function" ? selector({ mode: "pro" }) : { mode: "pro" }
 }))
 
+const mutationListeners = vi.hoisted(() => new Set<(profileChanged: boolean) => void>())
 vi.mock("@/db/dexie/chat", () => ({
+  watchOnDeviceHistoryChanges: (listener: (profileChanged: boolean) => void) => { mutationListeners.add(listener); return () => { mutationListeners.delete(listener) } },
   PageAssistDatabase: vi.fn(function MockPageAssistDatabase(this: {
     fullTextSearchChatHistories: typeof fullTextSearchChatHistoriesMock
   }) {
@@ -497,4 +499,46 @@ it("shows what was said under a server result that matched by message content (C
     expect.objectContaining({ query: "private", search_in: "title,content" }),
     expect.anything()
   )
+})
+
+
+it("refreshes an unchanged owned query after device history mutation and disposes the observer", async () => {
+  search.mockResolvedValue(empty)
+  fullTextSearchChatHistoriesMock.mockResolvedValue([
+    localResult("Deleted cached chat")
+  ])
+  const view = render(withClient(createClient(), owner(1)))
+  await screen.findByText("Deleted cached chat")
+  fullTextSearchChatHistoriesMock.mockResolvedValue([])
+  act(() => mutationListeners.forEach((listener) => listener(false)))
+  await screen.findByText("No matches found")
+  expect(screen.queryByText("Deleted cached chat")).toBeNull()
+  view.unmount()
+  expect(mutationListeners.size).toBe(0)
+})
+
+it("rejects a held old query result immediately after device mutation", async () => {
+  search.mockResolvedValue(empty)
+  const held = deferred<HistoryInfo[]>()
+  const next = deferred<HistoryInfo[]>()
+  fullTextSearchChatHistoriesMock
+    .mockReturnValueOnce(held.promise)
+    .mockReturnValue(next.promise)
+  render(withClient(createClient(), owner(1)))
+  await waitFor(() =>
+    expect(fullTextSearchChatHistoriesMock).toHaveBeenCalledTimes(1)
+  )
+  await act(async () => {
+    mutationListeners.forEach((listener) => listener(false))
+    held.resolve([localResult("Late deleted cached chat")])
+  })
+  await waitFor(() =>
+    expect(fullTextSearchChatHistoriesMock).toHaveBeenCalledTimes(2)
+  )
+  expect(screen.queryByText("Late deleted cached chat")).toBeNull()
+  expect(screen.getByText("Searching chat history…")).toBeInTheDocument()
+  await act(async () => {
+    next.resolve([])
+  })
+  await screen.findByText("No matches found")
 })

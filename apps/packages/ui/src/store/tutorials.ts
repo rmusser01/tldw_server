@@ -53,9 +53,20 @@ interface TutorialPersistedState {
   seenPromptPages: string[]
 }
 
+export type TutorialFocusReturn = {
+  target: HTMLElement | null
+  route: string
+  isCurrent: () => boolean
+  lastFocusedControl?: () => HTMLElement | null
+  dispose?: () => void
+}
+export type TutorialRun = { id: number; focusReturn?: TutorialFocusReturn }
+let nextTutorialRunId = 0
+
 interface TutorialRuntimeState {
   /** Currently active tutorial ID, null if no tutorial is running */
   activeTutorialId: string | null
+  activeRun: TutorialRun | null
   /** Current step index in the active tutorial */
   activeStepIndex: number
   /** Whether the help modal is open */
@@ -65,7 +76,7 @@ interface TutorialRuntimeState {
 interface TutorialActions {
   // Completion tracking (persisted)
   /** Mark a tutorial as completed */
-  markComplete: (tutorialId: string) => void
+  markComplete: (tutorialId: string, expectedRun?: TutorialRun) => void
   /** Check if a tutorial has been completed */
   isCompleted: (tutorialId: string) => boolean
 
@@ -77,11 +88,11 @@ interface TutorialActions {
 
   // Active tutorial state (not persisted)
   /** Start a tutorial by its ID */
-  startTutorial: (tutorialId: string) => void
+  startTutorial: (tutorialId: string, focusReturn?: TutorialFocusReturn) => void
   /** End the current tutorial (completed or skipped) */
-  endTutorial: () => void
+  endTutorial: (expectedRun?: TutorialRun) => void
   /** Set the current step index */
-  setStepIndex: (index: number) => void
+  setStepIndex: (index: number, expectedRun?: TutorialRun) => void
 
   // Help modal state (not persisted)
   /** Open the help modal */
@@ -111,6 +122,7 @@ const initialPersistedState: TutorialPersistedState = {
 
 const initialRuntimeState: TutorialRuntimeState = {
   activeTutorialId: null,
+  activeRun: null,
   activeStepIndex: 0,
   isHelpModalOpen: false
 }
@@ -129,9 +141,12 @@ export const useTutorialStore = createWithEqualityFn<TutorialState>()(
       // Completion Tracking Actions
       // ─────────────────────────────────────────────────────────────────────
 
-      markComplete: (tutorialId) =>
+      markComplete: (tutorialId, expectedRun) =>
         set((state) => {
-          if (state.completedTutorials.includes(tutorialId)) {
+          if (
+            (expectedRun && state.activeRun !== expectedRun) ||
+            state.completedTutorials.includes(tutorialId)
+          ) {
             return state
           }
           return {
@@ -165,23 +180,30 @@ export const useTutorialStore = createWithEqualityFn<TutorialState>()(
       // Active Tutorial Actions
       // ─────────────────────────────────────────────────────────────────────
 
-      startTutorial: (tutorialId) =>
+      startTutorial: (tutorialId, focusReturn) => {
+        get().activeRun?.focusReturn?.dispose?.()
         set({
           activeTutorialId: tutorialId,
+          activeRun: { id: ++nextTutorialRunId, focusReturn },
           activeStepIndex: 0,
           isHelpModalOpen: false // Close help modal when starting a tutorial
-        }),
+        })
+      },
 
-      endTutorial: () =>
-        set({
-          activeTutorialId: null,
-          activeStepIndex: 0
-        }),
+      endTutorial: (expectedRun) => {
+        if (expectedRun && get().activeRun !== expectedRun) return
+        get().activeRun?.focusReturn?.dispose?.()
+        set({ activeTutorialId: null, activeRun: null, activeStepIndex: 0 })
+      },
 
-      setStepIndex: (index) =>
-        set({
-          activeStepIndex: index
-        }),
+      setStepIndex: (index, expectedRun) =>
+        set((state) =>
+          expectedRun && state.activeRun !== expectedRun
+            ? state
+            : {
+                activeStepIndex: index
+              }
+        ),
 
       // ─────────────────────────────────────────────────────────────────────
       // Help Modal Actions
@@ -206,11 +228,10 @@ export const useTutorialStore = createWithEqualityFn<TutorialState>()(
       // Reset Actions
       // ─────────────────────────────────────────────────────────────────────
 
-      resetProgress: () =>
-        set({
-          ...initialPersistedState,
-          ...initialRuntimeState
-        })
+      resetProgress: () => {
+        get().activeRun?.focusReturn?.dispose?.()
+        set({ ...initialPersistedState, ...initialRuntimeState })
+      }
     }),
     {
       name: STORAGE_KEY,
@@ -234,6 +255,7 @@ export const useTutorialStore = createWithEqualityFn<TutorialState>()(
 export const useActiveTutorial = () => {
   return useTutorialStore((state) => ({
     activeTutorialId: state.activeTutorialId,
+    activeRun: state.activeRun,
     activeStepIndex: state.activeStepIndex,
     startTutorial: state.startTutorial,
     endTutorial: state.endTutorial,

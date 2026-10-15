@@ -907,3 +907,83 @@ def test_unprotected_snapshot_identity_cannot_impersonate_native_child(accepted_
 def test_placeholder_metadata_cannot_hide_retained_text_without_closed_replay(reason):
     with pytest.raises(HistorySelectionError, match="unsupported_native_fork_tool_replay"):
         project_native_fork_context(neutral(), (row(extra={"content_placeholder_reason": reason}),), ())
+
+
+def test_original_empty_tool_result_retains_empty_text_and_closed_inventory():
+    call = row(
+        tools=[
+            {
+                "id": "empty-call",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "{}"},
+            }
+        ]
+    )
+    result = {
+        **row(
+            "result",
+            role="tool",
+            text="[empty tool result]",
+            extra={
+                "tool_call_id": "empty-call",
+                "content_placeholder_reason": "empty_tool_result",
+            },
+        ),
+        "_message_version": 1,
+    }
+    projected = project_native_fork_context(neutral(), (call, result), ())
+    assert "tool_replay" in projected.required_effects
+    assert project_native_fork_messages((call, result))[1]["message"] == ""
+
+
+@pytest.mark.parametrize("content", ["Edited result", "[empty tool result]"])
+def test_edited_empty_tool_result_is_not_erased(content):
+    call = row(
+        tools=[
+            {
+                "id": "empty-call",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "{}"},
+            }
+        ]
+    )
+    result = {
+        **row(
+            "result",
+            role="tool",
+            text=content,
+            extra={
+                "tool_call_id": "empty-call",
+                "content_placeholder_reason": "empty_tool_result",
+            },
+        ),
+        "_message_version": 2,
+    }
+    assert project_native_fork_messages((call, result))[1]["message"] == content
+
+
+@pytest.mark.parametrize("version", [None, 0, True, "1"])
+def test_empty_tool_result_requires_a_valid_physical_revision(version):
+    call = row(
+        tools=[
+            {
+                "id": "empty-call",
+                "type": "function",
+                "function": {"name": "lookup", "arguments": "{}"},
+            }
+        ]
+    )
+    result = {
+        **row(
+            "result",
+            role="tool",
+            text="[empty tool result]",
+            extra={
+                "tool_call_id": "empty-call",
+                "content_placeholder_reason": "empty_tool_result",
+            },
+        ),
+        "_message_version": version,
+    }
+    with pytest.raises(HistorySelectionError, match="tool_replay_placeholder"):
+        project_native_fork_messages((call, result))

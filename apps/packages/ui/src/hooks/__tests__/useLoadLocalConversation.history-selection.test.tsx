@@ -189,6 +189,8 @@ const mountNativeImportRace = async () => {
 
 it("reopens an intentional profile-only fork when account scope is unavailable", async () => {
   const mounted = await mountNativeImportRace()
+  const { useStoreMessageOption } = await import("@/store/option");
+  useStoreMessageOption.getState().startNewChatDraft();
   mocks.loadSnapshot.mockRejectedValue(new Error("account_scope_unavailable"))
   mocks.details.mockResolvedValue({ id: "A", local_owner_key: "local-A", last_used_prompt: { prompt_content: "Local fork prompt" } })
   mocks.history.mockResolvedValue([])
@@ -200,10 +202,59 @@ it("reopens an intentional profile-only fork when account scope is unavailable",
   })
   expect(mounted.onCapture).toHaveBeenCalledOnce()
   expect(mounted.deps.setHistoryId).toHaveBeenCalledWith("A")
+  const { useStoreMessageOption: actualOption } = await import("@/store/option");
+  expect(actualOption.getState().chatDraftAddress).toEqual({ kind: "local", id: "A", profileId: "profile" });
   expect(mounted.deps.setSystemPrompt).toHaveBeenCalledWith("Local fork prompt")
   expect(mounted.deps.setContextFiles).toHaveBeenCalledWith([{ id: "local-file" }])
   expect(mounted.admission).not.toHaveBeenCalled()
   expect(mounted.provider).not.toHaveBeenCalled()
+})
+
+it("switches the private draft locator for a deliberate history that requires review", async () => {
+  const mounted = await mountNativeImportRace()
+  const { useStoreMessageOption } = await import("@/store/option")
+  useStoreMessageOption.getState().startNewChatDraft()
+  const source = useStoreMessageOption.getState().chatDraftAddress
+  mocks.details.mockResolvedValue({ id: "review-B", local_owner_key: "local-review-B" })
+  mocks.history.mockResolvedValue([])
+  const capture = mounted.captures.getMockImplementation()!
+  mounted.captures.mockImplementationOnce(async (...args) => ({
+    ...await capture(...args), status: "legacy_review_required", code: "legacy_review_required"
+  }))
+  await act(async () => { expect(await mounted.result.current.load("review-B")).toBe(true) })
+  expect(mounted.result.current.selection.getCurrent().status).toBe("legacy_review_required")
+  const target = useStoreMessageOption.getState().chatDraftAddress
+  expect(target).toMatchObject({ kind: "local", id: "review-B", profileId: "profile" })
+  expect(useStoreMessageOption.getState().chatDraftTransition).toMatchObject({ kind: "switch", sourceAddress: source })
+  await act(async () => { await mounted.result.current.selection.refresh() })
+  expect(useStoreMessageOption.getState().chatDraftAddress).toBe(target)
+  expect(mounted.admission).not.toHaveBeenCalled()
+  expect(mounted.provider).not.toHaveBeenCalled()
+  mounted.unmount()
+})
+
+it("does not publish held history after the source saving mode changes", async () => {
+  const mounted = await mountNativeImportRace()
+  const { useStoreMessageOption } = await import("@/store/option")
+  useStoreMessageOption.getState().startNewChatDraft()
+  mocks.details.mockResolvedValue({ id: "B", local_owner_key: "local-B" })
+  mocks.history.mockResolvedValue([])
+  const held = deferred()
+  const capture = mounted.captures.getMockImplementation()!
+  mounted.captures.mockImplementationOnce(async (...args) => {
+    await held.promise
+    return capture(...args)
+  })
+  let pending!: Promise<boolean>
+  act(() => { pending = mounted.result.current.load("B") })
+  await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve() })
+  act(() => { useStoreMessageOption.getState().setTemporaryChat(true) })
+  const source = useStoreMessageOption.getState().chatDraftAddress
+  await act(async () => { held.resolve(undefined); expect(await pending).toBe(false) })
+  expect(useStoreMessageOption.getState().chatDraftAddress).toBe(source)
+  expect(mounted.deps.setHistoryId).not.toHaveBeenCalled()
+  expect(mounted.onCapture).not.toHaveBeenCalled()
+  mounted.unmount()
 })
 
 it.each([

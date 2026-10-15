@@ -7,11 +7,11 @@ backend model change can't silently drift from the frontend's view of the API
 ## Files
 
 - **Contract artifacts live in `apps/packages/api-types` (`@tldw/api-types`,
-  ADR-065)**: the committed `openapi.fingerprint.json` drift fingerprint and
+  ADR-069)**: the committed `openapi.fingerprint.json` drift fingerprint and
   `paths.d.ts` path union, plus the gitignored regenerated `openapi.json` /
   `schema.d.ts`. The CI drift gate (`backend-required.yml` → "OpenAPI contract
-  drift gate") recomputes the fingerprint and fails if it differs, forcing a
-  backend contract change to be acknowledged.
+  drift gate") checks the fingerprint and exact committed path union against
+  the canonical schema, forcing both artifacts to be refreshed and reviewed.
 - **`generated/`** — legacy output location; no longer produced. The generation
   script now writes into the package (`bun run generate:api-types` here still
   delegates to it).
@@ -27,14 +27,15 @@ bun run generate:api-types
 # update any affected frontend types/mocks, then commit them together
 ```
 
-Or just refresh the fingerprint from the repo root: `make openapi-fingerprint`.
+`make openapi-fingerprint` refreshes only the fingerprint; a changed path set
+still requires generation. `make openapi-drift-check` checks both artifacts.
 
 ## Using the generated types
 
 After `bun run generate:api-types`, import from the generated schema:
 
 ```ts
-import type { paths, components } from "@/lib/api/generated/schema";
+import type { paths, components } from "@tldw/api-types/schema";
 type RoleResponse = components["schemas"]["RoleResponse"];
 ```
 

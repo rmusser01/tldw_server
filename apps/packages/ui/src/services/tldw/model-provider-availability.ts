@@ -1,4 +1,5 @@
 export type ProviderAvailability = {
+  default_model?: string
   is_configured?: boolean
   provider_enabled?: boolean
   availability?: string
@@ -33,6 +34,7 @@ export type TldwProvidersResponse =
 
 const PROVIDER_KEY_ALIASES: Record<string, string> = {
   "custom-openai-api": "custom_openai_api",
+  "openai-compatible": "custom_openai_api",
   custom_openai_api: "custom_openai_api",
   customopenaiapi: "custom_openai_api",
   customopenai: "custom_openai_api",
@@ -71,6 +73,14 @@ export const normalizeProviderAvailabilityKey = (
 
   const noWhitespace = raw.replace(/\s+/g, "")
   const compact = noWhitespace.replace(/[._-]+/g, "")
+  const normalized = noWhitespace.replace(/_/g, "-")
+  const customSlot =
+    /^(?:custom-openai-api-?|custom-openai-|openai-compatible-|customopenai)(\d{1,2})$/.exec(
+      normalized
+    ) ?? /^custom-openai(\d{1,2})-api$/.exec(normalized)
+  const slot = Number(customSlot?.[1])
+  if (slot >= 1 && slot <= 99)
+    return slot === 1 ? "custom_openai_api" : `custom_openai_api${slot}`
   return (
     PROVIDER_KEY_ALIASES[noWhitespace] ??
     PROVIDER_KEY_ALIASES[compact] ??
@@ -91,35 +101,13 @@ const normalizeProviders = (
   return []
 }
 
-const hasOptionalBoolean = (
-  record: Record<string, unknown>,
-  keys: string[]
-): boolean => keys.some((key) => typeof record[key] === "boolean")
-
-const hasNonEmptyString = (
-  record: Record<string, unknown>,
-  key: string
-): boolean => toNonEmptyProviderString(record[key]) != null
-
 const shouldEnrichModelRecord = (model: unknown): boolean => {
-  if (!model || typeof model !== "object") return false
-  const record = model as Record<string, unknown>
-  const type = toNonEmptyProviderString(record.type)?.toLowerCase()
-  if (type && type !== "chat") return false
-
-  const hasConfigured = hasOptionalBoolean(record, [
-    "is_configured",
-    "provider_is_configured",
-    "provider_configured",
-    "configured"
-  ])
-  const hasEnabled = hasOptionalBoolean(record, [
-    "provider_enabled",
-    "enabled"
-  ])
-  const hasAvailability = hasNonEmptyString(record, "availability")
-
-  return !hasConfigured || !hasEnabled || !hasAvailability
+  if (!model || typeof model !== "object" || Array.isArray(model)) return false
+  const type = toNonEmptyProviderString(
+    (model as Record<string, unknown>).type
+  )?.toLowerCase()
+  // The provider default is needed even when model availability is complete.
+  return !type || type === "chat"
 }
 
 export const shouldFetchProviderAvailability = (models: unknown[]): boolean =>
@@ -140,6 +128,9 @@ export const buildProviderAvailabilityMap = async (
     return providerAvailability
   }
 
+  const defaultProvider = normalizeProviderAvailabilityKey(
+    !Array.isArray(providersPayload) ? providersPayload?.default_provider : null
+  )
   const providers = normalizeProviders(providersPayload)
   for (const provider of providers) {
     try {
@@ -151,6 +142,10 @@ export const buildProviderAvailabilityMap = async (
       )
       if (!key) continue
       providerAvailability.set(key, {
+        default_model:
+          key === defaultProvider
+            ? toNonEmptyProviderString(record?.default_model) ?? undefined
+            : undefined,
         is_configured:
           toOptionalProviderBoolean(record?.is_configured) ??
           toOptionalProviderBoolean(record?.configured),

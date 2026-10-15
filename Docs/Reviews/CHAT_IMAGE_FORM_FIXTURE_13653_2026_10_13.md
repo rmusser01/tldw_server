@@ -1,0 +1,7 @@
+# Image refinement Form source fixture — TASK-13653
+
+Original first successful send failed because an incomplete model selector double lacked getState required by the real dispatch snapshot. The fixture now uses the actual model store/reset(custom), Actor reset and fresh draft. A partial H1 module keeps real capture exports while providing a declared idle controller/current account whose original AbortSignal cannot revive. Scoped Scene IO retains the exact target, current lease and actual default settings; real Scene capture and production send gates are unchanged.
+
+All16original provider-refresh/refinement/dictation assertions pass. Two held Scene preparation controls prove a read failure or account retirement cannot dispatch or clear exact typed input. Final native/WebUI each18passes1suite0skipprocess0 (3.85s/3.86s). Native --config vitest.extension.config.ts,WebUI --config vitest.config.ts from frontendcwd; this existing fixture deliberately mocks the SDK hook, so no physical storage evidence is claimed. Existing declared chat-settings durable-read warnings remain and are not relabeled as successful persistence.
+
+Independent bounded review clear. Existing-configESLint0errors/0introducedfindings versus25existing warnings; whitespace clean. Bandit N/A TypeScript tests only; exact normal hooks required. ADR assessment:no newADR,fixture boundaries only. PR:https://github.com/rmusser01/tldw_server/pull/3229. Remaining issues, final whole-PR independent review, rebase and merge pending.

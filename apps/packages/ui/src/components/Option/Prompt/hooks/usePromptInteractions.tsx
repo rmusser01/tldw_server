@@ -254,7 +254,7 @@ export function usePromptInteractions(deps: UsePromptInteractionsDeps) {
   // Insert handlers
   const handleInsertChoice = React.useCallback(async (choice: "system" | "quick" | "both") => {
     if (!insertPrompt) return
-    await editorMarkPromptAsUsed(insertPrompt.id)
+    void editorMarkPromptAsUsed(insertPrompt.id)
     if (choice === "system") {
       setSelectedSystemPrompt(insertPrompt.id)
       setSelectedQuickPrompt(undefined)
@@ -299,7 +299,7 @@ export function usePromptInteractions(deps: UsePromptInteractionsDeps) {
 
       const quickContent = userText ?? record?.content
       if (quickContent) {
-        await editorMarkPromptAsUsed(record.id)
+        void editorMarkPromptAsUsed(record.id)
         setSelectedQuickPrompt(quickContent)
         setSelectedSystemPrompt(undefined)
         navigate("/chat")

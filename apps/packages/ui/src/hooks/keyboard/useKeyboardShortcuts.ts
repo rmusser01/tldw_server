@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from 'react'
+import { useEffect, useLayoutEffect, useCallback, useRef } from 'react'
 import { useShortcutConfig, type ShortcutConfig } from './useShortcutConfig'
 import { useRouteTransitionStore } from '@/store/route-transition'
 import { isEditableTarget } from "@/utils/editable-target"
@@ -111,7 +111,7 @@ export const useKeyboardShortcuts = (
   target: Document | HTMLElement | null = document
 ) => {
   const shortcutsRef = useRef(shortcuts)
-  useEffect(() => {
+  useLayoutEffect(() => {
     shortcutsRef.current = shortcuts
   }, [shortcuts])
 

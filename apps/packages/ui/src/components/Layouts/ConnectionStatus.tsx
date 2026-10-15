@@ -16,27 +16,12 @@ import {
 type StatusKind = "unknown" | "ok" | "fail"
 
 const SEVERITY_STYLES = {
-  success: {
-    bg: "border-success/30 bg-success/10",
-    text: "text-success"
-  },
-  error: {
-    bg: "border-danger/30 bg-danger/10",
-    text: "text-danger"
-  },
-  warning: {
-    bg: "border-warn/30 bg-warn/10",
-    text: "text-warn"
-  },
-  info: {
-    bg: "border-primary/30 bg-primary/10",
-    text: "text-primary"
-  },
-  neutral: {
-    bg: "border-border bg-surface2",
-    text: "text-text-muted"
-  }
-} satisfies Record<DesignSystemSeverity, { bg: string; text: string }>
+  success: "border-success/30 bg-success/10",
+  error: "border-danger/30 bg-danger/10",
+  warning: "border-warn/30 bg-warn/10",
+  info: "border-primary/30 bg-primary/10",
+  neutral: "border-border bg-surface2"
+} satisfies Record<DesignSystemSeverity, string>
 
 interface ConnectionStatusProps {
   /** Custom click handler (defaults to navigating to /settings/health) */
@@ -109,9 +94,7 @@ export function ConnectionStatus({
     }
   }
 
-  const severityStyles = SEVERITY_STYLES[coreState.severity]
-  const statusBgClass = severityStyles.bg
-  const statusTextClass = severityStyles.text
+  const statusBgClass = SEVERITY_STYLES[coreState.severity]
 
   return (
     <button
@@ -145,7 +128,7 @@ export function ConnectionStatus({
     >
       <StatusDot status={coreStatus} stateKey={coreStateKey} />
       {showLabel && (
-        <span className={statusTextClass}>
+        <span className="text-text">
           {statusLabelForCore(coreStatus)}
         </span>
       )}

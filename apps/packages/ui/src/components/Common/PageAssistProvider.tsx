@@ -9,9 +9,18 @@ export const PageAssistProvider = ({
 }: {
   children: React.ReactNode
 }) => {
-  const [controller, setController] = React.useState<AbortController | null>(
-    null
-  )
+  const [controller, setControllerState] =
+    React.useState<AbortController | null>(null)
+  const controllerRef = React.useRef<AbortController | null>(null)
+  const setController = React.useCallback<
+    React.Dispatch<React.SetStateAction<AbortController | null>>
+  >((next) => {
+    const value =
+      typeof next === "function" ? next(controllerRef.current) : next
+    controllerRef.current = value
+    setControllerState(value)
+  }, [])
+  const getController = React.useCallback(() => controllerRef.current, [])
   const [embeddingController, setEmbeddingController] =
     React.useState<AbortController | null>(null)
 
@@ -35,6 +44,7 @@ export const PageAssistProvider = ({
       value={{
         controller,
         setController,
+        getController,
 
         embeddingController,
         setEmbeddingController

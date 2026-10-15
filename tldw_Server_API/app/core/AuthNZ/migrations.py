@@ -6525,6 +6525,7 @@ def get_authnz_migrations() -> list[Migration]:
             "Add sessions.created_at and org_members(org_id, user_id) admin indexes",
             migration_101_add_admin_perf_indexes,
         ),
+        Migration(102, "Add native retained chat quota reservations", migration_102_native_chat_quota_reservations),
     ]
 
 
@@ -6793,3 +6794,12 @@ def ensure_authnz_tables(db_path: Path) -> None:
 #
 # End of migrations.py
 #######################################################################################################################
+
+
+def migration_102_native_chat_quota_reservations(conn: sqlite3.Connection) -> None:
+    """Retain same-key native accounting separately from legacy storage counters."""
+    # Earlier PR previews recorded native quota as 101 before admin 101 was released.
+    migration_101_add_admin_perf_indexes(conn)
+    from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import native_quota_schema_statements
+    for statement in native_quota_schema_statements(postgres=False):
+        conn.execute(statement)

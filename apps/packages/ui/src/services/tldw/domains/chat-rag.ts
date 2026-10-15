@@ -1,3 +1,13 @@
+import {
+  parseRoleplayResumeAppendRequest,
+  parseRoleplayResumeAppendReceipt,
+  parseRoleplayResumeCompletionRequest,
+  parseRoleplayResumeCompletionReceipt,
+  readRoleplayResumeMetadata,
+  requireRoleplayResumeDetail,
+  type RoleplayResumeUserAppendRequest,
+  type RoleplayResumeUserAppendReceipt
+} from "../roleplay-resume"
 import type { HistoryCaptureRequestV1, LegacyHistoryProjectionConfirmV1 } from "@/types/history-selection"
 import type { ScopedRequestOptions } from "../TldwApiClient"
 import { bgRequest, bgStream, bgUpload } from '@/services/background-proxy'
@@ -9,6 +19,7 @@ import type { TldwApiClientCore } from '../TldwApiClient'
 import type { ChatScope } from '@/types/chat-scope'
 import { toChatScopeParams } from '@/types/chat-scope'
 import { normalizeChatRole } from '@/utils/normalize-chat-role'
+import { CONVERSATION_STATE_VALUES } from "@/utils/conversation-state"
 import { parseRagStreamLine } from '@/services/rag/stream-contract'
 import { sanitizeRagProviderFailure } from '@/services/rag/provider-error-contract'
 import { DEFAULT_RAG_SETTINGS } from '@/services/rag/unified-rag'
@@ -33,6 +44,7 @@ import type {
 } from '../TldwApiClient'
 import { isRequestConfigScopeChangedError } from '../service-prompt-scope-error'
 import { trackServerChatWrite } from '@/store/server-chat-save-status'
+import { isDefinitiveNativeBranchRejection, isDefinitiveNativeEditRejection } from "@/utils/history-selection"
 
 const CHAT_MESSAGES_CACHE_TTL_MS = 60 * 1000
 
@@ -344,6 +356,7 @@ export const chatRagMethods = {
           ? input.workspaceId
           : null
     return {
+      ...readRoleplayResumeMetadata(input),
       id: String(input?.id ?? ""),
       title: String(input?.title || ""),
       created_at,
@@ -354,9 +367,9 @@ export const chatRagMethods = {
         : null,
       source: input?.source ?? null,
       state: state ? String(state) : null,
-      topic_label: input?.topic_label ?? input?.topicLabel ?? null,
-      cluster_id: input?.cluster_id ?? input?.clusterId ?? null,
-      external_ref: input?.external_ref ?? input?.externalRef ?? null,
+      topic_label: Object.prototype.hasOwnProperty.call(input ?? {}, "topic_label") ? input.topic_label ?? null : input?.topicLabel ?? null,
+      cluster_id: Object.prototype.hasOwnProperty.call(input ?? {}, "cluster_id") ? input.cluster_id ?? null : input?.clusterId ?? null,
+      external_ref: Object.prototype.hasOwnProperty.call(input ?? {}, "external_ref") ? input.external_ref ?? null : input?.externalRef ?? null,
       bm25_norm:
         typeof input?.bm25_norm === "number"
           ? input?.bm25_norm
@@ -388,11 +401,13 @@ export const chatRagMethods = {
       forked_from_message_id:
         input?.forked_from_message_id ?? input?.forkedFromMessageId ?? null,
       version:
-        typeof input?.version === "number"
+        Number.isSafeInteger(input?.version) && input.version > 0
           ? input.version
-          : typeof input?.expected_version === "number"
-            ? input.expected_version
-            : null,
+          : null,
+      history_version:
+        Number.isSafeInteger(input?.history_version) && input.history_version >= 0
+          ? input.history_version
+          : null,
       scope_type,
       workspace_id,
       matched_in: Array.isArray(input?.matched_in)
@@ -467,6 +482,7 @@ export const chatRagMethods = {
       },
       body: request,
       abortSignal: options?.signal,
+      onDispatch: options?.onDispatch,
       streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
       ...(scopeFields.servicePromptConfig
         ? { servicePromptConfig: scopeFields.servicePromptConfig }
@@ -669,7 +685,7 @@ export const chatRagMethods = {
       ...(scopeFields.servicePromptConfig ? { servicePromptConfig: scopeFields.servicePromptConfig } : {})
     })
 
-    let list: any[] = []
+    let list: any[] | null = null
     let total: number | null = null
 
     if (Array.isArray(data)) {
@@ -692,6 +708,10 @@ export const chatRagMethods = {
       }
     }
 
+    if (!list || list.some((row) => !row || typeof row !== "object" || Array.isArray(row) ||
+      !(typeof row.id === "string" && row.id.trim() ||
+        typeof row.id === "number" && Number.isSafeInteger(row.id) && row.id > 0)))
+      throw new Error("The saved chat list response could not be verified.")
     const chats = list.map((c) => this.normalizeChatSummary(c))
     return {
       chats,
@@ -753,11 +773,23 @@ export const chatRagMethods = {
       scope?: ChatScope
       signal?: AbortSignal
       requestScope?: ServicePromptRequestScope
+      seedFirstMessage?: boolean
+      greetingStrategy?: "default" | "alternate_random" | "alternate_index"
+      alternateIndex?: number
     }
   ): Promise<ServerChatSummary> {
+    if (options?.alternateIndex != null &&
+      (!Number.isSafeInteger(options.alternateIndex) || options.alternateIndex < 0)) {
+      throw new RangeError("alternateIndex must be a nonnegative safe integer")
+    }
     const scopeFields = requestScopeFields(options?.requestScope)
+    const query = buildQuery({
+      seed_first_message: options?.seedFirstMessage,
+      greeting_strategy: options?.greetingStrategy,
+      alternate_index: options?.alternateIndex
+    })
     const res = await bgRequest<any>({
-      path: "/api/v1/chats/",
+      path: appendPathQuery("/api/v1/chats/", query),
       method: "POST",
       headers: { "Content-Type": "application/json", ...scopeFields.headers },
       body: { ...payload, ...toChatScopeParams(options?.scope) },
@@ -769,29 +801,86 @@ export const chatRagMethods = {
     return this.normalizeChatSummary(res)
   },
 
+  async appendRoleplayResumeInput(
+    this: TldwApiClientCore,
+    chat_id: string | number,
+    payload: RoleplayResumeUserAppendRequest,
+    options: ScopedRequestOptions & {onDispatch?: () => void}
+  ): Promise<RoleplayResumeUserAppendReceipt> {
+    const cid = String(chat_id)
+    if (!options?.requestScope)
+      throw new Error("roleplay_resume_original_scope_required")
+    options.signal?.throwIfAborted()
+    const input = parseRoleplayResumeAppendRequest(payload)
+    const fields = requestScopeFields(options.requestScope)
+    return trackServerChatWrite(cid, async () =>
+      parseRoleplayResumeAppendReceipt(
+        cid,
+        input,
+        await bgRequest<unknown>({
+          ...fields,
+          path: `/api/v1/chats/${encodeURIComponent(cid)}/roleplay/messages`,
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...fields.headers },
+          body: input,
+          abortSignal: options.signal,
+          onDispatch: options.onDispatch
+        })
+      )
+    )
+  },
+
   async completeCharacterChatTurn(
     this: TldwApiClientCore,
     chat_id: string | number,
-    payload: Record<string, any>
-  ): Promise<any> {
+    payload: Record<string, unknown>,
+    options?: ScopedRequestOptions & {onDispatch?: () => void}
+  ): Promise<Record<string, unknown>> {
     const cid = String(chat_id)
-    return await trackServerChatWrite(cid, () =>
-      bgRequest<any>({
-        path: `/api/v1/chats/${cid}/complete-v2`,
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: payload
-      })
+    const protectedResume = Object.prototype.hasOwnProperty.call(
+      payload,
+      "tldw_roleplay_resume_v1"
+    )
+    if (protectedResume && !options?.requestScope)
+      throw new Error("roleplay_resume_original_scope_required")
+    options?.signal?.throwIfAborted()
+    const body = protectedResume
+      ? parseRoleplayResumeCompletionRequest(payload)
+      : payload
+    const fields = requestScopeFields(options?.requestScope)
+    return trackServerChatWrite(
+      cid,
+      async () => {
+        const result = await bgRequest<Record<string, unknown>>({
+          ...fields,
+          path: `/api/v1/chats/${encodeURIComponent(cid)}/complete-v2`,
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...fields.headers },
+          body,
+          abortSignal: options?.signal,
+          onDispatch: options?.onDispatch
+        })
+        return protectedResume
+          ? parseRoleplayResumeCompletionReceipt(
+              cid,
+              parseRoleplayResumeCompletionRequest(body),
+              result
+            )
+          : result
+      },
+      { isAcknowledgedResult: (result) => result?.saved === true }
     )
   },
 
   async getChat(
     this: TldwApiClientCore,
     chat_id: string | number,
-    options?: { scope?: ChatScope } & ScopedRequestOptions
+    options?: { scope?: ChatScope; requiredMetadata?: readonly string[]; requireHistoryVersion?: boolean; requireRoleplayResume?: boolean } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
     const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
+    const requiredMetadata = [...(options?.requiredMetadata ?? [])]
+    options?.signal?.throwIfAborted()
     const query = buildQuery(toChatScopeParams(options?.scope))
     const res = await bgRequest<any>({
       ...scopeFields,
@@ -802,6 +891,33 @@ export const chatRagMethods = {
       abortSignal: options?.signal,
       ...(scopeFields.servicePromptConfig ? {servicePromptConfig: scopeFields.servicePromptConfig} : {})
     })
+    options?.signal?.throwIfAborted()
+    if (options?.requireRoleplayResume) requireRoleplayResumeDetail(cid, res)
+    if (
+      options?.requireHistoryVersion &&
+      (!res ||
+        typeof res !== "object" ||
+        Array.isArray(res) ||
+        typeof res.id !== "string" ||
+        res.id !== cid ||
+        !Number.isSafeInteger(res.history_version) ||
+        res.history_version < 0 ||
+        (options.scope &&
+          (res.scope_type !== options.scope.type ||
+            (options.scope.type === "workspace"
+              ? res.workspace_id !== options.scope.workspaceId
+              : res.workspace_id != null))))
+    )
+      throw new Error("unsupported_history_version")
+
+    if (requiredMetadata.length && (!res || typeof res !== "object" || Array.isArray(res) ||
+      !["string", "number"].includes(typeof res.id) || String(res.id) !== cid ||
+      !Number.isSafeInteger(res.version) || res.version <= 0 || requiredMetadata.some(key =>
+        !["title", "rating", "state", "topic_label", "cluster_id", "source", "external_ref"].includes(key) ||
+        !Object.prototype.hasOwnProperty.call(res, key) ||
+        (key === "state" && !CONVERSATION_STATE_VALUES.includes(res[key])) ||
+        (res[key] !== null && (key === "rating" ? !Number.isInteger(res[key]) || res[key] < 1 || res[key] > 5 : typeof res[key] !== "string")))))
+      throw new Error("The conversation metadata could not be verified. Reload before saving.")
     return this.normalizeChatSummary(res)
   },
 
@@ -866,7 +982,9 @@ export const chatRagMethods = {
   ): Promise<number | undefined> {
     const cid = String(chat_id)
     const current = await this.getChat(cid, options)
-    return typeof current?.version === "number" ? current.version : undefined
+    if (current.id !== cid || !Number.isSafeInteger(current.version) || (current.version ?? 0) <= 0)
+      throw new Error("The conversation version could not be verified. Reload before saving.")
+    return current.version!
   },
 
   isVersionConflictError(this: TldwApiClientCore, error: unknown): boolean {
@@ -933,47 +1051,55 @@ export const chatRagMethods = {
     payload: Record<string, any>,
     options?: { expectedVersion?: number; scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
-    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
+    const signal = options?.signal
+    const scope = options?.scope ? { ...options.scope } : undefined
+    const requestScope = options?.requestScope ? {
+      config: { ...options.requestScope.config }, userId: options.requestScope.userId
+    } : undefined
+    const scopeFields = requestScopeFields(requestScope)
+    signal?.throwIfAborted()
+    if (!cid || !payload || typeof payload !== "object" || Array.isArray(payload))
+      throw new Error("A conversation and supported metadata edit are required.")
+    const patch: Record<string, string | number | null> = {}
+    for (const [key, value] of Object.entries(payload)) {
+      if (!["title", "rating", "state", "topic_label", "cluster_id", "source", "external_ref"].includes(key))
+        throw new Error(`The server does not support editing ${key} here.`)
+      if (value === undefined) continue
+      if (value !== null && (key === "rating"
+        ? !Number.isInteger(value) || value < 1 || value > 5
+        : typeof value !== "string"))
+        throw new Error(`Invalid conversation ${key}.`)
+      const canonical = key === "state" && typeof value === "string" ? value.trim().toLowerCase() : value
+      if (key === "state" && canonical !== null && !["in-progress", "resolved", "backlog", "non-viable"].includes(canonical))
+        throw new Error("Invalid conversation state.")
+      patch[key] = canonical
+    }
+    if (!Object.keys(patch).length) throw new Error("No supported conversation changes to save.")
     let expectedVersion = options?.expectedVersion
-    if (expectedVersion == null) {
-      try {
-        expectedVersion = await this.getLatestChatVersion(cid, options)
-      } catch {
-        // ignore and fall back to unversioned update
-      }
-    }
-    const attemptUpdate = async (
-      versionToUse: number | undefined,
-      hasRetried = false
-    ): Promise<ServerChatSummary> => {
-      const qp =
-        buildQuery({
-          ...toChatScopeParams(options?.scope),
-          ...(typeof versionToUse === "number"
-            ? { expected_version: versionToUse }
-            : {})
-        })
-      try {
-        const res = await bgRequest<any>({
-          ...scopeFields,
-          ...(options?.signal ? { abortSignal: options.signal } : {}),
-          path: appendPathQuery(`/api/v1/chats/${cid}`, qp),
-          method: "PUT",
-          headers: { ...scopeFields.headers, "Content-Type": "application/json" },
-          body: payload
-        })
-        return this.normalizeChatSummary(res)
-      } catch (error) {
-        if (hasRetried || !this.isVersionConflictError(error)) {
-          throw error
-        }
-        const latestVersion = await this.getLatestChatVersion(cid, options)
-        return await attemptUpdate(latestVersion, true)
-      }
-    }
-
-    return await attemptUpdate(expectedVersion)
+    if (expectedVersion !== undefined && (!Number.isSafeInteger(expectedVersion) || expectedVersion <= 0))
+      throw new Error("A valid observed conversation version is required.")
+    if (expectedVersion === undefined)
+      expectedVersion = await this.getLatestChatVersion(cid, { scope, signal, requestScope })
+    signal?.throwIfAborted()
+    if (!Number.isSafeInteger(expectedVersion) || (expectedVersion ?? 0) <= 0)
+      throw new Error("The conversation version could not be verified. Reload before saving.")
+    const qp = buildQuery({ ...toChatScopeParams(scope), expected_version: expectedVersion })
+    const res = await bgRequest<any>({
+      ...scopeFields,
+      abortSignal: signal,
+      path: appendPathQuery(`/api/v1/chats/${cid}`, qp),
+      method: "PUT",
+      headers: { ...scopeFields.headers, "Content-Type": "application/json" },
+      body: patch
+    })
+    signal?.throwIfAborted()
+    if (!res || typeof res !== "object" || Array.isArray(res) ||
+      !["string", "number"].includes(typeof res.id) || String(res.id) !== cid ||
+      !Number.isSafeInteger(res.version) || res.version <= expectedVersion! ||
+      Object.entries(patch).some(([key, value]) => !Object.prototype.hasOwnProperty.call(res, key) || res[key] !== value))
+      throw new Error("The server did not confirm these conversation changes. Reload before retrying.")
+    return this.normalizeChatSummary(res)
   },
 
   async deleteChat(
@@ -1022,8 +1148,9 @@ export const chatRagMethods = {
   async restoreChat(
     this: TldwApiClientCore,
     chat_id: string | number,
-    options?: { expectedVersion?: number; scope?: ChatScope }
+    options?: { expectedVersion?: number; scope?: ChatScope } & ScopedRequestOptions
   ): Promise<ServerChatSummary> {
+    const scopeFields = requestScopeFields(options?.requestScope)
     const cid = String(chat_id)
     let expectedVersion = options?.expectedVersion
     if (expectedVersion == null) {
@@ -1044,6 +1171,8 @@ export const chatRagMethods = {
       )
       try {
         const res = await bgRequest<any>({
+          ...scopeFields,
+          ...(options?.signal ? {abortSignal:options.signal} : {}),
           path: `/api/v1/chats/${cid}/restore${query}`,
           method: "POST"
         })
@@ -1308,13 +1437,23 @@ export const chatRagMethods = {
     this: TldwApiClientCore,
     chatId: string,
     request: HistoryCaptureRequestV1,
-    options: { scope?: ChatScope; signal?: AbortSignal; requestScope: ServicePromptRequestScope }
+    options: {
+      scope?: ChatScope
+      signal?: AbortSignal
+      requestScope: ServicePromptRequestScope
+      includeNativeCompletion?: boolean
+    }
   ): Promise<unknown> {
     const scoped = requestScopeFields(options.requestScope)
     return bgRequest({
       path: appendPathQuery(
         `/api/v1/chat/conversations/${encodeURIComponent(chatId)}/history/selection`,
-        buildQuery(toChatScopeParams(options.scope))
+        buildQuery({
+          ...toChatScopeParams(options.scope),
+          ...(options.includeNativeCompletion === true
+            ? { include_native_completion: true }
+            : {})
+        })
       ),
       method: "POST",
       body: request,
@@ -1357,18 +1496,59 @@ export const chatRagMethods = {
     const cid = String(chat_id)
     const query = buildQuery(toChatScopeParams(options?.scope))
     const scopeFields = requestScopeFields(options?.requestScope)
-    const res = await trackServerChatWrite(cid, () =>
-      bgRequest<ServerChatMessage>({
-        path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
-        method: "POST",
-        headers: { "Content-Type": "application/json", ...scopeFields.headers },
-        body: payload,
-        abortSignal: options?.signal,
-        ...(scopeFields.servicePromptConfig
-          ? { servicePromptConfig: scopeFields.servicePromptConfig }
-          : {})
-      })
+    const selection = payload.tldw_history_selection_v1
+    const submittedSelection =
+      options?.requestScope &&
+      payload.role === "user" &&
+      payload.tldw_history_branch === false &&
+      selection?.conversation_id === cid &&
+      Array.isArray(selection.messages) &&
+      Array.from(selection.messages).every(
+        (row: unknown) =>
+          row &&
+          typeof row === "object" &&
+          typeof (row as { id?: unknown }).id === "string" &&
+          (row as { id: string }).id.length > 0
+      )
+        ? {
+            conversation_id: cid,
+            messages: selection.messages.map((row: { id: string }) => ({
+              id: row.id
+            }))
+          }
+        : null
+    const originalEdit = payload.tldw_history_edit_v1
+    const submittedEdit = options?.requestScope && payload.role === "user" && payload.tldw_history_branch === true &&
+      originalEdit?.version === 1 && typeof originalEdit.message_id === "string" && originalEdit.message_id.length > 0 &&
+      typeof originalEdit.message_revision === "string" && originalEdit.message_revision.length > 0 &&
+      Object.keys(originalEdit).length === 3 && ["version", "message_id", "message_revision"].every(key => Object.hasOwn(originalEdit, key)) &&
+      selection?.conversation_id === cid && selection.cursor?.kind === "before_message" && selection.cursor.message_id === originalEdit.message_id &&
+      typeof selection.selection_digest === "string" && selection.selection_digest.length > 0
+      ? { target: { version: 1 as const, message_id: originalEdit.message_id, message_revision: originalEdit.message_revision },
+          selection: { conversation_id: cid, cursor: { kind: "before_message" as const, message_id: originalEdit.message_id },
+            selection_digest: selection.selection_digest } } : null
+    const res = await trackServerChatWrite(
+      cid,
+      () =>
+        bgRequest<ServerChatMessage>({
+          path: appendPathQuery(`/api/v1/chats/${cid}/messages`, query),
+          method: "POST",
+          headers: { "Content-Type": "application/json", ...scopeFields.headers },
+          body: payload,
+          abortSignal: options?.signal,
+          ...(scopeFields.servicePromptConfig
+            ? { servicePromptConfig: scopeFields.servicePromptConfig }
+            : {})
+        }),
+      {
+        isUnchangedError: (error) =>
+          Boolean(
+            (submittedSelection && isDefinitiveNativeBranchRejection(error, submittedSelection)) ||
+            (submittedEdit && isDefinitiveNativeEditRejection(error, submittedEdit.selection, submittedEdit.target))
+          )
+      }
     )
+
     this.invalidateChatMessagesCache(cid)
     return res
   },
@@ -1452,10 +1632,15 @@ export const chatRagMethods = {
   },
 
   async *streamCharacterChatCompletion(
-    this: TldwApiClientCore,
     chat_id: string | number,
     payload?: Record<string, any>,
-    options?: { signal?: AbortSignal; streamIdleTimeoutMs?: number; scope?: ChatScope; requestScope?: ServicePromptRequestScope }
+    options?: {
+      signal?: AbortSignal
+      streamIdleTimeoutMs?: number
+      scope?: ChatScope
+      requestScope?: ServicePromptRequestScope
+      onDispatch?: () => void
+    }
   ): AsyncGenerator<any> {
     const cid = String(chat_id)
     const body = { ...(payload || {}), stream: true }
@@ -1474,7 +1659,10 @@ export const chatRagMethods = {
       body,
       abortSignal: options?.signal,
       streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
-      ...(scopeFields.servicePromptConfig ? { servicePromptConfig: scopeFields.servicePromptConfig } : {})
+      onDispatch: options?.onDispatch,
+      ...(scopeFields.servicePromptConfig
+        ? { servicePromptConfig: scopeFields.servicePromptConfig }
+        : {})
     })) {
       if (!line) continue
       try {
@@ -1532,9 +1720,21 @@ export const chatRagMethods = {
   },
 
   // Message (single) APIs
-  async getMessage(this: TldwApiClientCore, message_id: string | number): Promise<any> {
-    const mid = String(message_id)
-    return await bgRequest<any>({ path: `/api/v1/messages/${mid}`, method: 'GET' })
+  async getMessage(
+    this: TldwApiClientCore,
+    message_id: string | number,
+    options?: { scope?: ChatScope } & ScopedRequestOptions
+  ): Promise<any> {
+    const scoped = requestScopeFields(options?.requestScope)
+    options?.signal?.throwIfAborted()
+    const response = await bgRequest<any>({
+      ...scoped,
+      path: appendPathQuery(`/api/v1/messages/${encodeURIComponent(String(message_id))}`, buildQuery(toChatScopeParams(options?.scope))),
+      method: "GET",
+      abortSignal: options?.signal
+    })
+    options?.signal?.throwIfAborted()
+    return response
   },
 
   async editMessage(
@@ -1543,25 +1743,25 @@ export const chatRagMethods = {
     content: string,
     expectedVersion: number,
     chatId?: string | number,
-    options?: { pinned?: boolean }
+    options?: { pinned?: boolean; scope?: ChatScope } & ScopedRequestOptions
   ): Promise<any> {
-    const mid = String(message_id)
-    const qp = `?expected_version=${encodeURIComponent(String(expectedVersion))}`
+    const scoped = requestScopeFields(options?.requestScope)
+    options?.signal?.throwIfAborted()
+    const query = buildQuery({ expected_version: expectedVersion, ...toChatScopeParams(options?.scope) })
     const body: Record<string, unknown> = { content }
-    if (typeof options?.pinned === "boolean") {
-      body.pinned = options.pinned
-    }
+    if (typeof options?.pinned === "boolean") body.pinned = options.pinned
     const res = await trackServerChatWrite(chatId, () =>
       bgRequest<any>({
-        path: `/api/v1/messages/${mid}${qp}`,
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body
+        ...scoped,
+        path: appendPathQuery(`/api/v1/messages/${encodeURIComponent(String(message_id))}`, query),
+        method: "PUT",
+        headers: { "Content-Type": "application/json", ...scoped.headers },
+        body,
+        abortSignal: options?.signal
       })
     )
-    if (chatId != null) {
-      this.invalidateChatMessagesCache(chatId)
-    }
+    options?.signal?.throwIfAborted()
+    if (chatId != null) this.invalidateChatMessagesCache(chatId)
     return res
   },
 
@@ -1569,20 +1769,57 @@ export const chatRagMethods = {
     this: TldwApiClientCore,
     message_id: string | number,
     expectedVersion: number,
-    chatId?: string | number
+    chatId?: string | number,
+    options?: {
+      scope?: ChatScope
+      requireLeaf?: boolean
+      expectedRevision?: string
+    } & ScopedRequestOptions
   ): Promise<void> {
-    const mid = String(message_id)
-    const qp = `?expected_version=${encodeURIComponent(String(expectedVersion))}`
-    await trackServerChatWrite(chatId, () =>
-      bgRequest<void>({
-        path: `/api/v1/messages/${mid}${qp}`,
-        method: 'DELETE'
+    const scoped = requestScopeFields(options?.requestScope)
+    options?.signal?.throwIfAborted()
+    const query = buildQuery({
+      expected_version: expectedVersion,
+      ...toChatScopeParams(options?.scope),
+      ...(options?.requireLeaf ? { require_leaf: true } : {}),
+      ...(options?.expectedRevision
+        ? { expected_revision: options.expectedRevision }
+        : {})
+    })
+    await trackServerChatWrite(chatId, async () => {
+      const response = await bgRequest<{
+        ok: boolean
+        status: number
+        data?: unknown
+        error?: string
+      }>({
+        ...scoped,
+        path: appendPathQuery(
+          `/api/v1/messages/${encodeURIComponent(String(message_id))}`,
+          query
+        ),
+        method: "DELETE",
+        abortSignal: options?.signal,
+        returnResponse: options?.requireLeaf
       })
-    )
-    if (chatId != null) {
-      this.invalidateChatMessagesCache(chatId)
-    }
+      if (
+        options?.requireLeaf &&
+        (response?.ok !== true || response.status !== 204)
+      ) {
+        throw Object.assign(
+          new Error(response?.error || "message_delete_unconfirmed"),
+          {
+            status: response?.status,
+            details: response?.data,
+            detail: (response?.data as { detail?: unknown } | undefined)?.detail
+          }
+        )
+      }
+    })
+    options?.signal?.throwIfAborted()
+    if (chatId != null) this.invalidateChatMessagesCache(chatId)
   },
+
 
   async saveChatKnowledge(this: TldwApiClientCore, payload: {
     conversation_id: string | number
@@ -1749,12 +1986,12 @@ export const chatRagMethods = {
     return await bgRequest<any>({ path: '/api/v1/chat/dictionaries', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
   },
 
-  async listDictionaries(this: TldwApiClientCore, include_inactive?: boolean, include_usage?: boolean): Promise<any> {
+  async listDictionaries(this: TldwApiClientCore, include_inactive?: boolean, include_usage?: boolean, options?: ScopedRequestOptions): Promise<any> {
     const params = new URLSearchParams()
     if (include_inactive) params.set('include_inactive', 'true')
     if (include_usage) params.set('include_usage', 'true')
     const qp = params.toString()
-    return await bgRequest<any>({ path: `/api/v1/chat/dictionaries${qp ? `?${qp}` : ''}`, method: 'GET' })
+    return await bgRequest<any>({ ...requestScopeFields(options?.requestScope), path: `/api/v1/chat/dictionaries${qp ? `?${qp}` : ''}`, method: 'GET', abortSignal: options?.signal })
   },
 
   async getDictionary(this: TldwApiClientCore, dictionary_id: number | string): Promise<any> {

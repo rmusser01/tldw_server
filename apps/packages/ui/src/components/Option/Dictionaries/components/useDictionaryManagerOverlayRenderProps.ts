@@ -31,7 +31,7 @@ export function useDictionaryManagerOverlayRenderProps({
     quickAssignChatOptions: dataFlows.quickAssignChatOptions,
     refetchAssignableChats: dataFlows.refetchAssignableChats,
     toggleAssignChatSelection: dataFlows.toggleAssignChatSelection,
-    openChatContextFromDictionary: environment.openChatContextFromDictionary,
+    openChatContextFromDictionary: dataFlows.openQuickAssignChat,
     openCreate: workspaceControls.openCreate,
     closeCreateModal: workspaceControls.closeCreateModal,
     createForm: workspaceControls.createForm,

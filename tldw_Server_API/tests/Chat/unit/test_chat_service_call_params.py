@@ -849,3 +849,29 @@ def test_history_branch_opt_in_does_not_reach_provider():
     params = build_call_params_from_request(request_data=req, target_api_provider="openai", provider_api_key="test",
         templated_llm_payload=[], final_system_message=None, app_config=None)
     assert "tldw_history_branch" not in params
+
+
+@pytest.mark.parametrize(
+    "field", ["tldw_history_selection_v1", "tldw_history_branch", "tldw_history_edit_v1", "tldw_history_admission_v1"]
+)
+def test_private_history_proof_never_reaches_provider_extensions(field):
+    # model_construct exercises the final provider boundary when upstream validation was bypassed.
+    alias = field.upper().replace("_", "-")
+    req = ChatCompletionRequest.model_construct(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "hi"}],
+        extra_body={field: {"private": True}, alias: {"private": True}, "provider_extension": 7},
+        extra_headers={field: "private", alias: "private", "X-Provider-Extension": "kept"},
+        **{field: {"private": True}},
+    )
+    params = build_call_params_from_request(
+        request_data=req,
+        target_api_provider="openai",
+        provider_api_key="synthetic-test-key",
+        templated_llm_payload=[{"role": "user", "content": "hi"}],
+        final_system_message=None,
+        app_config=None,
+    )
+    assert field not in params
+    assert params["extra_body"] == {"provider_extension": 7}
+    assert params["extra_headers"] == {"X-Provider-Extension": "kept"}

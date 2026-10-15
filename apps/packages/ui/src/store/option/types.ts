@@ -17,6 +17,7 @@ import type {
   QueuedRequestInput
 } from "@/utils/chat-request-queue"
 import type { CharacterEmoteEvent } from "@/utils/character-emotes"
+import type { ChatDraftAddress, ChatDraftTransition } from "@/utils/chat-draft-address"
 
 // Knowledge type is now server-side only; this is a placeholder for legacy compatibility
 export type Knowledge = {
@@ -125,6 +126,15 @@ export type ChatHistory = {
 }[]
 
 export type State = {
+  chatDraftAddress: ChatDraftAddress | null
+  chatDraftRevision: number
+  chatDraftTransition: ChatDraftTransition | null
+  startNewChatDraft: (temporary?: boolean) => void
+  setChatDraftAddress: (address: ChatDraftAddress, options?: {
+    kind?: ChatDraftTransition["kind"]
+    expectedRevision?: number
+    sourceAddress?: ChatDraftAddress | null
+  }) => boolean
   messages: Message[]
   // Accepts either direct Message[] or functional update (like React setState)
   setMessages: (
@@ -138,6 +148,7 @@ export type State = {
       | ((prev: ChatHistory) => ChatHistory)
   ) => void
   streaming: boolean
+  detachedHistoryResponse: { originalReply?: Pick<Message, "id" | "message" | "isBot"> } | null
   setStreaming: (streaming: boolean) => void
   isFirstMessage: boolean
   setIsFirstMessage: (isFirstMessage: boolean) => void
@@ -151,7 +162,12 @@ export type State = {
   isProcessing: boolean
   setIsProcessing: (isProcessing: boolean) => void
   selectedModel: string | null
-  setSelectedModel: (selectedModel: string | null) => void
+  selectedModelStorageHandled: boolean
+  selectedModelRevision: number
+  setSelectedModel: (
+    selectedModel: string | null,
+    options?: { storageHandled?: boolean }
+  ) => void
   chatMode: "normal" | "rag" | "vision"
   setChatMode: (chatMode: "normal" | "rag" | "vision") => void
   isEmbedding: boolean
@@ -165,12 +181,17 @@ export type State = {
   selectedSystemPrompt: string | null
   setSelectedSystemPrompt: (selectedSystemPrompt: string) => void
   selectedQuickPrompt: string | null
-  setSelectedQuickPrompt: (selectedQuickPrompt: string) => void
+  quickPromptRevision: number
+  setSelectedQuickPrompt: (
+    selectedQuickPrompt: string | null | undefined,
+    options?: { expectedRevision?: number }
+  ) => boolean
+  messageSteeringRevision: number
   messageSteeringMode: MessageSteeringMode
   setMessageSteeringMode: (mode: MessageSteeringMode) => void
   messageSteeringForceNarrate: boolean
   setMessageSteeringForceNarrate: (enabled: boolean) => void
-  clearMessageSteering: () => void
+  clearMessageSteering: (options?: { expectedRevision?: number }) => void
   queuedMessages: QueuedRequest[]
   addQueuedMessage: (payload: QueuedRequestInput) => void
   setQueuedMessages: (
@@ -220,6 +241,8 @@ export type State = {
   // Server-backed character chat id
   serverChatId: string | null
   setServerChatId: (id: string | null) => void
+  serverChatRoleplaySetup: import("@/services/tldw/roleplay-resume").SavedRoleplayPresentation | null
+  setServerChatRoleplaySetup: (setup: import("@/services/tldw/roleplay-resume").SavedRoleplayPresentation | null) => void
   serverChatTitle: string | null
   setServerChatTitle: (title: string | null) => void
   serverChatCharacterId: string | number | null

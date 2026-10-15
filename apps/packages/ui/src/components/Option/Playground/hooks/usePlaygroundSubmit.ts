@@ -1,4 +1,10 @@
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
+import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
 import React from "react"
+import { captureActorSceneSend, type ActorSceneSend } from "@/hooks/chat/actor-scene-source"
+import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-preflight"
+import { useStoreMessageOption } from "@/store/option"
 import { defaultEmbeddingModelForRag } from "~/services/tldw-server"
 import { getIsSimpleInternetSearch } from "@/services/search"
 import { formatPinnedResults } from "@/utils/rag-format"
@@ -44,9 +50,11 @@ type DocumentProcessingTurnReservation = {
 export type UsePlaygroundSubmitDeps = {
   form: any
   beginPromptAssistReset: () => number
-  markPromptAssistAttemptSaved: (attemptId: number) => void
+  restorePromptAssistAttempt: (attemptId: number) => void
+  markPromptAssistAttemptSaved: (attemptId: number, acknowledgedDelivery?: boolean) => void
   isSending: boolean
   isConnectionReady: boolean
+  draftReady: boolean
   webSearch: boolean
   compareModeActive: boolean
   compareSelectedModels: string[]
@@ -67,6 +75,8 @@ export type UsePlaygroundSubmitDeps = {
   researchContext?: ChatResearchContext
   importedSidepanelContext?: SidepanelChatHandoffPageContext | null
   clearImportedSidepanelContext?: () => void
+  historySelection?: HistorySelectionController | null
+  captureCompletionGuard?: () => () => boolean
   sendMessage: (args: any) => Promise<any>
   clearOpenUIRequestMode: () => void
   clearSelectedDocuments: () => void
@@ -83,6 +93,7 @@ export type UsePlaygroundSubmitDeps = {
   estimateTokensForText: (text: string) => number
   resolveSubmissionIntent: (message: string) => any
   queueSubmission: (args: PlaygroundQueueSubmissionArgs) => unknown
+  getSubmitDisabledReason?: () => string | null
   validateSelectedChatModelsAvailability: (models: string[]) => boolean
   compareModelsSupportCapability: (models: string[], cap: string) => boolean
   notificationApi: any
@@ -137,9 +148,11 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   const {
     form,
     beginPromptAssistReset,
+    restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
     isSending,
     isConnectionReady,
+    draftReady,
     webSearch,
     compareModeActive,
     compareSelectedModels,
@@ -161,6 +174,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     importedSidepanelContext,
     clearImportedSidepanelContext,
     sendMessage,
+    historySelection,
+    captureCompletionGuard,
     clearOpenUIRequestMode,
     clearSelectedDocuments,
     clearUploadedFiles,
@@ -171,11 +186,21 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     estimateTokensForText,
     resolveSubmissionIntent,
     queueSubmission,
+    getSubmitDisabledReason,
     validateSelectedChatModelsAvailability,
     compareModelsSupportCapability,
     notificationApi,
     t
   } = deps
+  const connectionReadyRef = React.useRef(isConnectionReady)
+  const connectionGenerationRef = React.useRef(0)
+  React.useLayoutEffect(() => {
+    if (connectionReadyRef.current && !isConnectionReady) connectionGenerationRef.current += 1
+    connectionReadyRef.current = isConnectionReady
+  }, [isConnectionReady])
+  const draftReadyRef = React.useRef(draftReady)
+  draftReadyRef.current = draftReady
+  const sourceDraftRevision = useStoreMessageOption(state => state.chatDraftRevision)
 
   const submitFormRef = React.useRef<
     (options?: { ignorePinnedResults?: boolean }) => void
@@ -189,15 +214,20 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   const activeDocumentPreparationRef = React.useRef<{
     controller: AbortController
     selectionKey: string
+    isCurrent: () => boolean
   } | null>(null)
   currentDocumentSelectionKeyRef.current = currentDocumentSelectionKey
 
   React.useEffect(() => {
     const active = activeDocumentPreparationRef.current
-    if (active && active.selectionKey !== currentDocumentSelectionKey) {
+    if (active && (active.selectionKey !== currentDocumentSelectionKey || !isConnectionReady || !active.isCurrent())) {
       active.controller.abort()
+      if (activeDocumentPreparationRef.current === active) {
+        activeDocumentPreparationRef.current = null
+        setIsPreparingDocuments(false)
+      }
     }
-  }, [currentDocumentSelectionKey])
+  }, [currentDocumentSelectionKey, isConnectionReady, sourceDraftRevision, historySelection])
 
   React.useEffect(
     () => () => activeDocumentPreparationRef.current?.controller.abort(),
@@ -206,7 +236,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
   // Route through the shared composer dispatch so cross-cutting concerns
   // (metrics, error handling) have one home if we need them later.
-  const { dispatch } = useComposerSubmit({ sendMessage })
+  const { dispatch } = useComposerSubmit({ sendMessage, captureCompletionGuard })
 
   const buildPinnedMessage = React.useCallback(
     (message: string, options?: { ignorePinnedResults?: boolean }) => {
@@ -220,11 +250,33 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   )
 
   const submitForm = (options?: { ignorePinnedResults?: boolean }) => {
+    if (getSubmitDisabledReason?.()) return
     form.onSubmit(async (value: any) => {
-      if (activeDocumentPreparationRef.current) return
+      if (!connectionReadyRef.current) {
+        notificationApi.info({ message: t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") })
+        return
+      }
+      if (!draftReadyRef.current) {
+        notificationApi.info({ message: t("playground:draftLoading", "Draft still loading"),
+          description: t("playground:draftLoadingWait", "Wait for this conversation's draft to finish loading before sending.") })
+        return
+      }
+      const connectionGeneration = connectionGenerationRef.current
+      const draftRevision = useStoreMessageOption.getState().chatDraftRevision
+      const currentDraft = () => connectionReadyRef.current && connectionGenerationRef.current === connectionGeneration && draftReadyRef.current && useStoreMessageOption.getState().chatDraftRevision === draftRevision
+      const activePreparation = activeDocumentPreparationRef.current
+      if (activePreparation) {
+        if (activePreparation.isCurrent()) return
+        activePreparation.controller.abort()
+        if (activeDocumentPreparationRef.current === activePreparation) {
+          activeDocumentPreparationRef.current = null
+          setIsPreparingDocuments(false)
+        }
+      }
       let documentPreparation: {
         controller: AbortController
         selectionKey: string
+        isCurrent: () => boolean
       } | null = null
       try {
       const intent = resolveSubmissionIntent(value.message)
@@ -246,11 +298,42 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         })
         return
       }
+      const savedRoleplay = isSavedRoleplayConversation(historySelection)
+      if (
+        savedRoleplay &&
+        !intent.isImageCommand &&
+        (value.image ||
+          selectedDocuments.length ||
+          uploadedFiles.length ||
+          webSearch ||
+          fileRetrievalEnabled ||
+          (!options?.ignorePinnedResults && ragPinnedResults.length) ||
+          compareModeActive ||
+          openUIRequestMode ||
+          importedSidepanelContext ||
+          researchContext)
+      ) {
+        form.setFieldError(
+          "message",
+          t(
+            "playground:composer.roleplayResumeContext",
+            "This conversation uses its saved roleplay setup. Start a new chat to add extra context, tools or another mode. Your message is kept."
+          )
+        )
+        notificationApi.error({
+          message: t("error"),
+          description: t(
+            "playground:composer.roleplayResumeContext",
+            "This conversation uses its saved roleplay setup. Start a new chat to add extra context, tools or another mode. Your message is kept."
+          )
+        })
+        return
+      }
       const nextMessage = intent.message
       const combinedMessage = intent.isImageCommand
         ? nextMessage
         : buildPinnedMessage(nextMessage, options)
-      const trimmed = combinedMessage.trim()
+      const trimmed = savedRoleplay ? combinedMessage : combinedMessage.trim()
       const visiblePrompt =
         !intent.isImageCommand &&
         trimmed.length === 0 &&
@@ -290,8 +373,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       ) {
         return
       }
-      const shouldQueueInsteadOfSend = isSending || !isConnectionReady
-      if (!intent.isImageCommand) {
+      const shouldQueueInsteadOfSend = isSending
+      if (!intent.isImageCommand && !savedRoleplay) {
         if (!compareModeActive) {
           const normalizedSelectedModel = normalizeChatModelId(selectedModel)
           if (!normalizedSelectedModel) {
@@ -363,18 +446,50 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         return
       }
 
-      if (!intent.isImageCommand && uploadedFiles.length > 0) {
+      const completionIsCurrent = captureCompletionGuard?.() ?? (() => true)
+      const inputRevision = form.getRevision?.()
+      const dispatchIsCurrent = savedRoleplay
+        ? () => true
+        : captureChatDispatchSource({
+            selectedModel: selectedModel ?? "",
+            selectionSource: { model: "global", toolChoice: "global" }
+          })
+      const preparationIsCurrent = () => currentDraft() && completionIsCurrent() && form.getRevision?.() === inputRevision && dispatchIsCurrent() &&
+        (!documentPreparation || (!documentPreparation.controller.signal.aborted && currentDocumentSelectionKeyRef.current === documentPreparation.selectionKey))
+      const sceneCapture =
+        intent.isImageCommand || savedRoleplay
+          ? null
+          : captureActorSceneSend(
+              historySelection ?? null,
+              () => currentDraft() && dispatchIsCurrent()
+            )
+      let actorSceneSend: ActorSceneSend | undefined
+      if (!intent.isImageCommand) {
         documentPreparation = {
           controller: new AbortController(),
-          selectionKey: currentDocumentSelectionKeyRef.current
+          selectionKey: currentDocumentSelectionKeyRef.current,
+          isCurrent: () => preparationIsCurrent() && sceneCapture?.isCurrent() !== false
         }
         activeDocumentPreparationRef.current = documentPreparation
-        setIsPreparingDocuments(true)
+        if (uploadedFiles.length > 0) setIsPreparingDocuments(true)
+
+        try {
+          if (!savedRoleplay) {
+            if (!sceneCapture) throw new Error("actor_settings_unavailable")
+            actorSceneSend = await sceneCapture.read()
+          }
+        } catch (error) {
+          if (preparationIsCurrent() && sceneCapture?.isCurrent() !== false) notificationApi.error({ message: t("error", { defaultValue: "Error" }),
+            description: nativeCharacterPreflightMessage(error, t) ?? t("playground:composer.sceneLoadError", "Scene settings could not be loaded. Existing chat setup was left unchanged.") })
+          return
+        }
+        if (!currentDraft() || !preparationIsCurrent() || documentPreparation.controller.signal.aborted) return
       }
 
       if (!intent.isImageCommand && webSearch) {
         const defaultEM = await defaultEmbeddingModelForRag()
         const simpleSearch = await getIsSimpleInternetSearch()
+        if (!currentDraft() || !preparationIsCurrent()) return
         if (!defaultEM && !simpleSearch) {
           form.setFieldError("message", t("formError.noEmbeddingModel"))
           return
@@ -382,6 +497,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       }
       if (!intent.isImageCommand && uploadedFiles.length > 0) {
         if (!documentPreparation) return
+        if (!currentDraft()) return
         const waitingMetadata = buildPendingDocumentProcessingMetadata(
           uploadedFiles,
           "waiting_for_files"
@@ -433,6 +549,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           }
           return
         }
+        if (!currentDraft() || !preparationIsCurrent()) return
         const firstBlockedOrFailed =
           preparedDocuments.blockedFiles[0] || preparedDocuments.failedFiles[0]
         if (
@@ -507,36 +624,11 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           }
         }
       }
-      const promptAssistAttemptId = beginPromptAssistReset()
-      form.reset()
-      clearSelectedDocuments()
-      clearUploadedFiles()
-      textAreaFocus()
-      const projectedForSubmission = projectTokenBudget({
-        conversationTokens:
-          conversationTokenCount +
-          characterContextTokenEstimate +
-          pinnedSourceTokenEstimate,
-        draftTokens: estimateTokensForText(messageForModel ?? visiblePrompt),
-        maxTokens: resolvedMaxContext
-      })
-      if (projectedForSubmission.isOverLimit || projectedForSubmission.isNearLimit) {
-        notificationApi.warning({
-          message: t("playground:tokens.preSendWarningTitle", "Context budget warning"),
-          description: projectedForSubmission.isOverLimit
-            ? t(
-                "playground:tokens.preSendOverLimit",
-                "Projected send exceeds the model context window. Consider trimming prompt/context before sending."
-              )
-            : t(
-                "playground:tokens.preSendNearLimit",
-                "Projected send is near the context window limit."
-              )
-        })
-      }
-      setLastSubmittedContext(currentContextSnapshot)
+      if (!currentDraft()) return
+      let promptAssistAttemptId!: number
 
       const payload = {
+        actorSceneSend,
         image: intent.isImageCommand ? "" : value.image,
         message: visiblePrompt,
         docs: intent.isImageCommand
@@ -567,17 +659,55 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         ...(mergedRequestOverrides ? { requestOverrides: mergedRequestOverrides } : {})
       }
 
-      await dispatch(payload, {
+      if (!preparationIsCurrent() || actorSceneSend?.isCurrent() === false) return
+      if (documentPreparation && activeDocumentPreparationRef.current === documentPreparation) {
+        activeDocumentPreparationRef.current = null
+        setIsPreparingDocuments(false)
+      }
+      const result = await dispatch(payload, {
+        beforeSend: () => {
+          promptAssistAttemptId = beginPromptAssistReset()
+          form.reset()
+          clearSelectedDocuments()
+          clearUploadedFiles()
+          textAreaFocus()
+          const projectedForSubmission = projectTokenBudget({
+            conversationTokens:
+              conversationTokenCount +
+              characterContextTokenEstimate +
+              pinnedSourceTokenEstimate,
+            draftTokens: estimateTokensForText(messageForModel ?? visiblePrompt),
+            maxTokens: resolvedMaxContext
+          })
+          if (projectedForSubmission.isOverLimit || projectedForSubmission.isNearLimit) {
+            notificationApi.warning({
+              message: t("playground:tokens.preSendWarningTitle", "Context budget warning"),
+              description: projectedForSubmission.isOverLimit
+                ? t(
+                    "playground:tokens.preSendOverLimit",
+                    "Projected send exceeds the model context window. Consider trimming prompt/context before sending."
+                  )
+                : t(
+                    "playground:tokens.preSendNearLimit",
+                    "Projected send is near the context window limit."
+                  )
+            })
+          }
+          setLastSubmittedContext(currentContextSnapshot)
+        },
         afterSend: (result) => {
           if (isChatSubmitSuccess(normalizeChatSubmitResult(result as any))) {
-            markPromptAssistAttemptSaved(promptAssistAttemptId)
+            markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
             if (messageForModel) {
               clearImportedSidepanelContext?.()
             }
+          } else {
+            restorePromptAssistAttempt(promptAssistAttemptId)
           }
-        }
+        },
+        onSendError: () => restorePromptAssistAttempt(promptAssistAttemptId)
       })
-      if (openUIRequestMode) {
+      if (openUIRequestMode && completionIsCurrent() && isChatSubmitSuccess(normalizeChatSubmitResult(result))) {
         clearOpenUIRequestMode()
       }
       } finally {

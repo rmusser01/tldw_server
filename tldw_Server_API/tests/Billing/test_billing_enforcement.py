@@ -460,13 +460,12 @@ class TestBillingEnforcer:
         monkeypatch.setattr(enforcement_module.logger, "error", _record_log_message)
         monkeypatch.setattr(enforcement_module.logger, "warning", _record_log_message)
 
-        enforcer = BillingEnforcer()
-        usage = await enforcer.get_org_usage(org_id=77)
+        from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import NativeQuotaUnavailableError
 
-        assert usage.org_id == 77
-        assert usage.api_calls_today == 2_147_483_647
-        assert usage.llm_tokens_month == 2_147_483_647
-        assert usage.rag_queries_today == 2_147_483_647
+        enforcer = BillingEnforcer()
+        with pytest.raises(NativeQuotaUnavailableError, match="Native retained storage usage is unavailable"):
+            await enforcer.get_org_usage(org_id=77)
+
         joined = "\n".join(messages)
         assert leaked_secret not in joined
         assert leaked_path not in joined

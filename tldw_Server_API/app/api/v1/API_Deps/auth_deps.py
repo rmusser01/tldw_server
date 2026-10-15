@@ -2516,6 +2516,7 @@ def require_token_scope(
       match the request path param `schedule_path_param` when present, or header `schedule_header`.
     - When `require_if_present=True`, missing/invalid credentials fail closed (401).
       API keys are accepted via `X-API-KEY` or Authorization bearer (non-JWT).
+      Headerless single-user cookie sessions use canonical principal validation.
     - If `allow_admin_bypass=True`, admin users skip this enforcement.
     - If the bearer token is not a JWT, enforce API key constraints using that token.
     - If ``defer_count`` is true, validate quota metadata now and let the caller
@@ -2771,11 +2772,9 @@ def require_token_scope(
                 )
                 return None
             if require_if_present:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Authentication required",
-                    headers={"WWW-Authenticate": "Bearer"},
-                )
+                # Headerless single-user sessions carry no virtual-key constraints.
+                # Resolve their canonical owner; invalid explicit headers still fail closed.
+                await get_auth_principal(request)
             return None
         if api_key:
             try:

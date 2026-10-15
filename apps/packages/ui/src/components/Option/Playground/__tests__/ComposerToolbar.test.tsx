@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, within } from "@testing-library/react"
 import React from "react"
+import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
 import { ComposerToolbar } from "../ComposerToolbar"
@@ -71,6 +72,13 @@ vi.mock("../playground-features", () => ({
 
 vi.mock("../ComposerToolbarOverflow", () => ({
   ComposerToolbarOverflow: () => <div data-testid="toolbar-overflow" />
+}))
+
+vi.mock("../hooks/useCasualComposerDisclosure", () => ({
+  useCasualComposerDisclosure: () => {
+    const [open, setExplicitOpen] = React.useState(false)
+    return { open, setExplicitOpen, loading: false, unavailable: false }
+  }
 }))
 
 const createProps = (
@@ -179,6 +187,15 @@ describe("ComposerToolbar web search", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("forwards settled tracked model discovery to the existing assistant control", () => {
+    const tracked = vi.fn()
+    const props = createProps({ isProMode: true, onTrackedAssistantSelection: tracked, trackedAssistantSelectionLoading: true })
+    const f = render(<ComposerToolbar {...props} />)
+    expect(assistantSelectMock.mock.lastCall?.[0]).toMatchObject({ onTrackedSelection: tracked, trackedSelectionLoading: true })
+    f.rerender(<ComposerToolbar {...props} trackedAssistantSelectionLoading={false} />)
+    expect(assistantSelectMock.mock.lastCall?.[0]).toMatchObject({ onTrackedSelection: tracked, trackedSelectionLoading: false })
+  })
+
   it("passes the active chat route to system prompt assist", () => {
     render(
       <ComposerToolbar
@@ -190,6 +207,7 @@ describe("ComposerToolbar web search", () => {
         })}
       />
     )
+    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
 
     expect(promptSelectMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -204,6 +222,7 @@ describe("ComposerToolbar web search", () => {
     const openListener = vi.fn()
     window.addEventListener("tldw:open-model-selector", openListener)
     render(<ComposerToolbar {...createProps()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
 
     const promptProps = promptSelectMock.mock.calls.at(-1)?.[0] as {
       onSelectModel?: () => void
@@ -216,6 +235,7 @@ describe("ComposerToolbar web search", () => {
 
   it("owns the dropdown assistant selector used by chat starter events", () => {
     render(<ComposerToolbar {...createProps()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
 
     expect(screen.getByTestId("character-select")).toHaveAttribute(
       "data-variant",
@@ -238,7 +258,7 @@ describe("ComposerToolbar web search", () => {
     )
 
     const panel = screen.getByTestId("composer-options-panel")
-    expect(panel.className).toBe("mt-2 flex flex-col gap-1")
+    expect(panel).toHaveClass("min-w-0", "flex-col")
     expect(screen.getByText("Model selector")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
   })
@@ -273,73 +293,35 @@ describe("ComposerToolbar web search", () => {
     )
 
     expect(screen.getByRole("button", { name: "Attach image" })).toBeVisible()
-    expect(screen.queryByText("Model selector")).toBeNull()
+    expect(screen.getByText("Model selector")).toBeVisible()
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull()
   })
 
-  it("uses casual focus-first layout by default", () => {
+  it("uses a concise Casual primary row with secondary controls disclosed", () => {
     render(<ComposerToolbar {...createProps()} />)
-
-    expect(
-      screen.getByRole("button", { name: "Advanced controls" })
-    ).toBeInTheDocument()
-    expect(screen.getByText("Send")).toBeInTheDocument()
-    expect(screen.getByText("Model selector")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Customize chat" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Send" })).toBeVisible()
+    expect(screen.getByText("Model selector")).toBeVisible()
+    expect(screen.getByTestId("composer-casual-persistence-chip")).toHaveTextContent("History on")
+    expect(screen.queryByTestId("composer-session-status-chip")).toBeNull()
+    expect(screen.queryByTestId("composer-casual-runtime-context-chip")).toBeNull()
+    expect(screen.queryByRole("button", { name: "MCP" })).toBeNull()
+    expect(screen.getByTestId("prompt-select")).not.toBeVisible()
+    expect(screen.getByTestId("character-select")).not.toBeVisible()
     expect(screen.queryByText("Provider")).toBeNull()
     expect(screen.queryByText("Routing")).toBeNull()
-    expect(
-      screen.getByTestId("composer-casual-model-selector-chip")
-    ).toBeInTheDocument()
-    expect(screen.queryByTestId("composer-session-status-chip")).toBeNull()
-    expect(
-      screen.getByTestId("composer-casual-persistence-chip")
-    ).toHaveTextContent("Saved")
-    expect(
-      screen
-        .getByTestId("composer-casual-advanced-chip")
-        .closest('[data-testid="composer-context-strip"]')
-    ).not.toBeNull()
-    expect(
-      screen.queryByTestId("composer-casual-runtime-context-chip")
-    ).toBeNull()
-    expect(screen.queryByTestId("web-search-toggle")).toBeNull()
-    expect(screen.getByText("MCP")).toBeInTheDocument()
-    expect(screen.getByTestId("prompt-select")).toBeInTheDocument()
-    expect(screen.getByTestId("character-select")).toBeInTheDocument()
   })
 
-  it("labels casual composer control groups for scanning and keyboard focus", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          modeLauncherButton: <button type="button">Modes</button>,
-          voiceChatButton: <button type="button">Start voice chat</button>
-        })}
-      />
-    )
-
-    const contextGroup = screen.getByRole("group", {
-      name: "Mode and context controls"
-    })
-    const runGroup = screen.getByRole("group", {
-      name: "Run input controls"
-    })
-
-    expect(contextGroup).toContainElement(
-      screen.getByRole("button", { name: "Modes" })
-    )
-    expect(contextGroup).toContainElement(
-      screen.getByRole("button", { name: "MCP" })
-    )
-    expect(runGroup).toContainElement(
-      screen.getByRole("button", { name: "Start voice chat" })
-    )
-    expect(runGroup).toContainElement(
-      screen.getByRole("button", { name: "Chat Settings" })
-    )
-    expect(runGroup).toContainElement(
-      screen.getByRole("button", { name: "Send" })
-    )
+  it("labels customization by user tasks and keeps Send outside it", () => {
+    render(<ComposerToolbar {...createProps({ modeLauncherButton: <button>Modes</button>, voiceChatButton: <button>Start voice chat</button> })} />)
+    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    const research = screen.getByRole("group", { name: "Research & context" })
+    const response = screen.getByRole("group", { name: "Response settings" })
+    expect(research).toContainElement(screen.getByRole("button", { name: "Modes" }))
+    expect(research).toContainElement(screen.getByRole("button", { name: "MCP" }))
+    expect(response).toContainElement(screen.getByRole("button", { name: "Start voice chat" }))
+    expect(response).toContainElement(screen.getByRole("button", { name: "Chat Settings" }))
+    expect(response).not.toContainElement(screen.getByRole("button", { name: "Send" }))
   })
 
   it("only exposes casual advanced aria-controls when the controlled group is mounted", () => {
@@ -355,31 +337,16 @@ describe("ComposerToolbar web search", () => {
       "composer-casual-advanced-controls-row"
     )
     expect(
-      screen.getByRole("group", { name: "Advanced composer controls" })
+      screen.getByRole("region", { name: "Customize chat" })
     ).toHaveAttribute("id", "composer-casual-advanced-controls-row")
   })
 
-  it("exposes role-play setup directly in the desktop casual toolbar", () => {
-    const onOpenRolePlaySetup = vi.fn()
-    render(
-      <ComposerToolbar
-        {...createProps({
-          rolePlayActions: {
-            onOpenRolePlaySetup
-          }
-        })}
-      />
-    )
-
-    const setupButton = screen.getByRole("button", {
-      name: "Role-play setup"
-    })
-    fireEvent.click(setupButton)
-
-    expect(onOpenRolePlaySetup).toHaveBeenCalledTimes(1)
-    expect(
-      setupButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
+  it("reuses role-play setup inside the Casual character group", () => {
+    const setup = vi.fn()
+    render(<ComposerToolbar {...createProps({ rolePlayActions: { onOpenRolePlaySetup: setup } })} />)
+    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    fireEvent.click(within(screen.getByRole("group", { name: "Character & your role" })).getByRole("button", { name: "Role-play setup" }))
+    expect(setup).toHaveBeenCalledOnce()
   })
 
   it("places token usage in the casual bottom context chip row", () => {
@@ -400,118 +367,46 @@ describe("ComposerToolbar web search", () => {
     ).toBeNull()
   })
 
-  it("keeps Modes first and MCP immediately to its right in the casual controls row", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          modeLauncherButton: <button type="button">Modes</button>
-        })}
-      />
-    )
-
-    const actionsRow = document.querySelector<HTMLElement>(
-      '[data-playground-toolbar-row="actions"]'
-    )
-    expect(actionsRow).not.toBeNull()
-    const buttons = actionsRow?.querySelectorAll("button")
-    expect(buttons?.[0]).not.toBeNull()
-    expect(buttons?.[0]).toHaveTextContent("Modes")
-    expect(buttons?.[1]).not.toBeNull()
-    expect(buttons?.[1]).toHaveTextContent("MCP")
+  it("keeps Modes and MCP in the research customization group", () => {
+    render(<ComposerToolbar {...createProps({ modeLauncherButton: <button>Modes</button> })} />)
+    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    const group = screen.getByRole("group", { name: "Research & context" })
+    expect(group).toContainElement(screen.getByRole("button", { name: "Modes" }))
+    expect(group).toContainElement(screen.getByRole("button", { name: "MCP" }))
   })
 
-  it("places voice chat, attachment, and send controls in the casual middle actions row", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          voiceChatButton: <button type="button">Start voice chat</button>
-        })}
-      />
-    )
-
-    const voiceButton = screen.getByRole("button", {
-      name: "Start voice chat"
-    })
-    const attachmentButton = screen.getByRole("button", { name: "Attach" })
-    const sendButton = screen.getByRole("button", { name: "Send" })
-    expect(
-      voiceButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      attachmentButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      sendButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      voiceButton.closest('[data-playground-toolbar-row="primary"]')
-    ).toBeNull()
-    expect(
-      attachmentButton.closest('[data-playground-toolbar-row="primary"]')
-    ).toBeNull()
-    expect(
-      sendButton.closest('[data-playground-toolbar-row="primary"]')
-    ).toBeNull()
+  it("keeps idle voice inside Customize and Attach and Send in the primary row", () => {
+    render(<ComposerToolbar {...createProps({ voiceChatButton: <button>Start voice chat</button> })} />)
+    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    const response = screen.getByRole("group", { name: "Response settings" })
+    expect(response).toContainElement(screen.getByRole("button", { name: "Start voice chat" }))
+    const primary = screen.getByRole("group", { name: "Composer quick actions" })
+    expect(primary).toContainElement(screen.getByRole("button", { name: "Attach" }))
+    expect(primary).toContainElement(screen.getByRole("button", { name: "Send" }))
   })
 
-  it("keeps advanced controls below the casual actions row", () => {
+  it("keeps Customize after primary controls and active context", () => {
     render(<ComposerToolbar {...createProps()} />)
-
-    const actionsRow = document.querySelector<HTMLElement>(
-      '[data-playground-toolbar-row="actions"]'
-    )
-    const contextStrip = screen.getByTestId("composer-context-strip")
-    fireEvent.click(screen.getByTestId("composer-casual-advanced-chip"))
-    const advancedRow = screen.getByTestId(
-      "composer-casual-advanced-controls-row"
-    )
-
-    expect(actionsRow).not.toBeNull()
-    expect(contextStrip.compareDocumentPosition(actionsRow as Node)).toBe(
-      Node.DOCUMENT_POSITION_PRECEDING
-    )
-    expect(advancedRow.compareDocumentPosition(actionsRow as Node)).toBe(
-      Node.DOCUMENT_POSITION_PRECEDING
-    )
-    expect(advancedRow.compareDocumentPosition(contextStrip)).toBe(
-      Node.DOCUMENT_POSITION_PRECEDING
-    )
+    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    const primary = screen.getByRole("group", { name: "Composer quick actions" })
+    const context = screen.getByTestId("composer-context-strip")
+    const customize = screen.getByRole("region", { name: "Customize chat" })
+    expect(context.compareDocumentPosition(primary)).toBe(Node.DOCUMENT_POSITION_PRECEDING)
+    expect(customize.compareDocumentPosition(context)).toBe(Node.DOCUMENT_POSITION_PRECEDING)
   })
 
-  it("places Advanced controls immediately to the right of Saved in the casual context strip", () => {
+  it("keeps history status outside Customize and customization beside the model", () => {
     render(<ComposerToolbar {...createProps()} />)
-
-    const contextStrip = screen.getByTestId("composer-context-strip")
-    const contextButtons = contextStrip.querySelectorAll("button")
-    const savedButton = screen.getByTestId(
-      "composer-casual-persistence-chip"
-    ) as HTMLButtonElement
-    const advancedButton = screen.getByTestId(
-      "composer-casual-advanced-chip"
-    ) as HTMLButtonElement
-
-    const savedIndex = Array.from(contextButtons).indexOf(savedButton)
-    const advancedIndex = Array.from(contextButtons).indexOf(advancedButton)
-
-    expect(savedIndex).toBeGreaterThanOrEqual(0)
-    expect(advancedIndex).toBe(savedIndex + 1)
+    const primary = screen.getByRole("group", { name: "Composer quick actions" })
+    expect(primary).toContainElement(screen.getByRole("button", { name: "Customize chat" }))
+    expect(primary).toContainElement(screen.getByText("Model selector"))
+    expect(screen.getByTestId("composer-context-strip")).toContainElement(screen.getByTestId("composer-casual-persistence-chip"))
   })
 
-  it("renders a deep research launch control in the casual actions row when provided", () => {
-    render(
-      <ComposerToolbar
-        {...createProps({
-          researchLaunchButton: <button type="button">Deep Research</button>
-        })}
-      />
-    )
-
-    const researchButton = screen.getByRole("button", {
-      name: "Deep Research"
-    })
-    expect(
-      researchButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
+  it("keeps deep research reachable in the research group", () => {
+    render(<ComposerToolbar {...createProps({ researchLaunchButton: <button>Deep Research</button> })} />)
+    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    expect(screen.getByRole("group", { name: "Research & context" })).toContainElement(screen.getByRole("button", { name: "Deep Research" }))
   })
 
   it("does not render a standalone Generate control in the toolbar row", () => {
@@ -520,73 +415,34 @@ describe("ComposerToolbar web search", () => {
     expect(screen.queryByRole("button", { name: "Generate" })).toBeNull()
   })
 
-  it("places current chat model settings control in the casual middle actions row", () => {
-    render(<ComposerToolbar {...createProps()} />)
-
-    const chatSettingsButton = screen.getByRole("button", {
-      name: "Chat Settings"
-    })
-    expect(
-      chatSettingsButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      chatSettingsButton.closest('[data-playground-toolbar-row="advanced"]')
-    ).toBeNull()
+  it("keeps current model settings reachable in Response settings", () => {
+    const settings = vi.fn()
+    render(<ComposerToolbar {...createProps({ onOpenModelSettings: settings })} />)
+    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    fireEvent.click(within(screen.getByRole("group", { name: "Response settings" })).getByRole("button", { name: "Chat Settings" }))
+    expect(settings).toHaveBeenCalledOnce()
   })
 
-  it("wraps casual control groups to the available pane width at desktop sizes too", () => {
+  it("wraps customization control groups without a horizontal scrolling row", () => {
     render(<ComposerToolbar {...createProps()} />)
-
-    const actionsRow = document.querySelector<HTMLElement>(
-      '[data-playground-toolbar-row="actions"]'
-    )
-    expect(actionsRow).not.toBeNull()
-    expect(actionsRow?.className).toContain("flex-wrap")
-    expect(actionsRow?.className).not.toContain("lg:flex-nowrap")
-    expect(actionsRow?.className).not.toContain("overflow-x-auto")
-    for (const name of ["Mode and context controls", "Run input controls"]) {
+    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    for (const name of ["Research & context", "Character & your role", "Response settings"]) {
       const group = screen.getByRole("group", { name })
-      expect(group).toHaveClass("flex-wrap", "[&>*]:shrink-0")
-      expect(group.className).not.toContain("lg:flex-nowrap")
+      expect(group.querySelector("div")).toHaveClass("flex-wrap", "min-w-0")
+      expect(group.className).not.toContain("overflow-x-auto")
     }
   })
 
-  it("keeps MCP in the casual actions row when advanced controls are expanded", () => {
+  it("exposes every existing secondary editor once in its customization group", () => {
     render(<ComposerToolbar {...createProps()} />)
-
-    fireEvent.click(screen.getByTestId("composer-casual-advanced-chip"))
-
-    const mcpButton = screen.getByRole("button", { name: "MCP" })
-    expect(screen.getByTestId("prompt-select")).toBeInTheDocument()
-    expect(screen.getByTestId("character-select")).toBeInTheDocument()
-    expect(
-      mcpButton.closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      mcpButton.closest('[data-playground-toolbar-row="advanced"]')
-    ).toBeNull()
-    expect(
-      screen
-        .getByTestId("prompt-select")
-        .closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      screen
-        .getByTestId("character-select")
-        .closest('[data-playground-toolbar-row="actions"]')
-    ).not.toBeNull()
-    expect(
-      screen.getAllByRole("button", { name: "Chat Settings" })
-    ).toHaveLength(1)
-    expect(
-      screen.getByTestId("composer-formatting-guide-toggle")
-    ).toBeInTheDocument()
-    const advancedRow = screen.getByTestId(
-      "composer-casual-advanced-controls-row"
-    )
-    expect(advancedRow.className).toContain("flex-nowrap")
-    expect(advancedRow.className).toContain("overflow-x-auto")
-    expect(advancedRow.className).not.toContain("flex-wrap")
+    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    expect(screen.getByRole("group", { name: "Research & context" })).toContainElement(screen.getByRole("button", { name: "MCP" }))
+    expect(screen.getByRole("group", { name: "Response settings" })).toContainElement(screen.getByTestId("prompt-select"))
+    expect(screen.getByRole("group", { name: "Character & your role" })).toContainElement(screen.getByTestId("character-select"))
+    expect(screen.getAllByRole("button", { name: "Chat Settings" })).toHaveLength(1)
+    expect(screen.getByTestId("composer-formatting-guide-toggle")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Generation style" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "System prompts" })).toBeVisible()
   })
 
   it("toggles output formatting guide prompt appending from advanced controls", () => {
@@ -683,6 +539,7 @@ describe("ComposerToolbar web search", () => {
       <ComposerToolbar
         {...createProps({
           isMobile: true,
+          isProMode: true,
           modeLauncherButton: <button type="button">Modes</button>
         })}
       />
@@ -703,7 +560,7 @@ describe("ComposerToolbar web search", () => {
     )
     expect(primaryGroup).toContainElement(screen.getByText("Model selector"))
     expect(contextGroup).toContainElement(
-      screen.getByRole("button", { name: "Saved" })
+      screen.getByRole("button", { name: "Chat history: History on" })
     )
     expect(contextGroup).toContainElement(
       screen.getByRole("button", { name: "Search & Context" })
@@ -764,6 +621,7 @@ describe("ComposerToolbar web search", () => {
       />
     )
 
+    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
     expect(screen.getByText("Modes")).toBeInTheDocument()
     expect(screen.getByText("Compare")).toBeInTheDocument()
     const contextStrip = screen.getByTestId("composer-context-strip")
@@ -873,7 +731,7 @@ describe("ComposerToolbar web search", () => {
     ).toHaveTextContent("Offline")
   })
 
-  it("uses a bottom persistence chip to toggle saved vs temporary", () => {
+  it("uses a bottom persistence chip to toggle history mode vs temporary", () => {
     const onToggleTemporaryChat = vi.fn()
     render(
       <ComposerToolbar
@@ -887,4 +745,39 @@ describe("ComposerToolbar web search", () => {
 
     expect(onToggleTemporaryChat).toHaveBeenCalledWith(true)
   })
+})
+
+
+describe("history mode labels", () => {
+  it.each(
+    [
+      { name: "Casual desktop", isMobile: false, isProMode: false },
+      { name: "Pro desktop", isMobile: false, isProMode: true },
+      { name: "mobile", isMobile: true, isProMode: false }
+    ].flatMap((layout) =>
+      [false, true].map((temporaryChat) => ({ ...layout, temporaryChat }))
+    )
+  )(
+    "$name history toggle agrees with Temporary=$temporaryChat and responds to keyboard",
+    async (layout) => {
+      const onToggleTemporaryChat = vi.fn()
+      render(
+        <ComposerToolbar
+          {...createProps({ ...layout, onToggleTemporaryChat })}
+        />
+      )
+      const stateLabel = layout.temporaryChat ? "Temporary" : "History on"
+      const toggle = screen.getByRole("button", {
+        name: `Chat history: ${stateLabel}`
+      })
+      expect(toggle).toHaveTextContent(stateLabel)
+      expect(toggle).toHaveAttribute(
+        "aria-pressed",
+        String(!layout.temporaryChat)
+      )
+      toggle.focus()
+      await userEvent.setup().keyboard("{Enter}")
+      expect(onToggleTemporaryChat).toHaveBeenCalledWith(!layout.temporaryChat)
+    }
+  )
 })

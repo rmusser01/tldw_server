@@ -27,6 +27,8 @@ const OptionSetup = () => {
     state,
     metadata,
     loading,
+    connectionConfigured,
+    connectionChecking,
     error: setupError,
     refresh,
     adoptState
@@ -41,7 +43,8 @@ const OptionSetup = () => {
   const [showKeyHelp, setShowKeyHelp] = useState(false)
   const [testing, setTesting] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
-  const setupChoiceRequired = shouldShowSetupEntryChoice(state, metadata)
+  const connectionRequired = connectionConfigured === false && !connectionChecking && !setupError
+  const setupChoiceRequired = connectionRequired || shouldShowSetupEntryChoice(state, metadata)
   const showWizard =
     setupEntryMode === "webui" && isMutableWebUiSetupState(state)
   const shouldShowChoice = setupChoiceRequired && !showWizard
@@ -67,6 +70,8 @@ const OptionSetup = () => {
             state={state}
             metadata={metadata}
             configuredServerUrl={configuredServerUrl}
+            connectionRequired={connectionRequired}
+            onOpenConnectionSettings={() => navigate("/settings/tldw")}
             onStartWebUiSetup={() => setSetupEntryMode("webui")}
             onRefreshSetupState={async () => {
               try {

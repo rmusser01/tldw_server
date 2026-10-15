@@ -1,4 +1,5 @@
 import React from "react"
+import { captureChatDraftSource, confirmTemporaryChatDiscard } from "./chat-draft-transition"
 import { useNavigate } from "react-router-dom"
 import { Modal } from "antd"
 import { shallow } from "zustand/shallow"
@@ -35,6 +36,8 @@ type ResettableChatBase = {
 export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   const navigate = useNavigate()
   const historySelection = useHistorySelectionContext()
+  const resetHistorySelection = historySelection?.reset
+  const captureSelectionFence = historySelection?.fence
   const currentChatModelSettings = useStoreChatModelSettings()
   const [defaultInternetSearchOn] = useStorage("defaultInternetSearchOn", false)
 
@@ -92,16 +95,23 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
     shallow
   )
 
-  return React.useCallback(() => {
+  return React.useCallback((options?: { discardTemporaryConfirmed: true } | React.SyntheticEvent) => {
+    const source = captureChatDraftSource(captureSelectionFence?.())
     const destination = resolveClearChatPath()
-    if (!requestSettingsNavigation(destination)) return false
+    if (!requestSettingsNavigation(destination) || !source.isCurrent()) return false
+    const confirmed = options &&
+      "discardTemporaryConfirmed" in options &&
+      options.discardTemporaryConfirmed === true
+    if (!confirmed && !confirmTemporaryChatDiscard()) return false
+    if (!source.isCurrent()) return false
+    useStoreMessageOption.getState().startNewChatDraft()
+    resetHistorySelection?.()
     const current = useStoreMessageOption.getState()
     dispatchChatRouteReplacement({
       serverChatId: current.serverChatId,
       historyId: current.historyId,
       restoreRevision: usePlaygroundSessionStore.getState().restoreRevision
     })
-    historySelection?.reset()
     if (typeof window !== "undefined") {
       Modal.destroyAll()
       cleanupAntOverlays()
@@ -122,7 +132,7 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
     setServerChatVersion(null)
     setContextFiles([])
     updatePageTitle()
-    currentChatModelSettings.reset()
+    currentChatModelSettings.reset(useStoreChatModelSettings.getState().apiProvider)
     if (defaultInternetSearchOn) {
       setWebSearch(true)
     }
@@ -154,10 +164,11 @@ export const useClearChat = ({ textareaRef }: UseClearChatOptions = {}) => {
   }, [
     clearQueuedMessages,
     clearReplyTarget,
+    captureSelectionFence,
     currentChatModelSettings,
     defaultInternetSearchOn,
-    historySelection,
     navigate,
+    resetHistorySelection,
     resolveClearChatPath,
     setActionInfo,
     setCompareMode,

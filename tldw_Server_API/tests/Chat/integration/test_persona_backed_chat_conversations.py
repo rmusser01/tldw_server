@@ -551,7 +551,7 @@ async def test_client_correlation_does_not_change_empty_content_placeholder(pers
     assert saved["content"] == "<Message processing failed - no valid content>"
     metadata = persona_chat_db.get_message_metadata(message_id)["extra"]
     assert metadata["client_message_id"] == "local-empty"
-    assert "content_placeholder_reason" not in metadata
+    assert metadata["content_placeholder_reason"] == "invalid_content"
 
 
 @pytest.mark.parametrize("stream", [False, True])

@@ -1,3 +1,6 @@
+import AxeBuilder from "@axe-core/playwright";
+import { readStore } from "../../../extension/tests/e2e/utils/history-selection";
+import type { HistoryBookmark } from "../../../packages/ui/src/db/dexie/types";
 /**
  * /chat cockpit real-server parity checks.
  *
@@ -17,6 +20,7 @@ import {
 } from '@playwright/test';
 import { captureAllApiCalls, type CapturedApiCall } from '../utils/api-assertions';
 import { waitForStreamComplete } from '../utils/journey-helpers';
+import { parseRoleplayResumeAppendRequest, parseRoleplayResumeAppendReceipt, parseRoleplayResumeCompletionRequest, parseRoleplayResumeCompletionReceipt } from '../../../packages/ui/src/services/tldw/roleplay-resume';
 
 const serverUrl = (
   process.env.TLDW_E2E_SERVER_URL ||
@@ -78,11 +82,11 @@ const desktopCockpitRailConfig: Record<
 
 const mobileCockpitPanelConfig = {
   context: {
-    tabId: 'playground-cockpit-mobile-context-tab',
+    buttonId: 'playground-cockpit-mobile-context-tab',
     panelId: 'playground-cockpit-mobile-context-panel',
   },
   runtime: {
-    tabId: 'playground-cockpit-mobile-runtime-tab',
+    buttonId: 'playground-cockpit-mobile-runtime-tab',
     panelId: 'playground-cockpit-mobile-runtime-panel',
   },
 } as const;
@@ -150,7 +154,7 @@ const waitForMobileCockpitPanel = async (page: Page, panel: 'context' | 'runtime
     .poll(
       async () =>
         page.evaluate(
-          ({ panel, panelId, tabId }) => {
+          ({ panel, panelId, buttonId }) => {
             const shell = document.querySelector('[data-testid="playground-cockpit-shell"]');
             if (shell?.getAttribute('data-mode') !== 'cockpit') {
               return `mode:${shell?.getAttribute('data-mode') ?? 'missing'}`;
@@ -167,63 +171,47 @@ const waitForMobileCockpitPanel = async (page: Page, panel: 'context' | 'runtime
               );
             });
             if (!rails) return 'missing rails';
-            const tab = rails.querySelector<HTMLElement>(`#${tabId}`);
-            const panelNode = rails.querySelector<HTMLElement>(`#${panelId}`);
-            if (!tab || !panelNode) return 'missing tabpanel pair';
-            if (panelNode.getAttribute('role') !== 'tabpanel') return 'missing tabpanel role';
-            if (panelNode.getAttribute('aria-labelledby') !== tabId) return 'wrong panel label';
+            const button = rails.querySelector<HTMLButtonElement>(`button#${buttonId}`);
+            const panelNode = rails.querySelector<HTMLElement>(`section#${panelId}`);
+            if (!button || !panelNode) return 'missing disclosure pair';
+            if (button.type !== 'button') return 'wrong button type';
+            if (button.getAttribute('aria-controls') !== panelId) return 'wrong button target';
+            if (button.getAttribute('aria-expanded') !== 'true') return 'collapsed button';
+            if (panelNode.getAttribute('aria-labelledby') !== buttonId) return 'wrong panel label';
+            if (panelNode.hidden || panelNode.getAttribute('aria-hidden') !== 'false') {
+              return 'hidden panel';
+            }
             const panelBox = panelNode.getBoundingClientRect();
             return panelBox.width > 0 && panelBox.height > 0 ? 'ready' : 'unmeasurable panel';
           },
-          { panel, panelId: config.panelId, tabId: config.tabId }
+          { panel, panelId: config.panelId, buttonId: config.buttonId }
         ),
       { message: `mobile cockpit ${panel} panel ready`, timeout: 15_000 }
     )
     .toBe('ready');
   const rails = page
     .locator(
-      `[data-testid="playground-cockpit-mobile-rails"][data-mobile-panel="${panel}"]:visible:has(#${config.panelId})`
+      `[data-testid="playground-cockpit-mobile-rails"]:visible:has(#${config.panelId})`
     )
     .first();
   await expect(rails).toBeVisible({ timeout: 10_000 });
   await expect(rails).toHaveAttribute('data-mobile-panel', panel);
-  await expect(rails.locator(`#${config.panelId}`)).toHaveAttribute('aria-labelledby', config.tabId);
+  const button = rails.getByRole('button', {
+    name: panel === 'context' ? 'Context' : 'Runtime',
+    exact: true,
+  });
+  await expect(button).toHaveAttribute('id', config.buttonId);
+  await expect(button).toHaveAttribute('type', 'button');
+  await expect(button).toHaveAttribute('aria-controls', config.panelId);
+  await expect(button).toHaveAttribute('aria-expanded', 'true');
+  const region = rails.getByRole('region', {
+    name: panel === 'context' ? 'Context' : 'Runtime',
+    exact: true,
+  });
+  await expect(region).toHaveAttribute('id', config.panelId);
+  await expect(region).toHaveAttribute('aria-labelledby', config.buttonId);
+  await expect(region).toBeVisible();
   return rails;
-};
-
-const clickVisibleMobileCockpitControl = async (
-  page: Page,
-  selector: string,
-  label: string
-) => {
-  await expect
-    .poll(
-      async () =>
-        page.evaluate(
-          ({ selector }) => {
-            const isVisible = (element: HTMLElement) => {
-              const box = element.getBoundingClientRect();
-              const style = window.getComputedStyle(element);
-              return (
-                box.width > 0 &&
-                box.height > 0 &&
-                style.display !== 'none' &&
-                style.visibility !== 'hidden' &&
-                !element.closest('[hidden],[aria-hidden="true"]')
-              );
-            };
-            const target = Array.from(document.querySelectorAll<HTMLElement>(selector)).find(
-              isVisible
-            );
-            if (!target) return 'missing visible control';
-            target.click();
-            return 'clicked';
-          },
-          { selector }
-        ),
-      { message: label, timeout: 10_000 }
-    )
-    .toBe('clicked');
 };
 
 const switchChatLayoutMode = async (page: Page, targetMode: 'cockpit' | 'focus') => {
@@ -432,7 +420,7 @@ const extractConfiguredProviders = (payload: any): any[] => {
 
 const normalizeCockpitProviderKey = (provider: string): string => {
   const normalized = provider.trim().toLowerCase();
-  if (normalized === 'llama.cpp') return 'llamacpp';
+  if (normalized === 'llama.cpp' || normalized === 'llama') return 'llamacpp';
   if (normalized === 'local-llm') return 'local';
   if (normalized === 'custom_openai_api') return 'custom-openai-api';
   return normalized;
@@ -454,7 +442,7 @@ const normalizeConfiguredChatModelId = (providerName: string, value: unknown): s
   return model;
 };
 
-const buildConfiguredChatModelSelection = (payload: any): RealChatModelSelection => {
+const buildConfiguredChatModelSelection = (payload: any, metadata: unknown): RealChatModelSelection => {
   const configuredProviders = extractConfiguredProviders(payload).filter(
     (provider: any) => Array.isArray(provider?.models) && provider.models.length > 0
   );
@@ -481,20 +469,42 @@ const buildConfiguredChatModelSelection = (payload: any): RealChatModelSelection
     throw new Error(`Configured provider ${provider.name || '<unknown>'} has no usable model`);
   }
 
+  const configuredProvider = normalizeCockpitProviderKey(providerName);
+  const rows = Array.isArray(metadata) ? metadata : Array.isArray((metadata as any)?.models) ? (metadata as any).models : [];
+  // Match normalizeTldwModels ID precedence; Playwright cannot import the UI's ESM package in this CJS fixture.
+  const catalog = rows.map((entry: any) => {
+    const text = (value: unknown) => typeof value === 'string' ? value.trim() : '';
+    const rawModel = text(entry?.model) || text(entry?.model_id);
+    const rawName = text(entry?.name), rawId = text(entry?.id);
+    const id = rawModel || (rawName && !/\s/.test(rawName) && /[/:._-]/.test(rawName) ? rawName : '') || rawId || rawName;
+    return { id, provider: text(entry?.provider), type: entry?.type };
+  });
+  const matches = catalog.filter(entry =>
+    normalizeCockpitProviderKey(entry.provider) === configuredProvider &&
+    normalizeConfiguredChatModelId(providerName, entry.id) === model &&
+    (!entry.type || entry.type === 'chat')
+  );
+  if (matches.length !== 1) {
+    throw new Error(`Configured chat model ${providerName}/${model} needs one unique model catalog entry`);
+  }
   return {
     provider: providerName,
     model,
-    key: `tldw:${model}`,
+    key: `${configuredProvider}:${matches[0].id}`,
   };
 };
 
 const getConfiguredChatModelSelection = async (
   request: APIRequestContext
 ): Promise<RealChatModelSelection> => {
-  const providers = await apiGet<unknown>(request, '/api/v1/llm/providers');
+  const [providers, metadata] = await Promise.all([
+    apiGet<unknown>(request, '/api/v1/llm/providers'),
+    apiGet<unknown>(request, '/api/v1/llm/models/metadata'),
+  ]);
   expect(providers.status).toBe(200);
+  expect(metadata.status).toBe(200);
   expect(extractConfiguredProviders(providers.body).length).toBeGreaterThan(0);
-  return buildConfiguredChatModelSelection(providers.body);
+  return buildConfiguredChatModelSelection(providers.body, metadata.body);
 };
 
 const getDeterministicChatReadiness = async (
@@ -542,6 +552,7 @@ const seedRealServerConfig = async (
     selectedModel?: RealChatModelSelection;
     persistedServerChatId?: string | null;
     cockpitLayout?: CockpitLayoutSeed | null;
+    uiMode?: 'casual' | 'pro';
   } = {}
 ) => {
   await page.addInitScript(
@@ -551,6 +562,7 @@ const seedRealServerConfig = async (
       configuredSelectedModel,
       configuredPersistedServerChatId,
       configuredCockpitLayout,
+      configuredUiMode,
     }) => {
       const fnv1a36 = (value: string) => {
         let hash = 2166136261;
@@ -619,6 +631,7 @@ const seedRealServerConfig = async (
       localStorage.setItem('__tldw_first_run_complete', 'true');
       localStorage.setItem('assistant_setup_dismissed', 'true');
       localStorage.setItem('playgroundComposerOptionsExpanded', 'true');
+      writeJsonStorageValue('tldw-ui-mode', { state: { mode: configuredUiMode }, version: 1 });
       if (configuredCockpitLayout) {
         if (configuredCockpitLayout.mode) {
           writeJsonStorageValue('playgroundChatLayoutMode', configuredCockpitLayout.mode);
@@ -687,6 +700,7 @@ const seedRealServerConfig = async (
       configuredSelectedModel: options.selectedModel || null,
       configuredPersistedServerChatId: options.persistedServerChatId ?? null,
       configuredCockpitLayout: options.cockpitLayout ?? null,
+      configuredUiMode: options.uiMode ?? 'casual',
     }
   );
 };
@@ -803,13 +817,20 @@ const trackRealApiHits = (page: Page) => {
 };
 
 const ensureComposerOptionsVisible = async (page: Page) => {
-  const toggle = page.getByTestId('composer-options-toggle');
-  if (await toggle.isVisible().catch(() => false)) {
-    const label = await toggle.getAttribute('aria-label').catch(() => '');
-    if (/show composer options/i.test(label || '')) {
-      await toggle.click();
-    }
+  const mode = page.locator('[data-ui-mode]').first();
+  await expect(mode).toHaveAttribute('data-ui-mode', /casual|pro/);
+  const casual = page.getByTestId('composer-casual-advanced-chip');
+  if ((await mode.getAttribute('data-ui-mode')) === 'casual') {
+    await expect(casual).toBeEnabled();
+    if ((await casual.getAttribute('aria-expanded')) !== 'true') await casual.click();
+    await expect(casual).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.getByTestId('composer-casual-advanced-controls-row')).toBeVisible();
+    return;
   }
+  const toggle = page.getByTestId('composer-options-toggle');
+  await expect(toggle).toBeVisible();
+  const label = await toggle.getAttribute('aria-label');
+  if (/show composer options/i.test(label || '')) await toggle.click();
 };
 
 const closeSearchContextIfOpen = async (page: Page) => {
@@ -874,27 +895,43 @@ const assertCoreComposerControls = async (
   page: Page,
   options: { mobile?: boolean; composerOnly?: boolean } = {}
 ) => {
-  await ensureComposerOptionsVisible(page);
-  await expect(page.getByTestId('composer-options-toggle')).toBeVisible();
+  const mode = page.locator('[data-ui-mode]').first();
+  await expect(mode).toHaveAttribute('data-ui-mode', /casual|pro/);
+  const casual = page.getByTestId('composer-casual-advanced-chip');
+  const isCasual = (await mode.getAttribute('data-ui-mode')) === 'casual';
+  await expect(isCasual ? casual : page.getByTestId('composer-options-toggle')).toBeVisible();
   await expect(page.getByTestId('chat-input')).toBeVisible();
   await expect(page.getByRole('button', { name: /send message/i })).toBeVisible();
-
-  if (options.composerOnly) {
+  if (options.composerOnly) return;
+  await ensureComposerOptionsVisible(page);
+  await expect(page.getByTestId('model-selector').first()).toBeVisible();
+  await expect(page.getByTestId('attachment-button')).toBeVisible();
+  if (isCasual) {
+    const customize = page.getByTestId('composer-casual-advanced-controls-row');
+    const research = customize.getByRole('group', { name: 'Research & context' });
+    const character = customize.getByRole('group', { name: 'Character & your role' });
+    const response = customize.getByRole('group', { name: 'Response settings' });
+    await expect(research).toBeVisible();
+    await expect(character).toBeVisible();
+    await expect(response).toBeVisible();
+    await expect(character.getByTestId('character-select')).toBeVisible();
+    await expect(response.getByTestId('chat-prompt-select')).toBeVisible();
+    await expect(research.getByTestId('tools-button')).toBeVisible();
+    await expect(research.getByTestId('mcp-tools-toggle')).toBeVisible();
+    if (options.mobile)
+      await expect(
+        research.getByRole('button', { name: /Health & diagnostics|Server:/i })
+      ).toBeVisible();
     return;
   }
-
-  await expect(page.getByTestId('model-selector').first()).toBeVisible();
   await expect(page.getByTestId('chat-prompt-select')).toBeVisible();
   await expect(page.getByTestId('character-select')).toBeVisible();
-  await expect(page.getByTestId('attachment-button')).toBeVisible();
   await expect(page.getByTestId('tools-button')).toBeVisible();
-
   if (options.mobile) {
     await expect(page.getByRole('button', { name: /More options/i })).toBeVisible();
     await expect(page.getByRole('button', { name: /Health & diagnostics|Server:/i })).toBeVisible();
     return;
   }
-
   await expect(page.getByTestId('mcp-tools-toggle')).toBeVisible();
   await expect(page.getByRole('button', { name: /Advanced controls/i })).toBeVisible();
 };
@@ -1035,6 +1072,14 @@ const assertNoMobilePanelComposerOverlap = async (
       { message: label, timeout: 10_000 }
     )
     .toBe('ok');
+};
+
+const assertMobileComposerDraftVisible = async (page: Page) => {
+  await expect.poll(async () => {
+    const input = await page.getByTestId('chat-input').boundingBox();
+    const viewport = await page.locator('[data-testid="playground-chat-composer-region"], [data-testid="playground-chat-composer-dock"]').boundingBox();
+    return Boolean(input && viewport && input.y >= viewport.y - 1 && input.y + input.height <= viewport.y + viewport.height + 1);
+  }, { message: 'Mobile draft should be visible inside its composer scroll area' }).toBe(true);
 };
 
 const MAX_MOBILE_PANEL_HEIGHT_PX = 260;
@@ -1365,18 +1410,21 @@ const selectAssistantFromRuntimeRail = async (
   options: {
     tab: 'Characters' | 'Personas';
     assistantName: string;
+    applyAsOverlay?: boolean;
   }
 ) => {
+  await expect(page.getByRole('button', { name: /send message/i })).toBeEnabled();
   const runtimeInspector = getDesktopRuntimeInspector(page);
   await runtimeInspector.getByRole('button', { name: 'Select character or persona' }).click();
   const panel = page.getByTestId('assistant-select-panel');
   await expect(panel).toBeVisible();
-  await page.getByRole('tab', { name: options.tab }).click();
+  await expect(panel.getByRole('textbox', { name: 'Search characters and personas', exact: true })).toBeFocused();
+  await panel.getByRole('tab', { name: options.tab }).click();
   await expect(page.getByRole('tab', { name: options.tab })).toHaveAttribute(
     'aria-selected',
     'true'
   );
-  const assistantButton = page.getByRole('button', {
+  const assistantButton = panel.getByRole('button', {
     name: options.assistantName,
     exact: true,
   });
@@ -1393,6 +1441,11 @@ const selectAssistantFromRuntimeRail = async (
     await page.waitForTimeout(1_500);
   }
   await expect(assistantButton).toBeVisible({ timeout: 30_000 });
+  if (options.applyAsOverlay) {
+    await expect(assistantButton).toBeDisabled();
+    await panel.getByRole('button', { name: 'Use a persona prompt overlay' }).click();
+    await expect(assistantButton).toBeEnabled();
+  }
   await assistantButton.click();
   await expect(panel).toBeHidden({ timeout: 10_000 });
 };
@@ -1667,11 +1720,11 @@ test.describe('/chat cockpit real-server parity', () => {
             models: ['openai:gpt-4.1-mini'],
           },
         ],
-      })
+      }, { models: [{ name: 'gpt-4.1-mini', provider: 'openai', type: 'chat' }] })
     ).toEqual({
       provider: 'openai',
       model: 'gpt-4.1-mini',
-      key: 'tldw:gpt-4.1-mini',
+      key: 'openai:gpt-4.1-mini',
     });
 
     expect(
@@ -1683,8 +1736,23 @@ test.describe('/chat cockpit real-server parity', () => {
             models: ['llama3:latest'],
           },
         ],
-      }).model
-    ).toBe('llama3:latest');
+      }, { models: [{ model: 'llama3:latest', provider: 'llama.cpp', type: 'chat' }] })
+    ).toEqual({ provider: 'llama.cpp', model: 'llama3:latest', key: 'llamacpp:llama3:latest' });
+  });
+
+  test('qualifies deployed name-only metadata with its explicit provider', () => {
+    expect(buildConfiguredChatModelSelection({ providers: [{ name: 'openai', is_configured: true,
+      default_model: 'gpt-4.1-mini', models: ['gpt-4.1-mini'] }] },
+      { models: [{ name: 'gpt-4.1-mini', provider: 'openai' }] })).toEqual({
+      provider: 'openai', model: 'gpt-4.1-mini', key: 'openai:gpt-4.1-mini'
+    });
+  });
+
+  test('rejects missing or ambiguous configured model catalog entries', () => {
+    const providers = { providers: [{ name: 'openai', is_configured: true, models: ['gpt-4.1-mini'] }] };
+    expect(() => buildConfiguredChatModelSelection(providers, { models: [] })).toThrow(/unique.*catalog/i);
+    const entry = { id: 'openai:gpt-4.1-mini', provider: 'openai', type: 'chat' };
+    expect(() => buildConfiguredChatModelSelection(providers, { models: [entry, entry] })).toThrow(/unique.*catalog/i);
   });
 
   test('does not intercept backend routes in this real-server spec', async ({
@@ -1790,16 +1858,16 @@ test.describe('/chat cockpit real-server parity', () => {
     const providers = await apiGet<any>(request, '/api/v1/llm/providers');
     expect(providers.status).toBe(200);
     expect(extractConfiguredProviders(providers.body).length).toBeGreaterThan(0);
-    const chatModelSelection = buildConfiguredChatModelSelection(providers.body);
-
     const models = await apiGet<any>(request, '/api/v1/llm/models/metadata');
     expect(models.status).toBe(200);
     expect(extractModels(models.body).length).toBeGreaterThan(0);
+    const chatModelSelection = buildConfiguredChatModelSelection(providers.body, models.body);
 
     const apiTracker = trackRealApiHits(page);
     await seedRealServerConfig(page, {
       selectedModel: chatModelSelection,
       cockpitLayout: desktopCockpitLayoutSeed,
+      uiMode: 'pro',
     });
     await page.setViewportSize({ width: 1440, height: 960 });
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
@@ -1906,7 +1974,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(sourceInventory).toBeVisible();
     await expect(
       sourceInventory.getByRole('listitem').filter({ hasText: 'Web search' })
-    ).toContainText('Active');
+    ).toContainText('Selected for the next message.');
 
     await closeSearchContextIfOpen(page);
     await contextRail.getByRole('button', { name: 'Open Search & Context' }).click();
@@ -1922,8 +1990,12 @@ test.describe('/chat cockpit real-server parity', () => {
       await page.keyboard.press('Escape');
     }
 
-    await page.getByRole('button', { name: /Advanced controls/i }).click();
+    const advanced = page.getByTestId('composer-advanced-toggle');
+    await expect(advanced).toBeEnabled();
+    if (await advanced.getAttribute('aria-expanded') !== 'true') await advanced.click();
     await expect(page.getByTestId('composer-options-panel')).toBeVisible();
+    await expect(page.getByTestId('composer-advanced-toggle')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#composer-pro-advanced-controls-row')).toBeVisible();
 
     const modelSelector = page.getByTestId('model-selector').first();
     await modelSelector.focus();
@@ -1932,18 +2004,42 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(page.getByRole('textbox', { name: 'Search models' })).toBeVisible();
     await expect(page.getByRole('menu').first()).toBeVisible();
     await page.keyboard.press('Escape');
+    await expect(page.getByRole('textbox', { name: 'Search models' })).toBeHidden();
+    await expect(modelSelector).toBeFocused();
 
-    await contextRail.getByRole('button', { name: /Select prompt|Select a prompt/i }).click();
-    await expect(page.getByText(/Prompt|Search/i).first()).toBeVisible();
+    const promptTrigger = contextRail.getByRole('button', { name: /Select prompt|Select a prompt/i });
+    await promptTrigger.click();
+    const promptSearch = page.getByPlaceholder('Search prompts...', { exact: true });
+    await expect(promptSearch).toBeFocused();
     await page.keyboard.press('Escape');
+    await expect(promptSearch).toBeHidden();
+    await expect(promptTrigger).toBeFocused();
 
-    await runtimeInspector.getByRole('button', { name: 'Select character or persona' }).click();
-    await expect(page.getByText(/Character|No character/i).first()).toBeVisible();
+    const assistantTrigger = runtimeInspector.getByRole('button', { name: 'Select character or persona' });
+    await assistantTrigger.click();
+    const assistantSearch = page.getByRole('textbox', { name: 'Search characters and personas', exact: true });
+    await expect(assistantSearch).toBeFocused();
     await page.keyboard.press('Escape');
+    await expect(page.getByTestId('assistant-select-panel')).toBeHidden();
+    await expect(assistantTrigger).toBeFocused();
 
-    await page.getByTestId('tools-button').click();
-    await expect(page.getByText(/Clear conversation|More tools/i).first()).toBeVisible();
+    const toolsTrigger = page.getByTestId('tools-button');
+    const toolsBeforePointerFocus = await toolsTrigger.boundingBox();
+    expect(toolsBeforePointerFocus).not.toBeNull();
+    await toolsTrigger.click();
+    const toolsPopup = page.locator('.playground-more-tools:visible');
+    await expect(toolsPopup.getByRole('button', { name: 'Clear conversation', exact: true })).toBeVisible();
+    const toolsAfterPointerFocus = await toolsTrigger.boundingBox();
+    expect(toolsAfterPointerFocus).not.toBeNull();
+    expect(Math.abs(toolsAfterPointerFocus!.y - toolsBeforePointerFocus!.y)).toBeLessThanOrEqual(1);
     await page.keyboard.press('Escape');
+    await expect(toolsPopup).toBeHidden();
+    await expect(toolsTrigger).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(toolsPopup.getByRole('button', { name: 'Clear conversation', exact: true })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(toolsPopup).toBeHidden();
+    await expect(toolsTrigger).toBeFocused();
 
     await runtimeInspector.getByRole('button', { name: 'Open model settings' }).click();
     const modelSettingsDialog = page.getByRole('dialog', {
@@ -2181,6 +2277,19 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(runtimeInspector.getByText(restoredTemperature, { exact: true })).toBeVisible();
       await expect(compositionPreview).toContainText(`Temperature: ${restoredTemperature}`);
 
+      for (const dismissal of ['Close', 'Escape'] as const) {
+        await modelSettingsTrigger.click();
+        await expect(modelSettingsDialog).toBeVisible();
+        if (dismissal === 'Close') {
+          await modelSettingsDialog.getByRole('button', { name: 'Close', exact: true }).click();
+        } else {
+          await page.keyboard.press('Escape');
+        }
+        await expect(modelSettingsDialog).toBeHidden();
+        await expect(modelSettingsTrigger).toBeFocused({ timeout: 5_000 });
+        await expect(runtimeInspector.getByText(restoredTemperature, { exact: true })).toBeVisible();
+      }
+
       await assertRuntimeMcpRailState(runtimeInspector);
       const mcpSettingsTrigger = runtimeInspector.locator('[data-cockpit-mcp-settings-trigger]');
       await mcpSettingsTrigger.click();
@@ -2227,7 +2336,7 @@ test.describe('/chat cockpit real-server parity', () => {
     }
   });
 
-  test('keeps mobile cockpit tabs and focus composer usable against the live server', async ({
+  test('keeps mobile cockpit panels and focus composer usable against the live server', async ({
     page,
     request,
   }, testInfo) => {
@@ -2264,28 +2373,14 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
       await expect(page.getByTestId('composer-bottom-bar')).toHaveCount(0);
     };
-    const panelControlledByTab = async (panel: 'context' | 'runtime') => {
+    const panelControlledByButton = async (panel: 'context' | 'runtime') => {
       const config = mobileCockpitPanelConfig[panel];
-      await expect
-        .poll(
-          async () =>
-            page.evaluate(
-              ({ tabId, panelId }) => {
-                const tab = document.getElementById(tabId);
-                const panelNode = document.getElementById(panelId);
-                if (!tab || !panelNode) return 'missing tabpanel pair';
-                if (tab.getAttribute('aria-controls') !== panelId) return 'wrong tab target';
-                if (panelNode.getAttribute('role') !== 'tabpanel') return 'missing tabpanel role';
-                return panelNode.getAttribute('aria-labelledby') === tabId
-                  ? 'ready'
-                  : 'wrong panel label';
-              },
-              { tabId: config.tabId, panelId: config.panelId }
-            ),
-          { message: `mobile ${panel} tab controls its panel`, timeout: 10_000 }
-        )
-        .toBe('ready');
-      return page.locator(`#${config.panelId}`);
+      const button = page.locator(`button#${config.buttonId}`);
+      const region = page.locator(`section#${config.panelId}`);
+      await expect(button).toHaveAttribute('type', 'button');
+      await expect(button).toHaveAttribute('aria-controls', config.panelId);
+      await expect(region).toHaveAttribute('aria-labelledby', config.buttonId);
+      return region;
     };
     await fillEditableComposer(page, mobileDraft);
     await expectMobileDraftReachable();
@@ -2305,13 +2400,38 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     await expectMobileDraftPreserved();
     await expectNoMobileBottomControls();
-    const initialContextTab = mobileRails.getByRole('tab', { name: 'Context' });
-    const initialRuntimeTab = mobileRails.getByRole('tab', { name: 'Runtime' });
-    await panelControlledByTab('context');
-    const initialRuntimePanel = page.locator(`#${mobileCockpitPanelConfig.runtime.panelId}`);
-    const initialContextPanel = page.locator(`#${mobileCockpitPanelConfig.context.panelId}`);
-    await expect(initialContextTab).toHaveAttribute('aria-selected', 'true');
-    await expect(initialRuntimeTab).toHaveAttribute('aria-selected', 'false');
+    const contextButton = mobileRails.getByRole('button', { name: 'Context', exact: true });
+    const runtimeButton = mobileRails.getByRole('button', { name: 'Runtime', exact: true });
+    await expect(mobileRails.getByRole('group', { name: 'Mobile cockpit panels' })).toBeVisible();
+    await expect(mobileRails.getByRole('tab')).toHaveCount(0);
+    const initialContextPanel = await panelControlledByButton('context');
+    const initialRuntimePanel = await panelControlledByButton('runtime');
+    await expect(contextButton).toHaveAttribute('aria-expanded', 'true');
+    await expect(runtimeButton).toHaveAttribute('aria-expanded', 'false');
+    const expectMobilePanelsClosed = async () => {
+      await expect(mobileRails).toHaveAttribute('data-mobile-panel', 'none');
+      await expect(contextButton).toHaveAttribute('aria-expanded', 'false');
+      await expect(runtimeButton).toHaveAttribute('aria-expanded', 'false');
+      await expect(initialContextPanel).toHaveAttribute('hidden', '');
+      await expect(initialRuntimePanel).toHaveAttribute('hidden', '');
+      await expect(initialContextPanel).toHaveAttribute('aria-hidden', 'true');
+      await expect(initialRuntimePanel).toHaveAttribute('aria-hidden', 'true');
+      await expect(initialContextPanel).toBeHidden();
+      await expect(initialRuntimePanel).toBeHidden();
+      await expect(mobileRails.getByRole('region')).toHaveCount(0);
+      await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
+        'Cockpit panels hidden. Composer draft remains available below.'
+      );
+      await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
+        'data-left-rail',
+        'visible'
+      );
+      await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
+        'data-right-rail',
+        'visible'
+      );
+      await expectMobileDraftReachable();
+    };
     await expect(initialContextPanel).toBeVisible();
     await expect(initialRuntimePanel).toBeHidden();
     await assertNoHorizontalOverflow(page);
@@ -2325,43 +2445,22 @@ test.describe('/chat cockpit real-server parity', () => {
       path: testInfo.outputPath('chat-cockpit-mobile-context.png'),
       fullPage: true,
     });
-    await clickVisibleMobileCockpitControl(
-      page,
-      `button[aria-controls="${mobileCockpitPanelConfig.context.panelId}"]:not([role="tab"])`,
-      'hide mobile context rail'
-    );
+    await contextButton.click();
+    await expectMobilePanelsClosed();
+    await runtimeButton.focus();
+    await runtimeButton.press('Enter');
     mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
-    await expect(
-      mobileRails.getByRole('tab', { name: 'Context', exact: true })
-    ).toHaveCount(0);
-    await expect(
-      mobileRails.getByRole('tab', {
-        name: 'Restore context sidechannel',
-        exact: true,
-      })
-    ).toBeVisible();
-    await expect(mobileRails.getByRole('tab', { name: 'Runtime' })).toBeVisible();
-    await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
-      'Runtime panel active. Composer draft remains available below.'
-    );
+    await expect(contextButton).toHaveAttribute('aria-expanded', 'false');
+    await expect(initialContextPanel).toBeHidden();
     await expectMobileDraftPreserved();
-    await clickVisibleMobileCockpitControl(
-      page,
-      `button[aria-controls="${mobileCockpitPanelConfig.context.panelId}"]:not([role="tab"])`,
-      'show mobile context rail'
-    );
-    const contextTab = page.locator(`#${mobileCockpitPanelConfig.context.tabId}`);
-    await expect(contextTab).toBeVisible();
-    await clickVisibleMobileCockpitControl(
-      page,
-      `#${mobileCockpitPanelConfig.context.tabId}`,
-      'activate mobile context tab'
-    );
+    await runtimeButton.press('Space');
+    await expectMobilePanelsClosed();
+    await contextButton.click();
     mobileRails = await waitForMobileCockpitPanel(page, 'context');
-    const activeContextTab = mobileRails.locator(`#${mobileCockpitPanelConfig.context.tabId}`);
-    await expect(activeContextTab).toHaveAttribute('aria-selected', 'true');
-    const contextPanelTarget = await panelControlledByTab('context');
-    const runtimePanelTarget = await panelControlledByTab('runtime');
+    await expect(contextButton).toHaveAttribute('aria-expanded', 'true');
+    await expect(runtimeButton).toHaveAttribute('aria-expanded', 'false');
+    const contextPanelTarget = await panelControlledByButton('context');
+    const runtimePanelTarget = await panelControlledByButton('runtime');
     await expect(contextPanelTarget).toBeVisible();
     await expect(runtimePanelTarget).toBeHidden();
     await expectMobileDraftPreserved();
@@ -2398,14 +2497,14 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(promptSearch).toBeHidden();
     await expect(page.getByTestId('chat-input')).toBeVisible();
     await expectMobileDraftReachable();
-    const runtimeTab = mobileRails.locator(`#${mobileCockpitPanelConfig.runtime.tabId}`);
-    await runtimeTab.click();
+    // Retire earlier composer layout timers before focusing its sibling rail.
+    await page.waitForTimeout(1000);
+    await runtimeButton.click();
+    await expect(runtimeButton).toBeFocused();
     mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
-    await expect(mobileRails.locator(`#${mobileCockpitPanelConfig.runtime.tabId}`)).toHaveAttribute(
-      'aria-selected',
-      'true'
-    );
-    const runtimePanel = mobileRails.getByRole('tabpanel', { name: 'Runtime' });
+    await expect(runtimeButton).toHaveAttribute('aria-expanded', 'true');
+    await expect(contextButton).toHaveAttribute('aria-expanded', 'false');
+    const runtimePanel = mobileRails.getByRole('region', { name: 'Runtime', exact: true });
     await expect(runtimePanel).toBeVisible();
     await expect(contextPanelTarget).toBeHidden();
     await expect(mobileRails.getByTestId('playground-cockpit-mobile-panel-summary')).toHaveText(
@@ -2424,6 +2523,8 @@ test.describe('/chat cockpit real-server parity', () => {
     ).toBeVisible();
     await expect(runtimePanel.getByRole('button', { name: 'Configure MCP tools' })).toBeVisible();
     await assertNoHorizontalOverflow(page);
+    await assertMobileComposerDraftVisible(page);
+    await expect(runtimeButton).toBeFocused();
     await assertNoMobilePanelComposerOverlap(
       page,
       'runtime',
@@ -2477,7 +2578,24 @@ test.describe('/chat cockpit real-server parity', () => {
     await switchChatLayoutMode(page, 'cockpit');
     mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
     await expectMobileDraftPreserved();
-    await expect(mobileRails.getByRole('tabpanel', { name: 'Runtime' })).toBeVisible();
+    await expect(mobileRails.getByRole('region', { name: 'Runtime', exact: true })).toBeVisible();
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test('reserves composer space below runtime rails on a short mobile viewport', async ({ page, request }) => {
+    const selection = await getConfiguredChatModelSelection(request);
+    await seedRealServerConfig(page, { selectedModel: selection, cockpitLayout: { mode: 'cockpit', contextRailVisible: true, runtimeRailVisible: true, mobilePanel: 'runtime' } });
+    await page.setViewportSize({ width: 390, height: 600 });
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+    const rails = await waitForMobileCockpitPanel(page, 'runtime');
+    const panel = rails.getByRole('region', { name: 'Runtime', exact: true });
+    await expect(panel.getByRole('heading', { name: 'MCP tools' })).toBeVisible();
+    await fillEditableComposer(page, 'Keep this short-screen draft.');
+    await assertMobileComposerDraftVisible(page);
+    await assertNoMobilePanelComposerOverlap(page, 'runtime', 'short mobile runtime panel should leave composer space');
+    await expect(page.getByTestId('chat-input')).toHaveValue('Keep this short-screen draft.');
+    await panel.getByRole('button', { name: 'Configure MCP tools' }).focus();
+    await expect(panel.getByRole('button', { name: 'Configure MCP tools' })).toBeFocused();
     await assertNoHorizontalOverflow(page);
   });
 
@@ -2496,6 +2614,8 @@ test.describe('/chat cockpit real-server parity', () => {
       cockpitLayout: mobileFocusOnlyLayoutSeed,
     });
     await page.setViewportSize({ width: 390, height: 844 });
+    const catalogResponse = page.waitForResponse(response => response.request().method() === 'GET' &&
+      new URL(response.url()).pathname === '/api/v1/llm/models/metadata' && response.status() === 200);
     await page.goto('/chat', { waitUntil: 'domcontentloaded' });
 
     await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
@@ -2523,6 +2643,10 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(mobileWebSearchControl).toHaveAttribute('aria-pressed', 'false');
     }
 
+    const browserCatalog = extractModels(await (await catalogResponse).json());
+    expect(browserCatalog.some(entry => normalizeCockpitProviderKey(String(entry.provider)) === normalizeCockpitProviderKey(chatModelSelection.provider) &&
+      normalizeConfiguredChatModelId(chatModelSelection.provider, entry.model || entry.model_id || entry.id || entry.name) === chatModelSelection.model)).toBe(true);
+    await expect(page.getByTestId('model-selector-option')).toHaveCount(0);
     const mobileSmokePrompt = 'mobile cockpit smoke deterministic prompt';
     await page.getByTestId('chat-input').fill(mobileSmokePrompt);
     await page.getByRole('button', { name: /send message/i }).click();
@@ -2760,6 +2884,7 @@ test.describe('/chat cockpit real-server parity', () => {
       await selectAssistantFromRuntimeRail(page, {
         tab: 'Personas',
         assistantName: String(selectedPersona.name),
+        applyAsOverlay: true,
       });
 
       const assistantTrigger = runtimeInspector.locator('[data-cockpit-assistant-select-trigger]');
@@ -2835,13 +2960,12 @@ test.describe('/chat cockpit real-server parity', () => {
         tab: 'Characters',
         assistantName: character.name,
       });
-      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(
-        character.firstMessage
-      );
-
-      const prompt = `Tracked character proof ${timestamp}`;
-      const turn = await sendChatTurnAndCapture(page, prompt);
-      const createCall = findChatCreateCall(turn.calls);
+      const openingCapture = captureAllApiCalls(page);
+      await page.getByRole('button', { name: 'Start with this greeting', exact: true }).click();
+      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(character.firstMessage);
+      const openingCalls = await openingCapture.stop();
+      expect(openingCalls.filter(call => call.method === 'POST' && /\/(?:chat\/completions|complete-v2|completions)$/.test(new URL(call.url).pathname))).toEqual([]);
+      const createCall = findChatCreateCall(openingCalls);
       expect(createCall).toBeDefined();
       const trackedCharacterId = (createCall?.requestBody as Record<string, unknown> | null)
         ?.character_id;
@@ -2851,13 +2975,44 @@ test.describe('/chat cockpit real-server parity', () => {
         extractCreatedChatIdFromCreateCall(createCall) ??
         (await waitForPersistedServerChatId(page));
 
+      expect(createCall?.status).toBe(201);
+      expect(new URL(createCall!.url).searchParams.get('seed_first_message')).toBe('true');
+      expect(new URL(createCall!.url).searchParams.get('greeting_strategy')).toBe('default');
+      const opening = await apiGet<any>(request, `/api/v1/chats/${chatId}/messages?include_metadata=true&render_placeholders=false`);
+      expect(opening.status).toBe(200);
+      expect(opening.body.messages).toHaveLength(1);
+      const greeting = opening.body.messages[0];
+      expect(greeting).toMatchObject({ conversation_id: chatId, sender: 'assistant', content: character.firstMessage, parent_message_id: null, version: 1 });
+      const captured = openingCalls.filter(call => call.method === 'POST' && call.status === 200 && new URL(call.url).pathname === `/api/v1/chat/conversations/${chatId}/history/selection`).at(-1)?.responseBody as any;
+      expect(captured.view).toMatchObject({ owner_key: expect.stringMatching(/^native-history-v1:sha256:/), conversation_id: chatId, cursor: { kind: 'after_message', message_id: greeting.id } });
+      expect(captured.snapshot).toMatchObject({ owner_key: captured.view.owner_key, conversation_id: chatId, source_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/) });
+      expect(captured.rows).toHaveLength(1);
+      expect(captured.rows[0]).toMatchObject({ id: greeting.id, role: 'assistant', settled: true, parent_id: null });
+
+      const prompt = `Tracked character proof ${timestamp}`;
+      const turn = await sendChatTurnAndCapture(page, prompt);
+      const appendCall = turn.calls.find(call => call.method === 'POST' && new URL(call.url).pathname === `/api/v1/chats/${chatId}/roleplay/messages`);
+      const completionCall = turn.calls.find(call => call.method === 'POST' && new URL(call.url).pathname === `/api/v1/chats/${chatId}/complete-v2`);
+      expect(appendCall?.status).toBe(201);
+      expect(completionCall?.status).toBe(200);
+      const input = parseRoleplayResumeAppendRequest(appendCall?.requestBody);
+      expect(input.content).toBe(prompt);
+      expect(input.expected.tail).toEqual({ message_id: greeting.id, message_version: greeting.version });
+      const admission = parseRoleplayResumeAppendReceipt(chatId, input, appendCall?.responseBody);
+      const sent = parseRoleplayResumeCompletionRequest(completionCall?.requestBody);
+      expect(sent).toMatchObject({ stream: false, save_to_db: true, include_character_context: true, append_user_message: false,
+        tldw_roleplay_resume_v1: { input_message_id: admission.message_id, input_message_version: admission.message_version, expected: admission.fence } });
+      const settlement = parseRoleplayResumeCompletionReceipt(chatId, sent, completionCall?.responseBody);
+      expect(settlement).toMatchObject({ character_id: Number(character.id), saved: true });
+      const canonical = await apiGet<any>(request, `/api/v1/chats/${chatId}/messages?include_metadata=true&render_placeholders=false`);
+      expect(canonical.status).toBe(200);
+      expect(canonical.body.messages).toHaveLength(3);
+      expect(canonical.body.messages[0]).toEqual(greeting);
+      expect(canonical.body.messages[1]).toMatchObject({ id: admission.message_id, content: prompt, sender: 'user', parent_message_id: greeting.id });
+      expect(canonical.body.messages[2]).toMatchObject({ id: settlement.assistant_message_id, content: settlement.assistant_content, sender: 'assistant', parent_message_id: admission.message_id });
       const chatDetails = await getChatDetails(request, chatId);
       expect(chatDetails.status).toBe(200);
-      expect(chatDetails.body).toMatchObject({
-        id: chatId,
-        character_id: Number(character.id),
-        assistant_kind: 'character',
-      });
+      expect(chatDetails.body).toMatchObject({ id: chatId, character_id: Number(character.id), assistant_kind: 'character' });
       await expectDeterministicMockReply(page);
 
       await page.reload({ waitUntil: 'domcontentloaded' });
@@ -2871,6 +3026,9 @@ test.describe('/chat cockpit real-server parity', () => {
       await assertCoreComposerControls(page);
       await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(prompt);
       await expectDeterministicMockReply(page);
+      const reopened = await apiGet<any>(request, `/api/v1/chats/${chatId}/messages?include_metadata=true&render_placeholders=false`);
+      expect(reopened.status).toBe(200);
+      expect(reopened.body.messages).toEqual(canonical.body.messages);
 
       const runtimeInspector = getDesktopRuntimeInspector(page);
       await expect(runtimeInspector).toContainText('Character selected', {
@@ -2884,81 +3042,65 @@ test.describe('/chat cockpit real-server parity', () => {
     }
   });
 
-  test('starts a tracked persona chat from the runtime rail and restores tracked mode after reload', async ({
-    page,
-    request,
-  }) => {
+  test('explains unavailable tracked persona chat without writes and offers an explicit ordinary-chat overlay', async ({ page, request }) => {
     test.setTimeout(150_000);
-
     const health = await apiGet<any>(request, '/api/v1/health');
     assertHealthResponse(health);
     const chatModelSelection = await getDeterministicChatReadiness(request);
-    expect(chatModelSelection).toMatchObject({
-      providerId: 'custom-openai-api',
-      modelId: expect.any(String),
-    });
-
+    expect(chatModelSelection).toMatchObject({ providerId: 'custom-openai-api', modelId: expect.any(String) });
     const timestamp = Date.now();
     let persona: DisposablePersona | null = null;
-
     try {
-      persona = await createDisposablePersona(
-        request,
-        `tracked_persona_${timestamp}`,
-        `Tracked Persona ${timestamp}`
-      );
-
+      persona = await createDisposablePersona(request, `tracked_persona_${timestamp}`, `Tracked Persona ${timestamp}`);
       await openDesktopChatCockpit(page, chatModelSelection);
-
-      await selectAssistantFromRuntimeRail(page, {
-        tab: 'Personas',
-        assistantName: persona.name,
-      });
-
-      const prompt = `Tracked persona proof ${timestamp}`;
+      const prompt = `Preserved persona draft ${timestamp}`;
+      const input = page.getByTestId('chat-input');
+      await input.fill(prompt);
+      const originalSession = await readPlaygroundSessionSnapshot(page);
+      const originalMessages = await page.getByRole('log', { name: /chat messages/i }).textContent();
+      const writes: string[] = [];
+      const recordWrite = (hit: Request) => {
+        if (hit.url().includes('/api/') && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(hit.method()))
+          writes.push(`${hit.method()} ${new URL(hit.url()).pathname}`);
+      };
+      page.on('request', recordWrite);
+      try {
+        const runtime = getDesktopRuntimeInspector(page);
+        await runtime.getByRole('button', { name: 'Select character or persona' }).click();
+        const panel = page.getByTestId('assistant-select-panel');
+        await panel.getByRole('tab', { name: 'Personas' }).click();
+        const choice = panel.getByRole('button', { name: persona.name, exact: true });
+        await expect(choice).toBeVisible({ timeout: 30_000 });
+        await expect(choice).toBeDisabled();
+        await expect(choice).toHaveAccessibleDescription(/tracked persona chat.*unavailable.*overlay/i);
+        await expect(panel.getByRole('status')).toContainText('choose a character for tracked chat');
+        await choice.evaluate((element: HTMLButtonElement) => element.click());
+        await expect(choice).toBeDisabled();
+        await expect(panel).toBeVisible();
+        await expect(input).toHaveValue(prompt);
+        expect(await readPlaygroundSessionSnapshot(page)).toEqual(originalSession);
+        expect(await page.getByRole('log', { name: /chat messages/i }).textContent()).toBe(originalMessages);
+        await assertRuntimeAssistantCleared(runtime);
+        expect(writes).toEqual([]);
+        await panel.getByRole('button', { name: 'Use a persona prompt overlay' }).click();
+        await expect(choice).toBeEnabled();
+        await choice.click();
+        await expect(panel).toBeHidden();
+      } finally {
+        page.removeListener('request', recordWrite);
+      }
+      await expect(input).toHaveValue(prompt);
       const turn = await sendChatTurnAndCapture(page, prompt);
-      const createCall = findChatCreateCall(turn.calls);
-
-      expect(createCall).toBeDefined();
-      expect(createCall?.requestBody).toMatchObject({
-        assistant_kind: 'persona',
-        assistant_id: persona.id,
-      });
-
-      const chatId =
-        extractCreatedChatIdFromCreateCall(createCall) ??
-        extractConversationChatIdFromResponse(turn.response) ??
-        extractConversationChatIdFromCall(findConversationTurnCall(turn.calls)) ??
-        (await waitForPersistedServerChatId(page));
-
-      const chatDetails = await getChatDetails(request, chatId);
-      expect(chatDetails.status).toBe(200);
-      expect(chatDetails.body).toMatchObject({
-        id: chatId,
-        assistant_kind: 'persona',
-        assistant_id: persona.id,
-      });
+      expect(turn.response?.status()).toBe(200);
+      const ordinaryCompletion = turn.calls.find(call => call.method === 'POST' && /\/chat\/completions$/.test(new URL(call.url).pathname));
+      expect(ordinaryCompletion).toBeDefined();
+      expect(JSON.stringify(ordinaryCompletion?.requestBody)).toContain(`You are ${persona.name}, a concise overlay test persona.`);
+      await expect(getDesktopRuntimeInspector(page)).toContainText(persona.name);
+      for (const call of turn.calls.filter(call => call.method === 'POST')) {
+        expect(call.requestBody).not.toMatchObject({ assistant_kind: 'persona' });
+        expect(new URL(call.url).pathname).not.toMatch(/\/complete-v2$/);
+      }
       await expectDeterministicMockReply(page);
-
-      await page.reload({ waitUntil: 'domcontentloaded' });
-      await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible({
-        timeout: 60_000,
-      });
-      await assertNoBlockingServerDialog(page);
-      await expect(page.getByTestId('character-chat-readiness-panel')).toBeHidden({
-        timeout: 60_000,
-      });
-      await assertCoreComposerControls(page);
-      await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(prompt);
-      await expectDeterministicMockReply(page);
-
-      const runtimeInspector = getDesktopRuntimeInspector(page);
-      await expect(runtimeInspector).toContainText('Persona selected', {
-        timeout: 60_000,
-      });
-      await expect(runtimeInspector).toContainText(persona.name);
-      await expect(runtimeInspector.getByRole('button', { name: 'Clear assistant' })).toBeVisible();
-      await expect(page.getByTestId('character-control-rail')).toHaveCount(0);
     } finally {
       await cleanupDisposablePersona(request, persona);
     }
@@ -2989,7 +3131,7 @@ test.describe('/chat cockpit real-server parity', () => {
     const compositionPreview = getDesktopCompositionPreview(page);
 
     await expect(compositionPreview).toContainText(`Scope: ${modelKey}`);
-    await expect(compositionPreview).not.toContainText(`Scope: ${chatModelSelection.key}`);
+    expect(modelKey).toBe(chatModelSelection.key);
     await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
     await expect(runtimeInspector.getByText(modelKey, { exact: true })).toBeVisible();
 
@@ -3028,7 +3170,13 @@ test.describe('/chat cockpit real-server parity', () => {
     assertHealthResponse(health);
     const chatModelSelection = await getConfiguredChatModelSelection(request);
 
+    const catalogResponse = page.waitForResponse(response => response.request().method() === 'GET' &&
+      new URL(response.url()).pathname === '/api/v1/llm/models/metadata' && response.status() === 200);
     await openDesktopChatCockpit(page, chatModelSelection);
+    const browserCatalog = extractModels(await (await catalogResponse).json());
+    expect(browserCatalog.some(entry => normalizeCockpitProviderKey(String(entry.provider)) === normalizeCockpitProviderKey(chatModelSelection.provider) &&
+      normalizeConfiguredChatModelId(chatModelSelection.provider, entry.model || entry.model_id || entry.id || entry.name) === chatModelSelection.model)).toBe(true);
+    await expect(page.getByTestId('model-selector-option')).toHaveCount(0);
 
     const contextRail = getDesktopContextRail(page);
     const webSearchControl = contextRail.getByRole('button', {
@@ -3103,6 +3251,43 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(
         runtimeInspector.getByText('Regenerate becomes available after an assistant response.')
       ).toBeVisible();
+      // Stop may precede the server settlement receipt; reload the saved history before a new turn.
+      const originalChatId = completionRequest.postDataJSON().conversation_id ?? completionRequest.postDataJSON().tldw_history_selection_v1?.conversation_id;
+      expect(typeof originalChatId).toBe('string');
+      const originalRecoveries = ((await readStore(page, 'historySelections')) as HistoryBookmark[])
+        .filter(row => row.conversation_id === originalChatId).flatMap(row => Object.values(row.pending_turns ?? {}));
+      const stoppedInput = originalRecoveries.find(turn => turn.input_text === prompt);
+      expect(stoppedInput).toBeDefined();
+      await expect(page.getByText('The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.', { exact: true })).toBeVisible();
+      const automaticTurnAttempts: string[] = [];
+      const observeAutomaticTurn = (hit: Request) => {
+        if (hit.method() !== 'POST') return;
+        const path = new URL(hit.url()).pathname;
+        if (path.endsWith('/completions') || path.endsWith('/complete-v2') ||
+          path.endsWith('/complete') || path.endsWith('/messages')) automaticTurnAttempts.push(path);
+      };
+      page.on('request', observeAutomaticTurn);
+      try {
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        await assertNoBlockingServerDialog(page);
+        const coldRecovery = ((await readStore(page, 'historySelections')) as HistoryBookmark[])
+          .filter(row => row.conversation_id === originalChatId).flatMap(row => Object.values(row.pending_turns ?? {}))
+          .find(turn => turn.operation_id === stoppedInput!.operation_id);
+        expect(coldRecovery).toEqual(stoppedInput);
+        await page.getByRole('button', { name: 'Review conversation history', exact: true }).click();
+        const savedSource = page.getByRole('list', { name: 'Complete source messages', exact: true });
+        await expect(savedSource).toBeVisible();
+        const continueAfterSaved = savedSource.locator('[data-history-message-id]').last()
+          .getByRole('button', { name: 'Continue after this message', exact: true });
+        await expect(continueAfterSaved).toBeEnabled();
+        await continueAfterSaved.click();
+        await page.getByRole('button', { name: 'Cancel review', exact: true }).click();
+        await expect(page.locator("article[data-role='user']").filter({ hasText: prompt })).toHaveCount(1);
+        await expect(page.getByRole('button', { name: /send message/i })).toBeEnabled();
+        expect(automaticTurnAttempts).toEqual([]);
+      } finally {
+        page.removeListener('request', observeAutomaticTurn);
+      }
       const followUpCompletion = waitForChatCompletionAttempt(page, 90_000);
       await page.getByTestId('chat-input').fill('Reply with one short sentence to verify the saved-history regeneration gate.');
       await page.getByRole('button', { name: /send message/i }).click();
@@ -3119,4 +3304,194 @@ test.describe('/chat cockpit real-server parity', () => {
       fullPage: true,
     });
   });
+});
+
+test('refreshes a real empty native source after late settlement without replay or changing its boundary', async ({ page, request }) => {
+  test.setTimeout(90_000);
+  const model = await getConfiguredChatModelSelection(request);
+  const created = await apiPost<any>(request, '/api/v1/chats/', { title: `Empty refresh 13673 ${Date.now()}`, state: 'in-progress', source: 'e2e' });
+  expect(created.status).toBe(201);
+  const id = String(created.body.id);
+  const firstCapture = page.waitForResponse(response => new URL(response.url()).pathname.includes('/history/selection') && response.status() === 200);
+  await openDesktopChatCockpit(page, model, { persistedServerChatId: id });
+  const captured = await (await firstCapture).json();
+  expect(captured.status).toBe('captured');
+  expect(captured.snapshot.nodes).toEqual([]);
+  await expect.poll(async () => ((await readStore(page, 'historySelections')) as HistoryBookmark[]).filter(row => row.conversation_id === id).length).toBeGreaterThan(0);
+  const original = ((await readStore(page, 'historySelections')) as HistoryBookmark[]).filter(row => row.conversation_id === id).at(-1)!;
+  const recovery = { operation_id: crypto.randomUUID(), origin_view: original.view, owner_key: original.owner_key,
+    conversation_id: id, selection_digest: 'synthetic-original-empty', request_context_digest: 'synthetic-original-command',
+    created_at: Date.now(), input_text: '  Synthetic original uncertain input 13673  ', input_images: [], result_text: '', state: 'unknown', persistence: 'server' };
+  await page.evaluate(async ({ original, recovery }) => {
+    const opening = indexedDB.open('PageAssistDatabase');
+    const db = await new Promise<IDBDatabase>((resolve, reject) => { opening.onsuccess = () => resolve(opening.result); opening.onerror = () => reject(opening.error); });
+    const tx = db.transaction('historySelections', 'readwrite');
+    tx.objectStore('historySelections').put({ ...original, pending_turns: { ...original.pending_turns, [recovery.operation_id]: recovery } });
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); tx.onabort = () => reject(tx.error); });
+    db.close();
+  }, { original, recovery });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  const refresh = page.getByRole('button', { name: 'Refresh history', exact: true });
+  await expect(refresh).toBeVisible();
+  await expect(page.getByText("Save status unconfirmed", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Review conversation history', exact: true })).toHaveCount(0);
+  const attempts: string[] = [];
+  const observe = (hit: Request) => { const path = new URL(hit.url()).pathname; if (hit.method() === 'POST' && (path.endsWith('/messages') || path.endsWith('/completions') || path.endsWith('/complete-v2'))) attempts.push(path); };
+  page.on('request', observe);
+  try {
+    const user = await apiPost<any>(request, `/api/v1/chats/${id}/messages`, { role: 'user', content: recovery.input_text });
+    expect(user.status).toBe(201);
+    const answer = await apiPost<any>(request, `/api/v1/chats/${id}/messages`, { role: 'assistant', content: 'Synthetic late saved reply 13673', parent_message_id: user.body.id });
+    expect(answer.status).toBe(201);
+    const refreshed = page.waitForResponse(response => new URL(response.url()).pathname.includes('/history/selection') && response.status() === 200);
+    await refresh.focus();
+    await refresh.press("Enter");
+    const current = await (await refreshed).json();
+    expect(current.snapshot.nodes).toHaveLength(2);
+    expect(current.view.cursor).toEqual({ kind: 'empty' });
+    await expect(page.getByRole("button", { name: "Review conversation history", exact: true })).toBeFocused();
+    await expect(page.getByText("Save status unconfirmed", { exact: true }).first()).toBeVisible();
+    await page.getByRole('button', { name: 'Review conversation history', exact: true }).click();
+    await expect(page.getByRole('list', { name: 'Complete source messages', exact: true }).locator('[data-history-message-id]')).toHaveCount(2);
+    const records = ((await readStore(page, 'historySelections')) as HistoryBookmark[]).filter(row => row.conversation_id === id);
+    expect(records.flatMap(row => Object.values(row.pending_turns ?? {})).find(turn => turn.operation_id === recovery.operation_id)).toEqual(recovery);
+    expect(attempts).toEqual([]);
+  } finally { page.removeListener('request', observe); }
+});
+
+test('qualifies chat draft, keyboard semantics and both themes at narrow widths and renderer zoom', async ({ page, request }, testInfo) => {
+  test.setTimeout(120_000);
+  const model = await getConfiguredChatModelSelection(request);
+  await openDesktopChatCockpit(page, model);
+  const input = page.getByTestId('chat-input');
+  const draft = '  Acceptance matrix draft\nTrailing spaces  ';
+  await input.fill(draft);
+  const cells: unknown[] = [];
+  const violationsByCell: unknown[] = [];
+  for (const width of [320, 390, 1280]) for (const theme of ['light', 'dark']) for (const rendererZoom of [1, 2]) {
+    await page.evaluate(() => { document.documentElement.style.zoom = '1'; });
+    await page.setViewportSize({ width, height: 960 });
+    if (await page.evaluate(() => document.documentElement.classList.contains('dark')) !== (theme === 'dark')) await page.getByTestId('playground-chat-shell').getByTestId('chat-header-theme-toggle').click();
+    await expect.poll(() => page.evaluate(() => document.documentElement.classList.contains('dark'))).toBe(theme === 'dark');
+    await page.evaluate(zoom => { document.documentElement.style.zoom = String(zoom); }, rendererZoom);
+    await expect(input).toBeVisible();
+    await expect(input).toHaveValue(draft);
+    await expect(input).toHaveAccessibleName(/message/i);
+    await input.focus();
+    await expect(input).toBeFocused();
+    const send = page.getByRole('button', { name: /send message/i });
+    await expect(send).toBeEnabled();
+    await expect.poll(() => page.evaluate(() => document.getAnimations().filter(animation => animation.playState === 'running' && animation.effect?.getTiming().iterations !== Infinity).length)).toBe(0);
+    const results = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+    const violations = results.violations.map(issue => ({ id: issue.id, impact: issue.impact, targets: issue.nodes.map(node => node.target), nodes: issue.nodes.map(node => ({ target: node.target, html: node.html, summary: node.failureSummary, checks: node.any.map(check => check.data) })) }));
+    cells.push({ width, theme, rendererZoom, draftPreserved: true, violations });
+    await testInfo.attach(`chat-${width}-${theme}-renderer-${rendererZoom}`, { body: await page.screenshot({ fullPage: true }), contentType: 'image/png' });
+    if (violations.length) violationsByCell.push({ width, theme, rendererZoom, violations });
+  }
+  await testInfo.attach('chat-acceptance-matrix', { body: JSON.stringify({ cells, limits: 'CSS renderer zoom is a layout stress check; native browser-toolbar zoom and physical assistive technology remain unrun. No participant results or server-load claim.' }), contentType: 'application/json' });
+  expect(violationsByCell).toEqual([]);
+});
+
+for (const format of ['v2', 'png'] as const) test('imports a real '+format+' card and preserves greeting, two turns and reviewed Scene settings across reopen', async ({ page, request }, testInfo) => {
+  test.setTimeout(180_000);
+  const model = await getConfiguredChatModelSelection(request);
+  const name = 'Disposable imported '+format+' '+Date.now();
+  let seed: DisposableCharacter | null = null;
+  let imported: DisposableCharacter | null = null;
+  try {
+    seed = await createDisposableCharacter(request, name);
+    const exported = await request.get(serverUrl+'/api/v1/characters/'+seed.id+'/export?format='+format, { headers: apiHeaders() });
+    expect(exported.status()).toBe(200);
+    const buffer = await exported.body();
+    const renamedSeed = await request.put(serverUrl+"/api/v1/characters/"+seed.id+"?expected_version="+seed.version, { headers: apiHeaders(), data: { name: name+" export seed" } });
+    expect(renamedSeed.ok()).toBe(true);
+    seed.version = (await renamedSeed.json()).version;
+    await cleanupDisposableCharacter(request, seed); seed = null;
+    await openDesktopChatCockpit(page, model);
+    await page.goto('/characters', { waitUntil: 'domcontentloaded' });
+    const chooserEvent = page.waitForEvent('filechooser', { timeout: 5_000 }).catch(() => null);
+    await page.getByRole('button', { name: "Import character", exact: true }).click();
+    const chooser = await chooserEvent;
+    if (!chooser) await testInfo.attach('public-import-dom', { body: JSON.stringify(await page.getByTestId('character-import-dropzone').evaluate(node => ({ markup: node.outerHTML, buttons: node.querySelectorAll('button').length, inputs: node.querySelectorAll('input[type=file]').length }))), contentType: 'application/json' });
+    expect(chooser, 'Public Import must open its native file chooser').not.toBeNull();
+    await chooser!.setFiles({ name: format === 'png' ? 'synthetic-card.png' : 'synthetic-card.json', mimeType: format === 'png' ? 'image/png' : 'application/json', buffer });
+    const preview = page.getByRole('dialog', { name: 'Import preview' });
+    await expect(preview).toContainText(format === "png" ? "synthetic-card.png" : name);
+    const importResponse = page.waitForResponse(r => r.request().method() === 'POST' && /\/api\/v1\/characters\/import\/?$/.test(new URL(r.url()).pathname));
+    await preview.getByRole('button', { name: /Confirm import/i }).click();
+    expect((await importResponse).ok()).toBe(true);
+    await preview.getByRole('button', { name: 'OK', exact: true }).click();
+    const records = await apiGet<any>(request, '/api/v1/characters?limit=1000');
+    const record = extractCharacters(records.body).find(row => row.name === name && !row.deleted);
+    expect(record?.id).toBeTruthy();
+    imported = { id: String(record.id), name, firstMessage: record.first_message, version: record.version ?? 1 };
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('playground-cockpit-shell')).toBeVisible();
+    await selectAssistantFromRuntimeRail(page, { tab: 'Characters', assistantName: name });
+    await page.getByRole('button', { name: 'Start with this greeting', exact: true }).click();
+    await expect(page.getByRole('log', { name: /chat messages/i })).toContainText(imported.firstMessage);
+    const chatId = await waitForPersistedServerChatId(page);
+    for (const prompt of ['Imported card first turn '+format, 'Imported card second turn '+format]) {
+      const turn = await sendChatTurnAndCapture(page, prompt);
+      expect(turn.calls.find(call => call.method === 'POST' && new URL(call.url).pathname === '/api/v1/chats/'+chatId+'/roleplay/messages')?.status).toBe(201);
+      expect(turn.calls.find(call => call.method === 'POST' && new URL(call.url).pathname === '/api/v1/chats/'+chatId+'/complete-v2')?.status).toBe(200);
+    }
+    const canonical = await apiGet<any>(request, '/api/v1/chats/'+chatId+'/messages?include_metadata=true&render_placeholders=false');
+    expect(canonical.body.messages).toHaveLength(5);
+    expect(canonical.body.messages[0].content).toBe(imported.firstMessage);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('log', { name: /chat messages/i })).toContainText('Imported card second turn '+format);
+    const customize = page.getByRole('button', { name: 'Customize chat', exact: true });
+    if (await customize.isVisible() && await customize.getAttribute('aria-expanded') === 'false') await customize.click();
+    await page.getByTestId('composer-role-play-setup').click();
+    const scene = page.getByRole('dialog', { name: 'Role-play setup', exact: true });
+    await expect(scene).toBeVisible();
+    const notes = 'Reviewed imported Scene '+format;
+    const notesInput = scene.getByRole('textbox', { name: 'Scene notes', exact: true });
+    await expect(notesInput).toBeEditable();
+    await notesInput.fill(notes);
+    await expect(notesInput).toHaveValue(notes);
+    const sceneCapture = captureAllApiCalls(page);
+    await scene.getByRole('button', { name: 'Apply', exact: true }).click();
+    await expect(scene).toBeHidden();
+    const sceneCalls = await sceneCapture.stop();
+    await testInfo.attach("scene-apply-io", { body: JSON.stringify(sceneCalls.map(call => ({ method: call.method, path: new URL(call.url).pathname, status: call.status, requestContainsOwnNote: JSON.stringify(call.requestBody ?? null).includes(notes), responseContainsOwnNote: JSON.stringify(call.responseBody ?? null).includes(notes) }))), contentType: "application/json" });
+    await page.getByTestId('composer-role-play-setup').click();
+    await expect(scene.getByRole('textbox', { name: 'Scene notes', exact: true })).toHaveValue(notes);
+    await scene.getByRole('button', { name: 'Cancel', exact: true }).click();
+    const afterReview = await apiGet<any>(request, '/api/v1/chats/'+chatId+'/messages?include_metadata=true&render_placeholders=false');
+    expect(afterReview.body.messages).toEqual(canonical.body.messages);
+    await testInfo.attach('imported-card-journey', { body: JSON.stringify({ format, rows: 5, turns: 2, coldReopen: true, sceneNotesReview: true, limits: 'Scene settings review/change does not establish a saved frozen model or provider override. No packaged extension or physical AT claim.' }), contentType: 'application/json' });
+  } finally {
+    await cleanupDisposableCharacter(request, seed);
+    await cleanupDisposableCharacter(request, imported);
+  }
+});
+
+
+test('qualifies settled persistence badge contrast in both themes', async ({ page, request }, testInfo) => {
+  const model = await getConfiguredChatModelSelection(request);
+  const created = await apiPost<any>(request, '/api/v1/chats/', { title: 'Badge contrast '+Date.now(), state: 'in-progress', source: 'e2e' });
+  expect(created.status).toBe(201);
+  const id = String(created.body.id);
+  const user = await apiPost<any>(request, '/api/v1/chats/'+id+'/messages', { role: 'user', content: 'Synthetic saved badge question' });
+  expect(user.status).toBe(201);
+  expect((await apiPost<any>(request, '/api/v1/chats/'+id+'/messages', { role: 'assistant', content: 'Synthetic saved badge reply', parent_message_id: user.body.id })).status).toBe(201);
+  await openDesktopChatCockpit(page, model, { persistedServerChatId: id });
+  const shell = page.getByTestId('playground-chat-shell');
+  const badge = page.getByTestId('chat-header-persistence-badge');
+  const evidence: unknown[] = [];
+  for (const kind of ['server', 'temporary']) {
+    if (kind === 'temporary') await page.getByRole('button', { name: 'Temporary chat (on this device)', exact: true }).click();
+    await expect(badge).toHaveText(kind === 'server' ? 'Saved on server' : 'Temporary');
+    for (const theme of ['light', 'dark']) {
+      if (await page.evaluate(() => document.documentElement.classList.contains('dark')) !== (theme === 'dark')) await shell.getByTestId('chat-header-theme-toggle').click();
+      await expect.poll(() => page.evaluate(() => document.documentElement.classList.contains('dark'))).toBe(theme === 'dark');
+      await expect.poll(() => page.evaluate(() => document.getAnimations().filter(animation => animation.playState === 'running' && animation.effect?.getTiming().iterations !== Infinity).length)).toBe(0);
+      const results = await new AxeBuilder({ page }).include('[data-testid="chat-header-persistence-badge"]').withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze();
+      expect(results.violations).toEqual([]);
+      evidence.push({ kind, theme, styles: await badge.evaluate(node => { const css = getComputedStyle(node);return { color: css.color, background: css.backgroundColor, fontSize: css.fontSize }; }), violations: [] });
+    }
+  }
+  await testInfo.attach('settled-badge-contrast', { body: JSON.stringify({ evidence, limits: 'Saved and Temporary are actual runtime states. Failed shares the warning background/foreground projection qualified by mounted header tests; no forced runtime save failure or physical AT claim.' }), contentType: 'application/json' });
 });

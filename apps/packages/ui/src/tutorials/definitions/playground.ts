@@ -21,7 +21,7 @@ const playgroundBasics: TutorialDefinition = {
   priority: 1,
   steps: [
     {
-      target: '[data-testid="model-selector"]',
+      target: '[data-testid="model-selector"], [data-testid="chat-input"]',
       titleKey: "tutorials:playground.basics.modelTitle",
       titleFallback: "Choose a Model",
       contentKey: "tutorials:playground.basics.modelContent",
@@ -49,21 +49,22 @@ const playgroundBasics: TutorialDefinition = {
       placement: "top"
     },
     {
-      target: '[data-testid="chat-prompt-select"]',
-      titleKey: "tutorials:playground.basics.promptTitle",
-      titleFallback: "System Prompts",
-      contentKey: "tutorials:playground.basics.promptContent",
+      target:
+        '[data-testid="composer-casual-advanced-chip"], [data-testid="chat-input"]',
+      titleKey: "tutorials:playground.basics.customizeTitle",
+      titleFallback: "Customize Responses",
+      contentKey: "tutorials:playground.basics.customizeContent",
       contentFallback:
-        "Select a system prompt to guide how the AI responds. You can create custom prompts in the Prompts workspace.",
+        "A system prompt guides how the assistant replies. Use chat customization controls to choose one or adjust the response; create reusable prompts in the Prompts workspace.",
       placement: "bottom"
     },
     {
-      target: '[data-testid="new-chat-button"], [data-testid="chat-sidebar-new-chat"]',
+      target: '[data-testid="chat-input"]',
       titleKey: "tutorials:playground.basics.newChatTitle",
       titleFallback: "Start Fresh",
-      contentKey: "tutorials:playground.basics.newChatContent",
+      contentKey: "tutorials:playground.basics.newChatContentV2",
       contentFallback:
-        "Click here to start a new conversation. Your previous chats are saved in the sidebar for easy access.",
+        "Start a new conversation from the sidebar or with the New chat shortcut listed in keyboard help. Saved conversations can be reopened with Find conversations. A Temporary conversation asks before you discard it.",
       placement: "bottom"
     }
   ]

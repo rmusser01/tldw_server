@@ -1,9 +1,10 @@
 import { useTTS } from "@/hooks/useTTS"
 import { useStorage } from "@plasmohq/storage/hook"
 import React from "react"
+import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
 import { useTranslation } from "react-i18next"
 import { EditMessageForm } from "./EditMessageForm"
-import { Image, Tooltip } from "antd"
+import { Image, Popover, Tooltip } from "antd"
 import {
   CheckIcon,
   CopyIcon,
@@ -11,7 +12,8 @@ import {
   PlayIcon,
   Square,
   CornerUpLeft,
-  Trash2
+  Trash2,
+  MoreHorizontal
 } from "lucide-react"
 import { HumanMessage } from "./HumanMessge"
 import { ChatDocuments } from "@/models/ChatTypes"
@@ -73,7 +75,12 @@ type Props = {
   currentMessageIndex: number
   totalMessages: number
   onRegenerate: () => void
-  onEditFormSubmit: (value: string, isSend: boolean) => void
+  onEditFormSubmit: (
+    value: string,
+    isSend: boolean,
+    isCurrent?: () => boolean,
+    isOriginCurrent?: () => boolean
+  ) => unknown
   isProcessing: boolean
   webSearch?: unknown
   isSearchingInternet?: boolean
@@ -113,13 +120,27 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   const uiMode = useUiModeStore((state) => state.mode)
   const isProMode = uiMode === "pro"
   const setReplyTarget = useStoreMessageOption((state) => state.setReplyTarget)
-  const actionRowVisibility = isProMode
-    ? "flex"
-    : "hidden group-hover:flex group-focus-within:flex"
-  const overflowChipVisibility = isProMode
-    ? "hidden"
-    : "inline-flex group-hover:hidden"
+  const [actionsOpen, setActionsOpen] = React.useState(false)
+  const actionTriggerRef = React.useRef<HTMLButtonElement>(null)
+  const actionMenuRef = React.useRef<HTMLDivElement>(null)
+  const actionMenuOpenRef = React.useRef(actionsOpen)
+  actionMenuOpenRef.current = actionsOpen
+  const actionMenuId = React.useId()
+  const changeActionMenu = (open: boolean) => {
+    const restoreFocus = !open && actionMenuRef.current?.contains(document.activeElement)
+    setActionsOpen(open)
+    if (restoreFocus) actionTriggerRef.current?.focus()
+  }
+  React.useEffect(() => {
+    const menu = actionMenuRef.current
+    if (!actionsOpen || !menu) return
+    scheduleFocusFirstVisibleElement("button:not(:disabled)", menu, () =>
+      actionMenuOpenRef.current && actionMenuRef.current === menu && menu.isConnected)
+  }, [actionsOpen])
   const showInlineActions = !props.isProcessing && !editMode
+  React.useEffect(() => {
+    if (!showInlineActions) setActionsOpen(false)
+  }, [showInlineActions])
   const replyId = props.messageId ?? props.serverMessageId ?? null
   const canReply =
     isProMode && Boolean(replyId) && !props.message_type?.startsWith("compare")
@@ -199,6 +220,96 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
     : ({
         backgroundColor: `rgb(var(--color-surface2) / ${CHAT_MESSAGE_OPACITY_ALPHA})`
       } as React.CSSProperties)
+
+  const actionControls = (
+    <div className="flex flex-wrap items-center gap-1">
+      {props.isTTSEnabled && (
+        <Tooltip title={t("tts")}>
+          <IconButton
+            ariaLabel={t("tts") as string}
+            onClick={() => {
+              if (isSpeaking) {
+                cancel()
+              } else {
+                speak({
+                  utterance: props.message,
+                  saveClip: false
+                })
+              }
+            }}
+            className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
+            {!isSpeaking ? (
+              <PlayIcon className="w-3 h-3 text-text-subtle group-hover:text-text" />
+            ) : (
+              <Square className="w-3 h-3 text-danger group-hover:text-danger" />
+            )}
+          </IconButton>
+        </Tooltip>
+      )}
+      {!props.hideCopy && (
+        <Tooltip title={t("copyToClipboard")}>
+          <IconButton
+            ariaLabel={t("copyToClipboard") as string}
+            onClick={() => {
+              navigator.clipboard.writeText(props.message)
+              setIsBtnPressed(true)
+              if (timerRef.current) {
+                clearTimeout(timerRef.current)
+              }
+              timerRef.current = setTimeout(() => {
+                setIsBtnPressed(false)
+              }, 2000)
+            }}
+            className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
+            {!isBtnPressed ? (
+              <CopyIcon className="w-3 h-3 text-text-subtle group-hover:text-text" />
+            ) : (
+              <CheckIcon className="w-3 h-3 text-success group-hover:text-success" />
+            )}
+          </IconButton>
+        </Tooltip>
+      )}
+      {canReply && (
+        <Tooltip title={t("reply", "Reply")}>
+          <IconButton
+            ariaLabel={t("reply", "Reply") as string}
+            onClick={() => {
+              if (!replyId) return
+              setReplyTarget({
+                id: replyId,
+                preview: buildReplyPreview(props.message),
+                name: props.name,
+                isBot: props.isBot
+              })
+            }}
+            className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
+            <CornerUpLeft className="w-3 h-3 text-text-subtle group-hover:text-text" />
+          </IconButton>
+        </Tooltip>
+      )}
+
+      {!props.hideEditAndRegenerate && (
+        <Tooltip title={t("edit")}>
+          <IconButton
+            onClick={() => setEditMode(true)}
+            ariaLabel={t("edit") as string}
+            className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
+            <Pen className="w-3 h-3 text-text-subtle group-hover:text-text" />
+          </IconButton>
+        </Tooltip>
+      )}
+      {props.onDelete && (
+        <Tooltip title={t("delete", "Delete")}>
+          <IconButton
+            onClick={props.onDelete}
+            ariaLabel={t("delete", "Delete") as string}
+            className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
+            <Trash2 className="w-3 h-3 text-danger group-hover:text-danger" />
+          </IconButton>
+        </Tooltip>
+      )}
+    </div>
+  )
 
   return (
     <div
@@ -309,6 +420,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
           style={messageBubbleStyle}>
           <div className="w-full min-w-0">
             <EditMessageForm
+              key={props.serverMessageId ?? props.messageId ?? `${props.role ?? props.isBot}:${props.currentMessageIndex}`}
               value={props.message}
               onSumbit={props.onEditFormSubmit}
               onClose={() => setEditMode(false)}
@@ -337,103 +449,36 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
 
       {showInlineActions && (
         <div className="flex w-full justify-end">
-          <div className="flex items-center gap-1">
-            <button
-              type="button"
-              aria-label={t("moreActions", "More actions") as string}
-              title={t("moreActions", "More actions") as string}
-              className={`${overflowChipVisibility} rounded-full border border-border bg-surface2 px-2 py-0.5 text-xs text-text-muted transition-colors hover:text-text`}>
-              •••
-            </button>
-            <div
-              className={`${actionRowVisibility} flex-wrap items-center gap-1`}>
-              {props.isTTSEnabled && (
-                <Tooltip title={t("tts")}>
-                  <IconButton
-                    ariaLabel={t("tts") as string}
-                    onClick={() => {
-                      if (isSpeaking) {
-                        cancel()
-                      } else {
-                        speak({
-                          utterance: props.message,
-                          saveClip: false
-                        })
-                      }
-                    }}
-                    className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
-                    {!isSpeaking ? (
-                      <PlayIcon className="w-3 h-3 text-text-subtle group-hover:text-text" />
-                    ) : (
-                      <Square className="w-3 h-3 text-danger group-hover:text-danger" />
-                    )}
-                  </IconButton>
-                </Tooltip>
-              )}
-              {!props.hideCopy && (
-                <Tooltip title={t("copyToClipboard")}>
-                  <IconButton
-                    ariaLabel={t("copyToClipboard") as string}
-                    onClick={() => {
-                      navigator.clipboard.writeText(props.message)
-                      setIsBtnPressed(true)
-                      if (timerRef.current) {
-                        clearTimeout(timerRef.current)
-                      }
-                      timerRef.current = setTimeout(() => {
-                        setIsBtnPressed(false)
-                      }, 2000)
-                    }}
-                    className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
-                    {!isBtnPressed ? (
-                      <CopyIcon className="w-3 h-3 text-text-subtle group-hover:text-text" />
-                    ) : (
-                      <CheckIcon className="w-3 h-3 text-success group-hover:text-success" />
-                    )}
-                  </IconButton>
-                </Tooltip>
-              )}
-              {canReply && (
-                <Tooltip title={t("reply", "Reply")}>
-                  <IconButton
-                    ariaLabel={t("reply", "Reply") as string}
-                    onClick={() => {
-                      if (!replyId) return
-                      setReplyTarget({
-                        id: replyId,
-                        preview: buildReplyPreview(props.message),
-                        name: props.name,
-                        isBot: props.isBot
-                      })
-                    }}
-                    className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
-                    <CornerUpLeft className="w-3 h-3 text-text-subtle group-hover:text-text" />
-                  </IconButton>
-                </Tooltip>
-              )}
-
-              {!props.hideEditAndRegenerate && (
-                <Tooltip title={t("edit")}>
-                  <IconButton
-                    onClick={() => setEditMode(true)}
-                    ariaLabel={t("edit") as string}
-                    className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
-                    <Pen className="w-3 h-3 text-text-subtle group-hover:text-text" />
-                  </IconButton>
-                </Tooltip>
-              )}
-              {props.onDelete && (
-                <Tooltip title={t("delete", "Delete")}>
-                  <IconButton
-                    onClick={props.onDelete}
-                    ariaLabel={t("delete", "Delete") as string}
-                    className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
-                    <Trash2 className="w-3 h-3 text-danger group-hover:text-danger" />
-                  </IconButton>
-                </Tooltip>
-              )}
-            </div>
-          </div>
+          {isProMode ? actionControls : (
+            <Popover
+              open={actionsOpen}
+              onOpenChange={changeActionMenu}
+              trigger="click"
+              placement="bottomRight"
+              content={
+                <div
+                  id={actionMenuId}
+                  ref={actionMenuRef}
+                  onClick={() => changeActionMenu(false)}
+                  onKeyDown={event => {
+                    if (event.key !== "Escape") return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    changeActionMenu(false)
+                  }}>
+                  {actionControls}
+                </div>
+              }>
+              <IconButton
+                ref={actionTriggerRef}
+                ariaLabel={t("moreActions", "More actions") as string}
+                ariaExpanded={actionsOpen}
+                ariaControls={actionsOpen ? actionMenuId : undefined}
+                className={`${ACTION_BUTTON_CLASS} h-11 w-11`}>
+                <MoreHorizontal className="h-3 w-3" />
+              </IconButton>
+            </Popover>
+          )}
         </div>
       )}
 

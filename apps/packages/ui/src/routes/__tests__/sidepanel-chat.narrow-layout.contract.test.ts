@@ -42,13 +42,13 @@ describe("sidepanel chat narrow layout contract", () => {
       "relative flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-x-hidden bg-bg",
     )
     expect(sidepanelChatSource).toContain(
-      "relative z-10 flex min-w-0 flex-1 w-full flex-col items-center overflow-x-hidden overflow-y-auto",
+      "relative z-10 flex min-w-0 flex-1 min-h-0 w-full flex-col items-center overflow-x-hidden overflow-y-auto",
     )
   })
 
   it("allows the sticky composer and control rows to wrap within a 390px sidepanel", () => {
     expect(sidepanelChatSource).toContain(
-      'className="absolute bottom-0 left-0 right-0 z-10 w-full min-w-0"',
+      'className="absolute bottom-0 left-0 right-0 z-10 max-h-[60%] min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain"',
     )
     expect(sidepanelFormSource).toContain(
       "flex w-full min-w-0 flex-col items-center",

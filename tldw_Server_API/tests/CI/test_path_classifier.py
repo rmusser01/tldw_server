@@ -47,6 +47,10 @@ def test_admin_ui_change_enables_frontend_without_e2e() -> None:
 @pytest.mark.parametrize(
     ("path", "backend_changed", "tldw_frontend_changed", "admin_ui_changed"),
     (
+        ("apps/packages/api-types/paths.d.ts", True, True, False),
+        ("apps/packages/api-types/package.json", True, True, False),
+        ("apps/packages/api-types/scripts/generate-api-types.mjs", True, True, False),
+        ("Helper_Scripts/export_openapi_schema.py", True, False, False),
         (
             "Helper_Scripts/ci/vitest_base_ratchet.py",
             True,
@@ -86,7 +90,7 @@ def test_admin_ui_change_enables_frontend_without_e2e() -> None:
     ),
 )
 @pytest.mark.unit
-def test_shared_vitest_guardrail_selects_every_consuming_gate(
+def test_shared_contract_and_runner_paths_select_every_consuming_gate(
     path: str,
     backend_changed: bool,
     tldw_frontend_changed: bool,

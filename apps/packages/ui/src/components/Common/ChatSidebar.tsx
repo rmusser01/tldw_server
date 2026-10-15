@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react"
 import { useNavigate, useLocation } from "react-router-dom"
 import { useTranslation } from "react-i18next"
-import { Input, Tooltip, Segmented } from "antd"
+import { Input, Tooltip, Segmented, type InputRef } from "antd"
 import {
   Plus,
   Search,
@@ -13,6 +13,7 @@ import {
 } from "lucide-react"
 import {
   SIDEBAR_ACTIVE_TAB_SETTING,
+  SIDEBAR_RECENT_COLLAPSED_SETTING,
   SIDEBAR_SHORTCUTS_COLLAPSED_SETTING,
   SIDEBAR_SHORTCUT_SELECTION_SETTING
 } from "@/services/settings/ui-settings"
@@ -23,7 +24,10 @@ import {
   SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE,
   useServerChatHistory
 } from "@/hooks/useServerChatHistory"
+import { useChatDraftOwner } from "@/hooks/useChatDraftOwner"
+import type { VisibleServerChats } from "@/db/dexie/chat"
 import { useClearChat } from "@/hooks/chat/useClearChat"
+import { useShallow } from "zustand/react/shallow"
 import { useFolderStore } from "@/store/folder"
 import { useStoreMessageOption } from "@/store/option"
 import { useRouteTransitionStore } from "@/store/route-transition"
@@ -34,6 +38,7 @@ import {
 import { cn } from "@/libs/utils"
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open"
 import { ServerChatList } from "./ChatSidebar/ServerChatList"
+import { LocalChatList } from "./ChatSidebar/LocalChatList"
 import { FolderChatList } from "./ChatSidebar/FolderChatList"
 import {
   normalizeSidebarShortcutSelection,
@@ -57,7 +62,7 @@ interface ChatSidebarProps {
   onConversationSelected?: () => void
 }
 
-type SidebarTab = "server" | "folders"
+type SidebarTab = "all" | "server" | "local" | "folders"
 
 export function ChatSidebar({
   collapsed = false,
@@ -70,14 +75,46 @@ export function ChatSidebar({
   const navigate = useNavigate()
   const location = useLocation()
   const [searchQuery, setSearchQuery] = useState("")
+  const hasSearchQuery = searchQuery.trim().length > 0
   const debouncedSearchQuery = useDebounce(searchQuery, 300)
   const [selectionMode, setSelectionMode] = useState(false)
-  const [recentCollapsed, setRecentCollapsed] = useState(true)
-  const hasSearchQuery = searchQuery.trim().length > 0
-  const recentHistoryVisible = !recentCollapsed || hasSearchQuery
+  const [recentCollapsed, setRecentCollapsed, recentPreference] = useSetting(
+    SIDEBAR_RECENT_COLLAPSED_SETTING
+  )
+  // Read the saved source before starting any source-specific list.
+  const [savedTab, setCurrentTab, tabPreference] = useSetting(SIDEBAR_ACTIVE_TAB_SETTING)
+  const tabReady = tabPreference?.isLoading !== true
+  const currentTab: SidebarTab = savedTab === "folders" && hasSearchQuery ? "all" : savedTab
+  const [visibleServerChats, setVisibleServerChats] = useState<VisibleServerChats | null>(null)
+  const readOwner = useChatDraftOwner(() => setVisibleServerChats(null))
+  const ownerReady = readOwner.verificationState === "ready" && !!readOwner.ownerKey && !!readOwner.requestScope && readOwner.isCurrent()
+  const historyOwner = React.useMemo(() => ownerReady ? {
+    key: readOwner.ownerKey!, requestScope: readOwner.requestScope!, isCurrent: readOwner.isCurrent
+  } : undefined, [ownerReady, readOwner.ownerKey, readOwner.requestScope, readOwner.isCurrent])
 
-  // Tab state persisted in UI settings
-  const [currentTab, setCurrentTab] = useSetting(SIDEBAR_ACTIVE_TAB_SETTING)
+  const searchInput = React.useRef<InputRef>(null)
+  const focusSearchOnOpen = React.useRef<{
+    location: typeof location
+    initiator: HTMLButtonElement
+  } | null>(null)
+  React.useLayoutEffect(() => {
+    const requested = focusSearchOnOpen.current
+    if (!requested) return
+    if (collapsed || requested.location !== location) {
+      focusSearchOnOpen.current = null
+      return
+    }
+    if (!tabReady) return
+    focusSearchOnOpen.current = null
+    const active = document.activeElement
+    // A newer connected control owns focus; consume the old request quietly.
+    if (active !== document.body && active?.isConnected &&
+        active !== requested.initiator && active !== searchInput.current?.input) return
+    searchInput.current?.focus()
+  }, [collapsed, location, tabReady])
+  const recentHistoryVisible = tabReady && (hasSearchQuery ||
+    (recentPreference?.isLoading !== true && !recentCollapsed))
+
   const [shortcutsCollapsed, setShortcutsCollapsed] = useSetting(
     SIDEBAR_SHORTCUTS_COLLAPSED_SETTING
   )
@@ -93,22 +130,32 @@ export function ChatSidebar({
     (state) => shouldEnableOptionalResource(state, "server-history")
   )
   const serverHistoryPanelVisible =
-    !collapsed && recentHistoryVisible && currentTab === "server"
+    !collapsed && recentHistoryVisible && (currentTab === "server" || currentTab === "all")
 
   const clearChat = useClearChat()
   const temporaryChat = useStoreMessageOption((state) => state.temporaryChat)
   const startRouteTransition = useRouteTransitionStore((state) => state.start)
 
-  // Folder conversation count for tab badge
-  const conversationKeywordLinks = useFolderStore((s) => s.conversationKeywordLinks)
-  const folderConversationCount = useMemo(
-    () => new Set(conversationKeywordLinks.map((link) => link.conversation_id)).size,
-    [conversationKeywordLinks]
-  )
+  // Count only the verified view's successful server folder snapshot.
+  const folderData = useFolderStore(useShallow(state => ({
+    folders: state.folders, keywords: state.keywords, folderKeywordLinks: state.folderKeywordLinks,
+    conversationKeywordLinks: state.conversationKeywordLinks, serverDataScope: state.serverDataScope,
+    isLoading: state.isLoading, error: state.error, folderApiAvailable: state.folderApiAvailable,
+    getConversationsForFolder: state.getConversationsForFolder
+  })))
+  const folderConversationCount = useMemo(() => {
+    if (!ownerReady || folderData.serverDataScope?.requestScope !== historyOwner?.requestScope ||
+      !folderData.serverDataScope?.isCurrent() || folderData.isLoading || folderData.error ||
+      folderData.folderApiAvailable !== true) return 0
+    return new Set(folderData.folders.filter(folder => !folder.deleted)
+      .flatMap(folder => folderData.getConversationsForFolder(folder.id))).size
+  }, [folderData, ownerReady, historyOwner])
 
   // Server chat count for tab badge
   const { total: serverChatCount = 0 } = useServerChatHistory("", {
-    enabled: serverHistoryPanelVisible && serverHistoryOverviewEnabled,
+    enabled: ownerReady && serverHistoryPanelVisible && serverHistoryOverviewEnabled,
+    owner: historyOwner,
+    scope: {type:"global"},
     mode: "overview",
     page: 1,
     limit: SERVER_CHAT_HISTORY_OVERVIEW_PAGE_SIZE,
@@ -188,7 +235,7 @@ export function ChatSidebar({
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const nextValue = e.target.value
-    if (currentTab === "server" && nextValue.trim().length > 0) {
+    if (currentTab !== "local" && nextValue.trim().length > 0) {
       markPanelEngaged("server-history")
     }
     setSearchQuery(nextValue)
@@ -207,43 +254,19 @@ export function ChatSidebar({
       if (path === location.pathname) {
         return
       }
-      void setShortcutsCollapsed(true)
       startRouteTransition(path)
       navigate(path)
     },
-    [location.pathname, navigate, setShortcutsCollapsed, startRouteTransition]
+    [location.pathname, navigate, startRouteTransition]
   )
 
-  const resetToolsFirst = React.useCallback(() => {
-    if (shortcutsCollapsed === true) {
-      void setShortcutsCollapsed(false)
-    }
-    setRecentCollapsed(true)
+  // Reopening resets transient management, not explicit expansion preferences.
+  React.useEffect(() => {
     setSelectionMode(false)
-  }, [setShortcutsCollapsed, shortcutsCollapsed])
-
-  const previousCollapsedRef = React.useRef<boolean | null>(null)
-  React.useEffect(() => {
-    const wasCollapsed = previousCollapsedRef.current
-    if (!collapsed && (wasCollapsed === null || wasCollapsed === true)) {
-      resetToolsFirst()
-    }
-    previousCollapsedRef.current = collapsed
-  }, [collapsed, resetToolsFirst])
-
-  const previousOpenResetKeyRef = React.useRef(openResetKey)
-  React.useEffect(() => {
-    if (previousOpenResetKeyRef.current === openResetKey) {
-      return
-    }
-    previousOpenResetKeyRef.current = openResetKey
-    if (!collapsed) {
-      resetToolsFirst()
-    }
-  }, [collapsed, openResetKey, resetToolsFirst])
+  }, [collapsed, openResetKey])
 
   React.useEffect(() => {
-    if ((currentTab !== "server" || temporaryChat) && selectionMode) {
+    if ((currentTab !== "server" && currentTab !== "all" || temporaryChat) && selectionMode) {
       setSelectionMode(false)
     }
   }, [currentTab, selectionMode, temporaryChat])
@@ -262,49 +285,55 @@ export function ChatSidebar({
     }
   }, [markPanelEngaged, serverHistoryPanelVisible])
 
-  const previousPathRef = React.useRef(location.pathname)
-  React.useEffect(() => {
-    if (previousPathRef.current !== location.pathname) {
-      previousPathRef.current = location.pathname
-      void setShortcutsCollapsed(true)
-    }
-  }, [location.pathname, setShortcutsCollapsed])
-
   // Build tab options with counts
   const tabOptions: Array<{ value: SidebarTab; label: string }> = [
+    { value: "all", label: t("common:chatSidebar.tabs.all", "All") },
     {
-      value: "server",
-      label: `${t("common:chatSidebar.tabs.server", "Server")}${serverChatCount > 0 ? ` (${serverChatCount})` : ""}`
+      value: 'server',
+      label:
+        ownerReady && serverChatCount > 0
+          ? t('common:chatSidebar.tabs.serverTotal', 'Server ({{count}} total)', {
+              count: serverChatCount,
+            })
+          : t('common:chatSidebar.tabs.server', 'Server'),
     },
     {
-      value: "folders",
-      label: `${t("common:chatSidebar.tabs.folders", "Folders")}${folderConversationCount > 0 ? ` (${folderConversationCount})` : ""}`
-    }
-  ]
-  const settingsShortcutActive = isSidebarShortcutRouteActive(
-    "/settings",
-    location.pathname
-  )
+      value: "local",
+      label: t("common:chatSidebar.tabs.local", "On this device")
+    },
+    {
+      value: 'folders',
+      label:
+        folderConversationCount > 0
+          ? t(
+              'common:chatSidebar.tabs.foldersChats',
+              'Folders ({count, plural, one {# chat} other {# chats}})',
+              { count: folderConversationCount }
+            )
+          : t('common:chatSidebar.tabs.folders', 'Folders'),
+    },
+  ];
+  const settingsShortcutActive = isSidebarShortcutRouteActive('/settings', location.pathname);
   const focusRingClasses =
     "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
   const recentConversationsExpanded = recentHistoryVisible
   const toggleRecentConversations = React.useCallback(() => {
-    setRecentCollapsed((prev) => {
-      const next = !prev
-      if (next) {
-        setSelectionMode(false)
-      } else if (currentTab === "server") {
-        markPanelEngaged("server-history")
-      }
-      return next
-    })
-  }, [currentTab, markPanelEngaged])
+    if (recentConversationsExpanded) {
+      setSearchQuery("")
+      setSelectionMode(false)
+      void setRecentCollapsed(true)
+    } else {
+      void setRecentCollapsed(false)
+      if (currentTab === "server") markPanelEngaged("server-history")
+    }
+  }, [currentTab, markPanelEngaged, recentConversationsExpanded, setRecentCollapsed])
 
   // Collapsed view - just icons
   if (collapsed) {
     return (
       <div
         data-testid="chat-sidebar"
+      data-chat-sidebar
         className={cn(
           "flex flex-col h-screen items-center py-4 gap-2 w-12 overflow-hidden border-r border-border bg-surface2",
           className
@@ -347,6 +376,21 @@ export function ChatSidebar({
         </Tooltip>
 
         <div className="h-px w-6 bg-border my-2" />
+
+        <Tooltip title={t("common:chatSidebar.findConversations", "Find conversations")} placement="right">
+          <button
+            type="button"
+            aria-label={t("common:chatSidebar.findConversations", "Find conversations")}
+            onClick={(event) => {
+              focusSearchOnOpen.current = { location, initiator: event.currentTarget }
+              event.currentTarget.focus()
+              onToggleCollapse?.()
+            }}
+            className={cn("p-2 rounded-lg text-text-muted hover:bg-surface hover:text-text", focusRingClasses)}
+          >
+            <Search aria-hidden="true" className="size-4" />
+          </button>
+        </Tooltip>
 
         <div className="flex min-h-0 flex-1 w-full flex-col items-center gap-2 overflow-y-auto overflow-x-hidden px-1">
           {sidebarShortcuts.map((item) => (
@@ -403,6 +447,7 @@ export function ChatSidebar({
   return (
     <div
       data-testid="chat-sidebar"
+        data-chat-sidebar
       className={cn(
         "flex h-screen min-h-0 flex-col overflow-hidden border-r border-border bg-surface2",
         className
@@ -428,7 +473,7 @@ export function ChatSidebar({
               <Plus className="size-4" />
             </button>
           </Tooltip>
-          {recentHistoryVisible && currentTab === "server" && !temporaryChat && (
+          {recentHistoryVisible && (currentTab === "server" || currentTab === "all") && !temporaryChat && (
             <Tooltip
               title={
                 selectionMode
@@ -476,51 +521,47 @@ export function ChatSidebar({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {/* Quick Actions */}
-        <button
-          type="button"
-          aria-expanded={showShortcuts}
-          aria-controls="chat-sidebar-shortcuts"
-          onClick={() => {
-            void setShortcutsCollapsed(showShortcuts)
-          }}
-          className={cn(
-            "group flex w-full items-center justify-between px-3 py-2 text-left hover:bg-surface",
-            focusRingClasses
-          )}
-          title={t("common:chatSidebar.shortcuts", "Shortcuts")}
-        >
-          <span className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
-            {t("common:chatSidebar.shortcuts", "Shortcuts")}
-          </span>
-          <ChevronDown
-            className={cn(
-              "size-4 text-text-muted transition-transform group-hover:text-text",
-              showShortcuts ? "rotate-0" : "-rotate-90"
-            )}
+        {/* Search stays reachable even when recent history is collapsed. */}
+        <div className="px-3 py-2 border-b border-border">
+          <label htmlFor="chat-sidebar-search-input" className="mb-1 block text-xs font-semibold text-text-muted">
+            {t("common:chatSidebar.findConversations", "Find conversations")}
+          </label>
+          <Input
+            ref={searchInput}
+            disabled={!tabReady}
+            id="chat-sidebar-search-input"
+            data-testid="chat-sidebar-search"
+            prefix={<Search aria-hidden="true" className="size-3.5 text-text-subtle" />}
+            placeholder={currentTab === "local" ? t("common:chatSidebar.local.search", "Search on-device chats…") : t("common:chatSidebar.search", "Search chats...")}
+            aria-label={t("common:chatSidebar.findConversations", "Find conversations")}
+            aria-describedby="chat-sidebar-search-scope"
+            value={searchQuery}
+            onChange={handleSearchChange}
+            size="small"
+            className="bg-surface"
+            allowClear
           />
-        </button>
-        {showShortcuts && (
-          <div id="chat-sidebar-shortcuts" className="px-3 pb-2 space-y-1">
-            {sidebarShortcuts.length > 0 ? (
-              sidebarShortcuts.map((item) => renderSidebarShortcut(item))
-            ) : (
-              <div className="px-2 py-2 text-xs text-text-subtle">
-                {t(
-                  "settings:uiCustomization.shortcuts.empty",
-                  "No shortcuts selected"
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="h-px bg-border mx-3" />
+          <p id="chat-sidebar-search-scope" className="mt-1 text-xs text-text-muted">
+            {!tabReady
+              ? t("common:loading.title", "Loading…")
+              : currentTab === "folders"
+              ? t("common:chatSidebar.searchFromFolders", "Typing searches Server and On this device history.")
+              : currentTab === "all"
+              ? t("common:chatSidebar.discovery.allScope", "Search Server and On this device history.")
+              : t("common:chatSidebar.searchScope", "Search {{source}} history.", {
+                  source: currentTab === "local"
+                    ? t("common:chatSidebar.tabs.local", "On this device")
+                    : t("common:chatSidebar.tabs.server", "Server")
+                })}
+          </p>
+        </div>
 
         {/* Recent Conversations */}
         <button
           type="button"
           aria-expanded={recentConversationsExpanded}
+          disabled={!tabReady || recentPreference?.isLoading === true}
+          aria-busy={!tabReady || recentPreference?.isLoading === true}
           aria-controls="chat-sidebar-recent-conversations"
           onClick={toggleRecentConversations}
           className={cn(
@@ -545,20 +586,6 @@ export function ChatSidebar({
 
         {recentHistoryVisible && (
           <div id="chat-sidebar-recent-conversations">
-            {/* Search */}
-            <div className="px-3 py-2 border-b border-border">
-              <Input
-                data-testid="chat-sidebar-search"
-                prefix={<Search className="size-3.5 text-text-subtle" />}
-                placeholder={t("common:chatSidebar.search", "Search chats...")}
-                value={searchQuery}
-                onChange={handleSearchChange}
-                size="small"
-                className="bg-surface"
-                allowClear
-              />
-            </div>
-
             {/* Tabs */}
             <div className="px-3 py-2 border-b border-border">
               <label id="chat-sidebar-tab-label" className="sr-only">
@@ -571,32 +598,45 @@ export function ChatSidebar({
                 }}
                 options={tabOptions}
                 block
-                size="small"
-                className="w-full"
+                orientation="vertical"
+                className="w-full [&_.ant-segmented-item-label]:px-2"
+                styles={{
+                  label: { whiteSpace: 'normal', overflowWrap: 'anywhere', textAlign: 'left' },
+                }}
                 aria-labelledby="chat-sidebar-tab-label"
               />
             </div>
 
             {/* Tab Content. Temporary mode opens saved chats read-only (H1): rows stay
                 selectable without management actions, and folder management stays off. */}
-            <div
-              className={
-                temporaryChat && currentTab === "folders"
-                  ? "pointer-events-none opacity-50"
-                  : ""
-              }
-            >
-              {currentTab === "server" && (
+            <div>
+              {(currentTab === "server" || currentTab === "all") && (
+                <section aria-label={t("common:chatSidebar.tabs.server", "Server")}>
+                {currentTab === "all" && <h3 className="px-3 pt-3 text-sm font-semibold">{t("common:chatSidebar.discovery.serverGroup", "Server results")}</h3>}
                 <ServerChatList
                   searchQuery={debouncedSearchQuery}
                   selectionMode={selectionMode}
                   readOnly={temporaryChat}
                   onConversationSelected={onConversationSelected}
+                  onVisibleChatsChange={setVisibleServerChats}
                 />
+                </section>
+              )}
+
+              {(currentTab === "local" || currentTab === "all") && (
+                <section aria-label={t("common:chatSidebar.tabs.local", "On this device")}>
+                {currentTab === "all" && <h3 className="px-3 pt-3 text-sm font-semibold">{t("common:chatSidebar.discovery.deviceGroup", "On this device results")}</h3>}
+                <LocalChatList searchQuery={debouncedSearchQuery} readOnly={temporaryChat}
+                  includeCachedServerChats
+                  visibleServerChats={currentTab === "all" ? visibleServerChats : null}
+                  onSelectChat={() => onConversationSelected?.()} />
+                </section>
               )}
 
               {currentTab === "folders" && (
-                <FolderChatList onConversationSelected={onConversationSelected} />
+                <FolderChatList owner={historyOwner} verificationState={readOwner.verificationState}
+                  onRetryVerification={readOwner.retryVerification} readOnly={temporaryChat}
+                  onConversationSelected={onConversationSelected} />
               )}
             </div>
           </div>
@@ -609,6 +649,47 @@ export function ChatSidebar({
             hidden
           />
         )}
+        <div className="h-px bg-border mx-3" />
+
+        {/* Platform shortcuts */}
+        <button
+          type="button"
+          aria-expanded={showShortcuts}
+          aria-controls="chat-sidebar-shortcuts"
+          onClick={() => {
+            void setShortcutsCollapsed(showShortcuts)
+          }}
+          className={cn(
+            "group flex w-full items-center justify-between px-3 py-2 text-left hover:bg-surface",
+            focusRingClasses
+          )}
+          title={t("common:chatSidebar.navigation", "Navigation")}
+        >
+          <span className="text-xs font-semibold uppercase tracking-wide text-text-subtle">
+            {t("common:chatSidebar.navigation", "Navigation")}
+          </span>
+          <ChevronDown
+            className={cn(
+              "size-4 text-text-muted transition-transform group-hover:text-text",
+              showShortcuts ? "rotate-0" : "-rotate-90"
+            )}
+          />
+        </button>
+        {showShortcuts && (
+          <div id="chat-sidebar-shortcuts" className="px-3 pb-2 space-y-1">
+            {sidebarShortcuts.length > 0 ? (
+              sidebarShortcuts.map((item) => renderSidebarShortcut(item))
+            ) : (
+              <div className="px-2 py-2 text-xs text-text-subtle">
+                {t(
+                  "settings:uiCustomization.shortcuts.empty",
+                  "No shortcuts selected"
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
       </div>
 
       {/* Footer */}

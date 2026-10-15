@@ -53,6 +53,6 @@ describe("chat width cross-surface guard", () => {
     expect(humanMessageSource).toContain("max-w-none")
     expect(sidepanelFormSource).toContain("max-w-[64rem]")
     expect(sidepanelRouteSource).toContain("w-full max-w-5xl")
-    expect(extensionSidepanelRouteSource).toContain("w-full max-w-5xl")
+    expect(extensionSidepanelRouteSource.trim()).toBe('export { default } from "@/routes/sidepanel-chat"')
   })
 })

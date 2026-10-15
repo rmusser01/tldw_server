@@ -1111,6 +1111,11 @@ class DatabasePool:
                             "PostgreSQL AuthNZ bootstrap schema is unavailable"
                         )
 
+                    from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
+                        native_quota_schema_statements,
+                    )
+                    for statement in native_quota_schema_statements(postgres=True):
+                        await conn.execute(statement)
                     await ensure_postgres_profile_version_on_connection(conn)
                     await repair_postgres_profile_candidate_timestamps(conn)
                     await validate_postgres_profile_candidate_schema(conn)
@@ -1154,6 +1159,12 @@ class DatabasePool:
                     logger.info("SQLite schema created successfully")
                 else:
                     logger.debug("SQLite schema already exists")
+                from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
+                    native_quota_schema_statements,
+                )
+                for statement in native_quota_schema_statements(postgres=False):
+                    await conn.execute(statement)
+                await conn.commit()
 
             # Ensure AuthNZ migrations are up to date (handles legacy columns)
             try:

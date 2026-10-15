@@ -1,7 +1,7 @@
-import React from "react"
+import { Button as TldwButton } from "@/components/Common/Button"
 import { Popover, Radio, Tooltip } from "antd"
 import { ChevronDown } from "lucide-react"
-import { Button as TldwButton } from "@/components/Common/Button"
+import React from "react"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,10 +51,24 @@ export const PlaygroundMcpControl: React.FC<PlaygroundMcpControlProps> =
       t
     } = props
 
+    const triggerRef = React.useRef<HTMLButtonElement>(null)
+    const handleEscape = (event: React.KeyboardEvent<HTMLElement>) => {
+      if (
+        event.key !== "Escape" ||
+        event.defaultPrevented ||
+        event.nativeEvent.isComposing
+      )
+        return
+      event.preventDefault()
+      event.stopPropagation()
+      onMcpPopoverChange(false)
+      triggerRef.current?.focus()
+    }
+
     const disabled = !hasMcp || mcpHealthState === "unhealthy"
 
     const controlContent = (
-      <div className="flex w-64 flex-col gap-2 p-2">
+      <div onKeyDown={handleEscape} className="flex w-64 flex-col gap-2 p-2">
         <div className="text-[10px] font-semibold uppercase tracking-wider text-text-muted">
           {t("playground:composer.mcpToolsLabel", "MCP tools")}
         </div>
@@ -66,18 +80,10 @@ export const PlaygroundMcpControl: React.FC<PlaygroundMcpControlProps> =
           <Radio.Group
             size="small"
             value={toolChoice}
-            onChange={(e) =>
-              onToolChoiceChange(e.target.value)
-            }
+            onChange={(e) => onToolChoiceChange(e.target.value)}
             className="flex flex-wrap gap-1"
-            aria-label={t(
-              "playground:composer.toolChoiceLabel",
-              "Tool choice"
-            )}
-            disabled={
-              disabled || mcpToolsLoading || mcpToolsCount === 0
-            }
-          >
+            aria-label={t("playground:composer.toolChoiceLabel", "Tool choice")}
+            disabled={disabled || mcpToolsLoading || mcpToolsCount === 0}>
             <Radio.Button value="auto">
               {t("playground:composer.toolChoiceAuto", "Auto")}
             </Radio.Button>
@@ -98,8 +104,7 @@ export const PlaygroundMcpControl: React.FC<PlaygroundMcpControlProps> =
               onMcpPopoverChange(false)
               onOpenMcpSettings()
             }}
-            className="mt-1 inline-flex w-fit items-center gap-1 text-xs font-medium text-primary hover:text-primaryStrong"
-          >
+            className="mt-1 inline-flex w-fit items-center gap-1 text-xs font-medium text-primary hover:text-primaryStrong">
             {t("playground:composer.mcpConfigure", "Configure tools")}
           </button>
         </div>
@@ -108,6 +113,8 @@ export const PlaygroundMcpControl: React.FC<PlaygroundMcpControlProps> =
 
     const button = (
       <TldwButton
+        ref={triggerRef}
+        onKeyDown={mcpPopoverOpen ? handleEscape : undefined}
         variant="outline"
         size="md"
         shape="pill"
@@ -115,13 +122,10 @@ export const PlaygroundMcpControl: React.FC<PlaygroundMcpControlProps> =
         title={mcpAriaLabel}
         disabled={disabled}
         data-testid="mcp-tools-toggle"
-        className="gap-1.5 min-h-[44px]"
-      >
+        className="gap-1.5 min-h-[44px]">
         <span className="inline-flex items-center gap-1.5">
           <span className="text-[11px] font-semibold">MCP</span>
-          <span className="text-[11px] text-text-muted">
-            {mcpChoiceLabel}
-          </span>
+          <span className="text-[11px] text-text-muted">{mcpChoiceLabel}</span>
           {!mcpToolsLoading && hasMcp && mcpToolsCount > 0 && (
             <span className="rounded-full bg-surface2 px-1.5 py-0.5 text-[10px] text-text-muted">
               {mcpToolsCount}
@@ -149,8 +153,7 @@ export const PlaygroundMcpControl: React.FC<PlaygroundMcpControlProps> =
         placement="topRight"
         content={controlContent}
         open={mcpPopoverOpen}
-        onOpenChange={onMcpPopoverChange}
-      >
+        onOpenChange={onMcpPopoverChange}>
         <span className="inline-flex">{button}</span>
       </Popover>
     )

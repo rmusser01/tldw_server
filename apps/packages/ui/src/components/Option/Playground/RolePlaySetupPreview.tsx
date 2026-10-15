@@ -15,6 +15,7 @@ type PreviewCopy = {
   custom: string
   modified: string
   noScene: string
+  sceneDraftEnabled: string
   noGenerationStyle: string
   external: string
   noContext: string
@@ -32,7 +33,7 @@ const formatBehavior = (state: RolePlayState, copy: PreviewCopy): string => {
 }
 
 const formatScene = (state: RolePlayState, copy: PreviewCopy): string =>
-  state.scene?.summary || copy.noScene
+  state.scene ? state.scene.summary || copy.sceneDraftEnabled : copy.noScene
 
 const formatGeneration = (state: RolePlayState, copy: PreviewCopy): string =>
   state.generationStyle?.label || copy.noGenerationStyle
@@ -87,12 +88,19 @@ export const RolePlaySetupPreview: React.FC<RolePlaySetupPreviewProps> = ({
       custom: t("common:custom", "Custom"),
       modified: t("playground:composer.modifiedSuffix", "modified"),
       noScene: t("playground:composer.noScene", "No scene"),
+      sceneDraftEnabled: t(
+        "playground:composer.sceneDraftEnabled",
+        "Scene draft enabled"
+      ),
       noGenerationStyle: t(
         "playground:composer.noGenerationStyle",
         "No generation style"
       ),
       external: t("playground:composer.externalContext", "External"),
-      noContext: t("playground:composer.noContext", "No context"),
+      noContext: t(
+        "playground:composer.noAdditionalContext",
+        "No additional pinned or external context"
+      ),
       pinned: (count: number) =>
         t("playground:composer.pinnedContextCount", "{{count}} pinned", {
           count
@@ -140,15 +148,49 @@ export const RolePlaySetupPreview: React.FC<RolePlaySetupPreviewProps> = ({
         after={formatScene(after, copy)}
       />
       <PreviewRow
-        label={t("playground:composer.context.generationStyle", "Generation style")}
+        label={t(
+          "playground:composer.context.generationStyle",
+          "Generation style"
+        )}
         before={formatGeneration(before, copy)}
         after={formatGeneration(after, copy)}
       />
       <PreviewRow
-        label={t("playground:composer.context.context", "Context")}
+        label={t(
+          "playground:composer.context.additionalContext",
+          "Additional context"
+        )}
         before={formatContext(before, copy)}
         after={formatContext(after, copy)}
       />
+      {before.identity?.kind === "character" ||
+      after.identity?.kind === "character" ? (
+        <PreviewRow
+          label={t("playground:composer.characterLore", "Character lore")}
+          before={
+            before.identity?.kind === "character"
+              ? t(
+                  "playground:composer.characterLoreNotChecked",
+                  "Not checked in this preview"
+                )
+              : t(
+                  "playground:composer.noCharacterSelected",
+                  "No character selected"
+                )
+          }
+          after={
+            after.identity?.kind === "character"
+              ? t(
+                  "playground:composer.characterLoreNotChecked",
+                  "Not checked in this preview"
+                )
+              : t(
+                  "playground:composer.noCharacterSelected",
+                  "No character selected"
+                )
+          }
+        />
+      ) : null}
     </section>
   )
 }

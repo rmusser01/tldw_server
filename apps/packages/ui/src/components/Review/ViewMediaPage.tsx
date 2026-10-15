@@ -79,7 +79,6 @@ export const MEDIA_STALE_CHECK_INTERVAL_MS = 30_000
 
 // Debounce for keyword-suggestion searches triggered by Select onSearch
 // (per-keystroke network calls, TASK-13511).
-const KEYWORD_SUGGESTION_DEBOUNCE_MS = 300
 
 const LazyJumpToNavigator = React.lazy(() =>
   import('@/components/Media/JumpToNavigator').then((module) => ({
@@ -353,18 +352,6 @@ const MediaPageContent: React.FC = () => {
 
   // --- Hooks ---
   const search = useMediaSearch({ t, message })
-  // Debounce timer for keyword-suggestion searches (per-keystroke Select
-  // onSearch, TASK-13511).
-  const keywordSuggestionTimer = React.useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null)
-  React.useEffect(() => {
-    return () => {
-      if (keywordSuggestionTimer.current) {
-        clearTimeout(keywordSuggestionTimer.current)
-      }
-    }
-  }, [])
   const { isCurrent: isMediaCurrent } = search
   const viewPrefs = useMediaViewPreferences()
 
@@ -1544,18 +1531,7 @@ const MediaPageContent: React.FC = () => {
                   }}
                   keywordOptions={search.keywordOptions}
                   keywordSourceMode={search.keywordSourceMode}
-                  onKeywordSearch={(txt) => {
-                    // Debounced: the Select fires onSearch per keystroke and
-                    // each undebounced call hit the keyword search API
-                    // (TASK-13511).
-                    if (keywordSuggestionTimer.current) {
-                      clearTimeout(keywordSuggestionTimer.current)
-                    }
-                    keywordSuggestionTimer.current = setTimeout(() => {
-                      keywordSuggestionTimer.current = null
-                      search.loadKeywordSuggestions(txt)
-                    }, KEYWORD_SUGGESTION_DEBOUNCE_MS)
-                  }}
+                  onKeywordSearch={search.loadKeywordSuggestions}
                   showFavoritesOnly={selection.showFavoritesOnly}
                   onShowFavoritesOnlyChange={(show) => {
                     selection.setShowFavoritesOnly(show)

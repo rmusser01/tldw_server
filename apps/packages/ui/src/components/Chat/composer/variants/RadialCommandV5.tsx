@@ -57,7 +57,7 @@ export interface RadialCommandV5Props {
   // --- Send ---
   onSend: () => void
   sending?: boolean
-  stopStreaming?: () => void
+  stopStreaming?: (event?: React.SyntheticEvent<HTMLElement>) => void
   canSend?: boolean
 
   // --- Slash palette (inline, above the composer) ---
@@ -157,9 +157,9 @@ export const RadialCommandV5: React.FC<RadialCommandV5Props> = ({
     }
   }
 
-  const handleSend = () => {
+  const handleSend = (event?: React.SyntheticEvent<HTMLElement>) => {
     if (sending) {
-      stopStreaming?.()
+      stopStreaming?.(event)
       return
     }
     if (canSend) onSend()

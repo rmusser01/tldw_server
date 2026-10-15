@@ -1,8 +1,10 @@
 /** Owner selection is separate from workspace routing, view identity and inference connection. */
 import { z } from "zod"
+import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes"
 import type { ChatScope } from "@/types/chat-scope"
 import type {
   HistoryAdmissionReferenceV1,
+  HistoryEditTargetV1,
   HistoryAdmissionV1,
   HistoryCaptureRequestV1,
   HistoryCaptureResultV1,
@@ -13,9 +15,9 @@ import type {
   LegacyHistoryProjectionV1,
   PreparedHistoryContextV1
 } from "@/types/history-selection"
-import type { HistoryBookmarkScope, Message } from "@/db/dexie/types"
+import type { HistoryBookmarkScope, Message, UploadedFile } from "@/db/dexie/types"
 import type { ServicePromptRequestScope } from "./tldw/domains/service-prompts"
-import { tldwClient } from "./tldw/TldwApiClient"
+import { tldwClient, type ChatMessage } from "./tldw/TldwApiClient"
 import {
   acknowledgeHistoryConfirmation,
   appendLocalSelectedUser,
@@ -60,6 +62,9 @@ const freeze = <T>(value: T): T => {
   return value
 }
 const str = z.string().min(1)
+const historyEditSchema = z
+  .object({ version: z.literal(1), message_id: str, message_revision: str })
+  .strict()
 const revision = z.object({ id: str, revision: str }).strict()
 const fences = z
   .object({
@@ -150,6 +155,14 @@ const content = revision
   .strict()
 const capturedSchema = z
   .object({
+    native_completion_v1: z
+      .object({
+        policy: z.literal("selected_history_v1"),
+        supported: z.boolean(),
+        storage_context_digest: str
+      })
+      .strict()
+      .optional(),
     status: z.literal("captured"),
     snapshot,
     rows: z.array(node),
@@ -227,6 +240,32 @@ const assertOwnerLease = (
   )
     fail("request_config_scope_changed")
 }
+
+/** A ready controller must still belong to the conversation being submitted. */
+export const assertHistoryConversationTarget = async (
+  owner: HistoryOwnerV1,
+  target: { historyId?: string | null; serverChatId?: string | null }
+): Promise<void> => {
+  assertOwnerLease(owner)
+  if (owner.kind === "unavailable") return fail(owner.code)
+  if (target.serverChatId) {
+    if (owner.kind !== "native" || owner.conversation_id !== target.serverChatId)
+      fail("owner_conversation_mismatch")
+    return
+  }
+  if (!target.historyId) fail("owner_conversation_mismatch")
+  if (owner.kind === "local") {
+    if (owner.conversation_id !== target.historyId) fail("owner_conversation_mismatch")
+    return
+  }
+  const { PageAssistDatabase } = await import("@/db/dexie/chat")
+  const { serverChatMirrorOwnerKey } = await import("@/db/dexie/server-chat-mirror")
+  const details = await new PageAssistDatabase().getHistoryInfo(target.historyId)
+  assertOwnerLease(owner)
+  if (details?.server_chat_id !== owner.conversation_id ||
+      details.server_scope_key !== serverChatMirrorOwnerKey({ requestScope: owner.request_scope }))
+    fail("owner_conversation_mismatch")
+}
 const localOptions = (
   owner: LocalHistoryOwnerV1,
   opts?: HistoryOperationOptions
@@ -286,7 +325,10 @@ export const captureHistorySnapshot = async (
     response = await tldwClient.captureHistorySelection(
       owner.conversation_id,
       request,
-      nativeOptions(owner, signal)
+      {
+        ...nativeOptions(owner, signal),
+        ...(purpose === "send" ? { includeNativeCompletion: true } : {})
+      }
     )
   } catch (error) {
     assertOwnerLease(owner, { signal })
@@ -331,6 +373,13 @@ export const captureHistorySnapshot = async (
       canonicalHistoryJson(resolved.rows) !== canonicalHistoryJson(result.rows)
     )
       fail("selected_content_mismatch")
+    if (
+      result.native_completion_v1 &&
+      (purpose !== "send" ||
+        result.native_completion_v1.storage_context_digest !==
+          result.storage_context_digest)
+    )
+      fail("native_completion_capability_mismatch")
     bindSelectedHistoryContent(result.rows, result.selected_content)
   }
   const previous = nativeCapabilities.get(owner)
@@ -341,6 +390,559 @@ export const captureHistorySnapshot = async (
     captured: result.status === "captured" || previous?.captured === true
   })
   return freeze(result)
+}
+
+/** Keep the existing read gate until the deployed operation can enforce P1 atomically. */
+export const nativeHistoryNeedsBranchChoice = async (
+  owner: NativeHistoryOwnerV1,
+  capture: HistorySelectionCaptureV1,
+  operation: "messages" | "completion",
+  options?: HistoryOperationOptions
+): Promise<boolean> => {
+  assertOwnerLease(owner, options)
+  assertNativeBinding(owner, capture.view, true)
+  assertNativeBinding(owner, capture.snapshot, true)
+  if (capture.purpose !== "send") fail("selected_content_mismatch")
+  const spec = await tldwClient
+    .getOpenAPISpec(nativeOptions(owner, options?.signal))
+    .catch(() => null)
+  assertOwnerLease(owner, options)
+  const { detectNativeHistoryBranchAdmission } = await import(
+    "./tldw/server-capabilities"
+  )
+  assertOwnerLease(owner, options)
+  if (detectNativeHistoryBranchAdmission(spec, operation)) return false
+  // ponytail: an older server can still change after this read; upgrade it for atomic P1 admission.
+  const parents = new Map(
+    capture.snapshot.nodes.map((node) => [node.id, node.parent_id])
+  )
+  const interpretation = capture.snapshot.interpretation_status
+  if (
+    capture.view.interpretation.kind === "legacy_linear_v1" &&
+    interpretation.kind === "legacy_linear_v1"
+  ) {
+    interpretation.ordered_path_ids.forEach((id, index, path) =>
+      parents.set(id, index ? path[index - 1] : null)
+    )
+  }
+  const selectedParent = capture.rows.at(-1)?.id ?? null
+  return capture.snapshot.nodes.some(
+    (node) => parents.get(node.id) === selectedParent
+  )
+}
+
+/** Protected Edit has no read-only fallback for servers lacking atomic target admission. */
+export const requireNativeHistoryEditAdmission = async (
+  owner: NativeHistoryOwnerV1,
+  capture: HistorySelectionCaptureV1,
+  operation: "messages" | "completion",
+  options?: HistoryOperationOptions
+): Promise<void> => {
+  assertOwnerLease(owner, options)
+  assertNativeBinding(owner, capture.view, true)
+  assertNativeBinding(owner, capture.snapshot, true)
+  if (capture.purpose !== "send") fail("selected_content_mismatch")
+  const spec = await tldwClient
+    .getOpenAPISpec(nativeOptions(owner, options?.signal))
+    .catch(() => null)
+  assertOwnerLease(owner, options)
+  const { detectNativeHistoryEditAdmission } = await import(
+    "./tldw/server-capabilities"
+  )
+  assertOwnerLease(owner, options)
+  if (!detectNativeHistoryEditAdmission(spec, operation))
+    fail("native_history_edit_unsupported")
+}
+
+/** Read the deployed history fence without loading message content or changing the view. */
+export const readNativeHistoryVersion = async (
+  owner: NativeHistoryOwnerV1,
+  options?: HistoryOperationOptions
+): Promise<number> => {
+  assertOwnerLease(owner, options)
+  const capability = nativeCapabilities.get(owner)
+  if (!capability?.captured) fail("unsupported_history_capability")
+  const detail = await tldwClient.getChat(owner.conversation_id, {
+    ...nativeOptions(owner, options?.signal),
+    requireHistoryVersion: true
+  })
+  assertOwnerLease(owner, options)
+  if (
+    detail.id !== owner.conversation_id ||
+    typeof detail.history_version !== "number" ||
+    !Number.isSafeInteger(detail.history_version) ||
+    detail.history_version < 0
+  )
+    fail("unsupported_history_version")
+  return detail.history_version
+}
+
+export type NativeMessageEditReceipt = Readonly<{
+  message_id: string
+  message: string
+  version: number
+}>
+
+const nativeMessageTarget = (
+  capture: HistorySelectionCaptureV1,
+  messageId: string
+) => {
+  const nodes = capture.rows.filter((row) => row.id === messageId)
+  const members = capture.snapshot.nodes.filter((row) => row.id === messageId)
+  const content = capture.selected_content.filter((row) => row.id === messageId)
+  if (
+    nodes.length !== 1 ||
+    members.length !== 1 ||
+    content.length !== 1 ||
+    canonicalHistoryJson(nodes[0]) !== canonicalHistoryJson(members[0]) ||
+    content[0].revision !== nodes[0].revision ||
+    !nodes[0].settled ||
+    !["user", "assistant"].includes(nodes[0].role)
+  )
+    fail("message_changed")
+  return { node: nodes[0], content: content[0] }
+}
+const nativeEditTarget = (capture: HistorySelectionCaptureV1, messageId: string) => {
+  const target = nativeMessageTarget(capture, messageId)
+  if (target.content.images.length) fail("unsupported_message_payload")
+  return target
+}
+const nativeEditPreservedState = (
+  target: ReturnType<typeof nativeEditTarget>
+) => ({
+  parent: target.node.parent_id,
+  role: target.node.role,
+  settled: target.node.settled,
+  legacy_projection_id: target.node.legacy_projection_id ?? null,
+  metadata: target.node.metadata ?? [],
+  assets: target.node.assets ?? [],
+  comparison: target.node.comparison ?? null,
+  extra_metadata: target.content.extra_metadata ?? null,
+  tool_calls: target.content.tool_calls ?? null
+})
+
+/** A content-only edit must be canonically recaptured before replacing its mounted source. */
+export const qualifyNativeMessageEditCapture = (
+  original: HistorySelectionCaptureV1,
+  refreshed: HistorySelectionCaptureV1,
+  receipt: NativeMessageEditReceipt
+): void => {
+  const before = nativeEditTarget(original, receipt.message_id)
+  const after = nativeEditTarget(refreshed, receipt.message_id)
+  if (
+    original.snapshot.owner_key !== refreshed.snapshot.owner_key ||
+    original.snapshot.conversation_id !== refreshed.snapshot.conversation_id ||
+    canonicalHistoryJson(original.view) !==
+      canonicalHistoryJson(refreshed.view) ||
+    !Number.isSafeInteger(receipt.version) ||
+    receipt.version <= 1 ||
+    after.node.revision === before.node.revision ||
+    after.content.message !== receipt.message ||
+    canonicalHistoryJson(nativeEditPreservedState(before)) !==
+      canonicalHistoryJson(nativeEditPreservedState(after))
+  )
+    fail("message_changed")
+}
+
+/** Reuse the native target CAS; never turn an in-place Save into a local history mutation. */
+export const saveNativeHistoryMessage = async (
+  owner: NativeHistoryOwnerV1,
+  capture: HistorySelectionCaptureV1,
+  target: { id: string; message: string; isBot?: boolean },
+  message: string,
+  options?: HistoryOperationOptions & {
+    acknowledgement_current?: () => boolean
+  }
+): Promise<NativeMessageEditReceipt> => {
+  assertOwnerLease(owner, options)
+  assertNativeBinding(owner, capture.snapshot, true)
+  if (capture.view.interpretation.kind !== "parent_graph_v1")
+    fail("unsupported_history_capability")
+  const original = nativeEditTarget(capture, target.id)
+  if (
+    original.content.message !== target.message ||
+    original.node.role !== (target.isBot ? "assistant" : "user")
+  )
+    fail("message_changed")
+  if (!message.trim()) fail("unsupported_message_payload")
+  const scoped = nativeOptions(owner, options?.signal)
+  const row = await tldwClient.getMessage(target.id, scoped)
+  assertOwnerLease(owner, options)
+  if (
+    !row ||
+    row.id !== target.id ||
+    row.conversation_id !== owner.conversation_id ||
+    row.sender !== original.node.role ||
+    row.parent_message_id !== original.node.parent_id ||
+    row.has_image !== false ||
+    row.content !== target.message ||
+    !Number.isSafeInteger(row.version) ||
+    row.version <= 0 ||
+    row.version >= Number.MAX_SAFE_INTEGER
+  )
+    fail("message_changed")
+  const fresh = await captureHistorySnapshot(
+    owner,
+    capture.view,
+    "send",
+    options?.signal
+  )
+  assertOwnerLease(owner, options)
+  if (fresh.status !== "captured") return fail(fresh.code)
+  if (
+    canonicalHistoryJson(original) !==
+    canonicalHistoryJson(nativeEditTarget(fresh, target.id))
+  )
+    fail("message_changed")
+  const result = await tldwClient.editMessage(
+    target.id,
+    message,
+    row.version,
+    owner.conversation_id,
+    scoped
+  )
+  assertOwnerLease(owner, {
+    ...options,
+    validate_lease: options?.acknowledgement_current ?? options?.validate_lease
+  })
+  // PUT may render roleplay placeholders; the subsequent raw capture certifies the edited text.
+  if (
+    !result ||
+    result.id !== target.id ||
+    result.conversation_id !== owner.conversation_id ||
+    result.sender !== row.sender ||
+    result.parent_message_id !== row.parent_message_id ||
+    result.has_image !== false ||
+    typeof result.content !== "string" ||
+    !Number.isSafeInteger(result.version) ||
+    result.version !== row.version + 1
+  )
+    fail("message_edit_unconfirmed")
+  return Object.freeze({
+    message_id: target.id,
+    message,
+    version: result.version
+  })
+}
+
+/** Keep opaque snapshot revisions separate from the server message version CAS. */
+export const verifyNativeMessageEditReceipt = async (
+  owner: NativeHistoryOwnerV1,
+  original: HistorySelectionCaptureV1,
+  receipt: NativeMessageEditReceipt,
+  options?: HistoryOperationOptions
+): Promise<void> => {
+  assertOwnerLease(owner, options)
+  assertNativeBinding(owner, original.snapshot, true)
+  const target = nativeEditTarget(original, receipt.message_id)
+  const row = await tldwClient.getMessage(
+    receipt.message_id,
+    nativeOptions(owner, options?.signal)
+  )
+  assertOwnerLease(owner, options)
+  if (
+    !Number.isSafeInteger(receipt.version) ||
+    receipt.version <= 1 ||
+    !row ||
+    row.id !== receipt.message_id ||
+    row.conversation_id !== owner.conversation_id ||
+    row.sender !== target.node.role ||
+    row.parent_message_id !== target.node.parent_id ||
+    row.has_image !== false ||
+    row.content !== receipt.message ||
+    row.version !== receipt.version
+  )
+    fail("message_edit_unconfirmed")
+}
+
+export type NativeMessageDeleteReceipt = Readonly<{
+  message_id: string
+  parent_message_id: string | null
+}>
+
+export const nativeMessageDeleteView = (
+  original: HistorySelectionCaptureV1,
+  receipt: NativeMessageDeleteReceipt
+): HistoryViewSelectionV1 => {
+  const target = nativeMessageTarget(original, receipt.message_id)
+  if (target.node.parent_id !== receipt.parent_message_id)
+    fail("message_changed")
+  if (
+    original.view.cursor.kind === "empty" ||
+    original.view.cursor.message_id !== receipt.message_id
+  )
+    return original.view
+  if (
+    !Number.isSafeInteger(original.view.selection_revision) ||
+    original.view.selection_revision >= Number.MAX_SAFE_INTEGER
+  )
+    fail("stale_selection")
+  return {
+    ...original.view,
+    selection_revision: original.view.selection_revision + 1,
+    cursor: receipt.parent_message_id
+      ? { kind: "after_message", message_id: receipt.parent_message_id }
+      : { kind: "empty" }
+  }
+}
+
+/** Destructive deletion requires both physical CAS and exact saved content/assets. */
+export const deleteNativeHistoryMessage = async (
+  owner: NativeHistoryOwnerV1,
+  capture: HistorySelectionCaptureV1,
+  target: { id: string; message: string; isBot?: boolean; images?: string[] },
+  options?: HistoryOperationOptions
+): Promise<NativeMessageDeleteReceipt> => {
+  assertOwnerLease(owner, options)
+  assertNativeBinding(owner, capture.snapshot, true)
+  if (capture.view.interpretation.kind !== "parent_graph_v1")
+    fail("unsupported_history_capability")
+  const original = nativeMessageTarget(capture, target.id)
+  if (
+    original.content.message !== target.message ||
+    original.node.role !== (target.isBot ? "assistant" : "user") ||
+    canonicalHistoryJson(original.content.images) !==
+      canonicalHistoryJson(target.images ?? [])
+  )
+    fail("message_changed")
+  if (capture.snapshot.nodes.some((node) => node.parent_id === target.id))
+    fail("message_has_descendants")
+  const receipt = Object.freeze({
+    message_id: target.id,
+    parent_message_id: original.node.parent_id
+  })
+  nativeMessageDeleteView(capture, receipt)
+  const scoped = nativeOptions(owner, options?.signal)
+  const row = await tldwClient.getMessage(target.id, scoped)
+  assertOwnerLease(owner, options)
+  if (
+    !row ||
+    row.id !== target.id ||
+    row.conversation_id !== owner.conversation_id ||
+    row.sender !== original.node.role ||
+    row.parent_message_id !== original.node.parent_id ||
+    row.content !== target.message ||
+    row.has_image !== original.content.images.length > 0 ||
+    !Number.isSafeInteger(row.version) ||
+    row.version <= 0 ||
+    row.version >= Number.MAX_SAFE_INTEGER
+  )
+    fail("message_changed")
+  const fresh = await captureHistorySnapshot(
+    owner,
+    capture.view,
+    "send",
+    options?.signal
+  )
+  assertOwnerLease(owner, options)
+  if (fresh.status !== "captured") return fail(fresh.code)
+  if (
+    canonicalHistoryJson(original) !==
+    canonicalHistoryJson(nativeMessageTarget(fresh, target.id))
+  )
+    fail("message_changed")
+  if (fresh.snapshot.nodes.some((node) => node.parent_id === target.id))
+    fail("message_has_descendants")
+  await tldwClient.deleteMessage(
+    target.id,
+    row.version,
+    owner.conversation_id,
+    {
+      ...scoped,
+      requireLeaf: true,
+      expectedRevision: original.node.revision
+    }
+  )
+  assertOwnerLease(owner, options)
+  return receipt
+}
+
+/** Only the acknowledged leaf disappears; retained history is qualified before publication. */
+export const qualifyNativeMessageDeleteCapture = (
+  original: HistorySelectionCaptureV1,
+  refreshed: HistorySelectionCaptureV1,
+  receipt: NativeMessageDeleteReceipt
+): void => {
+  const expectedView = nativeMessageDeleteView(original, receipt)
+  if (
+    refreshed.snapshot.owner_key !== original.snapshot.owner_key ||
+    refreshed.snapshot.conversation_id !== original.snapshot.conversation_id ||
+    refreshed.snapshot.storage_context_digest !==
+      original.snapshot.storage_context_digest ||
+    canonicalHistoryJson(refreshed.view) !==
+      canonicalHistoryJson(expectedView) ||
+    refreshed.snapshot.nodes.some(
+      (node) =>
+        node.id === receipt.message_id || node.parent_id === receipt.message_id
+    ) ||
+    original.snapshot.nodes.some(
+      (node) =>
+        node.id !== receipt.message_id &&
+        !refreshed.snapshot.nodes.some(
+          (current) =>
+            canonicalHistoryJson(current) === canonicalHistoryJson(node)
+        )
+    ) ||
+    canonicalHistoryJson(refreshed.rows) !==
+      canonicalHistoryJson(
+        original.rows.filter((row) => row.id !== receipt.message_id)
+      ) ||
+    canonicalHistoryJson(refreshed.selected_content) !==
+      canonicalHistoryJson(
+        original.selected_content.filter((row) => row.id !== receipt.message_id)
+      )
+  )
+    fail("message_delete_unconfirmed")
+}
+
+/** Capture an explicit branch without replacing the mounted source/editor. */
+export const nativeEditResendView = (
+  owner: HistoryOwnerV1,
+  origin: HistoryViewSelectionV1,
+  capture: HistorySelectionCaptureV1,
+  intent: NativeHistoryEditResend,
+  sourceCapture: HistorySelectionCaptureV1 = capture
+): HistoryViewSelectionV1 => {
+  assertOwnerLease(owner)
+  if (owner.kind !== "native")
+    return fail("native_history_requires_server_owner")
+  if (
+    owner.conversation_id !== intent.conversation_id ||
+    origin.conversation_id !== intent.conversation_id ||
+    origin.owner_key !== intent.owner_key ||
+    capture.snapshot.conversation_id !== intent.conversation_id ||
+    capture.snapshot.owner_key !== intent.owner_key ||
+    (owner.owner_key && owner.owner_key !== intent.owner_key)
+  )
+    fail("owner_conversation_mismatch")
+  const targets = capture.snapshot.nodes.filter(
+    (node) => node.id === intent.message_id
+  )
+  if (
+    targets.length !== 1 ||
+    targets[0].role !== "user" ||
+    !targets[0].settled ||
+    targets[0].revision !== intent.message_revision
+  )
+    fail("message_changed")
+  if (targets[0].assets?.length || targets[0].comparison)
+    fail("unsupported_message_payload")
+  if (targets[0].metadata?.length) {
+    // Detached ancestry excludes the edited row; validate its metadata against the original capture.
+    const sourceNodes = sourceCapture.snapshot.nodes.filter(
+      (node) => node.id === intent.message_id
+    )
+    const sourceContent = sourceCapture.selected_content.filter(
+      (row) => row.id === intent.message_id
+    )
+    if (
+      sourceCapture.snapshot.owner_key !== intent.owner_key ||
+      sourceCapture.snapshot.conversation_id !== intent.conversation_id ||
+      sourceNodes.length !== 1 ||
+      sourceNodes[0].revision !== targets[0].revision ||
+      sourceContent.length !== 1 ||
+      sourceContent[0].revision !== targets[0].revision ||
+      targets[0].metadata.some(
+        (reference) => reference.kind !== "message_metadata"
+      ) ||
+      canonicalHistoryJson(sourceNodes[0].metadata ?? []) !==
+        canonicalHistoryJson(targets[0].metadata) ||
+      sourceContent[0].tool_calls?.length ||
+      sourceContent[0].extra_metadata?.sender_role !== "user"
+    )
+      fail("unsupported_message_payload")
+    nativeHistoryMessagePayload({
+      id: intent.message_id,
+      history_id: intent.conversation_id,
+      role: "user",
+      name: "You",
+      content: sourceContent[0].message,
+      createdAt: 0,
+      images: [...sourceContent[0].images],
+      metadataExtra: sourceContent[0].extra_metadata
+    })
+  }
+  if (!intent.isOriginCurrent() || !intent.isCurrent()) fail("stale_selection")
+  const selection_revision = origin.selection_revision + 1
+  if (!Number.isSafeInteger(selection_revision)) fail("invalid_selection")
+  return {
+    ...structuredClone(origin),
+    selection_revision,
+    cursor: { kind: "before_message", message_id: intent.message_id }
+  }
+}
+
+const nativeRegenerationTarget = (capture: HistorySelectionCaptureV1) => {
+  const user = capture.rows.at(-2)
+  const reply = capture.rows.at(-1)
+  if (!user || !reply || user.role !== "user" || reply.role !== "assistant" ||
+      !user.settled || !reply.settled || reply.parent_id !== user.id ||
+      user.comparison || reply.comparison)
+    return fail("unsupported_history_regeneration")
+  for (const row of [user, reply]) {
+    const nodes = capture.snapshot.nodes.filter(node => node.id === row.id)
+    if (nodes.length !== 1 || canonicalHistoryJson(nodes[0]) !== canonicalHistoryJson(row))
+      fail("message_changed")
+  }
+  const content = capture.selected_content.filter(row => row.id === user.id)
+  if (content.length !== 1 || content[0].revision !== user.revision)
+    return fail("message_changed")
+  return { user, reply, content: content[0] }
+}
+
+/** Regenerate the selected saved reply without changing the mounted selection. */
+export const nativeRegenerateView = (
+  owner: HistoryOwnerV1,
+  origin: HistoryViewSelectionV1,
+  capture: HistorySelectionCaptureV1,
+  intent: NativeHistoryRegenerate
+): HistoryViewSelectionV1 => {
+  assertOwnerLease(owner)
+  if (owner.kind !== "native") return fail("native_history_requires_server_owner")
+  if (origin.owner_key !== intent.owner_key || origin.conversation_id !== intent.conversation_id ||
+      capture.snapshot.owner_key !== intent.owner_key || capture.snapshot.conversation_id !== intent.conversation_id ||
+      owner.conversation_id !== intent.conversation_id || (owner.owner_key && owner.owner_key !== intent.owner_key))
+    fail("owner_conversation_mismatch")
+  if (origin.interpretation.kind !== "parent_graph_v1" || capture.view.interpretation.kind !== "parent_graph_v1")
+    fail("unsupported_history_regeneration")
+  const { user, reply } = nativeRegenerationTarget(capture)
+  if (reply.id !== intent.message_id || reply.revision !== intent.message_revision ||
+      user.id !== intent.input_message_id || user.revision !== intent.input_message_revision)
+    fail("message_changed")
+  if (!intent.isOriginCurrent() || !intent.isCurrent()) fail("stale_selection")
+  const selection_revision = origin.selection_revision + 1
+  if (!Number.isSafeInteger(selection_revision)) fail("invalid_selection")
+  return { ...structuredClone(origin), selection_revision,
+    cursor: { kind: "after_message", message_id: intent.message_id } }
+}
+
+/** Saved completion input uses every raw attachment, rather than MessageCreate's one-image form. */
+export const nativeRegenerationMessage = (
+  capture: HistorySelectionCaptureV1,
+  intent: NativeHistoryRegenerate,
+  inputVersion: number
+): Extract<ChatMessage, { role: "user" }> => {
+  const { user, reply, content } = nativeRegenerationTarget(capture)
+  if (user.id !== intent.input_message_id || user.revision !== intent.input_message_revision ||
+      reply.id !== intent.message_id || reply.revision !== intent.message_revision)
+    fail("message_changed")
+  const extra = content.extra_metadata ?? {}
+  const details = extra.image_details ?? content.images.map(() => "auto")
+  if (!Number.isSafeInteger(inputVersion) || inputVersion <= 0 || inputVersion >= Number.MAX_SAFE_INTEGER ||
+      (extra.sender_role != null && extra.sender_role !== "user") || content.tool_calls != null ||
+      extra.function_call != null || extra.tool_call_id != null ||
+      !Array.isArray(details) || details.length !== content.images.length ||
+      details.some(detail => typeof detail !== "string" || !["auto", "high", "low"].includes(detail)) ||
+      content.images.some(image => !/^data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/]*={0,2}$/.test(image)))
+    fail("unsupported_history_regeneration")
+  const text = inputVersion === 1 && extra.content_placeholder_reason === "image_attachment" &&
+    content.images.length && content.message === `<Image attachment x${content.images.length}>`
+    ? "" : content.message
+  return { role: "user", content: content.images.length ? [
+    ...(text ? [{ type: "text" as const, text }] : []),
+    ...content.images.map((url, index) => ({ type: "image_url" as const,
+      image_url: { url, detail: details[index] as "auto" | "high" | "low" } }))
+  ] : text }
 }
 
 /** Consumers dispatch this exact detached payload; never dispatch the original mutable input. */
@@ -384,8 +986,11 @@ export const finalizeHistorySelection = (
   return freeze(resolved.selection)
 }
 
+export { isDefinitiveNativeBranchRejection, isDefinitiveNativeEditRejection } from "@/utils/history-selection"
+
 // These exact native HistorySelectionError responses precede projection commit.
 // Transport/scope/abort errors and unrecognized responses cannot prove non-commit.
+
 const isDefinitiveProjectionRejection = (error: unknown): boolean => {
   const response = error as {
     status?: number
@@ -491,7 +1096,10 @@ export const nativeHistoryMessagePayload = (
     message.modelName ||
     message.modelImage ||
     message.reasoning_time_taken != null ||
-    (message.metadataExtra && Object.keys(message.metadataExtra).length)
+    (message.metadataExtra &&
+      Object.entries(message.metadataExtra).some(
+        ([key, value]) => key !== "sender_role" || value !== message.role
+      ))
   )
     fail("unsupported_message_payload")
   const image = images[0]
@@ -566,18 +1174,44 @@ export const parseNativeHistoryAdmission = (
   return freeze(admission)
 }
 
+/** The original user admission retains its original selection provenance during regeneration. */
+export const parseNativeRegenerationAdmission = (
+  owner: NativeHistoryOwnerV1,
+  capture: HistorySelectionCaptureV1,
+  inputVersion: number,
+  value: unknown
+): HistoryAdmissionV1 => {
+  assertOwnerLease(owner)
+  assertNativeBinding(owner, capture.snapshot, true)
+  const { user, reply } = nativeRegenerationTarget(capture)
+  const admission = parse(admissionSchema, value) as HistoryAdmissionV1
+  assertNativeBinding(owner, admission, true)
+  const ids = admission.messages.map(row => row.id)
+  if (!Number.isSafeInteger(inputVersion) || inputVersion <= 0 || inputVersion >= Number.MAX_SAFE_INTEGER ||
+      ids.includes(user.id) || ids.includes(reply.id) || new Set(ids).size !== ids.length ||
+      admission.input_message_id !== user.id || admission.input_message_revision !== String(inputVersion))
+    fail("invalid_history_admission")
+  return freeze(admission)
+}
+
 export const appendSelectedUser = async (
   owner: HistoryOwnerV1,
   selection: HistorySelectionV1,
   input: Message,
-  opts?: HistoryOperationOptions
+  opts?: HistoryOperationOptions & { historyBranch?: boolean; historyEdit?: HistoryEditTargetV1; documentPresentation?: boolean }
 ): Promise<HistoryAdmissionV1> => {
   selection = structuredClone(selection)
   input = structuredClone(input)
+  const historyEdit = opts?.historyEdit === undefined ? undefined :
+    parse(historyEditSchema, structuredClone(opts.historyEdit)) as HistoryEditTargetV1
   assertOwnerLease(owner, opts)
   if (owner.kind === "unavailable") return fail(owner.code)
+  if ((opts?.historyBranch !== undefined || historyEdit !== undefined) && owner.kind !== "native")
+    fail("native_history_requires_server_owner")
   if (owner.kind === "local")
-    return appendLocalSelectedUser(owner, selection, input, localOptions(owner, opts))
+    return appendLocalSelectedUser(owner, selection, input, {
+      ...localOptions(owner, opts), documentPresentation: opts?.documentPresentation
+    })
   assertNativeBinding(owner, selection, true)
   if (
     input.history_id !== owner.conversation_id ||
@@ -586,9 +1220,15 @@ export const appendSelectedUser = async (
     selectionDigest(selection) !== selection.selection_digest
   )
     fail("invalid_selection")
+  if (historyEdit && (opts?.historyBranch !== true || selection.cursor.kind !== "before_message" ||
+      selection.cursor.message_id !== historyEdit.message_id)) fail("invalid_history_edit")
   const body = {
     ...nativeHistoryMessagePayload(input),
-    tldw_history_selection_v1: structuredClone(selection)
+    tldw_history_selection_v1: structuredClone(selection),
+    ...(opts?.historyBranch !== undefined
+      ? { tldw_history_branch: opts.historyBranch }
+      : {}),
+    ...(historyEdit ? { tldw_history_edit_v1: historyEdit } : {})
   }
   const response = await tldwClient.addChatMessage(
     owner.conversation_id,
@@ -616,14 +1256,16 @@ export const settleAcceptedAssistant = async (
   owner: HistoryOwnerV1,
   admission: HistoryAdmissionReferenceV1,
   input: Message,
-  opts?: HistoryOperationOptions
+  opts?: HistoryOperationOptions,
+  sessionFilesToAdd: UploadedFile[] = []
 ): Promise<Message | { id: string }> => {
   admission = structuredClone(admission)
   input = structuredClone(input)
   assertOwnerLease(owner, opts)
   if (owner.kind === "unavailable") return fail(owner.code)
   if (owner.kind === "local")
-    return settleLocalAcceptedAssistant(owner, admission, input, localOptions(owner, opts))
+    return settleLocalAcceptedAssistant(owner, admission, input, localOptions(owner, opts), sessionFilesToAdd)
+  if (sessionFilesToAdd.length) fail("unsupported_history_message_assets")
   // Every versioned write requires the live endpoint handshake, including settlement.
   assertNativeBinding(owner, admission, true)
   if (

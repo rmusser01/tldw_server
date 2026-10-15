@@ -104,25 +104,24 @@ const stubCookieRuntimeFetch = ({
   return fetchMock
 }
 
+const navigatorLocksDescriptor = Object.getOwnPropertyDescriptor(window.navigator, "locks")
+
 describe("runtime-bootstrap chrome shim", () => {
   beforeEach(() => {
     vi.resetModules()
     localStorage.clear()
     sessionStorage.clear()
     beforeManualSessionCredentialLock = null
-    vi.stubGlobal(
-      "navigator",
-      Object.create(window.navigator, {
-        locks: {
-          value: {
-            request: async (_name: string, work: () => unknown) => {
-              beforeManualSessionCredentialLock?.()
-              return await work()
-            }
-          }
+    Object.defineProperty(window.navigator, "locks", {
+      configurable: true,
+      value: {
+        request: async (_name: string, work: () => unknown) => {
+          beforeManualSessionCredentialLock?.()
+          return await work()
         }
-      })
-    )
+      }
+    })
+    vi.stubGlobal("navigator", window.navigator)
   })
 
   afterEach(() => {
@@ -150,6 +149,8 @@ describe("runtime-bootstrap chrome shim", () => {
       value: originalWindowLocation
     })
     vi.unstubAllGlobals()
+    if (navigatorLocksDescriptor) Object.defineProperty(window.navigator, "locks", navigatorLocksDescriptor)
+    else Reflect.deleteProperty(window.navigator, "locks")
     localStorage.clear()
     sessionStorage.clear()
   })
@@ -311,6 +312,17 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(nextConfig.refreshToken).toBeUndefined()
   })
 
+  it("keeps a fresh advanced URL hint without creating authentication configuration", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "advanced"
+    process.env.NEXT_PUBLIC_API_URL = "https://initial-api.example.test"
+    delete process.env.NEXT_PUBLIC_X_API_KEY
+    delete process.env.NEXT_PUBLIC_API_BEARER
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false }))
+    await importAndAwaitBootstrap()
+    expect(readStoredValue("tldwServerUrl")).toBe("https://initial-api.example.test")
+    expect(localStorage.getItem("tldwConfig")).toBeNull()
+  })
+
   it("repairs a stale env LAN host to the current browser host during bootstrap", async () => {
     process.env.NEXT_PUBLIC_API_URL = "http://192.168.5.184:8000"
 
@@ -320,8 +332,7 @@ describe("runtime-bootstrap chrome shim", () => {
     await vi.waitFor(() => {
       expect(readStoredValue("tldwServerUrl")).toBe("http://localhost:8000")
 
-      const nextConfig = readStoredValue("tldwConfig") as Record<string, unknown>
-      expect(nextConfig.serverUrl).toBe("http://localhost:8000")
+      expect(localStorage.getItem("tldwConfig")).toBeNull()
     })
   })
 
@@ -831,6 +842,507 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(config).toEqual(manualConfig)
     expect(readStoredValue("tldwConfig")).toEqual(manualConfig)
     expect(readStoredValue("tldwCookieSessionConfig")).not.toBeNull()
+  })
+
+  it.each([
+    ["runtime config", "/api/_tldw-webui/runtime-config"],
+    ["session bootstrap", "/api/_tldw-webui/session"],
+    ["profile probe", "/api/v1/users/me/profile"]
+  ])(
+    "recovers the same page after a cold %s timeout",
+    async (_label, stalledUrl) => {
+      vi.useFakeTimers()
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      process.env.NEXT_PUBLIC_API_URL = "/api"
+      setWindowLocation("http://localhost:19769/chat")
+      const fetchMock = stubCookieRuntimeFetch()
+      const healthyFetch = fetchMock.getMockImplementation()!
+      let cold = true
+      fetchMock.mockImplementation(async (input, init) =>
+        cold && String(input) === stalledUrl
+          ? await new Promise<Response>(() => undefined)
+          : await healthyFetch(input, init)
+      )
+      const mod = await import("@web/extension/shims/runtime-bootstrap")
+      await vi.advanceTimersByTimeAsync(8_000)
+      await mod.runtimeBootstrapReady
+      expect(readStoredValue("tldwCookieSessionConfig")).toBeNull()
+      cold = false
+      const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
+      const client = new TldwApiClient()
+      await client.initialize()
+      expect(await client.getConfig()).toEqual({
+        authMode: "single-user",
+        authSource: "cookie-session",
+        serverUrl: "http://localhost:19769"
+      })
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url]) => String(url) === "/api/_tldw-webui/runtime-config"
+        )
+      ).toHaveLength(2)
+      const count = fetchMock.mock.calls.length
+      await client.initialize()
+      expect(fetchMock).toHaveBeenCalledTimes(count)
+    }
+  )
+
+  it("connection checking preserves failed bootstrap recovery for account Retry", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    process.env.NEXT_PUBLIC_API_URL = "/api"
+    setWindowLocation("http://localhost:19769/chat")
+    const fetchMock = stubCookieRuntimeFetch()
+    const healthyFetch = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async () => {
+      throw new TypeError("offline")
+    })
+    await importAndAwaitBootstrap()
+    const { useConnectionStore } = await import("@/store/connection")
+    await useConnectionStore.getState().checkOnce({ force: true })
+    expect(readStoredValue("tldwConfig")).toBeNull()
+    expect(useConnectionStore.getState().state).toMatchObject({
+      isConnected: false,
+      serverUrl: "http://localhost:19769",
+      configStep: "auth"
+    })
+
+    fetchMock.mockImplementation(healthyFetch)
+    const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+    expect(await tldwClient.getConfig()).toEqual({
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: "http://localhost:19769"
+    })
+  })
+
+  it.each([
+    ["serialized null", null],
+    ["URL-only setup hint", { serverUrl: "http://localhost:19769" }],
+    [
+      "legacy cookie hint",
+      {
+        authMode: "single-user",
+        authSource: "cookie-session",
+        serverUrl: "http://localhost:19769"
+      }
+    ]
+  ])("recovers after a failed bootstrap with %s", async (_label, stored) => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    process.env.NEXT_PUBLIC_API_URL = "/api"
+    setWindowLocation("http://localhost:19769/chat")
+    localStorage.setItem("tldwConfig", JSON.stringify(stored))
+    const fetchMock = stubCookieRuntimeFetch()
+    const healthyFetch = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async () => {
+      throw new TypeError("offline")
+    })
+    await importAndAwaitBootstrap()
+    fetchMock.mockImplementation(healthyFetch)
+    const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+    expect(await tldwClient.getConfig()).toEqual({
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: "http://localhost:19769"
+    })
+    expect(readStoredValue("tldwCookieSessionConfig")).toEqual({
+      authMode: "single-user",
+      authSource: "cookie-session",
+      serverUrl: "http://localhost:19769"
+    })
+    expect(readStoredValue("tldwConfig")).toEqual(stored)
+  })
+
+  it.each([
+    [
+      "manual metadata",
+      { serverUrl: "http://localhost:19769", credentialSource: "manual" }
+    ],
+    [
+      "manual key",
+      {
+        serverUrl: "http://localhost:19769",
+        apiKey: "manual-key",
+        credentialSource: "manual",
+        apiKeyPersistence: "device",
+        apiKeyServerOrigin: "http://localhost:19769"
+      }
+    ],
+    [
+      "multi-user tokens",
+      {
+        serverUrl: "http://localhost:19769",
+        authMode: "multi-user",
+        accessToken: "manual-token"
+      }
+    ],
+    ["foreign URL", { serverUrl: "https://other.example" }],
+    [
+      "foreign cookie",
+      {
+        serverUrl: "https://other.example",
+        authMode: "single-user",
+        authSource: "cookie-session"
+      }
+    ],
+    [
+      "unknown field",
+      { serverUrl: "http://localhost:19769", futureAuthority: true }
+    ],
+    [
+      "manual source",
+      { serverUrl: "http://localhost:19769", authSource: "manual" }
+    ],
+    ["path URL", { serverUrl: "http://localhost:19769/chat" }],
+    ["array", []],
+    ["primitive", "legacy hint"],
+    ...[
+      "apiKey",
+      "apiBearer",
+      "accessToken",
+      "refreshToken",
+      "credentialSource",
+      "apiKeyPersistence",
+      "apiKeyServerOrigin"
+    ].map((key) => [
+      `empty ${key}`,
+      { serverUrl: "http://localhost:19769", [key]: "" }
+    ])
+  ])(
+    "does not recover over %s after a failed bootstrap",
+    async (_label, stored) => {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      process.env.NEXT_PUBLIC_API_URL = "/api"
+      setWindowLocation("http://localhost:19769/chat")
+      localStorage.setItem("tldwConfig", JSON.stringify(stored))
+      const fetchMock = stubCookieRuntimeFetch()
+      const healthyFetch = fetchMock.getMockImplementation()!
+      fetchMock.mockImplementation(async () => {
+        throw new TypeError("offline")
+      })
+      await importAndAwaitBootstrap()
+      const count = fetchMock.mock.calls.length
+      fetchMock.mockImplementation(healthyFetch)
+      const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+      await tldwClient.getConfig()
+      expect(fetchMock).toHaveBeenCalledTimes(count)
+      expect(readStoredValue("tldwCookieSessionConfig")).toBeNull()
+    }
+  )
+
+  const beginFailedPageRecovery = async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    process.env.NEXT_PUBLIC_API_URL = "/api"
+    setWindowLocation("http://localhost:19769/chat")
+    const fetchMock = stubCookieRuntimeFetch()
+    const healthyFetch = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async () => {
+      throw new TypeError("offline")
+    })
+    await importAndAwaitBootstrap()
+    const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
+    const client = new TldwApiClient()
+    let enter!: () => void
+    let release!: () => void
+    const entered = new Promise<void>((resolve) => {
+      enter = resolve
+    })
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    fetchMock.mockImplementation(async (input, init) => {
+      if (String(input) === "/api/_tldw-webui/runtime-config") {
+        enter()
+        await held
+      }
+      return await healthyFetch(input, init)
+    })
+    return { client, fetchMock, entered, release }
+  }
+
+  it("explicit same-value URL configuration retires held recovery", async () => {
+    const { client, fetchMock, entered, release } =
+      await beginFailedPageRecovery()
+    localStorage.setItem(
+      "tldwConfig",
+      JSON.stringify({ serverUrl: "http://localhost:19769" })
+    )
+    const pending = client.initialize()
+    await entered
+    await client.updateConfig({ serverUrl: "http://localhost:19769" })
+    release()
+    await pending
+    expect(readStoredValue("tldwCookieSessionConfig")).toBeNull()
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url]) => String(url) === "/api/_tldw-webui/session"
+      )
+    ).toHaveLength(0)
+  })
+
+  it("shares recovery between simultaneous client initializers", async () => {
+    const { client, fetchMock, entered, release } =
+      await beginFailedPageRecovery()
+    const first = client.initialize()
+    const second = client.initialize()
+    await entered
+    release()
+    await Promise.all([first, second])
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url]) => String(url) === "/api/_tldw-webui/session"
+      )
+    ).toHaveLength(1)
+    expect((await client.getConfig())?.authSource).toBe("cookie-session")
+  })
+
+  it.each(["logout", "manual ABA", "foreign account ABA"])(
+    "retires held recovery on %s",
+    async (boundary) => {
+      const { client, fetchMock, entered, release } =
+        await beginFailedPageRecovery()
+      const pending = client.initialize()
+      await entered
+      if (boundary === "logout") await client.clearCookieSingleUserSession()
+      else if (boundary === "manual ABA") {
+        await client.updateConfig({
+          authMode: "single-user",
+          serverUrl: "https://new.example.test"
+        })
+        await client.updateConfig({
+          authMode: "single-user",
+          serverUrl: "http://localhost:19769"
+        })
+      } else {
+        window.dispatchEvent(
+          new StorageEvent("storage", {
+            key: "tldwConfig",
+            oldValue: null,
+            newValue: JSON.stringify({
+              serverUrl: "https://other.example.test"
+            })
+          })
+        )
+        window.dispatchEvent(
+          new StorageEvent("storage", {
+            key: "tldwConfig",
+            oldValue: JSON.stringify({
+              serverUrl: "https://other.example.test"
+            }),
+            newValue: null
+          })
+        )
+      }
+      release()
+      await pending
+      expect(readStoredValue("tldwCookieSessionConfig")).toBeNull()
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url]) => String(url) === "/api/_tldw-webui/session"
+        )
+      ).toHaveLength(0)
+    }
+  )
+
+  it("requires acknowledged cookie storage before activating recovered auth", async () => {
+    const { client, entered, release } = await beginFailedPageRecovery()
+    const { Storage } = await import("@plasmohq/storage")
+    const set = Storage.prototype.set
+    vi.spyOn(Storage.prototype, "set").mockImplementation(
+      async function (key, value) {
+        if (key === "tldwCookieSessionConfig")
+          throw new Error("storage unavailable")
+        return await set.call(this, key, value)
+      }
+    )
+    const pending = client.initialize()
+    await entered
+    release()
+    await pending
+    expect(await client.getConfig()).toBeNull()
+  })
+
+  it.each(["healthy", "failed"])(
+    "does not reactivate after logout during the initial %s bootstrap",
+    async (outcome) => {
+      process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+      process.env.NEXT_PUBLIC_API_URL = "/api"
+      setWindowLocation("http://localhost:19769/chat")
+      const fetchMock = stubCookieRuntimeFetch()
+      const healthyFetch = fetchMock.getMockImplementation()!
+      let enter!: () => void
+      let release!: () => void
+      const entered = new Promise<void>((resolve) => {
+        enter = resolve
+      })
+      const held = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      fetchMock.mockImplementation(async (input, init) => {
+        if (String(input) === "/api/_tldw-webui/runtime-config") {
+          enter()
+          await held
+          if (outcome === "failed") throw new TypeError("offline")
+        }
+        return await healthyFetch(input, init)
+      })
+      const mod = await import("@web/extension/shims/runtime-bootstrap")
+      await entered
+      const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
+      const client = new TldwApiClient()
+      await client.clearCookieSingleUserSession()
+      release()
+      await mod.runtimeBootstrapReady
+      fetchMock.mockImplementation(healthyFetch)
+      await client.initialize()
+      expect(await client.getConfig()).toBeNull()
+      expect(
+        fetchMock.mock.calls.filter(
+          ([url]) => String(url) === "/api/_tldw-webui/session"
+        )
+      ).toHaveLength(0)
+    }
+  )
+
+  it.each(["logout", "manual replacement"])(
+    "ignores a cookie marker write acknowledged after %s",
+    async (boundary) => {
+      const { client, entered, release } = await beginFailedPageRecovery()
+      const { Storage } = await import("@plasmohq/storage")
+      const set = Storage.prototype.set
+      let enterWrite!: () => void
+      let releaseWrite!: () => void
+      const enteredWrite = new Promise<void>((resolve) => {
+        enterWrite = resolve
+      })
+      const heldWrite = new Promise<void>((resolve) => {
+        releaseWrite = resolve
+      })
+      vi.spyOn(Storage.prototype, "set").mockImplementation(
+        async function (key, value) {
+          if (key === "tldwCookieSessionConfig") {
+            enterWrite()
+            await heldWrite
+          }
+          return await set.call(this, key, value)
+        }
+      )
+      const pending = client.initialize()
+      await entered
+      release()
+      await enteredWrite
+      if (boundary === "logout") await client.clearCookieSingleUserSession()
+      else
+        await client.updateConfig({
+          authMode: "single-user",
+          serverUrl: "https://new.example.test"
+        })
+      releaseWrite()
+      await pending
+      const { getEffectiveStoredTldwConfig } =
+        await import("@web/lib/authStorage")
+      expect(getEffectiveStoredTldwConfig()).toEqual(await client.getConfig())
+      expect(getEffectiveStoredTldwConfig()?.authSource).not.toBe(
+        "cookie-session"
+      )
+    }
+  )
+
+  it("a retired credential scrub preserves a newer acknowledged manual session key", async () => {
+    const { client, entered, release } = await beginFailedPageRecovery()
+    let firstLock = true
+    Object.defineProperty(navigator.locks, "request", {
+      value:
+        // Declared lock boundary: a newer credential operation finishes before the waiting scrub enters.
+        async (_name: string, work: () => unknown) => {
+          if (firstLock) {
+            firstLock = false
+            await client.clearCookieSingleUserSession()
+            await client.saveManualSingleUserCredential({
+              serverUrl: "http://localhost:19769",
+              apiKey: "new-session-key",
+              persistence: "session"
+            })
+          }
+          return await work()
+        }
+    })
+    const pending = client.initialize()
+    await entered
+    release()
+    await pending
+    expect(
+      JSON.parse(sessionStorage.getItem("tldwManualSessionApiKey") || "null")
+    ).toMatchObject({
+      apiKey: "new-session-key",
+      apiKeyServerOrigin: "http://localhost:19769"
+    })
+    expect((await client.getConfig())?.apiKey).toBe("new-session-key")
+  })
+
+  it("actual account Retry recovers configuration and preserves an unowned draft", async () => {
+    process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE = "quickstart"
+    process.env.NEXT_PUBLIC_API_URL = "/api"
+    setWindowLocation("http://localhost:19769/chat")
+    const fetchMock = stubCookieRuntimeFetch()
+    const healthyFetch = fetchMock.getMockImplementation()!
+    fetchMock.mockImplementation(async () => {
+      throw new TypeError("offline")
+    })
+    await importAndAwaitBootstrap()
+    const React = await import("react")
+    const { render, fireEvent, screen, waitFor, cleanup } =
+      await import("@testing-library/react/pure")
+    const { useChatDraftOwner } = await import("@/hooks/useChatDraftOwner")
+    const clearDraft = vi.fn()
+    const initialText = "Mira, explore the observatory.  \nKeep this draft."
+    const OwnerRetry = () => {
+      const [draft, setDraft] = React.useState(initialText)
+      const owner = useChatDraftOwner(() => {
+        clearDraft()
+        setDraft("")
+      })
+      return React.createElement(
+        "div",
+        null,
+        React.createElement("textarea", {
+          "aria-label": "Draft",
+          value: draft,
+          onChange: (e) => setDraft(e.currentTarget.value)
+        }),
+        React.createElement(
+          "output",
+          { "aria-label": "Account state" },
+          owner.verificationState
+        ),
+        React.createElement(
+          "button",
+          { onClick: owner.retryVerification },
+          "Retry account verification"
+        )
+      )
+    }
+    try {
+      render(React.createElement(OwnerRetry))
+      await waitFor(() =>
+        expect(screen.getByLabelText("Account state")).toHaveTextContent(
+          "error"
+        )
+      )
+      fetchMock.mockImplementation(healthyFetch)
+      fireEvent.click(
+        screen.getByRole("button", { name: "Retry account verification" })
+      )
+      await waitFor(() =>
+        expect(screen.getByLabelText("Account state")).toHaveTextContent(
+          "ready"
+        )
+      )
+      expect(screen.getByLabelText("Draft")).toHaveValue(initialText)
+      expect(clearDraft).not.toHaveBeenCalled()
+      expect(readStoredValue("tldwCookieSessionConfig")).not.toBeNull()
+    } finally {
+      cleanup()
+    }
   })
 
   it("does not fetch runtime config for extension protocols", async () => {

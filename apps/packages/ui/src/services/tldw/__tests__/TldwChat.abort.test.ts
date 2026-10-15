@@ -258,3 +258,19 @@ describe("TldwChatService abort lifecycle", () => {
     await expect(genB.next()).rejects.toThrow(/abort|cancel/i)
   })
 })
+
+
+it.each([false, true])("retains admitted image whitespace only for explicit regeneration %s in both serializers", async regenerate => {
+  const service = new TldwChatService()
+  const image = { type: "image_url" as const, image_url: { url: "data:image/png;base64,aW1hZ2U=", detail: "high" as const } }
+  const text = { type: "text" as const, text: "  \n" }
+  const messages = [{ role: "user" as const, content: [text, image] }]
+  const options = { model: "m", ...(regenerate ? { regenerateFromMessageId: "saved-reply" } : {}) }
+  mocks.createChatCompletion.mockResolvedValue({ json: async () => ({ choices: [{ message: { content: "answer" } }] }) })
+  mocks.streamChatCompletion.mockImplementation(async function* () { yield chunk("answer") })
+  await service.sendMessage(messages, options)
+  for await (const _token of service.streamMessage(messages, options)) { /* consume */ }
+  for (const request of [mocks.createChatCompletion.mock.calls.at(-1)![0], mocks.streamChatCompletion.mock.calls.at(-1)![0]]) {
+    expect(request.messages).toEqual([{ role: "user", content: regenerate ? [text, image] : [image] }])
+  }
+})

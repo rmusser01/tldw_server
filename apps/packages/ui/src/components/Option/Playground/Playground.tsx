@@ -1,9 +1,17 @@
+import { useConnectionState } from "@/hooks/useConnectionState";
+import { ConnectionPhase } from "@/types/connection";
+import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
+import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
+import { useChatHistoryFreshness } from "@/hooks/chat/useChatHistoryFreshness";
+import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
+import { resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils";
 import { HistorySelectionProvider, useHistorySelectionContext, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection";
+import { captureChatDraftLoad, captureChatDraftSource } from "@/hooks/chat/chat-draft-transition";
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview";
 import { formatSelectedHistory } from "@/db/dexie/helpers";
-import { resolveServicePromptScope, loadServicePromptSnapshot } from "@/services/service-prompts";
+import { loadServicePromptSnapshot } from "@/services/service-prompts";
 import React from "react";
-import { PlaygroundForm } from "./PlaygroundForm";
+import { PlaygroundForm, type ApplyCharacterRoute } from "./PlaygroundForm";
 import { PlaygroundChat } from "./PlaygroundChat";
 import type { ChatTimelineNavigation } from "./VirtualChatTimeline";
 import {
@@ -38,6 +46,7 @@ import {
   openAssistantSelector,
   openMcpSettings,
   openModelSettings,
+  openModelSelector,
   openPromptSelector,
   openSearchAndContext,
   setTemporaryChatFromCockpit,
@@ -67,9 +76,10 @@ import {
   type ChatModelSettings,
   useStoreChatModelSettings,
 } from "@/store/model";
-import { usePlaygroundSessionStore } from "@/store/playground-session";
+import { hasCurrentServerChatSelection, usePlaygroundSessionStore } from "@/store/playground-session";
 import { getDesignSystemState } from "@/design-system";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
+import { useComposerDockHeight } from "@/hooks/useComposerDockHeight";
 import {
   ChevronDown,
   Keyboard,
@@ -91,7 +101,6 @@ import {
 import { otherUnsupportedTypes } from "../Knowledge/utils/unsupported-types";
 import { useTranslation } from "react-i18next";
 import { useStoreMessageOption, type Message } from "@/store/option";
-import type { UploadedFile } from "@/db/dexie/types";
 import { useArtifactsStore } from "@/store/artifacts";
 import { DEGRADED_STATE_LABEL, READY_STATE_LABEL } from "@/design-system";
 import { useSetting } from "@/hooks/useSetting";
@@ -104,7 +113,6 @@ import { useLoadLocalConversation, restoreReadableLocalComparison } from "@/hook
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import {
   resolvePlaygroundShortcutAction,
-  shouldOpenShortcutsHelp,
 } from "./playground-shortcuts";
 import {
   EDIT_MESSAGE_EVENT,
@@ -113,12 +121,10 @@ import {
   type OpenHistoryDetail,
   type TimelineActionDetail,
 } from "@/utils/timeline-actions";
-import { useCharacterGreeting } from "@/hooks/useCharacterGreeting";
 import {
-  applyChatSettingsPatch,
   syncChatSettingsForServerChat,
 } from "@/services/chat-settings";
-import { fetchChatModels } from "@/services/tldw-server";
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog";
 import {
   buildResearchFollowUpPrompt,
   clearAttachedResearchContext,
@@ -163,10 +169,9 @@ import {
 import {
   buildChatModelUsability,
   buildCharacterChatReadiness,
+  buildCharacterChatSendReadiness,
   getCharacterChatReadinessCopy,
   getMatchingCharacterChatModelUsabilityCopy,
-  mergeChatProviderStatusIntoModels,
-  type ChatProviderConfigurationStatus,
   type CharacterChatReadinessAction,
 } from "@/utils/chat-model-availability";
 import type { Character } from "@/types/character";
@@ -199,14 +204,35 @@ const extractHashSearch = (hash: string | null | undefined): string => {
 const getCharacterChatRouteIntentFromLocation = (
   locationSearch: string,
   locationHash: string,
+  retiredAmbientCharacterIntent: React.MutableRefObject<boolean>,
 ) => {
   const candidates = [locationSearch, extractHashSearch(locationHash)];
-  if (typeof window !== "undefined") {
-    candidates.push(
-      window.location.search,
-      extractHashSearch(window.location.hash),
-    );
+  const ambientCandidates =
+    typeof window === "undefined" || retiredAmbientCharacterIntent.current
+      ? []
+      : [window.location.search, extractHashSearch(window.location.hash)];
+  // Literal copies carry no authority for character or conversation IDs. Raw
+  // fragments are checked only for copy presence, never as character commands.
+  const copyCandidates = [
+    ...candidates,
+    ...ambientCandidates,
+    locationHash.replace(/^#/, ""),
+    typeof window === "undefined" || retiredAmbientCharacterIntent.current
+      ? ""
+      : window.location.hash.replace(/^#/, ""),
+  ];
+  if (
+    copyCandidates.some((candidate) =>
+      new URLSearchParams(candidate).has(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM),
+    )
+  ) {
+    retiredAmbientCharacterIntent.current = true;
+    return null;
   }
+  // HashRouter can clean its own copy query while an old outer search remains.
+  // That ambient command stays retired; later explicit router links still work.
+  if (!retiredAmbientCharacterIntent.current)
+    candidates.push(...ambientCandidates);
 
   for (const candidate of candidates) {
     const intent = getCharacterChatRouteIntent(candidate);
@@ -258,23 +284,8 @@ const updateCharacterChatRouteHash = (
   )}`;
 };
 
-const withTrackedCharacterSelectionMode = (character: Character): Character => {
-  const metadata = character.metadata;
-  const normalizedMetadata =
-    metadata && typeof metadata === "object" && !Array.isArray(metadata)
-      ? metadata
-      : {};
 
-  return {
-    ...character,
-    metadata: {
-      ...normalizedMetadata,
-      selectionMode: "tracked",
-    },
-  };
-};
 
-type ChatModelCatalog = Awaited<ReturnType<typeof fetchChatModels>>;
 
 const getAssistantMessageRouteLabel = (
   message: Message | null,
@@ -335,45 +346,6 @@ const COCKPIT_MCP_SETTINGS_TRIGGER_SELECTOR =
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   Boolean(value) && typeof value === "object" && !Array.isArray(value);
 
-const isUploadedFileDraft = (value: unknown): value is UploadedFile =>
-  isRecord(value) &&
-  typeof value.id === "string" &&
-  typeof value.filename === "string" &&
-  typeof value.type === "string" &&
-  typeof value.content === "string" &&
-  typeof value.size === "number" &&
-  typeof value.uploadedAt === "number" &&
-  typeof value.processed === "boolean";
-
-const normalizeSidepanelDocumentDraftFiles = (
-  payload: unknown,
-): UploadedFile[] => {
-  if (!isRecord(payload) || !Array.isArray(payload.files)) {
-    return [];
-  }
-  const invalidCount = payload.files.filter(
-    (file) => !isUploadedFileDraft(file),
-  ).length;
-  if (invalidCount > 0) {
-    console.warn(
-      "[Playground] Ignored invalid sidepanel document draft file entries",
-      { invalidCount },
-    );
-  }
-  return payload.files.filter(isUploadedFileDraft);
-};
-
-const mergeUploadedFilesById = (
-  existing: UploadedFile[],
-  incoming: UploadedFile[],
-): UploadedFile[] => {
-  const byId = new Map(existing.map((file) => [file.id, file]));
-  for (const file of incoming) {
-    byId.set(file.id, file);
-  }
-  return Array.from(byId.values());
-};
-
 const getRecordString = (value: unknown, keys: string[]): string | null => {
   if (!isRecord(value)) return null;
   for (const key of keys) {
@@ -397,24 +369,39 @@ const normalizeChatWorkflowMode = (
   value === "character" ? "character" : "standard";
 
 export const Playground = () => {
-  return <HistorySelectionProvider storageKey="tldw-h1-playground-reference" onCapture={capture => {
-    const display = formatSelectedHistory(capture);
-    useStoreMessageOption.getState().setHistory(display.history);
-    useStoreMessageOption.getState().setMessages(display.messages);
-  }}><PlaygroundContent /></HistorySelectionProvider>;
+  return (
+    <HistorySelectionProvider
+      storageKey="tldw-h1-playground-reference"
+      onCapture={(capture) => {
+        const display = formatSelectedHistory(capture);
+        useStoreMessageOption.setState({ history: display.history, messages: display.messages });
+      }}>
+      <PlaygroundContent />
+    </HistorySelectionProvider>
+  );
 };
 
 const PlaygroundContent = () => {
   const historySelection = useHistorySelectionContext()!;
+  useChatHistoryFreshness(historySelection);
+  const researchDraftRevision = useStoreMessageOption(state => state.chatDraftRevision);
+  const renderedResearchFence = React.useMemo(() => historySelection.fence(), [historySelection]);
+  const followUpMountedRef = React.useRef(false);
+  const followUpAttemptRef = React.useRef<object | null>(null);
+  React.useLayoutEffect(() => {
+    followUpMountedRef.current = true;
+    return () => { followUpMountedRef.current = false; followUpAttemptRef.current = null; };
+  }, []);
   const drop = React.useRef<HTMLDivElement>(null);
   const artifactsTriggerRef = React.useRef<HTMLButtonElement>(null);
   const artifactsEdgeExpandRef = React.useRef<HTMLButtonElement>(null);
   const pendingArtifactsPanelFocusRef = React.useRef(false);
   const threadSearchInputRef = React.useRef<HTMLInputElement>(null);
-  const shortcutsTriggerRef = React.useRef<HTMLButtonElement>(null);
-  const shortcutsCloseRef = React.useRef<HTMLButtonElement>(null);
-  const composerDockRef = React.useRef<HTMLDivElement>(null);
+  const { ref: composerDockRef, height: composerDockHeight } =
+    useComposerDockHeight()
+
   const [droppedFiles, setDroppedFiles] = React.useState<File[]>([]);
+  const researchAttachmentIntentRef = React.useRef(0);
   const [attachedResearchContext, setAttachedResearchContext] =
     React.useState<AttachedResearchContext | null>(null);
   const [attachedResearchContextBaseline, setAttachedResearchContextBaseline] =
@@ -436,12 +423,16 @@ const PlaygroundContent = () => {
     React.useState<MissingCharacterRecovery | null>(null);
   const [routeCharacterRetryToken, setRouteCharacterRetryToken] =
     React.useState(0);
-  const [characterChatAvailableModels, setCharacterChatAvailableModels] =
-    React.useState<ChatModelCatalog | null>(null);
-  const [chatProviderStatus, setChatProviderStatus] =
-    React.useState<ChatProviderConfigurationStatus | null>(null);
-  const [composerDockMetrics, setComposerDockMetrics] =
-    React.useState<ComposerDockLayoutMetrics | null>(null);
+  const [applyCharacterRoute, setApplyCharacterRoute] = React.useState<ApplyCharacterRoute | null>(null);
+  const onCharacterRouteApplyReady = React.useCallback((apply: ApplyCharacterRoute | null) => {
+    setApplyCharacterRoute(() => apply);
+  }, []);
+  const catalogConnection = useConnectionState();
+  const catalogConnectionReady = catalogConnection.isConnected && catalogConnection.phase === ConnectionPhase.CONNECTED;
+  const { data: readinessChatModels, isFetching: chatModelsFetching, isError: chatModelsError, refetch: refreshCharacterChatModels } = useChatModelCatalog(catalogConnectionReady);
+  const [composerKeyboardInsetPx, setComposerKeyboardInsetPx] =
+    React.useState(0)
+
   const [composerHasDraft, setComposerHasDraft] = React.useState(false);
   const { t } = useTranslation(["playground", "common"]);
   const { mode: themeMode, toggleDarkMode } = useDarkMode();
@@ -471,6 +462,38 @@ const PlaygroundContent = () => {
   const isMobileViewport = useMobile();
   const isDesktopViewport = useDesktop();
   const location = useLocation();
+  const [retiredRouteLocation, setRetiredRouteLocation] = React.useState<string | null>(null);
+  const retiredRouteLocationRef = React.useRef<string | null>(null);
+  const routeLocationKey = [location.pathname, location.search, location.hash, location.key].join(
+    '|'
+  );
+  const routeLocationKeyRef = React.useRef(routeLocationKey);
+  routeLocationKeyRef.current = routeLocationKey;
+  const retiredAmbientCharacterIntentRef = React.useRef(false);
+  const rawRouteCharacterIntent = React.useMemo(
+    () =>
+      getCharacterChatRouteIntentFromLocation(
+        location.search ?? '',
+        location.hash ?? '',
+        retiredAmbientCharacterIntentRef
+      ),
+    [location.hash, location.key, location.search]
+  );
+  const routeCharacterIntent =
+    retiredRouteLocation === routeLocationKey ? null : rawRouteCharacterIntent;
+  React.useEffect(() => {
+    if (retiredRouteLocationRef.current !== routeLocationKey) {
+      retiredRouteLocationRef.current = null;
+      setRetiredRouteLocation(null);
+    }
+  }, [routeLocationKey]);
+  const routeCharacterIntentSignature = React.useMemo(() => {
+    if (!routeCharacterIntent) return null;
+    return [routeCharacterIntent.chatId ?? '', routeCharacterIntent.characterId ?? ''].join('|');
+  }, [routeCharacterIntent?.chatId, routeCharacterIntent?.characterId]);
+  const routeCharacterIntentChatId = routeCharacterIntent?.chatId ?? null;
+  const routeCharacterIntentId = routeCharacterIntent?.characterId ?? null;
+  const routeRequestsCharacterMode = Boolean(routeCharacterIntent);
   const defaultChatLayoutMode: PlaygroundCockpitMode = isMobileViewport
     ? "focus"
     : "cockpit";
@@ -480,46 +503,6 @@ const PlaygroundContent = () => {
       "standard",
     );
 
-  const refreshCharacterChatModels = React.useCallback(
-    async (isCancelled?: () => boolean, options?: { forceRefresh?: boolean }) => {
-      setCharacterChatAvailableModels(null);
-      setChatProviderStatus(null);
-      try {
-        const [models, providerStatus] = await Promise.all([
-          fetchChatModels({
-            returnEmpty: true,
-            // Mount refreshes reuse the model cache; only the explicit
-            // readiness retry forces a provider round trip (TASK-13511).
-            forceRefresh: options?.forceRefresh === true,
-          }),
-          tldwClient
-            .initialize()
-            .then(() => tldwClient.getProvidersStatus())
-            .catch((error) => {
-              console.warn("[Playground] Failed to load provider status", error);
-              return null;
-            }),
-        ]);
-        if (isCancelled?.()) return;
-        setCharacterChatAvailableModels(Array.isArray(models) ? models : []);
-        setChatProviderStatus(providerStatus);
-      } catch (error) {
-        if (isCancelled?.()) return;
-        console.warn("[Playground] Failed to refresh chat models", error);
-        setCharacterChatAvailableModels([]);
-        setChatProviderStatus(null);
-      }
-    },
-    [],
-  );
-
-  React.useEffect(() => {
-    let cancelled = false;
-    void refreshCharacterChatModels(() => cancelled);
-    return () => {
-      cancelled = true;
-    };
-  }, [refreshCharacterChatModels]);
   const [characterModeIntentActive, setCharacterModeIntentActive] =
     React.useState(false);
   const [chatLayoutMode, setChatLayoutMode] = useStorage<PlaygroundCockpitMode>(
@@ -564,18 +547,11 @@ const PlaygroundContent = () => {
     setServerChatId,
     contextFiles,
     setContextFiles,
-    chatMode,
-    setChatMode,
-    setWebSearch,
-    setTemporaryChat,
-    useOCR,
-    setUseOCR,
     createChatBranch,
     streaming,
     isProcessing,
     isSearchingInternet,
     selectedCharacter,
-    setSelectedCharacter,
     assistantSelectionMeta,
     compareMode,
     compareFeatureEnabled,
@@ -587,8 +563,6 @@ const PlaygroundContent = () => {
     setSelectedKnowledge,
     ragMediaIds,
     setRagMediaIds,
-    fileRetrievalEnabled,
-    setFileRetrievalEnabled,
     stopStreamingRequest,
     regenerateLastMessage,
     effectiveAssistantState,
@@ -600,7 +574,11 @@ const PlaygroundContent = () => {
     setServerChatAssistantId,
     setServerChatPersonaMemoryMode,
     setServerChatMetaLoaded,
-  } = useMessageOption({ hydrateServerChat: true });
+  } = useMessageOption({
+    // Do not reload the prior conversation while preparing a fresh card command.
+    hydrateServerChat: !routeCharacterIntentId || Boolean(routeCharacterIntentChatId),
+  });
+  const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest)
   // CS-04 (#3104): replies that ended early or finished off-screen stay in
   // the transcript; the review panel leaves out the ones shown or handled.
   const hideKeptHistoryTurn = useKeepInterruptedHistoryTurns({
@@ -621,9 +599,6 @@ const PlaygroundContent = () => {
     window.addEventListener("beforeunload", warnBeforeUnload);
     return () => window.removeEventListener("beforeunload", warnBeforeUnload);
   }, [replyInFlight]);
-  const setUploadedFiles = useStoreMessageOption(
-    (state) => state.setUploadedFiles,
-  );
   const {
     systemPrompt,
     setSystemPrompt,
@@ -690,25 +665,18 @@ const PlaygroundContent = () => {
     };
   }, [selectedSystemPrompt]);
   const composerBottomOffsetPx = stickyChatInput
-    ? resolveComposerBottomOffsetPx(composerDockMetrics)
-    : 0;
+    ? resolveComposerBottomOffsetPx({
+        occupiedHeightPx: composerDockHeight,
+        keyboardInsetPx: composerKeyboardInsetPx
+      })
+    : 0
   const handleComposerLayoutChange = React.useCallback(
     (metrics: ComposerDockLayoutMetrics) => {
-      if (metrics.occupiedHeightPx === 0 && metrics.keyboardInsetPx === 0) {
-        setComposerDockMetrics(null);
-        return;
-      }
-
-      const dockEl = composerDockRef.current;
-      setComposerDockMetrics({
-        occupiedHeightPx: dockEl
-          ? Math.round(dockEl.getBoundingClientRect().height)
-          : metrics.occupiedHeightPx,
-        keyboardInsetPx: metrics.keyboardInsetPx,
-      });
+      setComposerKeyboardInsetPx(metrics.keyboardInsetPx)
     },
-    [],
-  );
+    []
+  )
+
   const handleComposerDraftPresenceChange = React.useCallback(
     (hasDraft: boolean) => {
       setComposerHasDraft(hasDraft);
@@ -728,7 +696,6 @@ const PlaygroundContent = () => {
   const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState("");
   const [threadSearchActiveIndex, setThreadSearchActiveIndex] =
     React.useState(0);
-  const [shortcutsHelpOpen, setShortcutsHelpOpen] = React.useState(false);
   const [dropFeedback, setDropFeedback] = React.useState<{
     type: "info" | "error" | "warning";
     message: string;
@@ -741,7 +708,6 @@ const PlaygroundContent = () => {
   const initializePlaygroundCallbackRef = React.useRef<
     (signal: AbortSignal) => Promise<void>
   >(async () => {});
-  const sidepanelHandoffAppliedRef = React.useRef(false);
   const settingsReturnAppliedRef = React.useRef(false);
   const routeCharacterIntentAppliedRef = React.useRef<string | null>(null);
   const routeCharacterIntentInFlightRef = React.useRef<string | null>(null);
@@ -750,55 +716,29 @@ const PlaygroundContent = () => {
   const translationRef = React.useRef(t);
   const previousThreadRef = React.useRef<string | null>(null);
   const initialConversationRef = React.useRef({
+    sourceSelectionRevision: usePlaygroundSessionStore.getState().sourceSelectionRevision,
     historyId: historyId ?? null,
     serverChatId: serverChatId ?? null,
     messagesLength: messages.length,
     historyLength: history.length,
   });
   const stableHistoryId = historyId && historyId !== "temp" ? historyId : null;
+  const { updateSettings: updateOrdinarySettings, target: ordinarySettingsTarget } = useChatSettingsRecord({ historyId: stableHistoryId, serverChatId });
+  const { settingsMode: historySettingsMode, forkSettings: historyForkSettings } = historySelection;
   const showStarterDeck =
     messages.length === 0 &&
     history.length === 0 &&
     !stableHistoryId &&
     !serverChatId &&
     !composerHasDraft;
-  const [retiredRouteLocation, setRetiredRouteLocation] = React.useState<string | null>(null);
-  const retiredRouteLocationRef = React.useRef<string | null>(null);
-  const routeLocationKey = [location.pathname, location.search, location.hash, location.key].join("|");
-  const rawRouteCharacterIntent = React.useMemo(
-    () =>
-      getCharacterChatRouteIntentFromLocation(
-        location.search ?? "",
-        location.hash ?? "",
-      ),
-    [location.hash, location.key, location.search],
-  );
-  const routeCharacterIntent = retiredRouteLocation === routeLocationKey
-    ? null : rawRouteCharacterIntent;
-  React.useEffect(() => {
-    if (retiredRouteLocationRef.current !== routeLocationKey) {
-      retiredRouteLocationRef.current = null;
-      setRetiredRouteLocation(null);
-    }
-  }, [routeLocationKey]);
-  const routeCharacterIntentSignature = React.useMemo(() => {
-    if (!routeCharacterIntent) return null;
-    return [
-      routeCharacterIntent.chatId ?? "",
-      routeCharacterIntent.characterId ?? "",
-    ].join("|");
-  }, [
-    routeCharacterIntent?.chatId,
-    routeCharacterIntent?.characterId,
-  ]);
-  const routeCharacterIntentChatId = routeCharacterIntent?.chatId ?? null;
-  const routeCharacterIntentId = routeCharacterIntent?.characterId ?? null;
-  const routeRequestsCharacterMode = Boolean(routeCharacterIntent);
+  React.useEffect(() => () => { routeCharacterIntentRequestRef.current++; }, []);
   const {
     restoreSession,
     clearPersistedSession,
     sessionScopeReady,
     hasPersistedSession,
+    hasPersistedDraftHandle,
+    hasPersistedFreshDraft,
     persistedHistoryId,
     persistedServerChatId,
   } = usePlaygroundSessionPersistence();
@@ -833,6 +773,7 @@ const PlaygroundContent = () => {
   const shouldRestorePersistedSessionOnInit =
     shouldRestorePersistedPlaygroundSession({
       hasPersistedSession,
+      hasPersistedDraftHandle,
       persistedHistoryId,
       persistedServerChatId,
       initialHistoryId: initialConversationRef.current.historyId,
@@ -930,6 +871,13 @@ const PlaygroundContent = () => {
     },
     [setChatLayoutMode],
   );
+  React.useEffect(() => {
+    if (!focusModeActive) return
+    const revealConversations = () => handleChatLayoutModeChange("cockpit")
+    window.addEventListener("tldw:open-chat-sidebar", revealConversations)
+    return () =>
+      window.removeEventListener("tldw:open-chat-sidebar", revealConversations)
+  }, [focusModeActive, handleChatLayoutModeChange])
   const nextChatLayoutMode: PlaygroundCockpitMode =
     focusModeActive ? "cockpit" : "focus";
   const chatLayoutToggleLabel =
@@ -1024,11 +972,14 @@ const PlaygroundContent = () => {
       routeCharacterIntentAppliedRef.current = null;
       setRouteCharacterRecovery(null);
       session.cancelPendingRestore();
+      if (detail.onRestoreCancelled && !detail.onRestoreCancelled(
+        usePlaygroundSessionStore.getState().restoreRevision,
+      )) return;
       if (detail.characterId === undefined) return;
       const replaceSearch = (search: string) => {
         const next = updateCharacterChatRouteSearch(
           search,
-          detail.characterId ?? null,
+          detail.nextChatId ? detail.characterId ?? null : null,
           detail.nextChatId ?? null,
         );
         if (detail.characterId != null) return next;
@@ -1069,8 +1020,10 @@ const PlaygroundContent = () => {
   React.useEffect(() => {
     if (retiredRouteLocationRef.current === routeLocationKey) return;
     if (!routeCharacterIntentChatId) return;
-    if (serverChatId === routeCharacterIntentChatId) return;
+    if (serverChatId === routeCharacterIntentChatId && hasCurrentServerChatSelection(routeCharacterIntentChatId)) return;
     usePlaygroundSessionStore.getState().cancelPendingRestore();
+    const acceptDraft = captureChatDraftLoad("switch", () => retiredRouteLocationRef.current !== routeLocationKey);
+    usePlaygroundSessionStore.getState().requestServerChatSelection(routeCharacterIntentChatId, acceptDraft);
     setServerChatId(routeCharacterIntentChatId);
     routeCharacterIntentAppliedRef.current = null;
     routeCharacterIntentInFlightRef.current = null;
@@ -1084,101 +1037,87 @@ const PlaygroundContent = () => {
   }, [assistantSelectionMeta?.assistantKey]);
 
   React.useEffect(() => {
-    if (retiredRouteLocationRef.current === routeLocationKey) return;
-    if (assistantSelectionMeta?.isLoading || !routeCharacterIntentId) return;
-    if (routeCharacterIntentChatId) return;
-    if (routeCharacterIntentAppliedRef.current === routeCharacterIntentId) {
+    if (retiredRouteLocationRef.current === routeLocationKey || !applyCharacterRoute) return;
+    if (
+      assistantSelectionMeta?.isLoading ||
+      !catalogConnectionReady ||
+      chatModelsFetching ||
+      !routeCharacterIntentId ||
+      routeCharacterIntentChatId
+    )
       return;
-    }
-    if (routeCharacterIntentInFlightRef.current === routeCharacterIntentId) {
+    if (
+      routeCharacterIntentAppliedRef.current === routeCharacterIntentId ||
+      routeCharacterIntentInFlightRef.current === routeCharacterIntentId ||
+      routeCharacterRecovery
+    )
       return;
-    }
-
-    usePlaygroundSessionStore.getState().cancelPendingRestore();
-    setHistoryId(null, { preserveServerChatId: false });
-    setHistory([]);
-    setMessages([]);
-    setServerChatCharacterId(null);
-    setServerChatAssistantKind(null);
-    setServerChatAssistantId(null);
-    setServerChatPersonaMemoryMode(null);
-    setServerChatMetaLoaded(false);
-    setServerChatId(null);
-    void Promise.resolve(clearPersistedSession()).catch(() => undefined);
-
-    const requestId = routeCharacterIntentRequestRef.current + 1;
-    routeCharacterIntentRequestRef.current = requestId;
+    const requestId = ++routeCharacterIntentRequestRef.current;
     routeCharacterIntentInFlightRef.current = routeCharacterIntentId;
-    const fallbackCharacterName = toText(
-      translationRef.current(
-        "playground:characterChat.characterFallback",
-        "Character {{id}}",
+    const ownerIsCurrent = assistantSelectionMeta?.isCurrent ?? (() => true);
+    const sourceHref = window.location.href;
+    const isCurrent = () =>
+      ownerIsCurrent() &&
+      routeCharacterIntentRequestRef.current === requestId &&
+      window.location.href === sourceHref &&
+      routeLocationKeyRef.current === routeLocationKey &&
+      retiredRouteLocationRef.current !== routeLocationKey;
+    const consumeIntent = () => {
+      const search = location.search || window.location.search;
+      const hash = location.hash || window.location.hash;
+      const hasSearchIntent = Boolean(getCharacterChatRouteIntent(search));
+      const consumeSearch = (query: string) => updateCharacterChatRouteSearch(query, null);
+      const hashQuery = hash.indexOf('?');
+      navigate(
         {
-          id: routeCharacterIntentId,
+          pathname: location.pathname,
+          search: hasSearchIntent ? consumeSearch(search) : search,
+          hash: hasSearchIntent
+            ? hash
+            : hash.slice(0, hashQuery < 0 ? hash.length : hashQuery) +
+              consumeSearch(extractHashSearch(hash)),
         },
-      ),
-    ).replace("{{id}}", routeCharacterIntentId);
-    const fallbackCharacter: Character = {
-      id: routeCharacterIntentId,
-      name: fallbackCharacterName,
+        { replace: true }
+      );
     };
-    const isCurrentSelection = assistantSelectionMeta?.isCurrent ?? (() => true);
-    const loadCharacter = async () => {
-      const scope = await resolveServicePromptScope();
-      if (!isCurrentSelection()) return null;
-      return tldwClient.getCharacter(routeCharacterIntentId, { requestScope: { config: scope.config, userId: scope.userId } });
-    };
-    void loadCharacter()
-      .then(async (character) => {
-        if (!isCurrentSelection() || routeCharacterIntentRequestRef.current !== requestId) return;
-        routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
-        if (character) {
+    void applyCharacterRoute(routeCharacterIntentId, isCurrent)
+      .then((outcome) => {
+        if (!isCurrent()) return;
+        if (outcome === 'applied') {
+          routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
           setRouteCharacterRecovery(null);
-          await setSelectedCharacter(withTrackedCharacterSelectionMode(character));
-          return;
-        }
-        setRouteCharacterRecovery({
-          id: routeCharacterIntentId,
-          reason: "missing",
-        });
-        await setSelectedCharacter(
-          withTrackedCharacterSelectionMode(fallbackCharacter),
-        );
+          // A fresh URL is a command; consume it so reload restores the accepted draft.
+          consumeIntent();
+        } else
+          setRouteCharacterRecovery({
+            id: routeCharacterIntentId,
+            reason: outcome === 'failed' || outcome === 'retired' ? 'setup-failed' : outcome,
+          });
       })
-      .catch(async () => {
-        if (!isCurrentSelection() || routeCharacterIntentRequestRef.current !== requestId) return;
-        routeCharacterIntentAppliedRef.current = routeCharacterIntentId;
-        setRouteCharacterRecovery({
-          id: routeCharacterIntentId,
-          reason: "load-error",
-        });
-        await setSelectedCharacter(
-          withTrackedCharacterSelectionMode(fallbackCharacter),
-        );
+      .catch(() => {
+        if (isCurrent())
+          setRouteCharacterRecovery({ id: routeCharacterIntentId, reason: 'load-error' });
       })
       .finally(() => {
-        if (!isCurrentSelection() || routeCharacterIntentRequestRef.current !== requestId) return;
-        routeCharacterIntentInFlightRef.current = null;
+        if (routeCharacterIntentRequestRef.current === requestId)
+          routeCharacterIntentInFlightRef.current = null;
       });
   }, [
-    assistantSelectionMeta?.isLoading,
+    applyCharacterRoute,
     assistantSelectionMeta?.isCurrent,
-    clearPersistedSession,
-    routeLocationKey,
+    assistantSelectionMeta?.isLoading,
+    catalogConnectionReady,
+    chatModelsFetching,
+    location.hash,
+    location.pathname,
+    location.search,
+    navigate,
     routeCharacterIntentChatId,
     routeCharacterIntentId,
     routeCharacterIntentSignature,
+    routeCharacterRecovery,
     routeCharacterRetryToken,
-    setHistory,
-    setHistoryId,
-    setMessages,
-    setSelectedCharacter,
-    setServerChatAssistantId,
-    setServerChatAssistantKind,
-    setServerChatCharacterId,
-    setServerChatId,
-    setServerChatMetaLoaded,
-    setServerChatPersonaMemoryMode,
+    routeLocationKey,
   ]);
 
   React.useEffect(() => {
@@ -1189,15 +1128,6 @@ const PlaygroundContent = () => {
     }
   }, [routeCharacterIntentId]);
 
-  React.useEffect(() => {
-    if (!routeCharacterRecovery || !activeCharacterSelection?.id) return;
-    if (routeCharacterIntentInFlightRef.current === routeCharacterRecovery.id) {
-      return;
-    }
-    if (String(activeCharacterSelection.id) !== routeCharacterRecovery.id) {
-      setRouteCharacterRecovery(null);
-    }
-  }, [activeCharacterSelection?.id, routeCharacterRecovery]);
 
   React.useEffect(() => {
     if (retiredRouteLocationRef.current === routeLocationKey) return;
@@ -1213,6 +1143,8 @@ const PlaygroundContent = () => {
       String(serverChatCharacterId ?? "") === nextCharacterId
         ? String(serverChatId)
         : null;
+    // A consumed unsaved entry stays consumed; only a qualified saved target can add an ID again.
+    if (!routeCharacterIntentId && !routeCharacterIntentChatId && !savedRouteChatId) return;
     const routeCharacterApplied =
       routeCharacterIntentId != null &&
       routeCharacterIntentAppliedRef.current === routeCharacterIntentId;
@@ -1489,41 +1421,30 @@ const PlaygroundContent = () => {
           deepResearchPinnedAttachment: pinned ? toPersistedDeepResearchAttachment(pinned) : null,
           deepResearchAttachmentHistory: history.map(entry => toPersistedDeepResearchAttachment(entry, entry.attached_at))};
         if (settingsMode === "fork") {await historySelection.updateForkSettings(patch); return;}
-        await applyChatSettingsPatch({
-          historyId: stableHistoryId,
-          serverChatId,
-          patch: {
-            deepResearchAttachment: context
-              ? toPersistedDeepResearchAttachment(context)
-              : null,
-            deepResearchPinnedAttachment: pinned
-              ? toPersistedDeepResearchAttachment(pinned)
-              : null,
-            deepResearchAttachmentHistory: history.map((entry) =>
-              toPersistedDeepResearchAttachment(entry, entry.attached_at),
-            ),
-          },
-        });
+        await updateOrdinarySettings(patch);
       } catch {
         // Attachment persistence is best-effort and should never block chat use.
       }
     },
-    [serverChatId, stableHistoryId, historySelection],
+    [serverChatId, stableHistoryId, historySelection, updateOrdinarySettings],
   );
 
   React.useEffect(() => {
-    if (!playgroundReady || !serverChatId || historySelection.settingsMode(serverChatId) === "pending") {
+    if (!playgroundReady || !serverChatId || historySettingsMode(serverChatId) === "pending") {
       return;
     }
     let cancelled = false;
     const threadKey = `${serverChatId}::${stableHistoryId ?? ""}`;
+    const attachmentRevision = researchAttachmentIntentRef.current;
+    const source = captureChatDraftSource(() => !cancelled &&
+      researchAttachmentIntentRef.current === attachmentRevision && renderedResearchFence());
 
     const restorePersistedAttachment = async () => {
       try {
-        const settings = historySelection.settingsMode(serverChatId) === "fork"
-          ? historySelection.forkSettings
-          : await syncChatSettingsForServerChat({historyId: stableHistoryId, serverChatId});
-        if (cancelled || previousThreadRef.current !== threadKey) {
+        const settings = historySettingsMode(serverChatId) === "fork"
+          ? historyForkSettings
+          : await syncChatSettingsForServerChat({ ...ordinarySettingsTarget, validate_lease: source.isCurrent });
+        if (!source.isCurrent() || cancelled || previousThreadRef.current !== threadKey) {
           return;
         }
         const restoredAttachment = settings?.deepResearchAttachment
@@ -1562,10 +1483,11 @@ const PlaygroundContent = () => {
     return () => {
       cancelled = true;
     };
-  }, [playgroundReady, serverChatId, stableHistoryId, historySelection.status, historySelection.forkCandidate, historySelection.forkSettings]);
+  }, [playgroundReady, serverChatId, stableHistoryId, historySelection.status, historySelection.forkCandidate, historyForkSettings, historySettingsMode, renderedResearchFence, ordinarySettingsTarget]);
 
   const handleAttachResearchContext = React.useCallback(
     (context: AttachedResearchContext) => {
+      researchAttachmentIntentRef.current++;
       const nextState = setAttachedResearchContextActive({
         active: attachedResearchContext,
         baseline: attachedResearchContextBaseline,
@@ -1594,29 +1516,47 @@ const PlaygroundContent = () => {
 
   const handlePrepareResearchFollowUp = React.useCallback(
     async (target: ResearchFollowUpTarget) => {
+      const attempt = {};
+      followUpAttemptRef.current = attempt;
+      let attachmentRevision = researchAttachmentIntentRef.current;
+      const source = captureChatDraftSource(() => followUpMountedRef.current &&
+        followUpAttemptRef.current === attempt &&
+        researchAttachmentIntentRef.current === attachmentRevision && renderedResearchFence() &&
+        useStoreMessageOption.getState().chatDraftRevision === researchDraftRevision &&
+        routeLocationKeyRef.current === routeLocationKey);
+      if (!source.isQuickPromptCurrent()) return;
+      attachmentRevision = ++researchAttachmentIntentRef.current;
       if (attachedResearchContext?.run_id !== target.run_id) {
         try {
           await tldwClient.initialize().catch(() => null);
+          if (!source.isQuickPromptCurrent()) return;
           const bundle = await tldwClient.getResearchBundle(target.run_id);
+          if (!source.isQuickPromptCurrent()) return;
           handleAttachResearchContext(
             deriveAttachedResearchContext(bundle, target.run_id, target.query),
           );
+          // Accept only this synchronous attachment publication, never a newer intent.
+          attachmentRevision++;
         } catch {
           // Keep prompt preparation available even if bundle reload fails.
         }
       }
 
-      setSelectedQuickPrompt(buildResearchFollowUpPrompt(target.query));
+      if (source.isQuickPromptCurrent()) setSelectedQuickPrompt(buildResearchFollowUpPrompt(target.query));
     },
     [
       attachedResearchContext?.run_id,
       handleAttachResearchContext,
+      renderedResearchFence,
+      researchDraftRevision,
+      routeLocationKey,
       setSelectedQuickPrompt,
     ],
   );
 
   const handleApplyAttachedResearchContext = React.useCallback(
     (context: AttachedResearchContext) => {
+      researchAttachmentIntentRef.current++;
       setAttachedResearchContext(context);
       void persistAttachedResearchContext(
         context,
@@ -1632,6 +1572,7 @@ const PlaygroundContent = () => {
   );
 
   const handleResetAttachedResearchContext = React.useCallback(() => {
+    researchAttachmentIntentRef.current++;
     const resetContext = resetAttachedResearchContext(
       attachedResearchContextBaseline,
     );
@@ -1649,6 +1590,7 @@ const PlaygroundContent = () => {
   ]);
 
   const handleRemoveAttachedResearchContext = React.useCallback(() => {
+    researchAttachmentIntentRef.current++;
     const cleared = clearAttachedResearchContext({
       active: attachedResearchContext,
       baseline: attachedResearchContextBaseline,
@@ -1674,6 +1616,7 @@ const PlaygroundContent = () => {
 
   const handleSelectAttachedResearchContextHistory = React.useCallback(
     (context: AttachedResearchContext) => {
+      researchAttachmentIntentRef.current++;
       const nextState = setAttachedResearchContextActive({
         active: attachedResearchContext,
         baseline: attachedResearchContextBaseline,
@@ -1701,6 +1644,7 @@ const PlaygroundContent = () => {
   );
 
   const handlePinAttachedResearchContext = React.useCallback(() => {
+    researchAttachmentIntentRef.current++;
     const nextState = pinAttachedResearchContext({
       active: attachedResearchContext,
       baseline: attachedResearchContextBaseline,
@@ -1726,6 +1670,7 @@ const PlaygroundContent = () => {
 
   const handlePinAttachedResearchContextHistory = React.useCallback(
     (context: AttachedResearchContext) => {
+      researchAttachmentIntentRef.current++;
       const nextState = pinAttachedResearchContext({
         active: attachedResearchContext,
         baseline: attachedResearchContextBaseline,
@@ -1753,6 +1698,7 @@ const PlaygroundContent = () => {
   );
 
   const handleUnpinAttachedResearchContext = React.useCallback(() => {
+    researchAttachmentIntentRef.current++;
     const nextState = unpinAttachedResearchContext({
       active: attachedResearchContext,
       baseline: attachedResearchContextBaseline,
@@ -1777,6 +1723,7 @@ const PlaygroundContent = () => {
   ]);
 
   const handleRestorePinnedResearchContext = React.useCallback(() => {
+    researchAttachmentIntentRef.current++;
     const nextState = restorePinnedResearchContext({
       active: attachedResearchContext,
       baseline: attachedResearchContextBaseline,
@@ -1802,6 +1749,8 @@ const PlaygroundContent = () => {
 
   const initializePlayground = React.useCallback(async (signal: AbortSignal) => {
     if (signal.aborted) return;
+    // Explicit character entry prepares a fresh target; old automatic bookmarks have no authority here.
+    if (routeCharacterIntentId && !routeCharacterIntentChatId) return;
     let handoff;
     let handoffInHash = false;
     let storedHistoryReference;
@@ -1821,14 +1770,27 @@ const PlaygroundContent = () => {
     // rather than surfacing a malformed stored reference as an error.
     if (!handoff && historySelection.canAutomaticallyLoad?.() === false) return;
     try { storedHistoryReference = historySelection.getStoredReference(); }
-    catch { await historySelection.open({ kind: "unavailable", code: "invalid_history_reference" }); return; }
+    catch {
+      if (!hasPersistedFreshDraft) {
+        await historySelection.open({ kind: "unavailable", code: "invalid_history_reference" });
+        return;
+      }
+    }
     if (handoff) {
-      const loaded = await historySelection.loadConversation(handoff.owner_kind === "local" ? { historyId: handoff.conversation_id } : { serverChatId: handoff.conversation_id }, handoff);
-      if (loaded && !signal.aborted && historySelection.getCurrent().capture) {
+      usePlaygroundSessionStore.getState().cancelPendingRestore();
+      const acceptDraft = captureChatDraftLoad("switch", () => !signal.aborted);
+      let draftAccepted = false;
+      const loaded = await historySelection.loadConversation(handoff.owner_kind === "local" ? { historyId: handoff.conversation_id, isCurrent: acceptDraft.isCurrent } : { serverChatId: handoff.conversation_id, isCurrent: acceptDraft.isCurrent }, handoff, receipt => { draftAccepted = acceptDraft(receipt); });
+      const selected = historySelection.getCurrent();
+      if (loaded && !draftAccepted && selected.owner && selected.owner.kind !== "unavailable" && selected.owner.kind === handoff.owner_kind && selected.owner.conversation_id === handoff.conversation_id && selected.view) draftAccepted = acceptDraft({ owner: selected.owner, view: selected.view });
+      if (loaded && draftAccepted && acceptDraft.isCurrent() && !signal.aborted && historySelection.getCurrent().capture) {
         setHistoryId(handoff.owner_kind === "local" ? handoff.conversation_id : null);
         setServerChatId(handoff.owner_kind === "native" ? handoff.conversation_id : null);
         const handoffCurrent = historySelection.fence();
-        await restoreReadableLocalComparison(historySelection, display => { setHistory(display.history); setMessages(display.messages); });
+        await restoreReadableLocalComparison(historySelection, (display) => {
+          useStoreMessageOption.setState({ history: display.history, messages: display.messages });
+        });
+
         if (signal.aborted || !handoffCurrent()) return;
         // The frozen address initializes this writer once. Reload then uses its
         // own saved address, including the original pending-confirmation pointer.
@@ -1891,6 +1853,9 @@ const PlaygroundContent = () => {
       return;
     }
 
+    if (hasCurrentServerChatSelection(useStoreMessageOption.getState().serverChatId) ||
+      usePlaygroundSessionStore.getState().sourceSelectionRevision !== initialConversationRef.current.sourceSelectionRevision) return;
+
     // 1. Try session persistence first (restores exact state from nav-away)
     if (storedHistoryReference || shouldRestorePersistedSessionOnInit) {
       const restoreOutcome = await restoreSession();
@@ -1906,7 +1871,8 @@ const PlaygroundContent = () => {
     // 2. Fall back to existing webUIResumeLastChat behavior
     const revision = usePlaygroundSessionStore.getState().restoreRevision;
     const isCurrent = () => !signal.aborted &&
-      usePlaygroundSessionStore.getState().restoreRevision === revision;
+      usePlaygroundSessionStore.getState().restoreRevision === revision &&
+      usePlaygroundSessionStore.getState().sourceSelectionRevision === initialConversationRef.current.sourceSelectionRevision;
     const isEnabled = await webUIResumeLastChat();
     if (!isEnabled || !isCurrent()) return;
 
@@ -1915,15 +1881,21 @@ const PlaygroundContent = () => {
       if (!snapshot) return;
       try {
         let selectionCurrent = () => true;
-        const canPublish = () => isCurrent() && !snapshot.scopeSignal.aborted &&
-          !snapshot.scopeInvalidatedSignal.aborted && selectionCurrent();
+        const scopeCurrent = () => isCurrent() && !snapshot.scopeSignal.aborted && !snapshot.scopeInvalidatedSignal.aborted;
+        const canPublish = () => scopeCurrent() && selectionCurrent();
         if (!canPublish()) return;
         const recentChat = await getRecentChatFromWebUI(snapshot);
         if (recentChat && canPublish()) {
-          const loaded = await historySelection.loadConversation({ historyId: recentChat.history.id });
+          const acceptDraft = captureChatDraftLoad("switch", scopeCurrent);
+          let draftAccepted = false;
+          const loaded = await historySelection.loadConversation({ historyId: recentChat.history.id, isCurrent: acceptDraft.isCurrent }, null, receipt => { draftAccepted = acceptDraft(receipt); });
           selectionCurrent = historySelection.fence();
-          if (!loaded || !canPublish() || historySelection.getCurrent().owner?.kind === "unavailable") return;
-          setHistoryId(recentChat.history.id);
+          const selected = historySelection.getCurrent();
+          if (loaded && !draftAccepted && selected.owner && selected.owner.kind !== "unavailable" && selected.view &&
+            selected.owner.conversation_id === (recentChat.history.server_chat_id || recentChat.history.id)) draftAccepted = acceptDraft({ owner: selected.owner, view: selected.view });
+          if (!loaded || !draftAccepted || !acceptDraft.isCurrent() || !canPublish() || selected.owner?.kind === "unavailable") return;
+          setHistoryId(recentChat.history.id, { preserveServerChatId: selected.owner?.kind === "native" });
+          setServerChatId(selected.owner?.kind === "native" ? selected.owner.conversation_id : null);
           if (historySelection.getCurrent().capture?.status !== "captured") {
             setHistory(formatToChatHistory(recentChat.messages));
             setMessages(formatToMessage(recentChat.messages));
@@ -1968,6 +1940,7 @@ const PlaygroundContent = () => {
     setSelectedSystemPrompt,
     setSystemPrompt,
     shouldRestorePersistedSessionOnInit,
+    hasPersistedFreshDraft,
   ]);
 
   React.useEffect(() => {
@@ -2005,16 +1978,7 @@ const PlaygroundContent = () => {
     };
   }, [sessionScopeReady]);
 
-  useCharacterGreeting({
-    playgroundReady,
-    selectedCharacter: activeCharacterSelection,
-    selectedCharacterMode: selectedAssistantMode,
-    serverChatId,
-    historyId,
-    messagesLength: messages.length,
-    setMessages,
-    setHistory,
-  });
+
 
   const setLocalHistoryId = React.useCallback(
     (id: string) => setHistoryId(id, { preserveServerChatId: false }),
@@ -2128,213 +2092,6 @@ const PlaygroundContent = () => {
     serverChatId,
     setServerChatId,
     dismissedReturnedResearchRunId,
-  ]);
-
-  React.useEffect(() => {
-    if (
-      !sidepanelChatHandoff ||
-      sidepanelHandoffAppliedRef.current
-    ) {
-      return;
-    }
-    sidepanelHandoffAppliedRef.current = true;
-    usePlaygroundSessionStore.getState().cancelPendingRestore();
-
-    let cancelled = false;
-    const applySidepanelHandoff = async () => {
-      if (
-        sidepanelChatHandoff.historyId &&
-        sidepanelChatHandoff.historyId !== historyId
-      ) {
-        if (await loadLocalConversation(sidepanelChatHandoff.historyId) === false) return;
-      }
-      if (cancelled) return;
-
-      if (
-        sidepanelChatHandoff.serverChatId &&
-        sidepanelChatHandoff.serverChatId !== serverChatId
-      ) {
-        setServerChatId(sidepanelChatHandoff.serverChatId);
-      }
-      if (
-        sidepanelChatHandoff.selectedModel &&
-        sidepanelChatHandoff.selectedModel !== selectedModel
-      ) {
-        setSelectedModel(sidepanelChatHandoff.selectedModel);
-      }
-      if (
-        Object.prototype.hasOwnProperty.call(
-          sidepanelChatHandoff,
-          "selectedSystemPrompt",
-        )
-      ) {
-        const nextSystemPrompt =
-          sidepanelChatHandoff.selectedSystemPrompt ?? null;
-        if (nextSystemPrompt !== selectedSystemPrompt) {
-          setSelectedSystemPrompt(nextSystemPrompt);
-        }
-      }
-      if (
-        Object.prototype.hasOwnProperty.call(
-          sidepanelChatHandoff,
-          "selectedQuickPrompt",
-        )
-      ) {
-        const nextQuickPrompt = sidepanelChatHandoff.selectedQuickPrompt ?? null;
-        if (nextQuickPrompt !== selectedQuickPrompt) {
-          setSelectedQuickPrompt(nextQuickPrompt);
-        }
-      }
-      if (
-        sidepanelChatHandoff.chatMode &&
-        sidepanelChatHandoff.chatMode !== chatMode
-      ) {
-        setChatMode(sidepanelChatHandoff.chatMode);
-      }
-      if (
-        typeof sidepanelChatHandoff.webSearch === "boolean" &&
-        sidepanelChatHandoff.webSearch !== webSearch
-      ) {
-        setWebSearch(sidepanelChatHandoff.webSearch);
-      }
-      if (
-        sidepanelChatHandoff.toolChoice &&
-        sidepanelChatHandoff.toolChoice !== toolChoice
-      ) {
-        setToolChoice(sidepanelChatHandoff.toolChoice);
-      }
-      if (
-        typeof sidepanelChatHandoff.temporaryChat === "boolean" &&
-        sidepanelChatHandoff.temporaryChat !== temporaryChat
-      ) {
-        setTemporaryChat(sidepanelChatHandoff.temporaryChat);
-      }
-      if (
-        typeof sidepanelChatHandoff.useOCR === "boolean" &&
-        sidepanelChatHandoff.useOCR !== useOCR
-      ) {
-        setUseOCR(sidepanelChatHandoff.useOCR);
-      }
-      if (sidepanelChatHandoff.chatDocumentDraftId) {
-        try {
-          const documentDraft = await tldwClient.getDocumentUploadDraft(
-            sidepanelChatHandoff.chatDocumentDraftId,
-          );
-          if (cancelled) return;
-          const draftFiles = normalizeSidepanelDocumentDraftFiles(
-            documentDraft.payload,
-          );
-          if (draftFiles.length > 0) {
-            const currentState = useStoreMessageOption.getState();
-            const nextUploadedFiles = mergeUploadedFilesById(
-              currentState.uploadedFiles,
-              draftFiles,
-            );
-            const draftContextFiles = draftFiles.filter(
-              (file) => file.processingMode !== "ingest_to_library",
-            );
-            setUploadedFiles(nextUploadedFiles);
-            setContextFiles(
-              mergeUploadedFilesById(
-                currentState.contextFiles,
-                draftContextFiles,
-              ),
-            );
-          }
-          await tldwClient
-            .deleteDocumentUploadDraft(sidepanelChatHandoff.chatDocumentDraftId)
-            .catch((error) => {
-              console.warn(
-                "[Playground] Failed to delete imported document draft",
-                error,
-              );
-            });
-        } catch (error) {
-          console.warn(
-            "[Playground] Failed to import sidepanel document draft",
-            error,
-          );
-        }
-      }
-      if (
-        Object.prototype.hasOwnProperty.call(
-          sidepanelChatHandoff,
-          "ragMediaIds",
-        )
-      ) {
-        const nextRagMediaIds =
-          Array.isArray(sidepanelChatHandoff.ragMediaIds) &&
-          sidepanelChatHandoff.ragMediaIds.length > 0
-            ? sidepanelChatHandoff.ragMediaIds
-            : null;
-        setRagMediaIds(nextRagMediaIds);
-      }
-      if (
-        typeof sidepanelChatHandoff.fileRetrievalEnabled === "boolean" &&
-        sidepanelChatHandoff.fileRetrievalEnabled !== fileRetrievalEnabled
-      ) {
-        setFileRetrievalEnabled(sidepanelChatHandoff.fileRetrievalEnabled);
-      }
-
-      if (sidepanelChatHandoff.draft?.trim()) {
-        requestAnimationFrame(() => {
-          window.dispatchEvent(
-            new CustomEvent("tldw:set-composer-message", {
-              detail: {
-                message: sidepanelChatHandoff.draft,
-                ifEmptyOnly: true,
-              },
-            }),
-          );
-        });
-      }
-
-      if (typeof window !== "undefined") {
-        const url = new URL(window.location.href);
-        url.searchParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
-        const hashParams = new URLSearchParams(
-          url.hash.startsWith("#") ? url.hash.slice(1) : url.hash,
-        );
-        hashParams.delete(SIDEPANEL_CHAT_WEBUI_HANDOFF_PARAM);
-        const nextQuery = url.searchParams.toString();
-        const nextHash = hashParams.toString();
-        const nextPath = `${url.pathname}${nextQuery ? `?${nextQuery}` : ""}${nextHash ? `#${nextHash}` : ""}`;
-        window.history.replaceState(window.history.state, "", nextPath);
-      }
-    };
-
-    void applySidepanelHandoff();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    chatMode,
-    historyId,
-    loadLocalConversation,
-    selectedModel,
-    selectedQuickPrompt,
-    selectedSystemPrompt,
-    serverChatId,
-    setChatMode,
-    setContextFiles,
-    setFileRetrievalEnabled,
-    setRagMediaIds,
-    setSelectedModel,
-    setSelectedQuickPrompt,
-    setSelectedSystemPrompt,
-    setServerChatId,
-    setTemporaryChat,
-    setToolChoice,
-    setUploadedFiles,
-    setUseOCR,
-    setWebSearch,
-    sidepanelChatHandoff,
-    temporaryChat,
-    toolChoice,
-    useOCR,
-    webSearch,
-    fileRetrievalEnabled,
   ]);
 
   const pendingTimelineActionRef = React.useRef<TimelineActionDetail | null>(
@@ -2615,9 +2372,6 @@ const PlaygroundContent = () => {
     if (typeof window === "undefined") return;
 
     const handleShortcut = (event: KeyboardEvent) => {
-      // A bare "?" is ordinary typed input, so the shortcut must never fire
-      // while the caret is in the composer or any other editable target.
-      // Modifier chords (Cmd/Ctrl+F) are unreachable by typing and stay active.
       const editableTarget = isEditableTarget(event.target);
       if (
         (event.metaKey || event.ctrlKey) &&
@@ -2630,19 +2384,6 @@ const PlaygroundContent = () => {
         requestAnimationFrame(() => {
           threadSearchInputRef.current?.focus();
           threadSearchInputRef.current?.select();
-        });
-        return;
-      }
-      if (shouldOpenShortcutsHelp(event)) {
-        event.preventDefault();
-        setShortcutsHelpOpen(true);
-        return;
-      }
-      if (shortcutsHelpOpen && event.key === "Escape") {
-        event.preventDefault();
-        setShortcutsHelpOpen(false);
-        requestAnimationFrame(() => {
-          shortcutsTriggerRef.current?.focus();
         });
         return;
       }
@@ -2688,7 +2429,6 @@ const PlaygroundContent = () => {
     closeArtifacts,
     markArtifactsRead,
     setArtifactsOpen,
-    shortcutsHelpOpen,
     threadSearchOpen,
   ]);
 
@@ -2712,56 +2452,6 @@ const PlaygroundContent = () => {
       );
     };
   }, []);
-
-  React.useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handleOpenShortcutHelp = () => {
-      setShortcutsHelpOpen(true);
-    };
-    window.addEventListener(
-      "tldw:open-playground-shortcuts",
-      handleOpenShortcutHelp,
-    );
-    return () => {
-      window.removeEventListener(
-        "tldw:open-playground-shortcuts",
-        handleOpenShortcutHelp,
-      );
-    };
-  }, []);
-
-  React.useEffect(() => {
-    if (!shortcutsHelpOpen) return;
-    requestAnimationFrame(() => {
-      shortcutsCloseRef.current?.focus();
-    });
-  }, [shortcutsHelpOpen]);
-
-  // Dismiss the shortcuts help panel on Escape. A global capture-phase listener
-  // elsewhere calls stopPropagation() on Escape, which prevents the window
-  // bubble-phase shortcut handler above from ever seeing it. Listening in the
-  // capture phase (a sibling listener that stopPropagation does not block) keeps
-  // Escape working regardless of registration order.
-  React.useEffect(() => {
-    if (!shortcutsHelpOpen) return;
-    if (typeof window === "undefined") return;
-    const handleEscapeCapture = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      // Closing the shortcuts panel is the intended action for Escape while it is
-      // open; stop propagation so the same keypress does not also dismiss a parent
-      // overlay/dialog.
-      event.preventDefault();
-      event.stopPropagation();
-      setShortcutsHelpOpen(false);
-      requestAnimationFrame(() => {
-        shortcutsTriggerRef.current?.focus();
-      });
-    };
-    window.addEventListener("keydown", handleEscapeCapture, true);
-    return () => {
-      window.removeEventListener("keydown", handleEscapeCapture, true);
-    };
-  }, [shortcutsHelpOpen]);
 
   React.useEffect(() => {
     if (!threadSearchOpen) return;
@@ -2814,9 +2504,7 @@ const PlaygroundContent = () => {
   const ragMediaIdCount = Array.isArray(ragMediaIds) ? ragMediaIds.length : 0;
   const trimmedSystemPrompt = String(systemPrompt || "").trim();
   const hasPromptContext = Boolean(
-    selectedSystemPrompt ||
-    selectedQuickPrompt ||
-    trimmedSystemPrompt.length > 0,
+    selectedSystemPrompt || trimmedSystemPrompt.length > 0,
   );
   const promptSummary: PlaygroundPromptSummary = buildCockpitPromptSummary({
     selectedSystemPrompt,
@@ -2828,10 +2516,10 @@ const PlaygroundContent = () => {
       customPromptLabel: toText(
         t("playground:cockpit.customPrompt", "Custom prompt"),
       ),
-      inlineSystemPromptActiveDetail: toText(
+      inlineSystemPromptSelectedDetail: toText(
         t(
-          "playground:cockpit.inlineSystemPromptActive",
-          "Inline system prompt active",
+          "playground:cockpit.inlineSystemPromptSelected",
+          "Inline system prompt selected",
         ),
       ),
       loadingPromptDetail: toText(
@@ -2842,8 +2530,8 @@ const PlaygroundContent = () => {
       ),
       noPromptContextDetail: toText(
         t(
-          "playground:cockpit.noPromptContext",
-          "No prompt context will be added.",
+          "playground:cockpit.noAdditionalSystemPrompt",
+          "No additional system prompt selected.",
         ),
       ),
       noPromptSelectedLabel: toText(
@@ -2854,9 +2542,6 @@ const PlaygroundContent = () => {
           "playground:cockpit.promptDetailsUnavailable",
           "Prompt details unavailable",
         ),
-      ),
-      quickPromptLabel: toText(
-        t("playground:cockpit.quickPrompt", "Quick prompt"),
       ),
       selectedPromptDetail: toText(
         t("playground:cockpit.systemPrompt", "System prompt"),
@@ -2888,23 +2573,19 @@ const PlaygroundContent = () => {
   const clearAssistantFromCockpit = React.useCallback(async () => {
     const settingsMode = historySelection.settingsMode(serverChatId);
     if (settingsMode === "pending") return;
-    const forkChild = settingsMode === "fork";
-    const current = historySelection.fence();
-    if (forkChild) {
-      try {
-        await historySelection.updateForkSettings({ assistantOverlay: null });
-      } catch {
-        return;
-      }
-      if (!current()) return;
+    const source = captureChatDraftSource(() => renderedResearchFence());
+    const current = source.isCurrent;
+    try {
+      // Acknowledge the captured original target before intentional detach resets its identity.
+      await updateOrdinarySettings({ assistantOverlay: null });
+    } catch {
+      return;
     }
-    await setSelectedAssistant(null);
-    if (forkChild && !current()) return;
-    await setSelectedCharacter(null);
-    if (forkChild && !current()) return;
-    // Resetting selection is part of the intentional detach; keep the remaining state changes synchronous.
-    if (forkChild) clearPersistedSession();
-    else await clearPersistedSession();
+    if (!current()) return;
+    if (!await setSelectedAssistant(null, { isCurrent: current }) || !current()) return;
+    // Character selection derives from the same acknowledged assistant store.
+    // The accepted own reset and identity publication are synchronous.
+    clearPersistedSession();
     setServerChatCharacterId(null);
     setServerChatAssistantKind(null);
     setServerChatAssistantId(null);
@@ -2914,27 +2595,20 @@ const PlaygroundContent = () => {
     setCharacterModeIntentActive(false);
     void setChatWorkflowMode("standard");
     scheduleFocusFirstVisibleElement(COCKPIT_ASSISTANT_SELECT_TRIGGER_SELECTOR);
-    if (!forkChild) await applyChatSettingsPatch({
-      historyId: stableHistoryId,
-      serverChatId,
-      patch: {
-        assistantOverlay: null,
-      },
-    }).catch(() => undefined);
   }, [
     historySelection,
+    updateOrdinarySettings,
+    renderedResearchFence,
     clearPersistedSession,
     serverChatId,
     setChatWorkflowMode,
     setSelectedAssistant,
-    setSelectedCharacter,
     setServerChatId,
     setServerChatAssistantId,
     setServerChatAssistantKind,
     setServerChatCharacterId,
     setServerChatMetaLoaded,
     setServerChatPersonaMemoryMode,
-    stableHistoryId,
   ]);
   const inspectAssistantFromCockpit = React.useCallback(() => {
     if (selectedAssistant?.kind === "persona") {
@@ -3113,47 +2787,62 @@ const PlaygroundContent = () => {
     selectedProvider: apiProvider,
     selectedModel,
   });
-  const readinessChatModels = React.useMemo(
-    () =>
-      mergeChatProviderStatusIntoModels(
-        characterChatAvailableModels,
-        chatProviderStatus,
-      ),
-    [characterChatAvailableModels, chatProviderStatus],
-  );
   const standardChatModelUsability = React.useMemo(
     () =>
       buildChatModelUsability({
         isServerConnected: serverReadinessState !== "blocked",
-        selectedModel: providerRouteSummary.selectedModel,
+        selectedModel,
+        explicitProvider: apiProvider,
         availableModels: readinessChatModels,
-        modelsLoading: !Array.isArray(readinessChatModels),
+        modelsLoading: chatModelsFetching,
+        modelsError: chatModelsError,
         serverDegraded: serverReadinessState === "degraded",
         allowDegradedSend: true,
       }),
     [
-      providerRouteSummary.selectedModel,
+      selectedModel,
+      apiProvider,
       readinessChatModels,
+      chatModelsFetching,
+      chatModelsError,
       serverReadinessState,
     ],
   );
+  const savedRoleplayConversation = isSavedRoleplayConversation(historySelection);
+  const savedRoleplaySource = historySelection.getCurrent();
+  const savedRoleplaySendBlocked = savedRoleplaySource.status !== "ready" ||
+    savedRoleplaySource.capture?.status !== "captured" || !savedRoleplaySource.bookmarkScope ||
+    savedRoleplaySource.owner?.kind !== "native" || !savedRoleplaySource.owner.validate_lease();
   const characterChatReadiness = React.useMemo(
     () =>
-      buildCharacterChatReadiness({
+      savedRoleplayConversation
+        ? buildCharacterChatSendReadiness({
+            isServerConnected: serverReadinessState !== "blocked",
+            isSendBlocked: savedRoleplaySendBlocked || Boolean(streaming || isProcessing || isLoading),
+          })
+        : buildCharacterChatReadiness({
         isServerConnected: serverReadinessState !== "blocked",
         selectedCharacter: activeCharacterSelection,
-        selectedModel: providerRouteSummary.selectedModel,
+        requireExplicitProvider: true,
+        selectedModel,
+        explicitProvider: apiProvider,
         availableModels: readinessChatModels,
-        modelsLoading: !Array.isArray(readinessChatModels),
+        modelsLoading: chatModelsFetching,
+        modelsError: chatModelsError,
         serverDegraded: serverReadinessState === "degraded",
         allowDegradedSend: true,
         isSendBlocked: Boolean(streaming || isProcessing || isLoading),
       }),
     [
+      savedRoleplayConversation,
+      savedRoleplaySendBlocked,
       isLoading,
       isProcessing,
-      providerRouteSummary.selectedModel,
+      selectedModel,
+      apiProvider,
       readinessChatModels,
+      chatModelsFetching,
+      chatModelsError,
       activeCharacterSelection,
       serverReadinessState,
       streaming,
@@ -3173,10 +2862,10 @@ const PlaygroundContent = () => {
         : null,
     [activeCharacterModeLabel, characterChatBlocked, characterChatReadiness, t],
   );
-  const activeCharacterChatModelUsability = characterWorkflowActive
+  const activeCharacterChatModelUsability = characterWorkflowActive && !savedRoleplayConversation
     ? standardChatModelUsability
     : null;
-  const activeChatModelUsability = standardChatModelUsability;
+  const activeChatModelUsability = savedRoleplayConversation ? null : standardChatModelUsability;
   const characterChatModelUsabilityMessage =
     getMatchingCharacterChatModelUsabilityCopy({
       modelUsability: activeCharacterChatModelUsability,
@@ -3184,6 +2873,9 @@ const PlaygroundContent = () => {
       readinessTitle: characterChatReadinessCopy?.title ?? null,
     });
   const activeChatModelSelectorLabel = React.useMemo(() => {
+    if (characterWorkflowActive && characterChatReadiness.reason === "explicit-model-provider-required") {
+      return toText(t("playground:composer.chooseModelAndProvider", "Choose model and provider"));
+    }
     if (
       !activeChatModelUsability ||
       activeChatModelUsability.status === "ready" ||
@@ -3194,6 +2886,8 @@ const PlaygroundContent = () => {
     }
 
     switch (activeChatModelUsability.status) {
+      case "discovery_failed":
+        return toText(t("playground:composer.modelsDiscoveryFailed", "Could not check chat models"));
       case "loading":
         return toText(
           t(
@@ -3241,7 +2935,7 @@ const PlaygroundContent = () => {
       default:
         return null;
     }
-  }, [activeChatModelUsability, t]);
+  }, [activeChatModelUsability, characterWorkflowActive, characterChatReadiness.reason, t]);
   const activeChatModelUsabilityMessage =
     characterChatModelUsabilityMessage ?? activeChatModelSelectorLabel;
   const activeChatModelSelectorTitle = activeChatModelSelectorLabel
@@ -3261,11 +2955,15 @@ const PlaygroundContent = () => {
     activeChatModelUsabilityBlocks &&
     (activeChatModelUsability?.status === "no_models" ||
       activeChatModelUsability?.status === "provider_unconfigured");
+  const selectedModelSettingsScope = React.useMemo(
+    () => resolveModelSelectorSelection(readinessChatModels, selectedModel, apiProvider, { scope: activeSettingsScope, providerOverride: activeSettingsScope ? scopedSettingsByModelKey?.[activeSettingsScope]?.apiProvider : undefined }).settingsScope,
+    [readinessChatModels, selectedModel, apiProvider, activeSettingsScope, scopedSettingsByModelKey],
+  );
   React.useEffect(() => {
     if (typeof setActiveSettingsScope === "function") {
-      setActiveSettingsScope(providerRouteSummary.providerRouteLabel ?? null);
+      setActiveSettingsScope(selectedModelSettingsScope);
     }
-  }, [providerRouteSummary.providerRouteLabel, setActiveSettingsScope]);
+  }, [selectedModelSettingsScope, setActiveSettingsScope]);
   const contextFileItems = Array.isArray(contextFiles) ? contextFiles : [];
   const selectedKnowledgeItems = Array.isArray(selectedKnowledge)
     ? selectedKnowledge
@@ -3314,8 +3012,8 @@ const PlaygroundContent = () => {
             title: toText(t("playground:cockpit.webSearch", "Web search")),
             detail: toText(
               t(
-                "playground:cockpit.webSearchDetail",
-                "Enabled for the next reply.",
+                "playground:cockpit.webSearchPlanned",
+                "Selected for the next message.",
               ),
             ),
             state: "active" as const,
@@ -3413,7 +3111,10 @@ const PlaygroundContent = () => {
           label: toText(t("playground:cockpit.file", "File")),
           title,
           detail: toText(
-            t("playground:cockpit.nextReply", "Used on next reply"),
+            t(
+              "playground:cockpit.selectedForNextMessage",
+              "Selected for the next message",
+            ),
           ),
           state: "active" as const,
           onRemove: () => removeContextFileAt(index),
@@ -3438,7 +3139,10 @@ const PlaygroundContent = () => {
           label: toText(t("playground:cockpit.knowledge", "Knowledge")),
           title,
           detail: toText(
-            t("playground:cockpit.nextReply", "Used on next reply"),
+            t(
+              "playground:cockpit.selectedForNextMessage",
+              "Selected for the next message",
+            ),
           ),
           state: "active" as const,
           onOpen: () => openSearchAndContext({ tab: "context" }),
@@ -3464,7 +3168,12 @@ const PlaygroundContent = () => {
             id: mediaId,
           }),
         ),
-        detail: toText(t("playground:cockpit.nextReply", "Used on next reply")),
+        detail: toText(
+          t(
+            "playground:cockpit.selectedForNextMessage",
+            "Selected for the next message",
+          ),
+        ),
         state: "active" as const,
         onOpen: () => openSearchAndContext({ tab: "context" }),
         onRemove: () => removeRagMediaAt(index),
@@ -3633,13 +3342,13 @@ const PlaygroundContent = () => {
   });
   const openModelSettingsFromCockpit = React.useCallback(() => {
     if (typeof setActiveSettingsScope === "function") {
-      setActiveSettingsScope(providerRouteSummary.providerRouteLabel ?? null);
+      setActiveSettingsScope(selectedModelSettingsScope);
     }
     openModelSettings({
       returnFocusSelector: COCKPIT_MODEL_SETTINGS_TRIGGER_SELECTOR,
-      settingsScope: providerRouteSummary.providerRouteLabel ?? null,
+      settingsScope: selectedModelSettingsScope,
     });
-  }, [providerRouteSummary.providerRouteLabel, setActiveSettingsScope]);
+  }, [selectedModelSettingsScope, setActiveSettingsScope]);
   const openServerSettingsFromCockpit = React.useCallback(() => {
     if (typeof setActiveSettingsScope === "function") {
       setActiveSettingsScope(null);
@@ -3670,6 +3379,10 @@ const PlaygroundContent = () => {
         return;
       }
       if (action === "open-model-settings") {
+        if (characterChatReadiness.reason === "explicit-model-provider-required") {
+          openModelSelector({ returnFocusSelector: "[data-testid='model-selector']" });
+          return;
+        }
         openModelSettingsFromCockpit();
         return;
       }
@@ -3678,11 +3391,12 @@ const PlaygroundContent = () => {
         return;
       }
       if (action === "retry") {
-        void refreshCharacterChatModels(undefined, { forceRefresh: true });
+        void refreshCharacterChatModels();
       }
     },
     [
       openCharacterSelectorFromReadiness,
+      characterChatReadiness.reason,
       openModelSettingsFromCockpit,
       refreshCharacterChatModels,
       openServerSettingsFromCockpit,
@@ -3690,7 +3404,10 @@ const PlaygroundContent = () => {
   );
   const characterChatSendBlocker = React.useMemo<PlaygroundSendBlocker | null>(
     () =>
-      characterWorkflowActive &&
+      routeCharacterIntentId && !routeCharacterIntentChatId && routeCharacterIntentAppliedRef.current !== routeCharacterIntentId
+        ? { active: true, title: t("playground:characterChatReadiness.routeSetupPending", "Finish character setup before sending."),
+          actionLabel: t("playground:characterChatReadiness.character.action", "Choose character"), onAction: openCharacterSelectorFromReadiness }
+        : !isSavedRoleplayConversation(historySelection) && characterWorkflowActive &&
       characterChatReadiness.status === "blocked" &&
       characterChatReadiness.missingRequirement === "chat-model" &&
       characterChatReadinessCopy
@@ -3706,10 +3423,11 @@ const PlaygroundContent = () => {
           }
         : null,
     [
-      characterChatReadiness,
+      historySelection, characterChatReadiness,
       characterChatReadinessCopy,
       characterWorkflowActive,
       handleCharacterChatReadinessAction,
+      openCharacterSelectorFromReadiness, routeCharacterIntentChatId, routeCharacterIntentId, t,
     ],
   );
   const openMcpSettingsFromCockpit = React.useCallback(() => {
@@ -3854,7 +3572,7 @@ const PlaygroundContent = () => {
       onInspectAssistant={inspectAssistantFromCockpit}
       onOpenSceneDirector={openActorSettings}
       canStopStreaming={streaming}
-      onStopStreaming={() => stopStreamingRequest()}
+      onStopStreaming={stopStreamingFromUi}
       canRegenerate={canRegenerateLastResponse}
       onRegenerate={() => regenerateLastMessage()}
       regenerateUnavailableReason={
@@ -4087,16 +3805,14 @@ const PlaygroundContent = () => {
                     </span>
                   </button>
                   <button
-                    ref={shortcutsTriggerRef}
                     type="button"
                     data-testid="playground-shortcuts-help-trigger"
-                    onClick={() =>
-                      setShortcutsHelpOpen((previous) => !previous)
-                    }
+                    onClick={() => window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal"))}
+                    aria-label={t("common:shortcuts.showKeyboardShortcuts", "Show keyboard shortcuts")}
                     title={
                       t(
-                        "playground:shortcuts.openHelp",
-                        "Open keyboard shortcuts (Shift+/)",
+                        "playground:shortcuts.openKeyboardHelp",
+                        "Open keyboard shortcuts (?)",
                       ) as string
                     }
                     className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center gap-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"
@@ -4185,97 +3901,6 @@ const PlaygroundContent = () => {
                   </button>
                 </div>
               </div>
-              {shortcutsHelpOpen && (
-                <div
-                  data-testid="playground-shortcuts-help-panel"
-                  role="dialog"
-                  aria-modal="false"
-                  aria-label={t("playground:shortcuts.title", "Shortcuts")}
-                  className={`mx-auto mt-1 w-full ${chatContentWidthClassName} rounded-md border border-border bg-surface2 px-2 py-1.5 text-[11px] text-text`}
-                >
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <span className="font-semibold">
-                      {t("playground:shortcuts.title", "Shortcuts")}
-                    </span>
-                    <button
-                      ref={shortcutsCloseRef}
-                      type="button"
-                      data-testid="playground-shortcuts-help-close"
-                      onClick={() => {
-                        setShortcutsHelpOpen(false);
-                        requestAnimationFrame(() => {
-                          shortcutsTriggerRef.current?.focus();
-                        });
-                      }}
-                      className="rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text hover:bg-surface2"
-                    >
-                      {t("common:close", "Close")}
-                    </button>
-                  </div>
-                  <div className="grid gap-1 sm:grid-cols-2">
-                    <p>
-                      <span className="font-medium">Shift+Esc</span>{" "}
-                      {t(
-                        "playground:shortcuts.focusComposer",
-                        "Focus composer",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">
-                        {t("playground:shortcuts.findCombo", "Cmd/Ctrl+F")}
-                      </span>{" "}
-                      {t(
-                        "playground:shortcuts.searchThread",
-                        "Search this thread",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">
-                        {t("playground:shortcuts.helpCombo", "Shift+/")}
-                      </span>{" "}
-                      {t(
-                        "playground:shortcuts.openHelp",
-                        "Open keyboard shortcuts (Shift+/)",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">Alt+Shift+A</span>{" "}
-                      {t(
-                        "playground:shortcuts.toggleArtifacts",
-                        "Toggle artifacts panel",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">Alt+Shift+C</span>{" "}
-                      {t(
-                        "playground:shortcuts.toggleCompare",
-                        "Toggle compare mode",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">Alt+Shift+M</span>{" "}
-                      {t(
-                        "playground:shortcuts.toggleModes",
-                        "Open mode launcher",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">Alt+Shift+← / →</span>{" "}
-                      {t(
-                        "playground:shortcuts.variantSwitch",
-                        "Switch response variant",
-                      )}
-                    </p>
-                    <p>
-                      <span className="font-medium">Alt+Shift+B / R</span>{" "}
-                      {t(
-                        "playground:shortcuts.branchRegenerate",
-                        "Fork branch / regenerate",
-                      )}
-                    </p>
-                  </div>
-                </div>
-              )}
               {threadSearchOpen && (
                 <div
                   className={`mx-auto mt-1 flex w-full ${chatContentWidthClassName} flex-wrap items-center gap-2 rounded-md border border-border bg-surface2 px-2 py-1`}
@@ -4392,7 +4017,7 @@ const PlaygroundContent = () => {
               aria-live="polite"
               aria-relevant="additions"
               aria-label={t("playground:aria.chatTranscript", "Chat messages")}
-              className="custom-scrollbar flex-1 min-h-0 w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4"
+              className="custom-scrollbar flex-1 min-h-[20%] w-full overflow-x-hidden overflow-y-auto px-2 sm:px-4"
             >
               <div className={`mx-auto w-full ${chatContentWidthClassName} pb-6`}>
                 <ChatErrorBoundary>
@@ -4427,11 +4052,7 @@ const PlaygroundContent = () => {
                   ? "playground-chat-composer-dock"
                   : "playground-chat-composer-region"
               }
-              className={`relative w-full ${
-                mobileCockpitComposerConstrained
-                  ? "min-h-0 shrink overflow-y-auto overscroll-contain"
-                  : "shrink-0"
-              } ${
+              className={`relative flex max-h-[60%] min-h-0 w-full shrink flex-col ${
                 stickyChatInput
                   ? "sticky bottom-0 z-20 border-t border-border bg-surface/95 backdrop-blur"
                   : ""
@@ -4469,56 +4090,43 @@ const PlaygroundContent = () => {
                   </button>
                 </div>
               )}
-              <PlaygroundForm
-                droppedFiles={droppedFiles}
-                stickyDockEnabled={stickyChatInput}
-                mobileCockpitModeActive={mobileCockpitComposerConstrained}
-                forceWideMode={cockpitRailCollapsedWideContent}
-                onComposerLayoutChange={
-                  stickyChatInput ? handleComposerLayoutChange : undefined
-                }
-                attachedResearchContext={attachedResearchContext}
-                attachedResearchContextBaseline={
-                  attachedResearchContextBaseline
-                }
-                attachedResearchContextPinned={attachedResearchContextPinned}
-                attachedResearchContextHistory={attachedResearchContextHistory}
-                onApplyAttachedResearchContext={
-                  handleApplyAttachedResearchContext
-                }
-                onResetAttachedResearchContext={
-                  handleResetAttachedResearchContext
-                }
-                onRemoveAttachedResearchContext={
-                  handleRemoveAttachedResearchContext
-                }
-                onPinAttachedResearchContext={handlePinAttachedResearchContext}
-                onPinAttachedResearchContextHistory={
-                  handlePinAttachedResearchContextHistory
-                }
-                onUnpinAttachedResearchContext={
-                  handleUnpinAttachedResearchContext
-                }
-                onRestorePinnedResearchContext={
-                  handleRestorePinnedResearchContext
-                }
-                onPrepareResearchFollowUp={handlePrepareResearchFollowUp}
-                onSelectAttachedResearchContextHistory={
-                  handleSelectAttachedResearchContextHistory
-                }
-                onDraftPresenceChange={handleComposerDraftPresenceChange}
-                composerMessageCount={composerMessageCount}
-                composerMessageCountLabel={composerMessageCountLabel}
-                characterWorkflowActive={characterWorkflowActive}
-                characterChatSendBlocker={characterChatSendBlocker}
-                characterChatModelUsability={activeChatModelUsability}
-                characterChatModelUsabilityLabel={
-                  activeChatModelSelectorLabel
-                }
-                characterChatModelUsabilityTitle={
-                  activeChatModelSelectorTitle
-                }
-              />
+              <div className="min-h-0 overflow-y-auto overscroll-contain">
+                <PlaygroundForm
+                  onCharacterRouteApplyReady={onCharacterRouteApplyReady}
+                  droppedFiles={droppedFiles}
+                  stickyDockEnabled={stickyChatInput}
+                  mobileCockpitModeActive={mobileCockpitComposerConstrained}
+                  forceWideMode={cockpitRailCollapsedWideContent}
+                  onComposerLayoutChange={
+                    stickyChatInput ? handleComposerLayoutChange : undefined
+                  }
+                  attachedResearchContext={attachedResearchContext}
+                  attachedResearchContextBaseline={attachedResearchContextBaseline}
+                  attachedResearchContextPinned={attachedResearchContextPinned}
+                  attachedResearchContextHistory={attachedResearchContextHistory}
+                  onApplyAttachedResearchContext={handleApplyAttachedResearchContext}
+                  onResetAttachedResearchContext={handleResetAttachedResearchContext}
+                  onRemoveAttachedResearchContext={handleRemoveAttachedResearchContext}
+                  onPinAttachedResearchContext={handlePinAttachedResearchContext}
+                  onPinAttachedResearchContextHistory={
+                    handlePinAttachedResearchContextHistory
+                  }
+                  onUnpinAttachedResearchContext={handleUnpinAttachedResearchContext}
+                  onRestorePinnedResearchContext={handleRestorePinnedResearchContext}
+                  onPrepareResearchFollowUp={handlePrepareResearchFollowUp}
+                  onSelectAttachedResearchContextHistory={
+                    handleSelectAttachedResearchContextHistory
+                  }
+                  onDraftPresenceChange={handleComposerDraftPresenceChange}
+                  composerMessageCount={composerMessageCount}
+                  composerMessageCountLabel={composerMessageCountLabel}
+                  characterWorkflowActive={characterWorkflowActive}
+                  characterChatSendBlocker={characterChatSendBlocker}
+                  characterChatModelUsability={activeChatModelUsability}
+                  characterChatModelUsabilityLabel={activeChatModelSelectorLabel}
+                  characterChatModelUsabilityTitle={activeChatModelSelectorTitle}
+                />
+              </div>
             </div>
           </div>
         </PlaygroundCockpitShell>

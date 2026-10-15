@@ -1,10 +1,11 @@
+import { flushSync } from "react-dom"
 import React from "react"
 import { Button, Checkbox, Input, Modal, Select, Typography } from "antd"
 import type { TFunction } from "i18next"
 
 import KeywordPickerModal from "@/components/Notes/KeywordPickerModal"
 
-import { useTutorialStore } from "@/store/tutorials"
+import { useStartTutorial } from "@/hooks/useStartTutorial"
 
 import type {
   ImportDuplicateStrategy,
@@ -88,6 +89,39 @@ type NotesManagerOverlaysProps = {
   t: TFunction
 }
 
+// Only the open shortcut dialog needs the explicit tutorial source subscription.
+const NotesTutorialRestart: React.FC<{
+  getFocusTarget: () => HTMLElement | null
+  isCurrentOpen: () => boolean
+  beforeStart: () => void
+  close: () => void
+  t: TFunction
+}> = ({ getFocusTarget, isCurrentOpen, beforeStart, close, t }) => {
+  const startTutorial = useStartTutorial()
+  return (
+    <button
+      type="button"
+      className="text-xs text-primary hover:underline"
+      data-testid="notes-restart-tutorial"
+      onClick={() => {
+        if (
+          !isCurrentOpen() ||
+          !startTutorial("notes-basics", getFocusTarget())
+        )
+          return
+        void notesUiStorage
+          .remove(NOTES_TUTORIAL_SHOWN_STORAGE_KEY)
+          .catch(() => undefined)
+        beforeStart()
+        close()
+      }}>
+      {t("option:notesSearch.restartTutorialAction", {
+        defaultValue: "Restart tutorial"
+      })}
+    </button>
+  )
+}
+
 const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
   kw,
   imp,
@@ -104,6 +138,26 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
   handleKeywordPickerClear,
   t,
 }) => {
+  const tourOpenerRef = React.useRef<HTMLElement | null>(null)
+  const [tourHandoff, setTourHandoff] = React.useState(false)
+  const openInstance = React.useMemo(
+    () => (shortcutHelpOpen ? {} : null),
+    [shortcutHelpOpen]
+  )
+  const liveOpenInstance = React.useRef<object | null>(null)
+  React.useLayoutEffect(() => {
+    liveOpenInstance.current = openInstance
+    if (shortcutHelpOpen) {
+      const active = document.activeElement
+      tourOpenerRef.current =
+        active instanceof HTMLElement && active !== document.body ? active : null
+      setTourHandoff(false)
+    }
+    return () => {
+      liveOpenInstance.current = null
+    }
+  }, [shortcutHelpOpen, openInstance])
+
   return (
     <>
       <Modal
@@ -547,6 +601,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
 
       <Modal
         open={shortcutHelpOpen}
+        focusable={{ focusTriggerAfterClose: !tourHandoff }}
         onCancel={() => setShortcutHelpOpen(false)}
         footer={null}
         title={t("option:notesSearch.shortcutHelpTitle", {
@@ -589,20 +644,13 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
             </div>
           </div>
           <div className="border-t border-border pt-3">
-            <button
-              type="button"
-              className="text-xs text-primary hover:underline"
-              data-testid="notes-restart-tutorial"
-              onClick={() => {
-                void notesUiStorage.remove(NOTES_TUTORIAL_SHOWN_STORAGE_KEY).catch(() => undefined)
-                setShortcutHelpOpen(false)
-                useTutorialStore.getState().startTutorial('notes-basics')
-              }}
-            >
-              {t("option:notesSearch.restartTutorialAction", {
-                defaultValue: "Restart tutorial",
-              })}
-            </button>
+            <NotesTutorialRestart
+              getFocusTarget={() => tourOpenerRef.current}
+              isCurrentOpen={() => !!openInstance && liveOpenInstance.current === openInstance}
+              beforeStart={() => flushSync(() => setTourHandoff(true))}
+              close={() => setShortcutHelpOpen(false)}
+              t={t}
+            />
           </div>
         </div>
       </Modal>

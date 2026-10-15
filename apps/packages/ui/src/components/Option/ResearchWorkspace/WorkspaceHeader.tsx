@@ -1,3 +1,4 @@
+import { useStartTutorial } from "@/hooks/useStartTutorial"
 import React from "react"
 import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
 import { useTranslation } from "react-i18next"
@@ -95,7 +96,6 @@ import {
   undoWorkspaceAction,
   clearAllPendingUndoActions
 } from "./undo-manager"
-import { useTutorialStore } from "@/store/tutorials"
 import {
   FEATURE_ROLLOUT_PERCENTAGE_STORAGE_KEYS,
   FEATURE_ROLLOUT_SUBJECT_ID_STORAGE_KEY,
@@ -309,10 +309,10 @@ export const WorkspaceHeader: React.FC<WorkspaceHeaderProps> = ({
 }) => {
   const { t } = useTranslation(["playground", "option", "common"])
   const navigate = useNavigate()
-  const startTutorial = useTutorialStore((s) => s.startTutorial)
+  const startTutorial = useStartTutorial()
   const [messageApi, messageContextHolder] = message.useMessage()
   const handleStartWorkspaceTour = React.useCallback(() => {
-    startTutorial("research-workspace-basics")
+    if (!startTutorial("research-workspace-basics")) return
     messageApi.info(
       t(
         "playground:workspace.tourStarted",

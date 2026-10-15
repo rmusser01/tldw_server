@@ -456,7 +456,7 @@
     "message": "Enter a new title"
   },
   "temporaryChat": {
-    "message": "Temporary chat (not saved)"
+    "message": "Temporary chat (on this device)"
   },
   "more_copy_group": {
     "message": "Copy"
@@ -2675,11 +2675,11 @@
   "dictionariesList_stepPreviewBody": {
     "message": "— paste sample text to see the rules in action before going live."
   },
-  "dictionariesList_stepAssignTitle": {
-    "message": "Assign to chats"
+  "dictionariesList_savedChatLinksTitle": {
+    "message": "Inspect saved chat links"
   },
-  "dictionariesList_stepAssignBody": {
-    "message": "— link the dictionary to chat sessions so rules apply automatically."
+  "dictionariesList_savedChatLinksBody": {
+    "message": "— existing links are references. Saved chat assignment is unavailable in this server version."
   },
   "dictionariesList_searchPlaceholder": {
     "message": "Search dictionaries by name, description, category, or tags"
@@ -2711,8 +2711,8 @@
   "dictionariesList_emptyTitle": {
     "message": "No dictionaries yet"
   },
-  "dictionariesList_emptyDescription": {
-    "message": "Create your first dictionary to transform text consistently across chats."
+  "dictionariesList_previewEmptyDescription": {
+    "message": "Create a dictionary and preview its text transformations. Saved chat assignment is unavailable in this server version."
   },
   "dictionariesList_emptyExampleMedical": {
     "message": "Medical abbreviations (e.g., BP -> blood pressure)"
@@ -6406,5 +6406,29 @@
   },
   "quickIngest_review_replacementDisabled": {
     "message": "Replacement disabled: existing saved sources are preserved."
+  },
+  "promptInsert_reviewDescription": {
+    "message": "Your draft remains here. Review this prompt, then overwrite your message, append it, or cancel."
+  },
+  "promptInsert_preview": {
+    "message": "Prompt preview"
+  },
+  "header_showPages": {
+    "message": "Show pages"
+  },
+  "header_hidePages": {
+    "message": "Hide pages"
+  },
+  "header_pageNavigator": {
+    "message": "Pages"
+  },
+  "assistant_trackedPersonaUnavailable": {
+    "message": "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat."
+  },
+  "assistant_usePersonaOverlay": {
+    "message": "Use a persona prompt overlay"
+  },
+  "assistant_trackedModelsLoading": {
+    "message": "Loading models before tracked chat selection. Wait for discovery to finish, or retry in the model picker."
   }
 }

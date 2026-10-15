@@ -1,9 +1,10 @@
+import "./native-plasmo-storage-fixture"
 // @vitest-environment jsdom
 import React from "react"
 import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { useChatActions } from "../useChatActions"
+import { useOriginalSdkSceneFixture } from "./sdk-original-scene-fixture"
 import type { MessageMetadataExtra } from "@/store/option"
 
 const {
@@ -12,27 +13,30 @@ const {
   normalChatModeMock,
   saveMessageOnSuccessMock,
   storageValues,
-  storeOptionState
+  storeOptionState,
+  scopeState
 } = vi.hoisted(() => ({
   addChatMessageMock: vi.fn(async () => ({ id: "server-message-1" })),
   createChatMock: vi.fn(),
   normalChatModeMock: vi.fn(),
   saveMessageOnSuccessMock: vi.fn(async () => "history-1"),
   storageValues: new Map<string, unknown>(),
+  scopeState: { requestScope: { config: { serverUrl: "https://chat.test", authMode: "single-user" as "single-user" | "multi-user" }, userId: null as number | null }, invalidatedSignal: new AbortController().signal },
   storeOptionState: {
     value: { selectedModel: "deepseek-chat" as string | null }
   }
 }))
 
-vi.mock("@/hooks/chat-modes/normalChatMode", () => ({
+vi.mock("@/hooks/chat-modes/normalChatMode", async original => ({
+  ...await original<typeof import("@/hooks/chat-modes/normalChatMode")>(),
   normalChatMode: normalChatModeMock
 }))
 
 vi.mock("@/services/service-prompts", () => ({
-  loadServicePromptSnapshot: async () => ({
-    definitions: {}, scopeSignal: new AbortController().signal,
-    scopeInvalidatedSignal: new AbortController().signal,
-    requestScope: { config: { serverUrl: "https://chat.test", authMode: "single-user" }, userId: null },
+  loadServicePromptSnapshot: async (_ids: unknown, { signal }: { signal: AbortSignal }) => ({
+    definitions: {}, scopeSignal: signal,
+    scopeInvalidatedSignal: scopeState.invalidatedSignal,
+    requestScope: scopeState.requestScope,
     release: vi.fn()
   })
 }))
@@ -60,6 +64,7 @@ vi.mock("@/hooks/utils/messageHelpers", () => ({
 }))
 
 vi.mock("@/hooks/handlers/messageHandlers", () => ({
+  createNativeDeleteMessage: vi.fn(() => vi.fn(async () => false)),
   createRegenerateLastMessage: vi.fn(() => vi.fn()),
   createEditMessage: vi.fn(() => vi.fn()),
   createStopStreamingRequest: vi.fn(() => vi.fn()),
@@ -88,8 +93,8 @@ vi.mock("@/db/dexie/branch", () => ({
   generateBranchFromMessageIds: vi.fn(async () => null)
 }))
 
-vi.mock("@/services/actor-settings", () => ({
-  getActorSettingsForChat: vi.fn(async () => null)
+vi.mock("@/services/actor-settings", async original => ({
+  ...await original<typeof import("@/services/actor-settings")>()
 }))
 
 vi.mock("@/utils/image-backends", () => ({
@@ -110,7 +115,7 @@ vi.mock("@/utils/selected-character-storage", () => ({
 
 vi.mock("@/hooks/chat/useChatSettingsRecord", () => ({
   useChatSettingsRecord: () => ({
-    chatSettings: {},
+    settings: {},
     updateChatSettings: vi.fn()
   })
 }))
@@ -124,11 +129,13 @@ vi.mock("@plasmohq/storage/hook", () => ({
   }
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: {
-    getState: () => storeOptionState.value
-  }
-}))
+vi.mock("@/store/option", async original => {
+  const actual = await original<typeof import("@/store/option")>()
+  return { ...actual, useStoreMessageOption: {
+    getState: () => ({ ...actual.useStoreMessageOption.getState(), ...storeOptionState.value }),
+    setState: actual.useStoreMessageOption.setState
+  } }
+})
 
 vi.mock("@/services/tldw/server-capabilities", () => ({
   getServerCapabilities: vi.fn(async () => ({ hasChatSaveToDb: false }))
@@ -231,9 +238,14 @@ const createHookOptions = () => ({
   clearMessageSteering: vi.fn()
 })
 
+const useChatActions = (options: Parameters<typeof useOriginalSdkSceneFixture>[0]) =>
+  useOriginalSdkSceneFixture(options, () => ({ requestScope: scopeState.requestScope, scopeInvalidatedSignal: scopeState.invalidatedSignal }))
+
 describe("useChatActions dynamic UI action integration", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    scopeState.requestScope = { config: { serverUrl: "https://chat.test", authMode: "single-user" }, userId: null }
+    scopeState.invalidatedSignal = new AbortController().signal
     storageValues.clear()
     storeOptionState.value = { selectedModel: "deepseek-chat" }
     normalChatModeMock.mockImplementation(
@@ -259,6 +271,9 @@ describe("useChatActions dynamic UI action integration", () => {
           modelId: params.selectedModel,
           reasoning_time_taken: 0,
           saveToDb: false,
+          requestScope: params.servicePromptSnapshot?.requestScope,
+          scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+          scopeInvalidatedSignal: params.servicePromptSnapshot?.scopeInvalidatedSignal,
           conversationId: "chat-1",
           userMetadataExtra: params.userMetadataExtra
         })
@@ -307,7 +322,8 @@ describe("useChatActions dynamic UI action integration", () => {
       expect.objectContaining({
         role: "user",
         metadata_extra: metadata
-      })
+      }),
+      { requestScope: scopeState.requestScope, signal: normalChatModeMock.mock.calls[0][6].servicePromptSnapshot.scopeSignal }
     )
   })
 
@@ -325,6 +341,8 @@ describe("useChatActions dynamic UI action integration", () => {
       }),
       userId: 7
     })
+    scopeState.requestScope = requestScope
+    scopeState.invalidatedSignal = scopeController.signal
     normalChatModeMock.mockImplementationOnce(
       async (
         message: string,
@@ -348,10 +366,10 @@ describe("useChatActions dynamic UI action integration", () => {
           modelId: params.selectedModel,
           reasoning_time_taken: 0,
           saveToDb: false,
+          requestScope: params.servicePromptSnapshot?.requestScope,
+          scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+          scopeInvalidatedSignal: params.servicePromptSnapshot?.scopeInvalidatedSignal,
           conversationId: "chat-1",
-          scopeSignal: scopeController.signal,
-          scopeInvalidatedSignal: scopeController.signal,
-          requestScope
         })
       }
     )
@@ -370,7 +388,7 @@ describe("useChatActions dynamic UI action integration", () => {
       expect.objectContaining({ role: "user" }),
       expect.objectContaining({
         requestScope,
-        signal: scopeController.signal
+        signal: normalChatModeMock.mock.calls[0][6].servicePromptSnapshot.scopeSignal
       })
     )
     scopeController.abort()
@@ -402,6 +420,8 @@ describe("useChatActions dynamic UI action integration", () => {
       }),
       userId: 7
     })
+    scopeState.requestScope = requestScope
+    scopeState.invalidatedSignal = scopeController.signal
     normalChatModeMock.mockImplementationOnce(
       async (
         message: string,
@@ -425,9 +445,10 @@ describe("useChatActions dynamic UI action integration", () => {
           modelId: params.selectedModel,
           reasoning_time_taken: 0,
           saveToDb: false,
+          requestScope: params.servicePromptSnapshot?.requestScope,
+          scopeSignal: params.servicePromptSnapshot?.scopeSignal,
+          scopeInvalidatedSignal: params.servicePromptSnapshot?.scopeInvalidatedSignal,
           conversationId: "chat-1",
-          scopeSignal: scopeController.signal,
-          requestScope
         })
       }
     )

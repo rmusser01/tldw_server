@@ -158,7 +158,6 @@ export const Header: React.FC<Props> = ({
   }, [clearChat, setSelectedCharacter, setTemporaryChat])
 
   const startCharacterChat = React.useCallback(() => {
-    setTemporaryChat(false)
     const characterId = selectedCharacter?.id ?? null
     if (!isChatRoute) {
       navigate(buildCharacterChatPath({ characterId }))
@@ -179,7 +178,7 @@ export const Header: React.FC<Props> = ({
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("tldw:focus-composer"))
     }
-  }, [isChatRoute, navigate, selectedCharacter, setTemporaryChat])
+  }, [isChatRoute, navigate, selectedCharacter])
 
   const refreshShareLinks = React.useCallback(async () => {
     if (!serverChatId) {
