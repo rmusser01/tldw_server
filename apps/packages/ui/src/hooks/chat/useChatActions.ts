@@ -1707,10 +1707,10 @@ export const useChatActions = ({
         write()
         throwIfTurnCancelled()
       }
-      const publishServerChatId = (id: string | null) => {
+      const publishServerChatId: import("@/store/option/types").State["setServerChatId"] = (id, ...options) => {
         throwIfTurnCancelled()
         publishingServerChatId = id
-        setServerChatId(id)
+        setServerChatId(id, ...options)
         throwIfTurnCancelled()
         if (useStoreMessageOption.getState().serverChatId !== id)
           throw createServicePromptScopeChangedError()

@@ -369,8 +369,8 @@ describe("useChatActions persona integration", () => {
     normalChatModeMock.mockResolvedValue(undefined)
   })
 
-  it("creates a persona-backed chat with assistant_kind=persona", async () => {
-    const options = createHookOptions()
+  it.each([false, true])("creates a persona-backed chat with assistant_kind=persona (temporary=%s)", async temporaryChat => {
+    const options = { ...createHookOptions(), temporaryChat }
     const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
@@ -389,8 +389,10 @@ describe("useChatActions persona integration", () => {
       cluster_id: undefined,
       source: undefined,
       external_ref: undefined
-    }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal })
-    expect(options.setServerChatId).toHaveBeenCalledWith("persona-chat-1", { preserveTemporaryChat: false })
+    }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: expect.any(AbortSignal) })
+    expect(options.setServerChatId).toHaveBeenCalledWith("persona-chat-1", { preserveTemporaryChat: temporaryChat })
+    expect(useStoreMessageOption.getState().temporaryChat).toBe(temporaryChat)
+    expect(normalChatModeMock).toHaveBeenCalledOnce()
     expect(options.setServerChatCharacterId).toHaveBeenCalledWith(null)
     expect(options.setServerChatAssistantKind).toHaveBeenCalledWith("persona")
     expect(options.setServerChatAssistantId).toHaveBeenCalledWith("garden-helper")
@@ -413,7 +415,7 @@ describe("useChatActions persona integration", () => {
         trackedAssistantDisplayName: "Garden Helper",
         trackedAssistantAvatarUrl: null,
         serverChatPersonaMemoryMode: "read_only",
-        scopeKey: servicePromptSnapshot.scopeKey,
+        scopeKey: temporaryChat ? "scope:chat" : servicePromptSnapshot.scopeKey,
         trackedAssistantSelection: expect.objectContaining({
           kind: "persona",
           id: "garden-helper",

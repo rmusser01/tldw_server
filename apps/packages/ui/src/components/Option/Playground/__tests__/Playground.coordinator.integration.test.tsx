@@ -602,7 +602,7 @@ function prepareSharedClearFixture() {
   tldwClientState.getChat.mockResolvedValue({ id: "robot", title: "Robot chat",
     character_id: 5, assistant_kind: "character", assistant_id: "5",
     source: "webui-character-chat", scope_type: "global" })
-  tldwClientState.listChatMessages.mockResolvedValue([
+  setFixtureTranscript("robot", [
     { id: "answer", role: "assistant", content: "BEEP BOOP", version: 1 }
   ])
 }
@@ -655,8 +655,8 @@ describe("Playground coordinator integration", () => {
     let captured = false
     const held = new Promise<void>(resolve => { release = resolve })
     const capture = tldwClientState.captureHistorySelection.getMockImplementation()!
-    tldwClientState.captureHistorySelection.mockImplementationOnce(async (chatId, request) => {
-      const response = await capture(chatId, request)
+    tldwClientState.captureHistorySelection.mockImplementationOnce(async (chatId, request, options) => {
+      const response = await capture(chatId, request, options)
       captured = true
       await held
       return response
@@ -1485,7 +1485,7 @@ describe("Playground coordinator integration", () => {
       source: 'webui-chat',
       scope_type: 'global',
     });
-    tldwClientState.listChatMessages.mockResolvedValue([
+    setFixtureTranscript('ordinary', [
       { id: 'ordinary-server', role: 'user', content: 'Keep my saved conversation', version: 1 },
     ]);
     let release!: (card: { id: string; name: string }) => void;
