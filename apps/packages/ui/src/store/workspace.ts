@@ -235,6 +235,31 @@ const WORKSPACE_PERSIST_TRUNCATION_SUFFIX =
 const WORKSPACE_ARTIFACT_PAYLOAD_POINTER_KEY = "__tldwArtifactPayloadRef"
 const WORKSPACE_CHAT_POINTER_KIND = "workspace_chat_session_v1"
 const WORKSPACE_ARTIFACT_POINTER_KIND = "workspace_artifact_payload_v1"
+// Internal per-snapshot persist metadata (WP-16 per-workspace diff). These
+// fields ride ON the persisted snapshot object (not a wrapper envelope) so
+// legacy readers keep working; they are stripped on every hydration read and
+// never leak into store state.
+const WORKSPACE_SNAPSHOT_REVISION_FIELD = "__tldwPersistRevision"
+const WORKSPACE_SNAPSHOT_UPDATED_AT_FIELD = "__tldwPersistUpdatedAt"
+
+type RevisionedWorkspaceSnapshot = WorkspaceSnapshot & {
+  [WORKSPACE_SNAPSHOT_REVISION_FIELD]?: number
+  [WORKSPACE_SNAPSHOT_UPDATED_AT_FIELD]?: number
+}
+
+const stripWorkspaceSnapshotPersistMetadata = <T>(snapshot: T): T => {
+  if (
+    !isRecord(snapshot) ||
+    (!(WORKSPACE_SNAPSHOT_REVISION_FIELD in snapshot) &&
+      !(WORKSPACE_SNAPSHOT_UPDATED_AT_FIELD in snapshot))
+  ) {
+    return snapshot
+  }
+  const stripped: Record<string, unknown> = { ...snapshot }
+  delete stripped[WORKSPACE_SNAPSHOT_REVISION_FIELD]
+  delete stripped[WORKSPACE_SNAPSHOT_UPDATED_AT_FIELD]
+  return stripped as T
+}
 
 type WorkspaceIndexedDbChatPointer = {
   offloadType: typeof WORKSPACE_CHAT_POINTER_KIND
@@ -621,7 +646,12 @@ const readWorkspaceSnapshotFromStorage = (
 ): WorkspaceSnapshot | null => {
   const raw = localStorage.getItem(buildWorkspaceSnapshotStorageKey(workspaceId))
   const parsed = safeParseJson(raw)
-  return isRecord(parsed) ? (parsed as unknown as WorkspaceSnapshot) : null
+  if (!isRecord(parsed)) return null
+  // Accept both legacy (no-revision) and revision-carrying snapshots; the
+  // internal diff metadata never leaves the persistence layer.
+  return stripWorkspaceSnapshotPersistMetadata(
+    parsed as unknown as WorkspaceSnapshot
+  )
 }
 
 const isAudioTtsProvider = (value: unknown): value is AudioTtsProvider =>
@@ -1180,6 +1210,8 @@ const removeWorkspaceLocalPersistenceForId = async (
 
   localStorage.removeItem(buildWorkspaceSnapshotStorageKey(workspaceId))
   localStorage.removeItem(chatKey)
+  invalidateWorkspacePersistStamp(workspaceId)
+  invalidateWorkspacePersistIndexStamp()
 
   if (!indexedDbAdapter.isAvailable()) return
 
@@ -1420,8 +1452,9 @@ const reconstructPersistedWorkspaceStateFromSplitIndex = (
     )
     const parsedSnapshot = safeParseJson(snapshotRaw)
     if (isRecord(parsedSnapshot)) {
-      snapshots[workspaceStorageId] =
+      snapshots[workspaceStorageId] = stripWorkspaceSnapshotPersistMetadata(
         parsedSnapshot as unknown as WorkspaceSnapshot
+      )
       if (hasWorkspaceArtifactPayloadPointers(parsedSnapshot)) {
         requiresIndexedDbHydration = true
       }
@@ -1446,8 +1479,9 @@ const reconstructPersistedWorkspaceStateFromSplitIndex = (
     isRecord(stateCandidate.workspaceSnapshots) &&
     isRecord(stateCandidate.workspaceSnapshots[workspaceId])
   ) {
-    snapshots[workspaceId] =
+    snapshots[workspaceId] = stripWorkspaceSnapshotPersistMetadata(
       stateCandidate.workspaceSnapshots[workspaceId] as unknown as WorkspaceSnapshot
+    )
     if (hasWorkspaceArtifactPayloadPointers(snapshots[workspaceId])) {
       requiresIndexedDbHydration = true
     }
@@ -1524,13 +1558,154 @@ const reconstructPersistedWorkspaceStateFromSplitIndex = (
   })()
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-workspace persist diff state (WP-16)
+// ─────────────────────────────────────────────────────────────────────────────
+// Two module-level registries make a persist pass O(changed workspaces)
+// instead of O(all workspaces):
+//
+//  - `workspacePersistPartializeRecords` is written by `partialize`, where the
+//    RAW snapshot/chat references from store state are still identifiable. An
+//    unchanged raw reference means the persisted (sanitized/bounded) build is
+//    reusable — unchanged workspaces skip their sanitize pass entirely.
+//  - `workspacePersistStamps` is written by the split-key write path when a
+//    workspace's snapshot/chat is actually serialized and written. A stamp
+//    carries the raw reference it last persisted, the metadata-free content
+//    signature it produced (for the legacy-compat first pass and direct
+//    adapter writes that bypass partialize), and the cached previous
+//    artifact-id/pointer-key lists so unchanged workspaces perform ZERO
+//    per-workspace storage reads on subsequent passes.
+//
+// Correctness rules:
+//  - "No revision known" (missing stamp — legacy storage or first write after
+//    load) is DIRTY: serialize once, write revision-carrying, then track.
+//  - Identity is authoritative only together with the partialize record; a
+//    write whose envelope did not come through partialize (migration path,
+//    direct adapter writes) always re-serializes and compares the content
+//    signature, so equal content still produces zero writes.
+//  - `key in localStorage` existence guards keep an out-of-band clear (e.g.
+//    tests calling localStorage.clear() directly) from being mistaken for
+//    "already persisted".
+
+type WorkspacePersistPartializeRecord<TPersisted> = {
+  rawRef: unknown
+  persisted: TPersisted
+}
+
+type WorkspacePersistSnapshotStamp = {
+  rawRef: unknown
+  persistedSnapshot: WorkspaceSnapshot | null
+  contentSignature: string | null
+  revision: number
+  previousArtifactIds: string[]
+  previousArtifactPointerKeys: string[]
+}
+
+type WorkspacePersistChatStamp = {
+  rawRef: unknown
+  persistedReference: PersistedWorkspaceChatSessionReference | null
+  serializedValue: string | null
+  previousPointerKey: string | null
+}
+
+const workspacePersistPartializeRecords = new Map<
+  string,
+  {
+    snapshot?: WorkspacePersistPartializeRecord<WorkspaceSnapshot>
+    chat?: WorkspacePersistPartializeRecord<PersistedWorkspaceChatSession>
+  }
+>()
+
+// Set by `partialize` and consumed by the NEXT `storage.setItem` call: zustand
+// persist builds the persisted value as
+// `JSON.stringify({ state: partialize(get()), version })` and hands it to
+// setItem synchronously, so a setItem observing this flag true knows the
+// module-level partialize records describe its own value (identity anchors are
+// valid). Any other setItem (direct adapter writes, the migration path) must
+// NOT trust the records — its envelope never passed through partialize, and a
+// stale record would make the differ skip genuinely different content.
+let workspacePersistPartializeRecordsFresh = false
+
+const setWorkspacePersistPartializeRecord = (
+  workspaceId: string,
+  next: {
+    snapshot?: WorkspacePersistPartializeRecord<WorkspaceSnapshot>
+    chat?: WorkspacePersistPartializeRecord<PersistedWorkspaceChatSession>
+  }
+): void => {
+  const merged = workspacePersistPartializeRecords.get(workspaceId) || {}
+  workspacePersistPartializeRecords.set(workspaceId, { ...merged, ...next })
+}
+
+const workspacePersistStamps = new Map<
+  string,
+  { snapshot?: WorkspacePersistSnapshotStamp; chat?: WorkspacePersistChatStamp }
+>()
+
+let lastWrittenWorkspaceIndexValue: string | null = null
+
+const getWorkspacePersistStamp = (
+  workspaceId: string
+): { snapshot?: WorkspacePersistSnapshotStamp; chat?: WorkspacePersistChatStamp } =>
+  workspacePersistStamps.get(workspaceId) || {}
+
+const setWorkspacePersistStamp = (
+  workspaceId: string,
+  next: {
+    snapshot?: WorkspacePersistSnapshotStamp
+    chat?: WorkspacePersistChatStamp
+  }
+): void => {
+  const merged = workspacePersistStamps.get(workspaceId) || {}
+  workspacePersistStamps.set(workspaceId, { ...merged, ...next })
+}
+
+const invalidateWorkspacePersistStamp = (workspaceId: string): void => {
+  workspacePersistStamps.delete(workspaceId)
+}
+
+const invalidateWorkspacePersistIndexStamp = (): void => {
+  lastWrittenWorkspaceIndexValue = null
+}
+
+const clearWorkspacePersistStamps = (): void => {
+  workspacePersistStamps.clear()
+  lastWrittenWorkspaceIndexValue = null
+}
+
+// Prefix-concatenated snapshot serialization: the internal revision metadata
+// is prepended to the metadata-free content JSON, so one stringify covers both
+// the diff signature and (on change) the written value.
+const serializeWorkspaceSnapshotForPersist = (
+  snapshotForStorage: WorkspaceSnapshot,
+  revision: number,
+  updatedAt: number
+): { contentSignature: string; persistedValue: string } => {
+  const contentSignature = JSON.stringify(snapshotForStorage)
+  const persistedValue = `{"${WORKSPACE_SNAPSHOT_REVISION_FIELD}":${revision},"${WORKSPACE_SNAPSHOT_UPDATED_AT_FIELD}":${updatedAt},${contentSignature.slice(1)}`
+  return { contentSignature, persistedValue }
+}
+
+const parsePersistedSnapshotRevision = (candidate: unknown): number | null => {
+  if (!isRecord(candidate)) return null
+  const revision = candidate[WORKSPACE_SNAPSHOT_REVISION_FIELD]
+  return typeof revision === "number" && Number.isFinite(revision)
+    ? revision
+    : null
+}
+
 const writeSplitWorkspacePersistence = async (
   name: string,
   serializedValue: string,
-  indexedDbAdapter: WorkspaceIndexedDbAdapter
+  indexedDbAdapter: WorkspaceIndexedDbAdapter,
+  options?: {
+    /** Trust the module-level partialize records as identity anchors. */
+    trustPartializeRecords?: boolean
+  }
 ): Promise<boolean> => {
   if (name !== WORKSPACE_STORAGE_KEY) return false
 
+  const recordsTrusted = options?.trustPartializeRecords === true
   const envelope = parsePersistedWorkspaceEnvelope(serializedValue)
   if (!envelope) return false
 
@@ -1602,131 +1777,270 @@ const writeSplitWorkspacePersistence = async (
     }
 
     const snapshotKey = buildWorkspaceSnapshotStorageKey(workspaceStorageId)
-    const previousSnapshot = readWorkspaceSnapshotFromStorage(workspaceStorageId)
-    const previousArtifactIds = collectWorkspaceArtifactIdsFromSnapshot(
-      previousSnapshot
-    )
-    const previousArtifactPointerKeys = collectWorkspaceArtifactPointerKeysFromSnapshot(
-      previousSnapshot
-    )
-
     const snapshot = migrated.workspaceSnapshots[workspaceStorageId]
-    const nextArtifactIds = snapshot
-      ? collectWorkspaceArtifactIdsFromSnapshot(snapshot)
-      : []
-    const retainedArtifactKeys = new Set<string>()
+    const partializeSnapshotRecord =
+      workspacePersistPartializeRecords.get(workspaceStorageId)?.snapshot
+    const snapshotStamp = getWorkspacePersistStamp(workspaceStorageId).snapshot
+    // Identity anchors are only meaningful when this envelope was produced by
+    // the partialize call that wrote the records; otherwise fall back to the
+    // (always-fresh, never-matching) parsed snapshot reference so the content
+    // signature decides.
+    const snapshotRawRef =
+      recordsTrusted && partializeSnapshotRecord
+        ? partializeSnapshotRecord.rawRef
+        : snapshot
+    const snapshotUnchanged =
+      Boolean(snapshotStamp) &&
+      snapshotStamp.rawRef === snapshotRawRef &&
+      (snapshot
+        ? snapshotStamp.persistedSnapshot !== null &&
+          snapshotStamp.contentSignature !== null &&
+          snapshotKey in localStorage
+        : snapshotStamp.persistedSnapshot === null)
 
-    if (snapshot) {
-      let snapshotForStorage = snapshot
-      let offloadedArtifactIds = new Set<string>()
-      if (indexedDbAdapter.isAvailable()) {
-        const offloadResult = await offloadWorkspaceSnapshotArtifacts(
-          workspaceStorageId,
-          snapshot,
-          indexedDbAdapter
-        )
-        snapshotForStorage = offloadResult.snapshot
-        offloadedArtifactIds = offloadResult.offloadedArtifactIds
-        for (const artifactId of offloadedArtifactIds) {
-          retainedArtifactKeys.add(
-            buildWorkspaceIndexedDbArtifactRecordKey(workspaceStorageId, artifactId)
-          )
-        }
+    if (snapshotUnchanged && snapshotStamp) {
+      // Unchanged workspace: skip re-serialization, the per-workspace storage
+      // read, the offload pass, and the artifact-key reconciliation — the
+      // last persisted pass already wrote exactly this content.
+      if (snapshotStamp.persistedSnapshot) {
+        persistedSnapshotsForIndex[workspaceStorageId] =
+          snapshotStamp.persistedSnapshot
       }
-
-      const nextSnapshotValue = JSON.stringify(snapshotForStorage)
-      if (localStorage.getItem(snapshotKey) !== nextSnapshotValue) {
-        localStorage.setItem(snapshotKey, nextSnapshotValue)
-      }
-      persistedSnapshotsForIndex[workspaceStorageId] = snapshotForStorage
-    } else if (localStorage.getItem(snapshotKey) !== null) {
-      localStorage.removeItem(snapshotKey)
-    }
-
-    if (indexedDbAdapter.isAvailable()) {
-      const artifactPayloadKeysToDelete = new Set<string>(previousArtifactPointerKeys)
-      for (const artifactId of previousArtifactIds) {
-        const payloadKey = buildWorkspaceIndexedDbArtifactRecordKey(
-          workspaceStorageId,
-          artifactId
-        )
-        if (!nextArtifactIds.includes(artifactId)) {
-          artifactPayloadKeysToDelete.add(payloadKey)
-          continue
-        }
-        if (!retainedArtifactKeys.has(payloadKey)) {
-          artifactPayloadKeysToDelete.add(payloadKey)
-        }
-      }
-      for (const key of retainedArtifactKeys) {
-        artifactPayloadKeysToDelete.delete(key)
-      }
-      await Promise.all(
-        Array.from(artifactPayloadKeysToDelete, (key) =>
-          indexedDbAdapter.deleteArtifactPayloadRecord(key)
-        )
+    } else {
+      // Dirty: no stamp (legacy no-revision storage or first write after
+      // load — always serialize once, then track), the raw reference moved,
+      // or the storage key vanished out-of-band.
+      const previousSnapshot = snapshotStamp
+        ? snapshotStamp.persistedSnapshot
+        : readWorkspaceSnapshotFromStorage(workspaceStorageId)
+      const previousArtifactIds = collectWorkspaceArtifactIdsFromSnapshot(
+        previousSnapshot
       )
+      const previousArtifactPointerKeys =
+        collectWorkspaceArtifactPointerKeysFromSnapshot(previousSnapshot)
+
+      const nextArtifactIds = snapshot
+        ? collectWorkspaceArtifactIdsFromSnapshot(snapshot)
+        : []
+      const retainedArtifactKeys = new Set<string>()
+
+      if (snapshot) {
+        let snapshotForStorage = snapshot
+        let offloadedArtifactIds = new Set<string>()
+        if (indexedDbAdapter.isAvailable()) {
+          const offloadResult = await offloadWorkspaceSnapshotArtifacts(
+            workspaceStorageId,
+            snapshot,
+            indexedDbAdapter
+          )
+          snapshotForStorage = offloadResult.snapshot
+          offloadedArtifactIds = offloadResult.offloadedArtifactIds
+          for (const artifactId of offloadedArtifactIds) {
+            retainedArtifactKeys.add(
+              buildWorkspaceIndexedDbArtifactRecordKey(
+                workspaceStorageId,
+                artifactId
+              )
+            )
+          }
+        }
+
+        const previousRevision = snapshotStamp ? snapshotStamp.revision : 0
+        const updatedAt = Date.now()
+        const { contentSignature, persistedValue } =
+          serializeWorkspaceSnapshotForPersist(
+            snapshotForStorage,
+            previousRevision + 1,
+            updatedAt
+          )
+        const contentChanged =
+          !snapshotStamp ||
+          snapshotStamp.contentSignature !== contentSignature
+        const snapshotKeyMissing = !(snapshotKey in localStorage)
+        const mustWriteSnapshot = contentChanged || snapshotKeyMissing
+
+        let persistedSnapshotForIndex: WorkspaceSnapshot
+        if (mustWriteSnapshot) {
+          localStorage.setItem(snapshotKey, persistedValue)
+          persistedSnapshotForIndex = {
+            ...snapshotForStorage,
+            [WORKSPACE_SNAPSHOT_REVISION_FIELD]: previousRevision + 1,
+            [WORKSPACE_SNAPSHOT_UPDATED_AT_FIELD]: updatedAt
+          } as RevisionedWorkspaceSnapshot
+        } else {
+          persistedSnapshotForIndex =
+            snapshotStamp?.persistedSnapshot ?? snapshotForStorage
+        }
+        persistedSnapshotsForIndex[workspaceStorageId] =
+          persistedSnapshotForIndex
+
+        setWorkspacePersistStamp(workspaceStorageId, {
+          snapshot: {
+            rawRef: snapshotRawRef ?? null,
+            persistedSnapshot: persistedSnapshotForIndex,
+            contentSignature,
+            revision: mustWriteSnapshot
+              ? previousRevision + 1
+              : previousRevision,
+            previousArtifactIds: nextArtifactIds,
+            previousArtifactPointerKeys:
+              collectWorkspaceArtifactPointerKeysFromSnapshot(
+                persistedSnapshotForIndex
+              )
+          }
+        })
+      } else {
+        if (snapshotKey in localStorage) {
+          localStorage.removeItem(snapshotKey)
+        }
+        setWorkspacePersistStamp(workspaceStorageId, {
+          snapshot: {
+            rawRef: null,
+            persistedSnapshot: null,
+            contentSignature: null,
+            revision: 0,
+            previousArtifactIds: [],
+            previousArtifactPointerKeys: []
+          }
+        })
+      }
+
+      if (indexedDbAdapter.isAvailable()) {
+        const artifactPayloadKeysToDelete = new Set<string>(
+          previousArtifactPointerKeys
+        )
+        for (const artifactId of previousArtifactIds) {
+          const payloadKey = buildWorkspaceIndexedDbArtifactRecordKey(
+            workspaceStorageId,
+            artifactId
+          )
+          if (!nextArtifactIds.includes(artifactId)) {
+            artifactPayloadKeysToDelete.add(payloadKey)
+            continue
+          }
+          if (!retainedArtifactKeys.has(payloadKey)) {
+            artifactPayloadKeysToDelete.add(payloadKey)
+          }
+        }
+        for (const key of retainedArtifactKeys) {
+          artifactPayloadKeysToDelete.delete(key)
+        }
+        await Promise.all(
+          Array.from(artifactPayloadKeysToDelete, (key) =>
+            indexedDbAdapter.deleteArtifactPayloadRecord(key)
+          )
+        )
+      }
     }
 
     const chatKey = buildWorkspaceChatStorageKey(workspaceStorageId)
-    const previousChatCandidate = safeParseJson(localStorage.getItem(chatKey))
-    const previousChatPointerKey = isWorkspaceIndexedDbChatPointer(
-      previousChatCandidate
-    )
-      ? previousChatCandidate.key
-      : null
     const chatSession = migrated.workspaceChatSessions[workspaceStorageId]
-    let retainedChatRecordKey: string | null = null
+    const partializeChatRecord =
+      workspacePersistPartializeRecords.get(workspaceStorageId)?.chat
+    const chatStamp = getWorkspacePersistStamp(workspaceStorageId).chat
+    const chatRawRef =
+      recordsTrusted && partializeChatRecord
+        ? partializeChatRecord.rawRef
+        : chatSession
+    const chatUnchanged =
+      Boolean(chatStamp) &&
+      chatStamp.rawRef === chatRawRef &&
+      (chatSession
+        ? chatStamp.persistedReference !== null && chatKey in localStorage
+        : chatStamp.persistedReference === null)
 
-    if (chatSession) {
-      let chatReference: PersistedWorkspaceChatSessionReference = chatSession
-      if (
-        indexedDbAdapter.isAvailable() &&
-        estimateSerializedByteLength(chatSession) >= WORKSPACE_CHAT_OFFLOAD_MIN_BYTES
-      ) {
-        const chatRecordKey = buildWorkspaceIndexedDbChatRecordKey(workspaceStorageId)
-        const updatedAt = Date.now()
-        const didPersist = await indexedDbAdapter.putChatRecord({
-          key: chatRecordKey,
-          workspaceId: workspaceStorageId,
-          session: chatSession,
-          updatedAt
-        })
-        if (didPersist) {
-          retainedChatRecordKey = chatRecordKey
-          chatReference = {
-            offloadType: WORKSPACE_CHAT_POINTER_KIND,
+    if (chatUnchanged && chatStamp) {
+      if (chatStamp.persistedReference) {
+        persistedChatReferencesForIndex[workspaceStorageId] =
+          chatStamp.persistedReference
+      }
+    } else {
+      const previousChatCandidate = chatStamp
+        ? null
+        : safeParseJson(localStorage.getItem(chatKey))
+      const previousChatPointerKey = chatStamp
+        ? chatStamp.previousPointerKey
+        : isWorkspaceIndexedDbChatPointer(previousChatCandidate)
+          ? previousChatCandidate.key
+          : null
+      let retainedChatRecordKey: string | null = null
+      let nextChatStamp: WorkspacePersistChatStamp
+
+      if (chatSession) {
+        let chatReference: PersistedWorkspaceChatSessionReference = chatSession
+        if (
+          indexedDbAdapter.isAvailable() &&
+          estimateSerializedByteLength(chatSession) >=
+            WORKSPACE_CHAT_OFFLOAD_MIN_BYTES
+        ) {
+          const chatRecordKey = buildWorkspaceIndexedDbChatRecordKey(
+            workspaceStorageId
+          )
+          const updatedAt = Date.now()
+          const didPersist = await indexedDbAdapter.putChatRecord({
             key: chatRecordKey,
-            historyId: chatSession.historyId,
-            serverChatId: chatSession.serverChatId,
+            workspaceId: workspaceStorageId,
+            session: chatSession,
             updatedAt
+          })
+          if (didPersist) {
+            retainedChatRecordKey = chatRecordKey
+            chatReference = {
+              offloadType: WORKSPACE_CHAT_POINTER_KIND,
+              key: chatRecordKey,
+              historyId: chatSession.historyId,
+              serverChatId: chatSession.serverChatId,
+              updatedAt
+            }
           }
+        }
+
+        const nextChatValue = JSON.stringify(chatReference)
+        if (
+          !chatStamp ||
+          chatStamp.serializedValue !== nextChatValue ||
+          !(chatKey in localStorage)
+        ) {
+          localStorage.setItem(chatKey, nextChatValue)
+        }
+        persistedChatReferencesForIndex[workspaceStorageId] = chatReference
+        nextChatStamp = {
+          rawRef: chatRawRef ?? null,
+          persistedReference: chatReference,
+          serializedValue: nextChatValue,
+          previousPointerKey: retainedChatRecordKey
+        }
+      } else {
+        if (chatKey in localStorage) {
+          localStorage.removeItem(chatKey)
+        }
+        nextChatStamp = {
+          rawRef: null,
+          persistedReference: null,
+          serializedValue: null,
+          previousPointerKey: null
         }
       }
 
-      const nextChatValue = JSON.stringify(chatReference)
-      if (localStorage.getItem(chatKey) !== nextChatValue) {
-        localStorage.setItem(chatKey, nextChatValue)
-      }
-      persistedChatReferencesForIndex[workspaceStorageId] = chatReference
-    } else if (localStorage.getItem(chatKey) !== null) {
-      localStorage.removeItem(chatKey)
-    }
-
-    if (indexedDbAdapter.isAvailable()) {
-      const chatKeysToDelete = new Set<string>()
-      chatKeysToDelete.add(buildWorkspaceIndexedDbChatRecordKey(workspaceStorageId))
-      if (previousChatPointerKey) {
-        chatKeysToDelete.add(previousChatPointerKey)
-      }
-      if (retainedChatRecordKey) {
-        chatKeysToDelete.delete(retainedChatRecordKey)
-      }
-      await Promise.all(
-        Array.from(chatKeysToDelete, (key) =>
-          indexedDbAdapter.deleteChatRecord(key)
+      if (indexedDbAdapter.isAvailable()) {
+        const chatKeysToDelete = new Set<string>()
+        chatKeysToDelete.add(
+          buildWorkspaceIndexedDbChatRecordKey(workspaceStorageId)
         )
-      )
+        if (previousChatPointerKey) {
+          chatKeysToDelete.add(previousChatPointerKey)
+        }
+        if (retainedChatRecordKey) {
+          chatKeysToDelete.delete(retainedChatRecordKey)
+        }
+        await Promise.all(
+          Array.from(chatKeysToDelete, (key) =>
+            indexedDbAdapter.deleteChatRecord(key)
+          )
+        )
+      }
+
+      setWorkspacePersistStamp(workspaceStorageId, { chat: nextChatStamp })
     }
   }
 
@@ -1743,6 +2057,8 @@ const writeSplitWorkspacePersistence = async (
 
     localStorage.removeItem(buildWorkspaceSnapshotStorageKey(staleWorkspaceId))
     localStorage.removeItem(buildWorkspaceChatStorageKey(staleWorkspaceId))
+    invalidateWorkspacePersistStamp(staleWorkspaceId)
+    invalidateWorkspacePersistIndexStamp()
 
     if (indexedDbAdapter.isAvailable()) {
       await cleanupWorkspaceIndexedDbRecords(
@@ -1761,6 +2077,7 @@ const writeSplitWorkspacePersistence = async (
     !hasPersistableWorkspaceIndexState(migratedForIndex)
   ) {
     localStorage.removeItem(name)
+    invalidateWorkspacePersistIndexStamp()
     return true
   }
 
@@ -1775,9 +2092,13 @@ const writeSplitWorkspacePersistence = async (
     }
   })
   const indexValue = JSON.stringify(splitIndex)
-  if (localStorage.getItem(name) !== indexValue) {
+  if (
+    indexValue !== lastWrittenWorkspaceIndexValue ||
+    localStorage.getItem(name) !== indexValue
+  ) {
     localStorage.setItem(name, indexValue)
   }
+  lastWrittenWorkspaceIndexValue = indexValue
 
   return true
 }
@@ -2092,8 +2413,14 @@ export const createWorkspaceStorage = (
       }
       return localStorage.getItem(name)
     },
-    setItem: (name: string, value: string): Promise<void> =>
-      enqueueWorkspacePersistWrite({
+    setItem: (name: string, value: string): Promise<void> => {
+      // Consume the partialize freshness handshake NOW (synchronously with
+      // the caller): zustand persist runs partialize -> stringify -> setItem
+      // in one synchronous sequence, so a fresh flag here means the module
+      // records describe this exact value.
+      const trustPartializeRecords = workspacePersistPartializeRecordsFresh
+      workspacePersistPartializeRecordsFresh = false
+      return enqueueWorkspacePersistWrite({
         name,
         value,
         perform: async (jobName, jobValue): Promise<void> => {
@@ -2106,7 +2433,8 @@ export const createWorkspaceStorage = (
               ? await writeSplitWorkspacePersistence(
                   jobName,
                   jobValue,
-                  indexedDbAdapter
+                  indexedDbAdapter,
+                  { trustPartializeRecords }
                 )
               : false
             if (!handledBySplitStorage) {
@@ -2190,11 +2518,14 @@ export const createWorkspaceStorage = (
             throw error
           }
         }
-      }),
+      })
+    },
     removeItem: async (name: string): Promise<void> => {
       // Removal must not race a pending coalesced write (the write would
-      // resurrect the removed key after this returns).
+      // resurrect the removed key after this returns), and the per-workspace
+      // diff stamps describe storage that is about to be wiped.
       flushWorkspacePersistWrites()
+      clearWorkspacePersistStamps()
       if (name === WORKSPACE_STORAGE_KEY) {
         const workspaceIds = getWorkspaceIdsFromStoredValue(
           localStorage.getItem(name)
@@ -4129,14 +4460,49 @@ export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
           nextSnapshots[state.workspaceId] = buildWorkspaceSnapshot(state)
         }
 
+        // WP-16: unchanged workspaces keep their raw snapshot reference
+        // between passes, so reuse the previous sanitized persist output
+        // instead of re-running the sanitize pass for every workspace on
+        // every write. Only the active workspace (rebuilt from top-level
+        // state each pass) re-sanitizes.
         const persistedSnapshots: Record<string, WorkspaceSnapshot> = {}
         for (const [workspaceId, snapshot] of Object.entries(nextSnapshots)) {
-          persistedSnapshots[workspaceId] = {
+          const existingRecord =
+            workspacePersistPartializeRecords.get(workspaceId)?.snapshot
+          if (existingRecord && existingRecord.rawRef === snapshot) {
+            persistedSnapshots[workspaceId] = existingRecord.persisted
+            continue
+          }
+          const persisted: WorkspaceSnapshot = {
             ...snapshot,
             generatedArtifacts: sanitizeArtifactsForPersistence(
               snapshot.generatedArtifacts
             )
           }
+          setWorkspacePersistPartializeRecord(workspaceId, {
+            snapshot: { rawRef: snapshot, persisted }
+          })
+          persistedSnapshots[workspaceId] = persisted
+        }
+
+        // Chat sessions: same reference-based reuse — an unchanged raw
+        // session skips the per-message bounding rebuild.
+        const persistedChatSessions: Record<string, PersistedWorkspaceChatSession> =
+          {}
+        for (const [workspaceId, session] of Object.entries(
+          state.workspaceChatSessions
+        )) {
+          const existingRecord =
+            workspacePersistPartializeRecords.get(workspaceId)?.chat
+          if (existingRecord && existingRecord.rawRef === session) {
+            persistedChatSessions[workspaceId] = existingRecord.persisted
+            continue
+          }
+          const persisted = buildPersistedWorkspaceChatSession(session)
+          setWorkspacePersistPartializeRecord(workspaceId, {
+            chat: { rawRef: session, persisted }
+          })
+          persistedChatSessions[workspaceId] = persisted
         }
 
         const persistedState: PersistedWorkspaceState = {
@@ -4152,10 +4518,12 @@ export const useWorkspaceStore = createWithEqualityFn<WorkspaceState>()(
           workspaceSnapshots: persistedSnapshots,
 
           // Workspace chat sessions (messages canonical; history derived on rehydrate)
-          workspaceChatSessions: buildPersistedWorkspaceChatSessions(
-            state.workspaceChatSessions
-          )
+          workspaceChatSessions: persistedChatSessions
         }
+
+        // Flag the records as describing the value zustand persist is about
+        // to stringify and hand to storage.setItem (consumed there).
+        workspacePersistPartializeRecordsFresh = true
 
         recordWorkspacePersistenceDiagnostics(
           WORKSPACE_STORAGE_KEY,
