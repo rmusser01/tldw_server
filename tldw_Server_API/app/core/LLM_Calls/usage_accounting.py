@@ -11,7 +11,6 @@ import functools
 import inspect
 import json
 import math
-import re
 import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import suppress
@@ -28,6 +27,7 @@ from tldw_Server_API.app.core.Usage.llm_call_context import (
     in_accounted_call,
 )
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_async, check_user_sync, user_to_check
+from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
 
 _ACCOUNTED_METHODS = ("chat", "achat", "stream", "astream")
 _MARK = "__llm_accounted__"
@@ -64,12 +64,6 @@ def _approx_tokens(char_count: int) -> int:
     return max(1, char_count // 4) if char_count > 0 else 0
 
 
-# Redacts base64 image payloads before the estimate, as the chat endpoint's estimator does.
-# The media-type part is bounded: an unbounded ``[^,]*`` rescans to the end of the text for
-# every ``data:image`` with no comma after it, which is quadratic on a crafted prompt.
-_DATA_URI_RE = re.compile(r'(data:image[^,"\s]{0,128},)[^"\s]+', re.IGNORECASE)
-
-
 def _prompt_estimate(request: Any) -> int:
     """Estimated prompt tokens: the messages plus the system prompt, with image payloads redacted."""
     try:
@@ -79,7 +73,7 @@ def _prompt_estimate(request: Any) -> int:
         system_message = request.get("system_message")
         if isinstance(system_message, str):
             text += system_message
-        return max(1, len(_DATA_URI_RE.sub(r"\1<omitted>", text)) // 4)
+        return max(1, len(DATA_URI_REDACT_RE.sub(r"\1<omitted>", text)) // 4)
     except Exception:  # noqa: BLE001 - an estimate must never fail a call
         return 1
 
