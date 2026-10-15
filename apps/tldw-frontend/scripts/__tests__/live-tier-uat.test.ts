@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { EventEmitter } from "node:events"
+import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -26,6 +27,8 @@ import {
   summarizePlaywrightReport,
 } from "../live-tier-uat/report.mjs"
 import {
+  deferred43Recorder,
+  resolveDeferred43Sources,
   assertFreshRunTargets,
   assertServicesStopped,
   buildCommands,
@@ -897,5 +900,221 @@ describe('live Tier UAT artifact retention', () => {
     } finally {
       rmSync(baseTmpDir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('deferred43 metadata and native target admission', () => {
+  const root = (
+    recorder: ReturnType<typeof deferred43Recorder>,
+    role: number,
+    node: HTMLElement,
+    marked = true
+  ) => {
+    const owner = {},
+      ref = {},
+      downstream = () => {};
+    recorder.declare(role, ref, null, downstream);
+    recorder.owner(owner, ref, downstream, null);
+    recorder.target(owner, node, marked);
+    return { owner, ref, downstream };
+  };
+
+  it('keeps unrelated pending registrations out of the numeric identity budget', () => {
+    const recorder = deferred43Recorder(4096, 1, 'control');
+    for (let index = 0; index < 513; index++) {
+      const ref = {},
+        owner = {},
+        upstream = () => {},
+        downstream = () => {};
+      recorder.parent(upstream, () => {});
+      recorder.declare(1, ref, upstream, downstream);
+      recorder.owner(owner, ref, downstream, null, {}, {});
+    }
+    const node = document.createElement('button');
+    root(recorder, 1, node);
+    root(recorder, 2, node);
+    const data = recorder.drain();
+    expect(data.faults).toBe(0);
+    expect(data.counts[0]).toBe(6);
+    expect(data.rows.map((row: number[]) => row[4])).toEqual([1, 2]);
+    expect(new Set(data.rows.map((row: number[]) => row[3])).size).toBe(2);
+  });
+
+  it('preserves pending child and Menu rows before late parent target validation', () => {
+    const recorder = deferred43Recorder(4096, 1, 'control');
+    const parent = {},
+      parentRef = {},
+      parentContext = {},
+      parentDownstream = () => {};
+    recorder.declare(1, parentRef, null, parentDownstream);
+    recorder.owner(parent, parentRef, parentDownstream, null, null, parentContext);
+    const menuRef = { current: document.createElement('ul') },
+      menuCallback = () => {};
+    recorder.menu(menuRef, menuCallback);
+    const child = {},
+      popupCallback = () => {},
+      downstream = () => {};
+    recorder.submenu(popupCallback, {}, menuCallback);
+    recorder.owner(child, null, downstream, popupCallback, parentContext, {});
+    recorder.target(child, document.createElement('li'), false);
+    recorder.menuCommit(menuRef, menuCallback);
+    expect(recorder.role(child)).toBe(0);
+    recorder.observe(19, child, 1); // Existing role gate still suppresses pre-validation events.
+    recorder.target(parent, document.createElement('button'), true);
+    expect(recorder.role(child)).toBe(3);
+    recorder.observe(19, child, 2);
+    recorder.observe(20, menuRef, 2);
+    const data = recorder.drain();
+    expect(data.faults).toBe(0);
+    expect(data.rows.map((row: number[]) => row[0])).toEqual([1, 1, 1, 19, 20]);
+    expect(data.rows.slice(0, 3).map((row: number[]) => row[4])).toEqual([3, 4, 1]);
+    expect(data.rows[0][11]).toBe(data.rows[2][3]);
+    expect(data.rows[1][11]).toBe(data.rows[2][3]);
+    expect(data.rows.every((row: number[]) => row[3] > 0)).toBe(true);
+    expect(data.rows[0][3]).toBe(data.rows[3][3]);
+    expect(data.rows[1][3]).toBe(data.rows[4][3]);
+    expect(data.rows[0][5]).toBe(data.rows[3][5]);
+  });
+
+  it('retains raw callback identity and generations after unrelated registrations', () => {
+    const recorder = deferred43Recorder(4096, 1, 'control');
+    for (let index = 0; index < 513; index++) recorder.declare(2, {}, null, () => {});
+    const node = document.createElement('button'),
+      state = root(recorder, 2, node);
+    recorder.owner(state.owner, state.ref, state.downstream, null);
+    recorder.target(state.owner, node, true);
+    const replacement = () => {};
+    recorder.declare(2, state.ref, null, replacement);
+    recorder.owner(state.owner, state.ref, replacement, null);
+    recorder.target(state.owner, node, true);
+    const data = recorder.drain();
+    expect(data.faults).toBe(0);
+    expect(new Set(data.rows.map((row: number[]) => row[3])).size).toBe(1);
+    expect(data.rows[0][8]).toBe(data.rows[1][8]);
+    expect(data.rows[2][8]).not.toBe(data.rows[1][8]);
+    expect(data.rows.map((row: number[]) => row[5])).toEqual([2, 2, 2]);
+  });
+
+  it('uses the exact native getDOM target even when immediate child props are unmarked', () => {
+    const source = readFileSync(path.join(frontendRoot, 'scripts/live-tier-uat/run.mjs'), 'utf8');
+    const start =
+      source.indexOf('const deferred43Patches = ') + 'const deferred43Patches = '.length;
+    const patches = JSON.parse(
+      source.slice(start, source.indexOf('\nconst deferred43Hash', start))
+    );
+    const probe = patches[0].edits.find((edit: { from: string }) =>
+      edit.from.includes('const domNode = getDOM(node);')
+    ).to;
+    const marker = source.match(/^const deferred43Source = "([a-f0-9]+)"/m)![1];
+    const recorder = deferred43Recorder(4096, 1, marker);
+    const world = {};
+    Object.defineProperty(world, '__df43App', { value: recorder });
+    const nativeRequire = createRequire(resolveDeferred43Sources(frontendRoot, repoRoot)[0]);
+    const { getDOM } = nativeRequire('@rc-component/util/lib/Dom/findDOMNode');
+    const button = document.createElement('button');
+    button.setAttribute('data-testid', 'notes-overflow-menu-button');
+    expect(getDOM(button)).toBe(button);
+    const buttonHandle = { nativeElement: button };
+    expect(getDOM(buttonHandle)).toBe(button);
+    const applyProbe = new Function(
+      'globalThis',
+      'node',
+      'getDOM',
+      'externalPopupRef',
+      'originChildProps',
+      probe
+    );
+    for (const role of [1, 2]) {
+      const owner = {},
+        ref = {},
+        downstream = () => {};
+      recorder.declare(role, ref, null, downstream);
+      recorder.owner(owner, ref, downstream, null);
+      applyProbe(world, buttonHandle, getDOM, owner, {});
+    }
+    const wrongOwner = {},
+      wrongRef = {},
+      wrongDownstream = () => {};
+    recorder.declare(1, wrongRef, null, wrongDownstream);
+    recorder.owner(wrongOwner, wrongRef, wrongDownstream, null);
+    applyProbe(world, document.createElement('button'), getDOM, wrongOwner, {
+      'data-testid': 'notes-overflow-menu-button',
+    });
+    expect(recorder.role(wrongOwner)).toBe(0);
+    const data = recorder.drain();
+    expect(data.faults).toBe(0);
+    expect(data.rows.map((row: number[]) => row[4])).toEqual([1, 2]);
+    expect(data.rows[0][6]).toBe(data.rows[1][6]);
+    expect(data.rows[0][3]).not.toBe(data.rows[1][3]);
+  });
+
+  it('does not admit a wrong target or bypass conflicting declarations and parent links', () => {
+    const recorder = deferred43Recorder(4096, 1, 'control');
+    const wrong = root(recorder, 1, document.createElement('button'), false);
+    expect(recorder.role(wrong.owner)).toBe(0);
+    const wrongData = recorder.drain();
+    expect(wrongData.rows).toEqual([]);
+    expect(wrongData.faults).toBe(0);
+    const declarations = deferred43Recorder(4096, 1, 'control');
+    const ref = {},
+      downstream = () => {};
+    declarations.declare(1, ref, null, downstream);
+    declarations.declare(2, ref, null, downstream);
+    expect(declarations.drain().faults & 8).toBe(8);
+    const parents = deferred43Recorder(4096, 1, 'control');
+    const callback = () => {};
+    parents.link(callback, 5, {});
+    parents.link(callback, 5, {});
+    expect(parents.drain().faults & 8).toBe(8);
+  });
+
+  it('preserves simultaneous same-role collision and permits detach before replacement', () => {
+    const recorder = deferred43Recorder(4096, 1, 'control');
+    const node = document.createElement('button');
+    root(recorder, 1, node);
+    root(recorder, 1, node);
+    expect(recorder.drain().faults & 8).toBe(8);
+    const detached = deferred43Recorder(4096, 1, 'control');
+    const prior = root(detached, 1, node);
+    detached.target(prior.owner, null, false);
+    root(detached, 1, node);
+    expect(detached.drain().faults).toBe(0);
+  });
+
+  it('keeps genuine object, row, node, event and timer overflow fail-closed at existing caps', () => {
+    const objects = deferred43Recorder(4096, 1, 'control');
+    for (let index = 0; index < 171; index++) root(objects, 1, document.createElement('button'));
+    const objectData = objects.drain();
+    expect(objectData.count).toBe(171);
+    expect(objectData.counts).toEqual([512, 171, 0, 0]);
+    expect(
+      objectData.rows.slice(0, 170).every((row: number[]) => row[3] > 0 && row[7] > 0 && row[8] > 0)
+    ).toBe(true);
+    expect([3, 7, 8].some((column) => objectData.rows[170][column] === 0)).toBe(true);
+    expect(objectData.faults).toBe(1);
+    const rows = deferred43Recorder(1, 1, 'control');
+    rows.row(24);
+    rows.row(24);
+    expect(rows.drain()).toMatchObject({ count: 1, faults: 1 });
+    const nodes = deferred43Recorder(4096, 1, 'control');
+    for (let index = 0; index < 257; index++) nodes.node({});
+    expect(nodes.drain()).toMatchObject({ counts: [0, 256, 0, 0], faults: 1 });
+    const events = deferred43Recorder(4096, 2, 'control');
+    const node = document.createElement('button');
+    for (let index = 0; index < 257; index++)
+      events.nativeEvent(
+        [1, 1, 1],
+        node,
+        { type: 'pointerdown', isTrusted: true, clientX: 0, clientY: 0, timeStamp: index },
+        1,
+        true
+      );
+    expect(events.drain()).toMatchObject({ counts: [0, 1, 256, 0], faults: 1 });
+    const timers = deferred43Recorder(4096, 1, 'control');
+    const state = root(timers, 1, node);
+    for (let index = 0; index < 513; index++) timers.installed({}, state.owner, 1, index, 0);
+    const timerData = timers.drain();
+    expect(timerData.counts[3]).toBe(512);
+    expect(timerData.faults & 1).toBe(1);
   });
 });

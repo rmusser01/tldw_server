@@ -14,7 +14,7 @@ import {
 } from "./helpers"
 import { startApiCapture, getCapturedApiCalls } from "./api-assertions"
 
-const deferred43Marker = "16377700f81b700f459d05c3134ed3e23e440cdb588a74b062c2e3ceb4b01337"
+const deferred43Marker = "3485bd8cbd37b38ae9bfec6e7b3e9cb37164cfb53667f53bf78aa5530f6b1d82"
 const deferred43MeasuredTitles = new Map([
   ["e2e/ux-regression/notes-p0.spec.ts", "NE-04: 'Print / Save as PDF' prints the note without a pop-up error"],
   ["e2e/workflows/notes-studio-derived-note.spec.ts", "selects markdown, derives a Cornell studio note, and prints it"],
@@ -125,7 +125,7 @@ async function prepareDeferred43(page: Page, testInfo: TestInfo): Promise<null |
       receipt.source !== deferred43Marker ||
       typeof receipt.appSource !== 'string' ||
       createHash('sha256').update(receipt.appSource).digest('hex') !==
-        '64ac2ff634022084d76c70e1435699351387052b6daa90cb4aab2e04651deb46' ||
+        '2e4fd3e7e678b72cd41e7ac2bf9d374c5510ab803c698021994c6ba64e39ebc3' ||
       receipt.installed !== true ||
       typeof receipt.appSource !== 'string' ||
       Buffer.byteLength(receipt.appSource) > 65536 ||
