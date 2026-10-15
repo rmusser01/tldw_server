@@ -1,4 +1,6 @@
-# Native quota PostgreSQL allocation — TASK-13641
+# Native quota PostgreSQL allocation — TASK-13703
+
+Task identity corrected on 2026-10-15: this PR's historical TASK-13641 is now TASK-13703; the old ID belongs to a separate task on dev. This report keeps its stable filename and original evidence.
 
 Actual PostgreSQL retention allocation failed with the private type-only chain ProfileUserWriteRejected <- TokenError <- TokenError. The native reservation INSERT used compact question-mark placeholders that became adjacent PostgreSQL dollar parameters. The managed SQL parser could not tokenize that list and refused it. The fix spaces bound placeholders; original values, ownership, locking, reservation state and SQL guard remain unchanged.
 

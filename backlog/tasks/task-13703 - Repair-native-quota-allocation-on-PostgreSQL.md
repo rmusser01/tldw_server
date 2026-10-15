@@ -1,5 +1,5 @@
 ---
-id: TASK-13641
+id: TASK-13703
 title: Repair native quota allocation on PostgreSQL
 status: Done
 ---
@@ -25,6 +25,7 @@ PR3229 publicf5d CI gap-verified8 job115377521080. Dockerdaemon available now; o
 ActualofficialPG retention successRED1failure16s; private typechain ProfileUserWriteRejected <- TokenError <- TokenError. ExactcompactINSERTparameters convertto$1,$2; existinghouse database.py375 documents comma-space requirement. Realrepository/adapter/guard2engineRED1failPG1passSQLite→GREEN2, actualPGsuccessGREEN1. Full76=65passed11failed (1840warnings), subsequent8fixturecompactorg/team/member setup lists plus adminreadonlyasyncpg instancepatch. AdminprobeAttributeError mock.__enter__/__exit__; fixture backendread method+connectionidentityfilteredclasspatch nowunderqualification. Productionguardunchanged. ADRrequired:no; correctionimplementsgoverningownership/quota policy ADR049/050/064 and proposed070, nonewdecision. ProductionBandit0findings/errors0, Black2filescheck0, Ruff0.
 Final actualofficialfixture76passed0skips1837runtimewarnings209.89s process0; admin2engine2passed. ProductiononeSQLplaceholder-spacingfix+focused2engine realrepository/adapter/guardregression. Fixture8SQLspacings and originalconnection-onlyactualbackendread faultfix preserveallassertions. FinalRuff0, Blackall3filesclean (originalfixturealsoclean), embeddedSCRIPTparse0. ProductionBandit0/0errors; finaltestBandit0/0errors excludingintentionalB101assertions. BoundedindependentreviewCLEAR. Docs/Reviews/CHAT_NATIVE_QUOTA_POSTGRES_13641_2026_10_13.md. Normalhooks pending.
 Normal exact5file hooks allpass without bypass; owncompletedplan retired. Finalprocessactual76/76noPGskips. CurrentwholePRCIheadf5d remainsfailed; notwholePRclear.
+2026-10-15: Renumbered this PR's historical TASK-13641 to TASK-13703 after latest dev introduced an unrelated task with the old ID. The requester explicitly approved the proposed four manual task-ID renames and four report-heading updates. Backlog-py has no existing-task renumber operation; the approved exception changes filename/frontmatter ID, followed by this ordinary backlog-py note. Historical report filenames and original verification content remain unchanged. ADR assessment: no new architecture decision; metadata collision repair under ADR-059.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

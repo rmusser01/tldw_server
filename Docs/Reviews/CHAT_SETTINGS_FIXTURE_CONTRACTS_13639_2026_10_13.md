@@ -1,4 +1,6 @@
-# Settings fixture contracts — TASK-13639
+# Settings fixture contracts — TASK-13701
+
+Task identity corrected on 2026-10-15: this PR's historical TASK-13639 is now TASK-13701; the old ID belongs to a separate task on dev. This report keeps its stable filename and original evidence.
 
 The numeric and model-prompt suites now declare the physical native storage API before constructing real SDK storage. The prompt suite uses actual Actor scene reads and a stable controller/account receipt against an actual fresh draft. Existing model catalog and Actor Save boundaries remain controlled I/O; the numeric settings hook and storage persistence remain real.
 

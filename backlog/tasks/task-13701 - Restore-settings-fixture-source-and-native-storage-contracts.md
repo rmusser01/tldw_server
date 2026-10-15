@@ -1,5 +1,5 @@
 ---
-id: TASK-13639
+id: TASK-13701
 title: Restore settings fixture source and native storage contracts
 status: Done
 ---
@@ -24,6 +24,7 @@ ADR required:no; test-dependency repair only. Representative nativeRED3failed62s
 Initial native65:61passed4failed. Actual new draft after authretirement; added noSave/noActor write/noClose/nooldprompt before freshsource. Isolated unchanged reset-default5.059s exceeds5s; reset-template4.829s passes. Scoped cached-remount10s matches adjacent two-mount tests, no globaltimeout change. Followup5passed44skipped. Finalnative qualification running; bounded independent review noCritical/Important. Actor durableSave remains mocked limitation. Review Docs/Reviews/CHAT_SETTINGS_FIXTURE_CONTRACTS_13639_2026_10_13.md. Publicf5d nine CI failures, notmerge-ready.
 Finalnative202passed5suites; WebUI249passed4suites includingactual Actor read89/ownership95. Both normalclient sourcecompilers exit0; excludesdedicatedtest-file typechecking. Readonly boundedreview CLEAR, staleSave pre-renewal noClose/nooldprompt assertionsadded. Bandit N/A TypeScript tests. Finalnormalhooks pending; wholePR PostgreSQL/CI/frontend/H2 remainopen.
 Normal exact4file hooks allpass; no bypass. Completed ownplan retired/private/tmp. Independent boundedreview clear; otherwholePR failures and finalreview/rebase/merge remainpending.
+2026-10-15: Renumbered this PR's historical TASK-13639 to TASK-13701 after latest dev introduced an unrelated task with the old ID. The requester explicitly approved the proposed four manual task-ID renames and four report-heading updates. Backlog-py has no existing-task renumber operation; the approved exception changes filename/frontmatter ID, followed by this ordinary backlog-py note. Historical report filenames and original verification content remain unchanged. ADR assessment: no new architecture decision; metadata collision repair under ADR-059.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

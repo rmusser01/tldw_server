@@ -1,4 +1,6 @@
-# Cold Retry retirement qualification — TASK-13640
+# Cold Retry retirement qualification — TASK-13702
+
+Task identity corrected on 2026-10-15: this PR's historical TASK-13640 is now TASK-13702; the old ID belongs to a separate task on dev. This report keeps its stable filename and original evidence.
 
 The retirement harness now waits for the replacement account's durable record before taking its write baseline. It reuses the existing recovery-write helper, which permits only model-cache tombstones whose exact shape is asserted. Every other write remains counted. The test additionally checks the original Alice record, Bob record and account revision remain unchanged after the held Alice request rejects.
 

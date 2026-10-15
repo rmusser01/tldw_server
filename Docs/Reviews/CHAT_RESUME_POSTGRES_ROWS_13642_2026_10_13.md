@@ -1,4 +1,6 @@
-# Roleplay Resume PostgreSQL rows — TASK-13642
+# Roleplay Resume PostgreSQL rows — TASK-13704
+
+Task identity corrected on 2026-10-15: this PR's historical TASK-13642 is now TASK-13704; the old ID belongs to a separate task on dev. This report keeps its stable filename and original evidence.
 
 Actual PostgreSQL append/replay failed because its mapping row was read at numeric index0 for prompt-byte usage. Both database queries now alias the unchanged aggregate as prompt_bytes and read that name. Original-parent version reads use the existing version column. Byte arithmetic, refusal threshold, conversation/live-parent identity and source ownership fences are unchanged.
 
