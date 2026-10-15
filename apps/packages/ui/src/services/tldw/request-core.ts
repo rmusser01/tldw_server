@@ -280,7 +280,7 @@ export const resolveTldwRequestPlan = async (
       ok: true;
       plan: {
         method: string;
-        body: unknown;
+        body: TldwRequestPayload["body"];
         abortSignal?: AbortSignal;
         responseType?: "json" | "text" | "arrayBuffer";
         maxResponseBytes?: number;
@@ -464,8 +464,12 @@ const performTldwRequest = async (
   },
 ): Promise<ApiSendResponse> => {
   const resolvedPlan = await resolveTldwRequestPlan(payload, runtime);
-  if (!resolvedPlan.ok) {
-    return { ok: false, status: resolvedPlan.status, error: resolvedPlan.error };
+  if (resolvedPlan.ok !== true) {
+    return {
+      ok: false,
+      status: resolvedPlan.status,
+      error: resolvedPlan.error,
+    };
   }
   const {
     method,
@@ -655,7 +659,7 @@ const performTldwRequest = async (
   let retryController: AbortController | null = null;
   const timeoutMs = deriveRequestTimeout(
     cfg,
-    normalizedPath,
+    (normalizedPath ?? "") as Parameters<typeof deriveRequestTimeout>[1],
     Number(overrideTimeoutMs),
   );
   const onAbort = () => {
