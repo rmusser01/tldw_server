@@ -1799,8 +1799,10 @@ export const useMessage = () => {
         }
         chatId = normalizedId;
         createdNewChat = true;
-        if (queuedGuard) queuedGuard.publishServerChatId(normalizedId, setServerChatId);
-        else setServerChatId(normalizedId);
+        const publishCreatedChatId = (id: string | null) =>
+          setServerChatId(id, { preserveTemporaryChat: temporaryChat });
+        if (queuedGuard) queuedGuard.publishServerChatId(normalizedId, publishCreatedChatId);
+        else publishCreatedChatId(normalizedId);
         setServerChatTitle(String((created as any)?.title || ""));
         setServerChatCharacterId(
           (created as any)?.character_id ?? activeCharacter?.id ?? null,
@@ -3549,14 +3551,14 @@ export const useMessage = () => {
               createChat: (payload, options) => tldwClient.createChat(payload, options),
               ensureServerChatHistoryId: async () => historyId,
               invalidateServerChatHistory,
-              setServerChatId: (id) => {
+              setServerChatId: (id, options) => {
                 signal.throwIfAborted()
                 if (!sourceIsCurrent() || !normalHistoryPreparation.dispatchIsCurrent()) throw new Error("actor_settings_scope_changed")
                 // Only this Persona operation can acknowledge its own reset or created ID.
                 commandIdentity.serverChatId = id
                 try {
-                  if (assertQueuedDispatchCurrent) assertQueuedDispatchCurrent.publishServerChatId(id, setServerChatId)
-                  else setServerChatId(id)
+                  if (assertQueuedDispatchCurrent) assertQueuedDispatchCurrent.publishServerChatId(id, value => setServerChatId(value, options))
+                  else setServerChatId(id, options)
                 } catch (error) {
                   identityRetired = true
                   throw error

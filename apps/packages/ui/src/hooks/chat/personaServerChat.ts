@@ -48,7 +48,7 @@ type EnsurePersonaServerChatArgs = {
     scopeInvalidatedSignal?: AbortSignal
   ) => Promise<string | null>
   invalidateServerChatHistory: () => void
-  setServerChatId: (value: string | null) => void
+  setServerChatId: import("@/store/option/types").State["setServerChatId"]
   setServerChatTitle: (value: string | null) => void
   setServerChatCharacterId: (value: string | number | null) => void
   setServerChatAssistantKind: (value: "character" | "persona" | null) => void
@@ -305,7 +305,7 @@ export const ensurePersonaServerChat = async ({
         : personaMemoryMode
 
     publishServerChatState = () => {
-      publish(() => setServerChatId(normalizedId))
+      publish(() => setServerChatId(normalizedId, { preserveTemporaryChat: temporaryChat }))
       publish(() => setServerChatState(normalizeConversationState(createdState)))
       publish(() => setServerChatVersion(createdVersion))
       publish(() => setServerChatTopic(createdTopic))
