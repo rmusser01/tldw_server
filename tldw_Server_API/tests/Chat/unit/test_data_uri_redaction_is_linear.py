@@ -17,29 +17,36 @@ from tldw_Server_API.app.core.Chat import chat_service
 
 # ~510 KB of markers with no comma anywhere: every one of them would rescan to the end.
 _CRAFTED = '"url":"data:image' * 30_000
+# Two shapes: the "url" one engages the endpoint's old "url"-anchored pattern; the quote-free one
+# is a user's text inside one JSON string (its quotes are escaped), so a pattern that stops at a
+# quote but drops the 128-character bound is still caught.
+_CRAFTED_SHAPES = pytest.mark.parametrize("body", [_CRAFTED, "data:image" * 51_000], ids=["url-key", "quote-free"])
 
 
-def _assert_fast(fn) -> None:
+def _assert_fast(fn, body: str) -> None:
     started = time.perf_counter()
-    fn()
+    fn(body)
     elapsed = time.perf_counter() - started
-    assert elapsed < 2.0, f"redaction took {elapsed:.1f}s on {len(_CRAFTED)} chars"
+    assert elapsed < 2.0, f"redaction took {elapsed:.1f}s on {len(body)} chars"
 
 
 @pytest.mark.unit
-def test_chat_service_token_estimate_is_linear():
-    _assert_fast(lambda: chat_service.estimate_tokens_from_json(_CRAFTED))
+@_CRAFTED_SHAPES
+def test_chat_service_token_estimate_is_linear(body):
+    _assert_fast(chat_service.estimate_tokens_from_json, body)
 
 
 @pytest.mark.unit
-def test_chat_endpoint_rate_limit_sanitizer_is_linear():
-    _assert_fast(lambda: chat_endpoint._sanitize_json_for_rate_limit(_CRAFTED))
+@_CRAFTED_SHAPES
+def test_chat_endpoint_rate_limit_sanitizer_is_linear(body):
+    _assert_fast(chat_endpoint._sanitize_json_for_rate_limit, body)
 
 
 @pytest.mark.unit
-def test_request_size_validator_is_linear(monkeypatch):
+@_CRAFTED_SHAPES
+def test_request_size_validator_is_linear(monkeypatch, body):
     monkeypatch.setattr(chat_validators, "MAX_REQUEST_SIZE", 10_000_000)
-    _assert_fast(lambda: chat_validators.validate_request_size(_CRAFTED))
+    _assert_fast(chat_validators.validate_request_size, body)
 
 
 @pytest.mark.unit
