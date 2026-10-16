@@ -173,22 +173,22 @@ export const PlaygroundCockpitShell = ({
           );
   const collapseContextSidechannelLabel = t(
     "cockpit.collapseContextSidechannel",
-    "Collapse context sidechannel",
+    "Hide context",
   );
   const collapseRuntimeSidechannelLabel = t(
     "cockpit.collapseRuntimeSidechannel",
-    "Collapse runtime sidechannel",
+    "Hide chat settings",
   );
   const restoreContextSidechannelLabel = t(
     "cockpit.restoreContextSidechannel",
-    "Restore context sidechannel",
+    "Show context",
   );
   const restoreRuntimeSidechannelLabel = t(
     "cockpit.restoreRuntimeSidechannel",
-    "Restore runtime sidechannel",
+    "Show chat settings",
   );
-  const contextRailTabLabel = t("cockpit.contextRailTab", "Context rail");
-  const runtimeRailTabLabel = t("cockpit.runtimeRailTab", "Runtime rail");
+  const contextRailTabLabel = t("cockpit.contextRailTab", "Context");
+  const runtimeRailTabLabel = t("cockpit.runtimeRailTab", "Chat settings");
   const modeSummaryKey = buildModeSummaryKey(
     focusMode,
     leftRailVisible,
@@ -203,17 +203,17 @@ export const PlaygroundCockpitShell = ({
       : modeSummaryKey === "both-visible"
         ? t(
             "cockpit.cockpitRailsVisibleSummary",
-            "Context and runtime rails visible.",
+            "Context and chat settings visible.",
           )
         : modeSummaryKey === "context-hidden"
           ? t(
               "cockpit.contextRailHiddenSummary",
-              "Context rail hidden. Runtime rail visible.",
+              "Context hidden. Chat settings visible.",
             )
           : modeSummaryKey === "runtime-hidden"
             ? t(
                 "cockpit.runtimeRailHiddenSummary",
-                "Runtime rail hidden. Context rail visible.",
+                "Chat settings hidden. Context visible.",
               )
             : t(
                 "cockpit.cockpitRailsHiddenSummary",
@@ -317,7 +317,7 @@ export const PlaygroundCockpitShell = ({
                   : "text-text-muted hover:bg-bg"
               }`}
             >
-              {t("cockpit.runtime", "Runtime")}
+              {t("cockpit.runtime", "Chat settings")}
             </button>
           </div>
           <p
@@ -416,7 +416,7 @@ export const PlaygroundCockpitShell = ({
           >
             <div className="mb-2 flex min-h-[32px] items-center justify-between gap-2 rounded-md border border-border/70 bg-bg px-2 py-1 text-xs text-text-muted">
               <span className="font-semibold text-text">
-                {t("cockpit.runtime", "Runtime")}
+                {t("cockpit.runtime", "Chat settings")}
               </span>
               <CockpitTooltipButton
                 type="button"

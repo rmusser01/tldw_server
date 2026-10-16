@@ -259,7 +259,7 @@ describe("Playground mature cockpit surfaces", () => {
     const mobilePanels = screen.getByTestId("playground-cockpit-mobile-rails")
     const panels = within(mobilePanels)
     const contextButton = panels.getByRole("button", { name: "Context" })
-    const runtimeButton = panels.getByRole("button", { name: "Runtime" })
+    const runtimeButton = panels.getByRole("button", { name: "Chat settings" })
     const contextPanel = document.getElementById(
       contextButton.getAttribute("aria-controls") ?? "",
     )
@@ -281,7 +281,7 @@ describe("Playground mature cockpit surfaces", () => {
 
     fireEvent.click(runtimeButton)
     expect(onMobilePanelChange).toHaveBeenLastCalledWith("runtime")
-    expect(runtimePanel).toBe(panels.getByRole("region", { name: "Runtime" }))
+    expect(runtimePanel).toBe(panels.getByRole("region", { name: "Chat settings" }))
     expect(contextPanel).not.toBeVisible()
     expect(runtimePanel).toBeVisible()
     expect(contextButton).toHaveAttribute("aria-expanded", "false")
@@ -326,7 +326,7 @@ describe("Playground mature cockpit surfaces", () => {
     ).toHaveTextContent(
       "Context panel active. Composer draft remains available below.",
     )
-    for (const name of ["Context", "Runtime"]) {
+    for (const name of ["Context", "Chat settings"]) {
       expect(panels.getByRole("button", { name })).toHaveClass("min-h-[44px]")
     }
 
@@ -334,8 +334,8 @@ describe("Playground mature cockpit surfaces", () => {
     draft.focus()
     rerender(shell("runtime"))
     expect(mobilePanels).toHaveAttribute("data-mobile-panel", "runtime")
-    expect(panels.getByRole("region", { name: "Runtime" })).toBeVisible()
-    expect(panels.getByRole("button", { name: "Runtime" })).toHaveAttribute(
+    expect(panels.getByRole("region", { name: "Chat settings" })).toBeVisible()
+    expect(panels.getByRole("button", { name: "Chat settings" })).toHaveAttribute(
       "aria-expanded",
       "true",
     )

@@ -96,7 +96,7 @@
     }
   },
   "connectionCard": {
-    "headlineMissing": "Connect tldw Assistant to your server",
+    "headlineMissing": "Connect to your server to start chatting",
     "headlineSearching": "Searching for your tldw server…",
     "headlineConnected": "Connected to your tldw server",
     "headlineError": "Can’t reach your tldw server",

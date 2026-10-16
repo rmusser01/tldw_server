@@ -519,6 +519,38 @@ describe("RolePlaySetupDrawer", () => {
     vi.unstubAllGlobals()
   })
 
+  it("starts with character and keeps preview and reuse behind compact disclosures", async () => {
+    actorSettingsMocks.getActorSceneForChat.mockImplementation(async ({ target }) =>
+      sceneRead(target, createDefaultActorSettings())
+    )
+    renderDrawer({
+      onSavedSetupDraftNameChange: vi.fn(),
+      onSaveRolePlaySetup: vi.fn(),
+      onPreviewSavedSetup: vi.fn(),
+      onApplySavedSetup: vi.fn(),
+      onRenameSavedSetup: vi.fn(),
+      onDeleteSavedSetup: vi.fn()
+    })
+    await screen.findByRole("dialog", { name: "Role-play setup" })
+    await waitFor(() => expect(actorSettingsMocks.getActorSceneForChat).toHaveBeenCalled())
+
+    const character = screen.getByTestId("role-play-identity-select")
+    const preview = screen.getByText("Preview changes")
+    const reuse = screen.getByText("Saved role-play setups", { selector: "summary" })
+    expect(character.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(character.compareDocumentPosition(reuse) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(preview.closest("details")).not.toHaveAttribute("open")
+    expect(reuse.closest("details")).not.toHaveAttribute("open")
+    const sceneDetails = screen.getByText("Scene details").closest("details")
+    expect(sceneDetails).not.toHaveAttribute("open")
+    fireEvent.click(screen.getByText("Scene details"))
+    expect(sceneDetails).toHaveAttribute("open")
+    fireEvent.change(screen.getByRole("textbox", { name: "Scene notes" }), {
+      target: { value: "A staged scene note" }
+    })
+    expect(sceneDetails).toHaveAttribute("open")
+  })
+
   it("loads actor settings and renders before/after role-play state", async () => {
     renderDrawer()
 
@@ -937,7 +969,7 @@ describe("RolePlaySetupDrawer", () => {
     })
 
     await screen.findByText(/1 detail/)
-    expect(screen.getByText("Saved role-play setups")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("Saved role-play setups", { selector: "summary" }))
     expect(
       screen.getByRole("list", { name: "Saved role-play setup list" })
     ).toBeInTheDocument()

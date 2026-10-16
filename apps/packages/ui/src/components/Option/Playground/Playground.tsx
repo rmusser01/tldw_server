@@ -1,4 +1,5 @@
 import { useConnectionState } from "@/hooks/useConnectionState";
+import { requestSettingsNavigation } from "@/utils/settings-return";
 import { ConnectionPhase } from "@/types/connection";
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
@@ -2790,7 +2791,7 @@ const PlaygroundContent = () => {
   const standardChatModelUsability = React.useMemo(
     () =>
       buildChatModelUsability({
-        isServerConnected: serverReadinessState !== "blocked",
+        isServerConnected: catalogConnectionReady && serverReadinessState !== "blocked",
         selectedModel,
         explicitProvider: apiProvider,
         availableModels: readinessChatModels,
@@ -2806,6 +2807,7 @@ const PlaygroundContent = () => {
       chatModelsFetching,
       chatModelsError,
       serverReadinessState,
+      catalogConnectionReady,
     ],
   );
   const savedRoleplayConversation = isSavedRoleplayConversation(historySelection);
@@ -2817,11 +2819,11 @@ const PlaygroundContent = () => {
     () =>
       savedRoleplayConversation
         ? buildCharacterChatSendReadiness({
-            isServerConnected: serverReadinessState !== "blocked",
+            isServerConnected: catalogConnectionReady && serverReadinessState !== "blocked",
             isSendBlocked: savedRoleplaySendBlocked || Boolean(streaming || isProcessing || isLoading),
           })
         : buildCharacterChatReadiness({
-        isServerConnected: serverReadinessState !== "blocked",
+        isServerConnected: catalogConnectionReady && serverReadinessState !== "blocked",
         selectedCharacter: activeCharacterSelection,
         requireExplicitProvider: true,
         selectedModel,
@@ -2845,6 +2847,7 @@ const PlaygroundContent = () => {
       chatModelsError,
       activeCharacterSelection,
       serverReadinessState,
+      catalogConnectionReady,
       streaming,
     ],
   );
@@ -3350,14 +3353,8 @@ const PlaygroundContent = () => {
     });
   }, [selectedModelSettingsScope, setActiveSettingsScope]);
   const openServerSettingsFromCockpit = React.useCallback(() => {
-    if (typeof setActiveSettingsScope === "function") {
-      setActiveSettingsScope(null);
-    }
-    openModelSettings({
-      returnFocusSelector: COCKPIT_MODEL_SETTINGS_TRIGGER_SELECTOR,
-      settingsScope: null,
-    });
-  }, [setActiveSettingsScope]);
+    if (requestSettingsNavigation("/settings/tldw")) navigate("/settings/tldw");
+  }, [navigate]);
   const openCharacterSelectorFromReadiness = React.useCallback(() => {
     openAssistantSelector({
       tab: "character",
@@ -4092,6 +4089,7 @@ const PlaygroundContent = () => {
               )}
               <div className="min-h-0 overflow-y-auto overscroll-contain">
                 <PlaygroundForm
+                  connectionSetupInTimeline={showStarterDeck && !characterWorkflowActive}
                   onCharacterRouteApplyReady={onCharacterRouteApplyReady}
                   droppedFiles={droppedFiles}
                   stickyDockEnabled={stickyChatInput}

@@ -82,7 +82,7 @@ async function expectCharacterSessionsReachable(page: Page): Promise<void> {
 
   // Rail visibility is independent of focus mode and defaults to collapsed.
   const restoreContext = page.getByRole("button", {
-    name: "Restore context sidechannel", exact: true,
+    name: "Show context", exact: true,
   })
   if (await restoreContext.isVisible()) {
     await restoreContext.click()

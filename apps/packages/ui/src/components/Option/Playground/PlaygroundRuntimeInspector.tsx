@@ -300,7 +300,7 @@ export const PlaygroundRuntimeInspector = ({
     >
       <PlaygroundRailSection
         label={t("cockpit.runtimeState", "Runtime state")}
-        title={t("cockpit.runtime", "Runtime")}
+        title={t("cockpit.runtime", "Chat settings")}
       >
         <div className="mt-1 flex items-start justify-between gap-2">
           <div className="min-w-0">

@@ -330,7 +330,7 @@ test.describe('Chat mobile first action', () => {
             const panels = page.getByTestId('playground-cockpit-mobile-rails');
             await expect(panels.getByRole('button')).toHaveCount(2);
             await expect(panels.getByRole('tab')).toHaveCount(0);
-            for (const name of ['Context', 'Runtime'])
+            for (const name of ['Context', 'Chat settings'])
               await expect(
                 panels.getByRole('button', { name, exact: true }),
               ).toHaveAttribute('aria-expanded', 'false');

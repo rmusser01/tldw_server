@@ -14,6 +14,8 @@ import { useDemoMode } from "@/context/demo-mode";
 import { useHelpModal } from "@/store/tutorials";
 import { buildResearchLaunchPath } from "@/routes/route-paths";
 import { requestQuickIngestOpen } from "@/utils/quick-ingest-open";
+import { useIsConnected } from "@/hooks/useConnectionState";
+import { requestSettingsNavigation } from "@/utils/settings-return";
 import { EmptyState } from "@/components/ui/feedback";
 
 const actionButtonFocusClassName =
@@ -22,6 +24,7 @@ const actionButtonFocusClassName =
 export const PlaygroundEmpty = () => {
   const { t } = useTranslation(["playground", "common", "option"]);
   const { demoEnabled } = useDemoMode();
+  const isConnected = useIsConnected();
   const { open: openHelpModal } = useHelpModal();
   const navigate = useNavigate();
   const [modesExpanded, setModesExpanded] = React.useState(false);
@@ -139,6 +142,17 @@ export const PlaygroundEmpty = () => {
     : t("playground:empty.description", {
         defaultValue: "Choose a model, then write your first message below.",
       });
+
+  if (!demoEnabled && !isConnected) {
+    return <div className="mx-auto w-full max-w-xl px-4 py-4">
+      <EmptyState data-testid="playground-empty-shell" icon={MessageSquarePlus}
+        title={t("playground:empty.connectTitle", "Connect to start chatting")}
+        description={t("playground:empty.connectDescription", "Connect to your tldw server, then choose a model and start chatting.")}
+        primaryAction={{ label: t("playground:empty.connectAction", "Connect server"),
+          onClick: () => { if (requestSettingsNavigation("/settings/tldw")) navigate("/settings/tldw"); } }}
+        variant="inline" size="sm" />
+    </div>;
+  }
 
   return (
     <div className="mx-auto mt-1 max-w-5xl px-0 sm:mt-10 sm:px-4">

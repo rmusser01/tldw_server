@@ -112,7 +112,7 @@ describe("Playground cockpit rail restore tabs", () => {
     const contextRestore = screen.getByTestId(
       "playground-cockpit-left-rail-restore",
     );
-    expect(contextRestore).toHaveTextContent("Context rail");
+    expect(contextRestore).toHaveTextContent("Context");
     expect(contextRestore.parentElement).toHaveClass(
       ...COCKPIT_LEFT_RESTORE_WRAPPER_CLASS.split(" "),
     );
@@ -149,7 +149,7 @@ describe("Playground cockpit rail restore tabs", () => {
     const runtimeRestore = screen.getByTestId(
       "playground-cockpit-right-rail-restore",
     );
-    expect(runtimeRestore).toHaveTextContent("Runtime rail");
+    expect(runtimeRestore).toHaveTextContent("Chat settings");
     expect(runtimeRestore.parentElement).toHaveClass(
       "absolute",
       "right-0",
@@ -180,8 +180,8 @@ describe("Playground cockpit rail restore tabs", () => {
       "playground-cockpit-right-rail-restore",
     );
 
-    expect(contextRestore).toHaveTextContent("Context rail");
-    expect(runtimeRestore).toHaveTextContent("Runtime rail");
+    expect(contextRestore).toHaveTextContent("Context");
+    expect(runtimeRestore).toHaveTextContent("Chat settings");
     expect(
       screen.queryByTestId("playground-collapsed-composition-summary"),
     ).not.toBeInTheDocument();
@@ -214,7 +214,7 @@ describe("Playground cockpit rail restore tabs", () => {
       name: "Context",
     });
     const runtimeButton = within(mobileRails).getByRole("button", {
-      name: "Runtime",
+      name: "Chat settings",
     });
     const contextPanel = document.getElementById(
       contextButton.getAttribute("aria-controls") ?? "",

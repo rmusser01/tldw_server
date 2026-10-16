@@ -2096,5 +2096,17 @@
   },
   "notification_webClipAnalyzeNewChatRequired": {
     "message": "Start a new chat to analyze this clip. Your current conversation and saved clip are kept."
+  },
+  "characterSelect_charactersLoadFailed": {
+    "message": "Characters could not be loaded. Check your connection, then retry."
+  },
+  "characterSelect_personasLoadFailed": {
+    "message": "Personas could not be loaded. Check your connection, then retry."
+  },
+  "firstRun_headline": {
+    "message": "Finish setup to start chatting"
+  },
+  "firstRun_description": {
+    "message": "Finish setup in Options to connect to your tldw server, then return here to chat."
   }
 }

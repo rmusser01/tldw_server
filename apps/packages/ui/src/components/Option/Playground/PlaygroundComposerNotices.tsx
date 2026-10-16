@@ -178,6 +178,7 @@ export type PlaygroundComposerNoticesProps = {
   sessionInsightsTotalTokens: number
   jsonMode: boolean
   isConnectionReady: boolean
+  showDisconnectedNotice?: boolean
   connectionUxState: string
   isProMode: boolean
   selectedModel: string | null | undefined
@@ -390,6 +391,7 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
     sessionInsightsTotalTokens,
     jsonMode,
     isConnectionReady,
+    showDisconnectedNotice = true,
     connectionUxState,
     isProMode,
     selectedModel,
@@ -730,7 +732,7 @@ export const PlaygroundComposerNotices = React.memo(function PlaygroundComposerN
           </button>
         </div>
       )}
-      {!isConnectionReady && (
+      {!isConnectionReady && showDisconnectedNotice && (
         <Alert
           variant="info"
           role="status"

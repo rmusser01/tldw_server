@@ -145,6 +145,13 @@ const createProps = (
   ...overrides
 })
 
+const openCustomization = () => {
+  fireEvent.click(screen.getByRole("button", { name: "Customize chat" }));
+  const region = screen.queryByRole("region", { name: "Customize chat" });
+  const disclosure = region && within(region).getByText("Advanced customization");
+  if (disclosure && !disclosure.closest("details")?.open) fireEvent.click(disclosure);
+};
+
 describe("ComposerToolbar web search", () => {
   it.each([
     {
@@ -207,7 +214,7 @@ describe("ComposerToolbar web search", () => {
         })}
       />
     )
-    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    openCustomization()
 
     expect(promptSelectMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -222,7 +229,7 @@ describe("ComposerToolbar web search", () => {
     const openListener = vi.fn()
     window.addEventListener("tldw:open-model-selector", openListener)
     render(<ComposerToolbar {...createProps()} />)
-    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    openCustomization()
 
     const promptProps = promptSelectMock.mock.calls.at(-1)?.[0] as {
       onSelectModel?: () => void
@@ -235,7 +242,7 @@ describe("ComposerToolbar web search", () => {
 
   it("owns the dropdown assistant selector used by chat starter events", () => {
     render(<ComposerToolbar {...createProps()} />)
-    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    openCustomization()
 
     expect(screen.getByTestId("character-select")).toHaveAttribute(
       "data-variant",
@@ -314,12 +321,12 @@ describe("ComposerToolbar web search", () => {
 
   it("labels customization by user tasks and keeps Send outside it", () => {
     render(<ComposerToolbar {...createProps({ modeLauncherButton: <button>Modes</button>, voiceChatButton: <button>Start voice chat</button> })} />)
-    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    openCustomization()
     const research = screen.getByRole("group", { name: "Research & context" })
     const response = screen.getByRole("group", { name: "Response settings" })
-    expect(research).toContainElement(screen.getByRole("button", { name: "Modes" }))
+    expect(screen.getByRole("group", { name: "Advanced composer controls" })).toContainElement(screen.getByRole("button", { name: "Modes" }))
     expect(research).toContainElement(screen.getByRole("button", { name: "MCP" }))
-    expect(response).toContainElement(screen.getByRole("button", { name: "Start voice chat" }))
+    expect(screen.getByRole("group", { name: "Advanced composer controls" })).toContainElement(screen.getByRole("button", { name: "Start voice chat" }))
     expect(response).toContainElement(screen.getByRole("button", { name: "Chat Settings" }))
     expect(response).not.toContainElement(screen.getByRole("button", { name: "Send" }))
   })
@@ -344,7 +351,7 @@ describe("ComposerToolbar web search", () => {
   it("reuses role-play setup inside the Casual character group", () => {
     const setup = vi.fn()
     render(<ComposerToolbar {...createProps({ rolePlayActions: { onOpenRolePlaySetup: setup } })} />)
-    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    openCustomization()
     fireEvent.click(within(screen.getByRole("group", { name: "Character & your role" })).getByRole("button", { name: "Role-play setup" }))
     expect(setup).toHaveBeenCalledOnce()
   })
@@ -369,17 +376,16 @@ describe("ComposerToolbar web search", () => {
 
   it("keeps Modes and MCP in the research customization group", () => {
     render(<ComposerToolbar {...createProps({ modeLauncherButton: <button>Modes</button> })} />)
-    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    openCustomization()
     const group = screen.getByRole("group", { name: "Research & context" })
-    expect(group).toContainElement(screen.getByRole("button", { name: "Modes" }))
+    expect(screen.getByRole("group", { name: "Advanced composer controls" })).toContainElement(screen.getByRole("button", { name: "Modes" }))
     expect(group).toContainElement(screen.getByRole("button", { name: "MCP" }))
   })
 
   it("keeps idle voice inside Customize and Attach and Send in the primary row", () => {
     render(<ComposerToolbar {...createProps({ voiceChatButton: <button>Start voice chat</button> })} />)
-    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
-    const response = screen.getByRole("group", { name: "Response settings" })
-    expect(response).toContainElement(screen.getByRole("button", { name: "Start voice chat" }))
+    openCustomization()
+    expect(screen.getByRole("group", { name: "Advanced composer controls" })).toContainElement(screen.getByRole("button", { name: "Start voice chat" }))
     const primary = screen.getByRole("group", { name: "Composer quick actions" })
     expect(primary).toContainElement(screen.getByRole("button", { name: "Attach" }))
     expect(primary).toContainElement(screen.getByRole("button", { name: "Send" }))
@@ -387,7 +393,7 @@ describe("ComposerToolbar web search", () => {
 
   it("keeps Customize after primary controls and active context", () => {
     render(<ComposerToolbar {...createProps()} />)
-    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    openCustomization()
     const primary = screen.getByRole("group", { name: "Composer quick actions" })
     const context = screen.getByTestId("composer-context-strip")
     const customize = screen.getByRole("region", { name: "Customize chat" })
@@ -405,8 +411,8 @@ describe("ComposerToolbar web search", () => {
 
   it("keeps deep research reachable in the research group", () => {
     render(<ComposerToolbar {...createProps({ researchLaunchButton: <button>Deep Research</button> })} />)
-    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
-    expect(screen.getByRole("group", { name: "Research & context" })).toContainElement(screen.getByRole("button", { name: "Deep Research" }))
+    openCustomization()
+    expect(screen.getByRole("group", { name: "Advanced composer controls" })).toContainElement(screen.getByRole("button", { name: "Deep Research" }))
   })
 
   it("does not render a standalone Generate control in the toolbar row", () => {
@@ -418,14 +424,14 @@ describe("ComposerToolbar web search", () => {
   it("keeps current model settings reachable in Response settings", () => {
     const settings = vi.fn()
     render(<ComposerToolbar {...createProps({ onOpenModelSettings: settings })} />)
-    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    openCustomization()
     fireEvent.click(within(screen.getByRole("group", { name: "Response settings" })).getByRole("button", { name: "Chat Settings" }))
     expect(settings).toHaveBeenCalledOnce()
   })
 
   it("wraps customization control groups without a horizontal scrolling row", () => {
     render(<ComposerToolbar {...createProps()} />)
-    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    openCustomization()
     for (const name of ["Research & context", "Character & your role", "Response settings"]) {
       const group = screen.getByRole("group", { name })
       expect(group.querySelector("div")).toHaveClass("flex-wrap", "min-w-0")
@@ -435,7 +441,7 @@ describe("ComposerToolbar web search", () => {
 
   it("exposes every existing secondary editor once in its customization group", () => {
     render(<ComposerToolbar {...createProps()} />)
-    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    openCustomization()
     expect(screen.getByRole("group", { name: "Research & context" })).toContainElement(screen.getByRole("button", { name: "MCP" }))
     expect(screen.getByRole("group", { name: "Response settings" })).toContainElement(screen.getByTestId("prompt-select"))
     expect(screen.getByRole("group", { name: "Character & your role" })).toContainElement(screen.getByTestId("character-select"))
@@ -449,6 +455,7 @@ describe("ComposerToolbar web search", () => {
     render(<ComposerToolbar {...createProps()} />)
 
     fireEvent.click(screen.getByTestId("composer-casual-advanced-chip"))
+    fireEvent.click(screen.getByText("Advanced customization"))
     const toggle = screen.getByTestId("composer-formatting-guide-toggle")
     expect(toggle).toHaveAttribute("aria-pressed", "false")
 
@@ -621,7 +628,7 @@ describe("ComposerToolbar web search", () => {
       />
     )
 
-    fireEvent.click(screen.getByRole("button", { name: "Customize chat" }))
+    openCustomization()
     expect(screen.getByText("Modes")).toBeInTheDocument()
     expect(screen.getByText("Compare")).toBeInTheDocument()
     const contextStrip = screen.getByTestId("composer-context-strip")

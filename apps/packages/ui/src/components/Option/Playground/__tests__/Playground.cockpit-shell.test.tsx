@@ -546,7 +546,7 @@ describe("Playground cockpit shell", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByTestId("playground-cockpit-mode-summary"),
-    ).toHaveTextContent("Context and runtime rails visible.");
+    ).toHaveTextContent("Context and chat settings visible.");
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
     expect(
@@ -1801,6 +1801,8 @@ describe("Playground cockpit shell", () => {
       name: "Ariadne",
     };
     const modelSettingsListener = vi.fn();
+    const serverSettingsListener = vi.fn();
+    window.addEventListener("tldw:settings-navigation-request", serverSettingsListener);
     window.addEventListener("tldw:open-model-settings", modelSettingsListener);
 
     try {
@@ -1823,11 +1825,13 @@ describe("Playground cockpit shell", () => {
         screen.getByRole("button", { name: "Open server settings" }),
       );
 
-      const event = modelSettingsListener.mock.calls[0]?.[0] as CustomEvent;
+      expect(modelSettingsListener).not.toHaveBeenCalled();
+      const event = serverSettingsListener.mock.calls[0]?.[0] as CustomEvent;
       expect(event.detail).toMatchObject({
-        settingsScope: null,
+        destination: "/settings/tldw",
       });
     } finally {
+      window.removeEventListener("tldw:settings-navigation-request", serverSettingsListener);
       window.removeEventListener(
         "tldw:open-model-settings",
         modelSettingsListener,
@@ -1989,7 +1993,7 @@ describe("Playground cockpit shell", () => {
     );
 
     const contextCollapseTooltips = await screen.findAllByRole("tooltip", {
-      name: "Collapse context sidechannel",
+      name: "Hide context",
     });
     const tooltipIds = contextCollapseTooltips.map((tooltip) => tooltip.id);
 
@@ -2048,13 +2052,13 @@ describe("Playground cockpit shell", () => {
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-left-rail")).getByRole(
         "button",
-        { name: /collapse context sidechannel/i },
+        { name: /hide context/i },
       ),
     );
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-right-rail")).getByRole(
         "button",
-        { name: /collapse runtime sidechannel/i },
+        { name: /hide chat settings/i },
       ),
     );
 
@@ -2120,7 +2124,7 @@ describe("Playground cockpit shell", () => {
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-left-rail")).getByRole(
         "button",
-        { name: /collapse context sidechannel/i },
+        { name: /hide context/i },
       ),
     );
 
@@ -2129,7 +2133,7 @@ describe("Playground cockpit shell", () => {
     });
     expect(
       screen.getByTestId("playground-cockpit-mode-summary"),
-    ).toHaveTextContent("Context rail hidden. Runtime rail visible.");
+    ).toHaveTextContent("Context hidden. Chat settings visible.");
     expect(
       screen.getByTestId("playground-cockpit-right-rail"),
     ).toBeInTheDocument();
@@ -2137,13 +2141,13 @@ describe("Playground cockpit shell", () => {
       false,
     );
     expect(
-      screen.getByRole("button", { name: /restore context sidechannel/i }),
+      screen.getByRole("button", { name: /show context/i }),
     ).toBeInTheDocument();
 
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-right-rail")).getByRole(
         "button",
-        { name: /collapse runtime sidechannel/i },
+        { name: /hide chat settings/i },
       ),
     );
 
@@ -2160,10 +2164,10 @@ describe("Playground cockpit shell", () => {
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole("button", { name: /restore context sidechannel/i }),
+      screen.getByRole("button", { name: /show context/i }),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: /restore runtime sidechannel/i }),
+      screen.getByRole("button", { name: /show chat settings/i }),
     );
 
     await waitFor(() => {
@@ -2189,10 +2193,10 @@ describe("Playground cockpit shell", () => {
       "playground-cockpit-left-rail",
     );
     const collapseContextButton = within(contextRail).getByRole("button", {
-      name: /collapse context sidechannel/i,
+      name: /hide context/i,
     });
     const collapseContextTooltip = screen.getByRole("tooltip", {
-      name: "Collapse context sidechannel",
+      name: "Hide context",
     });
     expect(collapseContextButton).toHaveAttribute(
       "aria-describedby",
@@ -2205,10 +2209,10 @@ describe("Playground cockpit shell", () => {
       expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
     });
     const restoreContextButton = screen.getByRole("button", {
-      name: /restore context sidechannel/i,
+      name: /show context/i,
     });
     const restoreContextTooltip = screen.getByRole("tooltip", {
-      name: "Restore context sidechannel",
+      name: "Show context",
     });
     expect(restoreContextButton).toHaveAttribute(
       "aria-describedby",
@@ -2240,11 +2244,11 @@ describe("Playground cockpit shell", () => {
     const collapseRuntimeButton = within(runtimeRailAfterRestore).getByRole(
       "button",
       {
-        name: /collapse runtime sidechannel/i,
+        name: /hide chat settings/i,
       },
     );
     const collapseRuntimeTooltip = screen.getByRole("tooltip", {
-      name: "Collapse runtime sidechannel",
+      name: "Hide chat settings",
     });
     expect(collapseRuntimeButton).toHaveAttribute(
       "aria-describedby",
@@ -2257,10 +2261,10 @@ describe("Playground cockpit shell", () => {
       expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
     });
     const restoreRuntimeButton = screen.getByRole("button", {
-      name: /restore runtime sidechannel/i,
+      name: /show chat settings/i,
     });
     const restoreRuntimeTooltip = screen.getByRole("tooltip", {
-      name: "Restore runtime sidechannel",
+      name: "Show chat settings",
     });
     expect(restoreRuntimeButton).toHaveAttribute(
       "aria-describedby",

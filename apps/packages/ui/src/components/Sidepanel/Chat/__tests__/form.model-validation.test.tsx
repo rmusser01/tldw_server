@@ -14,6 +14,9 @@ import {
 import { X } from "lucide-react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
+import { EmptySidePanel } from "../empty"
+import { useConnectionStore } from "@/store/connection"
+import { ConnectionPhase } from "@/types/connection"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { ModelSelect } from "@/components/Common/ModelSelect"
 import {
@@ -184,6 +187,16 @@ const useSidebarValidation = new Function(
   trackedSelectionLoading: boolean
 }
 
+// Execute the deployed composer-message effect with the real controlled form.
+const messageEffect = nodes.find(node => ts.isExpressionStatement(node) &&
+  ts.isCallExpression(node.expression) && node.expression.expression.getText(ast) === "React.useEffect" &&
+  node.getText(ast).includes('"tldw:set-composer-message"'));
+if (!messageEffect) throw new Error("Missing actual composer message effect");
+const useActualComposerMessage = new Function("React", ts.transpileModule(
+  `return function useActualComposerMessage(form, textareaRef) { ${messageEffect.getText(ast)} }`,
+  { compilerOptions: { target: ts.ScriptTarget.ES2022 } }
+).outputText)(React) as (form: ReturnType<typeof useSimpleForm<{message: string; image: string}>>, ref: React.RefObject<HTMLTextAreaElement>) => void;
+
 function Harness({
   model = "",
   busy = false,
@@ -193,9 +206,13 @@ function Harness({
   text = "keep my draft",
   image = "",
   protectedHistory = false,
+  starters = false,
   personaMode = "none" as "none" | "tracked" | "overlay"
 }) {
   const form = useSimpleForm({ initialValues: { message: text, image } })
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  useActualComposerMessage(form, textareaRef);
+  const [controlsOpen, setControlsOpen] = React.useState(false);
   const [selectedModel, setSelectedModel] = React.useState(model)
   mocks.useMessage.mockReturnValue({ selectedModel, setSelectedModel: async (next: string) => { setSelectedModel(next); return true } })
   const { submit, inline, catalogReady, trackedSelectionLoading } = useSidebarValidation({
@@ -210,7 +227,12 @@ function Harness({
   })
   return (
     <>
-      <textarea aria-label="Message" {...form.getInputProps("message")} />
+      {starters && <>
+        <EmptySidePanel inputRef={textareaRef} />
+        <button onClick={() => setControlsOpen(true)}>Character controls</button>
+        {controlsOpen && <div role="dialog" aria-label="Character controls"><button onClick={() => setControlsOpen(false)}>Close character controls</button></div>}
+      </>}
+      <textarea ref={textareaRef} aria-label="Message" {...form.getInputProps("message")} />
       <button
         onClick={() => void submit(form.values.message, form.values.image)}
       >
@@ -238,6 +260,23 @@ const waitForCatalog = () =>
   )
 
 describe("sidebar model validation", () => {
+  it.each([["chat-suggestion-1", "Summarize this page"], ["chat-suggestion-2", "What are the key points?"]])("retains starter %s through controls and submits it exactly once", async (id, message) => {
+    const previous = useConnectionStore.getState().state;
+    useConnectionStore.setState({ state: { ...previous, phase: ConnectionPhase.CONNECTED, isConnected: true, serverUrl: "https://starter-fixture.example" } });
+    try {
+      renderHarness(<Harness model="ready-model" text="" starters />);
+      await waitForCatalog();
+      fireEvent.click(screen.getByTestId(id));
+      expect(screen.getByLabelText("Message")).toHaveValue(message);
+      fireEvent.click(screen.getByRole("button", { name: "Character controls", exact: true }));
+      fireEvent.click(screen.getByRole("button", { name: "Close character controls" }));
+      expect(screen.getByLabelText("Message")).toHaveValue(message);
+      fireEvent.click(screen.getByRole("button", { name: "Send", exact: true }));
+      await waitFor(() => expect(mocks.send).toHaveBeenCalledExactlyOnceWith(message, "", undefined));
+      expect(mocks.queue).not.toHaveBeenCalled();
+    } finally { useConnectionStore.setState({ state: previous }); }
+  });
+
   it.each(["failed", "offline"])("ends compact tracked waiting when discovery is %s", async mode => {
     if (mode === "failed") mocks.fetchChatModels.mockRejectedValueOnce(new Error("Declared model discovery failure"))
     renderHarness(<Harness protectedHistory connected={mode !== "offline"} />)

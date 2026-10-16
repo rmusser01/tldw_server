@@ -573,6 +573,8 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
     stagedIdentity,
     t
   ])
+  const previewChanged = (["identity", "behavior", "scene", "generationStyle", "context"] as const)
+    .some(key => JSON.stringify(beforeState[key]) !== JSON.stringify(afterState[key]))
 
   const updateSceneEnabled = React.useCallback((checked: boolean) => {
     stage(() => setSceneDraft((current) => ({ ...getDraft(current), isEnabled: checked })))
@@ -1242,32 +1244,10 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
           <p role="status">{t("playground:actor.defaultUnavailable",
             "Character defaults are unavailable. You can still edit and save this scene.")}</p>
         ) : null}
-        <RolePlaySetupPreview before={beforeState} after={afterState} />
-
-        {onSaveRolePlaySetup &&
-        onSavedSetupDraftNameChange &&
-        onPreviewSavedSetup &&
-        onApplySavedSetup &&
-        onRenameSavedSetup &&
-        onDeleteSavedSetup ? (
-          <SavedRolePlaySetupsPanel
-            setups={savedRolePlaySetups}
-            draftName={savedSetupDraftName}
-            nameFallback={savedSetupNameFallback}
-            onDraftNameChange={onSavedSetupDraftNameChange}
-            onSaveCurrent={handleSaveCurrentRolePlaySetup}
-            onPreviewSetup={onPreviewSavedSetup}
-            onApplySetup={handleApplySavedSetup}
-            onRenameSetup={onRenameSavedSetup}
-            onDeleteSetup={onDeleteSavedSetup}
-            t={t}
-          />
-        ) : null}
-
         <section
           aria-label={t("playground:composer.rolePlayLayers", "Role-play layers")}
           className="space-y-2 rounded-md border border-border bg-surface p-3">
-          <div className="grid gap-3 sm:grid-cols-2">
+          <div className="grid gap-3">
             <div className="space-y-1">
               <div className="text-xs font-medium text-text">
                 {t("playground:composer.context.character", "Character")}
@@ -1298,7 +1278,78 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
               </Button>
             </div>
           </div>
+        </section>
 
+        <section
+          aria-label={t("playground:composer.context.scene", "Scene")}
+          className="space-y-3 rounded-md border border-border bg-surface p-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-text">
+                {t("playground:composer.context.scene", "Scene")}
+              </h3>
+              <p className="text-xs text-text-muted">
+                {scenePreview.tokenCount > 0
+                  ? `${scenePreview.tokenCount} tokens`
+                  : scenePreview.active
+                    ? t("playground:composer.sceneDraftEnabled", "Scene draft enabled")
+                    : t("playground:composer.sceneInactive", "No scene draft")}
+              </p>
+            </div>
+            <Switch
+              checked={draft.isEnabled}
+              onChange={updateSceneEnabled}
+              aria-label={t("playground:composer.sceneEnabled", "Scene enabled")}
+            />
+          </div>
+
+          <details open={draft.isEnabled} className="space-y-3">
+            <summary className="cursor-pointer text-xs font-medium text-text-muted">
+              {t("playground:composer.sceneDetails", "Scene details")}
+            </summary>
+            <Input.TextArea
+              aria-label={t("playground:composer.sceneNotes", "Scene notes")}
+              value={draft.notes}
+              onChange={updateSceneNotes}
+              rows={3}
+              placeholder={t(
+                "playground:composer.sceneNotesPlaceholder",
+                "Describe the current scene context."
+              )}
+            />
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              {visibleAspects.map((aspect) => (
+                <label key={aspect.id} className="space-y-1 text-xs text-text-muted">
+                  <span>{aspect.name}</span>
+                  <Input
+                    aria-label={aspect.name}
+                    value={aspect.value}
+                    onChange={(event) =>
+                      updateAspectValue(aspect.id, event.target.value)
+                    }
+                  />
+                </label>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <Button onClick={() => stage(() => setSceneDraft(clearRolePlayScene(sceneDraft)))}>
+                {t("playground:composer.clearScene", "Clear scene")}
+              </Button>
+              <Button onClick={() => stage(() => setSceneDraft(resetRolePlayScene()))}>
+                {t("playground:composer.resetScene", "Reset scene")}
+              </Button>
+            </div>
+          </details>
+        </section>
+
+        <section
+          aria-label={t("playground:presets.generationStyle", "Generation style")}
+          className="space-y-3 rounded-md border border-border bg-surface p-3">
+          <h3 className="text-sm font-semibold text-text">
+            {t("playground:presets.generationStyle", "Generation style")}
+          </h3>
           <div
             role="radiogroup"
             aria-label={t(
@@ -1357,65 +1408,37 @@ export const RolePlaySetupDrawer: React.FC<RolePlaySetupDrawerProps> = ({
           </div>
         </section>
 
-        <section
-          aria-label={t("playground:composer.context.scene", "Scene")}
-          className="space-y-3 rounded-md border border-border bg-surface p-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-semibold text-text">
-                {t("playground:composer.context.scene", "Scene")}
-              </h3>
-              <p className="text-xs text-text-muted">
-                {scenePreview.tokenCount > 0
-                  ? `${scenePreview.tokenCount} tokens`
-                  : scenePreview.active
-                    ? t("playground:composer.sceneDraftEnabled", "Scene draft enabled")
-                    : t("playground:composer.sceneInactive", "No scene draft")}
-              </p>
-            </div>
-            <Switch
-              checked={draft.isEnabled}
-              onChange={updateSceneEnabled}
-              aria-label={t("playground:composer.sceneEnabled", "Scene enabled")}
+        <details open={previewChanged} className="space-y-2">
+          <summary className="cursor-pointer rounded-md border border-border bg-surface p-3 text-sm font-semibold text-text">
+            {t("playground:composer.previewChanges", "Preview changes")}
+          </summary>
+          <RolePlaySetupPreview before={beforeState} after={afterState} />
+        </details>
+
+        {onSaveRolePlaySetup &&
+        onSavedSetupDraftNameChange &&
+        onPreviewSavedSetup &&
+        onApplySavedSetup &&
+        onRenameSavedSetup &&
+        onDeleteSavedSetup ? (
+          <details open={savedRolePlaySetups.length > 0} className="space-y-2">
+            <summary className="cursor-pointer rounded-md border border-border bg-surface p-3 text-sm font-semibold text-text">
+              {t("playground:composer.savedRolePlaySetups", "Saved role-play setups")}
+            </summary>
+            <SavedRolePlaySetupsPanel
+              setups={savedRolePlaySetups}
+              draftName={savedSetupDraftName}
+              nameFallback={savedSetupNameFallback}
+              onDraftNameChange={onSavedSetupDraftNameChange}
+              onSaveCurrent={handleSaveCurrentRolePlaySetup}
+              onPreviewSetup={onPreviewSavedSetup}
+              onApplySetup={handleApplySavedSetup}
+              onRenameSetup={onRenameSavedSetup}
+              onDeleteSetup={onDeleteSavedSetup}
+              t={t}
             />
-          </div>
-
-          <Input.TextArea
-            aria-label={t("playground:composer.sceneNotes", "Scene notes")}
-            value={draft.notes}
-            onChange={updateSceneNotes}
-            rows={3}
-            placeholder={t(
-              "playground:composer.sceneNotesPlaceholder",
-              "Describe the current scene context."
-            )}
-          />
-
-          <div className="grid gap-2 sm:grid-cols-2">
-            {visibleAspects.map((aspect) => (
-              <label key={aspect.id} className="space-y-1 text-xs text-text-muted">
-                <span>{aspect.name}</span>
-                <Input
-                  aria-label={aspect.name}
-                  value={aspect.value}
-                  onChange={(event) =>
-                    updateAspectValue(aspect.id, event.target.value)
-                  }
-                />
-              </label>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={() => stage(() => setSceneDraft(clearRolePlayScene(sceneDraft)))}>
-              {t("playground:composer.clearScene", "Clear scene")}
-            </Button>
-            <Button onClick={() => stage(() => setSceneDraft(resetRolePlayScene()))}>
-              {t("playground:composer.resetScene", "Reset scene")}
-            </Button>
-          </div>
-        </section>
-
+          </details>
+        ) : null}
       </fieldset>
       <SystemPromptTemplatesModal
         open={templatesOpen}

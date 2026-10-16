@@ -6,6 +6,8 @@ import { useQuickChatStore } from "@/store/quick-chat"
 import { QuickChatHelperButton } from "@/components/Common/QuickChatHelper"
 import { PlaygroundEmpty } from "@/components/Option/Playground/PlaygroundEmpty"
 import { useTutorialStore } from "@/store/tutorials"
+import { useConnectionStore } from "@/store/connection"
+import { ConnectionPhase } from "@/types/connection"
 import { MemoryRouter, useNavigate } from "react-router-dom"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -212,8 +214,14 @@ vi.mock("@/context/demo-mode", () => ({
   DemoModeProvider: ({ children }: { children: React.ReactNode }) => (
     <>{children}</>
   ),
-  useDemoMode: () => ({ demoMode: false })
+  useDemoMode: () => ({ demoEnabled: false })
 }))
+
+beforeEach(() => {
+  const previous = useConnectionStore.getState().state
+  useConnectionStore.setState({ state: { ...previous, phase: ConnectionPhase.CONNECTED, isConnected: true } })
+  return () => useConnectionStore.setState({ state: previous })
+})
 
 describe("OptionLayout shell overrides", () => {
   beforeEach(() => {

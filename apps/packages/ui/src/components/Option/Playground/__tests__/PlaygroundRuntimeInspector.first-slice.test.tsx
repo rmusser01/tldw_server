@@ -84,7 +84,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     expect(
       screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent),
     ).toEqual([
-      "Runtime",
+      "Chat settings",
       "Model route",
       "Assistant",
       "MCP tools",
@@ -166,7 +166,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
 
     const rail = screen.getByTestId("playground-runtime-inspector");
     const collapseRuntime = within(rail).getByRole("button", {
-      name: "Collapse Runtime",
+      name: "Collapse Chat settings",
     });
     const runtimePanelId = collapseRuntime.getAttribute("aria-controls");
     const runtimePanel = runtimePanelId
@@ -185,7 +185,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     expect(runtimePanel).toHaveAttribute("aria-hidden", "true");
     expect(runtimePanel).toHaveClass("hidden");
     expect(
-      within(rail).getByRole("button", { name: "Expand Runtime" }),
+      within(rail).getByRole("button", { name: "Expand Chat settings" }),
     ).toBeInTheDocument();
 
     fireEvent.click(
@@ -201,7 +201,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
       within(rail).getByRole("button", { name: "Collapse Run controls" }),
     );
 
-    expect(screen.getByRole("heading", { name: "Runtime" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Chat settings" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Model route" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Assistant" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "MCP tools" })).toBeInTheDocument();
@@ -226,7 +226,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
 
     const rail = screen.getByTestId("playground-runtime-inspector");
     expect(
-      within(rail).getByRole("button", { name: "Collapse Runtime" }),
+      within(rail).getByRole("button", { name: "Collapse Chat settings" }),
     ).toHaveAttribute("aria-expanded", "true");
     expect(
       within(rail).getByRole("button", { name: "Collapse Model route" }),
