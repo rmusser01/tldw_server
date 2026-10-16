@@ -711,8 +711,9 @@ it("discovers all six interleaved character histories across a 2000-conversation
     await screen.findByText(`Session ${selected[0].id}`)
     await fullView()
     await screen.findByText(`Session ${selected[24].id}`)
+    const pagination = screen.getByRole("navigation", { name: "Character sessions pages" })
     for (let offset = 25; offset < selected.length; offset += 25) {
-      fireEvent.click(screen.getByRole("button", { name: "Next sessions page" }))
+      fireEvent.click(within(pagination).getByRole("button", { name: "Next sessions page" }))
       await screen.findByText(`Session ${selected[offset].id}`)
     }
     const last = selected.at(-1)!
