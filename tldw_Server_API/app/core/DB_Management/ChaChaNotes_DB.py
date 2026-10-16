@@ -34896,7 +34896,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             with self.transaction() as conn:
                 if not self._supports_notes_moodboard_studio_v61():
                     cursor = conn.execute(legacy_query, legacy_params)
-                    return int(cursor.lastrowid)
+                    legacy_moodboard_id = cursor.lastrowid
+                    if legacy_moodboard_id is None:
+                        raise CharactersRAGDBError("Failed to determine moodboard ID after insert.")  # noqa: TRY003
+                    return int(legacy_moodboard_id)
                 owner = str(self.client_id)
                 dataset = self.resolve_moodboard_compatibility_dataset_id(
                     owner_user_id=owner, conn=conn
@@ -34957,9 +34960,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     moodboard_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(query, params)
-                    moodboard_id = int(cursor.lastrowid)
+                    moodboard_id = cursor.lastrowid
                 if moodboard_id is None:
                     raise CharactersRAGDBError("Failed to determine moodboard ID after insert.")  # noqa: TRY003
+                moodboard_id = int(moodboard_id)
                 return moodboard_id
         except sqlite3.IntegrityError as exc:
             raise CharactersRAGDBError(f"Database integrity error adding moodboard: {exc}") from exc  # noqa: TRY003
@@ -36636,14 +36640,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if self.backend_type == BackendType.POSTGRESQL:
                     cursor = conn.execute(insert_sql + " RETURNING id", insert_params)
                     row = cursor.fetchone()
-                    deck_id = int(row["id"]) if row else None
+                    inserted_deck_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, insert_params)
-                    deck_id = int(cursor.lastrowid)
+                    inserted_deck_id = cursor.lastrowid
 
-                if deck_id is None:
+                if inserted_deck_id is None:
                     raise CharactersRAGDBError("Failed to determine deck ID after insert")  # noqa: TRY003
-                return deck_id
+                inserted_deck_id = int(inserted_deck_id)
+                return inserted_deck_id
         except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed: decks.name" in str(e):
                 raise ConflictError("Deck name already exists", entity="decks", identifier=name) from e  # noqa: TRY003
@@ -37231,13 +37236,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if self.backend_type == BackendType.POSTGRESQL:
                     cursor = conn.execute(insert_sql + " RETURNING id", params)
                     row = cursor.fetchone()
-                    template_id = int(row["id"]) if row else None
+                    inserted_template_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    template_id = int(cursor.lastrowid)
-                if template_id is None:
+                    inserted_template_id = cursor.lastrowid
+                if inserted_template_id is None:
                     raise CharactersRAGDBError("Failed to determine flashcard template ID after insert")  # noqa: TRY003
-                return template_id
+                inserted_template_id = int(inserted_template_id)
+                return inserted_template_id
         except sqlite3.IntegrityError as exc:
             if "UNIQUE constraint failed: flashcard_templates.name" in str(exc):
                 raise ConflictError(
@@ -40038,10 +40044,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     pack_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    pack_id = int(cursor.lastrowid)
+                    pack_id = cursor.lastrowid
 
                 if pack_id is None:
                     raise CharactersRAGDBError("Failed to determine study pack ID after insert")  # noqa: TRY003
+                pack_id = int(pack_id)
                 return pack_id
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Failed to create study pack: {exc}") from exc  # noqa: TRY003
@@ -42561,9 +42568,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     quiz_row = conn.execute(insert_quiz_sql + " RETURNING id", quiz_params).fetchone()
                     quiz_id = int(quiz_row["id"]) if quiz_row else None
                 else:
-                    quiz_id = int(conn.execute(insert_quiz_sql, quiz_params).lastrowid)
+                    quiz_id = conn.execute(insert_quiz_sql, quiz_params).lastrowid
                 if quiz_id is None:
                     raise CharactersRAGDBError("Failed to determine quiz ID after insert")  # noqa: TRY003
+                quiz_id = int(quiz_id)
 
                 station_ids = [
                     self._insert_osce_station_row(conn, quiz_id, station, now=now)
@@ -42705,9 +42713,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     quiz_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    quiz_id = int(cursor.lastrowid)
+                    quiz_id = cursor.lastrowid
                 if quiz_id is None:
                     raise CharactersRAGDBError("Failed to determine quiz ID after insert")  # noqa: TRY003
+                quiz_id = int(quiz_id)
                 return quiz_id
         except sqlite3.Error as e:
             raise CharactersRAGDBError(f"Failed to create quiz: {e}") from e  # noqa: TRY003
@@ -43063,9 +43072,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     question_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    question_id = int(cursor.lastrowid)
+                    question_id = cursor.lastrowid
                 if question_id is None:
                     raise CharactersRAGDBError("Failed to determine question ID after insert")  # noqa: TRY003
+                question_id = int(question_id)
                 self._recount_quiz_questions(conn, quiz_id)
                 return question_id
         except sqlite3.Error as e:
@@ -43400,9 +43410,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     attempt_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    attempt_id = int(cursor.lastrowid)
+                    attempt_id = cursor.lastrowid
                 if attempt_id is None:
                     raise CharactersRAGDBError("Failed to determine attempt ID after insert")  # noqa: TRY003
+                attempt_id = int(attempt_id)
                 return {
                     "id": attempt_id,
                     "quiz_id": quiz_id,
@@ -43923,9 +43934,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         conversion_id = int(row["id"]) if row else None
                     else:
                         cursor = conn.execute(insert_sql, insert_params)
-                        conversion_id = int(cursor.lastrowid)
+                        conversion_id = cursor.lastrowid
                     if conversion_id is None:
                         raise CharactersRAGDBError("Failed to determine remediation conversion ID after insert")  # noqa: TRY003
+                    conversion_id = int(conversion_id)
 
                     if previous_active and replace_active:
                         conn.execute(
@@ -44033,9 +44045,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     conversion_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    conversion_id = int(cursor.lastrowid)
+                    conversion_id = cursor.lastrowid
                 if conversion_id is None:
                     raise CharactersRAGDBError("Failed to determine remediation conversion ID after insert")  # noqa: TRY003
+                conversion_id = int(conversion_id)
             created = self.execute_query(
                 "SELECT id, attempt_id, quiz_id, question_id, status, superseded_by_id, "
                 "target_deck_id, target_deck_name_snapshot, flashcard_count, flashcard_uuids_json, "
@@ -44218,9 +44231,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     thread_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    thread_id = int(cursor.lastrowid)
+                    thread_id = cursor.lastrowid
                 if thread_id is None:
                     raise CharactersRAGDBError("Failed to determine study assistant thread ID after insert")  # noqa: TRY003
+                thread_id = int(thread_id)
         except sqlite3.IntegrityError as exc:
             if not self._is_unique_violation(exc):
                 raise CharactersRAGDBError(f"Failed to create study assistant thread: {exc}") from exc  # noqa: TRY003
@@ -44350,10 +44364,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     message_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, insert_params)
-                    message_id = int(cursor.lastrowid)
+                    message_id = cursor.lastrowid
 
                 if message_id is None:
                     raise CharactersRAGDBError("Failed to determine study assistant message ID after insert")  # noqa: TRY003
+                message_id = int(message_id)
 
                 thread_update_params: tuple[Any, ...]
                 thread_update_sql = (

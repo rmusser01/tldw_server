@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
+    CharactersRAGDBError,
     ConflictError,
     InputError,
 )
@@ -410,3 +412,51 @@ def test_postgres_station_operations_are_scoped_to_the_parent_quiz_owner(
     finally:
         attacker.close_all_connections()
         owner.close_all_connections()
+
+
+def test_atomic_quiz_missing_generated_id_rolls_back_parent_and_stations(
+    db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_transaction = db.transaction
+    inserted_ids = []
+
+    class MissingIdCursor:
+        lastrowid = None
+
+        def __init__(self, cursor):
+            self._cursor = cursor
+
+        def __getattr__(self, name):
+            return getattr(self._cursor, name)
+
+    class MissingIdConnection:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, sql, params=()):
+            cursor = self._conn.execute(sql, params)
+            if " ".join(sql.split()).startswith("INSERT INTO quizzes("):
+                inserted_ids.append(cursor.lastrowid)
+                return MissingIdCursor(cursor)
+            return cursor
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    @contextmanager
+    def missing_id_transaction():
+        with original_transaction() as conn:
+            yield MissingIdConnection(conn)
+
+    monkeypatch.setattr(db, "transaction", missing_id_transaction)
+
+    with pytest.raises(CharactersRAGDBError) as error:
+        db.create_quiz_with_osce_stations_atomic(
+            {"name": "Missing driver ID", "activity_type": "osce"},
+            [{"content": stored_content("One"), "origin": "generated"}],
+        )
+    assert str(error.value) == "Failed to determine quiz ID after insert"
+    assert len(inserted_ids) == 1 and isinstance(inserted_ids[0], int)
+    assert db.list_quizzes(include_workspace_items=True)["count"] == 0
+    assert db.execute_query("SELECT COUNT(*) AS count FROM osce_stations").fetchone()["count"] == 0

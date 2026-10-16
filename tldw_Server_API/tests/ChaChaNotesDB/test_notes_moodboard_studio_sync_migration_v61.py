@@ -8,6 +8,7 @@ import json
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from pathlib import Path
 from uuid import UUID
 
@@ -1900,3 +1901,59 @@ def test_postgres_v60_keeps_legacy_product_and_authority_sql_without_v61_columns
     assert "moodboard_graph_bound" not in issued  # nosec B101
     assert "studio_graph_bound" not in issued  # nosec B101
     assert "owner_user_id=? AND dataset_id=?" not in issued  # nosec B101
+
+
+@pytest.mark.parametrize("schema_version", [60, CharactersRAGDB._CURRENT_SCHEMA_VERSION])
+def test_moodboard_missing_generated_id_rolls_back_native_insert(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    schema_version: int,
+) -> None:
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", schema_version)
+    db = CharactersRAGDB(str(tmp_path / "missing-moodboard-id.sqlite"), client_id=OWNER)
+    try:
+        assert db._supports_notes_moodboard_studio_v61() is (schema_version >= 61)
+        existing_id = db.add_moodboard(name="Keep board")
+        assert isinstance(existing_id, int)
+        before = [dict(row) for row in db.execute_query("SELECT * FROM moodboards ORDER BY id").fetchall()]
+        original_transaction = db.transaction
+        inserted_ids = []
+
+        class MissingIdCursor:
+            lastrowid = None
+
+            def __init__(self, cursor):
+                self._cursor = cursor
+
+            def __getattr__(self, name):
+                return getattr(self._cursor, name)
+
+        class MissingIdConnection:
+            def __init__(self, conn):
+                self._conn = conn
+
+            def execute(self, sql, params=()):
+                cursor = self._conn.execute(sql, params)
+                if " ".join(sql.split()).startswith("INSERT INTO moodboards("):
+                    inserted_ids.append(cursor.lastrowid)
+                    return MissingIdCursor(cursor)
+                return cursor
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        @contextmanager
+        def missing_id_transaction():
+            with original_transaction() as conn:
+                yield MissingIdConnection(conn)
+
+        monkeypatch.setattr(db, "transaction", missing_id_transaction)
+
+        with pytest.raises(CharactersRAGDBError) as error:
+            db.add_moodboard(name="Absent driver ID")
+        assert str(error.value) == "Failed to determine moodboard ID after insert."
+        assert len(inserted_ids) == 1 and isinstance(inserted_ids[0], int)
+        after = [dict(row) for row in db.execute_query("SELECT * FROM moodboards ORDER BY id").fetchall()]
+        assert after == before
+    finally:
+        db.close_all_connections()

@@ -1,11 +1,13 @@
 import json
 import sqlite3
 import uuid
+from contextlib import contextmanager
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
+    CharactersRAGDBError,
     ConflictError,
     InputError,
 )
@@ -311,3 +313,70 @@ def test_convert_quiz_remediation_questions_translates_unique_violation_to_confl
             target_deck_id=7,
             replace_active=False,
         )
+
+
+def test_replace_remediation_missing_generated_id_restores_cards_and_prior_active(
+    quizzes_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    attempt_id, _quiz_id, question_id, _correct_id = _create_attempt_with_one_miss_and_one_correct(quizzes_db)
+    deck_id = quizzes_db.add_deck("Rollback target")
+    quizzes_db.convert_quiz_remediation_questions(
+        attempt_id=attempt_id,
+        question_ids=[question_id],
+        target_deck_id=deck_id,
+    )
+    before_conversions = [
+        dict(row)
+        for row in quizzes_db.execute_query("SELECT * FROM quiz_remediation_conversions ORDER BY id").fetchall()
+    ]
+    before_cards = [dict(row) for row in quizzes_db.execute_query("SELECT * FROM flashcards ORDER BY id").fetchall()]
+    original_transaction = quizzes_db.transaction
+    inserted_ids = []
+
+    class MissingIdCursor:
+        lastrowid = None
+
+        def __init__(self, cursor):
+            self._cursor = cursor
+
+        def __getattr__(self, name):
+            return getattr(self._cursor, name)
+
+    class MissingIdConnection:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, sql, params=()):
+            cursor = self._conn.execute(sql, params)
+            if " ".join(sql.split()).startswith("INSERT INTO quiz_remediation_conversions("):
+                inserted_ids.append(cursor.lastrowid)
+                return MissingIdCursor(cursor)
+            return cursor
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    @contextmanager
+    def missing_id_transaction():
+        with original_transaction() as conn:
+            yield MissingIdConnection(conn)
+
+    monkeypatch.setattr(quizzes_db, "transaction", missing_id_transaction)
+
+    with pytest.raises(CharactersRAGDBError) as error:
+        quizzes_db.convert_quiz_remediation_questions(
+            attempt_id=attempt_id,
+            question_ids=[question_id],
+            target_deck_id=deck_id,
+            replace_active=True,
+        )
+    assert str(error.value) == "Failed to determine remediation conversion ID after insert"
+    assert len(inserted_ids) == 1 and isinstance(inserted_ids[0], int)
+    after_conversions = [
+        dict(row)
+        for row in quizzes_db.execute_query("SELECT * FROM quiz_remediation_conversions ORDER BY id").fetchall()
+    ]
+    assert after_conversions == before_conversions
+    after_cards = [dict(row) for row in quizzes_db.execute_query("SELECT * FROM flashcards ORDER BY id").fetchall()]
+    assert after_cards == before_cards
