@@ -13,6 +13,7 @@ WORKDIR /app/apps
 # invalidate this layer.
 COPY apps/package.json /app/apps/package.json
 COPY apps/bun.lock /app/apps/bun.lock
+COPY apps/patches /app/apps/patches
 COPY apps/scripts /app/apps/scripts
 COPY apps/extension/package.json /app/apps/extension/package.json
 COPY apps/extension/scripts/wxt-prepare.mjs /app/apps/extension/scripts/wxt-prepare.mjs

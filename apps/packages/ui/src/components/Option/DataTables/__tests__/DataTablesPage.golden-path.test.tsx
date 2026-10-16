@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { MemoryRouter } from "react-router-dom"
 import { DataTablesPage } from "../DataTablesPage"
 
 const state = {
@@ -14,10 +15,6 @@ const state = {
 
 const connectionMocks = vi.hoisted(() => ({
   useConnectionUxState: vi.fn()
-}))
-
-const routerMocks = vi.hoisted(() => ({
-  navigate: vi.fn()
 }))
 
 vi.mock("react-i18next", () => ({
@@ -35,10 +32,6 @@ vi.mock("react-i18next", () => ({
       return key
     }
   })
-}))
-
-vi.mock("react-router-dom", () => ({
-  useNavigate: () => routerMocks.navigate
 }))
 
 vi.mock("@/hooks/useServerOnline", () => ({
@@ -122,7 +115,11 @@ describe("DataTablesPage golden path guardrails", () => {
   })
 
   it("renders the studio shell with expected tab affordances", () => {
-    render(<DataTablesPage />)
+    render(
+      <MemoryRouter initialEntries={["/data-tables"]}>
+        <DataTablesPage />
+      </MemoryRouter>
+    )
 
     expect(screen.getByText("Data Tables Studio")).toBeInTheDocument()
     expect(
@@ -136,7 +133,11 @@ describe("DataTablesPage golden path guardrails", () => {
   })
 
   it("preserves tab-switch interaction wiring to create flow", () => {
-    render(<DataTablesPage />)
+    render(
+      <MemoryRouter initialEntries={["/data-tables"]}>
+        <DataTablesPage />
+      </MemoryRouter>
+    )
 
     fireEvent.click(screen.getByRole("tab", { name: "Create Table" }))
     expect(state.setActiveTab).toHaveBeenCalledWith("create")

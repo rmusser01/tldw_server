@@ -160,18 +160,29 @@ describe("OsceStationEditor", () => {
   })
 
   it("keeps a definitive direct station rejection retryable", async () => {
+    const user = userEvent.setup()
+    let rejectCreate: ((error: Error) => void) | undefined
     vi.mocked(createOsceStation)
-      .mockRejectedValueOnce(Object.assign(new Error("invalid station"), { status: 422 }))
+      .mockImplementationOnce(() => new Promise<never>((_resolve, reject) => {
+        rejectCreate = reject
+      }))
       .mockResolvedValueOnce({ ...station, content: { ...station.content, title: "Retried draft" } })
     renderWithQueryClient(
       <OsceStationEditor quizId={7} initialContent={station.content} />
     )
     fireEvent.change(screen.getByLabelText("Station title"), { target: { value: "Retried draft" } })
+    const saveButton = screen.getByRole("button", { name: "Save station" })
 
-    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+    await user.click(saveButton)
     await waitFor(() => expect(createOsceStation).toHaveBeenCalledTimes(1))
-    expect(screen.getByRole("button", { name: "Save station" })).toBeEnabled()
-    fireEvent.click(screen.getByRole("button", { name: "Save station" }))
+    expect(saveButton).toBeDisabled()
+    await act(async () => {
+      rejectCreate?.(Object.assign(new Error("invalid station"), { status: 422 }))
+    })
+    expect(await screen.findByText("invalid station")).toBeInTheDocument()
+    await waitFor(() => expect(saveButton).toBeEnabled())
+    expect(createOsceStation).toHaveBeenCalledTimes(1)
+    await user.click(saveButton)
 
     await waitFor(() => expect(createOsceStation).toHaveBeenCalledTimes(2))
   })

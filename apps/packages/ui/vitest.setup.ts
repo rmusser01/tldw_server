@@ -2,6 +2,7 @@ import "@testing-library/jest-dom/vitest"
 import { cleanup } from "@testing-library/react"
 import { webcrypto } from "node:crypto"
 import { afterAll, afterEach, beforeAll, vi } from "vitest"
+import { cleanupStaticRoots, restoreStaticRootRenderer } from "./vitest-static-roots"
 
 const originalGetComputedStyle = window.getComputedStyle.bind(window)
 const originalConsoleLog = console.log.bind(console)
@@ -274,12 +275,17 @@ beforeAll(() => {
   ensureMutationObserver()
 })
 
-afterAll(() => {
-  console.log = originalConsoleLog
-  console.debug = originalConsoleDebug
-  console.info = originalConsoleInfo
-  console.warn = originalConsoleWarn
-  console.error = originalConsoleError
+afterAll(async () => {
+  try {
+    await cleanupStaticRoots()
+  } finally {
+    restoreStaticRootRenderer()
+    console.log = originalConsoleLog
+    console.debug = originalConsoleDebug
+    console.info = originalConsoleInfo
+    console.warn = originalConsoleWarn
+    console.error = originalConsoleError
+  }
 })
 
 const evaluateMediaQuery = (query: string): boolean => {
@@ -336,11 +342,12 @@ const clearNotesOfflineDraftQueues = () => {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   if (vi.isFakeTimers()) {
     vi.useRealTimers()
   }
   ensureMutationObserver()
   cleanup()
+  await cleanupStaticRoots()
   clearNotesOfflineDraftQueues()
 })

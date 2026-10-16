@@ -312,7 +312,10 @@ def test_frontend_required_uses_isolated_vitest_shards() -> None:
         apps_package["dependencies"]["jsdom"],
         frontend_package["devDependencies"]["jsdom"],
         ui_package["devDependencies"]["jsdom"],
-    } == {"^28.1.0"}
+    } == {"28.1.0"}
+    assert apps_package["overrides"]["@asamuzakjp/dom-selector"] == "7.1.1"
+    assert apps_package["patchedDependencies"]["jsdom@28.1.0"] == "patches/jsdom@28.1.0.patch"
+    assert Path("apps/patches/jsdom@28.1.0.patch").is_file()
 
     final_job = jobs["frontend-required"]
     assert final_job["needs"] == ["changes", "admission", "frontend-unit-tests", "await_license"]

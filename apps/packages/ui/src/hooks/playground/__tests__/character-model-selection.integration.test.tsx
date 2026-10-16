@@ -79,6 +79,7 @@ const readiness = expression(
 const evaluateRootReadiness = new Function(
   "buildCharacterChatReadiness",
   "serverReadinessState",
+  "catalogConnectionReady",
   "activeCharacterSelection",
   "selectedModel",
   "apiProvider",
@@ -98,6 +99,7 @@ const ordinaryReadiness = expression(
 const evaluateOrdinaryRootReadiness = new Function(
   "buildChatModelUsability",
   "serverReadinessState",
+  "catalogConnectionReady",
   "selectedModel",
   "apiProvider",
   "readinessChatModels",
@@ -277,6 +279,7 @@ describe("production full chat model ownership and readiness adapters", () => {
       evaluateOrdinaryRootReadiness(
         buildChatModelUsability,
         "ready",
+        true,
         "chrome:Model:Q4",
         "openai",
         catalog
@@ -286,6 +289,7 @@ describe("production full chat model ownership and readiness adapters", () => {
       evaluateRootReadiness(
         buildCharacterChatReadiness,
         "ready",
+        true,
         { id: 4 },
         "chrome:Model:Q4",
         null,
@@ -310,6 +314,7 @@ describe("production full chat model ownership and readiness adapters", () => {
       evaluateRootReadiness(
         buildCharacterChatReadiness,
         "ready",
+        true,
         { id: 4 },
         "chrome:Model:Q4",
         "openai",
@@ -327,6 +332,7 @@ describe("production full chat model ownership and readiness adapters", () => {
       evaluateRootReadiness(
         buildCharacterChatReadiness,
         "ready",
+        true,
         { id: 4 },
         "chrome:Model:Q4",
         "openai",
@@ -337,6 +343,38 @@ describe("production full chat model ownership and readiness adapters", () => {
         false
       )
     ).toMatchObject({ status: "ready" })
+  })
+
+  it("blocks cached models when the catalog connection is offline", () => {
+    expect(
+      evaluateOrdinaryRootReadiness(
+        buildChatModelUsability,
+        "ready",
+        false,
+        "tldw:gpt-4o-mini",
+        "openai",
+        models
+      )
+    ).toMatchObject({ status: "no_server" })
+    expect(
+      evaluateRootReadiness(
+        buildCharacterChatReadiness,
+        "ready",
+        false,
+        { id: 4 },
+        "tldw:gpt-4o-mini",
+        "openai",
+        models,
+        {},
+        false,
+        false,
+        false
+      )
+    ).toMatchObject({
+      status: "blocked",
+      missingRequirement: "server-connection",
+      reason: "server-unavailable"
+    })
   })
 
   it("opens the model chooser for a missing provider and settings for other model blockers", () => {
@@ -369,6 +407,7 @@ describe("production full chat model ownership and readiness adapters", () => {
       const result = evaluateRootReadiness(
         buildCharacterChatReadiness,
         "ready",
+        true,
         { id: 4 },
         selectedModel,
         provider,

@@ -5,6 +5,10 @@ const runtime = vi.hoisted(() => ({
     serverUrl: "https://api.example.test",
     authMode: "single-user",
     apiKey: "artifact-api-key",
+    authSource: "manual",
+    credentialSource: "manual",
+    apiKeyPersistence: "device",
+    apiKeyServerOrigin: "https://api.example.test",
     accessToken: ""
   } as Record<string, unknown>
 }))
@@ -41,6 +45,10 @@ describe("authenticated Watchlists artifacts", () => {
       serverUrl: "https://api.example.test",
       authMode: "single-user",
       apiKey: "artifact-api-key",
+      authSource: "manual",
+      credentialSource: "manual",
+      apiKeyPersistence: "device",
+      apiKeyServerOrigin: "https://api.example.test",
       accessToken: ""
     }
     vi.restoreAllMocks()

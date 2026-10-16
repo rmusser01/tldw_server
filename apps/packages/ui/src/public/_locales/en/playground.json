@@ -4591,5 +4591,8 @@
   },
   "characterRail_pageLabel": {
     "message": "Page"
+  },
+  "composer_advancedPreferenceUnavailable": {
+    "message": "Display preference unavailable. Advanced controls still work for this visit."
   }
 }

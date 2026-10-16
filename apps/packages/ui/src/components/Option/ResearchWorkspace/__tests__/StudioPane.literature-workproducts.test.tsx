@@ -355,6 +355,18 @@ const expandGeneratedOutputsSection = () => {
   }
 }
 
+const openArtifactViewer = async (viewButton: HTMLElement) => {
+  await act(async () => {
+    fireEvent.click(viewButton)
+    // AntD static Modal.info queues its separate React root on a zero-delay timer.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  })
+  // The modal commit starts React.lazy; settle that import inside act before asserting.
+  await act(async () => {
+    await vi.dynamicImportSettled()
+  })
+}
+
 const renderStudioPane = () => {
   const renderResult = render(
     <MemoryRouter>
@@ -1924,7 +1936,7 @@ Proposal
     ]
 
     renderStudioPane()
-    fireEvent.click(screen.getByRole("button", { name: "View" }))
+    await openArtifactViewer(screen.getByRole("button", { name: "View" }))
 
     await screen.findByRole("dialog");
     await act(async () => {
@@ -2087,7 +2099,7 @@ Proposal
     const proposalActions = screen.getByTestId(
       "studio-artifact-primary-actions-artifact-proposal"
     )
-    fireEvent.click(within(proposalActions).getByRole("button", { name: /view/i }))
+    await openArtifactViewer(within(proposalActions).getByRole("button", { name: /view/i }))
 
     await waitFor(() => {
       expect(screen.getAllByText("Deep Research verification").length).toBeGreaterThan(0)

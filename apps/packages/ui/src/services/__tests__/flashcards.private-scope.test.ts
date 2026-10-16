@@ -3,6 +3,7 @@ const boundary = vi.hoisted(() => ({ get: vi.fn(), fetch: vi.fn() }))
 vi.mock("wxt/browser", () => ({ browser: { runtime: { id: null } } }))
 vi.mock("@/utils/safe-storage", () => ({ createSafeStorage: () => ({ get: boundary.get, set: vi.fn(), remove: vi.fn() }) }))
 vi.mock("@/services/tldw/runtime-auth-override", () => ({ getRuntimeSingleUserApiKeyOverride: () => null, isCookieSessionConfigInvalidated: () => false }))
+import type { FlashcardsRequestOptions } from "../flashcards"
 import { createDeck, createFlashcard, generateFlashcards, listDecks, createFlashcardsBulk, getFlashcard, deleteFlashcard } from "../flashcards"
 import { uploadFlashcardAsset } from "../flashcard-assets"
 import { mediaMethods } from "../tldw/domains/media"
@@ -21,7 +22,16 @@ const operations = [
   ["generate", () => generateFlashcards({ text: "Private source" }, { requestScope })],
   ["deck", () => createDeck({ name: "Private deck" }, { requestScope })],
   ["card", () => createFlashcard({ front: "Private front", back: "Private back" }, { requestScope })],
-  ["source", () => mediaMethods.getMediaDetails(42, { requestScope })]
+  ["source", () => mediaMethods.getMediaDetails(42, { requestScope })],
+  ["source versions", () => mediaMethods.listMediaDocumentVersions(42, { requestScope })],
+  ["source version", () => mediaMethods.getMediaDocumentVersion(42, 7, { requestScope })]
+] as const
+
+const cancellationOperations = [
+  ["decks list", (options: FlashcardsRequestOptions) => listDecks({}, options)],
+  ["bulk create", (options: FlashcardsRequestOptions) => createFlashcardsBulk([{ front: "Q", back: "A" }], options)],
+  ["card read", (options: FlashcardsRequestOptions) => getFlashcard(cardUuid, options)],
+  ["card delete", (options: FlashcardsRequestOptions) => deleteFlashcard(cardUuid, 3, options)]
 ] as const
 
 describe("private Flashcards real outbound scope", () => {
@@ -71,19 +81,22 @@ describe("private Flashcards real outbound scope", () => {
     expect(boundary.fetch).toHaveBeenCalledTimes(3)
     for (const [, init] of boundary.fetch.mock.calls) expect(new Headers(init.headers).has("X-TLDW-Expected-User-ID")).toBe(false)
   })
-  it("forwards cancellation to Fetch for scoped reads and mutations", async () => {
-    boundary.fetch.mockImplementation(async (_url, init) => {
+  it.each(cancellationOperations)("rejects pre-aborted %s before dispatch", async (_name, run) => {
+    const controller = new AbortController()
+    controller.abort()
+    await expect(run({ requestScope, signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" })
+    expect(boundary.fetch).not.toHaveBeenCalled()
+  })
+  it.each(cancellationOperations)("forwards in-flight %s cancellation to Fetch", async (_name, run) => {
+    const controller = new AbortController()
+    boundary.fetch.mockImplementationOnce(async (_url, init) => {
+      controller.abort()
       init.signal.throwIfAborted()
       return new Response("{}", { status: 200 })
     })
-    const controller = new AbortController()
-    controller.abort()
-    const options = { requestScope, signal: controller.signal }
-    for (const run of [() => listDecks({}, options), () => createFlashcardsBulk([{ front: "Q", back: "A" }], options), () => getFlashcard(cardUuid, options), () => deleteFlashcard(cardUuid, 3, options)]) {
-      await expect(run()).rejects.toMatchObject({ name: "AbortError" })
-    }
-    expect(boundary.fetch).toHaveBeenCalledTimes(4)
-    for (const [, init] of boundary.fetch.mock.calls) expect(init.signal.aborted).toBe(true)
+    await expect(run({ requestScope, signal: controller.signal })).rejects.toMatchObject({ name: "AbortError" })
+    expect(boundary.fetch).toHaveBeenCalledTimes(1)
+    expect(boundary.fetch.mock.calls[0][1].signal.aborted).toBe(true)
   })
   it.each(["/api/v1/flashcards/bulk/extra", "/api/v1/flashcards/decks/2", "/api/v1/flashcards//generate", "/api/v1/flashcards/../generate"])("does not expand the scoped POST contract to %s", path => {
     expect(isServicePromptRequestPath(path, "POST")).toBe(false)
@@ -99,7 +112,7 @@ describe("private Flashcards real outbound scope", () => {
       for (const method of ["PUT", "PATCH"]) expect(isServicePromptRequestPath(path, method)).toBe(false)
     }
   })
-  it.each(["/api/v1/media/search", "/api/v1/media/42/versions", "/api/v1/media/%34%32", "/api/v1/media/42/"])("does not expand source GET to %s", path => {
+  it.each(["/api/v1/media/search", "/api/v1/media/42/versions/0", "/api/v1/media/42/versions/7/extra", "/api/v1/media/%34%32", "/api/v1/media/42/"])("does not expand source GET to %s", path => {
     expect(isServicePromptRequestPath(path, "GET")).toBe(false)
   })
 })

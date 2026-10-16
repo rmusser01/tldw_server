@@ -779,8 +779,8 @@ describe("ExternalServersTab", () => {
       />
     )
 
-    expect(await screen.findByDisplayValue("Docs Managed")).toBeTruthy()
-    expect(screen.getByDisplayValue("stdio")).toBeTruthy()
+    expect(await screen.findByRole("textbox", { name: "Name" })).toHaveValue("Docs Managed")
+    expect(screen.getByRole("combobox", { name: "Transport" })).toHaveValue("stdio")
     expect(onDrillHandled).toHaveBeenCalledWith(12)
   })
 

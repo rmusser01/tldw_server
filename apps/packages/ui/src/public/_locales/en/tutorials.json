@@ -516,13 +516,13 @@
     "message": "Status Filters"
   },
   "worldBooks_basics_filtersContent": {
-    "message": "Filter by enabled/disabled state and attachment status before editing or exporting."
+    "message": "Filter by status and attachment before editing or exporting. On smaller screens, open Filters to show these controls."
   },
   "worldBooks_basics_tableTitle": {
     "message": "World Book Library"
   },
   "worldBooks_basics_tableContent": {
-    "message": "Select a row to manage entries, attachments, and advanced actions for each world book."
+    "message": "Select a saved world book to manage entries and attachments. If the library is empty, create or import your first world book."
   },
   "worldBooks_basics_actionsTitle": {
     "message": "Create and Import"

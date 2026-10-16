@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const connectListeners = new Set<(port: any) => void>()
-const runtimeMessageListeners = new Set<(message: unknown) => void>()
-const storageChangeListeners = new Set<(changes: unknown, areaName: string) => void>()
-const alarmListeners = new Set<(alarm: { name: string }) => void>()
-const startupListeners = new Set<() => void>()
+const { connectListeners, runtimeMessageListeners, storageChangeListeners, alarmListeners, startupListeners } = vi.hoisted(() => ({
+  connectListeners: new Set<(port: any) => void>(),
+  runtimeMessageListeners: new Set<(message: unknown) => void>(),
+  storageChangeListeners: new Set<(changes: unknown, areaName: string) => void>(),
+  alarmListeners: new Set<(alarm: { name: string }) => void>(),
+  startupListeners: new Set<() => void>()
+}))
 
 const storageState = vi.hoisted(() => ({
   tldwConfig: {
@@ -100,6 +102,9 @@ vi.mock("wxt/browser", () => ({
           listener: (changes: unknown, areaName: string) => void
         ) => {
           storageChangeListeners.add(listener)
+        },
+        removeListener: (listener: (changes: unknown, areaName: string) => void) => {
+          storageChangeListeners.delete(listener)
         }
       }
     },

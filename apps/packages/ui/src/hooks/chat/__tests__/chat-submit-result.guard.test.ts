@@ -74,23 +74,27 @@ describe("chat submit result contract", () => {
   })
 
   it("requires chat mode wrappers to return pipeline results", () => {
-    const wrapperPaths = [
-      "hooks/chat-modes/normalChatMode.ts",
-      "hooks/chat-modes/ragMode.ts",
-      "hooks/chat-modes/documentChatMode.ts",
-      "hooks/chat-modes/tabChatMode.ts",
-      "hooks/chat-modes/continueChatMode.ts"
+    const wrappers = [
+      ["normalChatMode", "runChatModeWithHistory"],
+      ["ragMode", "runChatModeWithHistory"],
+      ["documentChatMode", "runChatModeWithHistory"],
+      ["tabChatMode", "runChatModeWithHistory"],
+      ["continueChatMode", "runChatPipeline"]
     ]
 
-    for (const path of wrapperPaths) {
+    for (const [mode, runner] of wrappers) {
+      const path = `hooks/chat-modes/${mode}.ts`
       const source = readUiSource(path)
       expect(source, path).toMatch(/Promise<ChatSubmitResult>/)
-      // Either return the pipeline call directly, or keep its result in a variable
-      // (normalChatMode follows the history result first) and return that variable.
       expect(source, path).toMatch(
-        /return\s+(?:await\s+)?runChatPipeline\(|const\s+(\w+)\s*=\s*await\s+runChatPipeline\([\s\S]*?\breturn\s+\1\b/
+        new RegExp(`return\\s+(?:await\\s+)?${runner}\\(\\s*${mode}Definition,`)
       )
     }
+
+    const sharedHistorySource = readUiSource("hooks/chat-modes/normalChatMode.ts")
+    expect(sharedHistorySource).toMatch(
+      /const\s+(\w+)\s*=\s*await\s+runChatPipeline\([\s\S]*?\breturn\s+\1\b/
+    )
   })
 
   it("requires useChatActions to return explicit submit results", () => {
@@ -100,7 +104,7 @@ describe("chat submit result contract", () => {
     expect(source).toContain("resolveTurnRagMediaIds")
     expect(source).toContain("resolveTurnFileRetrievalEnabled")
     expect(source).toMatch(
-      /buildChatModeParams\(\s*\{[\s\S]*ragMediaIds:\s*turnRagMediaIds[\s\S]*fileRetrievalEnabled:\s*turnFileRetrievalEnabled[\s\S]*selectedKnowledge:\s*turnSelectedKnowledge/
+      /buildChatModeParams\(\s*actorSceneSend,\s*\{[\s\S]*ragMediaIds:\s*turnRagMediaIds[\s\S]*fileRetrievalEnabled:\s*turnFileRetrievalEnabled[\s\S]*selectedKnowledge:\s*turnSelectedKnowledge/
     )
     expect(source).toContain("shouldUseRagForTurn")
     expect(source).toContain("const characterResult = await characterChatMode")

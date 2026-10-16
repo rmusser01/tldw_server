@@ -1,6 +1,6 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { PromptEditorDrawer } from "../PromptEditorDrawer"
 
@@ -157,7 +157,8 @@ describe("PromptEditorDrawer structured prompt mode", () => {
     renderDrawer()
 
     await screen.findByTestId("structured-block-list")
-    fireEvent.click(screen.getByTestId("structured-block-item-task"))
+    const taskBlock = screen.getByTestId("structured-block-item-task")
+    fireEvent.click(within(taskBlock).getByRole("button", { pressed: false }))
     fireEvent.change(screen.getByTestId("structured-block-content"), {
       target: { value: "Summarize {{topic}} clearly" }
     })
@@ -231,7 +232,8 @@ describe("PromptEditorDrawer structured prompt mode", () => {
     renderDrawer()
 
     await screen.findByTestId("structured-block-list")
-    fireEvent.click(screen.getByTestId("structured-block-item-task"))
+    const taskBlock = screen.getByTestId("structured-block-item-task")
+    fireEvent.click(within(taskBlock).getByRole("button", { pressed: false }))
     fireEvent.change(screen.getByTestId("structured-block-content"), {
       target: { value: "Summarize {{topic}} clearly" }
     })
@@ -248,7 +250,8 @@ describe("PromptEditorDrawer structured prompt mode", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Structured builder" }))
 
     await screen.findByTestId("structured-block-content")
-    fireEvent.click(screen.getByTestId("structured-block-item-task"))
+    const restoredTaskBlock = screen.getByTestId("structured-block-item-task")
+    fireEvent.click(within(restoredTaskBlock).getByRole("button", { pressed: false }))
     expect(
       (screen.getByTestId("structured-block-content") as HTMLTextAreaElement).value
     ).toBe("Summarize {{topic}} clearly")
