@@ -13,6 +13,7 @@ import traceback
 import unicodedata
 import warnings
 from collections.abc import Iterator
+from multiprocessing.process import BaseProcess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -20,6 +21,7 @@ from typing import Any
 import pytest
 from Helper_Scripts import web_scraping_phase4_fixtures as generator
 from Helper_Scripts.web_scraping_phase4 import router as router_fixture_cases
+from Helper_Scripts.web_scraping_phase4_fixtures import _OwnedDescriptor
 
 pytestmark = pytest.mark.integration
 
@@ -228,7 +230,9 @@ class _CloseFailingLockFile:
 
     @property
     def closed(self) -> bool:
-        return self._lock_file.closed
+        closed = self._lock_file.closed
+        assert isinstance(closed, bool)
+        return closed
 
     def close(self) -> None:
         self.close_calls += 1
@@ -243,10 +247,9 @@ def _install_tracking_owned_descriptors(
 ) -> list[Any]:
     monkeypatch.setattr(generator, "os", SimpleNamespace(**vars(generator.os)))
     native_close = generator.os.close
-    real_owned_descriptor = generator._OwnedDescriptor
     owners: list[Any] = []
 
-    class _TrackingOwnedDescriptor(real_owned_descriptor):
+    class _TrackingOwnedDescriptor(_OwnedDescriptor):
         def __init__(self, descriptor: int) -> None:
             super().__init__(descriptor)
             self.initial_descriptor = descriptor
@@ -337,7 +340,9 @@ class _DirectCloseFailingLockFile:
 
     @property
     def closed(self) -> bool:
-        return self._lock_file.closed
+        closed = self._lock_file.closed
+        assert isinstance(closed, bool)
+        return closed
 
     def close(self) -> None:
         self.close_calls += 1
@@ -534,7 +539,7 @@ def test_unavailable_metadata_identity_remains_fail_closed(metadata: Any) -> Non
 def _snapshot_path(path: Path) -> tuple[str, object]:
     if path.is_file():
         return "file", path.read_bytes()
-    entries = []
+    entries: list[tuple[str, str, str | bytes | None]] = []
     for entry in sorted(path.rglob("*")):
         relative = entry.relative_to(path).as_posix()
         if entry.is_symlink():
@@ -566,7 +571,8 @@ def _fixture_process_worker(
     failure_mode: str = "none",
     lock_attempted: Any | None = None,
 ) -> None:
-    def _build_payloads(_source_root: Path) -> dict[str, dict[str, Any]]:
+
+    def _build_payloads(source_root: Path) -> dict[str, dict[str, Any]]:
         entered_builder.set()
         if not release_builder.wait(15):
             raise TimeoutError("test worker payload release timed out")
@@ -616,10 +622,11 @@ def _publication_gap_worker(
                 raise TimeoutError("test publisher gap release timed out")
         return result
 
-    Path.replace = _pause_in_rename_gap
     try:
-        with generator._publication_lock(output_path, Path(source_root)):
-            generator._replace_output_directory(staging, output_path)
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(Path, "replace", _pause_in_rename_gap)
+            with generator._publication_lock(output_path, Path(source_root)):
+                generator._replace_output_directory(staging, output_path)
     except BaseException as exc:  # noqa: BLE001 - report child-process failures
         result_queue.put(("publisher", "error", type(exc).__name__, str(exc)))
     else:
@@ -667,13 +674,14 @@ def _crash_after_backup_rename_worker(
             os._exit(73)
         return result
 
-    generator.build_case_payloads = lambda _source_root: _fixture_payloads("unpublished")
-    Path.replace = _terminate_after_backup_rename
-    generator.generate_fixtures(
-        predecessor_commit,
-        output_path,
-        source_root=Path(source_root),
-    )
+    generator.build_case_payloads = lambda source_root: _fixture_payloads("unpublished")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(Path, "replace", _terminate_after_backup_rename)
+        generator.generate_fixtures(
+            predecessor_commit,
+            output_path,
+            source_root=Path(source_root),
+        )
 
 
 def _crash_after_recovery_record_worker(
@@ -691,7 +699,7 @@ def _crash_after_recovery_record_worker(
         os._exit(74)
         return record
 
-    generator.build_case_payloads = lambda _source_root: _fixture_payloads("unpublished")
+    generator.build_case_payloads = lambda source_root: _fixture_payloads("unpublished")
     generator._write_recovery_record = _terminate_after_recovery_record
     generator.generate_fixtures(
         predecessor_commit,
@@ -700,7 +708,7 @@ def _crash_after_recovery_record_worker(
     )
 
 
-def _join_process(process: multiprocessing.Process, timeout: float = 20) -> None:
+def _join_process(process: BaseProcess, timeout: float = 20) -> None:
     process.join(timeout)
     if process.is_alive():
         process.terminate()
@@ -2209,7 +2217,9 @@ def test_publication_lock_acquisition_and_close_baseexceptions_preserve_acquisit
     assert final_traceback is not None
     assert final_traceback.tb_next is not None
     assert final_traceback.tb_next.tb_next is primary_tracebacks_during_close[0]
-    assert lock_files[0].descriptor_owner.native_close_calls == 1
+    descriptor_owner = lock_files[0].descriptor_owner
+    assert descriptor_owner is not None
+    assert descriptor_owner.native_close_calls == 1
     _assert_lock_file_closed_once(lock_files)
 
 
@@ -2263,7 +2273,9 @@ def test_publication_lock_unlock_and_close_baseexceptions_preserve_unlock_error(
     assert final_traceback is not None
     assert final_traceback.tb_next is not None
     assert final_traceback.tb_next.tb_next is primary_tracebacks_during_close[0]
-    assert lock_files[0].descriptor_owner.native_close_calls == 1
+    descriptor_owner = lock_files[0].descriptor_owner
+    assert descriptor_owner is not None
+    assert descriptor_owner.native_close_calls == 1
     _assert_lock_file_closed_once(lock_files)
 
 
@@ -2358,7 +2370,9 @@ def test_publication_lock_direct_close_baseexception_preserves_exact_body_except
     while recorded_tail is not None and recorded_tail.tb_next is not None:
         recorded_tail = recorded_tail.tb_next
     assert final_traceback is recorded_tail
-    assert lock_files[0].descriptor_owner.native_close_calls == 1
+    descriptor_owner = lock_files[0].descriptor_owner
+    assert descriptor_owner is not None
+    assert descriptor_owner.native_close_calls == 1
     _assert_lock_file_closed_once(lock_files)
 
 
@@ -2526,7 +2540,9 @@ def test_publication_lock_standalone_direct_close_baseexception_is_preserved(
     assert lock_files[0].underlying_close_calls == 1
     assert lock_files[0].closed
     assert fallback_descriptors == []
-    assert lock_files[0].descriptor_owner.native_close_calls == 1
+    descriptor_owner = lock_files[0].descriptor_owner
+    assert descriptor_owner is not None
+    assert descriptor_owner.native_close_calls == 1
     _assert_lock_file_closed_once(lock_files)
 
 
@@ -2661,6 +2677,7 @@ def test_publication_lock_oserror_close_before_underlying_is_sanitized_and_close
     assert sensitive_marker not in formatted_diagnostic
     assert sensitive_path not in formatted_diagnostic
     descriptor_owner = lock_files[0].descriptor_owner
+    assert descriptor_owner is not None
     assert descriptor_owner.native_close_calls == 1
     assert descriptor_owner.close_calls == descriptor_owner.detach_calls == 1
     with pytest.raises(RuntimeError, match="^Descriptor ownership has already been released$"):
@@ -5105,7 +5122,7 @@ def test_staging_substitution_during_output_inspection_does_not_rename_old_outpu
 
     def _substitute_during_output_inspection(
         path: Path,
-    ) -> tuple[int, int, int] | None:
+    ) -> generator._FixtureSetSnapshot | None:
         identity = original_validate(path)
         original_replace(staging, validated_staging)
         _write_valid_fixture_set(staging, "3" * 40, substitute_marker)

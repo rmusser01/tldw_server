@@ -5,9 +5,9 @@ import asyncio
 import dataclasses
 import inspect
 import threading
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import FrozenInstanceError, dataclass, replace
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeVar
 from unittest.mock import AsyncMock, Mock, call
 
 import pytest
@@ -27,6 +27,11 @@ from tldw_Server_API.app.core.Web_Scraping.runtime import (
     PolicyDecision,
     RuntimeRequestContext,
 )
+
+if TYPE_CHECKING:
+    from tldw_Server_API.app.core.Web_Scraping.orchestration.article import ArticleDependencies
+
+_T = TypeVar("_T")
 
 URL = "https://example.com/article"
 
@@ -66,7 +71,7 @@ class FakeExecutor:
     def __init__(self) -> None:
         self.calls: list[tuple[Any, tuple[Any, ...], dict[str, Any]]] = []
 
-    async def run(self, func: Any, /, *args: Any, **kwargs: Any) -> Any:
+    async def run(self, func: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:
         self.calls.append((func, args, kwargs))
         return func(*args, **kwargs)
 
@@ -117,7 +122,7 @@ def _article(*, successful: bool = True, content: str = "article body") -> dict[
 
 @dataclass
 class Harness:
-    dependencies: Any
+    dependencies: ArticleDependencies
     fetch: FakeFetchClient
     browser: FakeBrowser
     executor: FakeExecutor
@@ -390,7 +395,7 @@ async def test_runner_preserves_explicit_route_or_config_backend_over_tls_advice
 async def test_runner_snapshots_nested_preflight_config_before_policy_admission() -> None:
     from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _run_article
 
-    source = {"web_scraper": {"web_scraper_preflight_analyzers": False, "nested": {"value": "stable"}}}
+    source: dict[str, Any] = {"web_scraper": {"web_scraper_preflight_analyzers": False, "nested": {"value": "stable"}}}
     harness = _harness(config=source)
 
     async def evaluate_target(*_args: Any, **kwargs: Any) -> PreflightTarget:
@@ -739,12 +744,12 @@ def test_log_failure_preserves_complete_guarded_browser_stage_contract() -> None
     assert expected_stages <= canonical._ARTICLE_LOG_STAGES
 
     harness = _harness()
-    for stage in sorted(expected_stages):
+    for stage_name in sorted(expected_stages):
         canonical._log_failure(
             harness.dependencies,
             RuntimeError("private browser detail"),
             code="browser_error",
-            stage=stage,
+            stage=stage_name,
             url=URL,
         )
 
@@ -1061,7 +1066,7 @@ async def test_runner_copies_successful_generic_extraction_before_conversion() -
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stage", ["policy", "preflight", "fetch", "browser", "executor"])
-async def test_runner_reraises_cancellation_at_each_await(stage: str) -> None:
+async def test_runner_reraises_cancellation_at_each_await(stage: str, monkeypatch: pytest.MonkeyPatch) -> None:
     from tldw_Server_API.app.core.Web_Scraping.orchestration.article import _run_article
 
     harness = _harness(fetch_outcomes=[FetchResponse(URL, 204, {}, "", "httpx")])
@@ -1074,7 +1079,7 @@ async def test_runner_reraises_cancellation_at_each_await(stage: str) -> None:
     elif stage == "browser":
         harness.browser.outcomes = [asyncio.CancelledError()]
     else:
-        harness.executor.run = AsyncMock(side_effect=asyncio.CancelledError())
+        monkeypatch.setattr(harness.executor, "run", AsyncMock(side_effect=asyncio.CancelledError()))
 
     with pytest.raises(asyncio.CancelledError):
         await _run_article(URL, None, True, dependencies=harness.dependencies)
@@ -1218,7 +1223,7 @@ def test_article_dependencies_are_frozen_and_slotted() -> None:
     assert dataclasses.is_dataclass(harness.dependencies)
     assert hasattr(ArticleDependencies, "__slots__")
     with pytest.raises(FrozenInstanceError):
-        harness.dependencies.fetch_client = object()
+        harness.dependencies.__setattr__("fetch_client", object())
 
 
 def test_public_coroutine_is_a_direct_canonical_export_with_exact_signature() -> None:
