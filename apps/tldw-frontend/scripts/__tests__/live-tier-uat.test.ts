@@ -826,7 +826,7 @@ describe('isolated Notes Studio route', () => {
         ports: { backend: 18180, web: 18181, mock: 18184 },
         workers: 1,
         runId: 'notes-studio-route',
-        baseEnv: { PATH: process.env.PATH },
+        baseEnv: { PATH: process.env.PATH, NODE_ENV: 'test' },
       });
       expect(commands.playwrightList.args).toContain('--project=notes-studio');
       expect(commands.playwrightRun.args).toEqual(
@@ -840,7 +840,11 @@ describe('isolated Notes Studio route', () => {
         expect(command.env.PYTHONPATH.split(path.delimiter)).toContain(repoRoot);
       }
       expect(
-        resolveExtensionBuild({ frontendRoot, projects: ['notes-studio'], baseEnv: {} })
+        resolveExtensionBuild({
+          frontendRoot,
+          projects: ['notes-studio'],
+          baseEnv: { NODE_ENV: 'test' },
+        })
       ).toBeNull();
     } finally {
       rmSync(root, { recursive: true, force: true });
