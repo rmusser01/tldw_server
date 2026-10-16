@@ -196,7 +196,7 @@ export class SidePanelChat {
     if (await backdrop.isVisible()) {
       await backdrop.click({ position: { x: viewport.width - 10, y: Math.round(viewport.height / 2) } })
     } else {
-      await this.page.getByRole("button", { name: "Collapse sidebar" }).click()
+      await this.sidebar.getByRole("button", { name: "Collapse sidebar" }).click()
     }
     await expect(this.sidebar).toBeHidden()
   }
@@ -227,8 +227,8 @@ export class SidePanelChat {
 
   /**
    * Search the history for `title` and open its server result, as a user
-   * looking up an old chat. Returns once the chat's tab is active; the sidebar
-   * stays open.
+   * looking up an old chat. Returns once the chat's tab is active. Accepted
+   * navigation may close an overlay sidebar; a docked sidebar stays open.
    */
   async openServerChatFromSearch(title: string, chatId: string) {
     await this.search(title)

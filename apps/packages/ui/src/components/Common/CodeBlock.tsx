@@ -22,6 +22,7 @@ interface Props {
   language: string
   value: string
   blockIndex?: number
+  enableArtifactAction?: boolean
 }
 
 const PREVIEW_MAX_HEIGHT = 420
@@ -48,7 +49,12 @@ const getOrCreateWindowMap = <K, V>(key: string): Map<K, V> => {
   return win[key] as Map<K, V>
 }
 
-export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
+export const CodeBlock: FC<Props> = ({
+  language,
+  value,
+  blockIndex,
+  enableArtifactAction = true
+}) => {
   const [isBtnPressed, setIsBtnPressed] = useState(false)
   const [previewValue, setPreviewValue] = useState(value)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
@@ -311,7 +317,7 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
   }, [isPreviewable, showPreview])
 
   useEffect(() => {
-    if (!isProMode) {
+    if (!enableArtifactAction || !isProMode) {
       return
     }
     if (!isMermaidLanguage && totalLines <= artifactAutoThreshold) {
@@ -340,6 +346,7 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
     autoOpenStateMap.set(artifactId, true)
   }, [
     artifactId,
+    enableArtifactAction,
     artifactAutoThreshold,
     autoOpenStateMap,
     isMermaidLanguage,
@@ -378,11 +385,10 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
       <div
         id={artifactOriginId}
         data-artifact-origin={artifactId}
-        className="not-prose"
-      >
+        className="not-prose">
         <div className=" [&_div+div]:!mt-0 my-4 bg-surface rounded-xl">
-          <div className="flex flex-row px-4 py-2 rounded-t-xl gap-3 bg-surface2 items-center justify-between">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-row flex-wrap px-4 py-2 rounded-t-xl gap-3 bg-surface2 items-center justify-between">
+            <div className="flex flex-wrap items-center gap-3">
               {isPreviewable && !collapsed && (
                 <div className="flex rounded-md overflow-hidden border border-border">
                   <button
@@ -407,27 +413,28 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
                   </button>
                 </div>
               )}
-              {showPreview && isPreviewable && !collapsed && isPreviewOversized && (
-                <Tooltip
-                  title={
-                    isPreviewConstrained
-                      ? t("previewToggleExpand", "Expand preview")
-                      : t("previewToggleClamp", "Clamp preview")
-                  }
-                >
-                  <button
-                    onClick={() => setIsPreviewConstrained((prev) => !prev)}
-                    aria-pressed={isPreviewConstrained}
-                    className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2 py-1 text-[11px] text-text-muted hover:text-text"
-                  >
-                    <span>
-                      {isPreviewConstrained
-                        ? t("previewMaxHeight", "Max height")
-                        : t("previewFitHeight", "Fit height")}
-                    </span>
-                  </button>
-                </Tooltip>
-              )}
+              {showPreview &&
+                isPreviewable &&
+                !collapsed &&
+                isPreviewOversized && (
+                  <Tooltip
+                    title={
+                      isPreviewConstrained
+                        ? t("previewToggleExpand", "Expand preview")
+                        : t("previewToggleClamp", "Clamp preview")
+                    }>
+                    <button
+                      onClick={() => setIsPreviewConstrained((prev) => !prev)}
+                      aria-pressed={isPreviewConstrained}
+                      className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2 py-1 text-[11px] text-text-muted hover:text-text">
+                      <span>
+                        {isPreviewConstrained
+                          ? t("previewMaxHeight", "Max height")
+                          : t("previewFitHeight", "Fit height")}
+                      </span>
+                    </button>
+                  </Tooltip>
+                )}
 
               <span className="font-mono text-xs">
                 {normalizedLanguage || "text"}
@@ -438,13 +445,15 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleOpenArtifact}
-                className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2 py-1 text-[11px] font-medium text-text-muted hover:text-text">
-                <CodeIcon className="size-3" />
-                <span>{viewLabel}</span>
-              </button>
+            <div className="flex flex-wrap items-center gap-2">
+              {enableArtifactAction && (
+                <button
+                  onClick={handleOpenArtifact}
+                  className="inline-flex items-center gap-1 rounded-full border border-border bg-surface px-2 py-1 text-[11px] font-medium text-text-muted hover:text-text">
+                  <CodeIcon className="size-3" />
+                  <span>{viewLabel}</span>
+                </button>
+              )}
               {isLong && (
                 <button
                   onClick={() => setCollapsed((prev) => !prev)}
@@ -468,15 +477,11 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
                   )}
                 </button>
               )}
-            </div>
-          </div>
-          <div className="sticky top-9 md:top-[5.75rem]">
-            <div className="absolute bottom-0 right-2 flex h-9 items-center gap-1">
               <Tooltip title={downloadLabel}>
                 <button
                   onClick={handleDownload}
                   aria-label={downloadLabel}
-                  className="flex gap-1.5 items-center rounded bg-none p-1 text-xs text-text-muted hover:bg-surface2 hover:text-text focus:outline-none">
+                  className="flex gap-1.5 items-center rounded bg-none p-1 text-xs text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
                   <DownloadIcon className="size-4" />
                 </button>
               </Tooltip>
@@ -484,7 +489,7 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
                 <button
                   onClick={handleCopy}
                   aria-label={copyLabel}
-                  className="flex gap-1.5 items-center rounded bg-none p-1 text-xs text-text-muted hover:bg-surface2 hover:text-text focus:outline-none">
+                  className="flex gap-1.5 items-center rounded bg-none p-1 text-xs text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2">
                   {!isBtnPressed ? (
                     <CopyIcon className="size-4" />
                   ) : (
@@ -518,29 +523,28 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
                     getTokenProps
                   }) => (
                     <pre
-                      className={`${highlightClassName} m-0 w-full bg-transparent px-4 py-3 text-[0.9rem]`}
+                      className={`${highlightClassName} m-0 w-full overflow-x-auto bg-transparent px-4 py-3 text-[0.9rem]`}
                       style={{
                         ...style,
                         fontFamily: "var(--font-mono)"
                       }}>
-                      {tokens.map((line, i) => (
-                        <div
-                          key={i}
-                          {...getLineProps({ line })}
-                          className="table w-full">
-                          <span className="table-cell select-none pr-4 text-right text-xs text-text-subtle">
-                            {i + 1}
-                          </span>
-                          <span className="table-cell whitespace-pre-wrap">
-                            {line.map((token, key) => (
-                              <span
-                                key={key}
-                                {...getTokenProps({ token })}
-                              />
-                            ))}
-                          </span>
-                        </div>
-                      ))}
+                      <div className="table w-full">
+                        {tokens.map((line, i) => (
+                          <div
+                            key={i}
+                            {...getLineProps({ line })}
+                            className="table-row">
+                            <span className="table-cell w-px min-w-[2ch] select-none pr-4 text-right text-xs text-text-subtle">
+                              {i + 1}
+                            </span>
+                            <span className="table-cell whitespace-pre">
+                              {line.map((token, key) => (
+                                <span key={key} {...getTokenProps({ token })} />
+                              ))}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
                     </pre>
                   )}
                 </Highlight>
@@ -550,8 +554,7 @@ export const CodeBlock: FC<Props> = ({ language, value, blockIndex }) => {
                   className={`w-full bg-surface rounded-b-xl border-t border-border overflow-x-hidden ${
                     isPreviewScrollable ? "overflow-y-auto" : "overflow-hidden"
                   }`}
-                  style={{ height: previewContainerHeight }}
-                >
+                  style={{ height: previewContainerHeight }}>
                   <iframe
                     title={t("preview", "Preview")}
                     ref={previewFrameRef}
