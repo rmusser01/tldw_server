@@ -8,11 +8,13 @@ parallelizability.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, TypeVar
 
 from pydantic import BaseModel
 
 from ._base import AdapterFunc
+
+F = TypeVar("F", bound=AdapterFunc)
 
 
 @dataclass
@@ -100,7 +102,7 @@ class AdapterRegistry:
         parallelizable: bool = True,
         config_model: type[BaseModel] | None = None,
         tags: list[str] | None = None,
-    ) -> Callable[[AdapterFunc], AdapterFunc]:
+    ) -> Callable[[F], F]:
         """Decorator to register an adapter with metadata.
 
         Args:
@@ -115,7 +117,7 @@ class AdapterRegistry:
             Decorator function that registers the adapter
         """
 
-        def decorator(func: AdapterFunc) -> AdapterFunc:
+        def decorator(func: F) -> F:
             self._adapters[name] = AdapterSpec(
                 name=name,
                 func=func,

@@ -123,3 +123,28 @@ def test_backward_compatible_imports():
     assert callable(run_branch_adapter)
     assert callable(run_map_adapter)
     assert callable(run_rag_search_adapter)
+
+
+def test_register_preserves_function_identity_and_loads_once():
+    from typing import Any
+
+    from tldw_Server_API.app.core.Workflows.adapters._registry import AdapterRegistry
+
+    registry = AdapterRegistry()
+    loads = []
+
+    async def adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        return config
+
+    def load() -> None:
+        loads.append(True)
+        registered = registry.register("identity-probe")(adapter)
+        assert registered is adapter
+
+    registry.set_loader(load)
+    assert loads == []
+    assert registry.get_adapter("identity-probe") is adapter
+    spec = registry.get_spec("identity-probe")
+    assert spec is not None
+    assert spec.func is adapter
+    assert loads == [True]
