@@ -332,8 +332,12 @@ const createHistoryEntry = (
   id: generateId(),
   timestamp: Date.now(),
   description,
-  nodes: JSON.parse(JSON.stringify(nodes)),
-  edges: JSON.parse(JSON.stringify(edges))
+  // structuredClone is safe here: node/edge shapes are JSON-origin (server
+  // definitions, form config) and React Flow attaches its DOM-carrying
+  // internals under a symbol key, which structuredClone skips just like
+  // JSON.stringify did.
+  nodes: structuredClone(nodes),
+  edges: structuredClone(edges)
 })
 
 // Storage helpers
