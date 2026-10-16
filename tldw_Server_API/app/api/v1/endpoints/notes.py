@@ -4928,9 +4928,10 @@ async def create_moodboard(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Moodboard created but could not be retrieved.",
             )
-        return MoodboardResponse.model_validate(_normalize_moodboard_payload(moodboard_row))
+        moodboard_payload = _normalize_moodboard_payload(moodboard_row)
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "moodboard")
+    return MoodboardResponse.model_validate(moodboard_payload)
 
 
 @router.get(
@@ -5019,11 +5020,12 @@ async def get_moodboard_endpoint(
         row = await _run_db_call(db.get_moodboard_by_id, moodboard_id=moodboard_id)
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Moodboard not found")
-        return MoodboardResponse.model_validate(_normalize_moodboard_payload(row))
+        moodboard_payload = _normalize_moodboard_payload(row)
     except HTTPException:
         raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "moodboard")
+    return MoodboardResponse.model_validate(moodboard_payload)
 
 
 @router.patch(
@@ -5069,11 +5071,12 @@ async def update_moodboard_endpoint(
         row = await _run_db_call(db.get_moodboard_by_id, moodboard_id=moodboard_id)
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Moodboard not found")
-        return MoodboardResponse.model_validate(_normalize_moodboard_payload(row))
+        moodboard_payload = _normalize_moodboard_payload(row)
     except HTTPException:
         raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "moodboard")
+    return MoodboardResponse.model_validate(moodboard_payload)
 
 
 @router.delete(
