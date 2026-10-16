@@ -4055,6 +4055,9 @@
   "characterRail_selectionError": {
     "message": "The assistant could not be selected. Your current chat and draft are still here; try choosing again."
   },
+  "composer_advancedPreferenceUnavailable": {
+    "message": "Display preference unavailable. Advanced controls still work for this visit."
+  },
   "composer_assistant_selection_restore_failed": {
     "message": "Assistant preferences could not be restored. Your chat and draft are still here; try choosing the assistant again."
   },
@@ -4342,6 +4345,9 @@
   },
   "sources_capturePublicOnly": {
     "message": "Public readable text only. Website sign-ins, browser cookies, and private-page access are not used."
+  },
+  "sources_captureBrowserUnavailable": {
+    "message": "Safe browser capture is unavailable for this page. Try another public URL, or use the Web Clipper or import readable content you can provide."
   },
   "sources_captureCompleteText": {
     "message": "The complete text is saved; it is never silently shortened."
