@@ -4029,10 +4029,13 @@ describe("CharactersManager first-use onboarding", () => {
     const input = await screen.findByPlaceholderText(
       "Ask this character a quick question..."
     )
+    const dialog = input.closest<HTMLElement>('[role="dialog"]')
+    expect(dialog).not.toBeNull()
+    const popupQueries = within(dialog!)
 
-    expect(screen.getByRole("combobox", { name: /modelLabel|^Model$/ })).toBeInTheDocument()
+    expect(popupQueries.getByRole("combobox", { name: /modelLabel|^Model$/ })).toBeInTheDocument()
     await user.type(input, "How do you help?")
-    await user.click(screen.getByRole("button", { name: "Send" }))
+    await user.click(popupQueries.getByRole("button", { name: "Send" }))
 
     await waitFor(() => expect(quickPopupFixture.send).toHaveBeenCalledWith(expect.objectContaining({
       characterId: 101, model: "openai:mock-chat-model", message: "How do you help?", toolChoice: "none",
@@ -4040,16 +4043,20 @@ describe("CharactersManager first-use onboarding", () => {
     })))
     expect(tldwClientMock.completeCharacterChatTurn).not.toHaveBeenCalled()
     expect(navigateMock).not.toHaveBeenCalled()
-    expect(await screen.findByText("Character quick reply")).toBeInTheDocument()
-    expect(screen.queryByRole("combobox", { name: /modelLabel|^Model$/ })).toBeNull()
-    await waitFor(() => expect(screen.getByText("This chat uses its saved model and provider. Review its settings in full chat.")).toBeVisible())
+    expect(await popupQueries.findByText("Character quick reply")).toBeInTheDocument()
+    expect(popupQueries.queryByRole("combobox", { name: /modelLabel|^Model$/ })).toBeNull()
+    await waitFor(() => expect(popupQueries.getByText("This chat uses its saved model and provider. Review its settings in full chat.")).toBeVisible())
     currentModel = "openai:another-default"
     mounted.rerender(popup())
-    expect(screen.queryByRole("combobox", { name: /modelLabel|^Model$/ })).toBeNull()
-    await user.click(screen.getByRole("button", { name: "Close" }))
+    expect(popupQueries.queryByRole("combobox", { name: /modelLabel|^Model$/ })).toBeNull()
+    await user.click(popupQueries.getByRole("button", { name: "Close" }))
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
     await user.click(await screen.findByRole("button", { name: /More actions/i }))
     await user.click(await screen.findByRole("menuitem", { name: "Test in popup" }))
-    expect(await screen.findByRole("combobox", { name: /modelLabel|^Model$/ })).toBeInTheDocument()
+    const reopenedInput = await screen.findByPlaceholderText("Ask this character a quick question...")
+    const reopened = reopenedInput.closest<HTMLElement>('[role="dialog"]')
+    expect(reopened).not.toBeNull()
+    expect(await within(reopened!).findByRole("combobox", { name: /modelLabel|^Model$/ })).toBeInTheDocument()
   }, 30000)
 
   it("keeps the popup draft and does not send when private retention fails", async () => {
