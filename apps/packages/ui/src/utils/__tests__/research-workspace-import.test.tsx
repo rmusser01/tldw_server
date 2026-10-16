@@ -11,7 +11,7 @@ import {
 import {
   act,
   fireEvent,
-  render,
+  render as renderUI,
   renderHook,
   screen,
   waitFor,
@@ -34,6 +34,13 @@ type CanonicalNote = Omit<WorkspaceNote, "isDirty"> & {
   id: string | number;
   conversation_id?: string | null;
 };
+
+// Match the router context supplied by the WebUI and extension shells.
+const render: typeof renderUI = (ui, options) =>
+  renderUI(ui, {
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
+    ...options,
+  })
 
 const mocks = vi.hoisted(() => ({
   owner: "alice",
