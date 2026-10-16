@@ -380,7 +380,7 @@ class WorkflowEngine:
             tenant = self._tenant_for_run(run_id)
             self.db.append_event(tenant, run_id, event_type, payload or {}, step_run_id=step_run_id)
         except _WF_NONCRITICAL_EXCEPTIONS as e:
-            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                 logger.warning(
                     "WorkflowEngine: append_event failed run_id={} type={} step_run_id={} error={}",
                     run_id,
@@ -426,7 +426,7 @@ class WorkflowEngine:
     ) -> bool:
         """Update run status while enforcing the lifecycle transition contract."""
         current_status: str | None = None
-        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
             run = self.db.get_run(run_id)
             if run and run.status:
                 current_status = str(run.status)
@@ -556,7 +556,7 @@ class WorkflowEngine:
         """Execute a linear workflow with retries, timeouts, and cancel checks."""
         logger.debug(f"WorkflowEngine: starting run {run_id} in mode={mode}")
         # Purge any expired in-memory secrets upfront
-        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
             self._purge_expired_secrets(self.config.secrets_ttl_seconds)
         # Capture tenant/workflow for scheduler notification at end
         _r = self.db.get_run(run_id)
@@ -571,7 +571,7 @@ class WorkflowEngine:
             except _WF_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"WorkflowEngine: pop_run_secrets failed for {run_id}: {e}")
             self._clear_tenant_cache(run_id)
-            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                 _scheduler_for_notify.notify_finished(_tenant_for_notify, _wf_for_notify, run_id=run_id)
 
         keep_secrets = False
@@ -606,7 +606,7 @@ class WorkflowEngine:
             finalized = True
             return
         self._append_event(run_id, "run_started", {"mode": mode})
-        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
             increment_counter("workflows_runs_started", labels={"tenant": self._tenant_for_run(run_id), "mode": str(mode)})
 
         run = self.db.get_run(run_id)
@@ -722,7 +722,7 @@ class WorkflowEngine:
                         self.db.update_step_lock_and_heartbeat(step_run_id=step_run_id, locked_by="engine", lock_ttl_seconds=int(self.config.heartbeat_interval_sec * 5))
                     except _WF_NONCRITICAL_EXCEPTIONS:
                         pass
-                    with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                    with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                         increment_counter("workflows_steps_started", labels={"type": step_type})
                     add_span_event("step_started", {"run_id": run_id, "step_id": step_id, "type": step_type})
 
@@ -743,7 +743,7 @@ class WorkflowEngine:
                             return
                         self._append_event(run_id, "run_cancelled", {"by": "user", "before_step": step_id})
                         # Standardize webhook behavior on cancellation pre-execution
-                        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                             await self._maybe_send_completion_webhook(definition, run_id, status="cancelled")
                         return
 
@@ -762,12 +762,12 @@ class WorkflowEngine:
                     jump_to_id_on_failure: str | None = None
                     while attempt <= max_retries:
                         # Update heartbeat
-                        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                             self.db.update_step_lock_and_heartbeat(step_run_id=step_run_id, locked_by="engine", lock_ttl_seconds=int(self.config.heartbeat_interval_sec * 5))
 
                         attempt += 1
                         # Persist attempt
-                        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                             self.db.update_step_attempt(step_run_id=step_run_id, attempt=attempt)
                         attempt_id = self._create_step_attempt_record(
                             run_id=run_id,
@@ -821,17 +821,17 @@ class WorkflowEngine:
                             err = te
                             error_reason_code = _reason_code_from_error(te)
                             self._append_event(run_id, "step_timeout", {"step_id": step_id, "attempt": attempt})
-                            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                                 record_span_exception(te)
                         except _WF_NONCRITICAL_EXCEPTIONS as e:
                             err = e
                             error_reason_code = _reason_code_from_error(e)
-                            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                                 record_span_exception(e)
                         except Exception as e:  # noqa: BLE001 - adapter/provider failures must terminally fail the step
                             err = e
                             error_reason_code = _reason_code_from_error(e)
-                            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                                 record_span_exception(e)
 
                         if err is not None:
@@ -868,9 +868,9 @@ class WorkflowEngine:
                     if err:
                         # Failed step
                         self._append_event(run_id, "step_failed", {"step_id": step_id, "error": str(err)})
-                        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                             increment_counter("workflows_steps_failed", labels={"type": step_type})
-                        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                             self.db.complete_step_run(step_run_id=step_run_id, status="failed", outputs=outputs, error=str(err))
                         # Check on_failure routing
                         try:
@@ -899,10 +899,10 @@ class WorkflowEngine:
                         ):
                             return
                         self._append_event(run_id, "run_failed", {"error": str(err)})
-                        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                             increment_counter("workflows_runs_failed", labels={"tenant": self._tenant_for_run(run_id)})
                         # Completion webhook on failure
-                        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                             await self._maybe_send_completion_webhook(definition, run_id, status="failed")
                         return
 
@@ -920,7 +920,7 @@ class WorkflowEngine:
                             step_type=step_type,
                             status=status_flag,
                         )
-                        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                             self.db.complete_step_run(step_run_id=step_run_id, status=status_flag, outputs=last_outputs)
                         on_timeout = None
                         timeout_cfg = None
@@ -949,7 +949,7 @@ class WorkflowEngine:
                             step_type=step_type,
                             status="cancelled",
                         )
-                        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                             self.db.complete_step_run(step_run_id=step_run_id, status="cancelled", outputs=last_outputs)
                         # Emit a step_cancelled event for observability
                         self._append_event(run_id, "step_cancelled", {"step_id": step_id})
@@ -975,15 +975,15 @@ class WorkflowEngine:
                         status="succeeded",
                     )
                     self._append_event(run_id, "step_completed", {"step_id": step_id, "type": step_type})
-                    with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                    with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                         increment_counter("workflows_steps_succeeded", labels={"type": step_type})
-                    with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                    with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                         observe_histogram(
                             "workflows_step_duration_ms",
                             int((time.time() - step_start_ts) * 1000),
                             labels={"type": step_type, "tenant": self._tenant_for_run(run_id)},
                         )
-                    with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                    with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                         self.db.complete_step_run(step_run_id=step_run_id, status="succeeded", outputs=last_outputs)
 
                     # Determine next step (branching)
@@ -1035,7 +1035,7 @@ class WorkflowEngine:
                 pass
             logger.info(f"WorkflowEngine: run {run_id} completed")
             # Completion webhook on success
-            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                 await self._maybe_send_completion_webhook(definition, run_id, status="succeeded")
         except _WF_NONCRITICAL_EXCEPTIONS as e:
             tokens_in, tokens_out, cost_usd = self._aggregate_run_token_usage(run_id)
@@ -1053,7 +1053,7 @@ class WorkflowEngine:
             self._append_event(run_id, "run_failed", {"error": str(e)})
             logger.error(f"WorkflowEngine: run {run_id} failed: {e}")
             # Completion webhook on failure
-            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                 await self._maybe_send_completion_webhook(definition, run_id, status="failed")
         finally:
             if not finalized:
@@ -1073,7 +1073,7 @@ class WorkflowEngine:
         wait_status = "waiting_human" if wait_payload.get("__status__") == "waiting_human" else "waiting_approval"
         reason = str(wait_payload.get("reason") or "").strip() or None
 
-        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
             self.db.complete_step_run(step_run_id=step_run_id, status=wait_status, outputs=wait_payload)
         if not self._update_run_status_guarded(
             run_id,
@@ -1096,7 +1096,7 @@ class WorkflowEngine:
             event_payload["research_checkpoint_type"] = wait_payload.get("research_checkpoint_type")
 
         if reason == "research_checkpoint":
-            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                 self.db.upsert_research_wait_link(
                     wait_id=f"{run_id}:{step_id}",
                     tenant_id=self._tenant_for_run(run_id),
@@ -1109,11 +1109,11 @@ class WorkflowEngine:
                     wait_payload=wait_payload,
                     active_poll_seconds=float(wait_payload.get("active_poll_seconds") or 0.0),
                 )
-            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                 self._append_event(run_id, wait_status, event_payload, step_run_id=step_run_id)
             return True
 
-        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
             self._append_event(run_id, wait_status, event_payload, step_run_id=step_run_id)
 
         try:
@@ -1300,7 +1300,7 @@ class WorkflowEngine:
                 self.db.update_step_lock_and_heartbeat(step_run_id=step_run_id, locked_by="engine", lock_ttl_seconds=int(self.config.heartbeat_interval_sec * 5))
             except _WF_NONCRITICAL_EXCEPTIONS:
                 pass
-            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                 increment_counter("workflows_steps_started", labels={"type": stype})
 
             # Cancel before running
@@ -1321,7 +1321,7 @@ class WorkflowEngine:
                     finalized = True
                     return
                 self._append_event(run_id, "run_cancelled", {"by": "user", "before_step": sid})
-                with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                     await self._maybe_send_completion_webhook(definition, run_id, status="cancelled")
                 _finalize(False)
                 finalized = True
@@ -1335,10 +1335,10 @@ class WorkflowEngine:
             outputs: dict[str, Any] = {}
             attempt_id: str | None = None
             while attempt <= max_retries:
-                with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                     self.db.update_step_lock_and_heartbeat(step_run_id=step_run_id, locked_by="engine", lock_ttl_seconds=int(self.config.heartbeat_interval_sec * 5))
                 attempt += 1
-                with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                     self.db.update_step_attempt(step_run_id=step_run_id, attempt=attempt)
                 attempt_id = self._create_step_attempt_record(
                     run_id=run_id,
@@ -1396,7 +1396,7 @@ class WorkflowEngine:
 
             if err:
                 self._append_event(run_id, "step_failed", {"step_id": sid, "error": str(err)})
-                with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                     self.db.complete_step_run(step_run_id=step_run_id, status="failed", outputs=outputs, error=str(err))
                 failure_next = str(step.get("on_failure") or "").strip()
                 if failure_next and failure_next in id_to_idx:
@@ -1419,7 +1419,7 @@ class WorkflowEngine:
                     finalized = True
                     return
                 self._append_event(run_id, "run_failed", {"error": str(err)})
-                with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                     await self._maybe_send_completion_webhook(definition, run_id, status="failed")
                 _finalize(False)
                 finalized = True
@@ -1434,7 +1434,7 @@ class WorkflowEngine:
                     step_type=stype,
                     status=wait_status,
                 )
-                with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                     self.db.complete_step_run(step_run_id=step_run_id, status=wait_status, outputs=last)
                 on_timeout = None
                 timeout_cfg = None
@@ -1465,7 +1465,7 @@ class WorkflowEngine:
                     step_type=stype,
                     status="cancelled",
                 )
-                with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                     self.db.complete_step_run(step_run_id=step_run_id, status="cancelled", outputs=last)
                 self._append_event(run_id, "step_cancelled", {"step_id": sid})
                 self._append_cancel_acknowledged(
@@ -1484,7 +1484,7 @@ class WorkflowEngine:
                     finalized = True
                     return
                 self._append_event(run_id, "run_cancelled", {"by": "user", "during_step": sid})
-                with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                     await self._maybe_send_completion_webhook(definition, run_id, status="cancelled")
                 _finalize(False)
                 finalized = True
@@ -1496,7 +1496,7 @@ class WorkflowEngine:
                 status="succeeded",
             )
             self._append_event(run_id, "step_completed", {"step_id": sid, "type": stype})
-            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                 self.db.complete_step_run(step_run_id=step_run_id, status="succeeded", outputs=last)
 
             # Determine next step
@@ -1546,7 +1546,7 @@ class WorkflowEngine:
                 observe_histogram("workflows_run_duration_ms", duration_ms, labels={"tenant": tenant_label})
         except _WF_NONCRITICAL_EXCEPTIONS:
             pass
-        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
             await self._maybe_send_completion_webhook(definition, run_id, status="succeeded")
 
         if not finalized:
@@ -1606,7 +1606,7 @@ class WorkflowEngine:
             return "already_applied"
         current_status = str(getattr(run, "status", "unknown"))
         cancel_requested = False
-        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
             cancel_requested = bool(self.db.is_cancel_requested(run_id))
         if current_status == "cancelled" or cancel_requested:
             return "already_applied"
@@ -1620,7 +1620,7 @@ class WorkflowEngine:
         if result != "applied":
             return result
 
-        with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
             self.db.set_cancel_requested(run_id, True)
         # Attempt to terminate any recorded subprocesses for this run
         try:
@@ -1640,7 +1640,7 @@ class WorkflowEngine:
                     _terminated, forced = (False, False)
                 self._append_event(run_id, "step_cancelled", {"step_run_id": r.get("step_run_id"), "forced_kill": bool(forced)})
         except _WF_NONCRITICAL_EXCEPTIONS as e:
-            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                 logger.debug(f"WorkflowEngine: cancel subprocess cleanup failed for run_id={run_id}: {e}")
         # Ensure ended_at is set on cancel for lifecycle completeness
         self._append_cancel_acknowledged(run_id, source="control_run")
@@ -1808,7 +1808,7 @@ class WorkflowEngine:
                         )
                     )
                     return
-                with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                     self._update_run_status_guarded(
                         run_id,
                         status="failed",
@@ -2040,9 +2040,9 @@ class WorkflowEngine:
                     on_reject="reject",
                 ):
                     continue
-                with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                     self._append_event(rid, "run_requeued", {"step_id": step_id, "step_run_id": target.get("step_run_id")})
-                with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                     asyncio.create_task(self.continue_run(rid, after_step_id=str(after_step_id), last_outputs=last_outputs, next_step_id=str(step_id)))
         except _WF_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Orphan reaper failed: {e}")
@@ -2245,7 +2245,7 @@ class WorkflowEngine:
                         body_data = payload
                     except _WF_NONCRITICAL_EXCEPTIONS:
                         body_data = None
-                    with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+                    with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                         self.db.enqueue_webhook_dlq(tenant_id=self._tenant_for_run(run_id), run_id=run_id, url=url, body=body_data, last_error=str(_e))
                 except _WF_NONCRITICAL_EXCEPTIONS:
                     pass
@@ -2379,6 +2379,6 @@ class WorkflowScheduler:
         may be scoped to a single request and shut down immediately in tests.
         """
         def _runner():
-            with contextlib.suppress(_WF_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                 asyncio.run(coro)
         threading.Thread(target=_runner, name="workflow-engine", daemon=True).start()

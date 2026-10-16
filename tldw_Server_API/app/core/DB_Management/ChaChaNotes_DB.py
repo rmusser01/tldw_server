@@ -8112,9 +8112,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
 
         def _replace_connection(bad_conn: RawBackendConnection) -> RawBackendConnection:
-            with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                 bad_conn.close()
-            with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                 pool.return_connection(bad_conn)
             return pool.get_connection()
 
@@ -8381,7 +8381,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             and is_factory_managed_backend(self.backend)
         ):
             release_managed_backend(self.backend)
-            with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                 self._local = threading.local()
             return
 
@@ -8407,7 +8407,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 logger.warning("Error closing all backend connections for {}: {}", self.db_path_str, exc)
 
         # Reset thread-local reference regardless of backend
-        with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
             self._local = threading.local()
 
     def backup_database(self, backup_file_path: str) -> bool:
@@ -26692,7 +26692,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     try:
                         rows.append({"id": r[0], "content": r[1], "version": r[2]})
                     except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                        with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+                        with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                             rows.append({"id": r['id'], "content": r['content'], "version": r['version']})
 
             for row in rows:
@@ -29294,7 +29294,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     )
                 raw_conn.commit()
             except BaseException:
-                with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                     raw_conn.rollback()
                 raise
             finally:

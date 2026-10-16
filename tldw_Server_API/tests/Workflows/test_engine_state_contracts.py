@@ -1,3 +1,5 @@
+import builtins
+import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -252,3 +254,43 @@ async def test_wait_transition_is_guarded(tmp_path, monkeypatch) -> None:
 
     rejected = [event for event in db.get_events(run_id) if event["event_type"] == "transition_rejected"]
     assert any(event["payload_json"].get("to") == "waiting_human" for event in rejected)
+
+
+@pytest.mark.parametrize("grouped", [False, True])
+def test_append_event_suppresses_noncritical_warning_failure(monkeypatch, grouped):
+    if grouped and sys.version_info < (3, 12):
+        pytest.skip("contextlib.suppress supports exception groups on Python 3.12+")
+    from types import SimpleNamespace
+
+    def fail_persistence(*args, **kwargs):
+        raise RuntimeError("event store unavailable")
+
+    def fail_warning(*args, **kwargs):
+        error = ValueError("warning failed")
+        raise builtins.ExceptionGroup("logging", [error]) if grouped else error
+
+    engine = engine_mod.WorkflowEngine.__new__(engine_mod.WorkflowEngine)
+    engine.db = SimpleNamespace(append_event=fail_persistence)
+    monkeypatch.setattr(engine, "_tenant_for_run", lambda run_id: "default")
+    monkeypatch.setattr(engine_mod.logger, "warning", fail_warning)
+    assert engine._append_event("run", "started") is None
+
+
+def test_append_event_propagates_unexpected_warning_failure(monkeypatch):
+    from types import SimpleNamespace
+
+    class UnexpectedWarningError(Exception):
+        pass
+
+    def fail_persistence(*args, **kwargs):
+        raise RuntimeError("event store unavailable")
+
+    def fail_warning(*args, **kwargs):
+        raise UnexpectedWarningError("unexpected warning failure")
+
+    engine = engine_mod.WorkflowEngine.__new__(engine_mod.WorkflowEngine)
+    engine.db = SimpleNamespace(append_event=fail_persistence)
+    monkeypatch.setattr(engine, "_tenant_for_run", lambda run_id: "default")
+    monkeypatch.setattr(engine_mod.logger, "warning", fail_warning)
+    with pytest.raises(UnexpectedWarningError, match="unexpected warning failure"):
+        engine._append_event("run", "started")

@@ -1,4 +1,6 @@
 import asyncio
+import builtins
+import sys
 import types
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
@@ -1935,3 +1937,42 @@ async def test_stream_response_duplicate_headers_aiohttp_are_comma_joined(monkey
 
     assert chunks == [b"audio"]
     assert seen == {"content-type": "audio/mpeg, audio/wav", "x-trace": "one, two"}
+
+
+@pytest.mark.parametrize("grouped", [False, True])
+def test_metric_registration_suppresses_noncritical_failure(monkeypatch, grouped):
+    if grouped and sys.version_info < (3, 12):
+        pytest.skip("contextlib.suppress supports exception groups on Python 3.12+")
+    from tldw_Server_API.app.core import http_client as hc
+
+    def fail_registration(definition):
+        error = ValueError("metric registration failed")
+        raise builtins.ExceptionGroup("metrics", [error]) if grouped else error
+
+    monkeypatch.setattr(hc, "_HTTP_CLIENT_METRICS_REGISTERED", False)
+    monkeypatch.setattr(
+        hc,
+        "get_metrics_registry",
+        lambda: types.SimpleNamespace(register_metric=fail_registration),
+    )
+    hc._register_http_client_metrics_once()
+    assert hc._HTTP_CLIENT_METRICS_REGISTERED is True
+
+
+def test_metric_registration_propagates_unexpected_failure(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    class UnexpectedMetricError(Exception):
+        pass
+
+    def fail_registration(definition):
+        raise UnexpectedMetricError("unexpected metric failure")
+
+    monkeypatch.setattr(hc, "_HTTP_CLIENT_METRICS_REGISTERED", False)
+    monkeypatch.setattr(
+        hc,
+        "get_metrics_registry",
+        lambda: types.SimpleNamespace(register_metric=fail_registration),
+    )
+    with pytest.raises(UnexpectedMetricError, match="unexpected metric failure"):
+        hc._register_http_client_metrics_once()
