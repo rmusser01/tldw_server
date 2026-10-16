@@ -258,7 +258,6 @@ export const SidePanelBody = ({
   const rowSwipeDisabled = Boolean(
     historySelection &&
       (!historySelection.view || historySelection.status === "loading")
-  
   )
 
   const previousUserMessageByIndex = React.useMemo(() => {
