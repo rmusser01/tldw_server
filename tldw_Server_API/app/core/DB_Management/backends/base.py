@@ -7,7 +7,7 @@ to ensure compatibility with the application.
 
 import threading
 from abc import ABC, abstractmethod
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
@@ -459,7 +459,7 @@ class DatabaseBackend(ABC):
     def execute(
         self,
         query: str,
-        params: Optional[Union[tuple, dict]] = None,
+        params: Optional[Union[tuple, list, dict]] = None,
         connection: Optional[Any] = None,
         *,
         log_errors: bool = True,
@@ -482,7 +482,7 @@ class DatabaseBackend(ABC):
     def execute_many(
         self,
         query: str,
-        params_list: list[Union[tuple, dict]],
+        params_list: Sequence[Union[tuple, list, dict]],
         connection: Optional[Any] = None
     ) -> QueryResult:
         """

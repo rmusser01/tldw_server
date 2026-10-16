@@ -15,7 +15,7 @@ import contextlib
 import os
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager, suppress
 from typing import Any, Optional, Union
 
@@ -1041,7 +1041,7 @@ class PostgreSQLBackend(DatabaseBackend):
     def _prepare_query(
         self,
         query: str,
-        params: Optional[Union[tuple, dict]]
+        params: Optional[Union[tuple, list, dict]]
     ) -> tuple[str, Optional[Union[tuple, dict]]]:
         """Prepare SQL and params for psycopg with robust placeholder handling.
 
@@ -1061,7 +1061,7 @@ class PostgreSQLBackend(DatabaseBackend):
     def execute(
         self,
         query: str,
-        params: Optional[Union[tuple, dict]] = None,
+        params: Optional[Union[tuple, list, dict]] = None,
         connection: Optional[Any] = None,
         *,
         log_errors: bool = True,
@@ -1204,7 +1204,7 @@ class PostgreSQLBackend(DatabaseBackend):
     def execute_many(
         self,
         query: str,
-        params_list: list[Union[tuple, dict]],
+        params_list: Sequence[Union[tuple, list, dict]],
         connection: Optional[Any] = None
     ) -> QueryResult:
         """Execute a query multiple times with different parameters."""

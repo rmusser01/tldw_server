@@ -13,7 +13,7 @@ import threading
 import time
 import urllib.parse as _url
 import weakref
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -452,7 +452,7 @@ class SQLiteBackend(DatabaseBackend):
     def execute(
         self,
         query: str,
-        params: Optional[Union[tuple, dict]] = None,
+        params: Optional[Union[tuple, list, dict]] = None,
         connection: Optional[sqlite3.Connection] = None,
         *,
         log_errors: bool = True,
@@ -518,7 +518,7 @@ class SQLiteBackend(DatabaseBackend):
     def execute_many(
         self,
         query: str,
-        params_list: list[Union[tuple, dict]],
+        params_list: Sequence[Union[tuple, list, dict]],
         connection: Optional[sqlite3.Connection] = None
     ) -> QueryResult:
         """Execute a query multiple times with different parameters."""

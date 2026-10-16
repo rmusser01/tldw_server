@@ -53,7 +53,7 @@ from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from functools import wraps  # noqa: E402
 from pathlib import Path  # noqa: E402
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Protocol, TypeAlias  # noqa: E402
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Protocol, TypeAlias, overload  # noqa: E402
 
 from loguru import logger  # noqa: E402
 
@@ -65,7 +65,7 @@ if TYPE_CHECKING:
     from tldw_Server_API.app.core.Sharing.clone_models import WorkspaceCloneSnapshot
 
 try:  # Prefer psycopg v3 sql helper, fall back to psycopg2 if available
-    from psycopg import sql as psycopg_sql  # type: ignore
+    from psycopg import sql as psycopg_sql
 except ImportError:  # pragma: no cover - compatibility fallback
     try:
         from psycopg2 import sql as psycopg_sql  # type: ignore
@@ -547,7 +547,7 @@ class BackendCursorWrapper:
         self._adapter: BackendCursorAdapter | None = None
         self.rowcount: int = -1
         self.lastrowid: int | None = None
-        self.description = None
+        self.description: list[tuple[Any, ...]] | None = None
 
     @_owned_wrapper_call
     def execute(self, query: str, params: tuple | list | dict | None = None):
@@ -675,14 +675,15 @@ class BackendConnectionWrapper:
     @property
     def in_transaction(self) -> bool:
         if self._backend.backend_type == BackendType.SQLITE:
-            return self._connection.in_transaction
+            in_transaction: bool = self._connection.in_transaction
+            return in_transaction
         state = self._operation_state
         if state is None and self._operation_owned:
             state = self._db._connection_state()
         status = getattr(getattr(self._connection, "info", None), "transaction_status", None)
         return bool(
             getattr(state, "tx_depth", 0)
-            or self._backend._tx_depth(self._connection)
+            or getattr(self._backend, "_tx_depth")(self._connection)  # noqa: B009 - lazy duck typing
             or getattr(status, "name", None) != "IDLE"
         )
 
@@ -712,7 +713,7 @@ class BackendManagedTransaction:
         self._db = db
         self._preserve_existing = preserve_existing
         self._raw_conn = None
-        self._wrapper = None
+        self._wrapper: BackendConnectionWrapper | None = None
         self._managed = False
         self._depth = 0
 
@@ -730,7 +731,7 @@ class BackendManagedTransaction:
                 self._managed = bool(
                     self._managed
                     and getattr(status, "name", None) == "IDLE"
-                    and backend._tx_depth(self._raw_conn) == 0
+                    and getattr(backend, "_tx_depth")(self._raw_conn) == 0  # noqa: B009 - lazy duck typing
                 )
             self._state.tx_depth = self._depth + 1
             self._wrapper = BackendConnectionWrapper(self._db, self._raw_conn, backend)
@@ -8230,11 +8231,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def backend_type(self) -> BackendType:
         return self.backend.backend_type
 
+    @overload
+    def _prepare_backend_statement(
+        self,
+        query: str,
+        params: tuple | dict,
+    ) -> tuple[str, tuple | dict]: ...
+
+    @overload
     def _prepare_backend_statement(
         self,
         query: str,
         params: tuple | list | dict | None = None,
-    ) -> tuple[str, tuple | dict | None]:
+    ) -> tuple[str, tuple | list | dict | None]: ...
+
+    def _prepare_backend_statement(
+        self,
+        query: str,
+        params: tuple | list | dict | None = None,
+    ) -> tuple[str, tuple | list | dict | None]:
         return prepare_backend_statement(
             self.backend_type,
             query,
@@ -8248,8 +8263,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _prepare_backend_many_statement(
         self,
         query: str,
-        params_list: list[tuple | list | dict],
-    ) -> tuple[str, list[tuple | dict]]:
+        params_list: Sequence[tuple | list | dict],
+    ) -> tuple[str, list[tuple | list | dict]]:
         converted_query, prepared_params = prepare_backend_many_statement(
             self.backend_type,
             query,
@@ -8276,7 +8291,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         active_backend = backend or self.backend
         try:
             pool = active_backend.get_pool()
-            conn = pool.get_connection()
+            conn: RawBackendConnection = pool.get_connection()
             # Apply per-tenant session guard for PostgreSQL (RLS via current_setting('app.current_user_id'))
             if active_backend.backend_type == BackendType.POSTGRESQL and self.client_id:
                 conn = self._apply_postgres_client_scope(conn, pool)
@@ -8298,7 +8313,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         def _set_session(target) -> None:
             cur = target.cursor()
-            if psycopg_sql is not None:  # type: ignore[name-defined]
+            if psycopg_sql is not None:
                 statement = psycopg_sql.SQL(
                     "SELECT set_config('app.current_user_id', {}, false)"
                 ).format(psycopg_sql.Literal(user_value))
@@ -8314,7 +8329,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 bad_conn.close()
             with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                 pool.return_connection(bad_conn)
-            return pool.get_connection()
+            replacement: RawBackendConnection = pool.get_connection()
+            return replacement
 
         def _safe_rollback(target, context: str) -> bool:
             try:
@@ -8436,7 +8452,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     try:
                         # Prefer public helper to clear thread-local connection state
                         if hasattr(pool, 'clear_thread_local_connection'):
-                            pool.clear_thread_local_connection()  # type: ignore[attr-defined]
+                            pool.clear_thread_local_connection()
                     except _CHACHA_NONCRITICAL_EXCEPTIONS:
                         # Best-effort; ignore if pool doesn't expose the helper
                         pass
@@ -8562,7 +8578,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 try:
                     pool = backend.get_pool()
                     if hasattr(pool, 'clear_thread_local_connection'):
-                        pool.clear_thread_local_connection()  # type: ignore[attr-defined]
+                        pool.clear_thread_local_connection()
                 except _CHACHA_NONCRITICAL_EXCEPTIONS:
                     pass
 
@@ -27849,6 +27865,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._ensure_skill_registry_table()
         now = self._get_current_utc_timestamp_iso()
         next_version = expected_version + 1
+        params: tuple[str | int, ...]
         if directory_path is None:
             query = (
                 "UPDATE skill_registry SET deleted = ?, last_modified = ?, version = ? "
