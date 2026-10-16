@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -964,3 +965,66 @@ def test_exact_retry_after_object_state_update_and_failed_applied_mark_completes
     note = chacha_db.get_note_by_id("note-1")
     assert note is not None
     assert note["title"] == "Trip notes revised"
+
+
+@pytest.mark.parametrize("object_id", [None, "", 17])
+@pytest.mark.parametrize("operation", ["upsert", "tombstone"])
+def test_materializer_rejects_corrupt_stored_note_id_before_lookup(
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    object_id,
+    operation,
+) -> None:
+    _push_one(sync_service, _note_envelope())
+    stored = sync_service.store.get_envelope_by_client_id("dataset-1", "env-create")
+    assert stored is not None
+    envelope = replace(stored, operation=operation)
+    # Model construction rejects missing IDs; simulate a corrupted stored object explicitly.
+    object.__setattr__(envelope, "object_id", object_id)
+    before = chacha_db.get_note_by_id("note-1")
+    state = sync_service.store.get_object_state("dataset-1", "notes.note", "note-1")
+
+    def unexpected_access(*args, **kwargs):
+        pytest.fail("Invalid note identity reached state or product access")
+
+    monkeypatch.setattr(sync_service.store, "get_object_state", unexpected_access)
+    monkeypatch.setattr(sync_service.store, "upsert_object_state", unexpected_access)
+    monkeypatch.setattr(chacha_db, "upsert_note_from_sync", unexpected_access)
+    monkeypatch.setattr(chacha_db, "tombstone_note_from_sync", unexpected_access)
+    result = NotesMaterializer(chacha_db).apply(envelope, store=sync_service.store)
+    assert result.status == "failed"
+    assert result.message == "Stored notes.note envelope requires a non-empty string object ID"
+    failed = sync_service.store.list_failed_applies("dataset-1")
+    assert len(failed) == 1
+    assert failed[0].apply_error_code == "notes_projection_failed"
+    assert failed[0].apply_error_message == result.message
+    assert chacha_db.get_note_by_id("note-1") == before
+    monkeypatch.undo()
+    assert sync_service.store.get_object_state("dataset-1", "notes.note", "note-1") == state
+
+
+@pytest.mark.parametrize("object_id", [None, "", 17])
+@pytest.mark.parametrize("operation", ["upsert", "tombstone"])
+def test_direct_product_projection_rejects_corrupt_stored_note_id(
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+    monkeypatch: pytest.MonkeyPatch,
+    object_id,
+    operation,
+) -> None:
+    _push_one(sync_service, _note_envelope())
+    stored = sync_service.store.get_envelope_by_client_id("dataset-1", "env-create")
+    assert stored is not None
+    envelope = replace(stored, operation=operation)
+    object.__setattr__(envelope, "object_id", object_id)
+    before = chacha_db.get_note_by_id("note-1")
+
+    def unexpected_access(*args, **kwargs):
+        pytest.fail("Invalid note identity reached product access")
+
+    monkeypatch.setattr(chacha_db, "upsert_note_from_sync", unexpected_access)
+    monkeypatch.setattr(chacha_db, "tombstone_note_from_sync", unexpected_access)
+    with pytest.raises(ValueError, match="^Stored notes.note envelope requires a non-empty string object ID$"):
+        NotesMaterializer(chacha_db).project_product(envelope, object_revision=2, conn=None)
+    assert chacha_db.get_note_by_id("note-1") == before
