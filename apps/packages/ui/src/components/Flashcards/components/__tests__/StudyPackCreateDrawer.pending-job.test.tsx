@@ -137,6 +137,8 @@ const submit = async (client: QueryClient, jobId = 91) => {
 describe("StudyPackCreateDrawer accepted job lifecycle", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
+    vi.mocked(createStudyPackJob).mockReset();
+    vi.mocked(getStudyPackJob).mockReset();
     vi.mocked(createStudyPackJob).mockResolvedValue({
       job: response("queued").job,
     });
@@ -349,7 +351,7 @@ describe("StudyPackCreateDrawer accepted job lifecycle", () => {
         job: response("queued", 92).job,
       });
       vi.mocked(getStudyPackJob).mockResolvedValue(response("queued", 92));
-      fireEvent.click(button());
+      await submit(client, 92);
       await waitFor(() => expect(getStudyPackJob).toHaveBeenCalledWith(92));
       expect(createStudyPackJob).toHaveBeenCalledTimes(2);
     },
