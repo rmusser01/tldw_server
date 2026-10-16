@@ -18,7 +18,7 @@ import { AnswerPanel } from "@/components/Option/KnowledgeQA/AnswerPanel"
 import { MediaKnowledgeActions } from "@/components/Review/MediaKnowledgeActions"
 import { DEFAULT_RAG_SETTINGS } from "@/services/rag/unified-rag"
 import { ResearchWorkspace } from "@/components/Option/ResearchWorkspace"
-import { useWorkspaceStore } from "@/store/workspace"
+import { flushWorkspacePersistence, useWorkspaceStore } from "@/store/workspace"
 import {
   buildKnowledgeQaWorkspacePrefill,
   consumeResearchWorkspacePrefill,
@@ -522,6 +522,8 @@ describe("mounted Knowledge research import", () => {
       content: firstNote,
     })
     view.unmount()
+    // Persist writes are debounced; readers of persisted state flush first.
+    await flushWorkspacePersistence()
     const persisted = new Map(
       Array.from(
         { length: localStorage.length },

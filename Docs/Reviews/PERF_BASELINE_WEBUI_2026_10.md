@@ -415,28 +415,26 @@ At HEAD there are zero unresolved Critical/Important review findings.
 
 ### Documented gaps / follow-ups
 
-- **Import-suite residual — standing-item verdict: branch-caused, NOT
-  pre-existing.** The Stage-2 fix-round report recorded the residual failure
-  in `apps/packages/ui/src/utils/__tests__/research-workspace-import.test.tsx`
+- **Import-suite residual — RESOLVED (round 2 of the batch-final task):
+  branch-caused by Stage 2's debounce (test read persisted state
+  synchronously); fixed test-side via reader-scoped flush; suite 68/68.**
+  The Stage-2 fix-round report had recorded the residual failure in
+  `apps/packages/ui/src/utils/__tests__/research-workspace-import.test.tsx`
   ("retains two note chunks, retries only unfinished snapshots, and reopens
-  source provenance") as pre-existing. Verification at batch-final
-  disproves that claim: the suite is **68/68 green at the dev merge-base
-  `3b68f2dbc2`** and **67/68 at HEAD** in the same environment. Method:
-  suite run at HEAD (1 failed / 67 passed), then run at the merge-base in a
-  temporary worktree sharing this branch's `node_modules` (package manifests
-  unchanged between base and HEAD), plus a mechanism check. Mechanism,
-  pinned empirically: the test snapshots `localStorage` synchronously after
-  its final mutation (`loadNote`); under the Stage-2 debounced writer that
-  write is still buffered (microtask/idle/300 ms trailing delivery), so the
-  re-seeded rehydrate restores the pre-`loadNote` envelope and
-  `currentNote.id` comes back `undefined` — adding
-  `await flushWorkspacePersistence()` before the snapshot restores the pass
-  (verified with a disposable patch that was reverted; not part of the
-  batch-final commit). Production impact is bounded by the reviewed debounce
-  semantics (lifecycle flushes cover unload; read-your-writes callers use
-  the flush seam), so this is a test-pattern incompatibility rather than a
-  violation of reviewed behavior — but it is a behavioral delta vs dev, and
-  the one-line test-side fix is left to the whole-branch review.
+  source provenance") as pre-existing; batch-final verification disproved
+  that — the suite is 68/68 green at the dev merge-base `3b68f2dbc2` vs
+  67/68 at HEAD in the same environment (merge-base run in a temporary
+  worktree sharing this branch's `node_modules`; manifests unchanged).
+  Mechanism, pinned empirically: the test snapshotted `localStorage`
+  synchronously after its final mutation (`loadNote`) while the debounced
+  write was still buffered (microtask/idle/300 ms trailing delivery), so
+  the re-seeded rehydrate restored the pre-`loadNote` envelope. Fix:
+  `await flushWorkspacePersistence()` immediately before the snapshot —
+  the same reader-scoped flush pattern `use-research-workspace-prefill.ts`
+  uses (Stage 2's Finding-4 resolution). Suite re-run 68/68 green at HEAD;
+  the only other storage reads in the suite are out-of-band `setItem`
+  seeding plus one rehydrate-after-awaits (microtask delivery lands writes;
+  green), so no other site needed the flush.
 - **Pre-existing split-storage test failure:** `workspace.split-storage.test.ts`
   (1/8) fails at the dev base as well — jsdom instance-level storage-spy
   pattern (the W0 ledger's jsdom note); documented since Stage 2, unchanged.
