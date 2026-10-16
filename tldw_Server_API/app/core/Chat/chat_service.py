@@ -223,6 +223,7 @@ from tldw_Server_API.app.core.Usage.pricing_catalog import (
 )
 from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
 from tldw_Server_API.app.core.Utils.cpu_bound_handler import process_large_json_async
+from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
 
 _CHAT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ChatAPIError,
@@ -3037,13 +3038,10 @@ def estimate_tokens_from_json(request_json: str) -> int:
         return 1
 
 
-_DATA_URI_RE = re.compile(r'(data:image[^,]*,)[^"\s]+', re.IGNORECASE)
-
-
 def _sanitize_data_uris(text: str) -> str:
     """Redact data URI payloads to avoid inflating token estimates."""
     try:
-        return _DATA_URI_RE.sub(r"\1<omitted>", text)
+        return DATA_URI_REDACT_RE.sub(r"\1<omitted>", text)
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         return text
 

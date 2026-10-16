@@ -68,6 +68,7 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
 from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
 from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
 from tldw_Server_API.app.core.Utils.image_validation import (
+    DATA_URI_REDACT_RE,
     get_max_base64_bytes,
     validate_image_url,
 )
@@ -6326,8 +6327,7 @@ def _sanitize_json_for_rate_limit(request_json: str) -> str:
     token estimation reflects text size, not binary data.
     """
     try:
-        pattern = re.compile(r"(\"url\"\s*:\s*\"data:image[^,]*,)[^\"\s]+")
-        return pattern.sub(r"\1<omitted>", request_json)
+        return DATA_URI_REDACT_RE.sub(r"\1<omitted>", request_json)
     except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         return request_json
 

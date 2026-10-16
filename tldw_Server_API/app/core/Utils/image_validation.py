@@ -202,6 +202,12 @@ MAX_BASE64_STRING_LENGTH = int(MAX_BASE64_BYTES * 4 / 3) + 100
 # Regex pattern for data URI validation
 DATA_URI_PATTERN = re.compile(r'^data:([^;]+);base64,(.+)$')
 
+# Finds data:image payloads in free text (a request body, a prompt) for redaction; group 1 is
+# the "data:image/...," prefix to keep. The media-type part is bounded: an unbounded ``[^,]*``
+# rescans to the end of the text for every ``data:image`` with no comma after it, which is
+# quadratic on crafted input.
+DATA_URI_REDACT_RE = re.compile(r'(data:image[^,"\s]{0,128},)[^"\s]+', re.IGNORECASE)
+
 #######################################################################################################################
 #
 # Functions:
