@@ -2,6 +2,7 @@ import React from "react"
 import { resolveApiProviderForModel } from "@/utils/resolve-api-provider"
 import {
   captureChatRequestDebugSnapshot,
+  setChatRequestDebugEnabled,
   type ChatRequestDebugSnapshot,
   type ChatToolRequestDebugMetadata
 } from "@/services/tldw/chat-request-debug"
@@ -624,6 +625,9 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     setToolsPopoverOpen(false)
     setRawRequestSnapshot(null)
     setRawRequestModalOpen(true)
+    // WP-22: the debug snapshot pipeline is disabled by default; opening the
+    // raw-request preview is the user-facing opt-in that re-enables it.
+    setChatRequestDebugEnabled(true)
     void refreshRawRequestSnapshot()
   }, [refreshRawRequestSnapshot, setToolsPopoverOpen])
 
