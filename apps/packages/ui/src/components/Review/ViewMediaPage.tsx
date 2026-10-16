@@ -116,6 +116,12 @@ const LazyMediaSectionNavigator = React.lazy(() =>
   }))
 )
 
+// Module-stable stand-ins for ResultsList props (WP-11 / TASK-13521): inline
+// noops and a fresh `new Set()` re-create row props on every render and defeat
+// the memoized ResultRow, so every parent re-render re-rendered all rows.
+const NOOP_ON_SELECT = () => {}
+const EMPTY_SELECTED_IDS: Set<string> = new Set()
+
 const ViewMediaPage: React.FC = () => {
   const { t } = useTranslation(['review', 'common', 'settings'])
   const navigate = useNavigate()
@@ -327,11 +333,13 @@ const MediaPageContent: React.FC = () => {
   const [mobileTab, setMobileTab] = useState<1 | 2>(1)
   const returnFocus = useRef<HTMLElement | null>(null)
   const backButton = useRef<HTMLButtonElement>(null)
-  const showContent = () => {
+  // Memoized so the ResultsList onSelect handler below can hold a stable
+  // identity across re-renders (refs and setState are stable, so no deps).
+  const showContent = useCallback(() => {
     returnFocus.current = document.activeElement as HTMLElement
     setMobileTab(2)
     requestAnimationFrame(() => backButton.current?.focus())
-  }
+  }, [])
   const backToResults = () => {
     setMobileTab(1)
     requestAnimationFrame(() => returnFocus.current?.focus())
@@ -422,6 +430,26 @@ const MediaPageContent: React.FC = () => {
   const handleSelectAllVisibleItems = useCallback(() => {
     selection.setBulkSelectedIds(previous => Array.from(new Set([...previous, ...displayResults.map(mediaResultKey)])))
   }, [displayResults, selection])
+
+  // Stable ResultsList row props (WP-11 / TASK-13521): an inline handler here
+  // defeated the memoized ResultRow on every parent re-render (search typing,
+  // loading toggles). Depends only on the stable members of `selection`/`nav`
+  // (the hook return objects themselves get fresh identities each render).
+  const handleResultsSelect = useCallback((id: string | number) => {
+    if (selection.bulkSelectionMode) {
+      selection.toggleBulkItemSelection(id)
+      return
+    }
+    const item = displayResults.find((r) => mediaResultKey(r) === String(id)) || displayResults.find((r) => r.id === id)
+    if (item) { nav.setSelected(item); if (isMobile) showContent() }
+  }, [
+    selection.bulkSelectionMode,
+    selection.toggleBulkItemSelection,
+    displayResults,
+    nav.setSelected,
+    isMobile,
+    showContent
+  ])
 
   const hasJumpTo = displayResults.length > 5
 
@@ -1224,7 +1252,7 @@ const MediaPageContent: React.FC = () => {
             <ResultsList
               results={displayResults}
               selectedId={null}
-              onSelect={() => {}}
+              onSelect={NOOP_ON_SELECT}
               totalCount={search.activeTotalCount}
               loadedCount={displayResults.length}
               isLoading={false}
@@ -1238,8 +1266,8 @@ const MediaPageContent: React.FC = () => {
               favorites={selection.favoritesSet}
               onToggleFavorite={selection.toggleFavorite}
               selectionMode={false}
-              selectedIds={new Set()}
-              onToggleSelected={() => {}}
+              selectedIds={EMPTY_SELECTED_IDS}
+              onToggleSelected={NOOP_ON_SELECT}
               readingProgress={selection.readingProgressMap}
               viewMode="standard"
               onViewModeChange={() => {}}
@@ -1632,14 +1660,7 @@ const MediaPageContent: React.FC = () => {
               <ResultsList
                 results={displayResults}
                 selectedId={nav.selected?.id || null}
-                onSelect={(id) => {
-                  if (selection.bulkSelectionMode) {
-                    selection.toggleBulkItemSelection(id)
-                    return
-                  }
-                  const item = displayResults.find((r) => mediaResultKey(r) === String(id)) || displayResults.find((r) => r.id === id)
-                  if (item) { nav.setSelected(item); if (isMobile) showContent() }
-                }}
+                onSelect={handleResultsSelect}
                 totalCount={search.activeTotalCount}
                 loadedCount={displayResults.length}
                 isLoading={search.isLoading || search.isFetching}
