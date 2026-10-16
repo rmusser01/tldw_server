@@ -8,7 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom"
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { Modal } from "antd"
 import type {
   AudioGenerationSettings,
@@ -356,6 +356,18 @@ const expandGeneratedOutputsSection = () => {
   }
 }
 
+const openArtifactViewer = async (viewButton: HTMLElement) => {
+  await act(async () => {
+    fireEvent.click(viewButton)
+    // AntD static Modal.info queues its separate React root on a zero-delay timer.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0))
+  })
+  // The modal commit starts React.lazy; settle that import inside act before asserting.
+  await act(async () => {
+    await vi.dynamicImportSettled()
+  })
+}
+
 const renderStudioPane = () => {
   const renderResult = render(
     <MemoryRouter>
@@ -461,11 +473,6 @@ const matchingDeepResearchImport = {
 } satisfies GeneratedArtifact
 
 describe("StudioPane literature work products", () => {
-  beforeAll(async () => {
-    // These cases verify viewer contracts after the shared lazy chunk is available.
-    await import("../StudioPane/ArtifactModalContent")
-  })
-
   afterEach(async () => {
     await act(async () => Modal.destroyAll())
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
@@ -1940,7 +1947,7 @@ Proposal
     ]
 
     renderStudioPane()
-    fireEvent.click(screen.getByRole("button", { name: "View" }))
+    await openArtifactViewer(screen.getByRole("button", { name: "View" }))
 
     await screen.findByRole("dialog");
     await act(async () => {
@@ -2103,7 +2110,7 @@ Proposal
     const proposalActions = screen.getByTestId(
       "studio-artifact-primary-actions-artifact-proposal"
     )
-    fireEvent.click(within(proposalActions).getByRole("button", { name: /view/i }))
+    await openArtifactViewer(within(proposalActions).getByRole("button", { name: /view/i }))
 
     await waitFor(() => {
       expect(screen.getAllByText("Deep Research verification").length).toBeGreaterThan(0)
