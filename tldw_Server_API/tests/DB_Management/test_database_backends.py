@@ -47,6 +47,51 @@ class TestDatabaseBackends:
         """Create SQLite configuration."""
         return DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=temp_db_path, client_id="test_client")
 
+    def test_sqlite_native_metadata_and_last_insert_id(self, sqlite_config):
+        from types import SimpleNamespace
+
+        from tldw_Server_API.app.core.DB_Management.media_db.runtime.rows import (
+            BackendCursorAdapter,
+        )
+
+        backend = SQLiteBackend(sqlite_config)
+        connection = backend.connect()
+        try:
+            assert backend.get_last_insert_id(connection=connection) == 0
+            backend.execute(
+                "CREATE TABLE adapter_contract (id INTEGER PRIMARY KEY, label TEXT)",
+                connection=connection,
+            )
+            inserted = backend.execute(
+                "INSERT INTO adapter_contract (label) VALUES (?)",
+                ("kept",),
+                connection=connection,
+            )
+            assert inserted.description is None
+            assert backend.get_last_insert_id(connection=connection) == inserted.lastrowid
+            cursor = connection.cursor()
+            result = backend.execute(
+                "SELECT label, id FROM adapter_contract",
+                connection=SimpleNamespace(cursor=lambda: cursor),
+            )
+            assert result.description is cursor.description
+            assert isinstance(result.description, tuple)
+            assert [entry[0] for entry in result.description] == ["label", "id"]
+            assert all(len(entry) == 7 for entry in result.description)
+            adapter = BackendCursorAdapter(result)
+            assert adapter.description is result.description
+            row = adapter.fetchone()
+            assert row[0] == row["label"] == "kept"
+            assert row[1] == row["id"] == inserted.lastrowid
+            batch = backend.execute_many(
+                "INSERT INTO adapter_contract (label) VALUES (?)",
+                [("batch",)],
+                connection=connection,
+            )
+            assert batch.description is None
+        finally:
+            backend.disconnect(connection)
+
     def test_sqlite_backend_creation(self, sqlite_config):
         """Test that SQLite backend can be created."""
         backend = SQLiteBackend(sqlite_config)
@@ -439,6 +484,33 @@ class TestPostgreSQLBackend:
         pg_database_config.client_id = "test_pg"
         return pg_database_config
 
+    def test_postgresql_native_column_metadata_roundtrip(self, pg_config):
+        import psycopg
+        from psycopg.rows import dict_row
+
+        from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import (
+            PostgreSQLBackend,
+        )
+        from tldw_Server_API.app.core.DB_Management.media_db.runtime.rows import (
+            BackendCursorAdapter,
+        )
+
+        backend = PostgreSQLBackend(pg_config)
+        connection = backend.connect()
+        try:
+            assert connection.row_factory is dict_row
+            result = backend.execute("SELECT 7 AS native_value", connection=connection)
+            assert isinstance(result.description, list)
+            assert isinstance(result.description[0], psycopg.Column)
+            assert result.description[0][0] == "native_value"
+            adapter = BackendCursorAdapter(result)
+            assert adapter.description is result.description
+            assert adapter.description[0] is result.description[0]
+            row = adapter.fetchone()
+            assert row[0] == row["native_value"] == 7
+        finally:
+            backend.disconnect(connection)
+
     def test_postgresql_backend_creation(self, pg_config):
         """Test PostgreSQL backend creation."""
         from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
@@ -561,3 +633,70 @@ class TestPostgreSQLBackend:
             assert res.rows
         finally:
             backend.execute(f"DROP TABLE IF EXISTS {source_table}")
+
+
+@pytest.mark.parametrize("external", [False, True], ids=["owned-checkout", "external-checkout"])
+@pytest.mark.parametrize("cleanup_fails", [False, True], ids=["returned", "cleanup-propagates"])
+def test_postgresql_execute_failure_preserves_redaction_and_checkout_ownership(external, cleanup_fails):
+    from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import (
+        PostgreSQLBackend,
+    )
+
+    connection = MagicMock()
+    connection.cursor.return_value.execute.side_effect = RuntimeError("private source value")
+    pool = MagicMock()
+    pool.get_connection.return_value = connection
+    if cleanup_fails:
+        pool.return_connection.side_effect = ValueError("cleanup failure")
+    backend = PostgreSQLBackend(DatabaseConfig(backend_type=BackendType.POSTGRESQL))
+    backend._pool = pool
+    expected = ValueError if cleanup_fails and not external else DatabaseError
+    with pytest.raises(expected) as raised:
+        backend.execute("SELECT private_source", connection=connection if external else None)
+    if expected is DatabaseError:
+        assert str(raised.value) == "PostgreSQL query execution failed"
+        assert raised.value.__cause__ is None
+        assert raised.value.__context__ is None
+    else:
+        assert str(raised.value) == "cleanup failure"
+    if external:
+        pool.return_connection.assert_not_called()
+        connection.rollback.assert_not_called()
+    else:
+        pool.return_connection.assert_called_once_with(connection)
+        connection.rollback.assert_called_once_with()
+
+
+def test_sqlite_last_insert_id_preserves_empty_optional_scalar(monkeypatch, tmp_path):
+    from tldw_Server_API.app.core.DB_Management.backends.base import QueryResult
+
+    backend = SQLiteBackend(DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=str(tmp_path / "empty.db")))
+    monkeypatch.setattr(backend, "execute", lambda *_args, **_kwargs: QueryResult(rows=[], rowcount=0))
+    assert backend.get_last_insert_id() is None
+
+
+def test_chacha_cursor_wrapper_retains_native_metadata_in_operation(tmp_path):
+    from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (
+        chacha_operation,
+    )
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+        BackendCursorWrapper,
+        CharactersRAGDB,
+    )
+
+    db = CharactersRAGDB(tmp_path / "metadata-owner.db", client_id="metadata-owner")
+    try:
+        with chacha_operation(independent=True):
+            wrapper = BackendCursorWrapper(db, db.get_connection(), db.backend)
+            wrapper.execute("SELECT 7 AS native_value")
+            assert isinstance(wrapper.description, tuple)
+            assert wrapper.description is wrapper._result.description
+            assert wrapper._adapter.description is wrapper.description
+            assert wrapper.fetchone() == {"native_value": 7}
+            wrapper.execute("CREATE TEMP TABLE wrapper_contract (value INTEGER)")
+            assert wrapper.description is None
+            wrapper.executemany("INSERT INTO wrapper_contract VALUES (?)", [(1,), (2,)])
+            assert wrapper.description is wrapper._result.description is None
+            assert wrapper._adapter.description is None
+    finally:
+        db.close_all_connections()

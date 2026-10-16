@@ -548,7 +548,7 @@ class BackendCursorWrapper:
         self._adapter: BackendCursorAdapter | None = None
         self.rowcount: int = -1
         self.lastrowid: int | None = None
-        self.description: list[tuple[Any, ...]] | None = None
+        self.description: Sequence[Sequence[Any]] | None = None
 
     @_owned_wrapper_call
     def execute(self, query: str, params: tuple | list | dict | None = None):

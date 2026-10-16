@@ -135,3 +135,37 @@ def test_sqlite_pool_prunes_dead_threads(tmp_path):
     stats = pool.get_stats()
     assert stats["total_connections"] == 1
     pool.close_all()
+
+
+def test_sqlite_checkout_retains_same_thread_native_identity(sqlite_pool):
+    connection = sqlite_pool.get_connection()
+    assert sqlite_pool.get_connection() is connection
+    assert sqlite_pool._connections[threading.get_ident()] is connection
+    sqlite_pool.invalidate_connection(connection)
+    assert sqlite_pool.get_connection() is not connection
+
+
+def test_simultaneous_sqlite_threads_keep_distinct_native_handles(sqlite_pool):
+    from concurrent.futures import ThreadPoolExecutor
+
+    ready = threading.Barrier(3, timeout=5)
+    release = threading.Event()
+    connections = []
+
+    def checkout():
+        connection = sqlite_pool.get_connection()
+        connections.append(connection)
+        assert sqlite_pool.get_connection() is connection
+        ready.wait()
+        assert release.wait(timeout=5)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(checkout) for _ in range(2)]
+        try:
+            ready.wait()
+            assert len(connections) == 2
+            assert connections[0] is not connections[1]
+        finally:
+            release.set()
+        for future in futures:
+            future.result(timeout=5)

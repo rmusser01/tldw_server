@@ -15,7 +15,7 @@ import contextlib
 import os
 import threading
 import time
-from collections.abc import Generator, Sequence
+from collections.abc import Callable, Generator, Sequence
 from contextlib import contextmanager, suppress
 from typing import Any, Optional, Union
 
@@ -171,6 +171,8 @@ class PostgreSQLConnectionPool(ConnectionPool):
     on-demand pool creating connections up to pool_size.
     """
 
+    _apply_scope_settings: Callable[[Any], None]
+
     def __init__(self, config: DatabaseConfig):
         if not PSYCOPG2_AVAILABLE:
             # Keep message for backward-compatible tests
@@ -231,9 +233,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
             self._pool = None
 
     def _new_connection(self) -> Any:
-        conn = psycopg.connect(self._dsn)
-        # Ensure rows are dicts by default
-        conn.row_factory = dict_row
+        conn = psycopg.connect(self._dsn, row_factory=dict_row)
         return conn
 
     def get_connection(self) -> Any:
@@ -951,8 +951,7 @@ class PostgreSQLBackend(DatabaseBackend):
                 f"sslmode={self.config.pg_sslmode or 'prefer'} "
                 f"connect_timeout={self.config.connect_timeout or 10}"
             )
-        conn = psycopg.connect(dsn)
-        conn.row_factory = dict_row
+        conn = psycopg.connect(dsn, row_factory=dict_row)
         try:
             self._apply_scope_settings(conn)
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:
@@ -1073,7 +1072,6 @@ class PostgreSQLBackend(DatabaseBackend):
         """
         start_time = time.time()
         query, params = self._prepare_query(query, params)
-        redacted_failure = False
         unique_failure = False
         saved_view_name_failure = False
         constraint_failure = False
@@ -1180,26 +1178,24 @@ class PostgreSQLBackend(DatabaseBackend):
             logger.bind(exception_type=type(e).__name__, sqlstate=_sqlstate).error(
                 "PostgreSQL query execution failed"
             )
-            redacted_failure = True
         finally:
             if not external_conn:
                 self.get_pool().return_connection(conn)
 
-        if redacted_failure:
-            if saved_view_name_failure:
-                raise SavedViewNameUniqueConstraintError("PostgreSQL query execution failed")
-            if unique_failure:
-                raise UniqueConstraintError("PostgreSQL query execution failed")
-            if authorization_failure:
-                raise AuthorizationDeniedError(
-                    "PostgreSQL denied the statement: row-level security policy "
-                    "or insufficient privilege (SQLSTATE 42501)"
-                )
-            if constraint_failure:
-                raise ConstraintViolationError("PostgreSQL query execution failed")
-            if contention_failure:
-                raise TransientContentionError("PostgreSQL query execution failed")
-            raise DatabaseError("PostgreSQL query execution failed")
+        if saved_view_name_failure:
+            raise SavedViewNameUniqueConstraintError("PostgreSQL query execution failed")
+        if unique_failure:
+            raise UniqueConstraintError("PostgreSQL query execution failed")
+        if authorization_failure:
+            raise AuthorizationDeniedError(
+                "PostgreSQL denied the statement: row-level security policy "
+                "or insufficient privilege (SQLSTATE 42501)"
+            )
+        if constraint_failure:
+            raise ConstraintViolationError("PostgreSQL query execution failed")
+        if contention_failure:
+            raise TransientContentionError("PostgreSQL query execution failed")
+        raise DatabaseError("PostgreSQL query execution failed")
 
     def execute_many(
         self,

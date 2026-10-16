@@ -283,7 +283,7 @@ class QueryResult:
     rows: list[dict[str, Any]]
     rowcount: int
     lastrowid: Optional[int] = None
-    description: Optional[list[tuple]] = None
+    description: Optional[Sequence[Sequence[Any]]] = None
     execution_time: Optional[float] = None
 
     def __len__(self) -> int:
