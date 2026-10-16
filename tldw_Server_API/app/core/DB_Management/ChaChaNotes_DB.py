@@ -34104,6 +34104,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         # Add created_at for new inserts
         cols_str_list_insert = cols_str_list + ['created_at', 'last_modified', 'client_id', 'version', 'deleted']
+        deleted_value: bool | int
         if self.backend_type == BackendType.POSTGRESQL:
             placeholders_str_list_insert = placeholders_str_list + ['?', '?', '?', '?', '?']
             version_value = 1
@@ -34139,7 +34140,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     next_version = current_version + 1
 
                     update_set_parts = [f"{unique_col_name} = ?"]
-                    update_params_list = [main_col_value]
+                    update_params_list: list[object] = [main_col_value]
                     for i, col_db in enumerate(other_cols):
                         if col_db == "sync_id":
                             continue
@@ -34348,7 +34349,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         next_version_val = expected_version + 1
         current_fields_to_update_sql = list(fields_to_update_sql) # clone
-        current_params_for_set_clause = list(params_for_set_clause) # clone
+        current_params_for_set_clause: list[object] = list(params_for_set_clause) # clone
 
         current_fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
         current_params_for_set_clause.extend([now, next_version_val, self.client_id])
@@ -34648,7 +34649,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = queries.get(category)
         if query is None:
             return 0
-        params = ()
+        params: tuple[str, ...] = ()
         if category == "world_books" and self.backend_type == BackendType.POSTGRESQL:
             query = "SELECT COUNT(*) AS count FROM world_books WHERE deleted = FALSE AND client_id = ?"
             params = (self.client_id,)
@@ -34682,7 +34683,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = queries.get(category)
         if query is None:
             return []
-        params = ()
+        params: tuple[str, ...] = ()
         if category == "world_books" and self.backend_type == BackendType.POSTGRESQL:
             query = "SELECT id FROM world_books WHERE deleted = FALSE AND client_id = ? ORDER BY id ASC"
             params = (self.client_id,)
@@ -35879,16 +35880,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             f"INSERT OR IGNORE INTO {link_table} ({col1_name}, {col2_name}, created_at) "
                             "VALUES (?, ?, ?)"
                         )
-                    params = (col1_val, col2_val, now_iso)
-                    cursor = conn.execute(query, params)
+                    link_params = (col1_val, col2_val, now_iso)
+                    cursor = conn.execute(query, link_params)
                     rows_affected = cursor.rowcount
                     if rows_affected > 0:  # Link was actually created
                         log_sync_entry = True
                         sync_payload_dict = {col1_name: col1_val, col2_name: col2_val, 'created_at': now_iso}
                 elif operation == "unlink":
                     query = f"DELETE FROM {link_table} WHERE {col1_name} = ? AND {col2_name} = ?"  # nosec B608
-                    params = (col1_val, col2_val)
-                    cursor = conn.execute(query, params)
+                    unlink_params = (col1_val, col2_val)
+                    cursor = conn.execute(query, unlink_params)
                     rows_affected = cursor.rowcount
                     if rows_affected > 0:  # Link was actually deleted
                         log_sync_entry = True
@@ -36247,10 +36248,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 existing_ids: set[int] = set()
                 for row in existing_rows:
                     record = self._coerce_mapping_row(row) or {}
-                    folder_id = record.get("folder_id")
-                    if folder_id is None:
+                    existing_folder_id = record.get("folder_id")
+                    if existing_folder_id is None:
                         continue
-                    existing_ids.add(int(folder_id))
+                    existing_ids.add(int(existing_folder_id))
                 desired_ids = {folder_id for _, folder_id in desired_pairs}
                 desired_keys = {
                     canonical_key
@@ -36464,6 +36465,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if target_deck_id is not None and parent_id == target_deck_id:
             raise InputError("Deck cannot be its own parent")  # noqa: TRY003
 
+        owner_params: tuple[str, ...]
         if self.backend_type == BackendType.POSTGRESQL:
             parent_lookup_query = (
                 "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0 AND client_id = ? FOR UPDATE"
@@ -36603,7 +36605,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     "name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, client_id, version, deleted"
                     ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 )
-                params = (
+                insert_params = (
                     name,
                     description,
                     parent_for_insert,
@@ -36620,11 +36622,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
 
                 if self.backend_type == BackendType.POSTGRESQL:
-                    cursor = conn.execute(insert_sql + " RETURNING id", params)
+                    cursor = conn.execute(insert_sql + " RETURNING id", insert_params)
                     row = cursor.fetchone()
                     deck_id = int(row["id"]) if row else None
                 else:
-                    cursor = conn.execute(insert_sql, params)
+                    cursor = conn.execute(insert_sql, insert_params)
                     deck_id = int(cursor.lastrowid)
 
                 if deck_id is None:
@@ -36684,7 +36686,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         owner_filter, owner_params = self._flashcard_owner_filter()
         query = select_sql + "WHERE 1 = 1" + owner_filter
-        params = list(owner_params)
+        params: list[str | int] = list(owner_params)
         if not include_deleted:
             query += " AND deleted = 0"
         if workspace_id is not None:
@@ -36815,7 +36817,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def list_deck_shares(self, deck_id: int) -> list[dict[str, Any]]:
         """List all per-user share records for a deck owned by this DB."""
         owner_filter = ""
-        owner_params = ()
+        owner_params: tuple[str, ...] = ()
         if self.backend_type == BackendType.POSTGRESQL:
             owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
             owner_params = (self.client_id,)
@@ -36837,7 +36839,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def get_deck_share(self, deck_id: int, *, user_id: int) -> dict[str, Any] | None:
         """Fetch one per-user share record for a deck owned by this DB."""
         owner_filter = ""
-        owner_params = ()
+        owner_params: tuple[str, ...] = ()
         if self.backend_type == BackendType.POSTGRESQL:
             owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
             owner_params = (self.client_id,)
@@ -36859,7 +36861,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def delete_deck_share(self, deck_id: int, *, user_id: int) -> bool:
         """Remove one per-user share record from a deck owned by this DB."""
         owner_filter = ""
-        owner_params = ()
+        owner_params: tuple[str, ...] = ()
         if self.backend_type == BackendType.POSTGRESQL:
             owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
             owner_params = (self.client_id,)
@@ -38688,7 +38690,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 card_id = int(card["id"])
                 card_deck_id = int(card["deck_id"]) if card["deck_id"] is not None else None
                 explicit_scope = review_mode is not None
-                scope_mode = self._normalize_flashcard_review_mode(review_mode if explicit_scope else "due")
+                scope_mode = self._normalize_flashcard_review_mode(review_mode if review_mode is not None else "due")
                 scope_deck_id = review_deck_id if explicit_scope else card_deck_id
                 scope_tag = self._normalize_nullable_text(review_tag_filter) if explicit_scope else None
                 scope_key = (
@@ -39465,14 +39467,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         }
         # ensure keywords exist and collect ids
         desired_kw_ids = set()
+        keyword_id: int | None
         for t in tags:
             if self.backend_type == BackendType.POSTGRESQL:
-                kid = self._flashcard_owned_keyword_id(conn, t)
+                keyword_id = self._flashcard_owned_keyword_id(conn, t)
             else:
                 kw = self.get_keyword_by_text(t)
-                kid = self.add_keyword(t) if not kw else kw['id']
-            if kid is not None:
-                desired_kw_ids.add(int(kid))
+                keyword_id = self.add_keyword(t) if not kw else kw["id"]
+            if keyword_id is not None:
+                desired_kw_ids.add(int(keyword_id))
         # link missing
         insert_ts = self._get_current_utc_timestamp_iso()
         for kid in desired_kw_ids - cur_kw_ids:
@@ -39522,9 +39525,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _source_review_timestamp_value(value: Any) -> str:
         """Serialize computed due timestamps consistently for both backends."""
         if isinstance(value, datetime):
-            if value.tzinfo is None:
-                value = value.replace(tzinfo=timezone.utc)
-            return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            timestamp: datetime = value
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            return timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
         return str(value)
 
     def create_source_review_plan(
@@ -41364,11 +41368,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             except (TypeError, ValueError):
                 return "0"
         if question_type == "multi_select":
-            normalized = self._normalize_multi_select_indices(correct_answer)
-            return json.dumps(normalized, ensure_ascii=True)
+            normalized_indices = self._normalize_multi_select_indices(correct_answer)
+            return json.dumps(normalized_indices, ensure_ascii=True)
         if question_type == "matching":
-            normalized = self._normalize_matching_map(correct_answer)
-            return json.dumps(normalized, ensure_ascii=True, sort_keys=True)
+            normalized_matching = self._normalize_matching_map(correct_answer)
+            return json.dumps(normalized_matching, ensure_ascii=True, sort_keys=True)
         if question_type == "true_false":
             val = str(correct_answer).strip().lower()
             return "true" if val in {"true", "1", "yes", "y"} else "false"
@@ -42598,7 +42602,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.services.osce_practice import materialize_station_content
 
         validated = OsceQuizExportV2.model_validate(entry)
-        stations = [
+        stations: list[dict[str, object]] = [
             {
                 "content": materialize_station_content(station.content),
                 "order_index": station.order_index,
@@ -43065,6 +43069,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     ) -> dict[str, Any] | None:
         """Get question by ID."""
         self._reject_question_for_osce_quiz(question_id, quiz_id)
+        params: tuple[int | str, ...]
         if self.backend_type == BackendType.POSTGRESQL:
             deleted_clause = "" if include_deleted else "AND qq.deleted = FALSE"
             parent_clause = " AND qq.quiz_id = ?" if quiz_id is not None else ""
@@ -43539,6 +43544,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         include_answers: bool = False,
     ) -> dict[str, Any] | None:
         """Get attempt with full answer breakdown."""
+        params: tuple[int | str, ...]
         if self.backend_type == BackendType.POSTGRESQL:
             query = (
                 "SELECT qa.id, qa.quiz_id, qa.started_at, qa.completed_at, qa.score, "
@@ -44642,6 +44648,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         version_parent_id = self._normalize_nullable_text(version_parent_id)
+        params: tuple[str, str, str, int, str | None, str, str, bool | int, str, int]
         if self.backend_type == BackendType.POSTGRESQL:
             params = (
                 final_id,
