@@ -118,6 +118,7 @@ import {
   serializeQuickIngestBatches,
   serializeQuickIngestSessions,
   type PersistedQuickIngestBatch,
+  type PersistedSessionState,
 } from "@/entries/background-session-store";
 
 type BackgroundDiagnostics = {
@@ -757,23 +758,27 @@ export default defineBackground({
 
     // Serialize the actual storage writes so that the many rapid, fire-and-forget
     // persist calls below cannot land out of order (an older Map snapshot
-    // clobbering a newer one). The snapshot is taken synchronously at call time;
-    // the writer coalesces overlapping writes so only the latest snapshot wins.
+    // clobbering a newer one). WP-19: the writer takes a snapshot BUILDER, so
+    // the Maps are only serialized when a write drains — a burst of status
+    // ticks inside one drain window serializes exactly once — and each drain
+    // diffs per-funnel shards so unchanged funnels cost zero bytes.
+    const buildSessionStateSnapshot = (): PersistedSessionState => ({
+      ingestSessions: serializeIngestSessions(ingestSessions),
+      pendingAuthReplay: serializePendingReplay(pendingAuthReplay),
+      quickIngestSessions:
+        serializeQuickIngestSessions(quickIngestModalSessions),
+      quickIngestBatches:
+        serializeQuickIngestBatches(quickIngestBatchRecords),
+    });
     const writeSessionStateSerialized = createSerializedSessionStateWriter(
       getSessionStorageArea(),
+      buildSessionStateSnapshot,
       (error) => logBackgroundError("persist session state", error),
     );
 
     const persistSessionState = (): void => {
       try {
-        writeSessionStateSerialized({
-          ingestSessions: serializeIngestSessions(ingestSessions),
-          pendingAuthReplay: serializePendingReplay(pendingAuthReplay),
-          quickIngestSessions:
-            serializeQuickIngestSessions(quickIngestModalSessions),
-          quickIngestBatches:
-            serializeQuickIngestBatches(quickIngestBatchRecords),
-        });
+        writeSessionStateSerialized();
       } catch (error) {
         logBackgroundError("persist session state", error);
       }
