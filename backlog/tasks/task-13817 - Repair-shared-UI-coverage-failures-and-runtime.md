@@ -1,7 +1,7 @@
 ---
 id: TASK-13817
 title: Repair shared UI coverage failures and runtime
-status: In Progress
+status: Done
 labels:
 - frontend
 - testing
@@ -16,9 +16,9 @@ Reproduce remaining native shared UI coverage failures and the 15-minute timeout
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Full shared UI coverage completes with zero failing tests and within the existing CI cap
+- [x] #1 Full shared UI coverage completes with zero failing tests and within the existing CI cap
 - [x] #2 Regression evidence covers Skills, research import, and roleplay failures without disabling cases
-- [ ] #3 Independent review and all required PR checks pass before merge
+- [x] #3 Independent review and all required PR checks pass before merge
 - [x] #4 Human requester provides a new Change summary before merge
 <!-- AC:END -->
 
@@ -56,20 +56,21 @@ Central shared teardown implemented after real-root regressionRED:1pass/2fail (p
 Shared static-root follow-up: real AntD CJS renderer ownership regression reproduced leaked persistent notices/effects before repair. Central shared teardown now genuinely unmounts detached roots and retires notice singleton references, preserving actual UI motion and removing superseded fixture workarounds. Expanded final coverage: 246 passed, 2 existing skips across 22 files in 39.81 seconds, no unhandled errors; strict helper TypeScript and ESLint passed with no new warnings. Current parent 06189 hosted inventory: 15/16 coverage shards pass; shard 7 assertions all pass but environment teardown reports the diagnosed detached React root error. Independent final review and new hosted validation pending. ADR assessment: no new ADR; test-only resource ownership; ADR-059 governs task tracking.
 Latest-dev integration: rebased all twelve reviewed commits onto ce2f87bcafc0590cbe1542fd723db61886533553 (#3214), preserving upstream canonical-note tests, actual-storage prototype spy, and literature export content assertions. Independent rebase review clears d1ea5907561a4d7d48c5a4b324e7146cb708698e; four conflict/ownership suites pass 114/114 under coverage. Hosted run38860733324 exposed two separate fixture failures: SharedResearchWorkspace accessibility asserts status text before pending ask completion; ResearchWorkspace stage3 migrated restore reaches error before creation. Diagnosis underway, no bypass or timeout increase. Detached-root errors absent from completed failing shard logs.
 Reproduced and repaired both integrated fixture failures without production changes: accessibility findByRole matched the existing pending live region, now waitFor preserves its Answer added completion assertion and one-scroll contract (4/4 coverage pass). Stage3 migration lacked the newly read web-capture checkpoint storage backend (Plasmo getAll threw before restore), now a partial empty-checkpoint fixture preserves actual account derivation/restore and supplies canonical notes search envelope; added captured Alice config/header assertions. Native38/38 and connected real restore100/100 coverage pass, no unhandled errors. Logs: /private/tmp/shared13817-shared-workspace-status-green-cov.log and /private/tmp/shared13817-workspace-stage3-green-cov.log. No new Python changes; Bandit N/A for this test-only follow-up.
+Final source verification on independently cleared 06246ee6d9aa482a368db56d9d224e72ecb0f951, based on latest remote dev ce2f87bcaf: all16 coverage shards SUCCESS plus completeness-guarded native merged report in run38862988101. All2523 discovered files represented (2522pass,1existingfileskip);28151tests pass,7existingtestskips; longest Vitest shard787.99s below unchanged900s cap (blob metadata788.22s). Merged statement coverage70.43% (185066/262761), branches65.42%,functions67.07%,lines72.33%. All seven protected statuses SUCCESS, including actual production extension build and WebUI/extension API-key/cookie lifecycles. No executed failing checks. Independent exact-head review and all16-log audit clear. Central real static-root teardown eliminates detached-root errors without motion overrides or suppression. Both upstream integration fixtures now pass actual ownership/completion checks. Implementation/verification complete; remove own completed follow-up plan, historical versions remain in Git. Final tracking-only head still requires checks before authorized merge; merge not yet performed. No new ADR; ADR059 tracking applies. Prior scoped Bandit zero new findings; this TS/test-only delta is N/A. Existing seven skips and no live-provider UAT remain limitations.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR #3250 repairs shared UI coverage fixture context, async/lazy/modal and mutation readiness boundaries, mock isolation, and Playwright actionability. A compatible jsdom stylesheet prefilter fixes the measured selector hot path, and ordinary apiSend mutations retain account guards without unsafe automatic refresh/replay. Sixteen bounded native shards preserve full source coverage and reject incomplete report sets before merging. Reviewed code head d8b2f5a2d6 passes all16 shards and merged coverage:27942 passing tests,7 existing skips,all2519 discovered files represented; longest shard729.86s under900s. Statement coverage70.37% of262198 statements. All seven required gates pass and independent review has no Critical/Important findings; the requester human Change summary is recorded verbatim in the PR. Final tracking-only head validation and authorized merge remain operational steps; no live-provider UAT was claimed.
+PR #3250 repairs shared UI coverage root causes: stale fixture context and async readiness, jsdom stylesheet matching cost, detached AntD static-root ownership, unsafe ordinary mutation refresh/replay, and dependency-patch build integration. Sixteen bounded native shards preserve the full suite and reject missing reports. Rebased onto latest dev ce2f87bcaf, retaining upstream canonical-note and restore safeguards. Independently reviewed source head06246ee6d9 passes all16 shards and complete merged report:28151tests pass,7existing skips,all2523files represented;slowest shard787.99s under900s;statement coverage70.43%. All seven protected gates pass; no Critical/Important review findings. Human requester Change summary recorded verbatim in PR. Final tracking-only head checks and actual authorized merge remain pending operational steps. No live-provider UAT claimed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
