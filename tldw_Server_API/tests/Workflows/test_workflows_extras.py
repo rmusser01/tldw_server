@@ -3,10 +3,13 @@ import json
 import sys
 import time
 import types
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier, Event
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
 
 # Stub heavyweight audio deps before app import for local test stability.
 if "torch" not in sys.modules:
@@ -46,17 +49,16 @@ if "transformers" not in sys.modules:
     _fake_tf.Qwen2AudioForConditionalGeneration = _StubModel
     sys.modules["transformers"] = _fake_tf
 
-from tldw_Server_API.app.main import app
-from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
-from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal
+from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     WORKFLOWS_RUNS_CONTROL,
     WORKFLOWS_RUNS_READ,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
-
+from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
+from tldw_Server_API.app.main import app
 
 pytestmark = pytest.mark.integration
 
@@ -336,3 +338,46 @@ def test_l1_acp_pipeline_persists_schema_version_on_acp_steps(client_with_wf: Te
     assert impl_step_run is not None
     impl_outputs = json.loads(impl_step_run.get("outputs_json") or "{}")
     assert impl_outputs.get("acp_output_schema_version") == "1.0"
+
+
+@pytest.mark.parametrize("target, close_code", [("owned", None), ("foreign", 4403), ("missing", 4404)])
+def test_ws_authorization_during_concurrent_run_reads(client_with_wf, target, close_code):
+    client = client_with_wf
+    db = app.dependency_overrides[wf_mod._get_db]()
+    for index in range(16):
+        db.create_run(
+            run_id=f"ws-run-{index}",
+            tenant_id="default",
+            user_id="1" if index == 0 else f"other-{index}",
+            inputs={},
+            workflow_id=None,
+            definition_version=1,
+            definition_snapshot={"name": "concurrent-ws", "version": 1, "steps": []},
+        )
+    token = wf_mod.get_jwt_manager().create_access_token(subject="1", username="tester", roles=["user"], permissions=[])
+    run_id = {"owned": "ws-run-0", "foreign": "ws-run-1", "missing": "missing-run"}[target]
+    stop = Event()
+    ready = Barrier(9, timeout=10)
+
+    def read_runs(index):
+        ready.wait()
+        while not stop.is_set():
+            db.get_run(f"ws-run-{index}")
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        readers = [executor.submit(read_runs, index) for index in range(8)]
+        try:
+            ready.wait()
+            for _ in range(20):
+                if close_code is None:
+                    with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}&token={token}") as ws:
+                        assert ws.receive_json()["run"]["run_id"] == "ws-run-0"
+                else:
+                    with pytest.raises(WebSocketDisconnect) as rejection:
+                        with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}&token={token}"):
+                            pytest.fail("Unauthorized WebSocket was accepted")
+                    assert rejection.value.code == close_code
+        finally:
+            stop.set()
+            for reader in readers:
+                reader.result(timeout=10)

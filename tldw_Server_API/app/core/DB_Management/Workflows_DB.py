@@ -21,6 +21,7 @@ from uuid import uuid4
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+from tldw_Server_API.app.core.Utils.backoff import capped_exponential_delay
 
 from .backends.base import (
     BackendType,
@@ -35,7 +36,6 @@ from .backends.query_utils import (
     prepare_backend_statement,
 )
 from .sqlite_policy import configure_sqlite_connection
-from tldw_Server_API.app.core.Utils.backoff import capped_exponential_delay
 
 _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS = (
     AssertionError,
@@ -543,7 +543,8 @@ class WorkflowsDatabase:
 
         self.db_path = str(db_path or DEFAULT_DB_PATH)
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+        # Shared statement caches can return another thread's row (CPython #118172).
+        self._conn = sqlite3.connect(self.db_path, check_same_thread=False, cached_statements=0)
         self._conn.row_factory = sqlite3.Row
         self._enable_wal()
         self._create_schema()
@@ -555,7 +556,7 @@ class WorkflowsDatabase:
         self._sqlite_pool: list[sqlite3.Connection] = []
         if pool_size and pool_size > 0:
             for _ in range(max(0, pool_size - 1)):
-                c = sqlite3.connect(self.db_path, check_same_thread=False)
+                c = sqlite3.connect(self.db_path, check_same_thread=False, cached_statements=0)
                 c.row_factory = sqlite3.Row
                 try:
                     configure_sqlite_connection(c)
