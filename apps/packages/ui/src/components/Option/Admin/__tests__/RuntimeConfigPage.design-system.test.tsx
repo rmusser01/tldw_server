@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 
 import React from "react"
-import { act, render, screen, waitFor } from "@testing-library/react"
-import { ConfigProvider, message } from "antd"
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { render, screen } from "@testing-library/react"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import RuntimeConfigPage from "../RuntimeConfigPage"
 
 const apiMock = vi.hoisted(() => ({
@@ -28,30 +27,6 @@ const expectDesignSystemAlertForTitle = async (titleText: string) => {
 }
 
 describe("RuntimeConfigPage design-system states", () => {
-  beforeAll(() => {
-    // jsdom does not complete CSS leave animations for static notification roots.
-    ConfigProvider.config({
-      holderRender: (children) => (
-        <ConfigProvider theme={{ token: { motion: false } }}>{children}</ConfigProvider>
-      )
-    })
-  })
-
-  afterAll(() => {
-    ConfigProvider.config({ holderRender: undefined })
-  })
-
-  afterEach(async () => {
-    // Let the static message root and its queued notice mount before destroying it.
-    await act(async () => {})
-    await act(async () => {
-      message.destroy()
-    })
-    await waitFor(() => {
-      expect(document.querySelector(".ant-message-notice")).not.toBeInTheDocument()
-    })
-  })
-
   beforeEach(() => {
     vi.clearAllMocks()
     apiMock.getCleanupSettings.mockResolvedValue({

@@ -8,8 +8,7 @@ import {
   within,
 } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { Modal } from "antd"
+import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   AudioGenerationSettings,
   GeneratedArtifact,
@@ -473,10 +472,6 @@ const matchingDeepResearchImport = {
 } satisfies GeneratedArtifact
 
 describe("StudioPane literature work products", () => {
-  afterEach(async () => {
-    await act(async () => Modal.destroyAll())
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
-  })
   it("finds only matching Deep Research imports for proposal verification", () => {
     const unrelatedImport = {
       ...matchingDeepResearchImport,
@@ -1058,12 +1053,6 @@ describe("StudioPane literature work products", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    const showInfo = Modal.info
-    vi.spyOn(Modal, "info").mockImplementation((config) => showInfo({
-      ...config,
-      transitionName: "",
-      maskTransitionName: ""
-    }))
     localStorage.removeItem("tldw:research-workspace:recent-output-types:v1")
 
     workspaceStoreState.selectedSourceIds = ["source-1", "source-2"]

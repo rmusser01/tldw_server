@@ -1,7 +1,7 @@
 ---
 id: TASK-13817
 title: Repair shared UI coverage failures and runtime
-status: Done
+status: In Progress
 labels:
 - frontend
 - testing
@@ -16,9 +16,9 @@ Reproduce remaining native shared UI coverage failures and the 15-minute timeout
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [x] #1 Full shared UI coverage completes with zero failing tests and within the existing CI cap
+- [ ] #1 Full shared UI coverage completes with zero failing tests and within the existing CI cap
 - [x] #2 Regression evidence covers Skills, research import, and roleplay failures without disabling cases
-- [x] #3 Independent review and all required PR checks pass before merge
+- [ ] #3 Independent review and all required PR checks pass before merge
 - [x] #4 Human requester provides a new Change summary before merge
 <!-- AC:END -->
 
@@ -50,6 +50,10 @@ Final StudyPack connected coverage21/21 across3files passes; independent reviewe
 a399 shard13 re-exposed literature Export CSV readiness race: warming ArtifactModalContent cache did not initialize React.lazy, whose first render starts only after AntD's zero-timer static modal root. Reassessed prior preload approach. New two-phase async-act helper drains that queued modal tick then awaits Vitest dynamic imports after lazy initialization; used for both View interactions, preload removed. Temporary held actual-import proof: old query deterministically fails1s; new helper remains pending until gate releases, then real export assertions pass. Probe removed. Original33 cases pass native and coverage; real modal/viewers, cleanup, assertions and deadlines retained. Independent final delta review pending.
 Complete hosted source validation on reviewed d8b2f5a2d6: all16 disjoint shared UI coverage shards PASS, followed by successful native completeness-guarded merged report in frontend-required run38852040226. Merged totals:2518 files pass/1 existing skipped (all2519 discovered),27942 tests pass/7 existing skips. Full source statement coverage70.37% (184519/262198), no exclusions added; percentages remain report-only. Slowest shard729.86s below existing900s cap. Independent exact-head review clear with no Critical/Important findings. Critical character E2E passes on this head; required frontend build/persistence lifecycle sequence still running. Full CI and merge remain pending; no live-model UAT was added.
 All seven protected statuses are SUCCESS on reviewed d8b2f5a2d6: frontend-required, backend-required, container-build-check, coverage-required, security-required, e2e-required, trusted license. Full16 coverage and native merged report also pass (run38852040226); no executed checks failing. Independent exact-head review clear. The implementation and acceptance criteria are complete. Remove this task's completed implementation plan per repository instructions; historical plan remains in Git. Final tracking-only commit must pass its head checks before the already-authorized merge; actual merge not yet performed. Bandit touched Python scope has zero new findings versus dev; final followups only change TS fixtures and tracking, where Bandit does not apply. Seven existing test skips and no live-provider/fresh-install UAT are documented.
+Final tracking-head06189 repeat exposes same leaked React-root teardown class in a second fixture: shard7 all1644 assertions PASS but uncaught window undefined after LocalChatList.on-device environment teardown. Prior d8b2 all16/merged/7required pass remains valid historical evidence, but final head is not merge-ready. Reopen task; reassess per-fixture cleanup and fix shared static-root lifecycle rather than another isolated fixture. No ignore-unhandled-errors, global suppression, or budget increase. Independent root investigation and central-harness review requested; actual merge remains blocked.
+Followup plan: Docs/Design/IMPLEMENTATION_PLAN_shared_ui_static_roots_13817.md. Independent diagnosis agrees installed AntD6.2.1's unstableSetRender is a no-op; real static APIs and wave roots use native CJS @rc-component/util/React/render. Choose transparent wrappers around that actual tiny renderer, not a ReactDOM factory or Vitest mock that misses CJS calls. Track real containers; drain queued confirms, actual-unmount under act, reset only already-cached message/notification holders. Avoid eager AntD UI imports and global motion changes. New real-root regression must prove interception, resource disposal, and subsequent static API reuse. ADR required:no, test-only resource ownership; ADR059 tracking unchanged.
+Central shared teardown implemented after real-root regressionRED:1pass/2fail (persistent notices remain and effect cleanup never runs). Actual native CJS rc-render wrappers retain genuine rendering and track fragments/wave containers; shared cleanup drains queued modal rendering in async act, actual-unmounts in a second act, then resets only cached notice holders; restoration uses finally. Connected4file coverage82/82 initially passes, and per-fixture RuntimeConfig/literature cleanup/motion overrides were removed. Additional unawaited-notice cases pass5/5 in3 fresh runs even with one-phase helper (suspected queue gap NOT reproduced); two phases clarify ordering, not a claimed red bug. Strict new-helper typecheck passes. Native fresh-process import probe confirms no AntD barrel/message/notification modules load from the tiny renderer boundary. Independent central code review has no Critical/Important findings; expanded22file accessibility/motion/focus/coldguard/CSS+connected coverage running.
+Shared static-root follow-up: real AntD CJS renderer ownership regression reproduced leaked persistent notices/effects before repair. Central shared teardown now genuinely unmounts detached roots and retires notice singleton references, preserving actual UI motion and removing superseded fixture workarounds. Expanded final coverage: 246 passed, 2 existing skips across 22 files in 39.81 seconds, no unhandled errors; strict helper TypeScript and ESLint passed with no new warnings. Current parent 06189 hosted inventory: 15/16 coverage shards pass; shard 7 assertions all pass but environment teardown reports the diagnosed detached React root error. Independent final review and new hosted validation pending. ADR assessment: no new ADR; test-only resource ownership; ADR-059 governs task tracking.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -60,10 +64,10 @@ PR #3250 repairs shared UI coverage fixture context, async/lazy/modal and mutati
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
+- [ ] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [x] #5 Final summary added
+- [ ] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
