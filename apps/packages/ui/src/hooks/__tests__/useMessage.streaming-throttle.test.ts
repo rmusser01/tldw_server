@@ -160,6 +160,36 @@ vi.mock("@/hooks/chat/useHistorySelection", async (original) => ({
   useHistorySelectionContext: () => null
 }))
 
+// Dev's scene-ownership rework (TASK-13549 lineage) requires every send to
+// carry an ActorSceneSend captured before dispatch; a bare-hook harness has
+// no composer scene capture, so provide a stub capture whose scene is inert
+// (default settings, enabled off) and whose requestScope matches the
+// service-prompts mock so the owner-key comparison passes.
+vi.mock("@/hooks/chat/actor-scene-source", async (original) => ({
+  ...(await original<any>()),
+  captureActorSceneSend: () => ({
+    isCurrent: () => true,
+    read: async () => {
+      const { createDefaultActorSettings } = await import("@/types/actor")
+      return Object.freeze({
+        scene: {
+          target: { account: { isCurrent: () => true } },
+          originalRecord: null,
+          settings: createDefaultActorSettings(),
+          origin: "default" as const,
+          profileUnavailable: false
+        },
+        requestScope: {
+          config: { serverUrl: "http://127.0.0.1:8000", authMode: "single-user" },
+          userId: null
+        },
+        isCurrent: () => true,
+        commandIsCurrent: () => true
+      })
+    }
+  })
+}))
+
 vi.mock("@/services/service-prompts", () => ({
   loadServicePromptSnapshot: async () => ({
     scopeKey: "scope:bench",

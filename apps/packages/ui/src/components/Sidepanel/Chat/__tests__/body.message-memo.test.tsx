@@ -85,10 +85,29 @@ vi.mock("@/hooks/useSelectedCharacter", () => ({
   useSelectedCharacter: () => [null]
 }))
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({ serverChatCharacterId: null })
-}))
+vi.mock("@/store/option", () => {
+  // Dev's body.tsx routes Stop-button focus through useExplicitStopFocus,
+  // which reads the draft snapshot via useStoreMessageOption.getState() (and
+  // subscribes on stop); the memo harness keeps those inert.
+  const optionState = {
+    serverChatCharacterId: null,
+    isLoading: false,
+    streaming: false,
+    isProcessing: false,
+    chatDraftAddress: null,
+    temporaryChat: false
+  }
+  return {
+    useStoreMessageOption: Object.assign(
+      (selector: (state: Record<string, unknown>) => unknown) =>
+        selector(optionState),
+      {
+        getState: () => optionState,
+        subscribe: () => () => {}
+      }
+    )
+  }
+})
 
 vi.mock("@/components/Common/ChatGreetingPicker", () => ({
   ChatGreetingPicker: () => null
