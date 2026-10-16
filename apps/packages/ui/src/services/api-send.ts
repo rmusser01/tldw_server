@@ -246,6 +246,8 @@ async function apiSendImpl<
   }
   return await tldwRequest(payload, {
     ...createDirectRuntime(storage),
-    ...directRecipeRequestAuthority
+    ...directRecipeRequestAuthority,
+    // Only the guarded readiness GET above opts into automatic refresh/replay.
+    refreshAuth: undefined
   })
 }

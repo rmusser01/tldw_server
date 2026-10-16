@@ -11,6 +11,12 @@
     "playwright": "^1.57.0"
   },
   "dependencies": {
-    "jsdom": "29.1.1"
+    "jsdom": "28.1.0"
+  },
+  "overrides": {
+    "@asamuzakjp/dom-selector": "7.1.1"
+  },
+  "patchedDependencies": {
+    "jsdom@28.1.0": "patches/jsdom@28.1.0.patch"
   }
 }
