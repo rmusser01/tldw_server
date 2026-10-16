@@ -2271,7 +2271,7 @@ class WorkflowScheduler:
         self._queue = deque()  # items: (engine, run_id, mode, tenant, workflow_id)
         self._active_tenant: dict[str, int] = {}
         self._active_workflow: dict[int | None, int] = {}
-        self._active_runs: set[str] = set()
+        self._active_runs: dict[str, tuple[str, int | None]] = {}
         self.tenant_limit = int(os.getenv("WORKFLOWS_TENANT_CONCURRENCY", "2"))
         self.workflow_limit = int(os.getenv("WORKFLOWS_WORKFLOW_CONCURRENCY", "1"))
         self._lock = threading.Lock()
@@ -2288,6 +2288,8 @@ class WorkflowScheduler:
     def schedule(self, engine: WorkflowEngine, run_id: str, mode: RunMode) -> None:
         queue_depth = 0.0
         with self._lock:
+            if run_id in self._active_runs or any(item[1] == run_id for item in self._queue):
+                return
             run = engine.db.get_run(run_id)
             if not run:
                 self._spawn(engine.start_run(run_id, mode, scheduler_for_notify=self))
@@ -2302,14 +2304,16 @@ class WorkflowScheduler:
         self._set_queue_gauge(queue_depth)
 
     def notify_finished(self, tenant: str, workflow_id: int | None, run_id: str | None = None) -> None:
+        """Release recorded admission once; unknown or missing run IDs do nothing."""
         queue_depth = 0.0
         with self._lock:
-            if run_id:
-                self._active_runs.discard(run_id)
-            if tenant:
-                self._active_tenant[tenant] = max(0, self._active_tenant.get(tenant, 0) - 1)
-                if self._active_tenant.get(tenant, 0) <= 0:
-                    self._active_tenant.pop(tenant, None)
+            admission = self._active_runs.pop(run_id, None) if run_id is not None else None
+            if admission is None:
+                return
+            tenant, workflow_id = admission
+            self._active_tenant[tenant] = max(0, self._active_tenant.get(tenant, 0) - 1)
+            if self._active_tenant.get(tenant, 0) <= 0:
+                self._active_tenant.pop(tenant, None)
             if workflow_id is not None:
                 self._active_workflow[workflow_id] = max(0, self._active_workflow.get(workflow_id, 0) - 1)
                 if self._active_workflow.get(workflow_id, 0) <= 0:
@@ -2330,7 +2334,7 @@ class WorkflowScheduler:
         return self._active_tenant.get(tenant, 0) < self.tenant_limit and self._active_workflow.get(workflow_id, 0) < self.workflow_limit
 
     def _start_locked(self, engine: WorkflowEngine, run_id: str, mode: RunMode, tenant: str, workflow_id: int | None) -> None:
-        self._active_runs.add(run_id)
+        self._active_runs[run_id] = (tenant, workflow_id)
         self._active_tenant[tenant] = self._active_tenant.get(tenant, 0) + 1
         if workflow_id is not None:
             self._active_workflow[workflow_id] = self._active_workflow.get(workflow_id, 0) + 1

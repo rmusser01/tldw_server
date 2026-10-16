@@ -1118,3 +1118,298 @@ describe('deferred43 metadata and native target admission', () => {
     expect(timerData.faults & 1).toBe(1);
   });
 });
+
+describe('deferred43 pre-click evidence retention', () => {
+  const nativeRequire = createRequire(import.meta.url);
+  const ts = nativeRequire('typescript');
+  const fixtureSource = () =>
+    readFileSync(path.join(frontendRoot, 'e2e/utils/fixtures.ts'), 'utf8');
+  const marker = () => fixtureSource().match(/^const deferred43Marker = "([a-f0-9]+)"/m)![1];
+  const payload = (realm: number) => {
+    const rows =
+      realm === 1
+        ? [
+            [1, 1, 0, 1, 1, 1, 44, 2],
+            [1, 2, 0, 3, 2, 1, 44, 4],
+            [1, 3, 0, 5, 3, 1, 45, 6, 0, 0, 0, 1],
+          ]
+        : [[40, 1]];
+    return {
+      schema: 43,
+      realm,
+      source: marker(),
+      timeOrigin: 1,
+      count: rows.length,
+      faults: 0,
+      first: 0,
+      counts: [6, 2, 0, 0],
+      rows: rows.map((row) => [...row, ...Array(24 - row.length).fill(0)]),
+      order: 0,
+    };
+  };
+  const runDrain = async (realms: number[]) => {
+    const source = fixtureSource();
+    const validation = source.slice(
+      source.indexOf('const deferred43Keys = '),
+      source.indexOf('async function deferred43Bound')
+    );
+    const start = source.indexOf(
+      '  return async () => {',
+      source.indexOf('async function prepareDeferred43')
+    );
+    const end = source.indexOf('\n}\n\n\n/**', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const body = ts.transpileModule(
+      `const deferred43Marker = ${JSON.stringify(marker())}; ${validation}\n${source.slice(start, end)}`,
+      { compilerOptions: { target: ts.ScriptTarget.ES2022 } }
+    ).outputText;
+    const attachments = new Map<string, string>(),
+      summaries: string[] = [],
+      drained: number[] = [];
+    const contexts = new Map(
+      realms.map((realm, index) => [
+        index + 1,
+        {
+          id: index + 1,
+          frameId: 'frame',
+          uniqueId: String(index),
+          default: realm === 1,
+          isolated: realm === 2,
+          destroyed: false,
+        },
+      ])
+    );
+    const worlds = realms.map((realm) => {
+      const world = {};
+      Object.defineProperty(world, realm === 1 ? '__df43App' : '__df43Utility', {
+        value: Object.freeze({
+          source: marker(),
+          realm,
+          drain: () => {
+            drained.push(realm);
+            return payload(realm);
+          },
+          fault: () => {},
+        }),
+      });
+      return world;
+    });
+    let detached = false;
+    const session = {
+      send: async (_method: string, parameters: { contextId: number; expression: string }) => ({
+        result: {
+          value: new Function('globalThis', 'performance', `return ${parameters.expression}`)(
+            worlds[parameters.contextId - 1],
+            { timeOrigin: 1, now: () => 2 }
+          ),
+        },
+      }),
+      detach: async () => {
+        detached = true;
+      },
+    };
+    const testInfo = {
+      attach: async (name: string, value: { body: string }) => {
+        attachments.set(name, value.body);
+      },
+    };
+    const construct = new Function(
+      'session',
+      'contexts',
+      'frameId',
+      'documents',
+      'contextLost',
+      'calibration',
+      'faults',
+      'app',
+      'utility',
+      'deferred43Bound',
+      'testInfo',
+      'Buffer',
+      'createHash',
+      'process',
+      body
+    );
+    await construct(
+      session,
+      contexts,
+      'frame',
+      1,
+      false,
+      undefined,
+      0,
+      undefined,
+      undefined,
+      (operation: Promise<unknown>) => operation,
+      testInfo,
+      Buffer,
+      nativeRequire('node:crypto').createHash,
+      { stdout: { write: (line: string) => summaries.push(line) } }
+    )();
+    return {
+      attachments,
+      drained,
+      detached,
+      summary: JSON.parse(summaries[0].slice('DEFERRED43 '.length)),
+    };
+  };
+  it.each([
+    {
+      name: 'app without utility before any selected action',
+      realms: [1],
+      expected: [1],
+      faults: 256,
+      contextFaults: 256,
+    },
+    { name: 'utility without app', realms: [2], expected: [2], faults: 264, contextFaults: 256 },
+    {
+      name: 'both unique healthy realms',
+      realms: [1, 2],
+      expected: [1, 2],
+      faults: 0,
+      contextFaults: 0,
+    },
+    {
+      name: 'duplicate app retains only unique utility',
+      realms: [1, 1, 2],
+      expected: [2],
+      faults: 264,
+      contextFaults: 256,
+    },
+    {
+      name: 'duplicate utility retains only unique app',
+      realms: [1, 2, 2],
+      expected: [1],
+      faults: 256,
+      contextFaults: 256,
+    },
+    { name: 'no healthy realm', realms: [], expected: [], faults: 264, contextFaults: 256 },
+  ])('$name', async ({ realms, expected, faults, contextFaults }) => {
+    const result = await runDrain(realms);
+    expect(result.drained).toEqual(expected);
+    expect(result.detached).toBe(true);
+    expect(result.summary.faults).toBe(faults);
+    expect(result.summary.available).toBe(faults === 0);
+    expect(result.attachments.has('deferred43-app.json')).toBe(expected.includes(1));
+    expect(result.attachments.has('deferred43-utility.json')).toBe(expected.includes(2));
+    expect(JSON.parse(result.attachments.get('deferred43-contexts.json')!).faults).toBe(
+      contextFaults
+    );
+  });
+  it('selects only exact Print hover and click under the native environment gate', () => {
+    const source = readFileSync(path.join(frontendRoot, 'scripts/live-tier-uat/run.mjs'), 'utf8');
+    const token = 'const deferred43Patches = ';
+    const patches = JSON.parse(
+      source.slice(source.indexOf(token) + token.length, source.indexOf('\nconst deferred43Hash'))
+    );
+    const native = patches[11].edits[0].to;
+    const begin = native.indexOf('const select = '),
+      end = native.indexOf('\n    };', begin);
+    expect(begin).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(begin);
+    const selectSource = native.slice(begin, end + '\n    };'.length);
+    const selector = 'internal:role=menuitem[name=/print \\/ save as pdf/i]';
+    for (const [action, selected] of [
+      ['hover', true],
+      ['click', true],
+      ['dblclick', false],
+      ['tap', false],
+      ['move', false],
+    ]) {
+      for (const [exactSelector, exactEnv] of [
+        [true, true],
+        [false, true],
+        [true, false],
+      ]) {
+        const recorder = deferred43Recorder(1024, 3, marker());
+        const select = new Function(
+          'recorder',
+          'process',
+          `let calls = 0, browserMetadata = null, metadataAttempted = true; ${selectSource}; return select;`
+        )(recorder, { env: { TLDW_DEFERRED43_SOURCE: exactEnv ? marker() : 'wrong' } });
+        const result = select(
+          { metadata: { id: 'call@1', params: { selector: exactSelector ? selector : 'other' } } },
+          {},
+          action,
+          0
+        );
+        expect(result !== null).toBe(selected && exactSelector && exactEnv);
+      }
+    }
+  });
+});
+
+describe('deferred43 native hover event vocabulary', () => {
+  it('records the installed native hover mousemove as distinct event code16', () => {
+    const recorder = deferred43Recorder(2048, 2, 'control');
+    const node = document.createElement('button');
+    recorder.nativeEvent(
+      [1, 1, 0],
+      node,
+      new MouseEvent('mousemove', { clientX: 12, clientY: 34 }),
+      1,
+      true,
+      true
+    );
+    const data = recorder.drain();
+    expect(data.faults).toBe(0);
+    expect(data.count).toBe(1);
+    expect(data.rows[0][0]).toBe(51);
+    expect(data.rows[0][9]).toBe(16);
+    expect(data.first).toBe(0);
+  });
+
+  it('preserves every existing event code1 through15', () => {
+    const recorder = deferred43Recorder(2048, 2, 'control');
+    const node = document.createElement('button');
+    const types = [
+      'pointerdown',
+      'mousedown',
+      'mouseup',
+      'click',
+      'pointerenter',
+      'mouseenter',
+      'pointerleave',
+      'mouseleave',
+      'contextmenu',
+      'focus',
+      'blur',
+      'touchstart',
+      'touchend',
+      'pointerup',
+      'touchcancel',
+    ];
+    for (const type of types)
+      recorder.nativeEvent(
+        [1, 1, 0],
+        node,
+        new MouseEvent(type, { clientX: 12, clientY: 34 }),
+        1,
+        true,
+        true
+      );
+    const data = recorder.drain();
+    expect(data.faults).toBe(0);
+    expect(data.rows.map((row: number[]) => row[9])).toEqual(types.map((_, index) => index + 1));
+    expect(data.first).toBe(0);
+  });
+
+  it('keeps unknown native event types faulted with reserved code0', () => {
+    for (const type of ['unknown-custom', 'pointerrawupdate', 'auxclick']) {
+      const recorder = deferred43Recorder(2048, 2, 'control');
+      recorder.nativeEvent(
+        [1, 1, 0],
+        document.createElement('button'),
+        new MouseEvent(type, { clientX: 12, clientY: 34 }),
+        1,
+        true,
+        true
+      );
+      const data = recorder.drain();
+      expect(data.faults).toBe(2);
+      expect(data.rows[0][9]).toBe(0);
+      expect(data.first).toBe(0);
+    }
+  });
+});

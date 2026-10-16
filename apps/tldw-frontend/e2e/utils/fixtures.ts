@@ -14,7 +14,7 @@ import {
 } from "./helpers"
 import { startApiCapture, getCapturedApiCalls } from "./api-assertions"
 
-const deferred43Marker = "3485bd8cbd37b38ae9bfec6e7b3e9cb37164cfb53667f53bf78aa5530f6b1d82"
+const deferred43Marker = "aa48400ea320ca9bf7ffd7e6f9f2ce7c34b8299dfa7f370a963391716cc1402d"
 const deferred43MeasuredTitles = new Map([
   ["e2e/ux-regression/notes-p0.spec.ts", "NE-04: 'Print / Save as PDF' prints the note without a pop-up error"],
   ["e2e/workflows/notes-studio-derived-note.spec.ts", "selects markdown, derives a Cornell studio note, and prints it"],
@@ -125,7 +125,7 @@ async function prepareDeferred43(page: Page, testInfo: TestInfo): Promise<null |
       receipt.source !== deferred43Marker ||
       typeof receipt.appSource !== 'string' ||
       createHash('sha256').update(receipt.appSource).digest('hex') !==
-        '2e4fd3e7e678b72cd41e7ac2bf9d374c5510ab803c698021994c6ba64e39ebc3' ||
+        '14b7a4ed2bb439dcd544f81a62da28a677238d917c44daeff6603bdaf1930038' ||
       receipt.installed !== true ||
       typeof receipt.appSource !== 'string' ||
       Buffer.byteLength(receipt.appSource) > 65536 ||
@@ -263,8 +263,10 @@ async function prepareDeferred43(page: Page, testInfo: TestInfo): Promise<null |
         if (response.exceptionDetails) { faults |= 256; continue }
         if (context.default && response.result?.value?.app === true || context.isolated && response.result?.value?.utility === true) selected.push(context)
       }
-      if (selected.length !== 2 || selected.filter(context => context.default).length !== 1 || selected.filter(context => context.isolated).length !== 1) { faults |= 256; return }
+      const appCount = selected.filter(context => context.default).length, utilityCount = selected.filter(context => context.isolated).length
+      if (selected.length !== 2 || appCount !== 1 || utilityCount !== 1) faults |= 256
       for (const context of selected) {
+        if ((context.default ? appCount : utilityCount) !== 1) continue
         if (Date.now() >= deadline) throw new Error("DEFERRED43_OBSERVATION_DEADLINE")
         if (context.destroyed) { contextLost = true; faults |= 256; continue }
         const key = context.default ? "__df43App" : "__df43Utility"
