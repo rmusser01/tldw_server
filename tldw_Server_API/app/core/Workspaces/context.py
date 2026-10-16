@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import PurePath, PureWindowsPath
 from typing import Any
 
@@ -29,7 +29,7 @@ def build_workspace_core_context(
     source_summary: Mapping[str, Any] | None,
     service_capabilities: Mapping[str, Any] | None,
     partial_errors: list[Mapping[str, Any]] | None,
-    active_operations: list[Mapping[str, Any]] | None = None,
+    active_operations: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Resolve the read-only Workspace Core context for status surfaces."""
     workspace_dict = dict(workspace or {})

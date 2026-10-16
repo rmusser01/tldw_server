@@ -20,7 +20,7 @@ from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
 )
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -424,7 +424,7 @@ def test_delete_workspace_invokes_sharing_cleanup_hook(
         cleanup_calls.append((workspace_id, owner_user_id))
 
     db.upsert_workspace("ws-delete-hook", "Delete Hook")
-    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=1, username="owner")
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
     monkeypatch.setattr(
@@ -459,7 +459,7 @@ def test_delete_workspace_cleanup_failure_log_includes_context(
 
     fake_logger = MagicMock()
     db.upsert_workspace("ws-delete-log", "Delete Log")
-    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=1, username="owner")
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
     monkeypatch.setattr(workspaces_endpoint, "on_workspace_deleted", _fail_cleanup)
@@ -1651,7 +1651,7 @@ def test_delete_workspace_maps_conflict_to_409(workspace_fastapi_app):
     async def _allow_rate_limit() -> None:
         return None
 
-    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=1, username="owner")
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _ConflictDB()
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
     try:
@@ -1706,7 +1706,7 @@ def test_delete_workspace_maps_database_error_to_contextual_500(workspace_fastap
     async def _allow_rate_limit() -> None:
         return None
 
-    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=1, username="owner")
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
     try:
@@ -2985,3 +2985,39 @@ def test_reorder_workspace_sources_maps_database_error_to_contextual_500(workspa
 
     assert response.status_code == 500, response.text
     assert response.json()["detail"] == "Failed to reorder workspace sources"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("owner_id", [1, "1", "tenant-private-id"])
+def test_delete_workspace_validates_sharing_owner_before_mutation(workspace_fastapi_app, db, monkeypatch, owner_id):
+    async def allow_rate_limit() -> None:
+        return None
+
+    cleanup_calls = []
+
+    async def record_cleanup(workspace_id: str, owner_user_id: int) -> None:
+        cleanup_calls.append((workspace_id, owner_user_id))
+
+    workspace_id = "ws-delete-owner-contract"
+    db.upsert_workspace(workspace_id, "Owner contract")
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=owner_id, username="owner")
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = allow_rate_limit
+    monkeypatch.setattr(workspaces_endpoint, "on_workspace_deleted", record_cleanup)
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.delete(f"/api/v1/workspaces/{workspace_id}")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
+
+    if owner_id == "tenant-private-id":
+        assert response.status_code == 400, response.text
+        assert response.json() == {"detail": "invalid_user_id"}
+        assert db.get_workspace(workspace_id) is not None
+        assert cleanup_calls == []
+    else:
+        assert response.status_code == 204, response.text
+        assert cleanup_calls == [(workspace_id, 1)]
+        assert db.get_workspace(workspace_id) is None
