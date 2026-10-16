@@ -194,6 +194,10 @@ export const getSetting = async <T>(setting: SettingDef<T>, options?: { throwOnE
     ensureStorageChangeListener()
     const cacheKey = settingCacheKey(setting as unknown as SettingDef<unknown>)
     if (valueCache.has(cacheKey)) {
+      // Invariant: cached values are SHARED references, not copies (copying
+      // per read would defeat the cache). Consumers must treat getSetting
+      // results as read-only and never mutate object/array values in place —
+      // no mutating consumer exists today; keep it that way.
       return valueCache.get(cacheKey) as T
     }
     await setting.beforeGet?.()

@@ -631,6 +631,14 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     void refreshRawRequestSnapshot()
   }, [refreshRawRequestSnapshot, setToolsPopoverOpen])
 
+  const closeRawRequestModal = React.useCallback(() => {
+    setRawRequestModalOpen(false)
+    // WP-22 round 1: the opt-in holds only while the preview is open. Closing
+    // the modal disables the pipeline again so later chat requests keep no
+    // debug snapshot (page-lifetime retention otherwise).
+    setChatRequestDebugEnabled(false)
+  }, [])
+
   const copyRawRequestJson = React.useCallback(async () => {
     if (!rawRequestJson) return
     try {
@@ -661,6 +669,7 @@ export function usePlaygroundRawPreview(deps: UsePlaygroundRawPreviewDeps) {
     rolePlayCompatibility,
     refreshRawRequestSnapshot,
     openRawRequestModal,
+    closeRawRequestModal,
     copyRawRequestJson
   }
 }
