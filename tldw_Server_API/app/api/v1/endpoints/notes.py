@@ -12,7 +12,7 @@ import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Callable, Literal, Optional, TypeVar
+from typing import Annotated, Any, Callable, Literal, NoReturn, Optional, TypeVar
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -71,6 +71,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_moodboards import (
     MoodboardCreate,
     MoodboardListResponse,
     MoodboardNotesListResponse,
+    MoodboardNoteSummary,
     MoodboardPinResponse,
     MoodboardResponse,
     MoodboardUpdate,
@@ -1502,7 +1503,12 @@ def _build_title_opts(note_in: Any) -> TitleGenOptions:
         max_len_val = max_bound
 
     opts = TitleGenOptions()
-    opts.strategy = strategy
+    if strategy == "llm":
+        opts.strategy = "llm"
+    elif strategy == "llm_fallback":
+        opts.strategy = "llm_fallback"
+    else:
+        opts.strategy = "heuristic"
     opts.max_len = max_len_val
     try:
         opts.language = getattr(note_in, "language", None)
@@ -1774,7 +1780,9 @@ def _parse_markdown_import_note(content: str, fallback_title: str | None = None)
 
 # --- Keyword attach helper ----------------------------------------------------
 def _attach_keywords_bulk(db: CharactersRAGDB, notes_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    note_ids = [nd.get("id") for nd in notes_data if isinstance(nd, dict) and nd.get("id")]
+    note_ids = [
+        note_id for nd in notes_data if isinstance(nd, dict) and isinstance(note_id := nd.get("id"), str) and note_id
+    ]
     if not note_ids:
         return notes_data
     try:
@@ -1792,7 +1800,9 @@ def _attach_keywords_bulk(db: CharactersRAGDB, notes_data: list[dict[str, Any]])
 
 def _attach_folders_bulk(db: CharactersRAGDB, notes_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
     _attach_provenance_bulk(db, notes_data)
-    note_ids = [nd.get("id") for nd in notes_data if isinstance(nd, dict) and nd.get("id")]
+    note_ids = [
+        note_id for nd in notes_data if isinstance(nd, dict) and isinstance(note_id := nd.get("id"), str) and note_id
+    ]
     if not note_ids:
         return notes_data
     try:
@@ -2090,7 +2100,7 @@ def _sync_collection_keywords(
 
 
 # --- Helper for Exception Handling (largely the same) ---
-def handle_db_errors(e: Exception, entity_type: str = "resource"):
+def handle_db_errors(e: Exception, entity_type: str = "resource") -> NoReturn:
     if isinstance(e, SyncStoreError):
         raise _note_sync_http_error(e)
     if isinstance(e, HTTPException):  # If it's already an HTTPException, re-raise
@@ -2390,7 +2400,7 @@ async def create_note(
         else:
             conversation_id = _normalize_optional_id(note_in.conversation_id)
             message_id = _normalize_optional_id(note_in.message_id)
-        note_payload = {
+        note_payload: dict[str, object] = {
             "title": effective_title,
             "content": note_in.content,
             "conversation_id": conversation_id,
@@ -4110,6 +4120,8 @@ async def create_keyword_collection_endpoint(
                 idempotency_key=request_key,
                 source="notes-api",
             )
+            if not isinstance(collection_data, Mapping):
+                raise SyncStoreError("Notes collection projection did not return a collection")
             return _attach_collection_keywords_inline(db, dict(collection_data))
 
         collection_id = db.add_keyword_collection(
@@ -4269,6 +4281,8 @@ async def update_keyword_collection_endpoint(
                     idempotency_key=request_key,
                     source="notes-api",
                 )
+                if not isinstance(updated_collection, Mapping):
+                    raise SyncStoreError("Notes collection projection did not return a collection")
                 return _attach_collection_keywords_inline(
                     db, dict(updated_collection)
                 )
@@ -4315,6 +4329,8 @@ async def update_keyword_collection_endpoint(
                 idempotency_key=request_key,
                 source="notes-api",
             )
+            if not isinstance(updated_collection, Mapping):
+                raise SyncStoreError("Notes collection projection did not return a collection")
             return _attach_collection_keywords_inline(db, dict(updated_collection))
 
         if update_data:
@@ -4912,7 +4928,7 @@ async def create_moodboard(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Moodboard created but could not be retrieved.",
             )
-        return _normalize_moodboard_payload(moodboard_row)
+        return MoodboardResponse.model_validate(_normalize_moodboard_payload(moodboard_row))
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "moodboard")
 
@@ -4956,7 +4972,7 @@ async def list_moodboards_endpoint(
             total = await _run_db_call(db.count_moodboards, include_deleted=include_deleted)
         except _NOTES_NONCRITICAL_EXCEPTIONS as count_exc:
             logger.warning("Counting moodboards failed: {}", count_exc)
-        payload = [_normalize_moodboard_payload(row) for row in rows]
+        payload = [MoodboardResponse.model_validate(_normalize_moodboard_payload(row)) for row in rows]
         return MoodboardListResponse(
             items=payload,
             moodboards=payload,
@@ -5003,7 +5019,7 @@ async def get_moodboard_endpoint(
         row = await _run_db_call(db.get_moodboard_by_id, moodboard_id=moodboard_id)
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Moodboard not found")
-        return _normalize_moodboard_payload(row)
+        return MoodboardResponse.model_validate(_normalize_moodboard_payload(row))
     except HTTPException:
         raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
@@ -5053,7 +5069,7 @@ async def update_moodboard_endpoint(
         row = await _run_db_call(db.get_moodboard_by_id, moodboard_id=moodboard_id)
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Moodboard not found")
-        return _normalize_moodboard_payload(row)
+        return MoodboardResponse.model_validate(_normalize_moodboard_payload(row))
     except HTTPException:
         raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
@@ -5206,9 +5222,10 @@ async def list_moodboard_notes_endpoint(
         notes = await _run_db_call(db.list_moodboard_notes, moodboard_id=moodboard_id, limit=limit, offset=offset)
         total = await _run_db_call(db.count_moodboard_notes, moodboard_id=moodboard_id)
         _attach_provenance_bulk(db, notes)
+        note_summaries = [MoodboardNoteSummary.model_validate(note) for note in notes]
         return MoodboardNotesListResponse(
-            items=notes,
-            notes=notes,
+            items=note_summaries,
+            notes=note_summaries,
             count=len(notes),
             limit=limit,
             offset=offset,
@@ -5462,25 +5479,24 @@ async def upload_note_attachment(
                 headers={"Retry-After": str(meta.get("retry_after", 60))}
             )
         _ensure_note_exists_or_404(db, note_id)
-        if not file.filename:
+        file_name = file.filename
+        if not file_name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Attachment filename is required")
-        safe_file_name = _sanitize_attachment_file_name(file.filename)
+        safe_file_name = _sanitize_attachment_file_name(file_name)
         coordinator = _active_notes_attachment_coordinator(db, current_user)
         ready: ReadyAttachmentDataset | None = None
         original_file_name = safe_file_name
         active_content_type: str | None = None
         attachment_max_bytes = _NOTES_ATTACHMENT_MAX_BYTES
         if coordinator is not None:
-            _, ready = _require_attachment_context(
+            _context_coordinator, ready = _require_attachment_context(
                 db,
                 current_user,
                 dataset_id=dataset_id,
                 writable=True,
             )
             try:
-                original_file_name = validate_note_attachment_original_file_name(
-                    file.filename
-                )
+                original_file_name = validate_note_attachment_original_file_name(file_name)
                 active_content_type = validate_note_attachment_content_type(
                     file.content_type
                     or mimetypes.guess_type(safe_file_name)[0]
@@ -5493,7 +5509,7 @@ async def upload_note_attachment(
                 ) from exc
             attachment_max_bytes = min(
                 attachment_max_bytes,
-                coordinator.service.settings.max_blob_bytes,
+                coordinator.service.settings.max_blob_bytes or coordinator.service.settings.max_attachment_bytes,
             )
         payload = await file.read(attachment_max_bytes + 1)
         if len(payload) == 0:
@@ -5664,12 +5680,12 @@ async def upload_note_attachment(
         attachment_dir = _get_note_attachments_dir(current_user.id, note_id, create=True)
         target_path = _resolve_unique_attachment_path(attachment_dir, safe_file_name)
         target_path.write_bytes(payload)
-        content_type = file.content_type or mimetypes.guess_type(target_path.name)[0]
+        legacy_content_type = file.content_type or mimetypes.guess_type(target_path.name)[0]
         uploaded_at = datetime.now(timezone.utc)
         _write_attachment_metadata(
             target_path,
-            original_file_name=file.filename,
-            content_type=content_type,
+            original_file_name=file_name,
+            content_type=legacy_content_type,
             size_bytes=len(payload),
             uploaded_at=uploaded_at,
         )
@@ -5717,32 +5733,30 @@ async def list_note_attachments(
         _ensure_note_exists_or_404(db, note_id)
         coordinator = _active_notes_attachment_coordinator(db, current_user)
         if coordinator is not None:
-            _, ready = _require_attachment_context(
+            _context_coordinator, ready = _require_attachment_context(
                 db,
                 current_user,
                 dataset_id=dataset_id,
                 writable=False,
             )
-            attachments: list[NoteAttachment] = []
+            canonical_attachments: list[NoteAttachment] = []
             after_attachment_id: str | None = None
-            while len(attachments) <= _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT:
+            while len(canonical_attachments) <= _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT:
                 page = db.note_attachment_store.list_page(
                     ready.dataset.dataset_id,
                     note_id,
                     after_attachment_id=after_attachment_id,
                     limit=min(
                         200,
-                        _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT
-                        + 1
-                        - len(attachments),
+                        _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT + 1 - len(canonical_attachments),
                     ),
                     state="live",
                 )
-                attachments.extend(page)
+                canonical_attachments.extend(page)
                 if len(page) < 200:
                     break
                 after_attachment_id = page[-1].attachment_id
-            if len(attachments) > _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT:
+            if len(canonical_attachments) > _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={
@@ -5752,11 +5766,8 @@ async def list_note_attachments(
                 )
             return {
                 "note_id": note_id,
-                "attachments": [
-                    _canonical_to_legacy_attachment_response(item)
-                    for item in attachments
-                ],
-                "count": len(attachments),
+                "attachments": [_canonical_to_legacy_attachment_response(item) for item in canonical_attachments],
+                "count": len(canonical_attachments),
             }
         _reject_inactive_attachment_dataset(dataset_id)
         attachment_dir = _get_note_attachments_dir(current_user.id, note_id, create=False)
@@ -5932,7 +5943,7 @@ async def create_note_attachment_from_upload(
             body = _attachment_mutation_response(service, replay)
             response.headers["ETag"] = body.etag
             return body
-        _, blob = service.require_completed_notes_attachment_upload(
+        _upload_session, blob = service.require_completed_notes_attachment_upload(
             user_id=str(current_user.id),
             dataset_id=ready.dataset.dataset_id,
             upload_id=request.upload_id,
@@ -6474,7 +6485,7 @@ async def download_note_attachment(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid attachment filename")
         coordinator = _active_notes_attachment_coordinator(db, current_user)
         if coordinator is not None:
-            _, ready = _require_attachment_context(
+            _context_coordinator, ready = _require_attachment_context(
                 db,
                 current_user,
                 dataset_id=dataset_id,
@@ -6554,7 +6565,7 @@ async def delete_note_attachment(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid attachment filename")
         coordinator = _active_notes_attachment_coordinator(db, current_user)
         if coordinator is not None:
-            _, ready = _require_attachment_context(
+            _context_coordinator, ready = _require_attachment_context(
                 db,
                 current_user,
                 dataset_id=dataset_id,
@@ -6650,13 +6661,19 @@ async def _list_keywords_impl(
             keyword_ids: list[int] = []
             for row in keywords_data:
                 try:
-                    keyword_ids.append(int(row.get("id")))
+                    raw_id = row.get("id")
+                    if raw_id is None:
+                        continue
+                    keyword_ids.append(int(raw_id))
                 except (TypeError, ValueError, AttributeError):
                     continue
             counts = db.get_note_counts_for_keywords(keyword_ids)
             for row in keywords_data:
                 try:
-                    keyword_id = int(row.get("id"))
+                    raw_id = row.get("id")
+                    if raw_id is None:
+                        continue
+                    keyword_id = int(raw_id)
                 except (TypeError, ValueError, AttributeError):
                     continue
                 row["note_count"] = counts.get(keyword_id, 0)
@@ -8544,7 +8561,10 @@ async def get_keywords_for_note_endpoint(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Note with ID '{note_id}' not found.")
 
         keywords_list = db.get_keywords_for_note(note_id=note_id)
-        return KeywordsForNoteResponse(note_id=note_id, keywords=keywords_list)
+        return KeywordsForNoteResponse(
+            note_id=note_id,
+            keywords=[KeywordResponse.model_validate(keyword) for keyword in keywords_list],
+        )
     except HTTPException:
         raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
@@ -8594,7 +8614,7 @@ async def get_notes_for_keyword_endpoint(
         _attach_provenance_bulk(db, notes_list)
         return NotesForKeywordResponse(
             keyword_id=keyword_id,
-            notes=notes_list,
+            notes=[NoteResponse.model_validate(note) for note in notes_list],
             count=len(notes_list),
             limit=limit,
             offset=offset,

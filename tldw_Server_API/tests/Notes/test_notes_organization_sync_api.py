@@ -3038,3 +3038,24 @@ def test_merge_sync_append_failure_preserves_source_projection(
         row["id"] for row in chacha_db.get_notes_for_keyword(source["id"])
     } == before_note_ids
     assert _notes_api_group(sync_service, "sync-merge-append") == []
+
+
+@pytest.mark.parametrize("invalid_result", [None, [], [("id", 1)]])
+def test_collection_create_rejects_non_mapping_plan_result(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_result: object,
+) -> None:
+    original = NotesOrganizationCoordinator.plan_collection_change
+
+    def invalid_loader(self, *args, **kwargs):
+        plan = original(self, *args, **kwargs)
+        return replace(plan, load_result=lambda: invalid_result)
+
+    monkeypatch.setattr(NotesOrganizationCoordinator, "plan_collection_change", invalid_loader)
+    response = client.post(
+        "/api/v1/notes/collections",
+        headers={"Idempotency-Key": "invalid-collection-result"},
+        json={"name": "Invalid projection"},
+    )
+    assert response.status_code == 503, response.text

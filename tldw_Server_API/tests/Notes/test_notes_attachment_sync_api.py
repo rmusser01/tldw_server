@@ -1080,3 +1080,20 @@ def test_canonical_routes_require_attachment_domain_enrollment(
 
     assert listed.status_code == 409, listed.text
     assert listed.json()["detail"]["error_code"] == ("notes_attachment_dataset_unavailable")
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("payload, expected_status", [(b"1234", 201), (b"12345", 413)])
+def test_active_one_shot_upload_uses_attachment_limit_when_blob_limit_is_unset(
+    canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
+    payload: bytes,
+    expected_status: int,
+) -> None:
+    client, _, service = canonical_api
+    service.settings = replace(service.settings, max_blob_bytes=None, max_attachment_bytes=4)
+    response = client.post(
+        f"/api/v1/notes/{NOTE_ID}/attachments",
+        headers={"Idempotency-Key": "fallback-limit"},
+        files={"file": ("report.txt", payload, "text/plain")},
+    )
+    assert response.status_code == expected_status, response.text

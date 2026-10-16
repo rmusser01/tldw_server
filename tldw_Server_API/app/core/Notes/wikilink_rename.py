@@ -32,7 +32,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
 from loguru import logger
 
@@ -53,15 +53,14 @@ from tldw_Server_API.app.core.Notes.wikilinks import (
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-WikilinkRenameStatus = Literal[
-    "updated",
-    "restored",
-    "skipped_conflict",
-    "skipped_no_match",
-    "skipped_not_found",
-    "skipped_resolved",
-    "failed",
+WikilinkSaveFailureStatus = Literal["skipped_conflict", "skipped_not_found", "failed"]
+WikilinkRewriteStatus = Literal[
+    "updated", "skipped_conflict", "skipped_no_match", "skipped_not_found", "skipped_resolved", "failed"
 ]
+WikilinkRestoreStatus = Literal["restored", "skipped_conflict", "skipped_no_match", "skipped_not_found", "failed"]
+WikilinkRenameStatus = WikilinkRewriteStatus | WikilinkRestoreStatus
+_Status = TypeVar("_Status", bound=WikilinkRenameStatus)
+_ResultStatus = TypeVar("_ResultStatus", bound=WikilinkRenameStatus, covariant=True)
 # Writes one note's new content at the version just read. It raises
 # ``ConflictError`` when the note changed first, and any other error when the
 # write did not happen.
@@ -95,11 +94,11 @@ class WikilinkRestoreTarget:
 
 
 @dataclass(frozen=True, slots=True)
-class WikilinkNoteResult:
+class WikilinkNoteResult(Generic[_ResultStatus]):
     """What happened to one note. ``version`` is its version afterwards."""
 
     note_id: str
-    status: WikilinkRenameStatus
+    status: _ResultStatus
     title: str | None = None
     version: int | None = None
     replacements: tuple[WikilinkTokenReplacement, ...] = ()
@@ -143,7 +142,7 @@ def rewrite_title_links(
     replacement: str,
     targets: Sequence[WikilinkRewriteTarget],
     save: SaveNoteContent | None = None,
-) -> list[WikilinkNoteResult]:
+) -> list[WikilinkNoteResult[WikilinkRewriteStatus]]:
     """Rewrite ``[[old_title]]`` links to ``replacement`` in each target note.
 
     Results come back in request order, one per distinct note.
@@ -152,7 +151,7 @@ def rewrite_title_links(
     _require_bounded(targets)
     save_content = save or _default_save(db)
     answering = set(db.note_graph_projection_store.list_live_note_ids_titled(old_title))
-    results: list[WikilinkNoteResult] = []
+    results: list[WikilinkNoteResult[WikilinkRewriteStatus]] = []
     for target in _distinct(targets):
         note = db.get_note_by_id(note_id=target.note_id)
         if note is None:
@@ -191,12 +190,12 @@ def restore_title_links(
     replacement: str,
     targets: Sequence[WikilinkRestoreTarget],
     save: SaveNoteContent | None = None,
-) -> list[WikilinkNoteResult]:
+) -> list[WikilinkNoteResult[WikilinkRestoreStatus]]:
     """Undo :func:`rewrite_title_links` for each target note, restoring its previous text."""
 
     _require_bounded(targets)
     save_content = save or _default_save(db)
-    results: list[WikilinkNoteResult] = []
+    results: list[WikilinkNoteResult[WikilinkRestoreStatus]] = []
     for target in _distinct(targets):
         note = db.get_note_by_id(note_id=target.note_id)
         if note is None:
@@ -245,9 +244,9 @@ def _distinct(targets: Sequence[Any]) -> list[Any]:
 
 def _result(
     note: dict[str, Any],
-    status: WikilinkRenameStatus,
+    status: _Status,
     replacements: tuple[WikilinkTokenReplacement, ...] = (),
-) -> WikilinkNoteResult:
+) -> WikilinkNoteResult[_Status]:
     return WikilinkNoteResult(
         str(note["id"]),
         status,
@@ -289,9 +288,9 @@ def _save(
     save_content: SaveNoteContent,
     note: dict[str, Any],
     content: str,
-    done: WikilinkRenameStatus,
+    done: _Status,
     replacements: tuple[WikilinkTokenReplacement, ...],
-) -> WikilinkNoteResult:
+) -> WikilinkNoteResult[_Status | WikilinkSaveFailureStatus]:
     """Save one note and report it. Only a failed write is reported as not saved."""
 
     try:
