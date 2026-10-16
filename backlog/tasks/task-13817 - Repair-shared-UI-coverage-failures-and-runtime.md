@@ -1,7 +1,7 @@
 ---
 id: TASK-13817
 title: Repair shared UI coverage failures and runtime
-status: In Progress
+status: Done
 labels:
 - frontend
 - testing
@@ -16,9 +16,9 @@ Reproduce remaining native shared UI coverage failures and the 15-minute timeout
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Full shared UI coverage completes with zero failing tests and within the existing CI cap
+- [x] #1 Full shared UI coverage completes with zero failing tests and within the existing CI cap
 - [x] #2 Regression evidence covers Skills, research import, and roleplay failures without disabling cases
-- [ ] #3 Independent review and all required PR checks pass before merge
+- [x] #3 Independent review and all required PR checks pass before merge
 - [x] #4 Human requester provides a new Change summary before merge
 <!-- AC:END -->
 
@@ -48,19 +48,22 @@ Executed optional E2E job45pass/1fail exposed a separate stale helper: Character
 a399 hosted critical E2E passes46/46 including actual character creation/native turn/reload; admin teardown shard8 now green. Shard10 exposes a missed followup in the existing StudyPack retry fixture: two missing-result cases click while AntD internal loading still blocks activation. Existing submit(client,jobId) helper already waits for both enabled and no loading class; reuse it for the missed retry. API clearAllMocks also preserves unconsumed once queues from a dropped click, cascading wrong jobID into the next case; reset create/get mocks before defaults. Temporary poisoned-once probe reproduces2/2 failures then passes2/2 after reset; probe removed. Final original12 cases pass natively; connected coverage and independent review pending. No production, deadline, or query-cache changes.
 Final StudyPack connected coverage21/21 across3files passes; independent reviewer clears the readiness helper reuse and API mock isolation with no Critical/Important findings. Installed scoped ESLint exits0; repository hooks and diff checks pass. Actual full hosted shard rerun remains required before merge.
 a399 shard13 re-exposed literature Export CSV readiness race: warming ArtifactModalContent cache did not initialize React.lazy, whose first render starts only after AntD's zero-timer static modal root. Reassessed prior preload approach. New two-phase async-act helper drains that queued modal tick then awaits Vitest dynamic imports after lazy initialization; used for both View interactions, preload removed. Temporary held actual-import proof: old query deterministically fails1s; new helper remains pending until gate releases, then real export assertions pass. Probe removed. Original33 cases pass native and coverage; real modal/viewers, cleanup, assertions and deadlines retained. Independent final delta review pending.
+Complete hosted source validation on reviewed d8b2f5a2d6: all16 disjoint shared UI coverage shards PASS, followed by successful native completeness-guarded merged report in frontend-required run38852040226. Merged totals:2518 files pass/1 existing skipped (all2519 discovered),27942 tests pass/7 existing skips. Full source statement coverage70.37% (184519/262198), no exclusions added; percentages remain report-only. Slowest shard729.86s below existing900s cap. Independent exact-head review clear with no Critical/Important findings. Critical character E2E passes on this head; required frontend build/persistence lifecycle sequence still running. Full CI and merge remain pending; no live-model UAT was added.
+All seven protected statuses are SUCCESS on reviewed d8b2f5a2d6: frontend-required, backend-required, container-build-check, coverage-required, security-required, e2e-required, trusted license. Full16 coverage and native merged report also pass (run38852040226); no executed checks failing. Independent exact-head review clear. The implementation and acceptance criteria are complete. Remove this task's completed implementation plan per repository instructions; historical plan remains in Git. Final tracking-only commit must pass its head checks before the already-authorized merge; actual merge not yet performed. Bandit touched Python scope has zero new findings versus dev; final followups only change TS fixtures and tracking, where Bandit does not apply. Seven existing test skips and no live-provider/fresh-install UAT are documented.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+PR #3250 repairs shared UI coverage fixture context, async/lazy/modal and mutation readiness boundaries, mock isolation, and Playwright actionability. A compatible jsdom stylesheet prefilter fixes the measured selector hot path, and ordinary apiSend mutations retain account guards without unsafe automatic refresh/replay. Sixteen bounded native shards preserve full source coverage and reject incomplete report sets before merging. Reviewed code head d8b2f5a2d6 passes all16 shards and merged coverage:27942 passing tests,7 existing skips,all2519 discovered files represented; longest shard729.86s under900s. Statement coverage70.37% of262198 statements. All seven required gates pass and independent review has no Critical/Important findings; the requester human Change summary is recorded verbatim in the PR. Final tracking-only head validation and authorized merge remain operational steps; no live-provider UAT was claimed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
