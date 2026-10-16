@@ -476,27 +476,37 @@ export const createSerializedSessionStateWriter = (
       try {
         const shards = shardSessionState(buildState())
         const changed: Record<string, unknown> = {}
+        const signatures = new Map<string, string>()
         for (const [key, value] of Object.entries(shards)) {
           const signature = JSON.stringify(value) ?? "null"
           if (lastWritten.get(key) === signature) continue
-          lastWritten.set(key, signature)
+          signatures.set(key, signature)
           changed[key] = value
         }
         const stale: string[] = []
         for (const key of Array.from(lastWritten.keys())) {
-          if (!(key in shards)) {
-            stale.push(key)
-            lastWritten.delete(key)
-          }
+          if (!(key in shards)) stale.push(key)
         }
         if (Object.keys(changed).length > 0) {
           await area?.set(changed)
+          // Record signatures only AFTER the set succeeded: a failed set must
+          // leave lastWritten untouched so the next persist of identical
+          // state fails the signature compare and retries the write instead
+          // of silently dropping it (durability).
+          for (const [key, signature] of signatures) {
+            lastWritten.set(key, signature)
+          }
         }
         if (!area) continue
         await removeFromArea(area, stale)
+        // Same durability rule for removals: forget the keys only after the
+        // removal landed, so a failed remove is retried on the next drain.
+        for (const key of stale) {
+          lastWritten.delete(key)
+        }
         if (legacySessionStateKeyCleanupPending) {
-          legacySessionStateKeyCleanupPending = false
           await removeFromArea(area, [SESSION_STATE_STORAGE_KEY])
+          legacySessionStateKeyCleanupPending = false
         }
       } catch (error) {
         onError?.(error)

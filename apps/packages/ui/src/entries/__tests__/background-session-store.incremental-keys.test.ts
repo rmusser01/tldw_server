@@ -283,4 +283,57 @@ describe("sharded session-state persistence (WP-19)", () => {
     const restored = await readPersistedSessionState(noRemoveArea)
     expect(restored.ingestSessions).toEqual({})
   })
+
+  it("retries a write whose set failed instead of signature-skipping it", async () => {
+    // Round-1 review (Important 1): signatures must be recorded only after a
+    // successful set. A failed set that had already poisoned lastWritten would
+    // make the next persist of IDENTICAL state signature-skip and never retry,
+    // silently dropping the failed write.
+    const store: Record<string, unknown> = {}
+    const setCalls: Array<Record<string, unknown>> = []
+    let failFirstSet = true
+    const errors: unknown[] = []
+    const area: SessionStorageArea = {
+      get: async (keys) => {
+        const wanted = Array.isArray(keys) ? keys : [keys]
+        const out: Record<string, unknown> = {}
+        for (const key of wanted) if (key in store) out[key] = store[key]
+        return out
+      },
+      set: async (items) => {
+        setCalls.push(items)
+        if (failFirstSet) {
+          failFirstSet = false
+          throw new Error("storage hiccup")
+        }
+        Object.assign(store, items)
+      }
+    }
+    const state = stateWith({
+      ingestSessions: { "ingest-a": { funnelId: "ingest-a", status: "running" } }
+    })
+    const write = createSerializedSessionStateWriter(
+      area,
+      () => state,
+      (error) => errors.push(error)
+    )
+
+    write()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(errors).toHaveLength(1)
+    expect((errors[0] as Error).message).toBe("storage hiccup")
+    expect(store).toEqual({})
+
+    // Same state persisted again: the failed write must be re-issued, not
+    // signature-skipped.
+    write()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(errors).toHaveLength(1)
+    expect(setCalls).toHaveLength(2)
+    expect(store["tldw:ingest:ingest-a"]).toMatchObject({ status: "running" })
+    expect(store[SESSION_STATE_INDEX_KEY]).toBeTruthy()
+
+    const restored = await readPersistedSessionState(area)
+    expect(restored.ingestSessions["ingest-a"]).toMatchObject({ status: "running" })
+  })
 })
