@@ -103,6 +103,9 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (  #
     build_web_clipper_rls_sql,
     build_workspace_source_saved_view_rls_sql,
 )
+from tldw_Server_API.app.core.DB_Management.backends.postgres_sequences import (  # noqa: E402
+    advance_postgres_serial,
+)
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noqa: E402
     normalise_params,
     prepare_backend_many_statement,
@@ -27160,10 +27163,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
 
     def _sync_postgres_sequences(self, conn) -> None:
-        """Ensure PostgreSQL sequences match current maxima for managed tables."""
+        """Advance managed PostgreSQL serials without reusing allocated IDs."""
 
         backend = self.backend
-        ident = backend.escape_identifier
 
         for table_name, column_name in self._POSTGRES_SEQUENCE_TABLES:
             try:
@@ -27173,43 +27175,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         continue
                 except _CHACHA_NONCRITICAL_EXCEPTIONS:
                     continue
-                seq_result = backend.execute(
-                    "SELECT pg_get_serial_sequence(%s, %s) AS seq",
+                sequence_rows = backend.execute(
+                    "SELECT ns.nspname AS sequence_schema, seq.relname AS sequence_name "
+                    "FROM pg_class seq JOIN pg_namespace ns ON ns.oid = seq.relnamespace "
+                    "WHERE seq.oid = pg_get_serial_sequence(%s, %s)::regclass",
                     (table_name, column_name),
                     connection=conn,
-                )
-                sequence_name = seq_result.scalar if seq_result else None
-                if not sequence_name:
+                ).rows
+                if not sequence_rows:
                     continue
-
-                max_result = backend.execute(
-                    (
-                        f"SELECT COALESCE(MAX({ident(column_name)}), 0) AS max_id "  # nosec B608
-                        f"FROM {ident(table_name)}"
-                    ),
-                    connection=conn,
+                sequence = sequence_rows[0]
+                advance_postgres_serial(
+                    backend,
+                    conn,
+                    table_name=table_name,
+                    column_name=column_name,
+                    sequence_schema=sequence["sequence_schema"],
+                    sequence_name=sequence["sequence_name"],
                 )
-
-                try:
-                    max_id = int(max_result.scalar or 0)
-                except (TypeError, ValueError):
-                    max_id = 0
-
-                if max_id <= 0:
-                    backend.execute(
-                        "SELECT setval(%s, %s, false)",
-                        (sequence_name, 1),
-                        connection=conn,
-                    )
-                else:
-                    backend.execute(
-                        "SELECT setval(%s, %s)",
-                        (sequence_name, max_id),
-                        connection=conn,
-                    )
             except BackendDatabaseError as exc:  # noqa: BLE001
                 logger.warning(
-                    'Failed to synchronize PostgreSQL sequence for {}.{}: {}',
+                    "Failed to synchronize PostgreSQL sequence for {}.{}: {}",
                     table_name,
                     column_name,
                     exc,
