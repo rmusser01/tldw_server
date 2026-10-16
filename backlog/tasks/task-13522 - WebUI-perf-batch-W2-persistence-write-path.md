@@ -1,7 +1,7 @@
 ---
 id: TASK-13522
 title: 'WebUI perf batch W2: persistence write-path'
-status: In Progress
+status: Done
 created_date: 2026-10-07 04:14
 ---
 
@@ -27,20 +27,21 @@ Stage 4 (WP-18 legacy chrome.storage blob DB quarantine) audit + completion: ove
 Stage 4 review round 1 fix (documentation-only): module-header fallback map in db/index.ts omitted the startup migration importer - db/dexie/migration.ts imports the legacy PageAssitDatabase via relative specifier from "../index" (invisible to the @/db-style grep used originally) and uses getUserID, getChatHistories, getChatHistory, deleteAllChatHistory, getAllPrompts, getAllWebshares, getSessionFilesInfo, reachable at startup via hooks/useMigration.tsx (Layout.tsx + sidepanel-chat.tsx). Header now enumerates three entry points (migration / Firefox-private-mode fallback / legacy-only utilities) with per-entry-point method lists, reworded per review Minor 5 so entry points and fallback bullets are separated; task-4-report importer enumeration corrected + fix-round note appended. Migration's method list intersects none of the Stage 4 behavior changes. Scoped quarantine suite re-run 10/10 green (comment-only change).
 Stage 5 (WP-19/WP-20/WP-22) implementation: session-state moved to builder-based coalescing writer (serialize once per drain window), per-funnel shards tldw:ingest:* + index key with one-time migration-on-read from the legacy monolithic tldw:backgroundSessionStateV1 (legacy key removed on next drain), result.data stripped from persisted collectedResults at persist time only; settings registry gained module valueCache + write-only-on-change localStorage mirror + chrome.storage.onChanged invalidation; chat-request-debug capture gated behind setChatRequestDebugEnabled (default off; Playground raw-request modal opts in; TASK-13511 lazy clone retained). Tests: background-session-store.incremental-keys.test.ts, services/settings/__tests__/registry.test.ts, chat-request-debug.gate.test.ts; authority suite old-shape resume characterization kept green. Overlap found: WP-22 partially pre-landed by TASK-13511.
 Stage 5 review round 1 fixed: writer records lastWritten signatures only after a successful set (failed writes are retried, not signature-skipped; same rule applied to stale-key removals and the legacy-key cleanup flag); Playground raw-request modal close now disables the chat-request debug gate (closeRawRequestModal) so the opt-in holds only while previewing; registry cache-hit return documents the shared-reference invariant. Regression tests: failed-set retry, modal-lifecycle gate; 13 suites / 165 tests green, tsc parity.
+Batch-final (2026-10-14, HEAD aaf09f42ef): Family C benches re-run at HEAD - C2 setItem 50->1/run, quota errors 2->0, amplification 26.5x->1.0x, attempted bytes 130,757,040->115,651 B (byte delta conflates batching + 2KB=2048-UTF-16-code-unit truncation + the reviewed bench requestBody->responseBody retarget; like-for-like metrics quoted alongside per the ledger ruling); C1 stringify 31->22, 2.45MB->1.92MB, setItemBytes 121,470->121,600 (+130 B revision/etag metadata), dev-diagnostic caveat unchanged, artifact-dedup sub-step unobservable in jsdom and pinned by unit tests. Scoped tsc unchanged (ui 400 pre-existing / 0 new; FE 0). Delta append landed as the dated '## Batch W2 (TASK-13522) - 2026-10-16' section in Docs/Reviews/PERF_BASELINE_WEBUI_2026_10.md with per-stage attribution (incl. TASK-13511 overlaps: Stage 3 ~80% via ff8803237e; Stage 4 repoint; Stage 5 WP-22 clone) and the fix-round record (Stages 2/4/5, 5/1/3 findings, 0 open). STANDING ITEM VERDICT: import-suite residual is branch-caused, NOT pre-existing - research-workspace-import.test.tsx is 68/68 green at merge-base 3b68f2dbc2 vs 67/68 at HEAD (verified in a temp worktree sharing node_modules); mechanism pinned: the test snapshots localStorage synchronously after loadNote while the debounced persist write is still buffered; adding await flushWorkspacePersistence() before the snapshot restores the pass (disposable patch, reverted); one-line test fix left to whole-branch review.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+WebUI perf batch W2 (persistence write-path) complete: Task 1 + Stages 2-6 landed on codex/webui-perf-w2-persistence (3b68f2dbc2..aaf09f42ef, 14 commits, all referencing TASK-13522). Task 1 3958f1e8d3 request-history sidecar: setItem 50->1 per run, quota errors 2->0, amplification 26.5x->1.0x, attempted bytes 130.8MB->115,651B (with the documented caveat that the byte delta conflates batching + 2KB=2048-UTF-16-code-unit truncation + the reviewed bench payload retarget). Stage 2 3751c03c22+df3db85514+55b070bb90, fix 426fc547af: workspace persist coalescing + revision diff + artifact dedup; stringify 31->22 and 2.45MB->1.92MB per trivial set (dedup unobservable in jsdom, pinned by tests). Stage 3 5b63d01050: ModelDb replaceAll 1 set + 1 remove (was 2+1); ~80% of the stage pre-landed by TASK-13511 ff8803237e. Stage 4 d6421555d2, fix 3626e61179: legacy blob DB quarantined (batched range delete O(N^2)->O(N), titles-only legacy search, deprecation header + full fallback map); repoint pre-landed. Stage 5 174b7e7bfe+01edfa3178, fix 623f8b2896: serialize-on-drain sharded session writer, registry cache/mirror/onChanged, default-off chat-request-debug gate (WP-22 clone pre-landed by TASK-13511). Stage 6 aaf09f42ef: structuredClone replaces JSON round-trips in store mutation paths. Review record: every stage independently reviewed; Stages 2/4/5 each cleared one fix round (5/1/3 findings addressed, 0 open); zero unresolved Critical/Important at HEAD. Final verification 2026-10-14: both W0 Family C benches green at HEAD (history bench as legitimately retargeted in Task 1); scoped tsc baselines unchanged (ui 400 pre-existing, FE 0); baseline delta append landed in Docs/Reviews/PERF_BASELINE_WEBUI_2026_10.md. Bandit: TS-only scope, documented N/A (0 findings possible for TS). Known follow-ups (documented in the baseline doc Batch W2 section): import-suite residual VERIFIED branch-caused not pre-existing (68/68 at merge-base vs 67/68 at HEAD; one-line flushWorkspacePersistence() test fix left to whole-branch review); pre-existing split-storage jsdom failure; replaceAll crash-orphan reclamation; defineSetting options-drop trap; multi-tab history clobber inherent; in-flight-IDB-await pagehide gap narrowed not closed; registry absent-value/web-context onChanged limits.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
