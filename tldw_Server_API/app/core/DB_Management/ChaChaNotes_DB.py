@@ -28204,7 +28204,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"Database error restoring skill '{name}': {exc}")
             raise
 
-    def _deserialize_row_fields(self, row: sqlite3.Row, json_fields: list[str]) -> dict[str, Any] | None:
+    def _deserialize_row_fields(self, row: sqlite3.Row, json_fields: Sequence[str]) -> dict[str, Any] | None:
         """
         Converts a sqlite3.Row object to a dictionary, deserializing specified JSON fields.
 
@@ -28214,7 +28214,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         Args:
             row: The sqlite3.Row object to convert. If None, returns None.
-            json_fields: A list of field names that should be treated as JSON strings
+            json_fields: A sequence of field names that should be treated as JSON strings
                          and deserialized.
 
         Returns:
@@ -35035,7 +35035,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 params.extend([limit, offset])
                 cursor = conn.execute(query, tuple(params))
                 rows = cursor.fetchall()
-                return [self._deserialize_moodboard_row(row) for row in rows if row]
+                return [item for row in rows if (item := self._deserialize_moodboard_row(row)) is not None]
         if only_deleted:
             predicates.append("deleted = ?")
             params.append(True if self.backend_type == BackendType.POSTGRESQL else 1)
@@ -35052,7 +35052,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         params.extend([limit, offset])
         cursor = self.execute_query(query, tuple(params))
         rows = cursor.fetchall()
-        return [self._deserialize_moodboard_row(row) for row in rows if row]
+        return [item for row in rows if (item := self._deserialize_moodboard_row(row)) is not None]
 
     def count_moodboards(
         self,
@@ -40310,9 +40310,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """  # nosec B608
         cursor = self.execute_query(query, (anchor_type, anchor_id, *owner_params))
         return [
-            self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)
+            item
             for row in cursor.fetchall()
-            if row
+            if (item := self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)) is not None
         ]
 
     def _suggestion_link_owner_filter(self) -> tuple[str, tuple[str, ...]]:
@@ -41586,7 +41586,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     @staticmethod
     def _normalize_osce_station_content(content: Any) -> dict[str, Any]:
         if hasattr(content, "model_dump"):
-            payload = content.model_dump(mode="json")
+            payload: dict[str, Any] = content.model_dump(mode="json")
         elif isinstance(content, Mapping):
             payload = dict(content)
         else:
