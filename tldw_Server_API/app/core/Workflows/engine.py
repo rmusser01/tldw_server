@@ -9,7 +9,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
@@ -22,7 +22,7 @@ from tldw_Server_API.app.core.Workflows.adapters import get_adapter
 from tldw_Server_API.app.core.Workflows.capabilities import get_step_capability
 from tldw_Server_API.app.core.Workflows.failures import build_failure_envelope
 
-_WF_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
+_WF_NONCRITICAL_EXCEPTIONS: tuple[type[Exception], ...] = (
     AttributeError,
     ConnectionError,
     KeyError,
@@ -46,22 +46,29 @@ try:
         start_span,
     )
 except _WF_NONCRITICAL_EXCEPTIONS:  # pragma: no cover - safety
-    def increment_counter(*args, **kwargs):
+
+    def increment_counter(metric_name: str, value: float = 1, labels: dict[str, str] | None = None):
         return None
-    def observe_histogram(*args, **kwargs):
+
+    def observe_histogram(metric_name: str, value: float, labels: dict[str, str] | None = None):
         return None
+
     class _NullSpan:
         def __enter__(self):
             return self
         def __exit__(self, *exc):
             return False
-    def start_span(*args, **kwargs):
+
+    def start_span(name: str, **kwargs):
         return _NullSpan()
-    def add_span_event(*args, **kwargs):
+
+    def add_span_event(name: str, attributes: dict[str, Any] | None = None):
         return None
-    def set_span_attribute(*args, **kwargs):
+
+    def set_span_attribute(key: str, value: Any):
         return None
-    def record_span_exception(*args, **kwargs):
+
+    def record_span_exception(exception: Exception, escaped: bool = True):
         return None
 
 
@@ -220,7 +227,7 @@ class WorkflowEngine:
         try:
             entry = cls._RUN_SECRETS.pop(run_id, None)
             if isinstance(entry, dict) and "data" in entry:
-                return entry.get("data")  # type: ignore[return-value]
+                return entry.get("data")
             return entry  # backward-compat
         except _WF_NONCRITICAL_EXCEPTIONS:
             return None
@@ -319,9 +326,13 @@ class WorkflowEngine:
         attempt_number: int,
         tenant_id: str,
     ) -> str | None:
-        create_step_attempt = getattr(self.db, "create_step_attempt", None)
-        if not callable(create_step_attempt):
+        candidate = getattr(self.db, "create_step_attempt", None)
+        if not callable(candidate):
             return None
+        if TYPE_CHECKING:
+            create_step_attempt = self.db.create_step_attempt
+        else:
+            create_step_attempt = candidate
         try:
             return create_step_attempt(
                 tenant_id=tenant_id,
@@ -637,8 +648,10 @@ class WorkflowEngine:
         _tenant = self.config.tenant_id
         _user_id = None
         try:
-            _user_id = (self.db.get_run(run_id).user_id if self.db.get_run(run_id) else None)
-            _tenant = (self.db.get_run(run_id).tenant_id if self.db.get_run(run_id) else self.config.tenant_id)
+            context_run = self.db.get_run(run_id)
+            if context_run is not None:
+                _user_id = context_run.user_id
+                _tenant = context_run.tenant_id
         except _WF_NONCRITICAL_EXCEPTIONS:
             pass
         context: dict[str, Any] = {"inputs": inputs, "tenant_id": _tenant}
@@ -1332,7 +1345,7 @@ class WorkflowEngine:
             attempt = 0
             err: Exception | None = None
             error_reason_code = ""
-            outputs: dict[str, Any] = {}
+            outputs = {}
             attempt_id: str | None = None
             while attempt <= max_retries:
                 with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
@@ -1635,7 +1648,7 @@ class WorkflowEngine:
                 task.stderr_path = Path(r.get("stderr_path") or "stderr.log")
                 try:
                     from tldw_Server_API.app.core.Workflows.subprocess_utils import terminate_process
-                    terminated, forced = terminate_process(task)  # type: ignore[arg-type]
+                    terminated, forced = terminate_process(task)
                 except _WF_NONCRITICAL_EXCEPTIONS:
                     _terminated, forced = (False, False)
                 self._append_event(run_id, "step_cancelled", {"step_run_id": r.get("step_run_id"), "forced_kill": bool(forced)})
@@ -2078,7 +2091,8 @@ class WorkflowEngine:
                 from urllib.parse import urlparse as _urlparse
 
                 from tldw_Server_API.app.core.Security import egress as _eg
-                tenant_id_for_policy = (self.db.get_run(run_id).tenant_id if self.db.get_run(run_id) else self.config.tenant_id)
+                policy_run = self.db.get_run(run_id)
+                tenant_id_for_policy = policy_run.tenant_id if policy_run is not None else self.config.tenant_id
                 parsed_host = _urlparse(url).hostname or ""
 
                 # Hard deny if host explicitly present in webhook denylist (global or tenant-specific)
@@ -2217,7 +2231,7 @@ class WorkflowEngine:
                 except TypeError:
                     client_ctx = _wf_create_client(timeout=timeout)
                 with client_ctx as client:
-                    resp = client.post(url, data=body, headers=headers)
+                    resp = client.post(url, content=body, headers=headers)
                 # Record delivery event (mask full URL)
                 try:
                     host = _urlparse(url).hostname or ""
@@ -2268,7 +2282,7 @@ class WorkflowScheduler:
     def __init__(self) -> None:
         import os
         from collections import deque
-        self._queue = deque()  # items: (engine, run_id, mode, tenant, workflow_id)
+        self._queue: deque[tuple[WorkflowEngine, str, RunMode, str, int | None]] = deque()
         self._active_tenant: dict[str, int] = {}
         self._active_workflow: dict[int | None, int] = {}
         self._active_runs: dict[str, tuple[str, int | None]] = {}

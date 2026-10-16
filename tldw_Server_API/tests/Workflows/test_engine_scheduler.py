@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 import pytest
+from starlette.requests import Request
 
 from tldw_Server_API.app.core.Workflows.engine import WorkflowEngine, WorkflowScheduler, RunMode
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowRun, WorkflowsDatabase
@@ -50,11 +51,11 @@ def _workflow_run(run_id: str, status: str) -> WorkflowRun:
     )
 
 
-class _TransientMissingRunDB:
+class _TransientMissingRunDB(WorkflowsDatabase):
     def __init__(self) -> None:
         self.calls = 0
 
-    def get_run(self, run_id: str):
+    def get_run(self, run_id: str) -> WorkflowRun | None:
         self.calls += 1
         if self.calls == 1:
             return None
@@ -318,7 +319,9 @@ def test_continue_run_recovers_succeeded_step_outputs_for_exact_resume(
     assert captured["compose_script"] == {
         "sections": [{"speaker": "HOST", "text": "Ready script"}]
     }
-    assert workflows_db.get_run(run_id).status == "succeeded"
+    run = workflows_db.get_run(run_id)
+    assert run is not None
+    assert run.status == "succeeded"
 
 
 def test_adapter_returned_research_checkpoint_wait_sets_run_waiting_human_without_human_timeout(
@@ -418,7 +421,7 @@ def test_run_saved_sync_waits_for_completion(workflows_db: WorkflowsDatabase, mo
         run_saved(
             workflow_id=workflow_id,
             mode="sync",
-            request=None,
+            request=Request({"type": "http", "method": "POST", "path": "/", "headers": []}),
             body=request_body,
             current_user=user,
             db=workflows_db,
@@ -443,6 +446,7 @@ def test_wait_for_run_completion_tolerates_transient_missing_run():
         )
     )
 
+    assert run is not None
     assert run.status == "succeeded"
     assert db.calls == 2
 
@@ -459,6 +463,7 @@ def test_wait_for_run_visibility_tolerates_transient_missing_run():
         )
     )
 
+    assert run is not None
     assert run.status == "succeeded"
     assert db.calls == 2
 
@@ -799,3 +804,27 @@ def test_scheduler_skips_blocked_queue_head_without_losing_fifo_scan(
         "active_tenants": 0,
         "active_workflows": 0,
     }
+
+
+@pytest.mark.parametrize(
+    "capability, expected",
+    [(None, None), ("absent", None), (lambda **kwargs: None, None), (lambda **kwargs: "attempt-id", "attempt-id")],
+)
+def test_step_attempt_optional_database_capability(workflows_db, monkeypatch, capability, expected):
+    class LegacyDatabase:
+        create_step_attempt: object
+
+    engine = WorkflowEngine(workflows_db)
+    legacy = LegacyDatabase()
+    if capability != "absent":
+        legacy.create_step_attempt = capability
+    monkeypatch.setattr(engine, "db", legacy)
+    result = engine._create_step_attempt_record(
+        run_id="run",
+        step_run_id="step-run",
+        step_id="step",
+        step_type="log",
+        attempt_number=1,
+        tenant_id="tenant",
+    )
+    assert result == expected

@@ -56,6 +56,7 @@ def _wait_for_status(
             continue
         assert response.status_code == 200, response.text
         data = response.json()
+        assert isinstance(data, dict)
         assert "status" in data, data
         last_data = data
         if data["status"] in statuses:

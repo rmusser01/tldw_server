@@ -236,10 +236,11 @@ async def test_webhook_hmac_and_ssrf(monkeypatch, client_with_wf: TestClient):
             return self
         def __exit__(self, exc_type, exc, tb):
             return False
-        def post(self, url, data=None, headers=None):
+
+        def post(self, url, content=None, headers=None):
             captured["calls"] += 1
             captured["headers"] = headers
-            captured["data"] = data
+            captured["data"] = content
             return type("Resp", (), {"status_code": 200})()
 
     import sys
@@ -275,3 +276,55 @@ async def test_webhook_hmac_and_ssrf(monkeypatch, client_with_wf: TestClient):
             sys.modules.pop("httpx", None)
         else:
             sys.modules["httpx"] = _original_httpx
+
+
+@pytest.mark.asyncio
+async def test_completion_webhook_signs_exact_transport_bytes(monkeypatch, client_with_wf: TestClient):
+    import hashlib
+    import hmac
+
+    import httpx
+
+    from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Security import egress
+    from tldw_Server_API.app.core.Workflows.engine import WorkflowEngine
+
+    db = client_with_wf.app.dependency_overrides[wf_mod._get_db]()
+    run_id = "run-exact-bytes"
+    db.create_run(
+        run_id=run_id,
+        tenant_id="default",
+        user_id="1",
+        inputs={"text": "café"},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={},
+    )
+    db.update_run_status(run_id, status="succeeded", ended_at="2024-01-01T00:00:00Z")
+    requests = []
+    clients = []
+
+    def receive(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200)
+
+    def create_client(**kwargs):
+        assert kwargs["trust_env"] is False
+        client = httpx.Client(transport=httpx.MockTransport(receive), **kwargs)
+        clients.append(client)
+        return client
+
+    monkeypatch.setattr(http_client, "create_client", create_client)
+    monkeypatch.setattr(egress, "is_url_allowed", lambda url: True)
+    monkeypatch.setenv("WORKFLOWS_WEBHOOK_SECRET", "exact-secret")
+    await WorkflowEngine(db)._maybe_send_completion_webhook(
+        {"on_completion_webhook": {"url": "https://example.test/hook"}}, run_id, status="succeeded"
+    )
+    assert len(requests) == 1
+    request = requests[0]
+    signed = request.headers["X-Signature-Timestamp"].encode() + b"." + request.content
+    expected = hmac.new(b"exact-secret", signed, hashlib.sha256).hexdigest()
+    assert request.headers["X-Workflows-Signature"] == expected
+    assert request.headers["content-type"] == "application/json"
+    assert clients[0].is_closed

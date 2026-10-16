@@ -12,13 +12,15 @@ from typing import Any, Callable
 
 from pydantic import BaseModel
 
+from ._base import AdapterFunc
+
 
 @dataclass
 class AdapterSpec:
     """Metadata for a registered adapter."""
 
     name: str
-    func: Callable
+    func: AdapterFunc
     category: str
     description: str
     parallelizable: bool = True
@@ -98,7 +100,7 @@ class AdapterRegistry:
         parallelizable: bool = True,
         config_model: type[BaseModel] | None = None,
         tags: list[str] | None = None,
-    ) -> Callable[[Callable], Callable]:
+    ) -> Callable[[AdapterFunc], AdapterFunc]:
         """Decorator to register an adapter with metadata.
 
         Args:
@@ -113,7 +115,7 @@ class AdapterRegistry:
             Decorator function that registers the adapter
         """
 
-        def decorator(func: Callable) -> Callable:
+        def decorator(func: AdapterFunc) -> AdapterFunc:
             self._adapters[name] = AdapterSpec(
                 name=name,
                 func=func,
@@ -127,7 +129,7 @@ class AdapterRegistry:
 
         return decorator
 
-    def get_adapter(self, name: str) -> Callable | None:
+    def get_adapter(self, name: str) -> AdapterFunc | None:
         """Get an adapter function by name.
 
         Args:
@@ -228,7 +230,7 @@ class AdapterRegistry:
 registry = AdapterRegistry.get()
 
 
-def get_adapter(name: str) -> Callable | None:
+def get_adapter(name: str) -> AdapterFunc | None:
     """Convenience function to get an adapter by name.
 
     Args:
