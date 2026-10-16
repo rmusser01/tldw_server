@@ -21466,6 +21466,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         self._ensure_flashcard_fts_triggers_sqlite(conn)
                         self._ensure_character_cards_fts_triggers_sqlite(conn)
                         self._ensure_notes_fts_triggers_sqlite(conn)
+                        self._ensure_messages_fts_triggers_sqlite(conn)
                         self._ensure_recent_persona_schema_sqlite(conn)
                         self._ensure_recent_voice_command_schema_sqlite(conn)
                         self._ensure_note_folder_schema_sqlite(conn)
@@ -22257,6 +22258,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_flashcard_fts_triggers_sqlite(conn)
                 self._ensure_character_cards_fts_triggers_sqlite(conn)
                 self._ensure_notes_fts_triggers_sqlite(conn)
+                self._ensure_messages_fts_triggers_sqlite(conn)
                 # Seed/heal character_cards_fts before request traffic. Schema V4
                 # inserts "Default Assistant" before FTS triggers are created.
                 self._self_heal_character_cards_fts_sqlite(conn)
@@ -22424,6 +22426,30 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring character_cards FTS triggers: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_messages_fts_triggers_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Normalize message triggers so only indexed live rows relinquish FTS terms."""
+        try:
+            with TransactionContextManager(self):
+                conn.execute("DROP TRIGGER IF EXISTS messages_ai")
+                conn.execute("DROP TRIGGER IF EXISTS messages_au")
+                conn.execute("DROP TRIGGER IF EXISTS messages_ad")
+                conn.execute("""CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN
+                    INSERT INTO messages_fts(rowid,content)
+                    SELECT new.rowid,new.content WHERE new.deleted = 0;
+                    END""")
+                conn.execute("""CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
+                    INSERT INTO messages_fts(messages_fts,rowid,content)
+                    SELECT 'delete',old.rowid,old.content WHERE old.deleted = 0;
+                    INSERT INTO messages_fts(rowid,content)
+                    SELECT new.rowid,new.content WHERE new.deleted = 0;
+                    END""")
+                conn.execute("""CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
+                    INSERT INTO messages_fts(messages_fts,rowid,content)
+                    SELECT 'delete',old.rowid,old.content WHERE old.deleted = 0;
+                    END""")
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring messages FTS triggers: {exc}") from exc  # noqa: TRY003
 
     def _ensure_conversations_fts_triggers_sqlite(self, conn: sqlite3.Connection) -> None:
         """Normalize conversations FTS triggers to avoid invalid delete operations.
