@@ -25,11 +25,15 @@ vi.mock("@/utils/safe-storage", () => ({
 }))
 
 import { TldwApiClient } from "@/services/tldw/TldwApiClient"
-import { getLastChatRequestDebugSnapshot } from "@/services/tldw/chat-request-debug"
+import {
+  getLastChatRequestDebugSnapshot,
+  setChatRequestDebugEnabled
+} from "@/services/tldw/chat-request-debug"
 
 describe("TldwApiClient chat request debug snapshot", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    setChatRequestDebugEnabled(true)
   })
 
   it("captures stream complete-v2 payloads used by character chat", async () => {
