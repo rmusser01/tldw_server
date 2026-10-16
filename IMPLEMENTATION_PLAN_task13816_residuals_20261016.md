@@ -1,0 +1,58 @@
+# TASK13816 residual correctness implementation plan
+
+> For agentic workers: use subagent-driven-development for scoped implementation and independent review. Read-only diagnosis of independent domains may run concurrently; implementation writers run sequentially.
+
+Goal: complete TASK13816 remaining acceptance criteria using current owning checks, actual bug fixes and accurate tracking.
+Spec: User request 2026-10-16; existing Docs/Design/2026-10-08-knowledge-mechanism-correction.md; TASK13816 acceptance criteria; issue3117 current verified behavior.
+Architecture: reuse existing DB, transport, scheduler, Notes and native test owners. No replacement frameworks, gate changes or diagnostic suppression. Existing ADR026/031/034/059/065/066 govern; no new ADR for repairs within these contracts.
+Base: f87446f05d442146ee180277418b07a2e45b4683; prior PR3214 merged ce2f87bc; previous immutable evidence retained outside this workspace.
+
+## Global constraints
+- TASK13816 owns all changes; backlog-py only, activated existing project venv.
+- Leave primary checkout, shared services/venvs and prior archived evidence untouched.
+- No blanket casts/Any/ignores, retries, sleeps, assertion weakening, timeout increases or gate relaxation to clear failures.
+- Historical640/33 are observations, not guaranteed current counts or causes. Freeze exact commands, dependency versions and current diagnostics.
+- Failed reproduction remains qualified; do not infer historical cause from a pass.
+- Independent reviews require actual diff, tests, command/outputs; normal configured hooks, Bandit for Python, owning types/builds.
+- Three failed causal attempts trigger reassessment, no repetition lottery.
+- Do not mark AC5/DoD1 or task Done before remaining obligations have actual evidence.
+
+## Stage 1: Current owners and tracking
+Goal: corrected summary and finite current inventory, including issue3117 subitems and existing frontend debt ownership.
+Success Criteria: native commands/owners/dependency requirements, exact failure files/codes and evidence references recorded; independent diagnoses produce concrete fix units or specific missing evidence.
+Tests: native current backend changed-file MyPy scope from prior32 bindings; inspect frontend coverage and issue3117 tests without changing config.
+Status: In Progress
+- [x] Update stale TASK13816 summary through backlog-py.
+- [ ] Diagnose backend type families, shared UI33 and issue3117 independently.
+
+## Stage 2: Backend type corrections
+Goal: zero diagnostics in all previously failing owning files and original32-file scope under unchanged native flags.
+Success Criteria: current RED inventory, smallest corrections retaining runtime semantics, covering regression tests and owning MyPy GREEN; no suppressions or policy changes.
+Tests: exact native MyPy --follow-imports=silent --ignore-missing-imports with the original32 files, relevant pytest owners, Ruff and Bandit touched scope.
+Status: Not Started
+- [ ] Convert diagnosis into per-family exact edit/test briefs; fix one unit at a time.
+- [ ] Independently review each actual unit and verify combined original scope.
+
+## Stage 3: Coverage failure corrections
+Goal: expose and correct reproducible failures behind historical33 without hiding non-reproduction.
+Success Criteria: original native test:coverage owner, existing limit and reporter preserve assertion evidence; isolated vs package-suite distinction explicit; any fix has RED/GREEN and independent review.
+Tests: RolePlayStarter214 and SkillsManager83 current tests, native coverage full relevant owner when needed for reproduction; no optional report success claim from selection skips.
+Status: Not Started
+- [ ] Diagnose actual missing stacks and current test isolation/load paths; one evidence-driven reproduction.
+- [ ] Fix proven cause and validate owning suite/coverage; preserve unresolved causes explicitly if still absent.
+
+## Stage 4: Notes issue3117
+Goal: correct currently reproduced print/editor/preview defects within shared Notes owners and both WebUI/extension callers.
+Success Criteria: map all six issue items to current source, existing fixes and gaps; relevant deterministic RED/GREEN, platform safety, owning tests and browser behavior; no guessed broad redesign.
+Tests: existing Notes export/stage45/UX and preview/editor owners, WebUI/extension types/builds; native browser print document content and lifecycle as applicable.
+Status: Not Started
+- [ ] Map current six items and write exact bounded repair briefs from source evidence.
+- [ ] Implement/review verified gaps, test both surfaces.
+
+## Stage 5: Integrated completion
+Goal: satisfy all outstanding TASK13816 criteria with explicit residual dispositions.
+Success Criteria: integrated types/tests/security/builds, independent whole-change review, normal commits; current final summary and AC/DoD reflect actual outcomes. No silent closure of unknown historical initiators or unrelated debt.
+Tests: combined changed backend/MyPy owners, affected frontend/native coverage, WebUI/extension types/builds, Bandit/Ruff/hooks and tracking format.
+Status: Not Started
+- [ ] Verify remaining obligations and existing TASK12116 ownership against measured results.
+- [ ] Final review, update backlog and report exact limitations before any publication/cleanup.
