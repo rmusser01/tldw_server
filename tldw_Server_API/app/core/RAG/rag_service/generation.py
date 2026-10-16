@@ -11,7 +11,7 @@ import json
 import re
 import time
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Optional, Protocol, Union, cast
@@ -415,7 +415,7 @@ class BaseGenerator(ABC):
         context: Any,
         query: str,
         **kwargs
-    ) -> AsyncIterator[str]:
+    ) -> AsyncGenerator[str, None]:
         """Generate a streaming response."""
         # Default implementation: yield complete response
         result = await self.generate(context, query, **kwargs)
@@ -580,7 +580,7 @@ class StreamingGenerator(LLMGenerator):
         context: Any,
         query: str,
         **kwargs
-    ) -> AsyncIterator[str]:
+    ) -> AsyncGenerator[str, None]:
         """Generate a streaming response."""
         # Enable streaming in config
         original_streaming = self.config.streaming
