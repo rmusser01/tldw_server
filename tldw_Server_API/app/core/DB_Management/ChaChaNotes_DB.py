@@ -59,6 +59,9 @@ from loguru import logger  # noqa: E402
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.api.v1.schemas.quizzes import OsceQuizExportV2
+    from tldw_Server_API.app.core.DB_Management.chacha.message_store import (
+        MAX_CHAT_ATTACHMENT_READ_BYTES,
+    )
     from tldw_Server_API.app.core.Sharing.clone_models import WorkspaceCloneSnapshot
 
 try:  # Prefer psycopg v3 sql helper, fall back to psycopg2 if available
@@ -831,6 +834,201 @@ class CharactersRAGDB:
             expected_version: int,
             conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
         ) -> bool | None: ...
+
+        def _ensure_conversation_settings_table(self, *, connection: Any | None = None) -> None: ...
+
+        def _ensure_persona_live_voice_session_summaries_table(self, *, connection: Any | None = None) -> None: ...
+
+        def add_keyword(self, keyword_text: str) -> int | None: ...
+
+        def add_keyword_collection(self, name: str, parent_id: int | None = None) -> int | None: ...
+
+        def add_message_metadata(
+            self, message_id: str, tool_calls: Any | None = None, extra: Any | None = None, *, conn: Any | None = None
+        ) -> bool: ...
+
+        def count_collection_keyword_links(self) -> int: ...
+
+        def count_conversation_keyword_links(self) -> int: ...
+
+        def count_deleted_notes(self) -> int: ...
+
+        def count_keyword_collections(self) -> int: ...
+
+        def count_note_titles_matching(self, search_term: str) -> int: ...
+
+        def count_notes(self, include_deleted: bool = False, only_deleted: bool = False) -> int: ...
+
+        def count_notes_matching_keywords(self, search_term: str | None, keyword_tokens: list[str]) -> int: ...
+
+        def get_conversation_by_id(
+            self, conversation_id: str, include_deleted: bool = False
+        ) -> dict[str, Any] | None: ...
+
+        def get_keyword_by_id(self, keyword_id: int) -> dict[str, Any] | None: ...
+
+        def get_keyword_by_text(self, keyword_text: str) -> dict[str, Any] | None: ...
+
+        def get_keyword_collection_by_id(self, collection_id: int) -> dict[str, Any] | None: ...
+
+        def get_keywords_for_collection(self, collection_id: int) -> list[dict[str, Any]]: ...
+
+        def get_keywords_for_conversation(self, conversation_id: str) -> list[dict[str, Any]]: ...
+
+        def get_keywords_for_note(self, note_id: str) -> list[dict[str, Any]]: ...
+
+        def get_keywords_for_notes(self, note_ids: list[str]) -> dict[str, list[dict[str, Any]]]: ...
+
+        def get_message_conversation_id(self, message_id: str) -> str | None: ...
+
+        def get_message_rag_context(self, message_id: str) -> dict[str, Any] | None: ...
+
+        def get_messages_for_conversation(
+            self,
+            conversation_id: str,
+            limit: int = 100,
+            offset: int = 0,
+            order_by_timestamp: str = "ASC",
+            include_deleted: bool = False,
+            *,
+            strict_images: bool = False,
+            image_byte_limit: int = MAX_CHAT_ATTACHMENT_READ_BYTES,
+        ) -> list[dict[str, Any]]: ...
+
+        def get_note_counts_for_keywords(self, keyword_ids: list[int] | None = None) -> dict[int, int]: ...
+
+        def get_note_studio_document(self, note_id: str) -> dict[str, Any] | None: ...
+
+        def get_notes_for_keyword(self, keyword_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]: ...
+
+        def hard_delete_conversation(self, conversation_id: str) -> bool: ...
+
+        def link_collection_to_keyword(self, collection_id: int, keyword_id: int) -> bool: ...
+
+        def link_conversation_to_keyword(self, conversation_id: str, keyword_id: int) -> bool: ...
+
+        def link_note_to_keyword(self, note_id: str, keyword_id: int) -> bool: ...
+
+        def list_collection_keyword_links(self, limit: int, offset: int) -> list[dict[str, Any]]: ...
+
+        def list_conversation_keyword_links(self, limit: int, offset: int) -> list[dict[str, Any]]: ...
+
+        def list_deleted_notes(
+            self,
+            limit: int = 100,
+            offset: int = 0,
+            sort_by: str = "last_modified",
+            sort_order: str = "desc",
+        ) -> list[dict[str, Any]]: ...
+
+        def list_keyword_collections(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]: ...
+
+        def list_keywords(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]: ...
+
+        def list_notes(
+            self,
+            limit: int = 100,
+            offset: int = 0,
+            include_deleted: bool = False,
+            only_deleted: bool = False,
+            sort_by: str = "last_modified",
+            sort_order: str = "desc",
+        ) -> list[dict[str, Any]]: ...
+
+        def merge_keywords(
+            self,
+            *,
+            source_keyword_id: int,
+            target_keyword_id: int,
+            expected_source_version: int,
+            expected_target_version: int | None = None,
+        ) -> dict[str, Any]: ...
+
+        def rename_keyword(self, keyword_id: int, new_keyword_text: str, expected_version: int) -> dict[str, Any]: ...
+
+        def resolve_moodboard_compatibility_dataset_id(
+            self, *, owner_user_id: str, conn: sqlite3.Connection | BackendConnectionWrapper | None = None
+        ) -> str: ...
+
+        def resolve_studio_compatibility_dataset_id(
+            self, *, owner_user_id: str, conn: sqlite3.Connection | BackendConnectionWrapper | None = None
+        ) -> str: ...
+
+        def restore_note(self, note_id: str, expected_version: int) -> bool | None: ...
+
+        def search_keywords(self, search_term: str, limit: int = 10) -> list[dict[str, Any]]: ...
+
+        def search_note_titles(self, search_term: str, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]: ...
+
+        def search_notes(
+            self, search_term: str, limit: int = 10, offset: int = 0, *, match_any: bool = False
+        ) -> list[dict[str, Any]]: ...
+
+        def search_notes_with_keywords(
+            self,
+            search_term: str | None,
+            keyword_tokens: list[str],
+            limit: int = 10,
+            offset: int = 0,
+        ) -> list[dict[str, Any]]: ...
+
+        def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool | None: ...
+
+        def soft_delete_keyword(self, keyword_id: int, expected_version: int) -> bool: ...
+
+        def soft_delete_keyword_collection(self, collection_id: int, expected_version: int) -> bool: ...
+
+        def soft_delete_message(
+            self,
+            message_id: str,
+            expected_version: int,
+            *,
+            require_leaf: bool = False,
+            expected_revision: str | None = None,
+            conn: Any | None = None,
+        ) -> bool | None: ...
+
+        def soft_delete_note(self, note_id: str, expected_version: int) -> bool | None: ...
+
+        def tombstone_note_from_sync(
+            self,
+            *,
+            note_id: str,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        ) -> bool: ...
+
+        def unlink_collection_from_keyword(self, collection_id: int, keyword_id: int) -> bool: ...
+
+        def unlink_conversation_from_keyword(self, conversation_id: str, keyword_id: int) -> bool: ...
+
+        def unlink_note_from_keyword(self, note_id: str, keyword_id: int) -> bool: ...
+
+        def update_keyword_collection(
+            self, collection_id: int, update_data: dict[str, Any], expected_version: int
+        ) -> bool: ...
+
+        def update_message(
+            self, message_id: str, update_data: dict[str, Any], expected_version: int, *, conn: Any | None = None
+        ) -> bool | None: ...
+
+        def upsert_note_from_sync(
+            self,
+            *,
+            note_id: str,
+            title: str,
+            content: str,
+            conversation_id: str | None,
+            message_id: str | None,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            expected_product_version: int | None = None,
+            projection_timestamp: str | None = None,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        ) -> bool: ...
 
     _CURRENT_SCHEMA_VERSION = 81  # Server-issued conversation source incarnation
     _POSTGRES_SCHEMA_VERSION = 85
