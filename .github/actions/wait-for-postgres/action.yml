@@ -32,6 +32,9 @@ runs:
         if [ -f /etc/apt/sources.list ]; then
           sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list
         fi
+        if [ -f /etc/apt/apt-mirrors.txt ]; then
+          sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/apt-mirrors.txt
+        fi
         source "${{ github.action_path }}/../apt-bounded.sh"
         apt_bounded update "${apt_opts[@]}"
         apt_bounded install -y --no-install-recommends "${apt_opts[@]}" postgresql-client

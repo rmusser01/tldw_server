@@ -338,14 +338,14 @@ def test_public_bounded_transport_denies_rebinding_before_dispatch(monkeypatch, 
     assert all(client.stream_calls == [] for client in httpx_streaming_backend.instances)
 
 
-@pytest.mark.parametrize("kwargs", [{"backend": "curl"}, {"proxies": "http://proxy.example"}])
+@pytest.mark.parametrize("kwargs", [{"max_response_bytes": None}, {"proxies": "http://proxy.example"}])
 def test_public_bounded_transport_declines_unpinnable_backend(monkeypatch, httpx_streaming_backend, kwargs):
     from tldw_Server_API.app.core.exceptions import EgressPolicyError
     from tldw_Server_API.app.core.Security import egress
 
     monkeypatch.setattr(egress, "_resolve_host_ips", lambda *_args, **_kwargs: ["93.184.216.34"])
     with egress.public_url_policy_scope(), pytest.raises(EgressPolicyError):
-        hc.fetch(URL, max_response_bytes=50, **kwargs)
+        hc.fetch(URL, **{"max_response_bytes": 50, **kwargs})
     assert httpx_streaming_backend.instances == []
 
 

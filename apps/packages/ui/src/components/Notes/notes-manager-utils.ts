@@ -1,8 +1,21 @@
-import type { KnowledgeNoteHead } from "@/utils/knowledge-note-provenance"
-import React from 'react'
-import { Modal, Input } from 'antd'
-import type { NotesTitleSuggestStrategy, NotesNotebookSetting } from '@/services/settings/ui-settings'
-import { createSafeStorage } from '@/utils/safe-storage'
+import {
+  knowledgeNoteHead,
+  knowledgeNoteProvenanceMatches,
+  retainKnowledgeNoteProvenance,
+  resolveKnowledgeNoteProvenance,
+  type KnowledgeNoteHead,
+} from "@/utils/knowledge-note-provenance";
+import React from "react";
+import { Modal, Input } from "antd";
+import type {
+  NotesTitleSuggestStrategy,
+  NotesNotebookSetting,
+} from "@/services/settings/ui-settings";
+import { createSafeStorage } from "@/utils/safe-storage";
+import {
+  withRecordLock,
+  type LocalRegistryRecord,
+} from "@/services/settings/local-bucket";
 import type { NotesStudioHandwritingMode, NotesStudioTemplateType } from './notes-studio-types'
 import type { NoteListItem } from './types'
 
@@ -479,20 +492,27 @@ export type KeywordMergeDraft = {
 export type MarkdownToolbarAction = 'bold' | 'italic' | 'heading' | 'list' | 'link' | 'code'
 export type OfflineDraftSyncState = 'queued' | 'syncing' | 'conflict' | 'error'
 export type OfflineDraftEntry = {
-  pendingWrite?: { operation?: 'restore'; key: string; body: Record<string, unknown>; expectedVersion: number | null; previousTitle?: string | null }
-  key: string
-  noteId: string | null
-  baseVersion: number | null
-  title: string
-  content: string
-  keywords: string[]
-  metadata: Record<string, any> | null
-  backlinkConversationId: string | null
-  backlinkMessageId: string | null
-  updatedAt: string
-  syncState: OfflineDraftSyncState
-  lastError: string | null
-}
+  pendingWrite?: {
+    authorityId?: string;
+    operation?: "restore";
+    key: string;
+    body: Record<string, unknown>;
+    expectedVersion: number | null;
+    previousTitle?: string | null;
+  };
+  key: string;
+  noteId: string | null;
+  baseVersion: number | null;
+  title: string;
+  content: string;
+  keywords: string[];
+  metadata: Record<string, any> | null;
+  backlinkConversationId: string | null;
+  backlinkMessageId: string | null;
+  updatedAt: string;
+  syncState: OfflineDraftSyncState;
+  lastError: string | null;
+};
 export type OfflineDraftSyncResult =
   | {
       status: 'synced'
@@ -565,6 +585,386 @@ export const normalizeOfflineDraftQueue = (rawValue: unknown): Record<string, Of
   }
   return normalized
 }
+// Surface-owned operations share this queue, but only their owning editor acknowledges them.
+export const isSurfaceOfflineDraft = (key: string): boolean => key.startsWith('surface:')
+
+export const readOfflineDraftQueue = (storageKey: string): Record<string, OfflineDraftEntry> =>
+  normalizeOfflineDraftQueue(JSON.parse(window.localStorage.getItem(storageKey) || '{}'))
+
+export const writeOfflineDraftQueue = (storageKey: string, queue: Record<string, OfflineDraftEntry>): void => {
+  const serialized = JSON.stringify(queue)
+  window.localStorage.setItem(storageKey, serialized)
+  if (window.localStorage.getItem(storageKey) !== serialized)
+    throw new Error('Could not retain the pending note operation on this device.')
+}
+
+export const writeNotesEditorOfflineDraftQueue = (
+  storageKey: string,
+  queue: Record<string, OfflineDraftEntry>,
+): void => {
+  let readableQueue: Record<string, OfflineDraftEntry> = {};
+  try {
+    readableQueue = readOfflineDraftQueue(storageKey);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    // Hydration already treats malformed JSON as an empty ordinary queue.
+  }
+  const surfaceEntries = Object.fromEntries(
+    Object.entries(readableQueue).filter(([key]) => isSurfaceOfflineDraft(key)),
+  );
+  writeOfflineDraftQueue(storageKey, { ...queue, ...surfaceEntries });
+};
+
+const surfaceOfflineDraftPrefix = (authorityScope: string): string => `${NOTES_OFFLINE_DRAFT_QUEUE_STORAGE_KEY}:${authorityScope}:`
+
+export const readSurfaceOfflineDraftQueue = async (
+  authorityScope: string,
+): Promise<Record<string, OfflineDraftEntry>> => {
+  const prefix = surfaceOfflineDraftPrefix(authorityScope);
+  const entries = await notesUiStorage.getAll();
+  const queue: Record<string, OfflineDraftEntry> = {};
+  for (const storageKey of Object.keys(entries).filter((key) =>
+    key.startsWith(`${prefix}surface:`),
+  )) {
+    const record =
+      await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+        storageKey,
+      );
+    if (record == null) continue;
+    const key = storageKey.slice(prefix.length);
+    const draft = normalizeOfflineDraftQueue({ [key]: record.value })[key];
+    if (!draft?.pendingWrite && !isQuickNotesRetainedDraft(draft))
+      throw new Error(
+        "The retained note operation cannot be read safely on this device.",
+      );
+    queue[key] = draft;
+  }
+  return queue
+}
+
+export const isQuickNotesRetainedDraft = (
+  draft?: OfflineDraftEntry,
+): boolean => {
+  const metadata = draft?.metadata;
+  return (
+    !!draft &&
+    !draft.pendingWrite &&
+    typeof metadata?.quickNotesAuthorityId === "string" &&
+    !!metadata.quickNotesAuthorityId &&
+    typeof (
+      metadata.quickNotesAcceptedKey || metadata.quickNotesRejectedKey
+    ) === "string" &&
+    !!(metadata.quickNotesAcceptedKey || metadata.quickNotesRejectedKey) &&
+    typeof metadata.quickNotesDirty === "boolean" &&
+    (metadata.quickNotesWorkspaceId === null ||
+      typeof metadata.quickNotesWorkspaceId === "string") &&
+    typeof metadata.quickNotesWorkspaceTag === "string" &&
+    draft.key.startsWith(
+      `surface:quick-notes:${JSON.stringify([metadata.quickNotesWorkspaceId, metadata.quickNotesWorkspaceTag])}:`,
+    ) &&
+    /^(?:[1-9][0-9]*|[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/i.test(
+      draft.noteId || "",
+    ) &&
+    Number.isSafeInteger(draft.baseVersion) &&
+    draft.baseVersion! > 0
+  );
+};
+
+export const retainSurfaceOfflineDraft = async (
+  authorityScope: string,
+  draft: OfflineDraftEntry,
+): Promise<void> => {
+  const storageKey = surfaceOfflineDraftPrefix(authorityScope) + draft.key;
+  await withRecordLock(storageKey, async () => {
+    const previous =
+      await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+        storageKey,
+      );
+    if (
+      previous?.value?.metadata?.quickNotesAuthorityId &&
+      (typeof navigator === "undefined" || !navigator.locks?.request)
+    )
+      throw new Error(
+        "Safe local note persistence requires a record lock on this device.",
+      );
+    if (
+      previous?.value?.pendingWrite &&
+      JSON.stringify(previous.value.pendingWrite) !==
+        JSON.stringify(draft.pendingWrite)
+    )
+      throw new Error(
+        "Resolve the retained note operation before replacing it.",
+      );
+    if (
+      isQuickNotesRetainedDraft(previous?.value) &&
+      (previous!.value.metadata?.quickNotesAcceptedKey ===
+        draft.pendingWrite?.key ||
+        previous!.value.metadata?.quickNotesRejectedKey ===
+          draft.pendingWrite?.key)
+    )
+      return;
+    // A retry must not replace mutable text with its older submitted snapshot.
+    if (
+      previous?.value?.metadata?.quickNotesAuthorityId &&
+      previous.value.pendingWrite
+    )
+      return;
+    try {
+      await notesUiStorage.set(storageKey, {
+        value: draft,
+        updatedAt: Date.now(),
+      });
+    } catch {
+      throw new Error(
+        "Could not retain the pending note operation on this device.",
+      );
+    }
+    const retained =
+      await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+        storageKey,
+      );
+    if (JSON.stringify(retained?.value) !== JSON.stringify(draft))
+      throw new Error(
+        "Could not retain the pending note operation on this device.",
+      );
+  });
+};
+
+export const retireSurfaceOfflineDraft = async (
+  authorityScope: string,
+  key: string,
+  pendingKey: string,
+): Promise<void> => {
+  const storageKey = surfaceOfflineDraftPrefix(authorityScope) + key;
+  await withRecordLock(storageKey, async () => {
+    const previous =
+      await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+        storageKey,
+      );
+    if (
+      previous?.value?.metadata?.quickNotesAuthorityId &&
+      (typeof navigator === "undefined" || !navigator.locks?.request)
+    )
+      throw new Error(
+        "Safe local note persistence requires a record lock on this device.",
+      );
+    if (previous?.value?.pendingWrite?.key !== pendingKey) return;
+    const draft = previous.value;
+    if (
+      draft.metadata?.quickNotesAuthorityId &&
+      draft.noteId &&
+      Number.isSafeInteger(draft.pendingWrite!.expectedVersion) &&
+      draft.pendingWrite!.expectedVersion! > 0
+    ) {
+      const retainedDraft: OfflineDraftEntry = {
+        ...draft,
+        pendingWrite: undefined,
+        baseVersion: draft.pendingWrite!.expectedVersion,
+        metadata: {
+          ...draft.metadata,
+          quickNotesAcceptedKey: undefined,
+          quickNotesRejectedKey: pendingKey,
+          quickNotesDirty: true,
+        },
+      };
+      if (!isQuickNotesRetainedDraft(retainedDraft))
+        throw new Error(
+          "The rejected Quick Notes draft binding is incomplete.",
+        );
+      await notesUiStorage.set(storageKey, {
+        value: retainedDraft,
+        updatedAt: Date.now(),
+      });
+      const retained =
+        await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+          storageKey,
+        );
+      if (JSON.stringify(retained?.value) !== JSON.stringify(retainedDraft))
+        throw new Error(
+          "Could not retire the rejected note operation while preserving its local draft.",
+        );
+      return;
+    }
+    try {
+      await notesUiStorage.remove(storageKey);
+    } catch {
+      throw new Error(
+        "Could not retire the acknowledged note operation on this device. Retry the same save.",
+      );
+    }
+    const retained =
+      await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+        storageKey,
+      );
+    if (retained?.value?.pendingWrite?.key === pendingKey)
+      throw new Error(
+        "Could not retire the acknowledged note operation on this device. Retry the same save.",
+      );
+  });
+};
+
+type QuickNotesDraftSnapshot = Pick<
+  OfflineDraftEntry,
+  "title" | "content" | "keywords" | "metadata"
+> & { isDirty: boolean };
+
+export const quickNotesDraftMatchesWrite = (
+  draft: Pick<OfflineDraftEntry, "title" | "content" | "keywords" | "metadata">,
+  body: Record<string, unknown>,
+): boolean => {
+  const research = resolveKnowledgeNoteProvenance(draft.metadata, draft.content)
+    .provenance?.research;
+  const keywords = [
+    ...draft.keywords,
+    ...(research ? [`workspace:${research.workspace_id}`] : []),
+    draft.metadata?.quickNotesWorkspaceTag || "",
+  ]
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const normalized = (values: string[]) =>
+    values
+      .filter(
+        (value, index) =>
+          values.findIndex(
+            (other) => other.toLowerCase() === value.toLowerCase(),
+          ) === index,
+      )
+      .sort();
+  if (
+    draft.metadata?.pendingKnowledgeProvenance &&
+    !knowledgeNoteProvenanceMatches(
+      draft.metadata.pendingKnowledgeProvenance,
+      body.knowledge_provenance,
+    )
+  )
+    return false;
+  return (
+    (draft.title || "Untitled Note") === body.title &&
+    retainKnowledgeNoteProvenance(draft.content, draft.metadata) ===
+      body.content &&
+    JSON.stringify(normalized(keywords)) ===
+      JSON.stringify(
+        normalized(Array.isArray(body.keywords) ? body.keywords : []),
+      )
+  );
+};
+
+export const checkpointQuickNotesOfflineDraft = async (
+  authorityScope: string,
+  key: string,
+  pendingKey: string,
+  readCurrentDraft: () => QuickNotesDraftSnapshot | null,
+  accepted?: KnowledgeNoteHead & { id: string | number; version?: number },
+): Promise<OfflineDraftEntry | null> => {
+  const storageKey = surfaceOfflineDraftPrefix(authorityScope) + key;
+  return withRecordLock(
+    storageKey,
+    async () => {
+      const record =
+        await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+          storageKey,
+        );
+      const previous = record?.value;
+      if (
+        !previous ||
+        (previous.pendingWrite?.key !== pendingKey &&
+          !(
+            isQuickNotesRetainedDraft(previous) &&
+            (previous.metadata?.quickNotesAcceptedKey === pendingKey ||
+              previous.metadata?.quickNotesRejectedKey === pendingKey)
+          ))
+      )
+        return null;
+      if (!key.startsWith("surface:quick-notes:"))
+        throw new Error("Only Quick Notes owns this retained draft.");
+      const current = readCurrentDraft();
+      if (
+        current &&
+        (current.metadata?.quickNotesAuthorityId !==
+          (previous.pendingWrite?.authorityId ??
+            previous.metadata?.quickNotesAuthorityId) ||
+          !key.startsWith(
+            `surface:quick-notes:${JSON.stringify([current.metadata?.quickNotesWorkspaceId, current.metadata?.quickNotesWorkspaceTag])}:`,
+          ))
+      )
+        throw new Error(
+          "The local draft does not match the retained Workspace and service authority.",
+        );
+      let next: OfflineDraftEntry = current
+        ? {
+            ...previous,
+            title: current.title,
+            content: current.content,
+            keywords: [...current.keywords],
+            metadata: {
+              ...previous.metadata,
+              ...current.metadata,
+              quickNotesDirty: current.isDirty,
+            },
+          }
+        : previous;
+      if (accepted && previous.pendingWrite) {
+        if (
+          String(accepted.id) !==
+            String(previous.pendingWrite.body.id ?? previous.noteId) ||
+          !Number.isSafeInteger(accepted.version) ||
+          accepted.version! < 1
+        )
+          throw new Error(
+            "The accepted note receipt does not match the retained operation.",
+          );
+        next = {
+          ...next,
+          noteId: String(accepted.id),
+          baseVersion: accepted.version!,
+          pendingWrite: undefined,
+          metadata: {
+            ...next.metadata,
+            ...knowledgeNoteHead(accepted),
+            quickNotesAuthorityId: previous.pendingWrite.authorityId,
+            quickNotesAcceptedKey: pendingKey,
+            quickNotesDirty: !quickNotesDraftMatchesWrite(
+              next,
+              previous.pendingWrite.body,
+            ),
+          },
+        };
+        if (!isQuickNotesRetainedDraft(next))
+          throw new Error(
+            "The accepted Quick Notes draft binding is incomplete.",
+          );
+      } else if (!previous.pendingWrite) {
+        // A checkpoint queued before ACK keeps its exact accepted base and authority.
+        next = {
+          ...next,
+          metadata: {
+            ...next.metadata,
+            ...knowledgeNoteHead(previous.metadata),
+            quickNotesAuthorityId: previous.metadata!.quickNotesAuthorityId,
+            quickNotesAcceptedKey: previous.metadata!.quickNotesAcceptedKey,
+          },
+        };
+      }
+      if (JSON.stringify(next) === JSON.stringify(previous)) return previous;
+      next = { ...next, updatedAt: new Date().toISOString() };
+      await notesUiStorage.set(storageKey, {
+        value: next,
+        updatedAt: Date.now(),
+      });
+      const retained =
+        await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+          storageKey,
+        );
+      if (JSON.stringify(retained?.value) !== JSON.stringify(next))
+        throw new Error(
+          "Could not retain the current local note draft on this device.",
+        );
+      return next;
+    },
+    true,
+  );
+};
+
 export type RemoteVersionInfo = { version: number; lastModified: string | null }
 export type NotesAssistAction = 'summarize' | 'expand_outline' | 'suggest_keywords'
 export type EditProvenanceState =

@@ -2,6 +2,7 @@ import React from "react"
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 import NotesListPanel from "../NotesListPanel"
+import type { ServerCapabilities } from "@/services/tldw/server-capabilities";
 import type { NoteListItem } from "../types"
 
 vi.mock("react-i18next", () => ({
@@ -49,7 +50,7 @@ describe("NotesListPanel stage 14 preview strategy", () => {
         isFetching={false}
         demoEnabled={false}
         capsLoading={false}
-        capabilities={{ hasNotes: true } as any}
+        capabilities={{ hasNotes: true } as ServerCapabilities}
         notes={notes}
         total={1}
         page={1}
@@ -65,8 +66,8 @@ describe("NotesListPanel stage 14 preview strategy", () => {
         onExportAllMd={vi.fn()}
         onExportAllCsv={vi.fn()}
         onExportAllJson={vi.fn()}
-      />
-    )
+      />,
+    );
 
     expect(
       screen.getByText("Focus on dataset coverage and error analysis.")
@@ -84,7 +85,7 @@ describe("NotesListPanel stage 14 preview strategy", () => {
           isFetching={false}
           demoEnabled={false}
           capsLoading={false}
-          capabilities={{ hasNotes: true } as any}
+          capabilities={{ hasNotes: true } as ServerCapabilities}
           notes={[{ ...notes[0], content: `${body}\n\n${marker}` }]}
           total={1}
           page={1}
@@ -101,7 +102,7 @@ describe("NotesListPanel stage 14 preview strategy", () => {
           onExportAllCsv={vi.fn()}
           onExportAllJson={vi.fn()}
         />,
-      )
+      );
       expect(document.body.textContent).not.toContain("%7B")
       expect(screen.getByText("Research plan")).toBeInTheDocument()
       if (body === "Hi" || body.includes("invalid"))

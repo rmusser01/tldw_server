@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs"
 import { EventEmitter } from "node:events"
+import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
@@ -16,7 +17,7 @@ import {
   buildLiveTierBackendEnv,
   buildLiveTierProfile,
 } from "../live-tier-uat/profile.mjs"
-import { inventorySource } from "../live-tier-uat/inventory-api-mocks.mjs"
+import { inventoryProjects, inventorySource } from "../live-tier-uat/inventory-api-mocks.mjs"
 import { shouldInstallTitleSettingsStub } from "../../e2e/utils/helpers"
 import { shouldInstallSmokeApiStubs } from "../../e2e/smoke/smoke.setup"
 import {
@@ -26,6 +27,8 @@ import {
   summarizePlaywrightReport,
 } from "../live-tier-uat/report.mjs"
 import {
+  deferred43Recorder,
+  resolveDeferred43Sources,
   assertFreshRunTargets,
   assertServicesStopped,
   buildCommands,
@@ -319,7 +322,7 @@ describe("live Tier UAT reporting", () => {
 })
 
 describe("live Tier UAT runner contract", () => {
-  it("accepts only Tier 1-3 projects and defaults to a serial complete run", () => {
+  it("accepts only supported projects and defaults to a serial complete run", () => {
     expect(parseArgs([])).toMatchObject({
       projects: ["tier-1", "tier-2", "tier-3"],
       workers: 1,
@@ -328,7 +331,7 @@ describe("live Tier UAT runner contract", () => {
       failOnSkip: true,
     })
     expect(parseArgs(["--allow-skips"]).failOnSkip).toBe(false)
-    expect(() => parseArgs(["--projects=tier-4"])).toThrow(/tier-1, tier-2, tier-3, or ux-regression/)
+    expect(() => parseArgs(["--projects=tier-4"])).toThrow(/tier-1, tier-2, tier-3, ux-regression, or notes-studio/)
     expect(parseArgs(["--projects=ux-regression"]).projects).toEqual(["ux-regression"])
   })
 
@@ -768,3 +771,649 @@ describe("interrupted execution evidence", () => {
     }
   })
 })
+
+describe('isolated Notes Studio route', () => {
+  it('admits only the fixed additional project without changing defaults', () => {
+    expect(parseArgs(['--projects=notes-studio']).projects).toEqual(['notes-studio']);
+    expect(parseArgs([]).projects).toEqual(['tier-1', 'tier-2', 'tier-3']);
+    for (const project of ['chromium', 'tier-4', 'notes-studio-other']) {
+      expect(() => parseArgs([`--projects=${project}`])).toThrow();
+    }
+    expect(isCertificationRun()).toBe(false);
+  });
+
+  it('inventories only the original derived spec and fails if it is absent', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'notes-studio-inventory-'));
+    try {
+      const workflows = path.join(root, 'e2e/workflows');
+      mkdirSync(workflows, { recursive: true });
+      const source =
+        'test("intercepted", async ({ page }) => { await page.route("**/api/v1/notes", route => route.abort()) })';
+      const target = path.join(workflows, 'notes-studio-derived-note.spec.ts');
+      writeFileSync(target, source);
+      writeFileSync(path.join(workflows, 'neighbor.spec.ts'), source);
+      expect(inventoryProjects(root, ['notes-studio'])).toEqual([
+        expect.objectContaining({
+          project: 'notes-studio',
+          file: 'e2e/workflows/notes-studio-derived-note.spec.ts',
+          test: 'intercepted',
+        }),
+      ]);
+      rmSync(target);
+      expect(() => inventoryProjects(root, ['notes-studio'])).toThrow(/ENOENT/);
+      expect(() => inventoryProjects(root, ['chromium'])).toThrow(/Unknown Tier project/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('builds isolated retry-free commands without the UX extension build', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'notes-studio-commands-'));
+    try {
+      const profile = buildLiveTierProfile({
+        repoRoot,
+        frontendRoot,
+        runId: 'notes-studio-route',
+        mockPort: 18184,
+        baseTmpDir: root,
+        pythonCommand: '/test/venv/bin/python',
+      });
+      const commands = buildCommands({
+        repoRoot,
+        frontendRoot,
+        profile,
+        projects: ['notes-studio'],
+        ports: { backend: 18180, web: 18181, mock: 18184 },
+        workers: 1,
+        runId: 'notes-studio-route',
+        baseEnv: { PATH: process.env.PATH, NODE_ENV: 'test' },
+      });
+      expect(commands.playwrightList.args).toContain('--project=notes-studio');
+      expect(commands.playwrightRun.args).toEqual(
+        expect.arrayContaining(['--project=notes-studio', '--workers=1', '--retries=0'])
+      );
+      expect(commands.playwrightRun.env.TLDW_E2E_ALLOW_OFFLINE).toBe('0');
+      expect(commands.playwrightRun.env.TLDW_WEB_AUTOSTART).toBe('false');
+      expect(commands.playwrightRun.env).not.toHaveProperty(EXTENSION_DIR_ENV);
+      for (const command of [commands.authInit, commands.backend]) {
+        expect(command.cwd).toBe(profile.runDir);
+        expect(command.env.PYTHONPATH.split(path.delimiter)).toContain(repoRoot);
+      }
+      expect(
+        resolveExtensionBuild({
+          frontendRoot,
+          projects: ['notes-studio'],
+          baseEnv: { NODE_ENV: 'test' },
+        })
+      ).toBeNull();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the original browser contract and chromium caller inclusion', async () => {
+    const config = (await import('../../playwright.config')).default;
+    const project = config.projects?.find((item) => item.name === 'notes-studio');
+    expect(project).toMatchObject({
+      testDir: 'e2e/workflows',
+      testMatch: 'notes-studio-derived-note.spec.ts',
+      use: { trace: 'retain-on-failure', defaultBrowserType: 'chromium' },
+    });
+    expect(project?.timeout).toBeUndefined();
+    expect(project?.expect).toBeUndefined();
+    expect(config.timeout).toBe(60_000);
+    expect(config.expect?.timeout).toBe(15_000);
+    const chromium = config.projects?.find((item) => item.name === 'chromium');
+    expect(chromium?.testIgnore).toEqual([
+      '**/workflows/tier-*/**',
+      '**/workflows/journeys/**',
+      '**/ux-regression/**',
+    ]);
+    expect(project?.use?.viewport).toEqual(chromium?.use?.viewport);
+  });
+});
+
+describe('live Tier UAT artifact retention', () => {
+  it('isolates native Playwright cleanup inside the run artifact root', () => {
+    const baseTmpDir = mkdtempSync(path.join(tmpdir(), 'tldw-live-tier-retention-'));
+    try {
+      const profile = buildLiveTierProfile({
+        repoRoot,
+        frontendRoot,
+        runId: 'artifact-retention',
+        mockPort: 18183,
+        baseTmpDir,
+        pythonCommand: '/test/venv/bin/python',
+      });
+      for (const artifactRoot of [profile.reportsDir, path.join(baseTmpDir, 'custom-artifacts')]) {
+        const commands = buildCommands({
+          repoRoot,
+          frontendRoot,
+          ports: { backend: 18180, web: 18181, mock: 18182 },
+          profile,
+          projects: ['tier-1'],
+          workers: 1,
+          runId: 'artifact-retention',
+          ...(artifactRoot === profile.reportsDir ? {} : { artifactRoot }),
+          baseEnv: { NODE_ENV: 'test', PATH: process.env.PATH },
+        });
+        expect(commands.playwrightRun.args.filter((arg) => arg.startsWith('--output='))).toEqual([
+          `--output=${path.join(artifactRoot, 'playwright-output')}`,
+        ]);
+      }
+    } finally {
+      rmSync(baseTmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('deferred43 metadata and native target admission', () => {
+  const root = (
+    recorder: ReturnType<typeof deferred43Recorder>,
+    role: number,
+    node: HTMLElement,
+    marked = true
+  ) => {
+    const owner = {},
+      ref = {},
+      downstream = () => {};
+    recorder.declare(role, ref, null, downstream);
+    recorder.owner(owner, ref, downstream, null);
+    recorder.target(owner, node, marked);
+    return { owner, ref, downstream };
+  };
+
+  it('keeps unrelated pending registrations out of the numeric identity budget', () => {
+    const recorder = deferred43Recorder(4096, 1, 'control');
+    for (let index = 0; index < 513; index++) {
+      const ref = {},
+        owner = {},
+        upstream = () => {},
+        downstream = () => {};
+      recorder.parent(upstream, () => {});
+      recorder.declare(1, ref, upstream, downstream);
+      recorder.owner(owner, ref, downstream, null, {}, {});
+    }
+    const node = document.createElement('button');
+    root(recorder, 1, node);
+    root(recorder, 2, node);
+    const data = recorder.drain();
+    expect(data.faults).toBe(0);
+    expect(data.counts[0]).toBe(6);
+    expect(data.rows.map((row: number[]) => row[4])).toEqual([1, 2]);
+    expect(new Set(data.rows.map((row: number[]) => row[3])).size).toBe(2);
+  });
+
+  it('preserves pending child and Menu rows before late parent target validation', () => {
+    const recorder = deferred43Recorder(4096, 1, 'control');
+    const parent = {},
+      parentRef = {},
+      parentContext = {},
+      parentDownstream = () => {};
+    recorder.declare(1, parentRef, null, parentDownstream);
+    recorder.owner(parent, parentRef, parentDownstream, null, null, parentContext);
+    const menuRef = { current: document.createElement('ul') },
+      menuCallback = () => {};
+    recorder.menu(menuRef, menuCallback);
+    const child = {},
+      popupCallback = () => {},
+      downstream = () => {};
+    recorder.submenu(popupCallback, {}, menuCallback);
+    recorder.owner(child, null, downstream, popupCallback, parentContext, {});
+    recorder.target(child, document.createElement('li'), false);
+    recorder.menuCommit(menuRef, menuCallback);
+    expect(recorder.role(child)).toBe(0);
+    recorder.observe(19, child, 1); // Existing role gate still suppresses pre-validation events.
+    recorder.target(parent, document.createElement('button'), true);
+    expect(recorder.role(child)).toBe(3);
+    recorder.observe(19, child, 2);
+    recorder.observe(20, menuRef, 2);
+    const data = recorder.drain();
+    expect(data.faults).toBe(0);
+    expect(data.rows.map((row: number[]) => row[0])).toEqual([1, 1, 1, 19, 20]);
+    expect(data.rows.slice(0, 3).map((row: number[]) => row[4])).toEqual([3, 4, 1]);
+    expect(data.rows[0][11]).toBe(data.rows[2][3]);
+    expect(data.rows[1][11]).toBe(data.rows[2][3]);
+    expect(data.rows.every((row: number[]) => row[3] > 0)).toBe(true);
+    expect(data.rows[0][3]).toBe(data.rows[3][3]);
+    expect(data.rows[1][3]).toBe(data.rows[4][3]);
+    expect(data.rows[0][5]).toBe(data.rows[3][5]);
+  });
+
+  it('retains raw callback identity and generations after unrelated registrations', () => {
+    const recorder = deferred43Recorder(4096, 1, 'control');
+    for (let index = 0; index < 513; index++) recorder.declare(2, {}, null, () => {});
+    const node = document.createElement('button'),
+      state = root(recorder, 2, node);
+    recorder.owner(state.owner, state.ref, state.downstream, null);
+    recorder.target(state.owner, node, true);
+    const replacement = () => {};
+    recorder.declare(2, state.ref, null, replacement);
+    recorder.owner(state.owner, state.ref, replacement, null);
+    recorder.target(state.owner, node, true);
+    const data = recorder.drain();
+    expect(data.faults).toBe(0);
+    expect(new Set(data.rows.map((row: number[]) => row[3])).size).toBe(1);
+    expect(data.rows[0][8]).toBe(data.rows[1][8]);
+    expect(data.rows[2][8]).not.toBe(data.rows[1][8]);
+    expect(data.rows.map((row: number[]) => row[5])).toEqual([2, 2, 2]);
+  });
+
+  it('uses the exact native getDOM target even when immediate child props are unmarked', () => {
+    const source = readFileSync(path.join(frontendRoot, 'scripts/live-tier-uat/run.mjs'), 'utf8');
+    const start =
+      source.indexOf('const deferred43Patches = ') + 'const deferred43Patches = '.length;
+    const patches = JSON.parse(
+      source.slice(start, source.indexOf('\nconst deferred43Hash', start))
+    );
+    const probe = patches[0].edits.find((edit: { from: string }) =>
+      edit.from.includes('const domNode = getDOM(node);')
+    ).to;
+    const marker = source.match(/^const deferred43Source = "([a-f0-9]+)"/m)![1];
+    const recorder = deferred43Recorder(4096, 1, marker);
+    const world = {};
+    Object.defineProperty(world, '__df43App', { value: recorder });
+    const nativeRequire = createRequire(resolveDeferred43Sources(frontendRoot, repoRoot)[0]);
+    const { getDOM } = nativeRequire('@rc-component/util/lib/Dom/findDOMNode');
+    const button = document.createElement('button');
+    button.setAttribute('data-testid', 'notes-overflow-menu-button');
+    expect(getDOM(button)).toBe(button);
+    const buttonHandle = { nativeElement: button };
+    expect(getDOM(buttonHandle)).toBe(button);
+    const applyProbe = new Function(
+      'globalThis',
+      'node',
+      'getDOM',
+      'externalPopupRef',
+      'originChildProps',
+      probe
+    );
+    for (const role of [1, 2]) {
+      const owner = {},
+        ref = {},
+        downstream = () => {};
+      recorder.declare(role, ref, null, downstream);
+      recorder.owner(owner, ref, downstream, null);
+      applyProbe(world, buttonHandle, getDOM, owner, {});
+    }
+    const wrongOwner = {},
+      wrongRef = {},
+      wrongDownstream = () => {};
+    recorder.declare(1, wrongRef, null, wrongDownstream);
+    recorder.owner(wrongOwner, wrongRef, wrongDownstream, null);
+    applyProbe(world, document.createElement('button'), getDOM, wrongOwner, {
+      'data-testid': 'notes-overflow-menu-button',
+    });
+    expect(recorder.role(wrongOwner)).toBe(0);
+    const data = recorder.drain();
+    expect(data.faults).toBe(0);
+    expect(data.rows.map((row: number[]) => row[4])).toEqual([1, 2]);
+    expect(data.rows[0][6]).toBe(data.rows[1][6]);
+    expect(data.rows[0][3]).not.toBe(data.rows[1][3]);
+  });
+
+  it('does not admit a wrong target or bypass conflicting declarations and parent links', () => {
+    const recorder = deferred43Recorder(4096, 1, 'control');
+    const wrong = root(recorder, 1, document.createElement('button'), false);
+    expect(recorder.role(wrong.owner)).toBe(0);
+    const wrongData = recorder.drain();
+    expect(wrongData.rows).toEqual([]);
+    expect(wrongData.faults).toBe(0);
+    const declarations = deferred43Recorder(4096, 1, 'control');
+    const ref = {},
+      downstream = () => {};
+    declarations.declare(1, ref, null, downstream);
+    declarations.declare(2, ref, null, downstream);
+    expect(declarations.drain().faults & 8).toBe(8);
+    const parents = deferred43Recorder(4096, 1, 'control');
+    const callback = () => {};
+    parents.link(callback, 5, {});
+    parents.link(callback, 5, {});
+    expect(parents.drain().faults & 8).toBe(8);
+  });
+
+  it('preserves simultaneous same-role collision and permits detach before replacement', () => {
+    const recorder = deferred43Recorder(4096, 1, 'control');
+    const node = document.createElement('button');
+    root(recorder, 1, node);
+    root(recorder, 1, node);
+    expect(recorder.drain().faults & 8).toBe(8);
+    const detached = deferred43Recorder(4096, 1, 'control');
+    const prior = root(detached, 1, node);
+    detached.target(prior.owner, null, false);
+    root(detached, 1, node);
+    expect(detached.drain().faults).toBe(0);
+  });
+
+  it('keeps genuine object, row, node, event and timer overflow fail-closed at existing caps', () => {
+    const objects = deferred43Recorder(4096, 1, 'control');
+    for (let index = 0; index < 171; index++) root(objects, 1, document.createElement('button'));
+    const objectData = objects.drain();
+    expect(objectData.count).toBe(171);
+    expect(objectData.counts).toEqual([512, 171, 0, 0]);
+    expect(
+      objectData.rows.slice(0, 170).every((row: number[]) => row[3] > 0 && row[7] > 0 && row[8] > 0)
+    ).toBe(true);
+    expect([3, 7, 8].some((column) => objectData.rows[170][column] === 0)).toBe(true);
+    expect(objectData.faults).toBe(1);
+    const rows = deferred43Recorder(1, 1, 'control');
+    rows.row(24);
+    rows.row(24);
+    expect(rows.drain()).toMatchObject({ count: 1, faults: 1 });
+    const nodes = deferred43Recorder(4096, 1, 'control');
+    for (let index = 0; index < 257; index++) nodes.node({});
+    expect(nodes.drain()).toMatchObject({ counts: [0, 256, 0, 0], faults: 1 });
+    const events = deferred43Recorder(4096, 2, 'control');
+    const node = document.createElement('button');
+    for (let index = 0; index < 257; index++)
+      events.nativeEvent(
+        [1, 1, 1],
+        node,
+        { type: 'pointerdown', isTrusted: true, clientX: 0, clientY: 0, timeStamp: index },
+        1,
+        true
+      );
+    expect(events.drain()).toMatchObject({ counts: [0, 1, 256, 0], faults: 1 });
+    const timers = deferred43Recorder(4096, 1, 'control');
+    const state = root(timers, 1, node);
+    for (let index = 0; index < 513; index++) timers.installed({}, state.owner, 1, index, 0);
+    const timerData = timers.drain();
+    expect(timerData.counts[3]).toBe(512);
+    expect(timerData.faults & 1).toBe(1);
+  });
+});
+
+describe('deferred43 pre-click evidence retention', () => {
+  const nativeRequire = createRequire(import.meta.url);
+  const ts = nativeRequire('typescript');
+  const fixtureSource = () =>
+    readFileSync(path.join(frontendRoot, 'e2e/utils/fixtures.ts'), 'utf8');
+  const marker = () => fixtureSource().match(/^const deferred43Marker = "([a-f0-9]+)"/m)![1];
+  const payload = (realm: number) => {
+    const rows =
+      realm === 1
+        ? [
+            [1, 1, 0, 1, 1, 1, 44, 2],
+            [1, 2, 0, 3, 2, 1, 44, 4],
+            [1, 3, 0, 5, 3, 1, 45, 6, 0, 0, 0, 1],
+          ]
+        : [[40, 1]];
+    return {
+      schema: 43,
+      realm,
+      source: marker(),
+      timeOrigin: 1,
+      count: rows.length,
+      faults: 0,
+      first: 0,
+      counts: [6, 2, 0, 0],
+      rows: rows.map((row) => [...row, ...Array(24 - row.length).fill(0)]),
+      order: 0,
+    };
+  };
+  const runDrain = async (realms: number[]) => {
+    const source = fixtureSource();
+    const validation = source.slice(
+      source.indexOf('const deferred43Keys = '),
+      source.indexOf('async function deferred43Bound')
+    );
+    const start = source.indexOf(
+      '  return async () => {',
+      source.indexOf('async function prepareDeferred43')
+    );
+    const end = source.indexOf('\n}\n\n\n/**', start);
+    expect(start).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(start);
+    const body = ts.transpileModule(
+      `const deferred43Marker = ${JSON.stringify(marker())}; ${validation}\n${source.slice(start, end)}`,
+      { compilerOptions: { target: ts.ScriptTarget.ES2022 } }
+    ).outputText;
+    const attachments = new Map<string, string>(),
+      summaries: string[] = [],
+      drained: number[] = [];
+    const contexts = new Map(
+      realms.map((realm, index) => [
+        index + 1,
+        {
+          id: index + 1,
+          frameId: 'frame',
+          uniqueId: String(index),
+          default: realm === 1,
+          isolated: realm === 2,
+          destroyed: false,
+        },
+      ])
+    );
+    const worlds = realms.map((realm) => {
+      const world = {};
+      Object.defineProperty(world, realm === 1 ? '__df43App' : '__df43Utility', {
+        value: Object.freeze({
+          source: marker(),
+          realm,
+          drain: () => {
+            drained.push(realm);
+            return payload(realm);
+          },
+          fault: () => {},
+        }),
+      });
+      return world;
+    });
+    let detached = false;
+    const session = {
+      send: async (_method: string, parameters: { contextId: number; expression: string }) => ({
+        result: {
+          value: new Function('globalThis', 'performance', `return ${parameters.expression}`)(
+            worlds[parameters.contextId - 1],
+            { timeOrigin: 1, now: () => 2 }
+          ),
+        },
+      }),
+      detach: async () => {
+        detached = true;
+      },
+    };
+    const testInfo = {
+      attach: async (name: string, value: { body: string }) => {
+        attachments.set(name, value.body);
+      },
+    };
+    const construct = new Function(
+      'session',
+      'contexts',
+      'frameId',
+      'documents',
+      'contextLost',
+      'calibration',
+      'faults',
+      'app',
+      'utility',
+      'deferred43Bound',
+      'testInfo',
+      'Buffer',
+      'createHash',
+      'process',
+      body
+    );
+    await construct(
+      session,
+      contexts,
+      'frame',
+      1,
+      false,
+      undefined,
+      0,
+      undefined,
+      undefined,
+      (operation: Promise<unknown>) => operation,
+      testInfo,
+      Buffer,
+      nativeRequire('node:crypto').createHash,
+      { stdout: { write: (line: string) => summaries.push(line) } }
+    )();
+    return {
+      attachments,
+      drained,
+      detached,
+      summary: JSON.parse(summaries[0].slice('DEFERRED43 '.length)),
+    };
+  };
+  it.each([
+    {
+      name: 'app without utility before any selected action',
+      realms: [1],
+      expected: [1],
+      faults: 256,
+      contextFaults: 256,
+    },
+    { name: 'utility without app', realms: [2], expected: [2], faults: 264, contextFaults: 256 },
+    {
+      name: 'both unique healthy realms',
+      realms: [1, 2],
+      expected: [1, 2],
+      faults: 0,
+      contextFaults: 0,
+    },
+    {
+      name: 'duplicate app retains only unique utility',
+      realms: [1, 1, 2],
+      expected: [2],
+      faults: 264,
+      contextFaults: 256,
+    },
+    {
+      name: 'duplicate utility retains only unique app',
+      realms: [1, 2, 2],
+      expected: [1],
+      faults: 256,
+      contextFaults: 256,
+    },
+    { name: 'no healthy realm', realms: [], expected: [], faults: 264, contextFaults: 256 },
+  ])('$name', async ({ realms, expected, faults, contextFaults }) => {
+    const result = await runDrain(realms);
+    expect(result.drained).toEqual(expected);
+    expect(result.detached).toBe(true);
+    expect(result.summary.faults).toBe(faults);
+    expect(result.summary.available).toBe(faults === 0);
+    expect(result.attachments.has('deferred43-app.json')).toBe(expected.includes(1));
+    expect(result.attachments.has('deferred43-utility.json')).toBe(expected.includes(2));
+    expect(JSON.parse(result.attachments.get('deferred43-contexts.json')!).faults).toBe(
+      contextFaults
+    );
+  });
+  it('selects only exact Print hover and click under the native environment gate', () => {
+    const source = readFileSync(path.join(frontendRoot, 'scripts/live-tier-uat/run.mjs'), 'utf8');
+    const token = 'const deferred43Patches = ';
+    const patches = JSON.parse(
+      source.slice(source.indexOf(token) + token.length, source.indexOf('\nconst deferred43Hash'))
+    );
+    const native = patches[11].edits[0].to;
+    const begin = native.indexOf('const select = '),
+      end = native.indexOf('\n    };', begin);
+    expect(begin).toBeGreaterThan(0);
+    expect(end).toBeGreaterThan(begin);
+    const selectSource = native.slice(begin, end + '\n    };'.length);
+    const selector = 'internal:role=menuitem[name=/print \\/ save as pdf/i]';
+    for (const [action, selected] of [
+      ['hover', true],
+      ['click', true],
+      ['dblclick', false],
+      ['tap', false],
+      ['move', false],
+    ]) {
+      for (const [exactSelector, exactEnv] of [
+        [true, true],
+        [false, true],
+        [true, false],
+      ]) {
+        const recorder = deferred43Recorder(1024, 3, marker());
+        const select = new Function(
+          'recorder',
+          'process',
+          `let calls = 0, browserMetadata = null, metadataAttempted = true; ${selectSource}; return select;`
+        )(recorder, { env: { TLDW_DEFERRED43_SOURCE: exactEnv ? marker() : 'wrong' } });
+        const result = select(
+          { metadata: { id: 'call@1', params: { selector: exactSelector ? selector : 'other' } } },
+          {},
+          action,
+          0
+        );
+        expect(result !== null).toBe(selected && exactSelector && exactEnv);
+      }
+    }
+  });
+});
+
+describe('deferred43 native hover event vocabulary', () => {
+  it('records the installed native hover mousemove as distinct event code16', () => {
+    const recorder = deferred43Recorder(2048, 2, 'control');
+    const node = document.createElement('button');
+    recorder.nativeEvent(
+      [1, 1, 0],
+      node,
+      new MouseEvent('mousemove', { clientX: 12, clientY: 34 }),
+      1,
+      true,
+      true
+    );
+    const data = recorder.drain();
+    expect(data.faults).toBe(0);
+    expect(data.count).toBe(1);
+    expect(data.rows[0][0]).toBe(51);
+    expect(data.rows[0][9]).toBe(16);
+    expect(data.first).toBe(0);
+  });
+
+  it('preserves every existing event code1 through15', () => {
+    const recorder = deferred43Recorder(2048, 2, 'control');
+    const node = document.createElement('button');
+    const types = [
+      'pointerdown',
+      'mousedown',
+      'mouseup',
+      'click',
+      'pointerenter',
+      'mouseenter',
+      'pointerleave',
+      'mouseleave',
+      'contextmenu',
+      'focus',
+      'blur',
+      'touchstart',
+      'touchend',
+      'pointerup',
+      'touchcancel',
+    ];
+    for (const type of types)
+      recorder.nativeEvent(
+        [1, 1, 0],
+        node,
+        new MouseEvent(type, { clientX: 12, clientY: 34 }),
+        1,
+        true,
+        true
+      );
+    const data = recorder.drain();
+    expect(data.faults).toBe(0);
+    expect(data.rows.map((row: number[]) => row[9])).toEqual(types.map((_, index) => index + 1));
+    expect(data.first).toBe(0);
+  });
+
+  it('keeps unknown native event types faulted with reserved code0', () => {
+    for (const type of ['unknown-custom', 'pointerrawupdate', 'auxclick']) {
+      const recorder = deferred43Recorder(2048, 2, 'control');
+      recorder.nativeEvent(
+        [1, 1, 0],
+        document.createElement('button'),
+        new MouseEvent(type, { clientX: 12, clientY: 34 }),
+        1,
+        true,
+        true
+      );
+      const data = recorder.drain();
+      expect(data.faults).toBe(2);
+      expect(data.rows[0][9]).toBe(0);
+      expect(data.first).toBe(0);
+    }
+  });
+});

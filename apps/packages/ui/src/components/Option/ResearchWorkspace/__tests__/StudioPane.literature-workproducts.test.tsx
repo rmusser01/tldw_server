@@ -1,5 +1,12 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type {
@@ -1919,11 +1926,34 @@ Proposal
     renderStudioPane()
     fireEvent.click(screen.getByRole("button", { name: "View" }))
 
+    await screen.findByRole("dialog");
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
+
     expect(await screen.findByRole("button", { name: "Export CSV" }))
       .toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Export JSON" }))
       .toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /xlsx/i })).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Export CSV" }));
+    const csvBlob = createObjectUrlSpy.mock.calls.at(-1)?.[0] as Blob;
+    expect(csvBlob.type).toBe("text/csv;charset=utf-8");
+    const csvText = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(csvBlob);
+    });
+    expect(csvText).toBe(
+      "Source,Methodology,Primary Finding\nPaper A,Survey,Finding A",
+    );
+    expect(
+      (anchorClickSpy.mock.instances.at(-1) as HTMLAnchorElement)?.download,
+    ).toBe("Literature Matrix.csv");
+    expect(anchorClickSpy).toHaveBeenCalledTimes(1);
+    expect(revokeObjectUrlSpy).toHaveBeenCalledWith("blob:literature-table");
 
     fireEvent.click(screen.getByRole("button", { name: "Export JSON" }))
 
@@ -1938,6 +1968,24 @@ Proposal
     }
     expect(jsonBlob).toBeTruthy()
     expect(jsonBlob.type).toContain("application/json")
+    const jsonText = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(jsonBlob);
+    });
+    expect(JSON.parse(jsonText)).toEqual({
+      title: "Literature Matrix",
+      table: {
+        headers: ["Source", "Methodology", "Primary Finding"],
+        rows: [["Paper A", "Survey", "Finding A"]],
+      },
+    });
+    expect(
+      (anchorClickSpy.mock.instances.at(-1) as HTMLAnchorElement)?.download,
+    ).toBe("Literature Matrix.json");
+    expect(anchorClickSpy).toHaveBeenCalledTimes(2);
+    expect(revokeObjectUrlSpy).toHaveBeenCalledTimes(2);
 
     createObjectUrlSpy.mockRestore()
     revokeObjectUrlSpy.mockRestore()

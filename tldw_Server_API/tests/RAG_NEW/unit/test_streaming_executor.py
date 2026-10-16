@@ -188,16 +188,35 @@ async def test_stream_preserves_safe_security_filter_outcome(retained, excluded,
         return UnifiedSearchResult(
             documents=[allowed] if retained else [],
             query=kwargs["query"],
-            metadata={"security_filter": {
-                "excluded_count": excluded, "retained_count": retained,
-                "excluded_ids": ["secret-id"], "excluded_text": "secret-text",
-            }},
+            metadata={
+                "security_filter": {
+                    "excluded_count": excluded,
+                    "retained_count": retained,
+                    "excluded_ids": ["secret-id"],
+                    "excluded_text": "secret-text",
+                },
+                "source_status": {
+                    "notes": {
+                        "status": "empty",
+                        "count": 0,
+                        "reason": "security_filtered" if excluded else "no_matching_entries",
+                        "excluded_ids": ["secret-id"],
+                        "excluded_text": "secret-text",
+                        "path": "/private/database",
+                        "exception": "private credential",
+                    },
+                    "media_db": {"status": "searched" if retained else "empty", "count": retained},
+                },
+            },
         )
 
     calls = []
 
     async def generate(context, **kwargs):
         calls.append(kwargs)
+        assert "secret" not in str(context)
+        if retained:
+            assert "Public release notice" in str(context)
         return await _fake_generate_streaming_response(context, **kwargs)
 
     events = [event async for event in stream_rag_events(
@@ -207,6 +226,13 @@ async def test_stream_preserves_safe_security_filter_outcome(retained, excluded,
     )]
     context = next(event for event in events if event["type"] == "contexts")
     assert context["security_filter"] == {"excluded_count": excluded, "retained_count": retained}
+    assert context["source_status"]["notes"] == {
+        "status": "empty",
+        "count": 0,
+        "reason": "security_filtered" if excluded else "no_matching_entries",
+    }
+    assert context["source_status"]["media_db"] == {"status": "searched" if retained else "empty", "count": retained}
+    assert "private" not in str(events)
     assert "secret-id" not in str(events)
     assert "secret-text" not in str(events)
     assert bool(calls) is not (excluded > 0 and retained == 0)

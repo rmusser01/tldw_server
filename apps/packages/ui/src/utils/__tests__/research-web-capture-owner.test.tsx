@@ -36,14 +36,15 @@ vi.mock("@/utils/safe-storage", async (original) => ({
   ...(await original<typeof import("@/utils/safe-storage")>()),
   createSafeStorage: () => ({
     hasPersistentBackend: true,
+    getAll: async () => Object.fromEntries(mocks.values),
     get: async (key: string) => structuredClone(mocks.values.get(key)),
     set: async (key: string, value: unknown) => {
-      mocks.values.set(key, structuredClone(value))
+      mocks.values.set(key, structuredClone(value));
     },
     watch: vi.fn(),
-    unwatch: vi.fn()
-  })
-}))
+    unwatch: vi.fn(),
+  }),
+}));
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     getConfig: async () => config(),
@@ -161,8 +162,8 @@ it.each(["single-user", "multi-user"] as const)(
     expect(mocks.save).toHaveBeenCalledOnce()
     const accepted = mocks.save.mock.calls[0][0]
     expect([...mocks.values.keys()]).toEqual([
-      `__tldw_research_workspace_prefill:${owner}:web-captures`
-    ])
+      `__tldw_research_workspace_prefill:${owner}:web-captures:${accepted.clip_id}`,
+    ]);
     expect((await readResearchWebCaptures(owner, "workspace"))[0].body).toEqual(
       accepted
     )

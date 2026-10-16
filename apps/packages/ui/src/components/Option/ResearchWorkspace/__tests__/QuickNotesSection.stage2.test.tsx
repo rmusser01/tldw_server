@@ -1,3 +1,8 @@
+vi.mock(
+  "@plasmohq/storage",
+  () =>
+    import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"),
+);
 import React from "react"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -24,18 +29,24 @@ const {
       content: "",
       keywords: [] as string[],
       version: undefined as number | undefined,
-      isDirty: false
+      isDirty: false,
     },
+    workspaceId: "workspace-test",
     workspaceTag: "workspace:test",
     updateNoteTitle: vi.fn(),
     updateNoteContent: vi.fn(),
     updateNoteKeywords: vi.fn(),
-    setCurrentNote: vi.fn(),
+    setCurrentNote: vi.fn((note) => {
+      storeState.currentNote = note;
+    }),
     clearCurrentNote: vi.fn(),
     loadNote,
-    noteFocusTarget: null as { field: "title" | "content"; token: number } | null,
-    clearNoteFocusTarget: vi.fn()
-  }
+    noteFocusTarget: null as {
+      field: "title" | "content";
+      token: number;
+    } | null,
+    clearNoteFocusTarget: vi.fn(),
+  };
 
   return {
     mockBgRequest: bgRequest,
@@ -65,12 +76,37 @@ vi.mock("react-i18next", () => ({
 }))
 
 vi.mock("@/store/workspace", () => ({
+  hasResearchWorkspaceMigrationTombstone: () => false,
   useWorkspaceStore: Object.assign(
     (selector: (state: typeof workspaceStoreState) => unknown) =>
       selector(workspaceStoreState),
-    { getState: () => workspaceStoreState, subscribe: () => () => {} }
-  )
-}))
+    {
+      getState: () => workspaceStoreState,
+      subscribe: () => () => {},
+      persist: {
+        getOptions: () => ({
+          name: "tldw-workspace",
+          storage: {
+            getItem: async () => ({
+              state: {
+                workspaceSnapshots: {
+                  [workspaceStoreState.workspaceId]: {
+                    workspaceTag: workspaceStoreState.workspaceTag,
+                    currentNote: workspaceStoreState.currentNote,
+                  },
+                },
+              },
+            }),
+          },
+        }),
+      },
+    },
+  ),
+}));
+
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: async () => ({ id: 1, is_active: true }) },
+}));
 
 vi.mock("@/services/service-prompts", () => ({
   loadServicePromptSnapshot: async () => ({
