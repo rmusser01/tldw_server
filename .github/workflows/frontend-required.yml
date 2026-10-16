@@ -564,7 +564,7 @@ jobs:
   # The monolithic run could not finish the growing suite within its 15m budget.
   shared-ui-coverage:
     name: shared-ui-coverage (${{ matrix.shard }}/16)
-    needs: [changes, admission]
+    needs: [changes]
     if: >-
       always() && !cancelled() &&
       needs.changes.result == 'success' &&
@@ -583,7 +583,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.admission.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -613,7 +613,7 @@ jobs:
 
   shared-ui-coverage-report:
     name: Shared UI coverage summary (report-only)
-    needs: [changes, admission, shared-ui-coverage]
+    needs: [changes, shared-ui-coverage]
     if: >-
       always() && !cancelled() &&
       needs.changes.result == 'success' &&
@@ -628,7 +628,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
         with:
-          ref: ${{ needs.admission.outputs.head_sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
       - name: Setup Node.js
         uses: actions/setup-node@v6

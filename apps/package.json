@@ -11,6 +11,6 @@
     "playwright": "^1.57.0"
   },
   "dependencies": {
-    "jsdom": "^28.1.0"
+    "jsdom": "29.1.1"
   }
 }

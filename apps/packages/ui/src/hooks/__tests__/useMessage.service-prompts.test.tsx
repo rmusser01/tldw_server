@@ -813,6 +813,25 @@ describe("useMessage legacy Sidepanel Service Prompts", () => {
     )
   })
 
+  it.each([false, true])("sends preset requests with the resolved model and OCR override (%s)", async (useOCR) => {
+    const { result } = renderHook(() => useMessage())
+    await act(async () => {
+      await result.current.onSubmit({
+        message: "Summarize this page",
+        image: "",
+        messageType: "summary",
+        requestOverrides: { chatMode: "normal", selectedModel: "override-model", useOCR }
+      })
+    })
+    expect(mocks.pageAssistModel).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "override-model" })
+    )
+    expect(mocks.humanMessageFormatter).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "override-model", useOCR })
+    )
+    expect(mocks.finalModel.stream).toHaveBeenCalled()
+  })
+
   it.each([
     ...(["rag", "vision", "preset", "normal"] as const).flatMap(mode =>
       [false, true].map(temporary => ({ mode, temporary, server: false }))

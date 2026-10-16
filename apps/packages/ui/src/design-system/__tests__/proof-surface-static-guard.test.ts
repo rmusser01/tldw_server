@@ -67,7 +67,7 @@ describe("design-system proof surface static guard", () => {
     expect(configurationError).not.toMatch(/background:\s*["'`]?#/i)
   })
 
-  it("keeps setup, health, and admin screens on canonical state labels and actions", () => {
+  it("keeps setup, health, and admin screens on canonical state primitives and actions", () => {
     const setupRoute = readAppFile("packages/ui/src/routes/option-setup.tsx")
     const onboarding = readAppFile(
       "packages/ui/src/components/Option/Onboarding/OnboardingConnectForm.tsx"
@@ -89,9 +89,8 @@ describe("design-system proof surface static guard", () => {
     expect(healthStatus).toContain("StatePanel")
     expect(healthStatus).toContain("RecoveryCallout")
     expect(healthStatus).toContain("SetupRequiredPanel")
-    expect(healthStatus).toContain("'Ready'")
-    expect(healthStatus).toContain("'Degraded'")
-    expect(healthStatus).toContain("'Loading'")
+    // Registry label behavior is covered by health-status.design-system.test.tsx.
+    expect(healthStatus).toContain("getDesignSystemState")
 
     expect(adminPage).toContain("PermissionNotice")
     expect(adminPage).toContain("RecoveryCallout")

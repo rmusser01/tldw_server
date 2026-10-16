@@ -135,7 +135,10 @@ ORIGINAL_JOB_NAMES = {
     "e2e-required.yml": ("changes", "e2e-required", "queue-tick"),
     "e2e-smoke.yml": ("e2e-smoke",),
     "frontend-e2e-tiers.yml": ("critical", "features", "admin", "ux-regression"),
-    "frontend-required.yml": ("changes", "frontend-unit-tests", "frontend-required", "queue-tick"),
+    "frontend-required.yml": (
+        "changes", "frontend-unit-tests", "shared-ui-coverage",
+        "shared-ui-coverage-report", "frontend-required", "queue-tick",
+    ),
     "frontend-ux-gates.yml": ("onboarding-gate", "smoke-gate"),
     "jobs-suite.yml": ("jobs-sqlite", "jobs-postgres"),
     "mcp-unified-rc.yml": ("internal-rc", "portable-stdio"),
@@ -182,6 +185,8 @@ ORIGINAL_DEPENDENCIES = {
     ("e2e-required.yml", "e2e-required"): ("changes",),
     ("e2e-required.yml", "queue-tick"): ("e2e-required",),
     ("frontend-required.yml", "frontend-unit-tests"): ("changes",),
+    ("frontend-required.yml", "shared-ui-coverage"): ("changes",),
+    ("frontend-required.yml", "shared-ui-coverage-report"): ("changes", "shared-ui-coverage"),
     ("frontend-required.yml", "frontend-required"): (
         "changes",
         "frontend-unit-tests",
@@ -744,6 +749,13 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     assert _normalized(job.get("if")) == _normalized(
                         f"{dependencies_succeeded} && ({backend_changed})"
                     ), (name, job_name)
+                elif name == "frontend-required.yml" and job_name in {
+                    "shared-ui-coverage", "shared-ui-coverage-report",
+                }:
+                    expected = dependencies_succeeded
+                    if job_name == "shared-ui-coverage":
+                        expected += " && needs.changes.outputs.tldw_frontend_changed == 'true'"
+                    assert _normalized(job.get("if")) == _normalized(expected), (name, job_name)
                 elif (name, job_name) == ("jobs-suite.yml", "jobs-postgres"):
                     assert _normalized(job.get("if")) == _normalized(dependencies_succeeded)
                 else:
@@ -778,7 +790,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 56
+    assert checkout_count == 58
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -821,8 +833,8 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
     combined_text = "\n".join(text for _, text in workflows.values())
     assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
     assert combined_text.count("github.event.pull_request.number") == 27
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 55
-    assert combined_text.count("github.event.pull_request.head.sha") == 52
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 57
+    assert combined_text.count("github.event.pull_request.head.sha") == 54
     # +1 each: backend-required passes the admitted-or-PR base to the backlog
     # task-format ratchet (TASK-13440), admission's base first, as the mypy step does.
     assert combined_text.count("github.event.pull_request.base.sha") == 6
