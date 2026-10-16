@@ -1025,3 +1025,43 @@ def test_history_snapshot_preserves_equal_text_distinct_ids(db):
     second = owner_db.add_message({"conversation_id": conversation_id, "sender": "user", "content": "repeat"})
     snapshot = owner_db.get_conversation_history_snapshot(conversation_id, owner_client_id="message-store-user")
     assert {row["id"] for row in snapshot.nodes} == {first, second}
+
+
+@pytest.mark.parametrize("invalid_message_id", [None, "", 7])
+def test_inline_tool_call_backfill_skips_corrupt_identity_before_matching(db, monkeypatch, invalid_message_id):
+    instance = db["db"]
+    inline_content = 'Answer [tool_calls]: [{"id":"call-1","type":"function"}]'
+    message_id = instance.add_message(
+        {
+            "conversation_id": db["conversation_id"],
+            "sender": "assistant",
+            "content": inline_content,
+        }
+    )
+    before = instance.get_message_by_id(message_id)
+    assert before is not None
+    assert instance.get_message_metadata(message_id) is None
+    execute_query = instance.execute_query
+
+    def corrupt_scanner_read(query, params=None, **kwargs):
+        if query == "SELECT id, content, version FROM messages WHERE sender = ? AND deleted = 0":
+            # Corrupt only scanner input; real metadata and optimistic writers remain intact.
+            return execute_query(
+                "SELECT ? AS id, ? AS content, 1 AS version "
+                "UNION ALL SELECT id, content, version FROM messages WHERE id = ?",
+                (invalid_message_id, inline_content, message_id),
+            )
+        return execute_query(query, params, **kwargs)
+
+    monkeypatch.setattr(instance, "execute_query", corrupt_scanner_read)
+
+    counts = instance.backfill_tool_calls_from_inline(strip_inline=True)
+
+    assert counts == {"scanned": 2, "matched": 1, "backfilled": 1, "stripped": 1}
+    metadata = instance.get_message_metadata(message_id)
+    assert metadata is not None
+    assert metadata["tool_calls"] == [{"id": "call-1", "type": "function"}]
+    message = instance.get_message_by_id(message_id)
+    assert message is not None
+    assert message["content"] == "Answer"
+    assert message["version"] == before["version"] + 1

@@ -19660,6 +19660,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def list_note_clipper_workspace_placements(self, clip_id: str) -> list[dict[str, Any]]:
         """Return active workspace placements for a clip."""
+        params: tuple[str, str, bool] | tuple[str, int]
         if self.backend_type == BackendType.POSTGRESQL:
             query = (
                 "SELECT clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version "
@@ -26004,7 +26005,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._verify_note_task_schema_postgres(conn, runtime=True)
         self._verify_notes_moodboard_studio_schema_postgres(conn)
         for fts_table, source_table, _ in self._FTS_CONFIG:
-            self.backend.register_fts_table(fts_table, self._map_table_for_backend(source_table))
+            # Required PostgreSQL capability stays lazy and bound before mapping each source.
+            register_fts_table: Callable[[str, str], None] = getattr(self.backend, "register_fts_table")  # noqa: B009
+            register_fts_table(fts_table, self._map_table_for_backend(source_table))
         self._runtime_schema_version = current_version
         return True
 
@@ -26662,7 +26665,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self.backend_type == BackendType.POSTGRESQL:
             try:
                 with self.transaction() as conn:
-                    raw_conn = conn._connection
+                    # The managed transaction supplies this required raw-connection capability.
+                    raw_conn: RawBackendConnection = getattr(conn, "_connection")  # noqa: B009
                     for fts_table, source_table, columns in self._FTS_CONFIG:
                         actual_source = self._map_table_for_backend(source_table)
                         self.backend.create_fts_table(
@@ -26894,6 +26898,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         try:
             rows: list[dict[str, Any]] = []
+            params: tuple[str] | tuple[str, int]
             if self.backend_type == BackendType.SQLITE:
                 query = "SELECT id, content, version FROM messages WHERE sender = ? AND deleted = 0"
                 params = ("assistant",)
@@ -26909,19 +26914,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     q += " LIMIT %s"
                     params = ("assistant", limit)
                 res = self.backend.execute(q, params)
-                fetched = res.fetchall()
-                # Convert to dicts (backend returns sequence rows)
+                fetched = res.rows
+                # The backend normalizes native result rows to named dictionaries.
                 for r in fetched:
-                    # Row maybe mapping or tuple; try subscripting by name first
-                    try:
-                        rows.append({"id": r[0], "content": r[1], "version": r[2]})
-                    except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                        with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
-                            rows.append({"id": r['id'], "content": r['content'], "version": r['version']})
+                    with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
+                        rows.append({"id": r["id"], "content": r["content"], "version": r["version"]})
 
             for row in rows:
                 counts["scanned"] += 1
                 mid = row.get('id')
+                if not isinstance(mid, str) or not mid:
+                    continue
                 content = row.get('content') or ""
                 version = row.get('version') or 1
                 extracted = _extract(content)
@@ -27356,7 +27359,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.warning(f"Record in {table_name} with {pk_col_name} = {pk_value} is soft-deleted.")
             raise ConflictError(f"Record is soft-deleted in {table_name}.", entity=table_name, entity_id=pk_value)  # noqa: TRY003
 
-        return row['version']
+        version: int = row["version"]
+        return version
 
     def _ensure_json_string(self, data: list | dict | set | None) -> str | None:
         """
@@ -43120,7 +43124,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if self.backend_type == BackendType.POSTGRESQL:
                 tsquery = FTSQueryTranslator.normalize_query(q, 'postgresql')
                 if not tsquery:
-                    return []
+                    return {"items": [], "count": 0}
                 fts_filter = "AND quiz_questions_fts_tsv @@ to_tsquery('english', ?)"
                 params.append(tsquery)
             else:
