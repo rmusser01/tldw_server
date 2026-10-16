@@ -112,6 +112,7 @@ from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noq
 )
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (  # noqa: E402
+    ChaChaOperation,
     ClosedChaChaOperationError,
     ConnectionState,
     ExternalConnection,
@@ -8985,7 +8986,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _sqlite_linear_migration_steps(self) -> dict[int, Callable[[sqlite3.Connection], None]]:
         """Return SQLite schema migrations keyed by their source schema version."""
-        steps = {
+        steps: dict[int, Callable[[sqlite3.Connection], None]] = {
             4: self._migrate_from_v4_to_v5,
             5: self._migrate_from_v5_to_v6,
             6: self._migrate_from_v6_to_v7,
@@ -11840,7 +11841,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not directed and source_note_id > target_note_id:
             raise SchemaError("Notes link v58 undirected endpoints must use canonical order.")  # noqa: TRY003
 
-        weight_value = 1.0 if row.get("weight") is None else row.get("weight")
+        raw_weight = row.get("weight")
+        weight_value = 1.0 if raw_weight is None else raw_weight
         if isinstance(weight_value, bool):
             raise SchemaError("Notes link v58 weight is invalid.")  # noqa: TRY003
         try:
@@ -11902,7 +11904,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         }
 
     @staticmethod
-    def _validate_notes_link_v58_unique(rows: list[Mapping[str, Any]]) -> None:
+    def _validate_notes_link_v58_unique(rows: Sequence[Mapping[str, Any]]) -> None:
         """Fail closed when legacy rows collide under canonical logical identity."""
 
         identities: set[tuple[str, str, bool, str, str]] = set()
@@ -14226,10 +14228,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             }
             diagnostic_code = diagnostic_hash = None
             try:
-                payload = parse_notes_moodboard_note_v1(placement_payload_source)
-                placement_id = placement_object_id(payload)
+                placement_payload = parse_notes_moodboard_note_v1(
+                    placement_payload_source
+                )
+                placement_id = placement_object_id(placement_payload)
                 canonical_hash = notes_moodboard_note_object_hash(
-                    payload, revision=1, deleted=False
+                    placement_payload, revision=1, deleted=False
                 )
             except NotesMoodboardStudioContractError:
                 diagnostic = moodboard_studio_legacy_source_diagnostic(
@@ -14826,7 +14830,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _postgres_v61_phase_is_complete(self, conn: Any, phase: str) -> bool:
         """Return whether a durable metadata or verification phase completed."""
-        return self._postgres_v61_progress_row(conn, phase)["status"] == "complete"
+        phase_is_complete: bool = (
+            self._postgres_v61_progress_row(conn, phase)["status"] == "complete"
+        )
+        return phase_is_complete
 
     def _complete_postgres_v61_phase(self, conn: Any, phase: str) -> None:
         """Record a content-free completion marker in the migration transaction."""
@@ -17579,8 +17586,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     @classmethod
     def _verify_note_task_v59_authority_catalog(
         cls,
-        relation_rows: list[Mapping[str, Any]],
-        policy_rows: list[Mapping[str, Any]],
+        relation_rows: Sequence[Mapping[str, Any]],
+        policy_rows: Sequence[Mapping[str, Any]],
     ) -> tuple[str, ...]:
         """Verify the sole reviewed v59 authority/RLS state before migration DDL."""
         expected_relations = ("notes", *cls._NOTE_TASK_V60_TABLES[:-1])
@@ -17678,8 +17685,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             ).rows
         ]
         for row in read_states:
-            owner = event_owners.get(str(row.get("event_id")))
-            if owner is None or owner != str(row.get("user_id") or ""):
+            read_state_owner = event_owners.get(str(row.get("event_id")))
+            if read_state_owner is None or read_state_owner != str(
+                row.get("user_id") or ""
+            ):
                 raise SchemaError("Notes task v60 migration could not prove read-state ownership.")  # noqa: TRY003
 
         reconciliation = [
@@ -18881,6 +18890,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _repair_conversation_assistant_identity(self, conn: Any) -> None:
         """Repair only historical missing Character fields, comparing locked normalized bindings."""
+        repair_scope: contextlib.AbstractContextManager[ChaChaOperation | None]
         if self.backend_type == BackendType.POSTGRESQL:
             # Schema transactions own their checkout independently of a live request.
             repair_scope = chacha_operation(
