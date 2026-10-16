@@ -212,6 +212,15 @@ def test_webui_dockerfile_copies_only_required_workspace_sources():
         "Expected Dockerfile.webui to copy the Bun lockfile explicitly",
     )
     _require(
+        "COPY apps/patches /app/apps/patches" in text,
+        "Expected frozen workspace patches to be present before dependency installation",
+    )
+    _require(
+        text.index("COPY apps/patches /app/apps/patches")
+        < text.index("RUN bun install --frozen-lockfile --cwd /app/apps"),
+        "Expected patched dependencies to be copied before the frozen install layer",
+    )
+    _require(
         "COPY apps/tldw-frontend /app/apps/tldw-frontend" in text,
         "Expected Dockerfile.webui to copy the frontend workspace explicitly",
     )
