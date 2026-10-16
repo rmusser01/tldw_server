@@ -288,3 +288,46 @@ def test_fallback_pool_close_all_deduplicates_connection_close(monkeypatch) -> N
     pool.close_all()
     assert conn.closed is True
     assert conn.close_calls == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("operation", ["return_connection", "discard_connection"])
+@pytest.mark.parametrize("failure_type", [RuntimeError, Exception], ids=["classified", "unclassified"])
+def test_pool_cleanup_preserves_exception_classification_and_return_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+    failure_type: type[Exception],
+) -> None:
+    """Known close failures are suppressed; unknown ones preserve cleanup ownership."""
+    events: list[tuple[str, _DummyConn]] = []
+    failure = failure_type("private cleanup detail")
+    poisoned = _DummyConn()
+
+    def _close() -> None:
+        events.append(("close", poisoned))
+        raise failure
+
+    def _putconn(connection: _DummyConn) -> None:
+        events.append(("putconn", connection))
+        if operation == "return_connection":
+            raise RuntimeError("delegate return failed")
+
+    monkeypatch.setattr(poisoned, "close", _close)
+    monkeypatch.setattr(pg_backend, "PSYCOPG2_AVAILABLE", True, raising=False)
+    monkeypatch.setattr(
+        pg_backend,
+        "psycopg_pool",
+        SimpleNamespace(ConnectionPool=lambda *_args, **_kwargs: SimpleNamespace(putconn=_putconn)),
+        raising=False,
+    )
+    pool = pg_backend.PostgreSQLConnectionPool(DatabaseConfig(backend_type=BackendType.POSTGRESQL, pool_size=1))
+
+    if failure_type is RuntimeError:
+        getattr(pool, operation)(poisoned)
+    else:
+        with pytest.raises(Exception) as raised:
+            getattr(pool, operation)(poisoned)
+        assert raised.value is failure
+
+    expected = ["putconn", "close"] if operation == "return_connection" else ["close", "putconn"]
+    assert events == [(event, poisoned) for event in expected]

@@ -48,12 +48,12 @@ from .query_utils import (
 
 # Try to import psycopg v3. Keep the legacy flag name for test compatibility.
 try:
-    import psycopg  # type: ignore
-    from psycopg.rows import dict_row  # type: ignore
+    import psycopg
+    from psycopg.rows import dict_row
     try:
-        import psycopg_pool  # type: ignore
+        import psycopg_pool
     except ImportError:  # pool is optional
-        psycopg_pool = None  # type: ignore
+        psycopg_pool = None
     PSYCOPG2_AVAILABLE = True  # Legacy name used by tests to simulate missing driver
 except ImportError:
     PSYCOPG2_AVAILABLE = False
@@ -75,7 +75,7 @@ else:
 # deadlock_detected, lock_not_available.
 _CONTENTION_SQLSTATES = frozenset({"40001", "40P01", "55P03"})
 
-_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS = (
+_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AssertionError,
     AttributeError,
     ConnectionError,
@@ -280,7 +280,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
                         self._connections.append(conn)
                 pool_closed = self._closed
             if pool_closed:
-                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                     conn.close()
                 raise DatabaseError("Connection pool is closed")
 
@@ -294,7 +294,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
 
     def return_connection(self, connection: Any) -> None:
         if self._closed or connection is None:
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 connection.close()
             return
         if self._use_psycopg_pool:
@@ -302,7 +302,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
             try:
                 self._pool.putconn(connection)
             except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
-                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                     connection.close()
             return
         # Minimal pool:
@@ -319,7 +319,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
                 )
 
         if not is_managed:
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 connection.close()
             return
 
@@ -353,7 +353,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
                     self._free.append(connection)
                     return
 
-        with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
             connection.close()
 
     def invalidate_connection(self, connection: Any) -> None:
@@ -385,10 +385,10 @@ class PostgreSQLConnectionPool(ConnectionPool):
             # psycopg_pool must receive every checkout back for bookkeeping.
             # A closed connection is recognized as broken and replaced.
             try:
-                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                     connection.close()
             finally:
-                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                     self._pool.putconn(connection)
             return
 
@@ -399,7 +399,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
             self._connections[:] = [
                 conn for conn in self._connections if conn is not connection
             ]
-        with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
             connection.close()
 
     @contextmanager
@@ -413,7 +413,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
     def close_all(self) -> None:
         if self._use_psycopg_pool:
             self._closed = True
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 self._pool.close()
             return
         # Close all tracked connections (both managed and currently free).
@@ -428,7 +428,7 @@ class PostgreSQLConnectionPool(ConnectionPool):
             if conn_id in seen_ids:
                 continue
             seen_ids.add(conn_id)
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 conn.close()
 
     def get_stats(self) -> dict[str, Any]:
@@ -651,7 +651,7 @@ class PostgreSQLBackend(DatabaseBackend):
                 except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
                     cur.execute("RESET ROLE")
 
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 cur.execute("SET row_security = on")
 
             for sql_stmt, params in statements:
@@ -677,7 +677,7 @@ class PostgreSQLBackend(DatabaseBackend):
                         connection.execute("RESET SESSION AUTHORIZATION")
                     except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
                         connection.execute("RESET ROLE")
-                with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                     connection.execute("SET row_security = on")
                 for sql_stmt, params in statements:
                     try:
@@ -710,7 +710,7 @@ class PostgreSQLBackend(DatabaseBackend):
                             connection.execute("RESET SESSION AUTHORIZATION")
                         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS:
                             connection.execute("RESET ROLE")
-                    with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+                    with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                         connection.execute("SET row_security = on")
                     for sql_stmt, params in statements:
                         try:
@@ -1606,11 +1606,11 @@ class PostgreSQLBackend(DatabaseBackend):
         try:
             # Use autocommit for VACUUM
             old_autocommit = getattr(conn, 'autocommit', False)
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 conn.autocommit = True
             cursor = conn.cursor()
             cursor.execute("VACUUM ANALYZE")
-            with suppress(_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 conn.autocommit = old_autocommit
         finally:
             if not external_conn:
