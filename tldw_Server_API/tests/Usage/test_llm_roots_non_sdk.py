@@ -94,7 +94,7 @@ async def test_the_audio_jobs_worker_runs_analysis_for_the_job_owner(monkeypatch
     jm = JobManager()
     jm.create_job(
         domain="audio", queue="default", job_type="audio_analyze",
-        payload={"text": "hello worker", "perform_analysis": True}, owner_user_id="7",
+        payload={"text": "hello worker", "api_name": "openai", "perform_analysis": True}, owner_user_id="7",
     )
     stop = asyncio.Event()
     task = asyncio.create_task(worker.run_audio_jobs_worker(stop))

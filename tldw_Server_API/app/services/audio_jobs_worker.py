@@ -20,6 +20,18 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
 from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 
 DOMAIN = "audio"
+# Analysis failures a retry can fix. The other SummaryProviderError codes (missing model or
+# credentials, bad configuration or authentication, an unknown provider) fail the same way every time.
+_RETRYABLE_ANALYSIS_CODES = frozenset({"rate_limit", "provider_failure"})
+
+
+class _StageFailure(RuntimeError):
+    """A stage failure carrying its job error code and whether a retry can fix it."""
+
+    def __init__(self, message: str, *, failure_code: str, retryable: bool) -> None:
+        super().__init__(message)
+        self.failure_code = failure_code
+        self.retryable = retryable
 
 
 async def _handle_audio_transcribe_stage(payload: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
@@ -345,24 +357,41 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                     updated_payload["chunks"] = chunks
                     next_type = payload.get("perform_analysis") and "audio_analyze" or "audio_store"
                 elif jtype == "audio_analyze":
-                    from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
+                    from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+                        SummaryProviderError,
+                        analyze,
+                    )
                     text = updated_payload.get("text")
                     if not text:
                         # Fallback to segments
                         segs = updated_payload.get("segments") or []
                         text = " ".join((s.get("Text", "").strip() if isinstance(s, dict) else "") for s in segs).strip()
-                    with llm_call_root(owner):
-                        analysis = await asyncio.to_thread(
-                            analyze,
-                            payload.get("api_name") or "openai",
-                            text,
-                            None,  # jobs carry no prompt: analyze's default system prompt (bulleted notes)
-                            input_is_literal_text=True,
-                            raise_on_error=True,
+                    api_name = str(payload.get("api_name") or "").strip()
+                    if not api_name or api_name.lower() == "none":
+                        # No provider named: skip analysis, as /media/process-audios does.
+                        updated_payload["analysis_skipped"] = "no api_name"
+                    elif not text.strip():
+                        raise _StageFailure(
+                            "empty transcript: nothing to analyze", failure_code="empty_transcript", retryable=False
                         )
-                    if isinstance(analysis, str) and analysis.startswith("Error:"):
-                        raise RuntimeError(analysis)
-                    updated_payload["analysis"] = analysis
+                    else:
+                        try:
+                            with llm_call_root(owner):
+                                analysis = await asyncio.to_thread(
+                                    analyze,
+                                    api_name,
+                                    text,
+                                    None,  # jobs carry no prompt: analyze's default system prompt (bulleted notes)
+                                    input_is_literal_text=True,
+                                    raise_on_error=True,
+                                )
+                        except SummaryProviderError as exc:
+                            raise _StageFailure(
+                                str(exc), failure_code=exc.code, retryable=exc.code in _RETRYABLE_ANALYSIS_CODES
+                            ) from exc
+                        if isinstance(analysis, str) and analysis.startswith("Error:"):
+                            raise RuntimeError(analysis)
+                        updated_payload["analysis"] = analysis
                     next_type = "audio_store"
                 elif jtype == "audio_store":
                     # Placeholder: integration to store into DB or export artifacts
@@ -392,7 +421,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                 else:
                     jm.complete_job(int(job["id"]), result={"payload": updated_payload}, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
             else:
-                # An error that says it is not retryable (an LLM quota refusal) fails the job now.
+                # An error that says it is not retryable (an LLM quota refusal, a _StageFailure) fails the job now.
                 jm.fail_job(
                     int(job["id"]),
                     error=msg_err,

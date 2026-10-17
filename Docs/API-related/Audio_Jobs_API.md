@@ -13,7 +13,7 @@ Base path: `/api/v1/audio`
     - `model` (string, default `whisper-1`): Transcription model.
     - `perform_chunking` (bool, default true)
     - `perform_analysis` (bool, default false)
-    - `api_name` (string, optional): LLM provider for analysis.
+    - `api_name` (string, optional): LLM provider for analysis. Without it the analysis stage is skipped, and the final payload records `analysis_skipped: "no api_name"`.
   - Response: `{ id, uuid, domain, queue, job_type, status }`
   - Auth: Single-user X-API-KEY or multi-user JWT.
 
@@ -36,6 +36,7 @@ Base path: `/api/v1/audio`
 ## Worker
 
 - Service: runs the pipeline stages `audio_download → audio_convert → audio_transcribe → audio_chunk → audio_analyze → audio_store`.
+- Analysis failures: these fail the job at once, with the reason in `error_code`: `missing_model`, `missing_credentials`, `authentication`, `configuration`, `invalid_provider`, `adapter_unavailable`, `llm_quota_exceeded` or `empty_transcript`. Every other provider failure is recorded as `rate_limit` or `provider_failure` and retried, including a provider rejecting the request (an unknown model, a transcript too long for the model). The same failure twice in a row quarantines the job (`JOBS_QUARANTINE_THRESHOLD`, default 2).
 - Env flags:
   - `AUDIO_JOBS_WORKER_ENABLED`: `true|false` (default false)
   - `AUDIO_JOBS_OWNER_STRICT`: enable owner-aware acquisition (default false)

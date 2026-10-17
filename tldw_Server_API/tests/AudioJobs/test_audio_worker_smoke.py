@@ -809,12 +809,17 @@ async def _run_worker_until(worker, done) -> None:
         await asyncio.wait_for(task, timeout=2.0)
 
 
-def _analyze_job(jm, text: str) -> int:
+def _analyze_job(jm, text: str, api_name: str | None = "openai") -> int:
     row = jm.create_job(
         domain="audio", queue="default", job_type="audio_analyze",
-        payload={"text": text, "api_name": "openai", "model": "whisper-1", "perform_analysis": True}, owner_user_id="7",
+        payload={"text": text, "api_name": api_name, "model": "whisper-1", "perform_analysis": True}, owner_user_id="7",
     )
     return int(row["id"])
+
+
+def _failed_or_retried(jm, job_id: int) -> bool:
+    job = jm.get_job(job_id) or {}
+    return job.get("status") in {"failed", "quarantined"} or int(job.get("retry_count") or 0) >= 1
 
 
 @pytest.mark.unit
@@ -833,14 +838,82 @@ async def test_audio_analyze_stores_the_model_analysis(analyze_worker):
 
 
 @pytest.mark.unit
-async def test_audio_analyze_fails_the_stage_on_an_error_result(analyze_worker):
+@pytest.mark.parametrize("text", ["", " \n "], ids=["empty", "whitespace"])
+async def test_audio_analyze_empty_transcript_fails_without_retry(analyze_worker, text):
     worker, jm, adapter = analyze_worker
-    job_id = _analyze_job(jm, "")  # analyze() returns "Error: Could not extract text content."
-    await _run_worker_until(worker, lambda: int((jm.get_job(job_id) or {}).get("retry_count") or 0) >= 1)
+    job_id = _analyze_job(jm, text)
+    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
+    job = jm.get_job(job_id) or {}
+    assert job.get("status") == "failed"
+    assert int(job.get("retry_count") or 0) == 0
+    assert job.get("error_code") == "empty_transcript"
+    assert adapter.requests == []
+    assert jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7") == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error_name", "code"),
+    [("ChatAuthenticationError", "authentication"), ("ChatConfigurationError", "configuration")],
+)
+async def test_audio_analyze_provider_setup_failure_fails_without_retry(analyze_worker, error_name, code):
+    from tldw_Server_API.app.core import exceptions
+
+    worker, jm, adapter = analyze_worker
+    adapter.error = getattr(exceptions, error_name)(provider="openai")
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
+    job = jm.get_job(job_id) or {}
+    assert job.get("status") == "failed"
+    assert int(job.get("retry_count") or 0) == 0
+    assert job.get("error_code") == code
+
+
+@pytest.mark.unit
+async def test_audio_analyze_missing_model_fails_without_retry(analyze_worker, monkeypatch):
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as summarization
+
+    worker, jm, adapter = analyze_worker
+    monkeypatch.setattr(summarization, "load_and_log_configs", lambda: {"openai_api": {}})
+    monkeypatch.delenv("DEFAULT_MODEL_OPENAI", raising=False)
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
+    job = jm.get_job(job_id) or {}
+    assert job.get("status") == "failed"
+    assert int(job.get("retry_count") or 0) == 0
+    assert job.get("error_code") == "missing_model"
+    assert adapter.requests == []
+
+
+@pytest.mark.unit
+async def test_audio_analyze_rate_limit_still_retries(analyze_worker):
+    from tldw_Server_API.app.core.exceptions import ChatRateLimitError
+
+    worker, jm, adapter = analyze_worker
+    adapter.error = ChatRateLimitError(provider="openai")
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
     job = jm.get_job(job_id) or {}
     assert int(job.get("retry_count") or 0) >= 1
-    assert "Could not extract text content" in str(job.get("error_message") or job.get("last_error"))
-    assert jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7") == []
+    assert job.get("status") != "failed"
+    assert job.get("error_code") == "rate_limit"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("api_name", [None, "", "None"], ids=["missing", "blank", "None-string"])
+async def test_audio_analyze_without_api_name_skips_analysis(analyze_worker, api_name):
+    worker, jm, adapter = analyze_worker
+    _analyze_job(jm, "hello transcript", api_name=api_name)
+
+    def stored():
+        return jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7")
+
+    await _run_worker_until(worker, stored)
+    assert stored(), "audio_analyze did not hand over to audio_store"
+    payload = stored()[0]["payload"]
+    assert payload.get("analysis_skipped") == "no api_name"
+    assert "analysis" not in payload
+    assert adapter.requests == []
 
 
 @pytest.mark.unit
@@ -868,4 +941,5 @@ async def test_audio_analyze_provider_failure_still_retries(analyze_worker):
     job = jm.get_job(job_id) or {}
     assert int(job.get("retry_count") or 0) >= 1
     assert job.get("status") != "failed"
+    assert job.get("error_code") == "provider_failure"
     assert len(adapter.requests) >= 1
