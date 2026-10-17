@@ -9,9 +9,11 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-from ..models import SyncEnvelope, SyncObjectState
+from ..errors import SyncMaterializationContractError
+from ..models import SyncDomain, SyncEnvelope, SyncObjectState
 from ..store import SyncV2Store
 from .base import MaterializationResult
+from .guarded_product_mutation import GuardedProductMutation
 
 # Recorded on a conflict that is closed because its tombstone turned out to be satisfied.
 SATISFIED_TOMBSTONE_NOTE = "tombstone_of_message_the_dataset_never_held"
@@ -22,16 +24,19 @@ class ChatConversationMaterializer:
     """Apply `chat.conversation` upserts and tombstones to ChaChaNotes."""
 
     note_db: CharactersRAGDB
-    domain: str = "chat.conversation"
+    domain: SyncDomain = "chat.conversation"
 
     def apply(
         self,
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> MaterializationResult:
         """Project one accepted conversation envelope and record apply status."""
 
+        if guarded_mutation is not None:
+            raise SyncMaterializationContractError()
         if envelope.domain != self.domain:
             return MaterializationResult(status="skipped")
         if envelope.server_cursor is None:
@@ -137,16 +142,19 @@ class ChatMessageMaterializer:
     """Apply `chat.message` appends and tombstones to ChaChaNotes."""
 
     note_db: CharactersRAGDB
-    domain: str = "chat.message"
+    domain: SyncDomain = "chat.message"
 
     def apply(
         self,
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> MaterializationResult:
         """Project one accepted message envelope and record apply status."""
 
+        if guarded_mutation is not None:
+            raise SyncMaterializationContractError()
         if envelope.domain != self.domain:
             return MaterializationResult(status="skipped")
         if envelope.server_cursor is None:

@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.api.v1.endpoints import notes as notes_endpoint
@@ -35,8 +36,10 @@ from tldw_Server_API.app.core.Sync.v2.blob_store import LocalSyncBlobStore
 from tldw_Server_API.app.core.Sync.v2.domain_adapters.attachment_refs import (
     AttachmentRefDomainAdapter,
 )
+from tldw_Server_API.app.core.Sync.v2.errors import SyncMaterializationContractError
 from tldw_Server_API.app.core.Sync.v2.materializers import AttachmentRefMaterializer
-from tldw_Server_API.app.core.Sync.v2.models import SyncDatasetCreate
+from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import GuardedProductMutation
+from tldw_Server_API.app.core.Sync.v2.models import SyncDatasetCreate, SyncEnvelope
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -65,7 +68,7 @@ class _NoopRateLimiter:
 def canonical_api(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> tuple[TestClient, CharactersRAGDB, SyncV2Service]:
+) -> Iterator[tuple[TestClient, CharactersRAGDB, SyncV2Service]]:
     note_db = CharactersRAGDB(str(tmp_path / "notes.sqlite"), client_id=OWNER)
     note_db.add_note("Parent", "Body", note_id=NOTE_ID)
     store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync.sqlite"))
@@ -263,7 +266,7 @@ def test_notes_attachment_schema_accepts_canonical_item_page_and_mutation_respon
     ],
 )
 @pytest.mark.integration
-def test_notes_attachment_schema_rejects_extra_fields(payload: dict[str, object], model: type):
+def test_notes_attachment_schema_rejects_extra_fields(payload: dict[str, object], model: type[BaseModel]):
     with pytest.raises(ValidationError):
         model.model_validate(payload)
 
@@ -1097,3 +1100,33 @@ def test_active_one_shot_upload_uses_attachment_limit_when_blob_limit_is_unset(
         files={"file": ("report.txt", payload, "text/plain")},
     )
     assert response.status_code == expected_status, response.text
+
+
+def test_attachment_materializer_rejects_guard_before_product_or_store_access(
+    canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _client, note_db, service = canonical_api
+    sync_store = service.store
+    materializer = AttachmentRefMaterializer(note_db)
+
+    def fail_access(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Unsupported guard must fail before callbacks or projection access")
+
+    monkeypatch.setattr(sync_store, "get_object_state", fail_access)
+    guard = GuardedProductMutation(
+        expected_domain="notes.keyword",
+        expected_object_id="foreign-guard-target",
+        before=fail_access,
+        after=None,
+    )
+    envelope = SyncEnvelope(
+        dataset_id="dataset-1",
+        client_envelope_id="unsupported-guard",
+        domain=materializer.domain,
+        operation="upsert",
+        object_id="unguarded-product-target",
+        server_cursor=1,
+    )
+    with pytest.raises(SyncMaterializationContractError):
+        materializer.apply(envelope, store=sync_store, guarded_mutation=guard)

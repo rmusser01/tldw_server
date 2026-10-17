@@ -24,9 +24,11 @@ from ..attachment_refs_v2 import (
     AttachmentRefV2ValidationError,
     parse_attachment_ref_v2_payload,
 )
-from ..models import SyncEnvelope, SyncObjectState
+from ..errors import SyncMaterializationContractError
+from ..models import SyncDomain, SyncEnvelope, SyncObjectState
 from ..store import SyncV2Store
 from .base import MaterializationResult
+from .guarded_product_mutation import GuardedProductMutation
 
 
 @dataclass(slots=True)
@@ -34,16 +36,19 @@ class AttachmentRefMaterializer:
     """Project v2 refs into Notes while preserving legacy v1 object state."""
 
     note_db: CharactersRAGDB | None = None
-    domain: str = "attachment.ref"
+    domain: SyncDomain = "attachment.ref"
 
     def apply(
         self,
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> MaterializationResult:
         """Project one accepted attachment-ref envelope into object state."""
 
+        if guarded_mutation is not None:
+            raise SyncMaterializationContractError()
         if envelope.domain != self.domain:
             return MaterializationResult(status="skipped")
         if envelope.server_cursor is None:

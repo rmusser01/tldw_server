@@ -75,3 +75,8 @@ ADR check for PR3253 CI continuation: ADR required: no; generated location refre
 ADR assessment: no new ADR; corrections preserve existing delegated stores, callable and transaction architecture (existing ADR020/031/059 and prior plan authorities).
 
 Unit B declaration substage complete locally:22native signatures/runtime AST preserved,101owningPASS/restrictedPG0skip, fresh74union231errors remaining, scopedreviewclear. Remaining test-contract/static Media boundary units remain open; exactfullchanged+acceptedunion required before final type-green claim.
+
+- [ ] Unit C: match actual SyncMaterializer optional-guard contract for chat/attachment domains by rejecting unsupported non-None guard before access, preserving normal projections; three native callback REDs, truthful Notes/Sync fixture contracts and five existing owning suites. Exact5pathV2 design, dataclass constructor retained with supported typed arguments; no guard/callback bypass or weaker validation.
+
+Unit C local review complete:3trueguardRED/180PASS/newguardbehaviorapproved, native76 still193errors; core22contractfollowupmandatory/ACTIVE, no overallgreen.
+- [ ] Unit D: exact8existingtestfiles with truthful Optional/native fixture types, realMoodboardcleanup and observedWorkflow persistence/warning behavior; staticRED/native8ownerverification/security/scopedreview.
