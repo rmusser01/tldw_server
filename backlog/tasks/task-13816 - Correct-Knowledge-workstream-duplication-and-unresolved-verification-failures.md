@@ -1,7 +1,7 @@
 ---
 id: TASK-13816
 title: Correct Knowledge workstream duplication and unresolved verification failures
-status: In Progress
+status: Done
 labels:
 - knowledge
 - research
@@ -23,7 +23,7 @@ Audit merged PR3196, PR3205, PR3211 and PR3213 against pre-existing mechanisms a
 - [x] #2 Public capture uses existing governed backend selection and transports; any required boundary repair is shared and demonstrated, with no HTTPX-only or curl prohibition justified by missing local dependencies.
 - [x] #3 Four quota-eviction and one split-storage failures are reproduced and repaired under their owning project harnesses with unchanged assertions.
 - [x] #4 The historical CSV failure and affected default-harness, lint and format qualifications are diagnosed and resolved or remain explicitly blocked with evidence rather than silently closed.
-- [ ] #5 Affected backend and client tests, security checks, types and builds pass; TASK13812 and related tracking accurately describe corrected and unfinished work.
+- [x] #5 Affected backend and client tests, security checks, types and builds pass; TASK13812 and related tracking accurately describe corrected and unfinished work.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -879,19 +879,22 @@ UnitJ reopened for actual4490 frontend coverage6 failure: NotesGraphWorkspace.pe
 UnitJ exact source-backed design accepted: realnativeQueryClient.fetchQuery/service403-vs500 cached-error/offline control; no state setter or scheduler patch. Conditional sharedhook denial addscurrentquery403 toexistingauthoritylatch, retaining enable/refresh/cancellation policy. Native2-case403RED/500PASS thenconditional2GREEN +3deduplicatedowners/bothclienttypes/quality/security/scopedreview/newheadCI required. Historical4490request/error/render values absent, so invariantproof is not historicalcausalclosure. ADRno:existing403policy/nativequeryclient, no durable newrule.
 UnitJ local verification:62 owningPASS, true403 classificationRED/500PASS then2GREEN, actual webtypes0 and extension native compile -p tsconfig.compile.json0, installedESLint0/newfragmentsformat/3274ASTequal. Root95bindings0bad. Fresh scoped independent review active; no commit/push/readiness yet. TS-onlyBanditNA; existing shared403 boundary/noADR. All tooling mistakes/raw historical4490 failure retained; no retry/gate changes.
 UnitJ independent scoped SpecPASS/QualityApproved0Critical0Important; reviewer independently95bindings0bad/reverseBASE2sourcebytes/original18preserved. Inherited ESLint pages-directory stderr and wholefileformatdebt qualified as Minor/no introduced defect. Root4reviewbindings0bad; source2files de89531a/3719f52c. Normal exact4pathcommit/publication and actual NEW-headCI required; AC5DoD1open. Historical4490cause unproved.
+Final functional source2830 actualfull208+aggregate+downstream/all7trusted/coverage16/Notes29/UX6/types70PASS. Newpermission20nativecasesPASSretry0/newDB13cleanup+176NotesOwner83PG explicitJUnitPASS. Root7074receiptbindings0bad; original4490failedseal2211bindings0bad retained. Finaltrackingonlycommit/publication needs ownnativeexact-headchecks; no merge/cleanup.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-PR3253 remains In Progress for actual final-head CI readiness. Unit J now repairs a demonstrated shared Notes graph permission-classification invariant: existing native query403 errors produce permission denial before graph/search rendering, while the original authority latch still governs automatic requests and explicit recovery. Exact real-service403/500 controls produced intended403 RED/500 PASS, then both GREEN; one deduplicated three-owner run passed62 tests (20 permission,18 hook,24 service). Both actual native client type checks and scoped BASE/CURRENT ESLint passed; original18 permission definitions/assertions/timers remain byte-identical. Final formatting preserves3274-node TS AST;95 execution bindings verified. Fresh scoped review/publication/new-head hosted CI still required. Historical4490 error/scheduler cause is not established by the invariant control. Wrong default extension config command was preserved and corrected to the existing native compile config, without source/config changes.
+TASK13816 is complete within its measured backend and Notes repair scope at functional source2830b4d705e1d3586d5bd11b45e6e80a57b0a0fb/currentdev0566130c. Actual hosted CI39026701066 completed all208Ubuntu/Python3.12shards, aggregate117397576570 and downstream117397595647 successfully:220successful jobs/9skipped/no failures. All7trustedrequiredgates,16coverage shards+aggregate,Notes29 andstrictUX6 succeeded. Native MyPy2.4.0 reports0issues in70changedPythonfiles(32app38tests); acceptedlocal80types are sourcebound, not wholebackend typing. NewDBowners2489PASS8explicitSKIP; actualJUnit proves13newcleanup and176NotesOwner including83PG casesPASS0skip. Coverage28248testsPASS7skip; integrations3418PASS46skip; all8WorkflowownersPASS. Root verified7074hostedreceipts0bad.
 
-Prior sourcedafd actual208full-suite shards plus aggregate/downstream/all7trusted/coverage16/Notes29/UX6/native70types remain sourcebound, not proof for the new fix. AC5/DoD1 stay open. Human Change summary published verbatim. Existing warning/skip/Black/retention/historical limits remain qualified; no merge/auto/archive/cleanup requested. Evidence: /private/tmp/task13816-pr3253-landing-20261017.
+UnitJ minimalsharedhook repair classifies existing query403 permission denial before graph/search rendering, preserving authority request latch/cancellation/refresh and500/503 behavior. Native403RED/500PASS then2GREEN/62ownersPASS/bothactualclienttypes0/scopedreviewApproved0Critical0Important; currenthosted20permissioncases including formerlyfailingrefresh andbothnewcontrolsPASS/retry0. Earlier4490failure andunprovedhistoricalerror/schedulercause remain retained. AllA-I native regression/security/review evidence remains sourcebound. Human Change summary is published verbatim.
+
+Final tracking-only publication preserves all functional source; its own exact-head native checks govern PR readiness. Existing warning/skip/Black/ESLint/formatdebt,Notesretentionfaults256completefalse,UXmissingpercaseJSON/firstattemptaccounting,alternativeplatform/device andhistoricalcause limits remain qualified. This does not close unrelated TASK12116/TASK13512/TASK13534 debt. No merge/auto/archive/cleanup requested. Evidence:/private/tmp/task13816-pr3253-landing-20261017; source CI report:unitJ2830-hosted-readiness/unitJ2830-hosted-readiness-report.md.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
