@@ -86,6 +86,12 @@ Unit D local scoped review complete:182PASS plus focused2PASS after three row-pr
 
 Unit E local scoped review complete:18intendedRED/274PASS/native76 154→132 (22removed0added), safe native failure logs/productstate unchanged, three exact static delegates/runtimeASTsame. Reviewed0findings; normalexact7pathcommit next.
 - [x] Unit F: exact9testpath same-shape native fixture batch (Native5V3 + backend/migration/transportV2/workflow-hardening), actual120diagnostic target notpassforecast; one deduplicated9owner runtime/native76/security/scopedreview.
-- [ ] Unit G: three-file native Media binding/cleanup unit, five truefaultREDs+positive subclass control, runtime323identity proof, finite native79 plus relevantSQLite/PG owners/security/review.
+- [x] Unit G: three-file native Media binding/cleanup unit, five truefaultREDs+positive subclass control, runtime323identity proof, finite native79 plus relevantSQLite/PG owners/security/review.
 
 Unit F local complete scoped SpecPASS/QualityPASS0findings: actualinitial311PASS9FAIL4SQLite-onlyskip retained, corrected30PASS4skip+2PASS, native76 132→12 removes120/adds0/allowned9zero. Media native-class boundary12 plus separately recorded354implementation diagnostics addressed onlyinUnitG; notwholebackendgreen.
+
+Unit G finite correction before production: initial6BASE2FAIL4PASS disproves ordinary tuple-crash premise. NEW native3.12 ExceptionGroup.split probe shows realnestedmatcherTypeError; exact13 controls characterize7ordinary/subclass passes and6group-boundary faults beforefix. PreserveALLfour existing suppress policies via unpacking, WITHDRAW outer-scope-removal proposal. Native323binding relocation remains; no newADR/securitypolicy. Allinitialfalsepremise/failedcontrols retained, rootactualdiffconcurrence required.
+
+UnitG authoritative groupV2 refinement: THREEcleanup stars +scopeclassic except preserveordinarynoncritical suppression and ALLscopegroup failure outcomes/originalidentity; V1fourstars wouldnewlyhideknownscopegroups andiswithdrawnprivately. RootFULLread13testdiff/productiondiff/source/artifacthashes. Native7PASS6TypeError baseline required, then13GREEN/323identity/native79/owningSQLitePG/security/review. No newADR; sourcecurrentproductionstillunchanged.
+
+All local affected79 Python types nowclean: UnitG348PASS/323nativeidentities/finalsubclass1PASS/scopedreview0findings, sourcequalifications retained. Stage5 integration stillInProgress: freshdev0566ornewer rebase/consequence tests/fullbranchreview/verbatimhumanbody/normalexactleasepush/newheadCI/trustedissuers/reviews/finalready. No merge requested.
