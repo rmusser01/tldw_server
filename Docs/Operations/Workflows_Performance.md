@@ -16,6 +16,18 @@ Reusable SQLite workflow connections deliberately use `cached_statements=0`: con
 
 The [paired cache benchmark and raw results](../Performance/WORKFLOWS_SQLITE_CACHE_2026_10_16_TASK_13819.md) measure the adapter cost, validate every read, and separate valid timings from corrupt cached controls. Reproduce locally with `python Helper_Scripts/benchmarks/workflows_sqlite_cache.py --output /tmp/workflows-cache.json` after activating the project environment. It creates disposable databases and does not change server configuration.
 
+### End-to-end WebSocket load
+
+The [real-network WebSocket benchmark and raw results](../Performance/WORKFLOWS_WEBSOCKET_LOAD_2026_10_16_TASK_13820.md) measure connection setup, initial snapshot, history drain, live-event latency and server event-loop lag. After activating the project environment, run:
+
+```bash
+python Helper_Scripts/benchmarks/workflows_websocket_load.py --output /tmp/workflows-ws-load.json
+```
+
+Run from a Git checkout with the backend dependencies installed. The harness copies tracked working source into disposable storage and starts the production app on loopback TCP with real JWT verification and SQLite. Lifespan workers are disabled. It validates ordered delivery and authorization refusals; a nonzero exit means the run is invalid. It never connects to an existing server. Avoid other tests or benchmarks while collecting timings.
+
+Workflow WebSockets offload synchronous owner/event reads to Starlette's bounded shared threadpool so disk waits do not block unrelated ASGI work. Readers can still queue behind other threadpool users. History delivery yields between events so writable sockets cannot monopolize the event loop, and normal peer departure finishes without an unhandled ASGI exception. The existing one-second polling interval remains part of event-delivery latency; offloading reads is a responsiveness repair, not a low-latency push protocol. Measure on deployment hardware before setting capacity or latency targets.
+
 ## PostgreSQL (Recommended for Production)
 
 - Connection Pooling
