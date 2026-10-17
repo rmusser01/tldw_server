@@ -226,6 +226,47 @@ describe("workspace persist lifecycle flush durability", () => {
     expect(state.putCalls).toHaveLength(1)
   })
 
+  it("removeItem awaits an in-flight drain instead of racing it (no resurrection of cleared storage)", async () => {
+    const workspaceId = "remove-race-ws"
+    const { adapter, state } = createGatedAdapter()
+    const storage = createWorkspaceStorage({ indexedDbAdapter: adapter })
+    const artifacts = [makeArtifact("art-1", "one")]
+
+    // Deliver the drain (microtask) and let it suspend inside the gated
+    // IndexedDB put: the write is IN FLIGHT — claimed off the pending map,
+    // blocked mid-perform — exactly the state a user's clearStorage() hits
+    // when it fires while an offload is settling.
+    const write = storage.setItem(
+      STORAGE_KEY,
+      buildEnvelope(workspaceId, "notes v1", artifacts)
+    )
+    for (let hop = 0; hop < 3; hop += 1) {
+      await Promise.resolve()
+    }
+    expect(state.putCalls).toHaveLength(1)
+    expect(workspacePersistWriterInternals.hasPendingWrite()).toBe(false)
+
+    // User clears storage while the drain is suspended on IndexedDB.
+    const removal = storage.removeItem(STORAGE_KEY)
+
+    // The suspension settles: the drain resumes and finishes its write pass
+    // BEFORE the removal proceeds (removeItem must await the full drain, not
+    // race it fire-and-forget).
+    state.releasePuts()
+    await removal
+
+    // Storage stays empty across a subsequent read/drain cycle — the resumed
+    // drain must not have resurrected the cleared keys.
+    await settlePersistWrites()
+    expect(localStorage.getItem(snapshotKey(workspaceId))).toBeNull()
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull()
+    const readBack = await Promise.resolve(storage.getItem(STORAGE_KEY))
+    expect(readBack).toBeNull()
+    expect(workspacePersistWriterInternals.hasPendingWrite()).toBe(false)
+
+    await Promise.allSettled([write])
+  })
+
   it("serves a buffered write to a prefill-style read that flushes first, while plain getItem stays storage-wins", async () => {
     const workspaceId = "read-flush-ws"
     const storage = createWorkspaceStorage()
