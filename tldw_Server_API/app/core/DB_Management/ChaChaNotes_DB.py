@@ -59,9 +59,12 @@ from loguru import logger  # noqa: E402
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.api.v1.schemas.quizzes import OsceQuizExportV2
+    from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
     from tldw_Server_API.app.core.DB_Management.chacha.message_store import (
         MAX_CHAT_ATTACHMENT_READ_BYTES,
     )
+    from tldw_Server_API.app.core.DB_Management.chacha.moodboard_sync_store import GraphConnection
+    from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskConnection
     from tldw_Server_API.app.core.Sharing.clone_models import WorkspaceCloneSnapshot
 
 try:  # Prefer psycopg v3 sql helper, fall back to psycopg2 if available
@@ -814,6 +817,134 @@ class CharactersRAGDB:
         db_path_str (str): String representation of the database path for SQLite connection.
     """
     if TYPE_CHECKING:
+
+        def add_character_card(self, card_data: dict[str, Any]) -> int | None: ...
+
+        def get_character_card_by_name(self, name: str, *, include_deleted: bool = False) -> dict[str, Any] | None: ...
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            *,
+            conn: Any | None = None,
+            lock_for_update: bool = False,
+            owner_client_id: str | None = None,
+        ) -> dict[str, Any]: ...
+
+        def add_conversation(
+            self,
+            conv_data: dict[str, Any],
+            *,
+            conn: Any | None = None,
+            assistant_startup: AssistantStartup | None = None,
+            create_request_fingerprint: str | None = None,
+        ) -> str | None: ...
+
+        def upsert_conversation_from_sync(
+            self,
+            *,
+            conversation_id: str,
+            title: str | None,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            root_id: str | None = None,
+            assistant_kind: str | None = None,
+            assistant_id: str | None = None,
+            character_id: int | str | None = None,
+            persona_memory_mode: str | None = None,
+            state: str | None = None,
+            topic_label: str | None = None,
+            cluster_id: str | None = None,
+            source: str | None = None,
+            external_ref: str | None = None,
+            rating: int | None = None,
+            scope_type: str | None = None,
+            workspace_id: str | None = None,
+        ) -> bool: ...
+
+        def tombstone_conversation_from_sync(
+            self, *, conversation_id: str, sync_client_id: str, object_revision: int, object_hash: str
+        ) -> bool: ...
+
+        def update_conversation(
+            self, conversation_id: str, update_data: dict[str, Any], expected_version: int
+        ) -> bool | None: ...
+
+        def restore_conversation(
+            self, conversation_id: str, expected_version: int, *, require_already_active: bool = False
+        ) -> bool | None: ...
+
+        def count_keywords(self) -> int: ...
+
+        def add_message(self, msg_data: dict[str, Any], *, conn: Any | None = None) -> str | None: ...
+
+        def get_message_by_id(
+            self, message_id: str, include_deleted: bool = False, *, strict_images: bool = False
+        ) -> dict[str, Any] | None: ...
+
+        def search_messages_by_content(
+            self, content_query: str, conversation_id: str | None = None, limit: int = 10, offset: int = 0
+        ) -> list[dict[str, Any]]: ...
+
+        def get_message_metadata(
+            self, message_id: str, *, conn: Any | None = None, strict: bool = False
+        ) -> dict[str, Any] | None: ...
+
+        def bind_local_moodboard_graph_to_dataset(
+            self, *, owner_user_id: str, target_dataset_id: str, conn: GraphConnection | None = None
+        ) -> dict[str, int]: ...
+
+        def bind_local_studio_graph_to_dataset(
+            self, *, owner_user_id: str, target_dataset_id: str, conn: GraphConnection | None = None
+        ) -> dict[str, int]: ...
+
+        def page_moodboards_for_sync_bootstrap(
+            self, *, owner_user_id: str, dataset_id: str, after_sync_id: str | None = None, limit: int = 100
+        ) -> list[dict[str, Any]]: ...
+
+        def page_moodboard_placements_for_sync_bootstrap(
+            self,
+            *,
+            owner_user_id: str,
+            dataset_id: str,
+            after_moodboard_sync_id: str | None = None,
+            after_note_id: str | None = None,
+            limit: int = 100,
+        ) -> list[dict[str, Any]]: ...
+
+        def page_studio_documents_for_sync_bootstrap(
+            self, *, owner_user_id: str, dataset_id: str, after_note_id: str | None = None, limit: int = 100
+        ) -> list[dict[str, Any]]: ...
+
+        def create_note_studio_document(
+            self,
+            *,
+            note_id: str,
+            payload_json: dict[str, Any],
+            template_type: str,
+            handwriting_mode: str,
+            source_note_id: str | None = None,
+            excerpt_snapshot: str | None = None,
+            excerpt_hash: str | None = None,
+            diagram_manifest_json: dict[str, Any] | None = None,
+            companion_content_hash: str | None = None,
+            render_version: int,
+            provenance_kind: str = "manual",
+            provenance_provider: str | None = None,
+            provenance_model: str | None = None,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        ) -> dict[str, Any]: ...
+
+        def create_persona_profile(self, profile_data: dict[str, Any]) -> str: ...
+
+        def resolve_task_compatibility_dataset_id(
+            self, *, owner_user_id: str, conn: TaskConnection | None = None
+        ) -> str: ...
+
+        def bind_local_task_graph_to_dataset(
+            self, *, owner_user_id: str, target_dataset_id: str, conn: TaskConnection | None = None
+        ) -> dict[str, int]: ...
         # Runtime methods below delegate to NoteStore and remain replaceable by callers.
         def add_note(
             self,

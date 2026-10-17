@@ -73,3 +73,5 @@ ADR check for PR3253 CI continuation: ADR required: no; generated location refre
 - [ ] Unit B: source-backed existing static DB delegate signatures, then finite remaining fixture contracts; no runtime wrappers, blanket Any/casts/ignores or gate changes. Actual diagnostics and caller behavior govern each patch.
 - [ ] Independently review new units, normal commit/push, require new-head CI; publish supplied human Change summary verbatim after running gates settle, then final fresh dev/rules/reviews/readiness.
 ADR assessment: no new ADR; corrections preserve existing delegated stores, callable and transaction architecture (existing ADR020/031/059 and prior plan authorities).
+
+Unit B declaration substage complete locally:22native signatures/runtime AST preserved,101owningPASS/restrictedPG0skip, fresh74union231errors remaining, scopedreviewclear. Remaining test-contract/static Media boundary units remain open; exactfullchanged+acceptedunion required before final type-green claim.
