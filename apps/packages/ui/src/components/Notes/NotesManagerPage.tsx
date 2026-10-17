@@ -98,8 +98,17 @@ import {
   markdownToWysiwygHtml,
   wysiwygHtmlToMarkdown,
   getEditableSelectionBlock,
+  getEditableCaretOffset,
+  setEditableCaretOffset,
   isHeadingElement,
   unwrapListsFromBlocks,
+  formatMarkdownLines,
+  makeEditableChecklist,
+  removeEditableTaskControls,
+  continueEditableChecklist,
+  syncEditableCheckboxes,
+  revealTextareaOffset,
+  extractMarkdownHeadings,
   LARGE_NOTES_PAGINATION_THRESHOLD,
   TRASH_LOOKUP_PAGE_SIZE,
   TRASH_LOOKUP_MAX_PAGES,
@@ -1664,23 +1673,43 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     [ed]
   )
 
+  const toolbarRangeRef = React.useRef<Range | null>(null)
+  React.useEffect(() => { toolbarRangeRef.current = null }, [ed.selectedId, ed.editorInputMode])
+  const captureToolbarSelection = React.useCallback(() => {
+    const selection = window.getSelection()
+    const editor = ed.richEditorRef.current
+    if (editor && selection?.rangeCount && editor.contains(selection.getRangeAt(0).commonAncestorContainer)) {
+      toolbarRangeRef.current = selection.getRangeAt(0).cloneRange()
+    }
+  }, [ed.richEditorRef])
+
   const applyMarkdownToolbarAction = React.useCallback(
     (action: MarkdownToolbarAction) => {
       if (editorDisabled) return
       if (ed.editorInputMode === 'wysiwyg') {
         const richEditor = ed.richEditorRef.current
         if (!richEditor) return
+        const savedRange = toolbarRangeRef.current
+        if (savedRange && richEditor.contains(savedRange.commonAncestorContainer)) {
+          richEditor.focus({ preventScroll: true })
+          const selection = window.getSelection()
+          selection?.removeAllRanges()
+          selection?.addRange(savedRange)
+        }
+        toolbarRangeRef.current = null
+        if (action === 'list' || action === 'numbered' || action.startsWith('heading')) removeEditableTaskControls(richEditor)
         const execute = (command: string, value?: string, options?: { focus?: boolean }) => {
           if (typeof document === 'undefined') return
           if (typeof document.execCommand !== 'function') return
           if (options?.focus !== false) {
-            richEditor.focus()
+            richEditor.focus({ preventScroll: true })
           }
           document.execCommand(command, false, value)
         }
         // The command edited the DOM in place: record it without replacing the
         // editor's nodes, so the caret and selection stay where they are (NE-01).
         const syncFromRichEditor = () => {
+          syncEditableCheckboxes(richEditor)
           const nextHtml = richEditor.innerHTML
           ed.recordWysiwygEditorHtml(nextHtml)
           ed.setWysiwygSessionDirty(true)
@@ -1690,22 +1719,33 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         }
         if (action === 'bold') execute('bold')
         else if (action === 'italic') execute('italic')
-        else if (action === 'heading') {
+        else if (action === 'heading' || action === 'heading1' || action === 'heading2' || action === 'heading3') {
           // Toggle: a heading goes back to a paragraph. Leave a list first,
           // because formatBlock would wrap the whole list in the heading.
           const block = getEditableSelectionBlock(richEditor)
-          if (isHeadingElement(block)) execute('formatBlock', '<p>')
+          if (action === 'heading' && isHeadingElement(block)) execute('formatBlock', '<p>')
           else {
             if (block?.tagName === 'LI') {
               execute(block.parentElement?.tagName === 'OL' ? 'insertOrderedList' : 'insertUnorderedList')
             }
-            execute('formatBlock', '<h2>')
+            execute('formatBlock', action === 'heading' ? '<h2>' : `<h${action.slice(-1)}>`)
           }
-        } else if (action === 'list') {
+        } else if (action === 'list' || action === 'numbered' || action === 'checklist') {
+          const caretOffset = richEditor.ownerDocument.defaultView?.getSelection()
+            ?.isCollapsed
+            ? getEditableCaretOffset(richEditor)
+            : null
           // A heading becomes a plain list item, not a list inside a heading.
           if (isHeadingElement(getEditableSelectionBlock(richEditor))) execute('formatBlock', '<p>')
-          execute('insertUnorderedList')
+          const block = getEditableSelectionBlock(richEditor)
+          if (action !== 'checklist' || block?.tagName !== 'LI' || block.parentElement?.tagName !== 'UL') {
+            execute(action === 'numbered' ? 'insertOrderedList' : 'insertUnorderedList')
+          }
           unwrapListsFromBlocks(richEditor)
+          if (caretOffset !== null && getEditableCaretOffset(richEditor) !== caretOffset) {
+            setEditableCaretOffset(richEditor, caretOffset)
+          }
+          if (action === 'checklist') makeEditableChecklist(richEditor)
         } else if (action === 'link') {
           ;(async () => {
             const savedSelection =
@@ -1748,6 +1788,20 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       const start = textarea.selectionStart ?? 0
       const end = textarea.selectionEnd ?? start
       const selected = ed.content.slice(start, end)
+      if (action === 'heading' || action === 'heading1' || action === 'heading2' || action === 'heading3' ||
+        action === 'list' || action === 'numbered' || action === 'checklist') {
+        const next = formatMarkdownLines(ed.content, start, end, action)
+        ed.setContentDirty(next.content)
+        window.requestAnimationFrame(() => {
+          const active = ed.contentTextareaRef.current
+          if (!active) return
+          active.focus({ preventScroll: true })
+          active.setSelectionRange(next.start, next.end)
+          ed.setEditorCursorIndex(next.end)
+          ed.resizeEditorTextarea()
+        })
+        return
+      }
       let replacement = selected
       let nextSelectionStart = start
       let nextSelectionEnd = end
@@ -1766,31 +1820,6 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         replacement = `\`${inner}\``
         nextSelectionStart = start + 1
         nextSelectionEnd = nextSelectionStart + inner.length
-      } else if (action === 'heading') {
-        if (selected) {
-          replacement = selected.split('\n').map((line) => (line.startsWith('#') ? line : `# ${line}`)).join('\n')
-          nextSelectionStart = start
-          nextSelectionEnd = start + replacement.length
-        } else {
-          replacement = '# Heading'
-          nextSelectionStart = start + 2
-          nextSelectionEnd = start + replacement.length
-        }
-      } else if (action === 'list') {
-        if (selected) {
-          replacement = selected.split('\n').map((line) => {
-            const trimmed = line.trim()
-            if (!trimmed) return line
-            if (trimmed.startsWith('- ')) return line
-            return line.replace(trimmed, `- ${trimmed}`)
-          }).join('\n')
-          nextSelectionStart = start
-          nextSelectionEnd = start + replacement.length
-        } else {
-          replacement = '- List item'
-          nextSelectionStart = start + 2
-          nextSelectionEnd = start + replacement.length
-        }
       } else if (action === 'link') {
         const text = selected || 'link text'
         const url = 'https://'
@@ -1935,6 +1964,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   // and update the Markdown, leaving the DOM (and the caret) alone (NE-01).
   const handleWysiwygInput = React.useCallback(
     (event: React.FormEvent<HTMLDivElement>) => {
+      if (editorDisabled) return
+      if (event.type === 'input' && event.target instanceof HTMLInputElement && event.target.type === 'checkbox') return
+      syncEditableCheckboxes(event.currentTarget)
       const nextHtml = event.currentTarget.innerHTML
       ed.recordWysiwygEditorHtml(nextHtml)
       ed.setWysiwygSessionDirty(true)
@@ -1942,8 +1974,16 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       ed.setContentDirty(nextMarkdown)
       ed.setEditorCursorIndex(nextMarkdown.length)
     },
-    [ed]
+    [ed, editorDisabled]
   )
+
+  const handleWysiwygKeyDown = React.useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (editorDisabled || event.nativeEvent.isComposing || event.key !== 'Enter' ||
+      event.shiftKey || event.ctrlKey || event.altKey || event.metaKey) return
+    if (!continueEditableChecklist(event.currentTarget)) return
+    event.preventDefault()
+    handleWysiwygInput(event)
+  }, [editorDisabled, handleWysiwygInput])
 
   const handleWysiwygPaste = React.useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
     if (editorDisabled) return
@@ -1956,40 +1996,44 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [editorDisabled])
 
   // TOC jump
+  const tocContextRef = React.useRef({ selectedId: ed.selectedId, inputMode: ed.editorInputMode })
+  tocContextRef.current = { selectedId: ed.selectedId, inputMode: ed.editorInputMode }
   const handleTocJump = React.useCallback(
     (entry: NotesTocEntry) => {
-      if (ed.editorInputMode === 'wysiwyg') {
-        const richEditor = ed.richEditorRef.current
-        if (!richEditor) return
-        const headingMatch = Array.from(
-          richEditor.querySelectorAll<HTMLElement>('[data-md-slug]')
-        ).find((element) => element.getAttribute('data-md-slug') === entry.id)
-        if (headingMatch) {
-          headingMatch.scrollIntoView({ block: 'center', behavior: 'smooth' })
-          const range = document.createRange()
-          range.selectNodeContents(headingMatch)
-          range.collapse(true)
-          const selection = window.getSelection()
-          selection?.removeAllRanges()
-          selection?.addRange(range)
+      const context = tocContextRef.current
+      const focusTarget = () => {
+        if (tocContextRef.current.selectedId !== context.selectedId || tocContextRef.current.inputMode !== context.inputMode) return
+        if (ed.editorInputMode === 'wysiwyg') {
+          const richEditor = ed.richEditorRef.current
+          if (!richEditor) return
+          const headingIndex = extractMarkdownHeadings(ed.content).findIndex((heading) => heading.id === entry.id)
+          const headingMatch = richEditor.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6')[headingIndex]
+          if (headingMatch) {
+            richEditor.focus({ preventScroll: true })
+            richEditor.scrollTop += headingMatch.getBoundingClientRect().top - richEditor.getBoundingClientRect().top - richEditor.clientHeight / 2
+            const range = document.createRange()
+            range.selectNodeContents(headingMatch)
+            range.collapse(true)
+            const selection = window.getSelection()
+            selection?.removeAllRanges()
+            selection?.addRange(range)
+          }
+          return
         }
-        richEditor.focus()
-        return
-      }
-      const focusAtOffset = () => {
         const textarea = ed.contentTextareaRef.current
         if (!textarea) return
         const cursor = Math.max(0, Math.min(entry.offset, ed.content.length))
-        textarea.focus()
+        textarea.focus({ preventScroll: true })
         textarea.setSelectionRange(cursor, cursor)
+        revealTextareaOffset(textarea, cursor)
         ed.setEditorCursorIndex(cursor)
       }
       if (ed.editorMode === 'preview') {
         ed.setEditorMode('split')
-        window.requestAnimationFrame(() => { window.requestAnimationFrame(focusAtOffset) })
+        window.requestAnimationFrame(focusTarget)
         return
       }
-      window.requestAnimationFrame(focusAtOffset)
+      window.requestAnimationFrame(focusTarget)
     },
     [ed]
   )
@@ -2889,6 +2933,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         renderKeywordLabelWithFrequency={kw.renderKeywordLabelWithFrequency}
         handleEditorInputModeChange={handleEditorInputModeChange}
         applyMarkdownToolbarAction={applyMarkdownToolbarAction}
+        captureToolbarSelection={captureToolbarSelection}
         openAttachmentPicker={openAttachmentPicker}
         handleAttachmentInputChange={handleAttachmentInputChange}
         runAssistAction={ed.runAssistAction}
@@ -2897,6 +2942,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         handleTocJump={handleTocJump}
         handlePreviewLinkClick={handlePreviewLinkClick}
         handleWysiwygInput={handleWysiwygInput}
+        handleWysiwygKeyDown={handleWysiwygKeyDown}
         handleWysiwygPaste={handleWysiwygPaste}
         handleEditorChange={handleEditorChange}
         handleEditorKeyDown={wl.handleEditorKeyDown}

@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
+from tldw_Server_API.app.core.DB_Management.backends.postgres_sequences import (
+    PostgresSequenceBackend,
+    advance_postgres_serial,
+)
+
 # Owned serial columns from Media's core, claims/collections, data-table and
 # email schema DDL. Shared PostgreSQL schemas also contain other modules' tables.
 # The real Media-only schema inventory test guards this list against omissions.
@@ -50,36 +55,10 @@ _MEDIA_SEQUENCE_COLUMNS = frozenset({
 })
 
 
-class _SequenceQueryResult(Protocol):
-    """Backend query result protocol for sequence metadata scans."""
-
-    rows: list[dict[str, object]]
-
-
-class _ScalarQueryResult(Protocol):
-    """Backend query result protocol for MAX(...) lookups."""
-
-    scalar: object
-
-
-class _SequenceMaintenanceBackend(Protocol):
-    """Backend protocol for PostgreSQL sequence synchronization."""
-
-    def execute(
-        self,
-        query: str,
-        params: tuple[object, ...] | None = None,
-        *,
-        connection: object,
-    ) -> _SequenceQueryResult | _ScalarQueryResult | object: ...
-
-    def escape_identifier(self, value: str) -> str: ...
-
-
 class PostgresSequenceMaintenanceDB(Protocol):
     """Protocol for DB objects exposing a PostgreSQL backend."""
 
-    backend: _SequenceMaintenanceBackend
+    backend: PostgresSequenceBackend
 
 
 def sync_postgres_sequences(
@@ -124,48 +103,14 @@ def sync_postgres_sequences(
         if (table_name, column_name) not in _MEDIA_SEQUENCE_COLUMNS:
             continue
 
-        ident = backend.escape_identifier
-        qualified_sequence = f"{ident(sequence_schema)}.{ident(sequence_name)}"
-
-        # A rollback-only savepoint releases this temporary sequence lock before
-        # later schema DDL, avoiding table/sequence lock inversion with other
-        # modules. setval is nontransactional; its forward advance survives.
-        with conn.transaction(force_rollback=True):
-            # Reassert the existing dependency without changing parameters.
-            # ALTER SEQUENCE also blocks ordinary nextval/setval allocations.
-            backend.execute(
-                f"ALTER SEQUENCE {qualified_sequence} "  # nosec B608
-                f"OWNED BY {ident('public')}.{ident(table_name)}.{ident(column_name)}",
-                connection=conn,
-            )
-            sequence_state = backend.execute(
-                f"SELECT last_value, is_called FROM {qualified_sequence}",  # nosec B608
-                connection=conn,
-            ).rows[0]
-
-            max_result = backend.execute(
-                (
-                    f"SELECT COALESCE(MAX({ident(column_name)}), 0) AS max_id "  # nosec B608
-                    f"FROM {ident(table_name)}"
-                ),
-                connection=conn,
-            )
-
-            max_id_raw = max_result.scalar
-            try:
-                max_id = int(max_id_raw or 0)
-            except (TypeError, ValueError):
-                max_id = 0
-
-            last_value = int(sequence_state["last_value"])
-            if max_id > last_value or (
-                max_id == last_value and not sequence_state["is_called"]
-            ):
-                backend.execute(
-                    "SELECT setval(%s, %s)",
-                    (qualified_sequence, max_id),
-                    connection=conn,
-                )
+        advance_postgres_serial(
+            backend,
+            conn,
+            table_name=table_name,
+            column_name=column_name,
+            sequence_schema=sequence_schema,
+            sequence_name=sequence_name,
+        )
 
 
 __all__ = [

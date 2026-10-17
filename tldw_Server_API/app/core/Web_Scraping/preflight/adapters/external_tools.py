@@ -76,7 +76,9 @@ class _LegacyExternalToolDefaultObserver:
     def _increment_legacy_default_metric(self) -> None:
         increment_counter = self._increment_counter
         if increment_counter is None:
-            from tldw_Server_API.app.core.Metrics import increment_counter
+            from tldw_Server_API.app.core.Metrics import increment_counter as default_increment_counter
+
+            increment_counter = default_increment_counter
 
         increment_counter(
             _LEGACY_DEFAULT_METRIC,

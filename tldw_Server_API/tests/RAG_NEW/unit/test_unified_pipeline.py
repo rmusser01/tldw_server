@@ -433,6 +433,7 @@ class TestUnifiedPipeline:
                     mock_reranker.rerank.assert_called_once()
                     # Documents should be reordered
                     docs = getattr(result, 'documents', None) if not isinstance(result, dict) else result.get('documents', [])
+                    assert isinstance(docs, list)
                     assert len(docs) <= 3
 
     @pytest.mark.asyncio
@@ -469,6 +470,7 @@ class TestUnifiedPipeline:
 
                         # Only non-sensitive document should be in results
                         docs = getattr(result, 'documents', None) if not isinstance(result, dict) else result.get('documents', [])
+                        assert isinstance(docs, list)
                         assert len(docs) == 1
                         first_id = docs[0]['id'] if docs and isinstance(docs[0], dict) else getattr(docs[0], 'id', None)
                         assert first_id == "1"
@@ -529,6 +531,7 @@ class TestUnifiedPipeline:
                     )
 
                     docs = getattr(result, 'documents', None) if not isinstance(result, dict) else result.get('documents', [])
+                    assert isinstance(docs, list)
                     errors = getattr(result, 'errors', None) if not isinstance(result, dict) else result.get('errors', [])
                     security_report = getattr(result, 'security_report', None) if not isinstance(result, dict) else result.get('security_report', {})
 
@@ -538,6 +541,7 @@ class TestUnifiedPipeline:
                         "retained_count": 1,
                     }
                     content = docs[0].get("content") if isinstance(docs[0], dict) else getattr(docs[0], "content", "")
+                    assert isinstance(content, str)
                     assert "[REDACTED]" in content
                     assert not any("Security filter failed" in err for err in (errors or []))
                     assert security_report == {"pii_detected": [[{"type": "person_name"}], [{"type": "person_name"}]]}
@@ -698,7 +702,7 @@ class TestUnifiedPipeline:
                     result = await unified_rag_pipeline(
                         query="test",
                         enable_citations=True,
-                        citation_style="academic"
+                        citation_style="apa"
                     )
 
                     citations = getattr(result, 'citations', None) if not isinstance(result, dict) else result.get('citations', {})
@@ -745,7 +749,9 @@ class TestUnifiedPipeline:
             )
 
             docs = getattr(result, 'documents', None) if not isinstance(result, dict) else result.get('documents', [])
+            assert isinstance(docs, list)
             metadata = getattr(result, 'metadata', None) if not isinstance(result, dict) else result.get('metadata', {})
+            assert isinstance(metadata, dict)
             chunk_citations = getattr(result, 'chunk_citations', None) if not isinstance(result, dict) else result.get('chunk_citations', [])
 
             assert len(docs) == 1
@@ -784,10 +790,13 @@ class TestUnifiedPipeline:
                 )
 
                 docs = getattr(result, 'documents', None) if not isinstance(result, dict) else result.get('documents', [])
+                assert isinstance(docs, list)
                 errors = getattr(result, 'errors', None) if not isinstance(result, dict) else result.get('errors', [])
                 first_doc = docs[0]
                 content = first_doc.get("content") if isinstance(first_doc, dict) else getattr(first_doc, "content", "")
+                assert isinstance(content, str)
                 metadata = first_doc.get("metadata") if isinstance(first_doc, dict) else getattr(first_doc, "metadata", {})
+                assert isinstance(metadata, dict)
 
                 assert "[Table serialized]" in content
                 assert metadata.get("table_metadata") == [{"rows": 1, "method": "hybrid"}]
@@ -819,9 +828,11 @@ class TestUnifiedPipeline:
             )
 
             docs = getattr(result, 'documents', None) if not isinstance(result, dict) else result.get('documents', [])
+            assert isinstance(docs, list)
             errors = getattr(result, 'errors', None) if not isinstance(result, dict) else result.get('errors', [])
             first_doc = docs[0]
             metadata = first_doc.get("metadata") if isinstance(first_doc, dict) else getattr(first_doc, "metadata", {})
+            assert isinstance(metadata, dict)
 
             assert metadata.get("highlighted")
             assert metadata.get("match_count", 0) > 0
@@ -864,7 +875,7 @@ class TestUnifiedPipeline:
 
             # Citation settings
             enable_citations=True,
-            citation_style="numeric",
+            citation_style="apa",
 
             # Analytics
             enable_analytics=True,
@@ -927,6 +938,7 @@ class TestUnifiedPipeline:
                 )
 
                 md = getattr(result, 'metadata', None) if not isinstance(result, dict) else result.get('metadata', {})
+                assert isinstance(md, dict)
                 for key, value in custom_metadata.items():
                     assert md.get(key) == value
 
@@ -971,6 +983,7 @@ class TestStreamingSupport:
                 ans = getattr(result, 'generated_answer', None) if not isinstance(result, dict) else result.get('generated_answer') or result.get('answer')
                 assert ans is None
                 md = getattr(result, 'metadata', None) if not isinstance(result, dict) else result.get('metadata', {})
+                assert isinstance(md, dict)
                 assert md.get("answer_generation_skipped") == "no_documents"
                 mock_generator_instance.generate.assert_not_awaited()
 

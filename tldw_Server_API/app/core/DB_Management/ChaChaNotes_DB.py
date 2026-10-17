@@ -53,16 +53,22 @@ from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from functools import wraps  # noqa: E402
 from pathlib import Path  # noqa: E402
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Protocol, TypeAlias  # noqa: E402
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Protocol, TypeAlias, overload  # noqa: E402
 
 from loguru import logger  # noqa: E402
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.api.v1.schemas.quizzes import OsceQuizExportV2
+    from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup
+    from tldw_Server_API.app.core.DB_Management.chacha.message_store import (
+        MAX_CHAT_ATTACHMENT_READ_BYTES,
+    )
+    from tldw_Server_API.app.core.DB_Management.chacha.moodboard_sync_store import GraphConnection
+    from tldw_Server_API.app.core.DB_Management.chacha.task_store import TaskConnection
     from tldw_Server_API.app.core.Sharing.clone_models import WorkspaceCloneSnapshot
 
 try:  # Prefer psycopg v3 sql helper, fall back to psycopg2 if available
-    from psycopg import sql as psycopg_sql  # type: ignore
+    from psycopg import sql as psycopg_sql
 except ImportError:  # pragma: no cover - compatibility fallback
     try:
         from psycopg2 import sql as psycopg_sql  # type: ignore
@@ -100,6 +106,9 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (  #
     build_web_clipper_rls_sql,
     build_workspace_source_saved_view_rls_sql,
 )
+from tldw_Server_API.app.core.DB_Management.backends.postgres_sequences import (  # noqa: E402
+    advance_postgres_serial,
+)
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noqa: E402
     normalise_params,
     prepare_backend_many_statement,
@@ -109,6 +118,7 @@ from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noq
 )
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend  # noqa: E402
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import (  # noqa: E402
+    ChaChaOperation,
     ClosedChaChaOperationError,
     ConnectionState,
     ExternalConnection,
@@ -544,7 +554,7 @@ class BackendCursorWrapper:
         self._adapter: BackendCursorAdapter | None = None
         self.rowcount: int = -1
         self.lastrowid: int | None = None
-        self.description = None
+        self.description: Sequence[Sequence[Any]] | None = None
 
     @_owned_wrapper_call
     def execute(self, query: str, params: tuple | list | dict | None = None):
@@ -672,14 +682,15 @@ class BackendConnectionWrapper:
     @property
     def in_transaction(self) -> bool:
         if self._backend.backend_type == BackendType.SQLITE:
-            return self._connection.in_transaction
+            in_transaction: bool = self._connection.in_transaction
+            return in_transaction
         state = self._operation_state
         if state is None and self._operation_owned:
             state = self._db._connection_state()
         status = getattr(getattr(self._connection, "info", None), "transaction_status", None)
         return bool(
             getattr(state, "tx_depth", 0)
-            or self._backend._tx_depth(self._connection)
+            or getattr(self._backend, "_tx_depth")(self._connection)  # noqa: B009 - lazy duck typing
             or getattr(status, "name", None) != "IDLE"
         )
 
@@ -709,7 +720,7 @@ class BackendManagedTransaction:
         self._db = db
         self._preserve_existing = preserve_existing
         self._raw_conn = None
-        self._wrapper = None
+        self._wrapper: BackendConnectionWrapper | None = None
         self._managed = False
         self._depth = 0
 
@@ -727,7 +738,7 @@ class BackendManagedTransaction:
                 self._managed = bool(
                     self._managed
                     and getattr(status, "name", None) == "IDLE"
-                    and backend._tx_depth(self._raw_conn) == 0
+                    and getattr(backend, "_tx_depth")(self._raw_conn) == 0  # noqa: B009 - lazy duck typing
                 )
             self._state.tx_depth = self._depth + 1
             self._wrapper = BackendConnectionWrapper(self._db, self._raw_conn, backend)
@@ -806,6 +817,169 @@ class CharactersRAGDB:
         db_path_str (str): String representation of the database path for SQLite connection.
     """
     if TYPE_CHECKING:
+
+        def add_character_card(self, card_data: dict[str, Any]) -> int | None: ...
+
+        def get_character_card_by_name(self, name: str, *, include_deleted: bool = False) -> dict[str, Any] | None: ...
+
+        def get_roleplay_resume_state(
+            self,
+            conversation_id: str,
+            *,
+            conn: Any | None = None,
+            lock_for_update: bool = False,
+            owner_client_id: str | None = None,
+        ) -> dict[str, Any]: ...
+
+        def add_conversation(
+            self,
+            conv_data: dict[str, Any],
+            *,
+            conn: Any | None = None,
+            assistant_startup: AssistantStartup | None = None,
+            create_request_fingerprint: str | None = None,
+        ) -> str | None: ...
+
+        def upsert_conversation_from_sync(
+            self,
+            *,
+            conversation_id: str,
+            title: str | None,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            root_id: str | None = None,
+            assistant_kind: str | None = None,
+            assistant_id: str | None = None,
+            character_id: int | str | None = None,
+            persona_memory_mode: str | None = None,
+            state: str | None = None,
+            topic_label: str | None = None,
+            cluster_id: str | None = None,
+            source: str | None = None,
+            external_ref: str | None = None,
+            rating: int | None = None,
+            scope_type: str | None = None,
+            workspace_id: str | None = None,
+        ) -> bool: ...
+
+        def tombstone_conversation_from_sync(
+            self, *, conversation_id: str, sync_client_id: str, object_revision: int, object_hash: str
+        ) -> bool: ...
+
+        def update_conversation(
+            self, conversation_id: str, update_data: dict[str, Any], expected_version: int
+        ) -> bool | None: ...
+
+        def restore_conversation(
+            self, conversation_id: str, expected_version: int, *, require_already_active: bool = False
+        ) -> bool | None: ...
+
+        def count_keywords(self) -> int: ...
+
+        def add_message(self, msg_data: dict[str, Any], *, conn: Any | None = None) -> str | None: ...
+
+        def append_message_from_sync(
+            self,
+            *,
+            stable_message_id: str,
+            conversation_id: str,
+            sender: str,
+            content: str | None,
+            timestamp: str | None,
+            sync_client_id: str,
+            object_revision: int,
+            payload_hash: str,
+            parent_message_id: str | None = None,
+            ranking: int | None = None,
+            projection_message_id: str | None = None,
+        ) -> dict[str, Any]: ...
+
+        def tombstone_message_from_sync(
+            self,
+            *,
+            stable_message_id: str,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            owner_client_id: str | None = None,
+        ) -> bool: ...
+
+        def tombstone_unsynced_message_from_sync(
+            self,
+            *,
+            stable_message_id: str,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+        ) -> str: ...
+
+        def get_message_by_id(
+            self, message_id: str, include_deleted: bool = False, *, strict_images: bool = False
+        ) -> dict[str, Any] | None: ...
+
+        def search_messages_by_content(
+            self, content_query: str, conversation_id: str | None = None, limit: int = 10, offset: int = 0
+        ) -> list[dict[str, Any]]: ...
+
+        def get_message_metadata(
+            self, message_id: str, *, conn: Any | None = None, strict: bool = False
+        ) -> dict[str, Any] | None: ...
+
+        def bind_local_moodboard_graph_to_dataset(
+            self, *, owner_user_id: str, target_dataset_id: str, conn: GraphConnection | None = None
+        ) -> dict[str, int]: ...
+
+        def bind_local_studio_graph_to_dataset(
+            self, *, owner_user_id: str, target_dataset_id: str, conn: GraphConnection | None = None
+        ) -> dict[str, int]: ...
+
+        def page_moodboards_for_sync_bootstrap(
+            self, *, owner_user_id: str, dataset_id: str, after_sync_id: str | None = None, limit: int = 100
+        ) -> list[dict[str, Any]]: ...
+
+        def page_moodboard_placements_for_sync_bootstrap(
+            self,
+            *,
+            owner_user_id: str,
+            dataset_id: str,
+            after_moodboard_sync_id: str | None = None,
+            after_note_id: str | None = None,
+            limit: int = 100,
+        ) -> list[dict[str, Any]]: ...
+
+        def page_studio_documents_for_sync_bootstrap(
+            self, *, owner_user_id: str, dataset_id: str, after_note_id: str | None = None, limit: int = 100
+        ) -> list[dict[str, Any]]: ...
+
+        def create_note_studio_document(
+            self,
+            *,
+            note_id: str,
+            payload_json: dict[str, Any],
+            template_type: str,
+            handwriting_mode: str,
+            source_note_id: str | None = None,
+            excerpt_snapshot: str | None = None,
+            excerpt_hash: str | None = None,
+            diagram_manifest_json: dict[str, Any] | None = None,
+            companion_content_hash: str | None = None,
+            render_version: int,
+            provenance_kind: str = "manual",
+            provenance_provider: str | None = None,
+            provenance_model: str | None = None,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        ) -> dict[str, Any]: ...
+
+        def create_persona_profile(self, profile_data: dict[str, Any]) -> str: ...
+
+        def resolve_task_compatibility_dataset_id(
+            self, *, owner_user_id: str, conn: TaskConnection | None = None
+        ) -> str: ...
+
+        def bind_local_task_graph_to_dataset(
+            self, *, owner_user_id: str, target_dataset_id: str, conn: TaskConnection | None = None
+        ) -> dict[str, int]: ...
         # Runtime methods below delegate to NoteStore and remain replaceable by callers.
         def add_note(
             self,
@@ -831,6 +1005,201 @@ class CharactersRAGDB:
             expected_version: int,
             conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
         ) -> bool | None: ...
+
+        def _ensure_conversation_settings_table(self, *, connection: Any | None = None) -> None: ...
+
+        def _ensure_persona_live_voice_session_summaries_table(self, *, connection: Any | None = None) -> None: ...
+
+        def add_keyword(self, keyword_text: str) -> int | None: ...
+
+        def add_keyword_collection(self, name: str, parent_id: int | None = None) -> int | None: ...
+
+        def add_message_metadata(
+            self, message_id: str, tool_calls: Any | None = None, extra: Any | None = None, *, conn: Any | None = None
+        ) -> bool: ...
+
+        def count_collection_keyword_links(self) -> int: ...
+
+        def count_conversation_keyword_links(self) -> int: ...
+
+        def count_deleted_notes(self) -> int: ...
+
+        def count_keyword_collections(self) -> int: ...
+
+        def count_note_titles_matching(self, search_term: str) -> int: ...
+
+        def count_notes(self, include_deleted: bool = False, only_deleted: bool = False) -> int: ...
+
+        def count_notes_matching_keywords(self, search_term: str | None, keyword_tokens: list[str]) -> int: ...
+
+        def get_conversation_by_id(
+            self, conversation_id: str, include_deleted: bool = False
+        ) -> dict[str, Any] | None: ...
+
+        def get_keyword_by_id(self, keyword_id: int) -> dict[str, Any] | None: ...
+
+        def get_keyword_by_text(self, keyword_text: str) -> dict[str, Any] | None: ...
+
+        def get_keyword_collection_by_id(self, collection_id: int) -> dict[str, Any] | None: ...
+
+        def get_keywords_for_collection(self, collection_id: int) -> list[dict[str, Any]]: ...
+
+        def get_keywords_for_conversation(self, conversation_id: str) -> list[dict[str, Any]]: ...
+
+        def get_keywords_for_note(self, note_id: str) -> list[dict[str, Any]]: ...
+
+        def get_keywords_for_notes(self, note_ids: list[str]) -> dict[str, list[dict[str, Any]]]: ...
+
+        def get_message_conversation_id(self, message_id: str) -> str | None: ...
+
+        def get_message_rag_context(self, message_id: str) -> dict[str, Any] | None: ...
+
+        def get_messages_for_conversation(
+            self,
+            conversation_id: str,
+            limit: int = 100,
+            offset: int = 0,
+            order_by_timestamp: str = "ASC",
+            include_deleted: bool = False,
+            *,
+            strict_images: bool = False,
+            image_byte_limit: int = MAX_CHAT_ATTACHMENT_READ_BYTES,
+        ) -> list[dict[str, Any]]: ...
+
+        def get_note_counts_for_keywords(self, keyword_ids: list[int] | None = None) -> dict[int, int]: ...
+
+        def get_note_studio_document(self, note_id: str) -> dict[str, Any] | None: ...
+
+        def get_notes_for_keyword(self, keyword_id: int, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]: ...
+
+        def hard_delete_conversation(self, conversation_id: str) -> bool: ...
+
+        def link_collection_to_keyword(self, collection_id: int, keyword_id: int) -> bool: ...
+
+        def link_conversation_to_keyword(self, conversation_id: str, keyword_id: int) -> bool: ...
+
+        def link_note_to_keyword(self, note_id: str, keyword_id: int) -> bool: ...
+
+        def list_collection_keyword_links(self, limit: int, offset: int) -> list[dict[str, Any]]: ...
+
+        def list_conversation_keyword_links(self, limit: int, offset: int) -> list[dict[str, Any]]: ...
+
+        def list_deleted_notes(
+            self,
+            limit: int = 100,
+            offset: int = 0,
+            sort_by: str = "last_modified",
+            sort_order: str = "desc",
+        ) -> list[dict[str, Any]]: ...
+
+        def list_keyword_collections(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]: ...
+
+        def list_keywords(self, limit: int = 100, offset: int = 0) -> list[dict[str, Any]]: ...
+
+        def list_notes(
+            self,
+            limit: int = 100,
+            offset: int = 0,
+            include_deleted: bool = False,
+            only_deleted: bool = False,
+            sort_by: str = "last_modified",
+            sort_order: str = "desc",
+        ) -> list[dict[str, Any]]: ...
+
+        def merge_keywords(
+            self,
+            *,
+            source_keyword_id: int,
+            target_keyword_id: int,
+            expected_source_version: int,
+            expected_target_version: int | None = None,
+        ) -> dict[str, Any]: ...
+
+        def rename_keyword(self, keyword_id: int, new_keyword_text: str, expected_version: int) -> dict[str, Any]: ...
+
+        def resolve_moodboard_compatibility_dataset_id(
+            self, *, owner_user_id: str, conn: sqlite3.Connection | BackendConnectionWrapper | None = None
+        ) -> str: ...
+
+        def resolve_studio_compatibility_dataset_id(
+            self, *, owner_user_id: str, conn: sqlite3.Connection | BackendConnectionWrapper | None = None
+        ) -> str: ...
+
+        def restore_note(self, note_id: str, expected_version: int) -> bool | None: ...
+
+        def search_keywords(self, search_term: str, limit: int = 10) -> list[dict[str, Any]]: ...
+
+        def search_note_titles(self, search_term: str, limit: int = 10, offset: int = 0) -> list[dict[str, Any]]: ...
+
+        def search_notes(
+            self, search_term: str, limit: int = 10, offset: int = 0, *, match_any: bool = False
+        ) -> list[dict[str, Any]]: ...
+
+        def search_notes_with_keywords(
+            self,
+            search_term: str | None,
+            keyword_tokens: list[str],
+            limit: int = 10,
+            offset: int = 0,
+        ) -> list[dict[str, Any]]: ...
+
+        def soft_delete_conversation(self, conversation_id: str, expected_version: int) -> bool | None: ...
+
+        def soft_delete_keyword(self, keyword_id: int, expected_version: int) -> bool: ...
+
+        def soft_delete_keyword_collection(self, collection_id: int, expected_version: int) -> bool: ...
+
+        def soft_delete_message(
+            self,
+            message_id: str,
+            expected_version: int,
+            *,
+            require_leaf: bool = False,
+            expected_revision: str | None = None,
+            conn: Any | None = None,
+        ) -> bool | None: ...
+
+        def soft_delete_note(self, note_id: str, expected_version: int) -> bool | None: ...
+
+        def tombstone_note_from_sync(
+            self,
+            *,
+            note_id: str,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        ) -> bool: ...
+
+        def unlink_collection_from_keyword(self, collection_id: int, keyword_id: int) -> bool: ...
+
+        def unlink_conversation_from_keyword(self, conversation_id: str, keyword_id: int) -> bool: ...
+
+        def unlink_note_from_keyword(self, note_id: str, keyword_id: int) -> bool: ...
+
+        def update_keyword_collection(
+            self, collection_id: int, update_data: dict[str, Any], expected_version: int
+        ) -> bool: ...
+
+        def update_message(
+            self, message_id: str, update_data: dict[str, Any], expected_version: int, *, conn: Any | None = None
+        ) -> bool | None: ...
+
+        def upsert_note_from_sync(
+            self,
+            *,
+            note_id: str,
+            title: str,
+            content: str,
+            conversation_id: str | None,
+            message_id: str | None,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            expected_product_version: int | None = None,
+            projection_timestamp: str | None = None,
+            conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+        ) -> bool: ...
 
     _CURRENT_SCHEMA_VERSION = 81  # Server-issued conversation source incarnation
     _POSTGRES_SCHEMA_VERSION = 85
@@ -8032,11 +8401,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def backend_type(self) -> BackendType:
         return self.backend.backend_type
 
+    @overload
+    def _prepare_backend_statement(
+        self,
+        query: str,
+        params: tuple | dict,
+    ) -> tuple[str, tuple | dict]: ...
+
+    @overload
     def _prepare_backend_statement(
         self,
         query: str,
         params: tuple | list | dict | None = None,
-    ) -> tuple[str, tuple | dict | None]:
+    ) -> tuple[str, tuple | list | dict | None]: ...
+
+    def _prepare_backend_statement(
+        self,
+        query: str,
+        params: tuple | list | dict | None = None,
+    ) -> tuple[str, tuple | list | dict | None]:
         return prepare_backend_statement(
             self.backend_type,
             query,
@@ -8050,8 +8433,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _prepare_backend_many_statement(
         self,
         query: str,
-        params_list: list[tuple | list | dict],
-    ) -> tuple[str, list[tuple | dict]]:
+        params_list: Sequence[tuple | list | dict],
+    ) -> tuple[str, list[tuple | list | dict]]:
         converted_query, prepared_params = prepare_backend_many_statement(
             self.backend_type,
             query,
@@ -8078,7 +8461,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         active_backend = backend or self.backend
         try:
             pool = active_backend.get_pool()
-            conn = pool.get_connection()
+            conn: RawBackendConnection = pool.get_connection()
             # Apply per-tenant session guard for PostgreSQL (RLS via current_setting('app.current_user_id'))
             if active_backend.backend_type == BackendType.POSTGRESQL and self.client_id:
                 conn = self._apply_postgres_client_scope(conn, pool)
@@ -8100,7 +8483,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         def _set_session(target) -> None:
             cur = target.cursor()
-            if psycopg_sql is not None:  # type: ignore[name-defined]
+            if psycopg_sql is not None:
                 statement = psycopg_sql.SQL(
                     "SELECT set_config('app.current_user_id', {}, false)"
                 ).format(psycopg_sql.Literal(user_value))
@@ -8112,11 +8495,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
 
         def _replace_connection(bad_conn: RawBackendConnection) -> RawBackendConnection:
-            with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                 bad_conn.close()
-            with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                 pool.return_connection(bad_conn)
-            return pool.get_connection()
+            replacement: RawBackendConnection = pool.get_connection()
+            return replacement
 
         def _safe_rollback(target, context: str) -> bool:
             try:
@@ -8238,7 +8622,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     try:
                         # Prefer public helper to clear thread-local connection state
                         if hasattr(pool, 'clear_thread_local_connection'):
-                            pool.clear_thread_local_connection()  # type: ignore[attr-defined]
+                            pool.clear_thread_local_connection()
                     except _CHACHA_NONCRITICAL_EXCEPTIONS:
                         # Best-effort; ignore if pool doesn't expose the helper
                         pass
@@ -8364,7 +8748,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 try:
                     pool = backend.get_pool()
                     if hasattr(pool, 'clear_thread_local_connection'):
-                        pool.clear_thread_local_connection()  # type: ignore[attr-defined]
+                        pool.clear_thread_local_connection()
                 except _CHACHA_NONCRITICAL_EXCEPTIONS:
                     pass
 
@@ -8381,7 +8765,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             and is_factory_managed_backend(self.backend)
         ):
             release_managed_backend(self.backend)
-            with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+            with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                 self._local = threading.local()
             return
 
@@ -8407,7 +8791,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 logger.warning("Error closing all backend connections for {}: {}", self.db_path_str, exc)
 
         # Reset thread-local reference regardless of backend
-        with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+        with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
             self._local = threading.local()
 
     def backup_database(self, backup_file_path: str) -> bool:
@@ -8771,7 +9155,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _sqlite_linear_migration_steps(self) -> dict[int, Callable[[sqlite3.Connection], None]]:
         """Return SQLite schema migrations keyed by their source schema version."""
-        steps = {
+        steps: dict[int, Callable[[sqlite3.Connection], None]] = {
             4: self._migrate_from_v4_to_v5,
             5: self._migrate_from_v5_to_v6,
             6: self._migrate_from_v6_to_v7,
@@ -11626,7 +12010,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if not directed and source_note_id > target_note_id:
             raise SchemaError("Notes link v58 undirected endpoints must use canonical order.")  # noqa: TRY003
 
-        weight_value = 1.0 if row.get("weight") is None else row.get("weight")
+        raw_weight = row.get("weight")
+        weight_value = 1.0 if raw_weight is None else raw_weight
         if isinstance(weight_value, bool):
             raise SchemaError("Notes link v58 weight is invalid.")  # noqa: TRY003
         try:
@@ -11688,7 +12073,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         }
 
     @staticmethod
-    def _validate_notes_link_v58_unique(rows: list[Mapping[str, Any]]) -> None:
+    def _validate_notes_link_v58_unique(rows: Sequence[Mapping[str, Any]]) -> None:
         """Fail closed when legacy rows collide under canonical logical identity."""
 
         identities: set[tuple[str, str, bool, str, str]] = set()
@@ -14012,10 +14397,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             }
             diagnostic_code = diagnostic_hash = None
             try:
-                payload = parse_notes_moodboard_note_v1(placement_payload_source)
-                placement_id = placement_object_id(payload)
+                placement_payload = parse_notes_moodboard_note_v1(
+                    placement_payload_source
+                )
+                placement_id = placement_object_id(placement_payload)
                 canonical_hash = notes_moodboard_note_object_hash(
-                    payload, revision=1, deleted=False
+                    placement_payload, revision=1, deleted=False
                 )
             except NotesMoodboardStudioContractError:
                 diagnostic = moodboard_studio_legacy_source_diagnostic(
@@ -14612,7 +14999,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _postgres_v61_phase_is_complete(self, conn: Any, phase: str) -> bool:
         """Return whether a durable metadata or verification phase completed."""
-        return self._postgres_v61_progress_row(conn, phase)["status"] == "complete"
+        phase_is_complete: bool = (
+            self._postgres_v61_progress_row(conn, phase)["status"] == "complete"
+        )
+        return phase_is_complete
 
     def _complete_postgres_v61_phase(self, conn: Any, phase: str) -> None:
         """Record a content-free completion marker in the migration transaction."""
@@ -17365,8 +17755,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     @classmethod
     def _verify_note_task_v59_authority_catalog(
         cls,
-        relation_rows: list[Mapping[str, Any]],
-        policy_rows: list[Mapping[str, Any]],
+        relation_rows: Sequence[Mapping[str, Any]],
+        policy_rows: Sequence[Mapping[str, Any]],
     ) -> tuple[str, ...]:
         """Verify the sole reviewed v59 authority/RLS state before migration DDL."""
         expected_relations = ("notes", *cls._NOTE_TASK_V60_TABLES[:-1])
@@ -17464,8 +17854,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             ).rows
         ]
         for row in read_states:
-            owner = event_owners.get(str(row.get("event_id")))
-            if owner is None or owner != str(row.get("user_id") or ""):
+            read_state_owner = event_owners.get(str(row.get("event_id")))
+            if read_state_owner is None or read_state_owner != str(
+                row.get("user_id") or ""
+            ):
                 raise SchemaError("Notes task v60 migration could not prove read-state ownership.")  # noqa: TRY003
 
         reconciliation = [
@@ -18667,6 +19059,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _repair_conversation_assistant_identity(self, conn: Any) -> None:
         """Repair only historical missing Character fields, comparing locked normalized bindings."""
+        repair_scope: contextlib.AbstractContextManager[ChaChaOperation | None]
         if self.backend_type == BackendType.POSTGRESQL:
             # Schema transactions own their checkout independently of a live request.
             repair_scope = chacha_operation(
@@ -19436,6 +19829,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def list_note_clipper_workspace_placements(self, clip_id: str) -> list[dict[str, Any]]:
         """Return active workspace placements for a clip."""
+        params: tuple[str, str, bool] | tuple[str, int]
         if self.backend_type == BackendType.POSTGRESQL:
             query = (
                 "SELECT clip_id, workspace_id, workspace_note_id, source_note_id, source_note_version "
@@ -21241,6 +21635,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         self._ensure_flashcard_fts_triggers_sqlite(conn)
                         self._ensure_character_cards_fts_triggers_sqlite(conn)
                         self._ensure_notes_fts_triggers_sqlite(conn)
+                        self._ensure_messages_fts_triggers_sqlite(conn)
                         self._ensure_recent_persona_schema_sqlite(conn)
                         self._ensure_recent_voice_command_schema_sqlite(conn)
                         self._ensure_note_folder_schema_sqlite(conn)
@@ -22032,6 +22427,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._ensure_flashcard_fts_triggers_sqlite(conn)
                 self._ensure_character_cards_fts_triggers_sqlite(conn)
                 self._ensure_notes_fts_triggers_sqlite(conn)
+                self._ensure_messages_fts_triggers_sqlite(conn)
                 # Seed/heal character_cards_fts before request traffic. Schema V4
                 # inserts "Default Assistant" before FTS triggers are created.
                 self._self_heal_character_cards_fts_sqlite(conn)
@@ -22199,6 +22595,30 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             )
         except sqlite3.Error as exc:
             raise SchemaError(f"Failed ensuring character_cards FTS triggers: {exc}") from exc  # noqa: TRY003
+
+    def _ensure_messages_fts_triggers_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Normalize message triggers so only indexed live rows relinquish FTS terms."""
+        try:
+            with TransactionContextManager(self):
+                conn.execute("DROP TRIGGER IF EXISTS messages_ai")
+                conn.execute("DROP TRIGGER IF EXISTS messages_au")
+                conn.execute("DROP TRIGGER IF EXISTS messages_ad")
+                conn.execute("""CREATE TRIGGER messages_ai AFTER INSERT ON messages BEGIN
+                    INSERT INTO messages_fts(rowid,content)
+                    SELECT new.rowid,new.content WHERE new.deleted = 0;
+                    END""")
+                conn.execute("""CREATE TRIGGER messages_au AFTER UPDATE ON messages BEGIN
+                    INSERT INTO messages_fts(messages_fts,rowid,content)
+                    SELECT 'delete',old.rowid,old.content WHERE old.deleted = 0;
+                    INSERT INTO messages_fts(rowid,content)
+                    SELECT new.rowid,new.content WHERE new.deleted = 0;
+                    END""")
+                conn.execute("""CREATE TRIGGER messages_ad AFTER DELETE ON messages BEGIN
+                    INSERT INTO messages_fts(messages_fts,rowid,content)
+                    SELECT 'delete',old.rowid,old.content WHERE old.deleted = 0;
+                    END""")
+        except sqlite3.Error as exc:
+            raise SchemaError(f"Failed ensuring messages FTS triggers: {exc}") from exc  # noqa: TRY003
 
     def _ensure_conversations_fts_triggers_sqlite(self, conn: sqlite3.Connection) -> None:
         """Normalize conversations FTS triggers to avoid invalid delete operations.
@@ -25780,7 +26200,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._verify_note_task_schema_postgres(conn, runtime=True)
         self._verify_notes_moodboard_studio_schema_postgres(conn)
         for fts_table, source_table, _ in self._FTS_CONFIG:
-            self.backend.register_fts_table(fts_table, self._map_table_for_backend(source_table))
+            # Required PostgreSQL capability stays lazy and bound before mapping each source.
+            register_fts_table: Callable[[str, str], None] = getattr(self.backend, "register_fts_table")  # noqa: B009
+            register_fts_table(fts_table, self._map_table_for_backend(source_table))
         self._runtime_schema_version = current_version
         return True
 
@@ -26438,7 +26860,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self.backend_type == BackendType.POSTGRESQL:
             try:
                 with self.transaction() as conn:
-                    raw_conn = conn._connection
+                    # The managed transaction supplies this required raw-connection capability.
+                    raw_conn: RawBackendConnection = getattr(conn, "_connection")  # noqa: B009
                     for fts_table, source_table, columns in self._FTS_CONFIG:
                         actual_source = self._map_table_for_backend(source_table)
                         self.backend.create_fts_table(
@@ -26670,6 +27093,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         try:
             rows: list[dict[str, Any]] = []
+            params: tuple[str] | tuple[str, int]
             if self.backend_type == BackendType.SQLITE:
                 query = "SELECT id, content, version FROM messages WHERE sender = ? AND deleted = 0"
                 params = ("assistant",)
@@ -26685,19 +27109,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     q += " LIMIT %s"
                     params = ("assistant", limit)
                 res = self.backend.execute(q, params)
-                fetched = res.fetchall()
-                # Convert to dicts (backend returns sequence rows)
+                fetched = res.rows
+                # The backend normalizes native result rows to named dictionaries.
                 for r in fetched:
-                    # Row maybe mapping or tuple; try subscripting by name first
-                    try:
-                        rows.append({"id": r[0], "content": r[1], "version": r[2]})
-                    except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                        with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
-                            rows.append({"id": r['id'], "content": r['content'], "version": r['version']})
+                    with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
+                        rows.append({"id": r["id"], "content": r["content"], "version": r["version"]})
 
             for row in rows:
                 counts["scanned"] += 1
                 mid = row.get('id')
+                if not isinstance(mid, str) or not mid:
+                    continue
                 content = row.get('content') or ""
                 version = row.get('version') or 1
                 extracted = _extract(content)
@@ -26907,10 +27329,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
 
     def _sync_postgres_sequences(self, conn) -> None:
-        """Ensure PostgreSQL sequences match current maxima for managed tables."""
+        """Advance managed PostgreSQL serials without reusing allocated IDs."""
 
         backend = self.backend
-        ident = backend.escape_identifier
 
         for table_name, column_name in self._POSTGRES_SEQUENCE_TABLES:
             try:
@@ -26920,43 +27341,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         continue
                 except _CHACHA_NONCRITICAL_EXCEPTIONS:
                     continue
-                seq_result = backend.execute(
-                    "SELECT pg_get_serial_sequence(%s, %s) AS seq",
+                sequence_rows = backend.execute(
+                    "SELECT ns.nspname AS sequence_schema, seq.relname AS sequence_name "
+                    "FROM pg_class seq JOIN pg_namespace ns ON ns.oid = seq.relnamespace "
+                    "WHERE seq.oid = pg_get_serial_sequence(%s, %s)::regclass",
                     (table_name, column_name),
                     connection=conn,
-                )
-                sequence_name = seq_result.scalar if seq_result else None
-                if not sequence_name:
+                ).rows
+                if not sequence_rows:
                     continue
-
-                max_result = backend.execute(
-                    (
-                        f"SELECT COALESCE(MAX({ident(column_name)}), 0) AS max_id "  # nosec B608
-                        f"FROM {ident(table_name)}"
-                    ),
-                    connection=conn,
+                sequence = sequence_rows[0]
+                advance_postgres_serial(
+                    backend,
+                    conn,
+                    table_name=table_name,
+                    column_name=column_name,
+                    sequence_schema=sequence["sequence_schema"],
+                    sequence_name=sequence["sequence_name"],
                 )
-
-                try:
-                    max_id = int(max_result.scalar or 0)
-                except (TypeError, ValueError):
-                    max_id = 0
-
-                if max_id <= 0:
-                    backend.execute(
-                        "SELECT setval(%s, %s, false)",
-                        (sequence_name, 1),
-                        connection=conn,
-                    )
-                else:
-                    backend.execute(
-                        "SELECT setval(%s, %s)",
-                        (sequence_name, max_id),
-                        connection=conn,
-                    )
             except BackendDatabaseError as exc:  # noqa: BLE001
                 logger.warning(
-                    'Failed to synchronize PostgreSQL sequence for {}.{}: {}',
+                    "Failed to synchronize PostgreSQL sequence for {}.{}: {}",
                     table_name,
                     column_name,
                     exc,
@@ -27132,7 +27537,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.warning(f"Record in {table_name} with {pk_col_name} = {pk_value} is soft-deleted.")
             raise ConflictError(f"Record is soft-deleted in {table_name}.", entity=table_name, entity_id=pk_value)  # noqa: TRY003
 
-        return row['version']
+        version: int = row["version"]
+        return version
 
     def _ensure_json_string(self, data: list | dict | set | None) -> str | None:
         """
@@ -27651,6 +28057,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._ensure_skill_registry_table()
         now = self._get_current_utc_timestamp_iso()
         next_version = expected_version + 1
+        params: tuple[str | int, ...]
         if directory_path is None:
             query = (
                 "UPDATE skill_registry SET deleted = ?, last_modified = ?, version = ? "
@@ -27963,7 +28370,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             logger.error(f"Database error restoring skill '{name}': {exc}")
             raise
 
-    def _deserialize_row_fields(self, row: sqlite3.Row, json_fields: list[str]) -> dict[str, Any] | None:
+    def _deserialize_row_fields(self, row: sqlite3.Row, json_fields: Sequence[str]) -> dict[str, Any] | None:
         """
         Converts a sqlite3.Row object to a dictionary, deserializing specified JSON fields.
 
@@ -27973,7 +28380,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         Args:
             row: The sqlite3.Row object to convert. If None, returns None.
-            json_fields: A list of field names that should be treated as JSON strings
+            json_fields: A sequence of field names that should be treated as JSON strings
                          and deserialized.
 
         Returns:
@@ -28697,7 +29104,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 pool = backend.get_pool()
                 connection = pool.get_connection()
                 connection.rollback()
-                backend.apply_and_verify_scope(
+                # Keep the required native capability lazy for duck-typed backends.
+                apply_and_verify_scope: Callable[..., None] = getattr(backend, "apply_and_verify_scope")  # noqa: B009
+                apply_and_verify_scope(
                     connection,
                     fallback_user_id=self.client_id,
                 )
@@ -28960,6 +29369,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if residual is not None:
             raise self._workspace_delete_incomplete(workspace_id)
         if not hard:
+            if expected_version is None:
+                raise self._workspace_delete_incomplete(workspace_id)
             cursor = conn.execute(
                 "UPDATE workspaces SET deleted = 1, last_modified = ?, version = ? "
                 "WHERE id = ? AND client_id = ? AND version = ? AND native_chat_admission_closed = ?",
@@ -29276,25 +29687,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conflict: dict[str, Any] | None = None
             workspace_found = False
             try:
-                conn = BackendConnectionWrapper(self, raw_conn, backend)
-                conn.execute(
+                fresh_pg_conn = BackendConnectionWrapper(self, raw_conn, backend)
+                fresh_pg_conn.execute(
                     "SELECT set_config('app.current_user_id', ?, true)",
                     (str(owner_user_id),),
                 )
-                workspace_found = conn.execute(
+                workspace_found = fresh_pg_conn.execute(
                     "SELECT id FROM workspaces WHERE id = ? AND client_id = ? AND deleted = ?",
                     (workspace_id, owner_user_id, self._workspace_active_deleted_value()),
                 ).fetchone() is not None
                 if workspace_found:
                     conflict = self._find_workspace_source_saved_view_name_with_conn(
-                        conn,
+                        fresh_pg_conn,
                         owner_user_id,
                         workspace_id,
                         name_key,
                     )
                 raw_conn.commit()
             except BaseException:
-                with contextlib.suppress(_CHACHA_NONCRITICAL_EXCEPTIONS):
+                with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
                     raw_conn.rollback()
                 raise
             finally:
@@ -29303,8 +29714,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise WorkspaceSourceSavedViewNotFoundError
             self._raise_workspace_source_saved_view_name_conflict(conflict)
 
-        with self.transaction() as conn:
-            conflict = find_scoped_conflict(conn)
+        with self.transaction() as transaction_conn:
+            conflict = find_scoped_conflict(transaction_conn)
         self._raise_workspace_source_saved_view_name_conflict(conflict)
 
     def create_workspace_source_saved_view(
@@ -30271,6 +30682,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return CharactersRAGDBError(f"Workspace file inventory write failed: {exc}")  # noqa: TRY003
 
     @staticmethod
+    @overload
+    def _workspace_file_inventory_int(value: Any, *, field_name: str, required: Literal[True]) -> int: ...
+
+    @staticmethod
+    @overload
+    def _workspace_file_inventory_int(value: Any, *, field_name: str, required: bool = False) -> int | None: ...
+
+    @staticmethod
     def _workspace_file_inventory_int(value: Any, *, field_name: str, required: bool = False) -> int | None:
         if value is None:
             if required:
@@ -31215,8 +31634,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if receipt is None:
                 continue
             try:
-                expected_byte_count = int(expected.get("byte_count"))
-                receipt_byte_count = int(receipt.get("byte_count"))
+                expected_byte_count_value = expected.get("byte_count")
+                receipt_byte_count_value = receipt.get("byte_count")
+                if expected_byte_count_value is None or receipt_byte_count_value is None:
+                    raise TypeError
+                expected_byte_count = int(expected_byte_count_value)
+                receipt_byte_count = int(receipt_byte_count_value)
             except (TypeError, ValueError):
                 mismatched.append(chunk_id)
                 continue
@@ -31258,7 +31681,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         sha256 = str(data.get("sha256") or "").strip().lower()
         chunk_kind = str(data.get("chunk_kind") or "workspace_bundle").strip()
         try:
-            byte_count = int(data.get("byte_count"))
+            byte_count_value = data.get("byte_count")
+            if byte_count_value is None:
+                raise TypeError
+            byte_count = int(byte_count_value)
         except (TypeError, ValueError) as exc:
             raise InputError("byte_count must be an integer.") from exc  # noqa: TRY003
         if not all((normalized_migration_id, normalized_chunk_id, sha256, chunk_kind)):
@@ -31289,7 +31715,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     entity_id=normalized_chunk_id,
                 )
             try:
-                expected_byte_count = int(expected.get("byte_count"))
+                expected_byte_count_value = expected.get("byte_count")
+                if expected_byte_count_value is None:
+                    raise TypeError
+                expected_byte_count = int(expected_byte_count_value)
             except (TypeError, ValueError) as exc:
                 raise ConflictError(  # noqa: TRY003
                     "Workspace migration chunk declaration has an invalid byte count.",
@@ -33875,6 +34304,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         # Add created_at for new inserts
         cols_str_list_insert = cols_str_list + ['created_at', 'last_modified', 'client_id', 'version', 'deleted']
+        deleted_value: bool | int
         if self.backend_type == BackendType.POSTGRESQL:
             placeholders_str_list_insert = placeholders_str_list + ['?', '?', '?', '?', '?']
             version_value = 1
@@ -33906,11 +34336,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     (main_col_value,) + owner_params)
                 existing_deleted = undelete_cursor.fetchone()
                 if existing_deleted:
-                    item_id, current_version = existing_deleted['id'], existing_deleted['version']
+                    item_id: int = existing_deleted["id"]
+                    current_version = existing_deleted["version"]
                     next_version = current_version + 1
 
                     update_set_parts = [f"{unique_col_name} = ?"]
-                    update_params_list = [main_col_value]
+                    update_params_list: list[object] = [main_col_value]
                     for i, col_db in enumerate(other_cols):
                         if col_db == "sync_id":
                             continue
@@ -34119,7 +34550,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         next_version_val = expected_version + 1
         current_fields_to_update_sql = list(fields_to_update_sql) # clone
-        current_params_for_set_clause = list(params_for_set_clause) # clone
+        current_params_for_set_clause: list[object] = list(params_for_set_clause) # clone
 
         current_fields_to_update_sql.extend(["last_modified = ?", "version = ?", "client_id = ?"])
         current_params_for_set_clause.extend([now, next_version_val, self.client_id])
@@ -34419,7 +34850,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = queries.get(category)
         if query is None:
             return 0
-        params = ()
+        params: tuple[str, ...] = ()
         if category == "world_books" and self.backend_type == BackendType.POSTGRESQL:
             query = "SELECT COUNT(*) AS count FROM world_books WHERE deleted = FALSE AND client_id = ?"
             params = (self.client_id,)
@@ -34453,7 +34884,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         query = queries.get(category)
         if query is None:
             return []
-        params = ()
+        params: tuple[str, ...] = ()
         if category == "world_books" and self.backend_type == BackendType.POSTGRESQL:
             query = "SELECT id FROM world_books WHERE deleted = FALSE AND client_id = ? ORDER BY id ASC"
             params = (self.client_id,)
@@ -34654,7 +35085,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             with self.transaction() as conn:
                 if not self._supports_notes_moodboard_studio_v61():
                     cursor = conn.execute(legacy_query, legacy_params)
-                    return int(cursor.lastrowid)
+                    legacy_moodboard_id = cursor.lastrowid
+                    if legacy_moodboard_id is None:
+                        raise CharactersRAGDBError("Failed to determine moodboard ID after insert.")  # noqa: TRY003
+                    return int(legacy_moodboard_id)
                 owner = str(self.client_id)
                 dataset = self.resolve_moodboard_compatibility_dataset_id(
                     owner_user_id=owner, conn=conn
@@ -34715,9 +35149,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     moodboard_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(query, params)
-                    moodboard_id = int(cursor.lastrowid)
+                    moodboard_id = cursor.lastrowid
                 if moodboard_id is None:
                     raise CharactersRAGDBError("Failed to determine moodboard ID after insert.")  # noqa: TRY003
+                moodboard_id = int(moodboard_id)
                 return moodboard_id
         except sqlite3.IntegrityError as exc:
             raise CharactersRAGDBError(f"Database integrity error adding moodboard: {exc}") from exc  # noqa: TRY003
@@ -34793,7 +35228,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 params.extend([limit, offset])
                 cursor = conn.execute(query, tuple(params))
                 rows = cursor.fetchall()
-                return [self._deserialize_moodboard_row(row) for row in rows if row]
+                return [item for row in rows if (item := self._deserialize_moodboard_row(row)) is not None]
         if only_deleted:
             predicates.append("deleted = ?")
             params.append(True if self.backend_type == BackendType.POSTGRESQL else 1)
@@ -34810,7 +35245,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         params.extend([limit, offset])
         cursor = self.execute_query(query, tuple(params))
         rows = cursor.fetchall()
-        return [self._deserialize_moodboard_row(row) for row in rows if row]
+        return [item for row in rows if (item := self._deserialize_moodboard_row(row)) is not None]
 
     def count_moodboards(
         self,
@@ -35650,16 +36085,16 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                             f"INSERT OR IGNORE INTO {link_table} ({col1_name}, {col2_name}, created_at) "
                             "VALUES (?, ?, ?)"
                         )
-                    params = (col1_val, col2_val, now_iso)
-                    cursor = conn.execute(query, params)
+                    link_params = (col1_val, col2_val, now_iso)
+                    cursor = conn.execute(query, link_params)
                     rows_affected = cursor.rowcount
                     if rows_affected > 0:  # Link was actually created
                         log_sync_entry = True
                         sync_payload_dict = {col1_name: col1_val, col2_name: col2_val, 'created_at': now_iso}
                 elif operation == "unlink":
                     query = f"DELETE FROM {link_table} WHERE {col1_name} = ? AND {col2_name} = ?"  # nosec B608
-                    params = (col1_val, col2_val)
-                    cursor = conn.execute(query, params)
+                    unlink_params = (col1_val, col2_val)
+                    cursor = conn.execute(query, unlink_params)
                     rows_affected = cursor.rowcount
                     if rows_affected > 0:  # Link was actually deleted
                         log_sync_entry = True
@@ -36018,10 +36453,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 existing_ids: set[int] = set()
                 for row in existing_rows:
                     record = self._coerce_mapping_row(row) or {}
-                    folder_id = record.get("folder_id")
-                    if folder_id is None:
+                    existing_folder_id = record.get("folder_id")
+                    if existing_folder_id is None:
                         continue
-                    existing_ids.add(int(folder_id))
+                    existing_ids.add(int(existing_folder_id))
                 desired_ids = {folder_id for _, folder_id in desired_pairs}
                 desired_keys = {
                     canonical_key
@@ -36235,6 +36670,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if target_deck_id is not None and parent_id == target_deck_id:
             raise InputError("Deck cannot be its own parent")  # noqa: TRY003
 
+        owner_params: tuple[str, ...]
         if self.backend_type == BackendType.POSTGRESQL:
             parent_lookup_query = (
                 "SELECT id, parent_deck_id FROM decks WHERE id = ? AND deleted = 0 AND client_id = ? FOR UPDATE"
@@ -36374,7 +36810,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     "name, description, parent_deck_id, workspace_id, visibility, review_prompt_side, scheduler_settings_json, scheduler_type, created_at, last_modified, client_id, version, deleted"
                     ") VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
                 )
-                params = (
+                insert_params = (
                     name,
                     description,
                     parent_for_insert,
@@ -36391,16 +36827,17 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 )
 
                 if self.backend_type == BackendType.POSTGRESQL:
-                    cursor = conn.execute(insert_sql + " RETURNING id", params)
+                    cursor = conn.execute(insert_sql + " RETURNING id", insert_params)
                     row = cursor.fetchone()
-                    deck_id = int(row["id"]) if row else None
+                    inserted_deck_id = int(row["id"]) if row else None
                 else:
-                    cursor = conn.execute(insert_sql, params)
-                    deck_id = int(cursor.lastrowid)
+                    cursor = conn.execute(insert_sql, insert_params)
+                    inserted_deck_id = cursor.lastrowid
 
-                if deck_id is None:
+                if inserted_deck_id is None:
                     raise CharactersRAGDBError("Failed to determine deck ID after insert")  # noqa: TRY003
-                return deck_id
+                inserted_deck_id = int(inserted_deck_id)
+                return inserted_deck_id
         except sqlite3.IntegrityError as e:
             if "UNIQUE constraint failed: decks.name" in str(e):
                 raise ConflictError("Deck name already exists", entity="decks", identifier=name) from e  # noqa: TRY003
@@ -36455,7 +36892,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         owner_filter, owner_params = self._flashcard_owner_filter()
         query = select_sql + "WHERE 1 = 1" + owner_filter
-        params = list(owner_params)
+        params: list[str | int] = list(owner_params)
         if not include_deleted:
             query += " AND deleted = 0"
         if workspace_id is not None:
@@ -36586,7 +37023,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def list_deck_shares(self, deck_id: int) -> list[dict[str, Any]]:
         """List all per-user share records for a deck owned by this DB."""
         owner_filter = ""
-        owner_params = ()
+        owner_params: tuple[str, ...] = ()
         if self.backend_type == BackendType.POSTGRESQL:
             owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
             owner_params = (self.client_id,)
@@ -36608,7 +37045,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def get_deck_share(self, deck_id: int, *, user_id: int) -> dict[str, Any] | None:
         """Fetch one per-user share record for a deck owned by this DB."""
         owner_filter = ""
-        owner_params = ()
+        owner_params: tuple[str, ...] = ()
         if self.backend_type == BackendType.POSTGRESQL:
             owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
             owner_params = (self.client_id,)
@@ -36630,7 +37067,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def delete_deck_share(self, deck_id: int, *, user_id: int) -> bool:
         """Remove one per-user share record from a deck owned by this DB."""
         owner_filter = ""
-        owner_params = ()
+        owner_params: tuple[str, ...] = ()
         if self.backend_type == BackendType.POSTGRESQL:
             owner_filter = " AND EXISTS (SELECT 1 FROM decks d WHERE d.id = deck_shares.deck_id AND d.client_id = ?)"
             owner_params = (self.client_id,)
@@ -36988,13 +37425,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if self.backend_type == BackendType.POSTGRESQL:
                     cursor = conn.execute(insert_sql + " RETURNING id", params)
                     row = cursor.fetchone()
-                    template_id = int(row["id"]) if row else None
+                    inserted_template_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    template_id = int(cursor.lastrowid)
-                if template_id is None:
+                    inserted_template_id = cursor.lastrowid
+                if inserted_template_id is None:
                     raise CharactersRAGDBError("Failed to determine flashcard template ID after insert")  # noqa: TRY003
-                return template_id
+                inserted_template_id = int(inserted_template_id)
+                return inserted_template_id
         except sqlite3.IntegrityError as exc:
             if "UNIQUE constraint failed: flashcard_templates.name" in str(exc):
                 raise ConflictError(
@@ -38459,7 +38897,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 card_id = int(card["id"])
                 card_deck_id = int(card["deck_id"]) if card["deck_id"] is not None else None
                 explicit_scope = review_mode is not None
-                scope_mode = self._normalize_flashcard_review_mode(review_mode if explicit_scope else "due")
+                scope_mode = self._normalize_flashcard_review_mode(review_mode if review_mode is not None else "due")
                 scope_deck_id = review_deck_id if explicit_scope else card_deck_id
                 scope_tag = self._normalize_nullable_text(review_tag_filter) if explicit_scope else None
                 scope_key = (
@@ -39236,14 +39674,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         }
         # ensure keywords exist and collect ids
         desired_kw_ids = set()
+        keyword_id: int | None
         for t in tags:
             if self.backend_type == BackendType.POSTGRESQL:
-                kid = self._flashcard_owned_keyword_id(conn, t)
+                keyword_id = self._flashcard_owned_keyword_id(conn, t)
             else:
                 kw = self.get_keyword_by_text(t)
-                kid = self.add_keyword(t) if not kw else kw['id']
-            if kid is not None:
-                desired_kw_ids.add(int(kid))
+                keyword_id = self.add_keyword(t) if not kw else kw["id"]
+            if keyword_id is not None:
+                desired_kw_ids.add(int(keyword_id))
         # link missing
         insert_ts = self._get_current_utc_timestamp_iso()
         for kid in desired_kw_ids - cur_kw_ids:
@@ -39293,9 +39732,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     def _source_review_timestamp_value(value: Any) -> str:
         """Serialize computed due timestamps consistently for both backends."""
         if isinstance(value, datetime):
-            if value.tzinfo is None:
-                value = value.replace(tzinfo=timezone.utc)
-            return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+            timestamp: datetime = value
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            return timestamp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
         return str(value)
 
     def create_source_review_plan(
@@ -39793,10 +40233,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     pack_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    pack_id = int(cursor.lastrowid)
+                    pack_id = cursor.lastrowid
 
                 if pack_id is None:
                     raise CharactersRAGDBError("Failed to determine study pack ID after insert")  # noqa: TRY003
+                pack_id = int(pack_id)
                 return pack_id
         except sqlite3.Error as exc:
             raise CharactersRAGDBError(f"Failed to create study pack: {exc}") from exc  # noqa: TRY003
@@ -40065,9 +40506,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """  # nosec B608
         cursor = self.execute_query(query, (anchor_type, anchor_id, *owner_params))
         return [
-            self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)
+            item
             for row in cursor.fetchall()
-            if row
+            if (item := self._deserialize_row_fields(row, self._SUGGESTION_SNAPSHOT_JSON_FIELDS)) is not None
         ]
 
     def _suggestion_link_owner_filter(self) -> tuple[str, tuple[str, ...]]:
@@ -41135,11 +41576,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             except (TypeError, ValueError):
                 return "0"
         if question_type == "multi_select":
-            normalized = self._normalize_multi_select_indices(correct_answer)
-            return json.dumps(normalized, ensure_ascii=True)
+            normalized_indices = self._normalize_multi_select_indices(correct_answer)
+            return json.dumps(normalized_indices, ensure_ascii=True)
         if question_type == "matching":
-            normalized = self._normalize_matching_map(correct_answer)
-            return json.dumps(normalized, ensure_ascii=True, sort_keys=True)
+            normalized_matching = self._normalize_matching_map(correct_answer)
+            return json.dumps(normalized_matching, ensure_ascii=True, sort_keys=True)
         if question_type == "true_false":
             val = str(correct_answer).strip().lower()
             return "true" if val in {"true", "1", "yes", "y"} else "false"
@@ -41341,7 +41782,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     @staticmethod
     def _normalize_osce_station_content(content: Any) -> dict[str, Any]:
         if hasattr(content, "model_dump"):
-            payload = content.model_dump(mode="json")
+            payload: dict[str, Any] = content.model_dump(mode="json")
         elif isinstance(content, Mapping):
             payload = dict(content)
         else:
@@ -42316,9 +42757,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     quiz_row = conn.execute(insert_quiz_sql + " RETURNING id", quiz_params).fetchone()
                     quiz_id = int(quiz_row["id"]) if quiz_row else None
                 else:
-                    quiz_id = int(conn.execute(insert_quiz_sql, quiz_params).lastrowid)
+                    quiz_id = conn.execute(insert_quiz_sql, quiz_params).lastrowid
                 if quiz_id is None:
                     raise CharactersRAGDBError("Failed to determine quiz ID after insert")  # noqa: TRY003
+                quiz_id = int(quiz_id)
 
                 station_ids = [
                     self._insert_osce_station_row(conn, quiz_id, station, now=now)
@@ -42369,7 +42811,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         from tldw_Server_API.app.services.osce_practice import materialize_station_content
 
         validated = OsceQuizExportV2.model_validate(entry)
-        stations = [
+        stations: list[dict[str, object]] = [
             {
                 "content": materialize_station_content(station.content),
                 "order_index": station.order_index,
@@ -42460,9 +42902,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     quiz_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    quiz_id = int(cursor.lastrowid)
+                    quiz_id = cursor.lastrowid
                 if quiz_id is None:
                     raise CharactersRAGDBError("Failed to determine quiz ID after insert")  # noqa: TRY003
+                quiz_id = int(quiz_id)
                 return quiz_id
         except sqlite3.Error as e:
             raise CharactersRAGDBError(f"Failed to create quiz: {e}") from e  # noqa: TRY003
@@ -42818,9 +43261,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     question_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    question_id = int(cursor.lastrowid)
+                    question_id = cursor.lastrowid
                 if question_id is None:
                     raise CharactersRAGDBError("Failed to determine question ID after insert")  # noqa: TRY003
+                question_id = int(question_id)
                 self._recount_quiz_questions(conn, quiz_id)
                 return question_id
         except sqlite3.Error as e:
@@ -42836,6 +43280,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
     ) -> dict[str, Any] | None:
         """Get question by ID."""
         self._reject_question_for_osce_quiz(question_id, quiz_id)
+        params: tuple[int | str, ...]
         if self.backend_type == BackendType.POSTGRESQL:
             deleted_clause = "" if include_deleted else "AND qq.deleted = FALSE"
             parent_clause = " AND qq.quiz_id = ?" if quiz_id is not None else ""
@@ -42895,7 +43340,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if self.backend_type == BackendType.POSTGRESQL:
                 tsquery = FTSQueryTranslator.normalize_query(q, 'postgresql')
                 if not tsquery:
-                    return []
+                    return {"items": [], "count": 0}
                 fts_filter = "AND quiz_questions_fts_tsv @@ to_tsquery('english', ?)"
                 params.append(tsquery)
             else:
@@ -43154,9 +43599,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     attempt_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    attempt_id = int(cursor.lastrowid)
+                    attempt_id = cursor.lastrowid
                 if attempt_id is None:
                     raise CharactersRAGDBError("Failed to determine attempt ID after insert")  # noqa: TRY003
+                attempt_id = int(attempt_id)
                 return {
                     "id": attempt_id,
                     "quiz_id": quiz_id,
@@ -43310,6 +43756,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         include_answers: bool = False,
     ) -> dict[str, Any] | None:
         """Get attempt with full answer breakdown."""
+        params: tuple[int | str, ...]
         if self.backend_type == BackendType.POSTGRESQL:
             query = (
                 "SELECT qa.id, qa.quiz_id, qa.started_at, qa.completed_at, qa.score, "
@@ -43676,9 +44123,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                         conversion_id = int(row["id"]) if row else None
                     else:
                         cursor = conn.execute(insert_sql, insert_params)
-                        conversion_id = int(cursor.lastrowid)
+                        conversion_id = cursor.lastrowid
                     if conversion_id is None:
                         raise CharactersRAGDBError("Failed to determine remediation conversion ID after insert")  # noqa: TRY003
+                    conversion_id = int(conversion_id)
 
                     if previous_active and replace_active:
                         conn.execute(
@@ -43786,9 +44234,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     conversion_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    conversion_id = int(cursor.lastrowid)
+                    conversion_id = cursor.lastrowid
                 if conversion_id is None:
                     raise CharactersRAGDBError("Failed to determine remediation conversion ID after insert")  # noqa: TRY003
+                conversion_id = int(conversion_id)
             created = self.execute_query(
                 "SELECT id, attempt_id, quiz_id, question_id, status, superseded_by_id, "
                 "target_deck_id, target_deck_name_snapshot, flashcard_count, flashcard_uuids_json, "
@@ -43971,9 +44420,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     thread_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, params)
-                    thread_id = int(cursor.lastrowid)
+                    thread_id = cursor.lastrowid
                 if thread_id is None:
                     raise CharactersRAGDBError("Failed to determine study assistant thread ID after insert")  # noqa: TRY003
+                thread_id = int(thread_id)
         except sqlite3.IntegrityError as exc:
             if not self._is_unique_violation(exc):
                 raise CharactersRAGDBError(f"Failed to create study assistant thread: {exc}") from exc  # noqa: TRY003
@@ -44103,10 +44553,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     message_id = int(row["id"]) if row else None
                 else:
                     cursor = conn.execute(insert_sql, insert_params)
-                    message_id = int(cursor.lastrowid)
+                    message_id = cursor.lastrowid
 
                 if message_id is None:
                     raise CharactersRAGDBError("Failed to determine study assistant message ID after insert")  # noqa: TRY003
+                message_id = int(message_id)
 
                 thread_update_params: tuple[Any, ...]
                 thread_update_sql = (
@@ -44158,7 +44609,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         correct = question.get("correct_answer")
         if q_type == "multiple_choice":
             try:
-                return int(user_answer) == int(correct)
+                user_index = int(user_answer)
+                if correct is None:
+                    return False
+                return user_index == int(correct)
             except (TypeError, ValueError):
                 return False
         if q_type == "multi_select":
@@ -44413,6 +44867,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         version_parent_id = self._normalize_nullable_text(version_parent_id)
+        params: tuple[str, str, str, int, str | None, str, str, bool | int, str, int]
         if self.backend_type == BackendType.POSTGRESQL:
             params = (
                 final_id,

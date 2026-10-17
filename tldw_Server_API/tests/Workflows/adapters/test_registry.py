@@ -20,6 +20,7 @@ def test_all_adapters_have_config_models():
     missing = []
     for name in registry.list_adapters():
         spec = registry.get_spec(name)
+        assert spec is not None, f"{name} missing registry spec"
         if spec.config_model is None:
             missing.append(name)
 
@@ -84,6 +85,7 @@ def test_adapter_spec_has_required_fields():
 
     for name in registry.list_adapters():
         spec = registry.get_spec(name)
+        assert spec is not None, f"{name} missing registry spec"
         assert spec.name == name
         assert spec.category, f"{name} missing category"
         assert spec.description, f"{name} missing description"
@@ -98,6 +100,7 @@ def test_adapter_functions_are_async():
 
     for name in registry.list_adapters():
         spec = registry.get_spec(name)
+        assert spec is not None, f"{name} missing registry spec"
         assert asyncio.iscoroutinefunction(spec.func), f"{name} is not an async function"
 
 
@@ -123,3 +126,28 @@ def test_backward_compatible_imports():
     assert callable(run_branch_adapter)
     assert callable(run_map_adapter)
     assert callable(run_rag_search_adapter)
+
+
+def test_register_preserves_function_identity_and_loads_once():
+    from typing import Any
+
+    from tldw_Server_API.app.core.Workflows.adapters._registry import AdapterRegistry
+
+    registry = AdapterRegistry()
+    loads = []
+
+    async def adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+        return config
+
+    def load() -> None:
+        loads.append(True)
+        registered = registry.register("identity-probe")(adapter)
+        assert registered is adapter
+
+    registry.set_loader(load)
+    assert loads == []
+    assert registry.get_adapter("identity-probe") is adapter
+    spec = registry.get_spec("identity-probe")
+    assert spec is not None
+    assert spec.func is adapter
+    assert loads == [True]

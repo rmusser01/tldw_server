@@ -17,11 +17,16 @@ import React from "react"
 import { I18nextProvider } from "react-i18next"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { fetchNotesGraph } from "@/services/note-graph-suggestions"
+
 import commonEn from "../../../assets/locale/en/common.json"
 import optionEn from "../../../assets/locale/en/option.json"
 import ICUWithInterpolation from "../../../i18n/icu-format"
 import NotesGraphWorkspace from "../NotesGraphWorkspace"
-import { useNotesGraphWorkspace } from "../hooks/useNotesGraphWorkspace"
+import {
+  notesGraphWorkspaceQueryKey,
+  useNotesGraphWorkspace
+} from "../hooks/useNotesGraphWorkspace"
 
 const { request } = vi.hoisted(() => ({ request: vi.fn() }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: request }))
@@ -134,6 +139,49 @@ afterEach(() => {
 })
 
 describe("Notes Graph permission boundary", () => {
+  it.each([403, 500])(
+    "classifies an existing service%s query error on an offline mount",
+    async (status) => {
+      request.mockRejectedValue(failure(status))
+      const { client, wrapper } = hookWorkspace()
+      const queryKey = [
+        ...notesGraphWorkspaceQueryKey,
+        "alice",
+        null,
+        "focused",
+        "a",
+        "a",
+        1,
+        120,
+        480
+      ] as const
+      await expect(
+        client.fetchQuery({
+          queryKey,
+          queryFn: () => fetchNotesGraph({ centerNoteId: "a" }),
+          retry: false,
+          gcTime: Infinity
+        })
+      ).rejects.toMatchObject({ status })
+      const view = renderHook(
+        () =>
+          useNotesGraphWorkspace({
+            authorityScope: "alice",
+            enabled: true,
+            isOnline: false,
+            initialFocusNoteId: "a"
+          }),
+        { wrapper }
+      )
+      expect(view.result.current.graphQuery.error).toMatchObject({ status })
+      expect(view.result.current.isPermissionDenied).toBe(status === 403)
+      expect(view.result.current.graph).toBeNull()
+      expect(view.result.current.searchResults).toEqual([])
+      expect(view.result.current.canExpand).toBe(false)
+      expect(request).toHaveBeenCalledTimes(1)
+    }
+  )
+
   it("explains the actual service403 without claiming an empty graph or rendering server diagnostics", async () => {
     request.mockRejectedValue(failure(403))
     await setup()

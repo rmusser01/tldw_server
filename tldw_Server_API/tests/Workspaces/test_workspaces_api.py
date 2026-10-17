@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from httpx import Response
+from httpx2 import Response
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
@@ -20,7 +20,7 @@ from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
 )
 from tldw_Server_API.app.api.v1.endpoints import workspaces as workspaces_endpoint
 from tldw_Server_API.app.api.v1.API_Deps.jobs_deps import get_job_manager
-from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
+from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -340,7 +340,7 @@ class TestWorkspaceLifecycle:
 
 
 @pytest.mark.integration
-def test_workspace_api_accepts_and_returns_study_materials_policy(workspace_fastapi_app, db):
+def test_workspace_api_accepts_and_returns_study_materials_policy(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
         WORKSPACES_READ_RATE_LIMIT,
         WORKSPACES_WRITE_RATE_LIMIT,
@@ -424,7 +424,7 @@ def test_delete_workspace_invokes_sharing_cleanup_hook(
         cleanup_calls.append((workspace_id, owner_user_id))
 
     db.upsert_workspace("ws-delete-hook", "Delete Hook")
-    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=1, username="owner")
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
     monkeypatch.setattr(
@@ -459,7 +459,7 @@ def test_delete_workspace_cleanup_failure_log_includes_context(
 
     fake_logger = MagicMock()
     db.upsert_workspace("ws-delete-log", "Delete Log")
-    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=1, username="owner")
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
     monkeypatch.setattr(workspaces_endpoint, "on_workspace_deleted", _fail_cleanup)
@@ -633,7 +633,7 @@ def test_workspace_api_rejects_confirmation_only_patch(workspace_fastapi_app, db
 
 
 @pytest.mark.integration
-def test_workspace_root_endpoints_happy_path(workspace_fastapi_app, db):
+def test_workspace_root_endpoints_happy_path(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -1651,7 +1651,7 @@ def test_delete_workspace_maps_conflict_to_409(workspace_fastapi_app):
     async def _allow_rate_limit() -> None:
         return None
 
-    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=1, username="owner")
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _ConflictDB()
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
     try:
@@ -1706,7 +1706,7 @@ def test_delete_workspace_maps_database_error_to_contextual_500(workspace_fastap
     async def _allow_rate_limit() -> None:
         return None
 
-    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=1, username="owner")
     workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: _DatabaseErrorDB()
     workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = _allow_rate_limit
     try:
@@ -1760,7 +1760,7 @@ def test_update_workspace_source_maps_input_error_to_400(workspace_fastapi_app):
 
 
 @pytest.mark.integration
-def test_workspace_artifact_endpoints_happy_path(workspace_fastapi_app, db):
+def test_workspace_artifact_endpoints_happy_path(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -1865,11 +1865,13 @@ def test_workspace_artifact_redaction_schema_requires_typed_posture():
     )
 
     with pytest.raises(ValidationError):
-        WorkspaceArtifactCreateRequest(
-            id="brief-1",
-            artifact_type="workspace_brief",
-            title="Brief",
-            redaction={"support_safe": "yes", "redacted": False},
+        WorkspaceArtifactCreateRequest.model_validate(
+            {
+                "id": "brief-1",
+                "artifact_type": "workspace_brief",
+                "title": "Brief",
+                "redaction": {"support_safe": "yes", "redacted": False},
+            }
         )
 
     schema = WorkspaceArtifactResponse.model_json_schema()
@@ -1880,7 +1882,9 @@ def test_workspace_artifact_redaction_schema_requires_typed_posture():
 
 
 @pytest.mark.integration
-def test_workspace_artifact_export_accepted_version_preserves_identity_and_refs(workspace_fastapi_app, db):
+def test_workspace_artifact_export_accepted_version_preserves_identity_and_refs(
+    workspace_fastapi_app, db: CharactersRAGDB
+):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -1988,7 +1992,7 @@ def test_workspace_artifact_export_accepted_version_preserves_identity_and_refs(
 
 
 @pytest.mark.integration
-def test_workspace_artifact_export_missing_version_snapshot_fails_loudly(workspace_fastapi_app, db):
+def test_workspace_artifact_export_missing_version_snapshot_fails_loudly(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -2050,7 +2054,7 @@ def test_workspace_artifact_export_missing_version_snapshot_fails_loudly(workspa
 
 
 @pytest.mark.integration
-def test_workspace_artifact_export_rejects_non_accepted_state(workspace_fastapi_app, db):
+def test_workspace_artifact_export_rejects_non_accepted_state(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -2106,7 +2110,7 @@ def test_workspace_artifact_export_rejects_non_accepted_state(workspace_fastapi_
 
 
 @pytest.mark.integration
-def test_workspace_artifact_export_rejects_placeholder_generated_artifact(workspace_fastapi_app, db):
+def test_workspace_artifact_export_rejects_placeholder_generated_artifact(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -2162,7 +2166,7 @@ def test_workspace_artifact_export_rejects_placeholder_generated_artifact(worksp
 
 
 @pytest.mark.integration
-def test_workspace_artifact_api_exposes_traceable_contract_fields(workspace_fastapi_app, db):
+def test_workspace_artifact_api_exposes_traceable_contract_fields(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -2416,7 +2420,7 @@ def test_update_workspace_note_maps_input_error_to_400(workspace_fastapi_app):
 
 
 @pytest.mark.integration
-def test_workspace_note_endpoints_happy_path(workspace_fastapi_app, db):
+def test_workspace_note_endpoints_happy_path(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -2587,7 +2591,7 @@ def test_delete_workspace_note_maps_database_error_to_contextual_500(workspace_f
 
 
 @pytest.mark.integration
-def test_workspace_source_endpoints_happy_path(workspace_fastapi_app, db):
+def test_workspace_source_endpoints_happy_path(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -2985,3 +2989,39 @@ def test_reorder_workspace_sources_maps_database_error_to_contextual_500(workspa
 
     assert response.status_code == 500, response.text
     assert response.json()["detail"] == "Failed to reorder workspace sources"
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("owner_id", [1, "1", "tenant-private-id"])
+def test_delete_workspace_validates_sharing_owner_before_mutation(workspace_fastapi_app, db, monkeypatch, owner_id):
+    async def allow_rate_limit() -> None:
+        return None
+
+    cleanup_calls = []
+
+    async def record_cleanup(workspace_id: str, owner_user_id: int) -> None:
+        cleanup_calls.append((workspace_id, owner_user_id))
+
+    workspace_id = "ws-delete-owner-contract"
+    db.upsert_workspace(workspace_id, "Owner contract")
+    workspace_fastapi_app.dependency_overrides[get_request_user] = lambda: User(id=owner_id, username="owner")
+    workspace_fastapi_app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    workspace_fastapi_app.dependency_overrides[WORKSPACES_DELETE_RATE_LIMIT] = allow_rate_limit
+    monkeypatch.setattr(workspaces_endpoint, "on_workspace_deleted", record_cleanup)
+    try:
+        with TestClient(workspace_fastapi_app, raise_server_exceptions=False) as client:
+            response = client.delete(f"/api/v1/workspaces/{workspace_id}")
+    finally:
+        workspace_fastapi_app.dependency_overrides.pop(get_request_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(get_chacha_db_for_user, None)
+        workspace_fastapi_app.dependency_overrides.pop(WORKSPACES_DELETE_RATE_LIMIT, None)
+
+    if owner_id == "tenant-private-id":
+        assert response.status_code == 400, response.text
+        assert response.json() == {"detail": "invalid_user_id"}
+        assert db.get_workspace(workspace_id) is not None
+        assert cleanup_calls == []
+    else:
+        assert response.status_code == 204, response.text
+        assert cleanup_calls == [(workspace_id, 1)]
+        assert db.get_workspace(workspace_id) is None

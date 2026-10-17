@@ -4,7 +4,8 @@ import type { HistoryBookmark } from "../../../packages/ui/src/db/dexie/types";
 /**
  * /chat cockpit real-server parity checks.
  *
- * This spec intentionally does not stub or fulfill backend routes. It verifies
+ * This spec uses real backend responses. The MCP race regression defers one
+ * unchanged native response across a Close press; it does not stub tools. It verifies
  * the /chat cockpit and focus layouts against the live tldw server configured
  * by TLDW_E2E_SERVER_URL/TLDW_E2E_API_KEY.
  */
@@ -17,6 +18,7 @@ import {
   type Page,
   type Request,
   type Response,
+  type Route,
 } from '@playwright/test';
 import { captureAllApiCalls, type CapturedApiCall } from '../utils/api-assertions';
 import { waitForStreamComplete } from '../utils/journey-helpers';
@@ -2586,6 +2588,119 @@ test.describe('/chat cockpit real-server parity', () => {
     await expectMobileDraftPreserved();
     await expect(mobileRails.getByRole('region', { name: 'Chat settings', exact: true })).toBeVisible();
     await assertNoHorizontalOverflow(page);
+  });
+
+  test('keeps mobile cockpit panels and focus composer usable against the live server while MCP tools arrive during a Close press', async ({
+    page,
+    request,
+  }) => {
+    test.setTimeout(120_000);
+    let releaseTools!: () => void;
+    const toolDelivery = new Promise<void>((resolve) => {
+      releaseTools = resolve;
+    });
+    const deliveries: Promise<void>[] = [];
+    let nativeToolResponses = 0;
+    let nativeToolStatus: number | null = null;
+    const executePattern = '**/api/v1/mcp/tools/execute';
+    const deferToolDelivery = (route: Route) => {
+      const delivery = (async () => {
+        const request = route.request();
+        if (request.method() !== 'POST' || request.postDataJSON()?.tool_name !== 'mcp.tools.list') {
+          await route.fallback();
+          return;
+        }
+        const response = await route.fetch();
+        nativeToolStatus = response.status();
+        nativeToolResponses += 1;
+        await toolDelivery;
+        await route.fulfill({ response });
+      })();
+      deliveries.push(delivery);
+      return delivery;
+    };
+    await page.route(executePattern, deferToolDelivery);
+    try {
+      assertHealthResponse(await apiGet(request, '/api/v1/health'));
+      const selectedModel = await getConfiguredChatModelSelection(request);
+      await seedRealServerConfig(page, {
+        selectedModel,
+        cockpitLayout: {
+          mode: 'cockpit',
+          contextRailVisible: true,
+          runtimeRailVisible: true,
+          mobilePanel: 'runtime',
+        },
+      });
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+      await assertNoBlockingServerDialog(page);
+      const rails = await waitForMobileCockpitPanel(page, 'runtime');
+      const runtimePanel = rails.getByRole('region', { name: 'Chat settings', exact: true });
+      const draft = 'Keep this draft while MCP tools arrive.';
+      await fillEditableComposer(page, draft);
+      await waitForPlaygroundDraftSaved(page);
+      const trigger = runtimePanel.getByRole('button', { name: 'Configure MCP tools' });
+      await trigger.click();
+      const dialog = page.getByRole('dialog', { name: 'MCP tool settings' });
+      const close = dialog
+        .getByTestId('mcp-settings-modal-footer')
+        .getByRole('button', { name: 'Close' });
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByText('Loading tools...', { exact: true }).first()).toBeVisible();
+      await expect(dialog).not.toHaveClass(/ant-zoom-(?:appear|enter)/);
+      await expect.poll(() => nativeToolResponses).toBe(1);
+      expect(nativeToolStatus).toBe(200);
+      await close.scrollIntoViewIfNeeded();
+      const before = await close.boundingBox();
+      expect(before).not.toBeNull();
+      await page.mouse.move(before!.x + before!.width / 2, before!.y + before!.height / 2);
+      await page.mouse.down();
+      releaseTools();
+      await expect(dialog.getByTestId('mcp-tool-selector').getByRole('switch').first()).toBeVisible();
+      await page.mouse.up();
+      await expect(dialog).toBeHidden();
+      await expect(page.getByTestId('chat-input')).toHaveValue(draft);
+      await expect(trigger).toBeFocused();
+
+      await page.setViewportSize({ width: 390, height: 600 });
+      await trigger.click();
+      await expect(dialog).toBeVisible();
+      await expect(dialog).not.toHaveClass(/ant-zoom-(?:appear|enter)/);
+      const shortViewportClose = await close.boundingBox();
+      expect(shortViewportClose).not.toBeNull();
+      expect(shortViewportClose!.y).toBeGreaterThanOrEqual(0);
+      expect(shortViewportClose!.y + shortViewportClose!.height).toBeLessThanOrEqual(600);
+      const body = dialog.locator('.ant-modal-body');
+      expect(await body.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(
+        true
+      );
+      await body.hover({ position: { x: 1, y: 1 } });
+      await page.mouse.wheel(0, 10_000);
+      await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+      await close.focus();
+      await close.press('Enter');
+      await expect(dialog).toBeHidden();
+      await expect(page.getByTestId('chat-input')).toHaveValue(draft);
+      await trigger.click();
+      await expect(dialog).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(dialog).toBeHidden();
+      await expect(page.getByTestId('chat-input')).toHaveValue(draft);
+    } finally {
+      releaseTools();
+      const cleanup = await Promise.allSettled([
+        page.mouse.up(),
+        page.unroute(executePattern, deferToolDelivery),
+        ...deliveries,
+      ]);
+      expect
+        .soft(
+          cleanup.map((result) => result.status),
+          'native MCP response delivery cleanup'
+        )
+        .not.toContain('rejected');
+    }
   });
 
   test('reserves composer space below runtime rails on a short mobile viewport', async ({ page, request }) => {

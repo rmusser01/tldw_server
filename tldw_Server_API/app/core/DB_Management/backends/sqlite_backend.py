@@ -13,7 +13,7 @@ import threading
 import time
 import urllib.parse as _url
 import weakref
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -147,7 +147,8 @@ class SQLiteConnectionPool(ConnectionPool):
                 else:
                     self._local.connection = self._connections[thread_id]
 
-        return self._local.connection
+        connection: sqlite3.Connection = self._local.connection
+        return connection
 
     def _create_connection(self) -> sqlite3.Connection:
         """Create a new SQLite connection with optimal settings."""
@@ -452,14 +453,13 @@ class SQLiteBackend(DatabaseBackend):
     def execute(
         self,
         query: str,
-        params: Optional[Union[tuple, dict]] = None,
+        params: Optional[Union[tuple, list, dict]] = None,
         connection: Optional[sqlite3.Connection] = None,
         *,
         log_errors: bool = True,
     ) -> QueryResult:
         """Execute a query and return results."""
         start_time = time.time()
-        redacted_failure = False
         constraint_failure = False
         unique_failure = False
         contention_failure = False
@@ -495,7 +495,6 @@ class SQLiteBackend(DatabaseBackend):
             logger.bind(exception_type=type(e).__name__).error(
                 "SQLite query execution failed"
             )
-            redacted_failure = True
             # The CLASS of failure only. sqlite3.IntegrityError covers CHECK, NOT NULL,
             # FOREIGN KEY and UNIQUE. The raise stays outside this except block so the
             # driver exception is never chained; the message is unchanged.
@@ -506,19 +505,18 @@ class SQLiteBackend(DatabaseBackend):
             )
             contention_failure = is_sqlite_locked_error(e)
 
-        if redacted_failure:
-            if unique_failure:
-                raise UniqueConstraintError("SQLite query execution failed")
-            if constraint_failure:
-                raise ConstraintViolationError("SQLite query execution failed")
-            if contention_failure:
-                raise TransientContentionError("SQLite query execution failed")
-            raise DatabaseError("SQLite query execution failed")
+        if unique_failure:
+            raise UniqueConstraintError("SQLite query execution failed")
+        if constraint_failure:
+            raise ConstraintViolationError("SQLite query execution failed")
+        if contention_failure:
+            raise TransientContentionError("SQLite query execution failed")
+        raise DatabaseError("SQLite query execution failed")
 
     def execute_many(
         self,
         query: str,
-        params_list: list[Union[tuple, dict]],
+        params_list: Sequence[Union[tuple, list, dict]],
         connection: Optional[sqlite3.Connection] = None
     ) -> QueryResult:
         """Execute a query multiple times with different parameters."""
@@ -802,7 +800,8 @@ class SQLiteBackend(DatabaseBackend):
     def get_last_insert_id(self, connection: Optional[sqlite3.Connection] = None) -> Optional[int]:
         """Get the last inserted row ID."""
         result = self.execute("SELECT last_insert_rowid()", connection=connection)
-        return result.scalar
+        last_insert_id: int | None = result.scalar
+        return last_insert_id
 
     def vacuum(self, connection: Optional[sqlite3.Connection] = None) -> None:
         """Vacuum the SQLite database."""

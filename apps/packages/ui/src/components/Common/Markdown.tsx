@@ -162,6 +162,7 @@ export function Markdown({
   allowExternalImages,
   richTextModeOverride,
   headingAnchorIds,
+  enableCodeArtifactActions = true,
   enableMermaidDiagrams = false,
   enableMermaidArtifactActions = false,
   artifactContextId,
@@ -173,6 +174,7 @@ export function Markdown({
   allowExternalImages?: boolean
   richTextModeOverride?: ChatRichTextMode
   headingAnchorIds?: string[]
+  enableCodeArtifactActions?: boolean
   enableMermaidDiagrams?: boolean
   enableMermaidArtifactActions?: boolean
   artifactContextId?: string
@@ -504,7 +506,14 @@ export function Markdown({
                 </div>
               )
             }
-            return <CodeBlock language={match ? match[1] : ""} value={value} blockIndex={blockIndex} />
+            return (
+              <CodeBlock
+                language={match ? match[1] : ""}
+                value={value}
+                blockIndex={blockIndex}
+                enableArtifactAction={enableCodeArtifactActions}
+              />
+            )
           },
           code({ className, children, ...props }) {
             const mergedClassName = className ? `${className} font-semibold` : "font-semibold"

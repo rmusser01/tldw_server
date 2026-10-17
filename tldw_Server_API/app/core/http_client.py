@@ -23,6 +23,7 @@ import os  # noqa: E402
 import re  # noqa: E402
 import socket  # noqa: E402
 import ssl  # noqa: E402
+import sys  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
 from collections.abc import (  # noqa: E402
@@ -39,7 +40,7 @@ from dataclasses import dataclass  # noqa: E402
 from functools import wraps  # noqa: E402
 from pathlib import Path  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
-from typing import Any, Protocol, TypedDict, TypeVar  # noqa: E402
+from typing import TYPE_CHECKING, Any, Literal, ParamSpec, Protocol, TypedDict, TypeVar, overload  # noqa: E402
 from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit  # noqa: E402
 
 from loguru import logger  # noqa: E402
@@ -71,20 +72,23 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     aiohttp = None  # type: ignore
 
-try:
+if sys.version_info >= (3, 11):
     from asyncio import timeout as _stream_timeout
-except ImportError:  # pragma: no cover - Python 3.10 compatibility
-    from async_timeout import timeout as _stream_timeout
+else:  # pragma: no cover - Python 3.10 compatibility
+    from async_timeout import timeout as _legacy_stream_timeout
+
+    _stream_timeout = _legacy_stream_timeout
 
 try:  # Optional OpenTelemetry traceparent injection
-    from opentelemetry import trace as _otel_trace  # type: ignore
+    from opentelemetry import trace as _otel_trace
+
     _OTEL_AVAILABLE = True
 except ImportError:  # pragma: no cover
     _OTEL_AVAILABLE = False
     _otel_trace = None  # type: ignore
 
 try:  # Optional OpenTelemetry HTTP auto-instrumentation suppression
-    from opentelemetry import context as _otel_context  # type: ignore
+    from opentelemetry import context as _otel_context
 except ImportError:  # pragma: no cover
     _otel_context = None  # type: ignore
 
@@ -95,9 +99,12 @@ _OTEL_HTTP_SUPPRESSION_KEY = getattr(
 )
 
 _StreamItem = TypeVar("_StreamItem")
+_Client = TypeVar("_Client")
+_Result = TypeVar("_Result")
+_Params = ParamSpec("_Params")
 
 try:  # Optional public OpenTelemetry suppression helper
-    from opentelemetry.instrumentation.utils import (  # type: ignore
+    from opentelemetry.instrumentation.utils import (
         suppress_http_instrumentation as _suppress_http_instrumentation,
     )
 except ImportError:  # pragma: no cover - optional dependency
@@ -196,7 +203,7 @@ _STREAM_CLEANUP_TRANSPORT_EXCEPTIONS = (
 
 try:
     # Python 3.8+/backport safe import
-    from importlib import metadata as _importlib_metadata  # type: ignore
+    from importlib import metadata as _importlib_metadata
 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:  # pragma: no cover
     _importlib_metadata = None  # type: ignore
 
@@ -210,7 +217,7 @@ def _resolve_httpx():
         import importlib
         return importlib.import_module("httpx")
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-        return httpx  # type: ignore
+        return httpx
 
 
 def _resolve_curl_session():
@@ -238,12 +245,7 @@ DEFAULT_MAX_REDIRECTS = int(os.getenv("HTTP_MAX_REDIRECTS", "5"))
 DEFAULT_TRUST_ENV = is_truthy(os.getenv("HTTP_TRUST_ENV", "false"))
 DEFAULT_USER_AGENT = os.getenv("HTTP_DEFAULT_USER_AGENT", "tldw_server httpx")
 PROXY_ALLOWLIST = {h.strip().lower() for h in (os.getenv("PROXY_ALLOWLIST", "").split(",")) if h.strip()}
-ENFORCE_TLS_MIN = (
-    os.getenv("HTTP_ENFORCE_TLS_MIN")
-    or os.getenv("TLS_ENFORCE_MIN_VERSION")
-    or "false"
-)
-ENFORCE_TLS_MIN = is_truthy(str(ENFORCE_TLS_MIN))
+ENFORCE_TLS_MIN = is_truthy(os.getenv("HTTP_ENFORCE_TLS_MIN") or os.getenv("TLS_ENFORCE_MIN_VERSION") or "false")
 TLS_MIN_VERSION = (os.getenv("HTTP_TLS_MIN_VERSION") or os.getenv("TLS_MIN_VERSION") or "1.2").strip()
 _SENSITIVE_OBSERVABILITY_URL = "https://sensitive-endpoint.invalid"
 _SENSITIVE_HTTP_LOG_CONTEXT = contextvars.ContextVar(
@@ -318,11 +320,11 @@ def sensitive_http_observability_context() -> Iterator[None]:
 
 
 def _with_sensitive_http_log_context(
-    function: Callable[..., httpx.Response],
-) -> Callable[..., httpx.Response]:
+    function: Callable[_Params, _Result],
+) -> Callable[_Params, _Result]:
     """Activate sensitive logging before any request validation runs."""
     @wraps(function)
-    def wrapped(*args: Any, **kwargs: Any) -> httpx.Response:
+    def wrapped(*args: _Params.args, **kwargs: _Params.kwargs) -> _Result:
         if kwargs.get("sensitive_observability") is not True:
             return function(*args, **kwargs)
         with sensitive_http_observability_context():
@@ -421,7 +423,7 @@ async def _iterate_sensitive_http_items(
     stream: AsyncIterator[_StreamItem],
     *,
     enabled: bool,
-) -> AsyncIterator[_StreamItem]:
+) -> AsyncGenerator[_StreamItem, None]:
     """Advance a sensitive stream inside request-local scopes, never across yield."""
     iterator = stream.__aiter__()
     enabled = _effective_sensitive_observability(enabled)
@@ -440,6 +442,7 @@ async def _iterate_sensitive_http_items(
         if close is not None:
             async with _sensitive_http_stream_context(enabled):
                 await close()
+
 
 _OPAQUE_STT_ENDPOINT_ID_RE = re.compile(
     r"^sha256:[0-9a-f]{64}$"
@@ -600,11 +603,16 @@ def build_limits(
     if not kwargs:
         return None
     try:
-        return _hx.Limits(**kwargs)
+        if TYPE_CHECKING:
+            limits_factory = httpx.Limits
+        else:
+            limits_factory = _hx.Limits
+        return limits_factory(**kwargs)
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
         return None
 
 
+_PROJECT_VERSION_EXCEPTIONS: tuple[type[BaseException], ...] = (ImportError,) + _HTTPCLIENT_NONCRITICAL_EXCEPTIONS
 _CACHED_VERSION: str | None = None
 
 
@@ -620,11 +628,11 @@ def _get_project_version() -> str:
     # 2) Try package metadata if installed
     try:
         if _importlib_metadata is not None:
-            _CACHED_VERSION = _importlib_metadata.version("tldw-server")  # type: ignore[attr-defined]
+            _CACHED_VERSION = _importlib_metadata.version("tldw-server")
             if _CACHED_VERSION:
                 return _CACHED_VERSION
     # PackageNotFoundError (not pip-installed, e.g. a source checkout) is an ImportError.
-    except (ImportError, *_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+    except _PROJECT_VERSION_EXCEPTIONS:
         pass
     # 3) Fallback: parse pyproject.toml in repo root
     try:
@@ -668,7 +676,7 @@ async def _capture_error_body_hook_async(response: httpx.Response) -> None:
             try:
                 await response.aread()
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-                with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     response.read()
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
         pass
@@ -686,7 +694,7 @@ def _register_http_client_metrics_once() -> None:
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
         return
     # Register http-client-specific metrics if not present
-    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
         reg.register_metric(
             MetricDefinition(
                 name="http_client_requests_total",
@@ -695,7 +703,7 @@ def _register_http_client_metrics_once() -> None:
                 labels=["method", "host", "status"],
             )
         )
-    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
         reg.register_metric(
             MetricDefinition(
                 name="http_client_request_duration_seconds",
@@ -706,7 +714,7 @@ def _register_http_client_metrics_once() -> None:
                 buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30],
             )
         )
-    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
         reg.register_metric(
             MetricDefinition(
                 name="http_client_retries_total",
@@ -715,7 +723,7 @@ def _register_http_client_metrics_once() -> None:
                 labels=["reason"],
             )
         )
-    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
         reg.register_metric(
             MetricDefinition(
                 name="http_client_egress_denials_total",
@@ -727,7 +735,7 @@ def _register_http_client_metrics_once() -> None:
     _HTTP_CLIENT_METRICS_REGISTERED = True
 
 # Ensure metrics are registered on import
-with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
     _register_http_client_metrics_once()
 
 
@@ -812,7 +820,7 @@ class _AiohttpResponse:
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
             pass
 
-    async def aiter_bytes(self, chunk_size: int = 65536) -> AsyncIterator[bytes]:
+    async def aiter_bytes(self, chunk_size: int = 65536) -> AsyncGenerator[bytes, None]:
         if not self._body:
             return
         for idx in range(0, len(self._body), chunk_size):
@@ -824,24 +832,36 @@ class _AiohttpResponse:
 # --------------------------------------------------------------------------------------
 
 class SyncResponseLike(Protocol):
-    status_code: int
-    headers: dict[str, Any]
-    url: str
-    text: str
+
+    @property
+    def status_code(self) -> int: ...
+    @property
+    def headers(self) -> Mapping[str, str]: ...
+    @property
+    def url(self) -> str | httpx.URL: ...
+    @property
+    def text(self) -> str: ...
 
     def json(self) -> Any: ...
-    def raise_for_status(self) -> None: ...
+    def raise_for_status(self) -> httpx.Response | None: ...
+
     def close(self) -> None: ...
 
 
 class AsyncResponseLike(Protocol):
-    status_code: int
-    headers: dict[str, Any]
-    url: str
-    text: str
+
+    @property
+    def status_code(self) -> int: ...
+    @property
+    def headers(self) -> Mapping[str, str]: ...
+    @property
+    def url(self) -> str | httpx.URL: ...
+    @property
+    def text(self) -> str: ...
 
     def json(self) -> Any: ...
-    def raise_for_status(self) -> None: ...
+    def raise_for_status(self) -> httpx.Response | None: ...
+
     async def aclose(self) -> None: ...
 
 
@@ -892,7 +912,7 @@ class TransportAdapter(Protocol):
         max_response_bytes: int | None = None,
     ) -> AsyncResponseLike: ...
 
-    async def stream_bytes(
+    def stream_bytes(
         self,
         *,
         method: str,
@@ -915,7 +935,7 @@ class TransportAdapter(Protocol):
         verify: bool | str | ssl.SSLContext | None = None,
     ) -> AsyncIterator[bytes]: ...
 
-    async def stream_sse(
+    def stream_sse(
         self,
         *,
         url: str,
@@ -1041,7 +1061,7 @@ class HttpxAdapter:
         on_response: ResponseHeadersCallback | None = None,
         raise_for_status: bool = True,
         verify: bool | str | ssl.SSLContext | None = None,
-    ) -> AsyncIterator[bytes]:
+    ) -> AsyncGenerator[bytes, None]:
         stream = _astream_bytes_httpx(
             method=method,
             url=url,
@@ -1087,7 +1107,7 @@ class HttpxAdapter:
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
-    ) -> AsyncIterator[SSEEvent]:
+    ) -> AsyncGenerator[SSEEvent, None]:
         stream = _astream_sse_httpx(
             url=url,
             method=method,
@@ -1184,7 +1204,7 @@ class AiohttpAdapter:
         on_response: ResponseHeadersCallback | None = None,
         raise_for_status: bool = True,
         verify: bool | str | ssl.SSLContext | None = None,
-    ) -> AsyncIterator[bytes]:
+    ) -> AsyncGenerator[bytes, None]:
         stream = _astream_bytes_aiohttp(
             method=method,
             url=url,
@@ -1230,7 +1250,7 @@ class AiohttpAdapter:
         retry: RetryPolicy | None = None,
         cert_pinning: dict[str, set[str]] | None = None,
         sensitive_observability: bool = False,
-    ) -> AsyncIterator[SSEEvent]:
+    ) -> AsyncGenerator[SSEEvent, None]:
         stream = _astream_sse_aiohttp(
             url=url,
             method=method,
@@ -1426,7 +1446,7 @@ def _close_simple_response(response: Any) -> None:
     """Best-effort close for simple fetch streaming responses."""
     close = getattr(response, "close", None)
     if callable(close):
-        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             close()
 
 
@@ -1702,7 +1722,7 @@ def _prepare_pinned_transport_target(
 
 def _restore_httpx_response_url(response: Any, original_url: str) -> None:
     """Keep the caller-visible request URL and redirect base on the logical origin."""
-    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
         response.request.url = httpx.URL(original_url)
 
 
@@ -1726,7 +1746,7 @@ def _inject_trace_headers(headers: dict[str, str] | None) -> dict[str, str]:
             span = _otel_trace.get_current_span()
             if span is not None:
                 ctx = span.get_span_context()
-                if ctx and getattr(ctx, "trace_id", 0):
+                if ctx and ctx.trace_id:
                     trace_id = format(ctx.trace_id, "032x")
                     span_id = format(ctx.span_id, "016x")
                     out.setdefault("traceparent", f"00-{trace_id}-{span_id}-01")
@@ -1764,7 +1784,7 @@ def _validate_egress_or_raise(
     # accurate.
     block_override: bool | None = None
     host = ""
-    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
         host = ((_urlparse(url).hostname or "").strip())
     if is_explicit_pytest_runtime() or env_flag_enabled("TESTING") or is_test_mode():
         try:
@@ -1809,7 +1829,7 @@ def _validate_egress_or_raise(
     if not getattr(res, "allowed", False):
         reason = res.reason or "URL not allowed by egress policy"
         # metrics
-        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             get_metrics_registry().increment(
                 "http_client_egress_denials_total",
                 1,
@@ -1850,12 +1870,10 @@ def _is_url_allowed(url: str) -> bool:
     """
     try:
         from tldw_Server_API.app.core.Security.egress import evaluate_url_policy
-        policy_kwargs = (
-            {"sensitive_observability": True}
-            if _effective_sensitive_observability()
-            else {}
-        )
-        res = evaluate_url_policy(url, **policy_kwargs)
+        if _effective_sensitive_observability():
+            res = evaluate_url_policy(url, sensitive_observability=True)
+        else:
+            res = evaluate_url_policy(url)
         return bool(getattr(res, "allowed", False))
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
         # Fail closed in strict paths; the simple path's callers expect explicit
@@ -1955,6 +1973,16 @@ def _is_cross_origin(original_url: str, target_url: str) -> bool:
     return original != target
 
 
+@overload
+def _strip_sensitive_headers_for_cross_origin(
+    headers: dict[str, str], *, original_url: str, target_url: str
+) -> dict[str, str]: ...
+
+
+@overload
+def _strip_sensitive_headers_for_cross_origin(headers: None, *, original_url: str, target_url: str) -> None: ...
+
+
 def _strip_sensitive_headers_for_cross_origin(
     headers: dict[str, str] | None,
     *,
@@ -2020,7 +2048,7 @@ def _clear_client_cookie_jar(client: Any) -> None:
             continue
         clear = getattr(store, "clear", None)
         if callable(clear):
-            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 clear()
             continue
         if isinstance(store, dict):
@@ -2053,7 +2081,7 @@ def _is_aiohttp_client(client: Any) -> bool:
         return False
 
 
-def _network_error_classification(exc: BaseException) -> str | None:
+def _network_error_classification(exc: BaseException) -> Literal["timeout"] | None:
     """Return stable transport-error metadata without parsing exception text."""
     if isinstance(exc, (TimeoutError, asyncio.TimeoutError)):
         return "timeout"
@@ -2112,7 +2140,7 @@ def _aiohttp_ssl_from_verify(verify: Any | None) -> Any | None:
         try:
             ctx = ssl.create_default_context(cafile=verify)
             if ENFORCE_TLS_MIN:
-                with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     ctx.minimum_version = _tls_min_version_from_str(TLS_MIN_VERSION)
             return ctx  # noqa: TRY300
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
@@ -2120,10 +2148,10 @@ def _aiohttp_ssl_from_verify(verify: Any | None) -> Any | None:
     return _build_ssl_context(ENFORCE_TLS_MIN, TLS_MIN_VERSION)
 
 
-_AIOHTTP_SESSION_CACHE: dict[int, Any] = {}
+_AIOHTTP_SESSION_CACHE: dict[int, aiohttp.ClientSession] = {}
 _AIOHTTP_SESSION_LOCK = threading.Lock()
-_HTTPX_ASYNC_CLIENT_CACHE: dict[tuple[int, Any], Any] = {}
-_HTTPX_CLIENT_CACHE: dict[Any, Any] = {}
+_HTTPX_ASYNC_CLIENT_CACHE: dict[tuple[int, Any], httpx.AsyncClient] = {}
+_HTTPX_CLIENT_CACHE: dict[Any, httpx.Client] = {}
 _HTTPX_CLIENT_LOCK = threading.Lock()
 
 
@@ -2209,7 +2237,7 @@ def _get_aiohttp_session() -> aiohttp.ClientSession:
             connector = aiohttp.TCPConnector(
                 limit=int(os.getenv("HTTP_MAX_CONNECTIONS", "100")),
                 limit_per_host=int(os.getenv("HTTP_MAX_KEEPALIVE_CONNECTIONS", "20")),
-                ssl=ssl_ctx,
+                ssl=ssl_ctx if ssl_ctx is not None else True,
             )
         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
             connector = None
@@ -2238,7 +2266,7 @@ async def shutdown_http_client() -> None:
             sessions = list(_AIOHTTP_SESSION_CACHE.values())
             _AIOHTTP_SESSION_CACHE.clear()
     for session in sessions:
-        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             await session.close()
     async_clients: list[Any] = []
     sync_clients: list[Any] = []
@@ -2248,10 +2276,10 @@ async def shutdown_http_client() -> None:
         sync_clients = list(_HTTPX_CLIENT_CACHE.values())
         _HTTPX_CLIENT_CACHE.clear()
     for client in async_clients:
-        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             await client.aclose()
     for client in sync_clients:
-        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             client.close()
 
 
@@ -2531,7 +2559,8 @@ def _check_cert_pins_for_url(
 # Client factories
 # --------------------------------------------------------------------------------------
 
-def _instantiate_client(factory, kwargs: dict[str, Any]):  # type: ignore[no-untyped-def]
+
+def _instantiate_client(factory: Callable[..., _Client], kwargs: dict[str, Any]) -> _Client:
     """Instantiate httpx client tolerating version differences in kwargs.
 
     On TypeError mentioning an unexpected keyword argument, remove that kwarg
@@ -2593,7 +2622,10 @@ def create_async_client(
         raise RuntimeError("httpx is not available")  # noqa: TRY003
     _validate_proxies_or_raise(proxies)
     # Build a timeout value tolerant of stubbed httpx without Timeout class
-    if hasattr(_hx, "Timeout"):
+    to: float | httpx.Timeout
+    if isinstance(timeout, httpx.Timeout):
+        to = timeout
+    elif hasattr(_hx, "Timeout"):
         try:
             to = (
                 timeout
@@ -2604,11 +2636,11 @@ def create_async_client(
             to = timeout if timeout is not None else DEFAULT_READ_TIMEOUT
         if not isinstance(to, getattr(_hx, "Timeout", object)):
             try:
-                to = _hx.Timeout(float(to))
+                to = _hx.Timeout(float(to) if isinstance(to, (int, float)) else DEFAULT_READ_TIMEOUT)
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-                to = float(timeout) if timeout is not None else DEFAULT_READ_TIMEOUT
+                to = float(timeout) if isinstance(timeout, (int, float)) else DEFAULT_READ_TIMEOUT
     else:
-        to = float(timeout) if timeout is not None else DEFAULT_READ_TIMEOUT
+        to = float(timeout) if isinstance(timeout, (int, float)) else DEFAULT_READ_TIMEOUT
     hdrs = _build_default_headers()
     if headers:
         hdrs.update(headers)
@@ -2631,14 +2663,18 @@ def create_async_client(
         kwargs["verify"] = verify_ctx
     if base_url is not None:
         kwargs["base_url"] = base_url
-    client = _instantiate_client(getattr(_hx, "AsyncClient", object), kwargs)
+    if TYPE_CHECKING:
+        client_factory = httpx.AsyncClient
+    else:
+        client_factory = getattr(_hx, "AsyncClient", object)
+    client = _instantiate_client(client_factory, kwargs)
     try:
         if cert_pinning:
-            client._tldw_cert_pinning = cert_pinning
+            setattr(client, "_tldw_cert_pinning", cert_pinning)  # noqa: B010 - dynamic transport metadata
         else:
             env_pins = _parse_pins_from_env()
             if env_pins:
-                client._tldw_cert_pinning = env_pins
+                setattr(client, "_tldw_cert_pinning", env_pins)  # noqa: B010 - dynamic transport metadata
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
         pass
     return client
@@ -2665,7 +2701,10 @@ def create_client(
         raise RuntimeError("httpx is not available")  # noqa: TRY003
     _validate_proxies_or_raise(proxies)
     # Build a timeout value tolerant of stubbed httpx without Timeout class
-    if hasattr(_hx, "Timeout"):
+    to: float | httpx.Timeout
+    if isinstance(timeout, httpx.Timeout):
+        to = timeout
+    elif hasattr(_hx, "Timeout"):
         try:
             to = (
                 timeout
@@ -2676,11 +2715,11 @@ def create_client(
             to = timeout if timeout is not None else DEFAULT_READ_TIMEOUT
         if not isinstance(to, getattr(_hx, "Timeout", object)):
             try:
-                to = _hx.Timeout(float(to))
+                to = _hx.Timeout(float(to) if isinstance(to, (int, float)) else DEFAULT_READ_TIMEOUT)
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
-                to = float(timeout) if timeout is not None else DEFAULT_READ_TIMEOUT
+                to = float(timeout) if isinstance(timeout, (int, float)) else DEFAULT_READ_TIMEOUT
     else:
-        to = float(timeout) if timeout is not None else DEFAULT_READ_TIMEOUT
+        to = float(timeout) if isinstance(timeout, (int, float)) else DEFAULT_READ_TIMEOUT
     hdrs = _build_default_headers()
     if headers:
         hdrs.update(headers)
@@ -2709,14 +2748,18 @@ def create_client(
         _logger.debug("http_client.create_client: httpx.Client factory={} kwargs_keys={}", getattr(_hx, "Client", None), list(kwargs.keys()))
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
         pass
-    client = _instantiate_client(getattr(_hx, "Client", object), kwargs)
+    if TYPE_CHECKING:
+        client_factory = httpx.Client
+    else:
+        client_factory = getattr(_hx, "Client", object)
+    client = _instantiate_client(client_factory, kwargs)
     try:
         if cert_pinning:
-            client._tldw_cert_pinning = cert_pinning
+            setattr(client, "_tldw_cert_pinning", cert_pinning)  # noqa: B010 - dynamic transport metadata
         else:
             env_pins = _parse_pins_from_env()
             if env_pins:
-                client._tldw_cert_pinning = env_pins
+                setattr(client, "_tldw_cert_pinning", env_pins)  # noqa: B010 - dynamic transport metadata
     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
         pass
     return client
@@ -2886,7 +2929,7 @@ async def _httpx_arequest_io(
         _restore_httpx_response_url(response, url)
         return response
     if method_upper == "POST" and hasattr(client, "post") and verify is None:
-        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             logger.debug("afetch io: using AsyncClient.post")
         return await client.post(
             url,
@@ -2900,7 +2943,7 @@ async def _httpx_arequest_io(
             follow_redirects=follow_redirects,
         )
     if method_upper == "GET" and hasattr(client, "get") and verify is None:
-        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             logger.debug("afetch io: using AsyncClient.get")
         return await client.get(
             url,
@@ -2910,7 +2953,7 @@ async def _httpx_arequest_io(
             timeout=timeout,
             follow_redirects=follow_redirects,
         )
-    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
         logger.debug("afetch io: using AsyncClient.request")
     req_kwargs: dict[str, Any] = {
         "headers": headers,
@@ -3131,7 +3174,7 @@ async def _iter_sse_events_from_bytes(
     byte_iter: AsyncIterator[bytes],
     *,
     on_body_started: Callable[[], None] | None = None,
-) -> AsyncIterator[SSEEvent]:
+) -> AsyncGenerator[SSEEvent, None]:
     """Parse SSE events and report the first non-empty response body chunk."""
     buffer = ""
     iterator = byte_iter.__aiter__()
@@ -3179,10 +3222,10 @@ def _stream_timeout_values(timeout: Any | None) -> tuple[float, float]:
     if read is None:
         read = getattr(timeout, "sock_read", None)
     if connect is not None:
-        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             first_byte_timeout = float(connect)
     if read is not None:
-        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             idle_timeout = float(read)
     return first_byte_timeout, idle_timeout
 
@@ -3296,7 +3339,9 @@ async def _afetch_httpx(
     _head_disable_h2_tried = False
     _head_get_range_tried = False
 
-    async def _do_once(ac: httpx.AsyncClient, target_url: str) -> tuple[httpx.Response | None, str, str | None]:
+    async def _do_once(
+        ac: httpx.AsyncClient, target_url: str
+    ) -> tuple[httpx.Response | None, str, Literal["timeout"] | None]:
         req_headers = _inject_trace_headers(headers)
         req_headers = _strip_sensitive_headers_for_cross_origin(
             req_headers, original_url=url, target_url=target_url
@@ -3304,7 +3349,7 @@ async def _afetch_httpx(
         req_cookies = _cookies_for_hop(cookies, original_url=url, target_url=target_url)
         # Parity with other paths: drop 'zstd' from Accept-Encoding for httpx
         try:
-            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 logger.debug(
                     f"afetch _do_once: method={method_upper} "
                     f"url={_sanitize_url_for_logs(observability_url)}"
@@ -3363,7 +3408,7 @@ async def _afetch_httpx(
             # Let callers see HTTPStatusError directly so that adapters/tests
             # can distinguish 4xx/5xx responses from transport failures. All
             # other exceptions are normalized into a NetworkError reason.
-            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 if _opaque_stt_endpoint_id() is not None:
                     logger.debug(
                         "planned STT HTTP transport exception"
@@ -3385,8 +3430,8 @@ async def _afetch_httpx(
             # can treat them as permanent failures.
             try:
                 if _is_dns_resolution_error(e):
-                    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
-                        e._tldw_dns_resolution = True
+                    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                        setattr(e, "_tldw_dns_resolution", True)  # noqa: B010 - dynamic transport metadata
                     return None, "DNSResolutionError", _network_error_classification(e)
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                 pass
@@ -3427,7 +3472,7 @@ async def _afetch_httpx(
                                 _head_disable_h2_tried = True
                                 try:
                                     if need_close:
-                                        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                                        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                             await ac.aclose()
                                     ac = create_async_client(proxies=proxies, http2=False)
                                     need_close = True
@@ -3455,7 +3500,7 @@ async def _afetch_httpx(
                                     req_headers = _strip_sensitive_headers_for_cross_origin(
                                         req_headers, original_url=url, target_url=cur_url
                                     )
-                                    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                                    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                         req_headers = _sanitize_accept_encoding_for_backend(req_headers, "httpx")
                                     req_headers.setdefault("Range", "bytes=0-0")
                                     # Use a small per-request timeout specifically for this fallback
@@ -3482,7 +3527,7 @@ async def _afetch_httpx(
                                         ),
                                         max_response_bytes=max_response_bytes,
                                     )
-                                    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                                    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                         tm.set_attributes({"http.status_code": int(r2.status_code)})
                                     _log_outbound_request(
                                         method="GET",
@@ -3501,7 +3546,9 @@ async def _afetch_httpx(
                         last_exc = NetworkError(reason, classification=classification)
                         try:
                             if reason == "DNSResolutionError":
-                                last_exc._tldw_dns_resolution = True
+                                setattr(  # noqa: B010 - dynamic transport metadata
+                                    last_exc, "_tldw_dns_resolution", True
+                                )
                         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                             pass
                         # Exit redirect loop; retry/backoff handled after loop
@@ -3510,7 +3557,7 @@ async def _afetch_httpx(
                         # Handle redirects explicitly to enforce per-hop egress
                         if allow_redirects and resp.status_code in (301, 302, 303, 307, 308):
                             location = resp.headers.get("location")
-                            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                 await resp.aclose()
                             if not location:
                                 last_exc = NetworkError("Redirect without Location header")
@@ -3565,7 +3612,7 @@ async def _afetch_httpx(
                                     )
                                 except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                                     pass
-                                with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                                with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                     tm.set_attributes({"http.status_code": int(resp.status_code)})
                                 _log_outbound_request(
                                     method=method,
@@ -3603,7 +3650,7 @@ async def _afetch_httpx(
                                 f"afetch retry attempt={attempt} reason={reason} delay={delay:.3f}s "
                                 f"url={_sanitize_url_for_logs(observability_url)}"
                             )
-                            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                 tm.add_event("http.retry", {"attempt": attempt, "reason": reason})
                             await asyncio.sleep(delay)
                             sleep_s = delay
@@ -3624,14 +3671,14 @@ async def _afetch_httpx(
                             exception_class=last_exc.__class__.__name__,
                         )
                         raise last_exc
-                    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         get_metrics_registry().increment("http_client_retries_total", 1, labels={"reason": rsn})
                     delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                     logger.debug(
                         f"afetch network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
                         f"url={_sanitize_url_for_logs(observability_url)}"
                     )
-                    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         tm.add_event("http.retry", {"attempt": attempt, "reason": rsn})
                     await asyncio.sleep(delay)
                     sleep_s = delay
@@ -3650,7 +3697,7 @@ async def _afetch_httpx(
         raise RetryExhaustedError("All retry attempts exhausted")  # noqa: TRY003
     finally:
         if need_close:
-            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 await ac.aclose()
 
 
@@ -3715,13 +3762,13 @@ async def _afetch_aiohttp(
 
     async def _do_once(
         session: aiohttp.ClientSession, target_url: str
-    ) -> tuple[_AiohttpResponse | None, str, str | None]:
+    ) -> tuple[_AiohttpResponse | None, str, Literal["timeout"] | None]:
         req_headers = _inject_trace_headers(headers)
         req_headers = _strip_sensitive_headers_for_cross_origin(
             req_headers, original_url=url, target_url=target_url
         )
         req_cookies = _cookies_for_hop(cookies, original_url=url, target_url=target_url)
-        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             req_headers = _sanitize_accept_encoding_for_backend(req_headers, "aiohttp")
         try:
             # Optional cert pinning per host
@@ -3778,15 +3825,15 @@ async def _afetch_aiohttp(
         except EgressPolicyError:
             raise
         except _HTTPCLIENT_REQUEST_EXCEPTIONS as e:
-            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 logger.debug(
                     "afetch _do_once: caught exception {}",
                     type(e).__name__,
                 )
             try:
                 if _is_dns_resolution_error(e):
-                    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
-                        e._tldw_dns_resolution = True
+                    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                        setattr(e, "_tldw_dns_resolution", True)  # noqa: B010 - dynamic transport metadata
                     return None, "DNSResolutionError", _network_error_classification(e)
             except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                 pass
@@ -3855,7 +3902,7 @@ async def _afetch_aiohttp(
                                 ),
                                 max_response_bytes=max_response_bytes,
                             )
-                            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                 tm.set_attributes({"http.status_code": int(r2_wrap.status_code)})
                             _log_outbound_request(
                                 method="GET",
@@ -3873,7 +3920,7 @@ async def _afetch_aiohttp(
                     last_exc = NetworkError(reason, classification=classification)
                     try:
                         if reason == "DNSResolutionError":
-                            last_exc._tldw_dns_resolution = True
+                            setattr(last_exc, "_tldw_dns_resolution", True)  # noqa: B010 - dynamic transport metadata
                     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                         pass
                     break
@@ -3927,7 +3974,7 @@ async def _afetch_aiohttp(
                         )
                     except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                         pass
-                    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         tm.set_attributes({"http.status_code": int(resp.status_code)})
                     _log_outbound_request(
                         method=method,
@@ -3964,7 +4011,7 @@ async def _afetch_aiohttp(
                     f"afetch retry attempt={attempt} reason={reason} delay={delay:.3f}s "
                     f"url={_sanitize_url_for_logs(observability_url)}"
                 )
-                with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     tm.add_event("http.retry", {"attempt": attempt, "reason": reason})
                 await asyncio.sleep(delay)
                 sleep_s = delay
@@ -3983,14 +4030,14 @@ async def _afetch_aiohttp(
                         exception_class=last_exc.__class__.__name__,
                     )
                     raise last_exc
-                with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     get_metrics_registry().increment("http_client_retries_total", 1, labels={"reason": rsn})
                 delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                 logger.debug(
                     f"afetch network retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
                     f"url={_sanitize_url_for_logs(observability_url)}"
                 )
-                with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     tm.add_event("http.retry", {"attempt": attempt, "reason": rsn})
                 await asyncio.sleep(delay)
                 sleep_s = delay
@@ -4141,7 +4188,7 @@ async def apost(
         return resp
     finally:
         if need_close:
-            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 await ac.aclose()
 
 
@@ -4203,7 +4250,7 @@ def _fetch_httpx_response(
         )
         req_cookies = _cookies_for_hop(cookies, original_url=url, target_url=target_url)
         # Parity with simple fetch: drop 'zstd' from Accept-Encoding for httpx
-        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
             req_headers = _sanitize_accept_encoding_for_backend(req_headers, "httpx")
         try:
             # Optional cert pinning per host
@@ -4290,7 +4337,7 @@ def _fetch_httpx_response(
                                 _head_disable_h2_tried = True
                                 try:
                                     if need_close:
-                                        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                                        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                             sc.close()
                                     sc = create_client(proxies=proxies, http2=False)
                                     need_close = True
@@ -4318,7 +4365,7 @@ def _fetch_httpx_response(
                                     req_headers = _strip_sensitive_headers_for_cross_origin(
                                         req_headers, original_url=url, target_url=cur_url
                                     )
-                                    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                                    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                         req_headers = _sanitize_accept_encoding_for_backend(req_headers, "httpx")
                                     req_headers.setdefault("Range", "bytes=0-0")
                                     # Use a small per-request timeout specifically for this fallback
@@ -4343,7 +4390,7 @@ def _fetch_httpx_response(
                                             cur_url,
                                         ),
                                     )
-                                    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                                    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                         tm.set_attributes({"http.status_code": int(r2.status_code)})
                                     _log_outbound_request(
                                         method="GET",
@@ -4361,7 +4408,7 @@ def _fetch_httpx_response(
                         should, rsn = _should_retry(method, None, NetworkError(reason), retry)
                         if not should or attempt == attempts:
                             raise NetworkError(reason)
-                        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                             get_metrics_registry().increment("http_client_retries_total", 1, labels={"reason": rsn})
                         delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                         logger.debug(
@@ -4374,7 +4421,7 @@ def _fetch_httpx_response(
                     # redirect handling
                     if allow_redirects and resp.status_code in (301, 302, 303, 307, 308):
                         location = resp.headers.get("location")
-                        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                             resp.close()
                         if not location:
                             if attempt == attempts:
@@ -4427,7 +4474,7 @@ def _fetch_httpx_response(
                             )
                         except _HTTPCLIENT_NONCRITICAL_EXCEPTIONS:
                             pass
-                        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                             tm.set_attributes({"http.status_code": int(resp.status_code)})
                         _log_outbound_request(
                             method=method,
@@ -4449,7 +4496,7 @@ def _fetch_httpx_response(
                             last_retry_delay_s=sleep_s,
                         )
                         return resp
-                    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         get_metrics_registry().increment("http_client_retries_total", 1, labels={"reason": rsn})
                     delay = 0.0
                     if retry.respect_retry_after:
@@ -4460,7 +4507,7 @@ def _fetch_httpx_response(
                         f"fetch retry attempt={attempt} reason={rsn} delay={delay:.3f}s "
                         f"url={_sanitize_url_for_logs(observability_url)}"
                     )
-                    with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                    with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                         tm.add_event("http.retry", {"attempt": attempt, "reason": rsn})
                     time.sleep(delay)
                     sleep_s = delay
@@ -4477,7 +4524,7 @@ def _fetch_httpx_response(
         raise RetryExhaustedError("All retry attempts exhausted")  # noqa: TRY003
     finally:
         if need_close:
-            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 sc.close()
 
 
@@ -4554,7 +4601,7 @@ def stream_response(
             yield response
     finally:
         if owns_client:
-            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 sc.close()
 
 
@@ -4568,7 +4615,6 @@ def _fetch_curl_simple(
     proxies: dict[str, str] | None,
     session: Any | None = None,
 ) -> HttpResponse:
-    CurlSession = None
     if session is None:
         CurlSession = _resolve_curl_session()
         if CurlSession is None:
@@ -5004,8 +5050,8 @@ def fetch(*args, **kwargs):
             if not follow_redirects or status not in (301, 302, 303, 307, 308):
                 break
 
-            location = getattr(r, "headers", {}) or {}
-            location = location.get("location") or location.get("Location")
+            response_headers = getattr(r, "headers", {}) or {}
+            location = response_headers.get("location") or response_headers.get("Location")
             if not location:
                 break
 
@@ -5314,7 +5360,7 @@ async def _astream_bytes_httpx(
     on_response: ResponseHeadersCallback | None = None,
     raise_for_status: bool = True,
     verify: bool | str | ssl.SSLContext | None = None,
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes, None]:
     if httpx is None:  # pragma: no cover
         raise RuntimeError("httpx is not available")  # noqa: TRY003
     sensitive_observability = _effective_sensitive_observability(
@@ -5401,7 +5447,7 @@ async def _astream_bytes_httpx(
                     except httpx.HTTPStatusError:
                         should, rsn = _should_retry(method, resp.status_code, None, retry)
                         if should and attempt < attempts:
-                            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                                 get_metrics_registry().increment(
                                     "http_client_retries_total",
                                     1,
@@ -5508,7 +5554,7 @@ async def _astream_bytes_httpx(
                     if sensitive_observability:
                         raise network_exc from None
                     raise network_exc from e
-                with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     get_metrics_registry().increment(
                         "http_client_retries_total",
                         1,
@@ -5553,7 +5599,7 @@ async def _astream_bytes_httpx(
                         exception_class=e.__class__.__name__,
                     )
                     raise
-                with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     get_metrics_registry().increment(
                         "http_client_retries_total",
                         1,
@@ -5572,7 +5618,7 @@ async def _astream_bytes_httpx(
                 sleep_s = delay
     finally:
         if need_close:
-            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 await ac.aclose()
 
 
@@ -5596,7 +5642,7 @@ async def _astream_bytes_aiohttp(
     on_response: ResponseHeadersCallback | None = None,
     raise_for_status: bool = True,
     verify: bool | str | ssl.SSLContext | None = None,
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes, None]:
     if aiohttp is None:  # pragma: no cover
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
     sensitive_observability = _effective_sensitive_observability(
@@ -5869,7 +5915,7 @@ async def astream_bytes(
     on_response: ResponseHeadersCallback | None = None,
     raise_for_status: bool = True,
     verify: bool | str | ssl.SSLContext | None = None,
-) -> AsyncIterator[bytes]:
+) -> AsyncGenerator[bytes, None]:
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
     )
@@ -5921,7 +5967,7 @@ async def _astream_sse_httpx(
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
-) -> AsyncIterator[SSEEvent]:
+) -> AsyncGenerator[SSEEvent, None]:
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
     )
@@ -6113,7 +6159,7 @@ async def _astream_sse_httpx(
         raise RetryExhaustedError("All retry attempts exhausted (astream_sse)")  # noqa: TRY003
     finally:
         if need_close:
-            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 await ac.aclose()
 
 
@@ -6132,7 +6178,7 @@ async def _astream_sse_aiohttp(
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
-) -> AsyncIterator[SSEEvent]:
+) -> AsyncGenerator[SSEEvent, None]:
     if aiohttp is None:  # pragma: no cover
         raise RuntimeError("aiohttp is not available")  # noqa: TRY003
     sensitive_observability = _effective_sensitive_observability(
@@ -6333,7 +6379,7 @@ async def astream_sse(
     retry: RetryPolicy | None = None,
     cert_pinning: dict[str, set[str]] | None = None,
     sensitive_observability: bool = False,
-) -> AsyncIterator[SSEEvent]:
+) -> AsyncGenerator[SSEEvent, None]:
     sensitive_observability = _effective_sensitive_observability(
         sensitive_observability
     )
@@ -6465,7 +6511,7 @@ def download(
             if max_bytes_total is not None and existing > max_bytes_total:
                 raise DownloadError("Disk quota exceeded before download")  # noqa: TRY003
 
-            last_exc: Exception | None = None
+            last_exc: BaseException | None = None
             try:
                 # Optional cert pinning
                 try:
@@ -6560,7 +6606,7 @@ def download(
                                 last_retry_delay_s=sleep_s,
                             )
                             raise DownloadError(f"Download failed with status {resp.status_code}")  # noqa: TRY003
-                        with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                        with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                             get_metrics_registry().increment("http_client_retries_total", 1, labels={"reason": rsn})
                         delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                         logger.debug(
@@ -6600,7 +6646,7 @@ def download(
                     if isinstance(last_exc, DownloadError):
                         raise last_exc
                     raise DownloadError(str(last_exc))
-                with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+                with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                     get_metrics_registry().increment("http_client_retries_total", 1, labels={"reason": rsn})
                 delay = _decorrelated_jitter_sleep(sleep_s, retry.backoff_base_ms, retry.backoff_cap_s)
                 logger.debug(
@@ -6622,7 +6668,7 @@ def download(
         raise RetryExhaustedError("All retry attempts exhausted (download)")  # noqa: TRY003
     finally:
         if need_close:
-            with suppress(_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
+            with suppress(*_HTTPCLIENT_NONCRITICAL_EXCEPTIONS):
                 sc.close()
 
 

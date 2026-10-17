@@ -397,8 +397,10 @@ def ensure_notes_provenance_ready(
         return note
 
     def core_payload(note: Mapping[str, object]) -> dict:
-        return validate_notes_note_upsert_payload(
-            {key: note.get(key) for key in ("title", "content", "conversation_id", "message_id")}
+        return dict(
+            validate_notes_note_upsert_payload(
+                {key: note.get(key) for key in ("title", "content", "conversation_id", "message_id")}
+            )
         )
 
     def verified(envelope: SyncEnvelope | SyncEnvelopeCreate) -> bool:

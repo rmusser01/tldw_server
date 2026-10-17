@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypedDict, cast
 from uuid import UUID
 
 from .notes_link_contract import (
@@ -818,9 +818,18 @@ def client_private_server_frontend_limitation_warning() -> dict[str, str]:
     }
 
 
+class NotesNoteUpsertPayload(TypedDict):
+    """Lossless validated version-1 ``notes.note`` payload."""
+
+    title: str
+    content: str
+    conversation_id: str | None
+    message_id: str | None
+
+
 def validate_notes_note_upsert_payload(
     payload: Mapping[str, object],
-) -> dict[str, str | None]:
+) -> NotesNoteUpsertPayload:
     """Validate and return the lossless version-1 ``notes.note`` payload."""
 
     unexpected = set(payload).difference(NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS)
@@ -855,7 +864,8 @@ def validate_notes_note_upsert_payload(
     return {
         "title": title,
         "content": content,
-        **backlinks,
+        "conversation_id": backlinks["conversation_id"],
+        "message_id": backlinks["message_id"],
     }
 
 
@@ -2263,6 +2273,7 @@ __all__ = [
     "blob_upload_expires_at",
     "blob_upload_session_is_expired",
     "sync_v2_domain_schemas",
+    "NotesNoteUpsertPayload",
     "validate_notes_note_upsert_payload",
 ]
 
