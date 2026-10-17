@@ -886,6 +886,20 @@ async def test_audio_analyze_missing_model_fails_without_retry(analyze_worker, m
 
 
 @pytest.mark.unit
+async def test_audio_analyze_unavailable_adapter_fails_without_retry(analyze_worker, monkeypatch):
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as summarization
+
+    worker, jm, adapter = analyze_worker
+    monkeypatch.setattr(summarization, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: None))
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
+    job = jm.get_job(job_id) or {}
+    assert job.get("status") == "failed"
+    assert int(job.get("retry_count") or 0) == 0
+    assert job.get("error_code") == "adapter_unavailable"
+
+
+@pytest.mark.unit
 async def test_audio_analyze_rate_limit_still_retries(analyze_worker):
     from tldw_Server_API.app.core.exceptions import ChatRateLimitError
 

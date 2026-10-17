@@ -64,8 +64,9 @@ Set once for every step: `PY=/Users/macbook-dev/Documents/GitHub/tldw_server/.ve
 ```bash
 git fetch -q origin dev
 git switch -c fix/audio-analyze-retry-classification origin/dev
-cp /private/tmp/claude-501/-Users-macbook-dev-Documents-GitHub-tldw-server--claude-worktrees-core-review-fixes/a0583666-bebe-4c56-a0f9-cfe2e049d483/scratchpad/plan13640.md Docs/superpowers/plans/2026-10-16-audio-analyze-retry-classification.md
 ```
+
+Copy this plan to `Docs/superpowers/plans/2026-10-16-audio-analyze-retry-classification.md`.
 
 The plan stays uncommitted until Step 10.
 
