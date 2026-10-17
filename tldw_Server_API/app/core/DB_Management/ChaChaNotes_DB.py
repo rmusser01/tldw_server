@@ -34170,7 +34170,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     (main_col_value,) + owner_params)
                 existing_deleted = undelete_cursor.fetchone()
                 if existing_deleted:
-                    item_id, current_version = existing_deleted['id'], existing_deleted['version']
+                    item_id: int = existing_deleted["id"]
+                    current_version = existing_deleted["version"]
                     next_version = current_version + 1
 
                     update_set_parts = [f"{unique_col_name} = ?"]
@@ -44442,7 +44443,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         correct = question.get("correct_answer")
         if q_type == "multiple_choice":
             try:
-                return int(user_answer) == int(correct)
+                user_index = int(user_answer)
+                if correct is None:
+                    return False
+                return user_index == int(correct)
             except (TypeError, ValueError):
                 return False
         if q_type == "multi_select":
