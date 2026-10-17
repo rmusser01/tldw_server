@@ -1,7 +1,7 @@
 ---
 id: TASK-13819
 title: Benchmark workflow SQLite cache safety and improve WebSocket diagnostics
-status: In Progress
+status: Done
 labels:
 - backend
 - workflows
@@ -33,6 +33,7 @@ Completed paired macOS/Python 3.12.13/SQLite 3.50.4 and Linux arm64 container/Py
 Final report/raw JSON independently recomputed and reviewed with no actionable findings. Final scoped Ruff, Black for new files, scope-predicate exact baseline and production Bandit pass (zero findings/errors). Test Bandit excludes assertion B101 and narrowly documents fixed-local-CLI subprocess and synthetic leak-detection credential sentinels; zero remaining findings. Final focused suite rerun pending exit. New PR and requester Change summary remain required merge gates.
 Final focused24/24 pass with exit0 (including benchmark6 and full extras18); connected172/172 also exit0. Pre-commit all selected files passes; production Bandit zero findings/errors, test scan zero remaining after assertions exclusion and narrow fixed-local CLI/synthetic sentinel annotations. Report and safe diagnostics guide independently reviewed without findings. Integration stage remains open pending new PR, human-written rationale, exact-head hosted checks, latest-dev merge.
 PR https://github.com/rmusser01/tldw_server/pull/3254 targets dev. Independent exact code/report head54799cb9e6bfeab53dd653fa6169638318eea890 approved with no findings; all production fingerprints match benchmark reports. Requester supplied the PR-specific human Change summary directly in this task; copied verbatim into PR body. All local deliverables/acceptance checks complete. Hosted checks and latest-dev serial merge remain operational gates; do not merge before all pass. The implementation plan is retired after local delivery; integration progress is tracked in PR3254.
+Operational integration complete: PR3254 merged into dev at0566130cbed2670efca6bbfa3c309031d2d3bc3b after262 successful checks,34 expected skips and1 neutral, all7 required statuses green. Reviewed head d436d8a0b299dac1b071b9ce8ccf2ca8801a0da2 is ancestor of remote dev; merged DB/tool hashes match benchmark report. Closure recorded during the immediately following TASK13820 benchmark work.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -43,7 +44,7 @@ Delivered reproducible paired macOS/Linux SQLite cache benchmark and raw reports
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip

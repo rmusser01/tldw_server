@@ -1,3 +1,4 @@
+import asyncio
 import importlib.machinery
 import json
 import sys
@@ -9,7 +10,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from starlette.websockets import WebSocketDisconnect
+from starlette.websockets import WebSocket, WebSocketDisconnect
 
 # Stub heavyweight audio deps before app import for local test stability.
 if "torch" not in sys.modules:
@@ -510,3 +511,144 @@ def test_ws_lookup_failure_has_safe_diagnostics(client_with_wf, monkeypatch):
     assert records[0]["extra"]["error_type"] == "ValueError"
     assert "private-lookup-do-not-log" not in records[0]["message"]
     assert records[0]["exception"] is None
+
+
+@pytest.mark.parametrize("read_method", ["get_run", "get_events"])
+def test_ws_pending_database_read_keeps_http_responsive(client_with_wf, monkeypatch, read_method):
+    """A pending disk read must not hold the ASGI loop needed by unrelated requests."""
+    client = client_with_wf
+    db = app.dependency_overrides[wf_mod._get_db]()
+    run_id = uuid4().hex
+    db.create_run(
+        run_id=run_id,
+        tenant_id="default",
+        user_id="1",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "pending-read", "version": 1, "steps": []},
+    )
+    token = wf_mod.get_jwt_manager().create_access_token(subject="1")
+    entered, http_completed = Event(), Event()
+    released_by_http = []
+    original = getattr(db, read_method)
+
+    def pending_read(*args, **kwargs):
+        entered.set()
+        released_by_http.append(http_completed.wait(timeout=5))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(db, read_method, pending_read)
+
+    def receive_snapshot():
+        with client.websocket_connect(f"/api/v1/workflows/ws?run_id={run_id}&token={token}") as ws:
+            return ws.receive_json()
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        connected = executor.submit(receive_snapshot)
+        try:
+            assert entered.wait(timeout=10), "WebSocket did not reach the database read"
+            response = client.get("/health")
+        finally:
+            http_completed.set()
+        snapshot = connected.result(timeout=10)
+    assert response.status_code == 200
+    assert snapshot["run"]["run_id"] == run_id
+    assert released_by_http and all(released_by_http), "Database read blocked the ASGI event loop"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("close_code", [1000, 1001, 1006])
+async def test_ws_peer_disconnect_finishes_without_asgi_exception(client_with_wf, monkeypatch, close_code):
+    """A closed transport is normal endpoint completion, not an unhandled server error."""
+    db = app.dependency_overrides[wf_mod._get_db]()
+    run_id = uuid4().hex
+    db.create_run(
+        run_id=run_id,
+        tenant_id="default",
+        user_id="1",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "peer-disconnect", "version": 1, "steps": []},
+    )
+    token = wf_mod.get_jwt_manager().create_access_token(subject="1")
+
+    async def receive():
+        return {"type": "websocket.connect"}
+
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    async def disconnected_transport(self, payload):
+        raise WebSocketDisconnect(close_code)
+
+    monkeypatch.setattr(wf_mod.WebSocketStream, "send_json", disconnected_transport)
+    records = []
+    sink = wf_mod.logger.add(
+        lambda message: records.append(message.record),
+        filter=lambda record: record["extra"].get("endpoint") == "workflows_ws",
+    )
+    try:
+        await wf_mod.workflows_ws(
+            WebSocket({"type": "websocket", "headers": []}, receive, send),
+            run_id,
+            token=token,
+            types=None,
+            db=db,
+        )
+    finally:
+        wf_mod.logger.remove(sink)
+    assert sent == [{"type": "websocket.accept", "subprotocol": None, "headers": []}]
+    assert len(records) == 1
+    assert records[0]["level"].name == "INFO"
+    assert records[0]["extra"]["reason"] == "peer_disconnected"
+    assert records[0]["extra"]["close_code"] == close_code
+    assert records[0]["exception"] is None
+
+
+@pytest.mark.asyncio
+async def test_ws_history_burst_allows_other_loop_work(client_with_wf):
+    """A writable transport must not let a whole history page monopolize the loop."""
+    db = app.dependency_overrides[wf_mod._get_db]()
+    run_id = uuid4().hex
+    db.create_run(
+        run_id=run_id,
+        tenant_id="default",
+        user_id="1",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "history-fairness", "version": 1, "steps": []},
+    )
+    for index in range(500):
+        db.append_event("default", run_id, "history", {"index": index})
+    token = wf_mod.get_jwt_manager().create_access_token(subject="1")
+    event_sequences, probe_counts = [], []
+
+    async def receive():
+        return {"type": "websocket.connect"}
+
+    async def send(message):
+        # Real writable sockets can complete sends without suspending the task.
+        if message["type"] == "websocket.send":
+            frame = json.loads(message["text"])
+            if "event_seq" in frame:
+                event_sequences.append(frame["event_seq"])
+                if len(event_sequences) == 1:
+                    asyncio.get_running_loop().call_soon(lambda: probe_counts.append(len(event_sequences)))
+                if len(event_sequences) == 500:
+                    raise WebSocketDisconnect(1000)
+
+    await wf_mod.workflows_ws(
+        WebSocket({"type": "websocket", "headers": []}, receive, send),
+        run_id,
+        token=token,
+        types=None,
+        db=db,
+    )
+    await asyncio.sleep(0)
+    assert event_sequences == list(range(1, 501))
+    assert probe_counts and probe_counts[0] < 500, "History send monopolized the event loop"
