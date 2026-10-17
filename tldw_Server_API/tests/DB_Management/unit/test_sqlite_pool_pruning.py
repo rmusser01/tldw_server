@@ -5,12 +5,16 @@ import threading
 from collections.abc import Iterator
 from contextlib import nullcontext
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteConnectionPool
+
+if TYPE_CHECKING:
+    from loguru import Message
 
 
 @pytest.fixture
@@ -87,7 +91,7 @@ def test_sqlite_pool_detaches_rejected_handle_after_close_failure(
             super().close()
 
     failed = sqlite3.connect(sqlite_pool.db_path, factory=CloseFailureConnection)
-    messages = []
+    messages: list[Message] = []
     sink = logger.add(messages.append, level="WARNING")
     try:
         with monkeypatch.context() as patch:

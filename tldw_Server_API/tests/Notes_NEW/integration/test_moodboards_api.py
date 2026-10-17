@@ -50,7 +50,7 @@ def moodboard_client(tmp_path: Path) -> Generator[TestClient, None, None]:
 
     app.dependency_overrides.clear()
     try:
-        db.close()
+        db.close_all_connections()
     except Exception:
         _ = None
 
@@ -172,7 +172,10 @@ def test_malformed_stored_moodboard_returns_sanitized_server_error(
     monkeypatch: pytest.MonkeyPatch,
     operation: str,
 ) -> None:
-    db = moodboard_client.app.dependency_overrides[get_chacha_db_for_user]()
+    app = moodboard_client.app
+    assert isinstance(app, FastAPI)
+    db = app.dependency_overrides[get_chacha_db_for_user]()
+    assert isinstance(db, CharactersRAGDB)
     stored_secret = "private-row-value-" + "x" * 2001
     path = "/api/v1/notes/moodboards"
     if operation == "create":

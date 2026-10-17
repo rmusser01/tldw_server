@@ -154,6 +154,7 @@ def test_append_study_assistant_message_updates_thread_counts_and_persists_json(
 
     messages = chacha_db.list_study_assistant_messages(thread["id"])
     reloaded_thread = chacha_db.get_study_assistant_thread(thread["id"])
+    assert reloaded_thread is not None
 
     assert first_message["role"] == "user"
     assert second_message["role"] == "assistant"

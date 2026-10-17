@@ -34,7 +34,7 @@ def workspace_fastapi_app():
 
 
 @pytest.fixture
-def workspace_client(workspace_fastapi_app, db):
+def workspace_client(workspace_fastapi_app: FastAPI, db: CharactersRAGDB):
     async def _allow_rate_limit() -> None:
         return None
 

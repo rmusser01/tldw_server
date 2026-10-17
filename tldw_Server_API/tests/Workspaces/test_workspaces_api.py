@@ -9,7 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from httpx import Response
+from httpx2 import Response
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import try_get_media_db_for_user
@@ -340,7 +340,7 @@ class TestWorkspaceLifecycle:
 
 
 @pytest.mark.integration
-def test_workspace_api_accepts_and_returns_study_materials_policy(workspace_fastapi_app, db):
+def test_workspace_api_accepts_and_returns_study_materials_policy(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.api.v1.endpoints.workspaces_rate_limit_policy import (
         WORKSPACES_READ_RATE_LIMIT,
         WORKSPACES_WRITE_RATE_LIMIT,
@@ -633,7 +633,7 @@ def test_workspace_api_rejects_confirmation_only_patch(workspace_fastapi_app, db
 
 
 @pytest.mark.integration
-def test_workspace_root_endpoints_happy_path(workspace_fastapi_app, db):
+def test_workspace_root_endpoints_happy_path(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -1760,7 +1760,7 @@ def test_update_workspace_source_maps_input_error_to_400(workspace_fastapi_app):
 
 
 @pytest.mark.integration
-def test_workspace_artifact_endpoints_happy_path(workspace_fastapi_app, db):
+def test_workspace_artifact_endpoints_happy_path(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -1865,11 +1865,13 @@ def test_workspace_artifact_redaction_schema_requires_typed_posture():
     )
 
     with pytest.raises(ValidationError):
-        WorkspaceArtifactCreateRequest(
-            id="brief-1",
-            artifact_type="workspace_brief",
-            title="Brief",
-            redaction={"support_safe": "yes", "redacted": False},
+        WorkspaceArtifactCreateRequest.model_validate(
+            {
+                "id": "brief-1",
+                "artifact_type": "workspace_brief",
+                "title": "Brief",
+                "redaction": {"support_safe": "yes", "redacted": False},
+            }
         )
 
     schema = WorkspaceArtifactResponse.model_json_schema()
@@ -1880,7 +1882,9 @@ def test_workspace_artifact_redaction_schema_requires_typed_posture():
 
 
 @pytest.mark.integration
-def test_workspace_artifact_export_accepted_version_preserves_identity_and_refs(workspace_fastapi_app, db):
+def test_workspace_artifact_export_accepted_version_preserves_identity_and_refs(
+    workspace_fastapi_app, db: CharactersRAGDB
+):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -1988,7 +1992,7 @@ def test_workspace_artifact_export_accepted_version_preserves_identity_and_refs(
 
 
 @pytest.mark.integration
-def test_workspace_artifact_export_missing_version_snapshot_fails_loudly(workspace_fastapi_app, db):
+def test_workspace_artifact_export_missing_version_snapshot_fails_loudly(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -2050,7 +2054,7 @@ def test_workspace_artifact_export_missing_version_snapshot_fails_loudly(workspa
 
 
 @pytest.mark.integration
-def test_workspace_artifact_export_rejects_non_accepted_state(workspace_fastapi_app, db):
+def test_workspace_artifact_export_rejects_non_accepted_state(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -2106,7 +2110,7 @@ def test_workspace_artifact_export_rejects_non_accepted_state(workspace_fastapi_
 
 
 @pytest.mark.integration
-def test_workspace_artifact_export_rejects_placeholder_generated_artifact(workspace_fastapi_app, db):
+def test_workspace_artifact_export_rejects_placeholder_generated_artifact(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -2162,7 +2166,7 @@ def test_workspace_artifact_export_rejects_placeholder_generated_artifact(worksp
 
 
 @pytest.mark.integration
-def test_workspace_artifact_api_exposes_traceable_contract_fields(workspace_fastapi_app, db):
+def test_workspace_artifact_api_exposes_traceable_contract_fields(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -2416,7 +2420,7 @@ def test_update_workspace_note_maps_input_error_to_400(workspace_fastapi_app):
 
 
 @pytest.mark.integration
-def test_workspace_note_endpoints_happy_path(workspace_fastapi_app, db):
+def test_workspace_note_endpoints_happy_path(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:
@@ -2587,7 +2591,7 @@ def test_delete_workspace_note_maps_database_error_to_contextual_500(workspace_f
 
 
 @pytest.mark.integration
-def test_workspace_source_endpoints_happy_path(workspace_fastapi_app, db):
+def test_workspace_source_endpoints_happy_path(workspace_fastapi_app, db: CharactersRAGDB):
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 
     async def _allow_rate_limit() -> None:

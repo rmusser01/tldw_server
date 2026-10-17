@@ -260,25 +260,27 @@ async def test_wait_transition_is_guarded(tmp_path, monkeypatch) -> None:
 def test_append_event_suppresses_noncritical_warning_failure(monkeypatch, grouped):
     if grouped and sys.version_info < (3, 12):
         pytest.skip("contextlib.suppress supports exception groups on Python 3.12+")
-    from types import SimpleNamespace
+    events: list[str] = []
 
     def fail_persistence(*args, **kwargs):
+        events.append("persistence")
         raise RuntimeError("event store unavailable")
 
     def fail_warning(*args, **kwargs):
+        events.append("warning")
         error = ValueError("warning failed")
         raise builtins.ExceptionGroup("logging", [error]) if grouped else error
 
     engine = engine_mod.WorkflowEngine.__new__(engine_mod.WorkflowEngine)
-    engine.db = SimpleNamespace(append_event=fail_persistence)
+    engine.db = WorkflowsDatabase.__new__(WorkflowsDatabase)
+    monkeypatch.setattr(engine.db, "append_event", fail_persistence)
     monkeypatch.setattr(engine, "_tenant_for_run", lambda run_id: "default")
     monkeypatch.setattr(engine_mod.logger, "warning", fail_warning)
-    assert engine._append_event("run", "started") is None
+    engine._append_event("run", "started")
+    assert events == ["persistence", "warning"]
 
 
 def test_append_event_propagates_unexpected_warning_failure(monkeypatch):
-    from types import SimpleNamespace
-
     class UnexpectedWarningError(Exception):
         pass
 
@@ -289,7 +291,8 @@ def test_append_event_propagates_unexpected_warning_failure(monkeypatch):
         raise UnexpectedWarningError("unexpected warning failure")
 
     engine = engine_mod.WorkflowEngine.__new__(engine_mod.WorkflowEngine)
-    engine.db = SimpleNamespace(append_event=fail_persistence)
+    engine.db = WorkflowsDatabase.__new__(WorkflowsDatabase)
+    monkeypatch.setattr(engine.db, "append_event", fail_persistence)
     monkeypatch.setattr(engine, "_tenant_for_run", lambda run_id: "default")
     monkeypatch.setattr(engine_mod.logger, "warning", fail_warning)
     with pytest.raises(UnexpectedWarningError, match="unexpected warning failure"):

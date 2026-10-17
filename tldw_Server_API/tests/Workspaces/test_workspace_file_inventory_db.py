@@ -86,7 +86,9 @@ def test_begin_scan_creates_queued_record_and_updates_root_state(db: CharactersR
     assert scan["root_version"] == root["version"]
     assert scan["state"] == "queued"
     assert scan["job_id"] is None
-    assert db.get_workspace_primary_root("ws-1")["file_inventory_state"] == "queued"
+    stored_root = db.get_workspace_primary_root("ws-1")
+    assert stored_root is not None
+    assert stored_root["file_inventory_state"] == "queued"
 
 
 def test_begin_scan_reuses_active_scan_only_after_job_is_attached(db: CharactersRAGDB) -> None:
@@ -161,7 +163,9 @@ def test_enqueue_failure_marks_scan_and_root_failed_and_allows_retry(db: Charact
 
     assert failed["state"] == "failed"
     assert "path_hint" not in json.loads(failed["diagnostics_json"])[0]
-    assert db.get_workspace_primary_root("ws-1")["file_inventory_state"] == "queued"
+    stored_root = db.get_workspace_primary_root("ws-1")
+    assert stored_root is not None
+    assert stored_root["file_inventory_state"] == "queued"
     assert retry["scan_id"] != scan["scan_id"]
 
 
@@ -171,7 +175,9 @@ def test_scan_completion_status_and_stale_projection(db: CharactersRAGDB) -> Non
 
     scanning = db.mark_workspace_file_inventory_scanning(scan["scan_id"])
     assert scanning["state"] == "scanning"
-    assert db.get_workspace_primary_root("ws-1")["file_inventory_state"] == "scanning"
+    stored_root = db.get_workspace_primary_root("ws-1")
+    assert stored_root is not None
+    assert stored_root["file_inventory_state"] == "scanning"
 
     completed = db.complete_workspace_file_inventory_scan(
         scan["scan_id"],
@@ -189,6 +195,7 @@ def test_scan_completion_status_and_stale_projection(db: CharactersRAGDB) -> Non
     assert status["counts"]["files"] == 2
     assert status["counts"]["diagnostics"] == 0
     current_root = db.get_workspace_primary_root("ws-1")
+    assert current_root is not None
     db.update_workspace_project_root_state(
         "ws-1",
         "root-1",
@@ -225,6 +232,7 @@ def test_root_version_mismatch_failure_keeps_previous_completed_scan_stale(db: C
         root_snapshot_token="snapshot-1",
     )
     current_root = db.get_workspace_primary_root("ws-1")
+    assert current_root is not None
     db.update_workspace_project_root_state(
         "ws-1",
         "root-1",
@@ -232,6 +240,7 @@ def test_root_version_mismatch_failure_keeps_previous_completed_scan_stale(db: C
         expected_version=current_root["version"],
     )
     changed_root = db.get_workspace_primary_root("ws-1")
+    assert changed_root is not None
     scan_2 = _begin_attached_scan(
         db,
         root_version=changed_root["version"],
@@ -364,8 +373,9 @@ def test_root_replacement_and_workspace_hard_delete_clean_inventory_rows(db: Cha
     assert db.execute_query("SELECT COUNT(*) AS c FROM workspace_file_inventory_scans").fetchone()["c"] == 0
     assert db.execute_query("SELECT COUNT(*) AS c FROM workspace_file_inventory_items").fetchone()["c"] == 0
 
-    root = db.get_workspace_primary_root("ws-1")
-    scan = _begin_attached_scan(db, root_id="root-2", root_version=root["version"])
+    refreshed_root = db.get_workspace_primary_root("ws-1")
+    assert refreshed_root is not None
+    scan = _begin_attached_scan(db, root_id="root-2", root_version=refreshed_root["version"])
     db.complete_workspace_file_inventory_scan(scan["scan_id"], "current", {}, [], root_snapshot_token="snapshot-2")
     db.replace_workspace_file_inventory_items(
         "ws-1",

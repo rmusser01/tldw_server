@@ -80,3 +80,6 @@ Unit B declaration substage complete locally:22native signatures/runtime AST pre
 
 Unit C local review complete:3trueguardRED/180PASS/newguardbehaviorapproved, native76 still193errors; core22contractfollowupmandatory/ACTIVE, no overallgreen.
 - [ ] Unit D: exact8existingtestfiles with truthful Optional/native fixture types, realMoodboardcleanup and observedWorkflow persistence/warning behavior; staticRED/native8ownerverification/security/scopedreview.
+
+Unit D local scoped review complete:182PASS plus focused2PASS after three row-presence assertions; native76 193→154,39removed0added/owned8zero. Normal exact10path commit authorized; no new-head proof yet.
+- [ ] Unit E: exact5path existing Sync identity-boundary checks and native MessageStore declarations;18 actual corrupt-identity RED controls then six native owners including legacy attachment refs, native76/security/scoped review. No new ADR; existing Notes pattern and native stores govern.

@@ -78,7 +78,9 @@ def test_create_station_updates_total_stations_in_same_transaction(
 
     assert station["version"] == 1
     assert station["verification_state"] == "manually_authored"
-    assert db.get_quiz(osce_quiz["id"])["total_stations"] == 1
+    stored_quiz = db.get_quiz(osce_quiz["id"])
+    assert stored_quiz is not None
+    assert stored_quiz["total_stations"] == 1
 
 
 def test_list_stations_is_ordered_and_paginated(
@@ -171,7 +173,9 @@ def test_soft_delete_recounts_and_is_idempotent(
     assert deleted is not None
     assert deleted["deleted"] is True
     assert deleted["version"] == 2
-    assert db.get_quiz(osce_quiz["id"])["total_stations"] == 0
+    stored_quiz = db.get_quiz(osce_quiz["id"])
+    assert stored_quiz is not None
+    assert stored_quiz["total_stations"] == 0
     assert db.delete_osce_station(osce_quiz["id"], station["id"]) is True
 
 
@@ -193,7 +197,9 @@ def test_create_station_rolls_back_when_recount_fails(
         (osce_quiz["id"],),
     ).fetchone()["count"]
     assert count == 0
-    assert db.get_quiz(osce_quiz["id"])["total_stations"] == 0
+    stored_quiz = db.get_quiz(osce_quiz["id"])
+    assert stored_quiz is not None
+    assert stored_quiz["total_stations"] == 0
 
 
 def test_create_quiz_with_stations_is_atomic(db: CharactersRAGDB) -> None:
@@ -298,7 +304,9 @@ def test_postgres_station_crud_and_atomic_bundle(
             client_id=db.client_id,
         )
         station = db.create_osce_station(quiz_id, stored_content(), origin="manual")
-        assert db.get_osce_station(quiz_id, station["id"])["content"]["title"] == "Warfarin counselling"
+        stored_station = db.get_osce_station(quiz_id, station["id"])
+        assert stored_station is not None
+        assert stored_station["content"]["title"] == "Warfarin counselling"
         updated = db.update_osce_station(
             quiz_id,
             station["id"],
@@ -405,9 +413,9 @@ def test_postgres_station_operations_are_scoped_to_the_parent_quiz_owner(
         assert all(isinstance(outcome, ConflictError) for outcome in outcomes)
         assert all("Quiz not found" in str(outcome) for outcome in outcomes)
         assert owner.list_osce_stations(quiz_id)["count"] == 3
-        assert owner.get_osce_station(quiz_id, updateable["id"])["content"]["title"] == (
-            "Updateable"
-        )
+        stored_station = owner.get_osce_station(quiz_id, updateable["id"])
+        assert stored_station is not None
+        assert stored_station["content"]["title"] == "Updateable"
         assert owner.get_osce_station(quiz_id, deletable["id"]) is not None
     finally:
         attacker.close_all_connections()
