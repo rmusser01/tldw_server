@@ -66,3 +66,10 @@ Local completion through3b483dc4 remains historical source-bound evidence. The u
 - [ ] Final latest-dev/head/queue/rules/readiness verification; retain human-authored Change summary as required external input before merge. No merge is requested by this continuation.
 
 ADR check for PR3253 CI continuation: ADR required: no; generated location refreshes, EOF and existing behavioral test observations introduce no durable architecture or workflow rule. Existing ADR-059 governs canonical task tracking.
+
+### Actual changed-Python type scope continuation
+- [ ] Clear the actual hosted 63-file scope (28 app + 35 test files), locally reproduced 331 errors in23files using unchanged native flags; no whole-backend claim. Original32 means18app+14tests; boundary union36 means22app+14tests, not36productionfiles.
+- [x] Unit A local source: independent review0C/I/M; actual2RED/224PASS and final2PASS; native64 removes39production diagnostics/292tests remain. Existing AllowedAction annotations, truthful optional generation models, narrowed credential runtime and native claims callback compatibility. Two canonical/full-positional regression REDs before implementation, deduplicated six owning suites, native type delta and security/quality review.
+- [ ] Unit B: source-backed existing static DB delegate signatures, then finite remaining fixture contracts; no runtime wrappers, blanket Any/casts/ignores or gate changes. Actual diagnostics and caller behavior govern each patch.
+- [ ] Independently review new units, normal commit/push, require new-head CI; publish supplied human Change summary verbatim after running gates settle, then final fresh dev/rules/reviews/readiness.
+ADR assessment: no new ADR; corrections preserve existing delegated stores, callable and transaction architecture (existing ADR020/031/059 and prior plan authorities).
