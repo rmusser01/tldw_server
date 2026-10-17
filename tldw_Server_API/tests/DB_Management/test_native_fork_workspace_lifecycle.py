@@ -33,6 +33,24 @@ def db(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[CharactersRAG
         kwargs["backend"].get_pool().close_all()
 
 
+def test_soft_final_transition_requires_version_and_rolls_back_caller_work(db: CharactersRAGDB) -> None:
+    db._begin_native_workspace_delete("workspace-one", expected_version=1, hard=False)
+
+    with pytest.raises(ConflictError, match="workspace_delete_incomplete") as exc_info:
+        with db.transaction() as conn:
+            conn.execute("UPDATE workspaces SET name = ? WHERE id = ?", ("Caller change", "workspace-one"))
+            db._finish_native_workspace_delete(conn, "workspace-one", expected_version=None, hard=False)
+
+    assert exc_info.value.entity == "workspaces"
+    assert exc_info.value.entity_id == "workspace-one"
+    workspace = db.get_workspace("workspace-one", include_deleted=True)
+    assert workspace is not None
+    assert workspace["name"] == "Workspace One"
+    assert workspace["version"] == 1
+    assert not workspace["deleted"]
+    assert bool(workspace["native_chat_admission_closed"])
+
+
 def test_soft_delete_closure_survives_cascade_failure_and_retry(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Child", "scope_type": "workspace", "workspace_id": "workspace-one"})
     original = db.soft_delete_conversation

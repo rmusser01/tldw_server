@@ -379,3 +379,25 @@ def test_root_replacement_and_workspace_hard_delete_clean_inventory_rows(db: Cha
 
     assert db.execute_query("SELECT COUNT(*) AS c FROM workspace_file_inventory_scans").fetchone()["c"] == 0
     assert db.execute_query("SELECT COUNT(*) AS c FROM workspace_file_inventory_items").fetchone()["c"] == 0
+
+
+@pytest.mark.parametrize("required", [False, True])
+@pytest.mark.parametrize(("value", "expected"), [(0, 0), (" 12 ", 12), ("-2", -2)])
+def test_file_inventory_integer_preserves_required_and_optional_values(required, value, expected):
+    assert CharactersRAGDB._workspace_file_inventory_int(value, field_name="size", required=required) == expected
+
+
+def test_file_inventory_optional_integer_preserves_missing_value():
+    assert CharactersRAGDB._workspace_file_inventory_int(None, field_name="size") is None
+
+
+@pytest.mark.parametrize("required", [False, True])
+@pytest.mark.parametrize("value", [True, "1.5"])
+def test_file_inventory_integer_rejects_non_integer_values(required, value):
+    with pytest.raises(InputError, match="size must be an integer"):
+        CharactersRAGDB._workspace_file_inventory_int(value, field_name="size", required=required)
+
+
+def test_file_inventory_required_integer_rejects_missing_value():
+    with pytest.raises(InputError, match="size is required"):
+        CharactersRAGDB._workspace_file_inventory_int(None, field_name="size", required=True)

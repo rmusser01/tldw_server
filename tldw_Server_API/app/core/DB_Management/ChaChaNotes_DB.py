@@ -53,7 +53,7 @@ from configparser import ConfigParser  # noqa: E402
 from datetime import datetime, timedelta, timezone  # noqa: E402
 from functools import wraps  # noqa: E402
 from pathlib import Path  # noqa: E402
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Protocol, TypeAlias, overload  # noqa: E402
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Literal, Protocol, TypeAlias, overload  # noqa: E402
 
 from loguru import logger  # noqa: E402
 
@@ -28938,7 +28938,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 pool = backend.get_pool()
                 connection = pool.get_connection()
                 connection.rollback()
-                backend.apply_and_verify_scope(
+                # Keep the required native capability lazy for duck-typed backends.
+                apply_and_verify_scope: Callable[..., None] = getattr(backend, "apply_and_verify_scope")  # noqa: B009
+                apply_and_verify_scope(
                     connection,
                     fallback_user_id=self.client_id,
                 )
@@ -29201,6 +29203,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if residual is not None:
             raise self._workspace_delete_incomplete(workspace_id)
         if not hard:
+            if expected_version is None:
+                raise self._workspace_delete_incomplete(workspace_id)
             cursor = conn.execute(
                 "UPDATE workspaces SET deleted = 1, last_modified = ?, version = ? "
                 "WHERE id = ? AND client_id = ? AND version = ? AND native_chat_admission_closed = ?",
@@ -29517,18 +29521,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conflict: dict[str, Any] | None = None
             workspace_found = False
             try:
-                conn = BackendConnectionWrapper(self, raw_conn, backend)
-                conn.execute(
+                fresh_pg_conn = BackendConnectionWrapper(self, raw_conn, backend)
+                fresh_pg_conn.execute(
                     "SELECT set_config('app.current_user_id', ?, true)",
                     (str(owner_user_id),),
                 )
-                workspace_found = conn.execute(
+                workspace_found = fresh_pg_conn.execute(
                     "SELECT id FROM workspaces WHERE id = ? AND client_id = ? AND deleted = ?",
                     (workspace_id, owner_user_id, self._workspace_active_deleted_value()),
                 ).fetchone() is not None
                 if workspace_found:
                     conflict = self._find_workspace_source_saved_view_name_with_conn(
-                        conn,
+                        fresh_pg_conn,
                         owner_user_id,
                         workspace_id,
                         name_key,
@@ -29544,8 +29548,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise WorkspaceSourceSavedViewNotFoundError
             self._raise_workspace_source_saved_view_name_conflict(conflict)
 
-        with self.transaction() as conn:
-            conflict = find_scoped_conflict(conn)
+        with self.transaction() as transaction_conn:
+            conflict = find_scoped_conflict(transaction_conn)
         self._raise_workspace_source_saved_view_name_conflict(conflict)
 
     def create_workspace_source_saved_view(
@@ -30512,6 +30516,14 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return CharactersRAGDBError(f"Workspace file inventory write failed: {exc}")  # noqa: TRY003
 
     @staticmethod
+    @overload
+    def _workspace_file_inventory_int(value: Any, *, field_name: str, required: Literal[True]) -> int: ...
+
+    @staticmethod
+    @overload
+    def _workspace_file_inventory_int(value: Any, *, field_name: str, required: bool = False) -> int | None: ...
+
+    @staticmethod
     def _workspace_file_inventory_int(value: Any, *, field_name: str, required: bool = False) -> int | None:
         if value is None:
             if required:
@@ -31456,8 +31468,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if receipt is None:
                 continue
             try:
-                expected_byte_count = int(expected.get("byte_count"))
-                receipt_byte_count = int(receipt.get("byte_count"))
+                expected_byte_count_value = expected.get("byte_count")
+                receipt_byte_count_value = receipt.get("byte_count")
+                if expected_byte_count_value is None or receipt_byte_count_value is None:
+                    raise TypeError
+                expected_byte_count = int(expected_byte_count_value)
+                receipt_byte_count = int(receipt_byte_count_value)
             except (TypeError, ValueError):
                 mismatched.append(chunk_id)
                 continue
@@ -31499,7 +31515,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         sha256 = str(data.get("sha256") or "").strip().lower()
         chunk_kind = str(data.get("chunk_kind") or "workspace_bundle").strip()
         try:
-            byte_count = int(data.get("byte_count"))
+            byte_count_value = data.get("byte_count")
+            if byte_count_value is None:
+                raise TypeError
+            byte_count = int(byte_count_value)
         except (TypeError, ValueError) as exc:
             raise InputError("byte_count must be an integer.") from exc  # noqa: TRY003
         if not all((normalized_migration_id, normalized_chunk_id, sha256, chunk_kind)):
@@ -31530,7 +31549,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     entity_id=normalized_chunk_id,
                 )
             try:
-                expected_byte_count = int(expected.get("byte_count"))
+                expected_byte_count_value = expected.get("byte_count")
+                if expected_byte_count_value is None:
+                    raise TypeError
+                expected_byte_count = int(expected_byte_count_value)
             except (TypeError, ValueError) as exc:
                 raise ConflictError(  # noqa: TRY003
                     "Workspace migration chunk declaration has an invalid byte count.",
