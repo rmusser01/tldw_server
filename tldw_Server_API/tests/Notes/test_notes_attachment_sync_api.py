@@ -39,7 +39,7 @@ from tldw_Server_API.app.core.Sync.v2.domain_adapters.attachment_refs import (
 from tldw_Server_API.app.core.Sync.v2.errors import SyncMaterializationContractError
 from tldw_Server_API.app.core.Sync.v2.materializers import AttachmentRefMaterializer
 from tldw_Server_API.app.core.Sync.v2.materializers.guarded_product_mutation import GuardedProductMutation
-from tldw_Server_API.app.core.Sync.v2.models import SyncDatasetCreate, SyncEnvelope
+from tldw_Server_API.app.core.Sync.v2.models import SyncDatasetCreate, SyncEnvelope, SyncOperation
 from tldw_Server_API.app.core.Sync.v2.security import (
     server_trusted_encryption_status_from_config,
 )
@@ -1130,3 +1130,80 @@ def test_attachment_materializer_rejects_guard_before_product_or_store_access(
     )
     with pytest.raises(SyncMaterializationContractError):
         materializer.apply(envelope, store=sync_store, guarded_mutation=guard)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("object_id", [None, "", 17])
+@pytest.mark.parametrize("operation", ["upsert", "tombstone"])
+def test_attachment_materializer_rejects_corrupt_stored_id_before_lookup(
+    canonical_api: tuple[TestClient, CharactersRAGDB, SyncV2Service],
+    monkeypatch: pytest.MonkeyPatch,
+    operation: SyncOperation,
+    object_id: object,
+) -> None:
+    client, note_db, service = canonical_api
+    upload_id = _complete_create_upload(service, b"Original attachment")
+    created = client.post(
+        f"/api/v1/notes/{NOTE_ID}/attachments/from-upload",
+        params={"dataset_id": DATASET_ID},
+        headers={"Idempotency-Key": "corrupt-id-create"},
+        json={"upload_id": upload_id},
+    )
+    assert created.status_code == 201, created.text
+    if operation == "tombstone":
+        deleted = client.request(
+            "DELETE",
+            f"/api/v1/notes/{NOTE_ID}/attachments/by-id/{ATTACHMENT_ID}",
+            params={"dataset_id": DATASET_ID},
+            headers={
+                "Idempotency-Key": "corrupt-id-delete",
+                "If-Match": created.json()["etag"],
+            },
+            json={"reason": "removed"},
+        )
+        assert deleted.status_code == 200, deleted.text
+    store = service.store
+    stored = store.get_current_head(DATASET_ID, "attachment.ref", ATTACHMENT_ID)
+    assert stored is not None
+    assert stored.operation == operation
+    assert stored.adapter_version == 2
+    assert stored.apply_status == "applied"
+    before_state = store.get_object_state(DATASET_ID, "attachment.ref", ATTACHMENT_ID)
+    assert before_state is not None
+    projection = note_db.note_attachment_store
+    before_attachment = projection.get(DATASET_ID, ATTACHMENT_ID)
+    assert before_attachment is not None
+    assert before_attachment.deleted == (operation == "tombstone")
+    before_note = note_db.get_note_by_id(NOTE_ID)
+    assert before_note is not None
+    assert store.list_failed_applies(DATASET_ID) == []
+    envelope = replace(stored)
+    # Model construction rejects missing IDs; explicitly control a corrupt projection boundary.
+    object.__setattr__(envelope, "object_id", object_id)
+
+    def unexpected_access(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Invalid attachment identity reached state or product access")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(store, "get_object_state", unexpected_access)
+        scoped.setattr(store, "upsert_object_state", unexpected_access)
+        scoped.setattr(note_db, "get_note_by_id", unexpected_access)
+        for method in ("get", "create", "tombstone", "restore", "compare_and_set"):
+            scoped.setattr(projection, method, unexpected_access)
+        result = AttachmentRefMaterializer(note_db).apply(envelope, store=store)
+
+    assert result.status == "failed"
+    assert result.error_code == "attachment_ref_projection_failed"
+    assert result.message == "Stored attachment.ref envelope requires a non-empty string object ID"
+    failed = store.list_failed_applies(DATASET_ID)
+    assert len(failed) == 1
+    assert failed[0].server_cursor == stored.server_cursor
+    assert failed[0].client_envelope_id == stored.client_envelope_id
+    assert failed[0].object_id == ATTACHMENT_ID
+    assert failed[0].operation == operation
+    assert failed[0].payload == stored.payload
+    assert failed[0].apply_error_code == result.error_code
+    assert failed[0].apply_error_message == result.message
+    assert store.get_object_state(DATASET_ID, "attachment.ref", ATTACHMENT_ID) == before_state
+    assert projection.get(DATASET_ID, ATTACHMENT_ID) == before_attachment
+    assert note_db.get_note_by_id(NOTE_ID) == before_note

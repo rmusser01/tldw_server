@@ -879,6 +879,41 @@ class CharactersRAGDB:
 
         def add_message(self, msg_data: dict[str, Any], *, conn: Any | None = None) -> str | None: ...
 
+        def append_message_from_sync(
+            self,
+            *,
+            stable_message_id: str,
+            conversation_id: str,
+            sender: str,
+            content: str | None,
+            timestamp: str | None,
+            sync_client_id: str,
+            object_revision: int,
+            payload_hash: str,
+            parent_message_id: str | None = None,
+            ranking: int | None = None,
+            projection_message_id: str | None = None,
+        ) -> dict[str, Any]: ...
+
+        def tombstone_message_from_sync(
+            self,
+            *,
+            stable_message_id: str,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+            owner_client_id: str | None = None,
+        ) -> bool: ...
+
+        def tombstone_unsynced_message_from_sync(
+            self,
+            *,
+            stable_message_id: str,
+            sync_client_id: str,
+            object_revision: int,
+            object_hash: str,
+        ) -> str: ...
+
         def get_message_by_id(
             self, message_id: str, include_deleted: bool = False, *, strict_images: bool = False
         ) -> dict[str, Any] | None: ...

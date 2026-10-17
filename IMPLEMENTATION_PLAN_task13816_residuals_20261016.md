@@ -83,3 +83,7 @@ Unit C local review complete:3trueguardRED/180PASS/newguardbehaviorapproved, nat
 
 Unit D local scoped review complete:182PASS plus focused2PASS after three row-presence assertions; native76 193→154,39removed0added/owned8zero. Normal exact10path commit authorized; no new-head proof yet.
 - [ ] Unit E: exact5path existing Sync identity-boundary checks and native MessageStore declarations;18 actual corrupt-identity RED controls then six native owners including legacy attachment refs, native76/security/scoped review. No new ADR; existing Notes pattern and native stores govern.
+
+Unit E local scoped review complete:18intendedRED/274PASS/native76 154→132 (22removed0added), safe native failure logs/productstate unchanged, three exact static delegates/runtimeASTsame. Reviewed0findings; normalexact7pathcommit next.
+- [ ] Unit F: exact9testpath same-shape native fixture batch (Native5V3 + backend/migration/transportV2/workflow-hardening), actual120diagnostic target notpassforecast; one deduplicated9owner runtime/native76/security/scopedreview.
+- [ ] Unit G: three-file native Media binding/cleanup unit, five truefaultREDs+positive subclass control, runtime323identity proof, finite native79 plus relevantSQLite/PG owners/security/review.

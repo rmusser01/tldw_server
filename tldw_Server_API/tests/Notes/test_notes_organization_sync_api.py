@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.Sync.v2.models import (
     NOTES_ORGANIZATION_DOMAINS,
     SyncDomain,
     SyncEnvelope,
+    SyncOperation,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_organization import organization_link_id
 from tldw_Server_API.app.core.Sync.v2.notes_organization_bootstrap import (
@@ -3142,3 +3143,117 @@ def test_chat_materializer_rejects_guard_before_product_or_store_access(
     )
     with pytest.raises(SyncMaterializationContractError):
         materializer.apply(envelope, store=sync_store, guarded_mutation=guard)
+
+
+@pytest.mark.parametrize("object_id", [None, "", 17])
+@pytest.mark.parametrize(
+    "domain, operation",
+    [
+        ("chat.conversation", "upsert"),
+        ("chat.conversation", "tombstone"),
+        ("chat.message", "append"),
+        ("chat.message", "tombstone"),
+    ],
+)
+def test_chat_materializer_rejects_corrupt_stored_id_before_lookup(
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+    monkeypatch: pytest.MonkeyPatch,
+    domain: SyncDomain,
+    operation: SyncOperation,
+    object_id: object,
+) -> None:
+    conversation_id = "corrupt-id-conversation"
+    message_id = "corrupt-id-message"
+    conversation = capture_server_origin_mutation(
+        sync_service,
+        user_id="user-1",
+        domain="chat.conversation",
+        operation="upsert",
+        object_id=conversation_id,
+        payload={"title": "Original conversation"},
+        source="test-corrupt-stored-id",
+    )
+    materializer = (
+        ChatMessageMaterializer(chacha_db) if domain == "chat.message" else ChatConversationMaterializer(chacha_db)
+    )
+    sync_service.materializers[domain] = materializer
+    captured = conversation
+    target_id = conversation_id
+    if domain == "chat.message":
+        target_id = message_id
+        captured = capture_server_origin_mutation(
+            sync_service,
+            user_id="user-1",
+            domain=domain,
+            operation="append",
+            object_id=target_id,
+            payload={
+                "conversation_id": conversation_id,
+                "sender": "user",
+                "content": "Original message",
+            },
+            source="test-corrupt-stored-id",
+        )
+    if operation == "tombstone":
+        captured = capture_server_origin_mutation(
+            sync_service,
+            user_id="user-1",
+            domain=domain,
+            operation=operation,
+            object_id=target_id,
+            payload={},
+            source="test-corrupt-stored-id",
+        )
+    store = sync_service.store
+    stored = store.get_envelope_by_client_id(captured.dataset.dataset_id, captured.envelope.client_envelope_id)
+    assert stored is not None
+    assert stored.operation == operation
+    assert stored.apply_status == "applied"
+    before_state = store.get_object_state(stored.dataset_id, domain, target_id)
+    assert before_state is not None
+    before_conversation = chacha_db.get_conversation_by_id(conversation_id, include_deleted=True)
+    assert before_conversation is not None
+    before_message = chacha_db.get_message_by_id(message_id, include_deleted=True)
+    if domain == "chat.message":
+        assert before_message is not None
+        assert before_message["content"] == "Original message"
+    assert store.list_failed_applies(stored.dataset_id) == []
+    envelope = replace(stored)
+    # Model construction rejects missing IDs; explicitly control a corrupt projection boundary.
+    object.__setattr__(envelope, "object_id", object_id)
+
+    def unexpected_access(*_args: object, **_kwargs: object) -> None:
+        pytest.fail("Invalid chat identity reached state or product access")
+
+    with monkeypatch.context() as scoped:
+        scoped.setattr(store, "get_object_state", unexpected_access)
+        scoped.setattr(store, "upsert_object_state", unexpected_access)
+        for method in (
+            "get_conversation_by_id",
+            "get_message_by_id",
+            "get_messages_by_sync_stable_id",
+            "upsert_conversation_from_sync",
+            "tombstone_conversation_from_sync",
+            "append_message_from_sync",
+            "tombstone_unsynced_message_from_sync",
+            "tombstone_message_from_sync",
+        ):
+            scoped.setattr(chacha_db, method, unexpected_access)
+        result = materializer.apply(envelope, store=store)
+
+    assert result.status == "failed"
+    assert result.error_code == "chat_projection_failed"
+    assert result.message == f"Stored {domain} envelope requires a non-empty string object ID"
+    failed = store.list_failed_applies(stored.dataset_id)
+    assert len(failed) == 1
+    assert failed[0].server_cursor == stored.server_cursor
+    assert failed[0].client_envelope_id == stored.client_envelope_id
+    assert failed[0].object_id == target_id
+    assert failed[0].operation == operation
+    assert failed[0].payload == stored.payload
+    assert failed[0].apply_error_code == result.error_code
+    assert failed[0].apply_error_message == result.message
+    assert store.get_object_state(stored.dataset_id, domain, target_id) == before_state
+    assert chacha_db.get_conversation_by_id(conversation_id, include_deleted=True) == before_conversation
+    assert chacha_db.get_message_by_id(message_id, include_deleted=True) == before_message

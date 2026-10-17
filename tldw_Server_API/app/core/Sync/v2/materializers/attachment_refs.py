@@ -58,15 +58,42 @@ class AttachmentRefMaterializer:
                 message="Stored Sync envelope is missing a server cursor",
             )
 
+        object_id = envelope.object_id
+        if not isinstance(object_id, str) or not object_id:
+            message = f"Stored {self.domain} envelope requires a non-empty string object ID"
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="failed",
+                apply_error_code="attachment_ref_projection_failed",
+                apply_error_message=message,
+            )
+            return MaterializationResult(
+                status="failed",
+                error_code="attachment_ref_projection_failed",
+                message=message,
+            )
+
         if envelope.adapter_version == 2:
-            return self._apply_v2(envelope, store=store)
-        return self._apply_legacy(envelope, store=store)
+            return self._apply_v2(
+                envelope,
+                store=store,
+                object_id=object_id,
+                server_cursor=envelope.server_cursor,
+            )
+        return self._apply_legacy(
+            envelope,
+            store=store,
+            object_id=object_id,
+            server_cursor=envelope.server_cursor,
+        )
 
     def _apply_v2(
         self,
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store,
+        object_id: str,
+        server_cursor: int,
     ) -> MaterializationResult:
         """Project a strict attachment-ref v2 envelope into product state."""
 
@@ -98,11 +125,11 @@ class AttachmentRefMaterializer:
         current_state = store.get_object_state(
             envelope.dataset_id,
             envelope.domain,
-            envelope.object_id,
+            object_id,
         )
         if _already_materialized(envelope, current_state):
             store.mark_envelope_apply_status(
-                envelope.server_cursor or 0,
+                server_cursor,
                 apply_status="applied",
             )
             return MaterializationResult(status="applied")
@@ -111,7 +138,7 @@ class AttachmentRefMaterializer:
             return _mark_v2_conflict(envelope, store, conflict_reason)
 
         projection = self.note_db.note_attachment_store
-        existing = projection.get(envelope.dataset_id, envelope.object_id)
+        existing = projection.get(envelope.dataset_id, object_id)
         desired_deleted = envelope.operation == "tombstone"
         if _is_exact_product_postcondition(
             existing,
@@ -123,6 +150,8 @@ class AttachmentRefMaterializer:
             _record_attachment_ref_state(
                 store=store,
                 envelope=envelope,
+                object_id=object_id,
+                server_cursor=server_cursor,
                 object_revision=revision,
                 object_hash=envelope.payload_hash or "",
                 deleted=desired_deleted,
@@ -134,7 +163,7 @@ class AttachmentRefMaterializer:
             if existing is None:
                 projection.create(
                     dataset_id=envelope.dataset_id,
-                    attachment_id=envelope.object_id,
+                    attachment_id=object_id,
                     note_id=str(payload.parent_object_id),
                     file_name=payload.file_name,
                     original_file_name=payload.original_file_name,
@@ -163,7 +192,7 @@ class AttachmentRefMaterializer:
                     )
                 projection.tombstone(
                     dataset_id=envelope.dataset_id,
-                    attachment_id=envelope.object_id,
+                    attachment_id=object_id,
                     expected_version=envelope.base_object_revision or 0,
                     expected_object_hash=envelope.base_object_hash or "",
                     object_hash=envelope.payload_hash or "",
@@ -174,7 +203,7 @@ class AttachmentRefMaterializer:
             elif envelope.routing_metadata.get("restore_intent") is True:
                 projection.restore(
                     dataset_id=envelope.dataset_id,
-                    attachment_id=envelope.object_id,
+                    attachment_id=object_id,
                     expected_version=envelope.base_object_revision or 0,
                     expected_object_hash=envelope.base_object_hash or "",
                     object_hash=envelope.payload_hash or "",
@@ -183,7 +212,7 @@ class AttachmentRefMaterializer:
             else:
                 projection.compare_and_set(
                     dataset_id=envelope.dataset_id,
-                    attachment_id=envelope.object_id,
+                    attachment_id=object_id,
                     expected_version=envelope.base_object_revision or 0,
                     expected_object_hash=envelope.base_object_hash or "",
                     file_name=payload.file_name,
@@ -198,7 +227,7 @@ class AttachmentRefMaterializer:
         except Exception as exc:  # noqa: BLE001 - failures must remain replayable.
             logger.warning(
                 "Failed attachment.ref v2 projection for cursor {}: {}",
-                envelope.server_cursor,
+                server_cursor,
                 type(exc).__name__,
             )
             return _mark_failed(
@@ -208,7 +237,7 @@ class AttachmentRefMaterializer:
                 "Notes attachment projection failed",
             )
 
-        projected = projection.get(envelope.dataset_id, envelope.object_id)
+        projected = projection.get(envelope.dataset_id, object_id)
         if not _is_exact_product_postcondition(
             projected,
             envelope=envelope,
@@ -225,6 +254,8 @@ class AttachmentRefMaterializer:
         _record_attachment_ref_state(
             store=store,
             envelope=envelope,
+            object_id=object_id,
+            server_cursor=server_cursor,
             object_revision=revision,
             object_hash=envelope.payload_hash or "",
             deleted=desired_deleted,
@@ -236,6 +267,8 @@ class AttachmentRefMaterializer:
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store,
+        object_id: str,
+        server_cursor: int,
     ) -> MaterializationResult:
         """Keep adapter-v1 replay compatibility out of the product registry."""
 
@@ -245,11 +278,11 @@ class AttachmentRefMaterializer:
             logger.warning(
                 "Invalid attachment.ref envelope {} for object {}: {}",
                 envelope.client_envelope_id,
-                envelope.object_id,
+                object_id,
                 exc.error_code,
             )
             store.mark_envelope_apply_status(
-                envelope.server_cursor,
+                server_cursor,
                 apply_status="failed",
                 apply_error_code=exc.error_code,
                 apply_error_message=str(exc),
@@ -263,13 +296,13 @@ class AttachmentRefMaterializer:
         current_state = store.get_object_state(
             envelope.dataset_id,
             envelope.domain,
-            envelope.object_id,
+            object_id,
         )
         if envelope.operation == "upsert":
             if current_state is not None:
                 if current_state.deleted:
                     store.mark_envelope_apply_status(
-                        envelope.server_cursor,
+                        server_cursor,
                         apply_status="conflict",
                         apply_error_code="attachment_ref_tombstoned",
                         apply_error_message=(
@@ -279,12 +312,12 @@ class AttachmentRefMaterializer:
                     return _tombstone_conflict_result(envelope, current_state=current_state)
                 if current_state.object_hash == metadata.payload_hash:
                     store.mark_envelope_apply_status(
-                        envelope.server_cursor,
+                        server_cursor,
                         apply_status="applied",
                     )
                     return MaterializationResult(status="applied")
                 store.mark_envelope_apply_status(
-                    envelope.server_cursor,
+                    server_cursor,
                     apply_status="conflict",
                     apply_error_code="attachment_ref_hash_mismatch",
                     apply_error_message=(
@@ -296,6 +329,8 @@ class AttachmentRefMaterializer:
             _record_attachment_ref_state(
                 store=store,
                 envelope=envelope,
+                object_id=object_id,
+                server_cursor=server_cursor,
                 object_revision=_next_object_revision(envelope, current_state),
                 object_hash=metadata.payload_hash,
                 deleted=False,
@@ -307,6 +342,8 @@ class AttachmentRefMaterializer:
             _record_attachment_ref_state(
                 store=store,
                 envelope=envelope,
+                object_id=object_id,
+                server_cursor=server_cursor,
                 object_revision=_next_object_revision(envelope, current_state),
                 object_hash=object_hash,
                 deleted=True,
@@ -314,7 +351,7 @@ class AttachmentRefMaterializer:
             return MaterializationResult(status="applied")
 
         store.mark_envelope_apply_status(
-            envelope.server_cursor,
+            server_cursor,
             apply_status="failed",
             apply_error_code="attachment_ref_projection_failed",
             apply_error_message=f"Unsupported attachment.ref operation: {envelope.operation}",
@@ -504,6 +541,8 @@ def _record_attachment_ref_state(
     *,
     store: SyncV2Store,
     envelope: SyncEnvelope,
+    object_id: str,
+    server_cursor: int,
     object_revision: int,
     object_hash: str,
     deleted: bool,
@@ -512,14 +551,14 @@ def _record_attachment_ref_state(
         SyncObjectState(
             dataset_id=envelope.dataset_id,
             domain=envelope.domain,
-            object_id=envelope.object_id,
+            object_id=object_id,
             object_revision=object_revision,
             object_hash=object_hash,
-            latest_server_cursor=envelope.server_cursor or 0,
+            latest_server_cursor=server_cursor,
             deleted=deleted,
         )
     )
-    store.mark_envelope_apply_status(envelope.server_cursor or 0, apply_status="applied")
+    store.mark_envelope_apply_status(server_cursor, apply_status="applied")
 
 
 def _next_object_revision(
