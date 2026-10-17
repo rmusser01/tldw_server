@@ -21,38 +21,39 @@ Base: f87446f05d442146ee180277418b07a2e45b4683; prior PR3214 merged ce2f87bc; pr
 Goal: corrected summary and finite current inventory, including issue3117 subitems and existing frontend debt ownership.
 Success Criteria: native commands/owners/dependency requirements, exact failure files/codes and evidence references recorded; independent diagnoses produce concrete fix units or specific missing evidence.
 Tests: native current backend changed-file MyPy scope from prior32 bindings; inspect frontend coverage and issue3117 tests without changing config.
-Status: In Progress
+Status: Complete
 - [x] Update stale TASK13816 summary through backlog-py.
-- [ ] Diagnose backend type families, shared UI33 and issue3117 independently.
+- [x] Diagnose backend type families, shared UI33 and issue3117 independently.
 
 ## Stage 2: Backend type corrections
-Goal: zero diagnostics in all previously failing owning files and original32-file scope under unchanged native flags.
+Goal: zero diagnostics in all previously failing owning files, original32-file scope and newly measured shared DB adapter scopes under unchanged native flags.
 Success Criteria: current RED inventory, smallest corrections retaining runtime semantics, covering regression tests and owning MyPy GREEN; no suppressions or policy changes.
 Tests: exact native MyPy --follow-imports=silent --ignore-missing-imports with the original32 files, relevant pytest owners, Ruff and Bandit touched scope.
-Status: Not Started
-- [ ] Convert diagnosis into per-family exact edit/test briefs; fix one unit at a time.
-- [ ] Independently review each actual unit and verify combined original scope.
+Status: Complete
+- [x] Convert diagnosis into per-family exact edit/test briefs.
+- [x] Twenty-three backend units reviewed and committed through bdd0a416eca156058a9212e64ef20e5adc1f5642. Original32-file scope: 640 errors to zero; overlapping shared DB boundary: zero. Extra media rows/helper/wrapper scopes remain source-bound zero.
+- [x] Independent actual-diff review for each unit; final fresh original32 and boundary5 MyPy commands both exit0 with no issues. Latest native preservation11pass/0skip; earlier genuine SQLite FTS267, Pg RLS sequence PK23505, missing-ID and version rollback RED/GREEN retained. No whole-repository type-green claim; inherited lint/format/security assertion and warning qualifications remain explicit.
 
 ## Stage 3: Coverage failure corrections
 Goal: expose and correct reproducible failures behind historical33 without hiding non-reproduction.
 Success Criteria: original native test:coverage owner, existing limit and reporter preserve assertion evidence; isolated vs package-suite distinction explicit; any fix has RED/GREEN and independent review.
 Tests: RolePlayStarter214 and SkillsManager83 current tests, native coverage full relevant owner when needed for reproduction; no optional report success claim from selection skips.
-Status: Not Started
-- [ ] Diagnose actual missing stacks and current test isolation/load paths; one evidence-driven reproduction.
-- [ ] Fix proven cause and validate owning suite/coverage; preserve unresolved causes explicitly if still absent.
+Status: Complete (existing TASK13817 repair verified)
+- [x] Reconcile current native owner and exact33-case identities with completed TASK13817; obsolete local measurement stopped.
+- [x] Verify existing merged16shard repair/full hosted coverage; retain historical assertion cause UNKNOWN without duplicate repairs.
 
 ## Stage 4: Notes issue3117
 Goal: correct currently reproduced print/editor/preview defects within shared Notes owners and both WebUI/extension callers.
 Success Criteria: map all six issue items to current source, existing fixes and gaps; relevant deterministic RED/GREEN, platform safety, owning tests and browser behavior; no guessed broad redesign.
 Tests: existing Notes export/stage45/UX and preview/editor owners, WebUI/extension types/builds; native browser print document content and lifecycle as applicable.
-Status: Not Started
-- [ ] Map current six items and write exact bounded repair briefs from source evidence.
-- [ ] Implement/review verified gaps, test both surfaces.
+Status: Complete
+- [x] Map current six items and write exact bounded repair briefs from source evidence.
+- [x] Shared preview/code/Mermaid a5265c6c, print cc6e1087 and editor a1632648 independently reviewed and committed. Both normal client builds, nine-case native acceptance and fresh affected two-case native acceptance pass with all health gates. Selected-body review finding repaired with two behavior REDs, 64 owning passes and scoped re-review; historical unknowns retained.
 
 ## Stage 5: Integrated completion
 Goal: satisfy all outstanding TASK13816 criteria with explicit residual dispositions.
 Success Criteria: integrated types/tests/security/builds, independent whole-change review, normal commits; current final summary and AC/DoD reflect actual outcomes. No silent closure of unknown historical initiators or unrelated debt.
 Tests: combined changed backend/MyPy owners, affected frontend/native coverage, WebUI/extension types/builds, Bandit/Ruff/hooks and tracking format.
-Status: Not Started
-- [ ] Verify remaining obligations and existing TASK12116 ownership against measured results.
+Status: In Progress
+- [x] Verify remaining obligations and existing TASK12116 ownership against measured results.
 - [ ] Final review, update backlog and report exact limitations before any publication/cleanup.

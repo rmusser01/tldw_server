@@ -1,6 +1,6 @@
 # Notes editor and outline corrective behavior (TASK13816 / issue3117)
 
-Status: implementation-scoped corrective specification; verification pending.
+Status: implemented and independently reviewed; bounded deterministic and both-client browser verification passed. Whole-branch integration review is separate.
 Scope: accepted coupled NE03 + NE06 repair in the existing 14-file candidate.
 
 ## Existing ownership and architecture
