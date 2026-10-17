@@ -110,4 +110,3 @@ describe("Markdown toolbar lines", () => {
     )
   })
 })
-

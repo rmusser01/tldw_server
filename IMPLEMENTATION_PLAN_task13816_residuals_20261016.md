@@ -60,7 +60,9 @@ Status: In Progress
 
 ### PR3253 authorized landing continuation (2026-10-17)
 Local completion through3b483dc4 remains historical source-bound evidence. The user now requests current-dev readiness and all hosted failures fixed.
-- [ ] Preserve original head/check failures, rebase only this unarmed PR onto actual latest dev, resolve conflicts and verify all source/base bindings.
-- [ ] Diagnose and repair actual EOF, tenant-predicate and Notes coverage failures with unchanged gates, owning regressions and scoped independent review.
+- [x] Preserve original head/check failures, rebase only this unarmed PR onto actual latest dev, resolve conflicts and verify all source/base bindings. Actual rebase exit0/no conflicts onto696d7fde; 99branch/13dev paths no overlap and27730 source bindings preserved.
+- [x] Correct EOF and stale tenant/import generated locations; strengthen the Notes coverage publication observations with unchanged gates/actions/deadlines. Original hosted Notes cause remains UNKNOWN; unchanged control4pass and observing4pass are local non-reproduction, requiring actual new-head hosted coverage. Native tenant52/cache9 pass, inventory10pass after preserved70pass1inventoryfail; normal hooks103files pass and scoped independent review recorded in continuation evidence.
 - [ ] Normal exact-lease publish; require actual new-head required statuses and relevant full-suite/coverage/Notes outcomes, review findings and trusted issuers.
 - [ ] Final latest-dev/head/queue/rules/readiness verification; retain human-authored Change summary as required external input before merge. No merge is requested by this continuation.
+
+ADR check for PR3253 CI continuation: ADR required: no; generated location refreshes, EOF and existing behavioral test observations introduce no durable architecture or workflow rule. Existing ADR-059 governs canonical task tracking.
