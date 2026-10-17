@@ -110,6 +110,13 @@ export const PlaygroundMcpSettingsModal: React.FC<PlaygroundMcpSettingsModalProp
           />
         }
         width={560}
+        style={{ top: '1rem', paddingBottom: 0 }}
+        styles={{
+          container: { height: 'calc(100dvh - 2rem)', display: 'flex', flexDirection: 'column' },
+          header: { flexShrink: 0 },
+          body: { flex: 1, minHeight: 0, overflowY: 'auto' },
+          footer: { flexShrink: 0 },
+        }}
         title={t(
           "playground:composer.mcpSettingsTitle",
           "MCP tool settings"
