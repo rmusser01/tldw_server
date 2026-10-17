@@ -381,3 +381,132 @@ def test_ws_authorization_during_concurrent_run_reads(client_with_wf, target, cl
             stop.set()
             for reader in readers:
                 reader.result(timeout=10)
+
+
+@pytest.mark.parametrize(
+    "scenario, expected_code, expected_reason",
+    [
+        ("missing_credentials", 4401, "authentication_required"),
+        ("invalid_token", 4401, "invalid_token"),
+        ("missing_run", 4404, "run_not_found"),
+        ("foreign_run", 4403, "not_run_owner"),
+        ("cookie_rejected", 4403, "cookie_auth_rejected"),
+    ],
+)
+def test_ws_rejections_have_safe_diagnostics(client_with_wf, monkeypatch, scenario, expected_code, expected_reason):
+    db = app.dependency_overrides[wf_mod._get_db]()
+    run_id = "private-run-do-not-log"
+    db.create_run(
+        run_id=run_id,
+        tenant_id="default",
+        user_id="1",
+        inputs={"secret": "private-input-do-not-log"},  # nosec B105: synthetic leak-detection sentinel.
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "diagnostics", "version": 1, "steps": []},
+    )
+    token = wf_mod.get_jwt_manager().create_access_token(
+        subject="2" if scenario == "foreign_run" else "1", username="tester", roles=["user"], permissions=[]
+    )
+    if scenario == "invalid_token":
+        token = "private-token-do-not-log"  # nosec B105: deliberately invalid test credential.
+    if scenario == "cookie_rejected":
+
+        async def reject_cookie(websocket):
+            websocket.state.single_user_cookie_websocket_close_code = 4403
+            return None
+
+        monkeypatch.setattr(wf_mod, "resolve_single_user_cookie_websocket", reject_cookie)
+    if scenario == "missing_run":
+        run_id = "missing-private-run-do-not-log"
+    query = f"run_id={run_id}"
+    if scenario not in {"missing_credentials", "cookie_rejected"}:
+        query += f"&token={token}"
+    records = []
+    sink = wf_mod.logger.add(
+        lambda message: records.append(message.record),
+        filter=lambda record: record["extra"].get("endpoint") == "workflows_ws",
+    )
+    try:
+        with pytest.raises(WebSocketDisconnect) as rejection:
+            with client_with_wf.websocket_connect(f"/api/v1/workflows/ws?{query}"):
+                pytest.fail("Rejected WebSocket was accepted")
+    finally:
+        wf_mod.logger.remove(sink)
+    assert rejection.value.code == expected_code
+    assert rejection.value.reason == expected_reason
+    assert len(records) == 1
+    record = records[0]
+    assert record["level"].name == "WARNING"
+    assert record["extra"]["close_code"] == expected_code
+    assert record["extra"]["reason"] == expected_reason
+    assert f"code={expected_code}" in record["message"]
+    assert expected_reason in record["message"]
+    diagnostic = record["message"] + str(record["extra"])
+    assert all(secret not in diagnostic for secret in (token, run_id, "private-input-do-not-log"))
+    assert record["exception"] is None
+
+
+def test_ws_stream_failure_diagnostics_exclude_exception_contents(client_with_wf, monkeypatch):
+    db = app.dependency_overrides[wf_mod._get_db]()
+    db.create_run(
+        run_id="diagnostic-stream",
+        tenant_id="default",
+        user_id="1",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "diagnostics", "version": 1, "steps": []},
+    )
+
+    def fail_events(*args, **kwargs):
+        raise ValueError("private-exception-do-not-log")
+
+    monkeypatch.setattr(db, "get_events", fail_events)
+    token = wf_mod.get_jwt_manager().create_access_token(subject="1", username="tester", roles=["user"], permissions=[])
+    records = []
+    sink = wf_mod.logger.add(
+        lambda message: records.append(message.record),
+        filter=lambda record: record["extra"].get("endpoint") == "workflows_ws",
+    )
+    try:
+        with client_with_wf.websocket_connect(f"/api/v1/workflows/ws?run_id=diagnostic-stream&token={token}") as ws:
+            assert ws.receive_json()["type"] == "snapshot"
+            with pytest.raises(WebSocketDisconnect) as failure:
+                ws.receive_json()
+    finally:
+        wf_mod.logger.remove(sink)
+    assert failure.value.code == 1011
+    assert failure.value.reason == "stream_error"
+    record = next(record for record in records if record["extra"].get("reason") == "stream_error")
+    assert record["extra"]["error_type"] == "ValueError"
+    assert "private-exception-do-not-log" not in record["message"]
+    assert token not in record["message"]
+    assert record["exception"] is None
+
+
+def test_ws_lookup_failure_has_safe_diagnostics(client_with_wf, monkeypatch):
+    db = app.dependency_overrides[wf_mod._get_db]()
+
+    def fail_lookup(*args, **kwargs):
+        raise ValueError("private-lookup-do-not-log")
+
+    monkeypatch.setattr(db, "get_run", fail_lookup)
+    token = wf_mod.get_jwt_manager().create_access_token(subject="1", username="tester", roles=["user"], permissions=[])
+    records = []
+    sink = wf_mod.logger.add(
+        lambda message: records.append(message.record),
+        filter=lambda record: record["extra"].get("endpoint") == "workflows_ws",
+    )
+    try:
+        with pytest.raises(WebSocketDisconnect) as failure:
+            with client_with_wf.websocket_connect(f"/api/v1/workflows/ws?run_id=diagnostic-lookup&token={token}"):
+                pytest.fail("Failed lookup was accepted")
+    finally:
+        wf_mod.logger.remove(sink)
+    assert failure.value.code == 1011
+    assert failure.value.reason == "run_lookup_error"
+    assert len(records) == 1
+    assert records[0]["extra"]["error_type"] == "ValueError"
+    assert "private-lookup-do-not-log" not in records[0]["message"]
+    assert records[0]["exception"] is None
