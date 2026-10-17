@@ -1717,7 +1717,7 @@ class WorkflowsDatabase:
         return self._conn
 
     def _release_sqlite(self, conn: sqlite3.Connection) -> None:
-        if getattr(self, "_sqlite_pool", None) and conn is not self._conn:
+        if conn is not self._conn:
             try:
                 self._sqlite_pool.append(conn)
             except _WORKFLOWS_DB_NONCRITICAL_EXCEPTIONS:
