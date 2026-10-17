@@ -1,7 +1,7 @@
 ---
 id: TASK-13461
 title: Restore native server ownership for fresh saved normal chats
-status: In Progress
+status: Done
 ---
 
 ## Description
@@ -34,19 +34,22 @@ Independent CI fixture fix complete: PromptBody.search-pagination.test.tsx parti
 Finalfollowup2026-10-05: fixture-local static notification isolation removes leaked AntD auto-close timer; original CI exception not locally reproduced, but lingering-toast regression observedRED. Parent exactshard6 replay29files309testsPASS exit0; all existing payload/search/pagination assertions retained. Independent fixture and twojourney reviews no actionable findings. Pushing shared reset + native-oracle + fixture followups; CI must rerun before merge.
 UpdatedCIcriticalrerun44pass2fail: bothfailures are test wire assertions requiring parent_message_id:null for the empty initial user request; actual request correctly omits optional root parent. Native create/admission/settlement201 and response200/render usefulanswer passed. Canonical server parent null assertion retained; adjustwireoracle toacceptomittedornull while rejecting nonnull. No productioncode/backport/imagechange needed. ContinueCI withoutbypass.
 2026-10-05: Corrected the two journey wire assertions after CI proved that the client legitimately omits the optional root parent. Stored root-parent null and assistant-parent linkage checks remain unchanged. Fresh frontend TypeScript check exited 0. AST-extracted assertion regression check accepted four valid undefined/null cases and rejected eight invalid parents; the old HEAD assertions rejected both omitted-parent cases. Independent review found no actionable issues. No production code, provider dispatch, private backport, or qualified image changed in this follow-up.
+2026-10-05: Critical browser journeys passed all 46 tests at head 9ddabf00f835399168d19d0dbcb89a7179ea65c3. Seven frontend shards also passed, including the repaired notification fixture in shard 6. Shard 2 found one head-only Notes AI keyword-assist failure amid 26 inherited baseline failures; full-context comparison failed closed because assertion statuses differ. No merge or gate override occurred. Investigating the asynchronous Notes fixture and existing source-grounded provider assertion; no additional real-provider dispatches or staging changes.
+Integration verified 2026-10-05T19:38:19Z: PR3195 merged into latest dev as27ce9763870e5fb5de40dece8e2744b6b2475c28 from exact reviewed9ddabf00f835399168d19d0dbcb89a7179ea65c3. Allseven explicit required contexts SUCCESS, actualcritical46browser tests SUCCESS, all8frontendunit shards passed and no failing check. Bounded failed-shard retry resolved the isolated Notes status flake without changing production Notes, comparator or workflow checks. Qodo paused/outofcredits and CodeRabbit dev auto-reviewdisabled; independentreviews clean, no bot-pass claim. GoverningADR049unchanged; no schema change.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Restored scoped native ownership before first-send admission for fresh saved normal drafts, retaining local/temp behavior, lease/account/navigation fences and recovery. Shared New saved chat reset clears stale owner only after accepted navigation. Exactlyone native chat and user/assistant pair; inference save_to_db=false; full reasoning persists without client-clock metadata. Focused273tests, sibling296tests and tsc passed; known baseline RAG assertion independently reproduced and recorded. Strict frontend gate and all46critical browser journeys passed. Independentreview findings addressed. PR3195 merged27ce976387 into currentdev with allseven required contexts green, no bypass. External automated reviews unavailable, not claimed successful.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
