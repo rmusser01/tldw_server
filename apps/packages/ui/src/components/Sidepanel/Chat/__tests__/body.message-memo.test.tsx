@@ -27,8 +27,18 @@ const sidepanelMessageState = vi.hoisted(() => ({
   }
 }))
 
+// Production's useMessage re-creates its action callbacks every render
+// (deleteMessage's useCallback closes over the current `messages` snapshot;
+// editMessage is a per-render factory product). The mock therefore hands
+// body.tsx NEW deleteMessage/editMessage identities on every useMessage()
+// call, so the row-memo contract below must hold under that per-render
+// churn — not just for identity-stable mocks.
 vi.mock("~/hooks/useMessage", () => ({
-  useMessage: () => sidepanelMessageState.value
+  useMessage: () => ({
+    ...sidepanelMessageState.value,
+    deleteMessage: vi.fn(),
+    editMessage: vi.fn()
+  })
 }))
 
 // Memoized row spy standing in for the real PlaygroundMessage: default
@@ -205,6 +215,36 @@ describe("SidePanelBody row memoization (WP-02/WP-03/WP-09)", () => {
       expect(rowRenderCounts.get(`msg-${index}`) ?? 0).toBe(0)
     }
     expect(screen.getByText("partial streamed text")).toBeInTheDocument()
+  })
+
+  it("keeps sibling rows memo-stable when the hook re-creates delete/edit identities per render", () => {
+    const initialMessages = buildMessages(50)
+    sidepanelMessageState.value = {
+      ...sidepanelMessageState.value,
+      streaming: true,
+      messages: initialMessages
+    }
+
+    const { rerender } = render(<SidePanelBody />)
+
+    expect(screen.getAllByTestId("sidepanel-row")).toHaveLength(50)
+    rowRenderCounts.clear()
+
+    // Token flush: the useMessage mock hands body.tsx NEW deleteMessage and
+    // editMessage identities on this render (production re-creates both per
+    // streaming flush). Sibling rows must still not re-render — row props
+    // must not depend on hook callback identity.
+    sidepanelMessageState.value = {
+      ...sidepanelMessageState.value,
+      messages: replaceLastMessage(initialMessages, "next token")
+    }
+    rerender(<SidePanelBody />)
+
+    expect(rowRenderCounts.get("msg-49")).toBe(1)
+    for (let index = 0; index < 49; index += 1) {
+      expect(rowRenderCounts.get(`msg-${index}`) ?? 0).toBe(0)
+    }
+    expect(screen.getByText("next token")).toBeInTheDocument()
   })
 
   it("narrows isStreaming so only the last row receives isStreaming=true while streaming", () => {
