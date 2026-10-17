@@ -295,7 +295,9 @@ type Props = {
   discoSkillComment?: DiscoSkillComment | null
   historyId?: string
   conversationInstanceId: string
-  onDeleteMessage?: () => void | boolean | Promise<void | boolean>
+  onDeleteMessage?:
+    | (() => void | boolean | Promise<void | boolean>)
+    | { readonly current: () => void | boolean | Promise<void | boolean> }
   suppressDeleteSuccessToast?: boolean
   onSaveToWorkspaceNotes?: (payload: {
     message: string
@@ -1551,6 +1553,20 @@ const PlaygroundMessageImpl = (props: Props) => {
   const handleDelete = React.useCallback(() => {
     if (!props.onDeleteMessage) return
 
+    // Ref-like delete sources (memoized rows, e.g. SidePanelBody) are
+    // resolved once HERE, at confirmation-open time, so the pending onOk
+    // keeps acting on the exact deleteMessage instance and row captured
+    // when the dialog opened, even if later renders replace either the
+    // source or the target. Plain per-render closure props are used
+    // as-is.
+    const deleteSource =
+      typeof (props.onDeleteMessage as { current?: unknown }).current ===
+      "function"
+        ? (props.onDeleteMessage as unknown as {
+            current: () => void | boolean | Promise<void | boolean>
+          }).current
+        : props.onDeleteMessage
+
     Modal.confirm({
       title: t("common:confirmTitle", "Please confirm"),
       content: t("common:deleteMessageConfirm", "Delete this message?"),
@@ -1559,7 +1575,7 @@ const PlaygroundMessageImpl = (props: Props) => {
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          const accepted = await props.onDeleteMessage?.()
+          const accepted = await deleteSource()
           if (accepted !== false && !props.suppressDeleteSuccessToast) {
             messageApi.success(t("common:deleted", "Deleted"))
           }
