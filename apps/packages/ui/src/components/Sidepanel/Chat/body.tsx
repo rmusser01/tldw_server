@@ -217,21 +217,56 @@ export const SidePanelBody = ({
       ),
     []
   )
+  // O(1) row index lookup by message id, rebuilt once per `messages`
+  // identity (a streaming flush rebuilds the map once, not per row).
+  const rowIndexById = React.useMemo(() => {
+    const map = new Map<string, number>()
+    messages.forEach((row, index) => {
+      if (row.id != null) map.set(row.id, index)
+    })
+    return map
+  }, [messages])
+  // Interned delete handlers CAPTURE the deleteMessage instance and row
+  // index that were current when the entry was interned, instead of
+  // dispatching through latestRowHandlers: a Delete confirm opened against
+  // them keeps acting on that exact source and target even after later
+  // renders replace either (dev's delete-refusal semantics). The entry is
+  // re-interned only when the live deleteMessage instance or the row's
+  // position changes, so ordinary streaming flushes keep the handler
+  // identity stable for PlaygroundMessage's memo comparator (WP-03).
   const getRowDeleteHandler = React.useCallback(
-    (messageId: string | undefined) =>
-      getStableRowHandler(
-        rowHandlerCache,
-        `delete:${messageId ?? ""}`,
-        () => () => {
-          const index = messagesRef.current.findIndex(
-            (row) => row.id === messageId
-          )
-          if (index < 0) return
-          // Rows await the pending delete outcome; pass it through.
-          return latestRowHandlers.current.deleteMessage(index)
-        }
-      ),
-    []
+    (messageId: string | undefined) => {
+      const key = `delete:${messageId ?? ""}`
+      const interned = rowHandlerCache.current.get(key) as
+        | {
+            handler: () => ReturnType<typeof deleteMessage>
+            source: typeof deleteMessage
+            index: number
+          }
+        | undefined
+      const index =
+        messageId == null
+          ? messages.findIndex((row) => row.id == null)
+          : rowIndexById.get(messageId)
+      // Keep the interned handler once the row is gone: a confirm opened
+      // before the replacement still dispatches to the original target.
+      if (
+        interned &&
+        (index === undefined ||
+          (interned.source === deleteMessage && interned.index === index))
+      ) {
+        return interned.handler
+      }
+      const source = deleteMessage
+      const targetIndex = index ?? -1
+      const handler = () => {
+        // Rows await the pending delete outcome; pass it through.
+        return source(targetIndex)
+      }
+      rowHandlerCache.current.set(key, { handler, source, index: targetIndex })
+      return handler
+    },
+    [deleteMessage, rowIndexById, messages]
   )
   const getRowNewBranchHandler = React.useCallback(
     (messageId: string | undefined) =>
