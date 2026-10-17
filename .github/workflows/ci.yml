@@ -925,9 +925,15 @@ jobs:
           - name: db-management-d-l
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[d-l]*.py
-          - name: db-management-m-r
+          - name: db-management-m
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[m-r]*.py
+              tldw_Server_API/tests/DB_Management/test_m*.py
+          - name: db-management-n
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_n*.py
+          - name: db-management-o-r
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[o-r]*.py
           - name: db-management-s-z
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[s-z]*.py
@@ -2589,9 +2595,15 @@ jobs:
           - name: db-management-d-l
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[d-l]*.py
-          - name: db-management-m-r
+          - name: db-management-m
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[m-r]*.py
+              tldw_Server_API/tests/DB_Management/test_m*.py
+          - name: db-management-n
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_n*.py
+          - name: db-management-o-r
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[o-r]*.py
           - name: db-management-s-z
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[s-z]*.py
@@ -4093,9 +4105,15 @@ jobs:
           - name: db-management-d-l
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[d-l]*.py
-          - name: db-management-m-r
+          - name: db-management-m
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[m-r]*.py
+              tldw_Server_API/tests/DB_Management/test_m*.py
+          - name: db-management-n
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_n*.py
+          - name: db-management-o-r
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[o-r]*.py
           - name: db-management-s-z
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[s-z]*.py
@@ -5508,9 +5526,15 @@ jobs:
           - name: db-management-d-l
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[d-l]*.py
-          - name: db-management-m-r
+          - name: db-management-m
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[m-r]*.py
+              tldw_Server_API/tests/DB_Management/test_m*.py
+          - name: db-management-n
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_n*.py
+          - name: db-management-o-r
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[o-r]*.py
           - name: db-management-s-z
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[s-z]*.py
@@ -6914,9 +6938,15 @@ jobs:
           - name: db-management-d-l
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[d-l]*.py
-          - name: db-management-m-r
+          - name: db-management-m
             paths: >-
-              tldw_Server_API/tests/DB_Management/test_[m-r]*.py
+              tldw_Server_API/tests/DB_Management/test_m*.py
+          - name: db-management-n
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_n*.py
+          - name: db-management-o-r
+            paths: >-
+              tldw_Server_API/tests/DB_Management/test_[o-r]*.py
           - name: db-management-s-z
             paths: >-
               tldw_Server_API/tests/DB_Management/test_[s-z]*.py

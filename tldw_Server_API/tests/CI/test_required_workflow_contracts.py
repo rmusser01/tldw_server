@@ -11,7 +11,9 @@ import yaml
 
 
 def _load(path: str) -> dict:
-    return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    data = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    assert isinstance(data, dict)
+    return data
 
 
 def _get_step(steps: list[dict], name: str) -> dict:
@@ -892,7 +894,9 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
             "chacha-content-persona",
             "db-management-a-c",
             "db-management-d-l",
-            "db-management-m-r",
+            "db-management-m",
+            "db-management-n",
+            "db-management-o-r",
             "db-management-s-z",
             "db-privileges",
         }
@@ -1133,7 +1137,7 @@ def test_full_suite_splits_slow_chat_and_retrieval_shards() -> None:
         for shard_name in media_ingestion_shards:
             for pattern in shard_path_sets[shard_name]:
                 if Path(pattern).is_dir():
-                    matches = [
+                    matches: list[str] | set[str] = [
                         filename
                         for filename in media_ingestion_test_files
                         if filename.startswith(f"{pattern}/")
@@ -1882,7 +1886,9 @@ def test_db_management_partitions_cover_each_file_once() -> None:
             "test_claims_*.py", "test_con*.py", "test_core_*.py",
         ),
         "db-management-d-l": ("test_[d-l]*.py",),
-        "db-management-m-r": ("test_[m-r]*.py",),
+        "db-management-m": ("test_m*.py",),
+        "db-management-n": ("test_n*.py",),
+        "db-management-o-r": ("test_[o-r]*.py",),
         "db-management-s-z": ("test_[s-z]*.py",),
     }
     jobs = (
@@ -1899,6 +1905,7 @@ def test_db_management_partitions_cover_each_file_once() -> None:
             for shard in workflow["jobs"][job]["strategy"]["matrix"]["shard"]
         }
         assert "db-management-a-l" not in shards
+        assert "db-management-m-r" not in shards
         assert (root / "test_chacha_*.py").as_posix() in shards["chacha-core-stores"]
         covered: list[str] = [
             filename for filename in files
