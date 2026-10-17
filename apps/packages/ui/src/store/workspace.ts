@@ -2800,10 +2800,15 @@ export const createWorkspaceStorage = (
       })
     },
     removeItem: async (name: string): Promise<void> => {
-      // Removal must not race a pending coalesced write (the write would
-      // resurrect the removed key after this returns), and the per-workspace
-      // diff stamps describe storage that is about to be wiped.
-      flushWorkspacePersistWrites()
+      // Removal must not race a pending OR in-flight coalesced write: a drain
+      // suspended on an IndexedDB await would resume after these removals,
+      // find its stamps cleared, treat storage as legacy-dirty, and rewrite
+      // the snapshot/chat/split-index keys — the cleared workspace would
+      // reappear on reload (reachable via persist.clearStorage() then reload).
+      // Await the full drain (buffered + in-flight) FIRST, then clear the
+      // diff stamps (they describe storage that is about to be wiped) and
+      // remove the keys.
+      await flushWorkspacePersistence()
       clearWorkspacePersistStamps(indexedDbAdapter)
       if (name === WORKSPACE_STORAGE_KEY) {
         const workspaceIds = getWorkspaceIdsFromStoredValue(
