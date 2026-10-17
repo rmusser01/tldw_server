@@ -337,35 +337,52 @@ describe("ServerAdminPage design-system states", () => {
     expect(alert).toHaveTextContent("Budget exploded")
   })
 
-  it("resets a user's password with a generated secret and reveals it once (#2918)", async () => {
-    apiMock.resetAdminUserPassword.mockResolvedValue({
-      user_id: 7,
-      force_password_change: true,
-      message: "ok"
-    })
+  // This test drives the heaviest admin page through a full mount plus two
+  // table interactions (popconfirm + reveal modal). That flow legitimately
+  // takes >5s of wall time on loaded CI runners (measured 8.4s on a loaded
+  // host: ~3.7s jsdom mount alone), so vitest's 5s default killed it
+  // mid-flow and read as a flake. The interaction itself is deterministic.
+  it(
+    "resets a user's password with a generated secret and reveals it once (#2918)",
+    async () => {
+      apiMock.resetAdminUserPassword.mockResolvedValue({
+        user_id: 7,
+        force_password_change: true,
+        message: "ok"
+      })
 
-    renderPage(<ServerAdminPage />)
+      renderPage(<ServerAdminPage />)
 
-    const rowButton = (
-      await screen.findAllByRole("button", { name: "Reset password" })
-    )[0]
-    fireEvent.click(rowButton)
-    // Popconfirm opens with a verb-labeled confirm of the same name.
-    const confirmButtons = await screen.findAllByRole("button", {
-      name: "Reset password"
-    })
-    fireEvent.click(confirmButtons[confirmButtons.length - 1])
+      const rowButton = (
+        await screen.findAllByRole("button", { name: "Reset password" })
+      )[0]
+      fireEvent.click(rowButton)
+      // Popconfirm opens with a verb-labeled confirm of the same name. Wait
+      // for it explicitly: findAllByRole resolves as soon as the row button
+      // exists, so grabbing "the last match" without this could re-click the
+      // row button if the popconfirm portal has not landed yet.
+      await waitFor(() => {
+        expect(
+          screen.getAllByRole("button", { name: "Reset password" }).length
+        ).toBeGreaterThan(1)
+      })
+      const confirmButtons = screen.getAllByRole("button", {
+        name: "Reset password"
+      })
+      fireEvent.click(confirmButtons[confirmButtons.length - 1])
 
-    await waitFor(() => {
-      expect(apiMock.resetAdminUserPassword).toHaveBeenCalledTimes(1)
-    })
-    const [, payload] = apiMock.resetAdminUserPassword.mock.calls[0]
-    expect(payload.temporary_password.length).toBeGreaterThanOrEqual(10)
-    expect(payload.reason.length).toBeGreaterThanOrEqual(8)
-    expect(payload.force_password_change).toBe(true)
+      await waitFor(() => {
+        expect(apiMock.resetAdminUserPassword).toHaveBeenCalledTimes(1)
+      })
+      const [, payload] = apiMock.resetAdminUserPassword.mock.calls[0]
+      expect(payload.temporary_password.length).toBeGreaterThanOrEqual(10)
+      expect(payload.reason.length).toBeGreaterThanOrEqual(8)
+      expect(payload.force_password_change).toBe(true)
 
-    // The generated secret is revealed exactly once for the admin to share.
-    const reveal = await screen.findByTestId("admin-reset-password-result")
-    expect(reveal).toHaveTextContent(payload.temporary_password)
-  })
+      // The generated secret is revealed exactly once for the admin to share.
+      const reveal = await screen.findByTestId("admin-reset-password-result")
+      expect(reveal).toHaveTextContent(payload.temporary_password)
+    },
+    20000
+  )
 })

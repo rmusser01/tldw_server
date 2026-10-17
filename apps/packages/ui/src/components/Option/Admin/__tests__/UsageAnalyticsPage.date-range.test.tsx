@@ -71,10 +71,12 @@ describe("UsageAnalyticsPage date-range pass-through", () => {
 
     // The initial load already carries the selected range; switching ranges
     // (covered below) must not stack a second mount-style fan-out.
+    // /usage/daily documents start/end (not start_date/end_date) as the
+    // backend query params (admin_usage.py) — pin the corrected names.
     expect(apiMock.getDailyUsage).toHaveBeenCalledWith(
       expect.objectContaining({
-        start_date: expect.any(String),
-        end_date: expect.any(String)
+        start: expect.any(String),
+        end: expect.any(String)
       })
     )
   })
@@ -107,6 +109,15 @@ describe("UsageAnalyticsPage date-range pass-through", () => {
       expect(apiMock.getLlmUsageSummary).toHaveBeenCalledTimes(1)
       expect(apiMock.getLlmTopSpenders).toHaveBeenCalledTimes(1)
     })
+
+    const [dailyArgs] = apiMock.getDailyUsage.mock.calls[0]
+    // /usage/daily documents start/end as YYYY-MM-DD inclusive, same as
+    // /usage/top (admin_usage.py).
+    expect(dailyArgs.start).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(dailyArgs.end).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(
+      Date.parse(dailyArgs.end) - Date.parse(dailyArgs.start)
+    ).toBeGreaterThanOrEqual(28 * DAY_MS)
 
     const [topUsageArgs] = apiMock.getTopUsage.mock.calls[0]
     // /usage/top documents start/end as YYYY-MM-DD inclusive.

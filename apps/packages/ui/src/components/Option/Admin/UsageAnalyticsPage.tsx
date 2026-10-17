@@ -99,7 +99,10 @@ const UsageAnalyticsPage: React.FC = () => {
   const loadDailyUsage = useCallback(async () => {
     setDailyLoading(true)
     try {
-      const result = await tldwClient.getDailyUsage(getDateParams())
+      // /usage/daily takes start/end (like /usage/top), not the internal
+      // start_date/end_date keys getDateParams() uses.
+      const { start_date, end_date } = getDateParams()
+      const result = await tldwClient.getDailyUsage({ start: start_date, end: end_date })
       setDailyUsage(Array.isArray(result) ? result : result?.data ?? [])
     } catch (err) {
       markAdminGuardFromError(err)

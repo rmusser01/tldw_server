@@ -154,6 +154,34 @@ def test_pagination_returns_page_and_truthful_total(backup_root):
     ]
 
 
+def test_vanished_file_between_scan_and_page_is_skipped(backup_root):
+    """A file deleted after the (TTL-cached) scan must not 500 the listing.
+
+    The 30s scan cache widens the race between scan and BackupFile stat: the
+    cached rows may reference files that no longer exist. Such rows are
+    skipped, so a page may return fewer items than requested; ``total`` still
+    reflects the cached scan (TASK-13647).
+    """
+    media_dir = _dataset_dir(backup_root, "media", 1)
+    newest = _write_backup_file(media_dir, "newest.db", mtime=2_000.0)
+    _write_backup_file(media_dir, "oldest.db", mtime=1_000.0)
+
+    # Prime the cache with both files on disk.
+    _, total = svc.list_backup_items(dataset="media", user_id=1, limit=10, offset=0)
+    assert total == 2
+
+    # Delete between the cached scan and the next page build.
+    newest.unlink()
+
+    items, total_after = svc.list_backup_items(
+        dataset="media", user_id=1, limit=10, offset=0
+    )
+    assert total_after == 2, "total still reflects the cached scan"
+    assert [item.filename for item in items] == ["oldest.db"], (
+        "vanished file must be skipped without raising"
+    )
+
+
 def test_stats_only_page_files(backup_root, monkeypatch):
     """Only the requested page pays full BackupFile construction/stat-detail cost.
 

@@ -203,8 +203,13 @@ def _scan_all_users_backup_rows(dataset: str) -> list[_BackupScanRow]:
     return rows
 
 
-def _backup_file_from_row(row: _BackupScanRow) -> BackupFile:
-    stat = os.stat(row.path)
+def _backup_file_from_row(row: _BackupScanRow) -> BackupFile | None:
+    # A backup can vanish between the (TTL-cached) scan and this page build;
+    # treat a vanished file as absent rather than 500-ing the whole listing.
+    try:
+        stat = os.stat(row.path)
+    except OSError:
+        return None
     return BackupFile(
         dataset=row.dataset,
         user_id=row.user_id,
@@ -257,7 +262,11 @@ def list_backup_items(
 
     total = len(rows)
     page_rows = rows[offset: offset + limit]
-    return [_backup_file_from_row(row) for row in page_rows], total
+    # Rows whose file vanished between scan and page build are skipped, so a
+    # page may hold fewer items than requested while `total` still reflects
+    # the cached scan - the listing self-corrects at the next TTL refresh.
+    page = [bf for bf in (_backup_file_from_row(row) for row in page_rows) if bf is not None]
+    return page, total
 
 
 def _resolve_dataset_db_path(dataset: str, user_id: int | None) -> tuple[str, int | None]:
