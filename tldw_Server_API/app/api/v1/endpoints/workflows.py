@@ -30,6 +30,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
@@ -4627,7 +4628,7 @@ async def workflows_ws(
 
     # Enforce the existing owner-only rule.
     try:
-        run = db.get_run(run_id)
+        run = await run_in_threadpool(db.get_run, run_id)
     except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
         await _close_workflows_websocket(websocket, 1011, "run_lookup_error", error_type=type(exc).__name__)
         return
@@ -4664,7 +4665,7 @@ async def workflows_ws(
             }
         )
         while True:
-            events = db.get_events(run_id, since=last_seq, types=(types_norm or None))
+            events = await run_in_threadpool(db.get_events, run_id, since=last_seq, types=(types_norm or None))
             if events:
                 for e in events:
                     payload = e.get("payload_json") or {}
@@ -4677,6 +4678,8 @@ async def workflows_ws(
                         }
                     )
                     last_seq = e["event_seq"]
+                    # A writable socket may send without yielding during history bursts.
+                    await asyncio.sleep(0)
             else:
                 # Send a lightweight heartbeat so clients using blocking receive_json() don't hang indefinitely
                 await stream.send_json({"type": "heartbeat", "ts": _utcnow_iso()})
@@ -4685,7 +4688,7 @@ async def workflows_ws(
         logger.bind(
             component="workflows", endpoint="workflows_ws", close_code=exc.code, reason="peer_disconnected"
         ).info("Workflows WS disconnected: code={}", exc.code)
-        raise
+        return
     except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
         with contextlib.suppress(_WORKFLOWS_NONCRITICAL_EXCEPTIONS):
             await _close_workflows_websocket(
