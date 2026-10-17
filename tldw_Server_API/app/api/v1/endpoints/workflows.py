@@ -10,10 +10,12 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
+from weakref import WeakValueDictionary
 
 from fastapi import (
     APIRouter,
@@ -4592,6 +4594,46 @@ async def _close_workflows_websocket(
     await websocket.close(code=code, reason=reason)
 
 
+class _WorkflowHistoryBudget:
+    """Bound combined history-send work to 1ms before polling the loop's timers."""
+
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+        self._deadline = 0.0
+        self._pending: asyncio.Event | None = None
+
+    async def checkpoint(self) -> None:
+        while self._loop.time() >= self._deadline:
+            if self._pending is None:
+                pending = asyncio.Event()
+                self._pending = pending
+
+                def resume(pending: asyncio.Event = pending) -> None:
+                    self._deadline = self._loop.time() + 0.001
+                    self._pending = None
+                    pending.set()
+
+                # Bare yields requeue senders ahead of timers; one shared timer resets the budget.
+                self._loop.call_later(0, resume)
+            await self._pending.wait()
+
+
+_WORKFLOW_HISTORY_BUDGETS: WeakValueDictionary[asyncio.AbstractEventLoop, _WorkflowHistoryBudget] = (
+    WeakValueDictionary()
+)
+_WORKFLOW_HISTORY_BUDGETS_LOCK = threading.Lock()
+
+
+def _workflow_history_budget() -> _WorkflowHistoryBudget:
+    loop = asyncio.get_running_loop()
+    with _WORKFLOW_HISTORY_BUDGETS_LOCK:
+        budget = _WORKFLOW_HISTORY_BUDGETS.get(loop)
+        if budget is None:
+            budget = _WorkflowHistoryBudget(loop)
+            _WORKFLOW_HISTORY_BUDGETS[loop] = budget
+        return budget
+
+
 @router.websocket("/ws")
 async def workflows_ws(
     websocket: WebSocket,
@@ -4652,6 +4694,7 @@ async def workflows_ws(
     # Normalize event types if provided for server-side filtering
     types_norm = [t.strip() for t in (types or []) if str(t).strip()]
     last_seq: Optional[int] = None
+    history_budget = _workflow_history_budget()
     try:
         await stream.start()
         # On connect, send a snapshot event
@@ -4668,6 +4711,7 @@ async def workflows_ws(
             events = await run_in_threadpool(db.get_events, run_id, since=last_seq, types=(types_norm or None))
             if events:
                 for e in events:
+                    await history_budget.checkpoint()
                     payload = e.get("payload_json") or {}
                     await stream.send_json(
                         {
@@ -4678,8 +4722,6 @@ async def workflows_ws(
                         }
                     )
                     last_seq = e["event_seq"]
-                    # A writable socket may send without yielding during history bursts.
-                    await asyncio.sleep(0)
             else:
                 # Send a lightweight heartbeat so clients using blocking receive_json() don't hang indefinitely
                 await stream.send_json({"type": "heartbeat", "ts": _utcnow_iso()})

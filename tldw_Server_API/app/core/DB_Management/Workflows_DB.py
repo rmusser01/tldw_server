@@ -2414,6 +2414,31 @@ class WorkflowsDatabase:
         else:
             conn = self._acquire_sqlite()
             try:
+                # One SQLite/Python transfer avoids concurrent per-row GIL handoffs.
+                packed_sql = (
+                    "SELECT json_group_array(json_object("  # nosec B608 - Internal SQL clauses only; values stay bound.
+                    "'event_id', event_id, 'tenant_id', tenant_id, 'run_id', run_id, "
+                    "'step_run_id', step_run_id, 'event_seq', event_seq, 'event_type', event_type, "
+                    "'payload_json', json(COALESCE(NULLIF(payload_json, ''), '{}')), 'created_at', created_at)), "
+                    "min(payload_json IS NULL OR payload_json = '' OR "
+                    "(typeof(payload_json) = 'text' AND json_valid(payload_json))) FROM (" + sql + ")"
+                )
+                try:
+                    packed, strict_json = conn.cursor().execute(packed_sql, params).fetchone()
+                    if strict_json != 0:
+                        # Aggregate nesting/digit limits must retain per-payload legacy decoding.
+                        with contextlib.suppress(ValueError, RecursionError):
+                            return json.loads(packed)
+                except sqlite3.Error as exc:
+                    # Legacy JSON/BLOBs, optional JSON1 and aggregate size limits retain the original reader.
+                    if getattr(exc, "sqlite_errorcode", None) != sqlite3.SQLITE_TOOBIG and str(exc) not in {
+                        "malformed JSON",
+                        "no such function: json_group_array",
+                        "no such function: json_object",
+                        "no such function: json_valid",
+                        "no such function: json",
+                    }:
+                        raise
                 rows = conn.cursor().execute(sql, params).fetchall()
             finally:
                 self._release_sqlite(conn)

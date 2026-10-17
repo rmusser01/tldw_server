@@ -10,10 +10,12 @@ ADR check: no new ADR for a benchmark or local responsiveness repair; preserve a
 **Status**: Complete
 
 ## Stage 2: Evidence-driven repair
-**Goal**: Repair only reproduced root causes and compare matched workloads.
+**Goal**: Repair only reproduced root causes and compare matched workloads. Follow-up: remove concurrent per-row SQLite transfers with one native JSON page, preserving the original row/decode path for legacy payloads, unavailable JSON functions and oversized aggregates. Replace per-frame bare yields with a loop-shared 1ms work budget and a timer checkpoint, retaining ordered individual frames. No global read admission limit or schema shortcut.
+
+**Scope and ADR assessment**: Shared get_events callers include REST, webhooks, investigations, voice workflows and WebSockets; PostgreSQL remains on its current path. Compatibility tests cover stored payload types, filters/limits/order, missing JSON1, oversized values and genuine database errors. Scheduler tests cover cumulative work, cancellation, separate loops and cleanup. These are local retrieval/scheduling implementation details under existing persistence/auth/frame rules, so no new ADR is needed; ADR-059 governs tracking. Performance must be established against a freshly matched baseline before this repair is considered complete.
 **Success Criteria**: Red/green regressions preserve auth, ownership, event delivery and safe diagnostics; paired before/after results.
 **Tests**: Connected workflow/stream/auth suites and benchmark correctness/error cases.
-**Status**: Complete
+**Status**: In Progress — Event-based candidate passes219 connected tests and independent code review; final ABBA must wait for the requester-approved quiet host window. The timing reference is latest dev plus the common normal-disconnect return, so both variants must have zero errors and exact delivery. Earlier Future/shield timings failed performance and are excluded from acceptance.
 
 ## Stage 3: Review and integration
 **Goal**: Deliver a reviewed new PR against latest dev.
