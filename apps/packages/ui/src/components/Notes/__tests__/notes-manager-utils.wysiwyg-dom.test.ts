@@ -149,6 +149,144 @@ describe("edited list roundtrip", () => {
     )
   })
 
+  it.each([
+    ["add", "start", "plain"],
+    ["add", "end", "plain"],
+    ["remove", "start", "plain"],
+    ["remove", "end", "plain"],
+    ["add", "start", "inline"],
+    ["add", "end", "inline"],
+    ["remove", "start", "inline"],
+    ["remove", "end", "inline"]
+  ])(
+    "%s excludes zero-content %s boundary in %s bodies",
+    (action, direction, shape) => {
+      const body = (text: string) =>
+        shape === "inline" ? `<span>${text}</span>` : text
+      // Keep the checked control outside the actual Range in each direction.
+      const neighbourControl =
+        action === "remove" ? '<input type="checkbox" checked>' : ""
+      const neighbourHtml = `<li>${direction === "start" ? neighbourControl : ""}${body("neighbour")}${direction === "end" ? neighbourControl : ""}</li>`
+      const targetHtml = `<li>${action === "remove" ? '<input type="checkbox" checked>' : ""}${body("target")}</li>`
+      const editor = mountEditor(
+        `<ul>${direction === "start" ? neighbourHtml + targetHtml : targetHtml + neighbourHtml}<li>ordinary</li><li><input type="checkbox" checked>checked sibling</li></ul>`
+      )
+      const items = editor.querySelectorAll("li")
+      const target = items[direction === "start" ? 1 : 0]
+      const neighbour = items[direction === "start" ? 0 : 1]
+      const ordinary = items[2]
+      const checkedSibling = items[3]
+      const checkedSiblingBox = checkedSibling.querySelector("input")!
+      const targetText = firstText(target)
+      const neighbourText = firstText(neighbour)
+      const neighbourBody =
+        shape === "inline" ? neighbour.querySelector("span")! : neighbourText
+      const neighbourBox = neighbour.querySelector("input")
+      const neighbourHtmlBefore = neighbour.innerHTML
+      const ordinaryText = ordinary.firstChild
+      const range = document.createRange()
+      if (direction === "start") {
+        range.setStart(neighbourText, neighbourText.length)
+        range.setEnd(targetText, 3)
+      } else {
+        range.setStart(targetText, 3)
+        range.setEnd(neighbourText, 0)
+      }
+      window.getSelection()?.removeAllRanges()
+      window.getSelection()?.addRange(range)
+      expect(range.startContainer).toBe(
+        direction === "start" ? neighbourText : targetText
+      )
+      expect(range.startOffset).toBe(
+        direction === "start" ? neighbourText.length : 3
+      )
+      expect(range.endContainer).toBe(
+        direction === "start" ? targetText : neighbourText
+      )
+      expect(range.endOffset).toBe(direction === "start" ? 3 : 0)
+      expect(range.toString()).toBe(direction === "start" ? "tar" : "get")
+      if (action === "remove") {
+        expect(neighbourBox).not.toBeNull()
+        expect(neighbourBox!.checked).toBe(true)
+      } else expect(neighbourBox).toBeNull()
+      expect(checkedSiblingBox.checked).toBe(true)
+      if (action === "add") makeEditableChecklist(editor)
+      else removeEditableTaskControls(editor)
+      expect(
+        target.querySelectorAll(":scope > input[type=checkbox]")
+      ).toHaveLength(action === "add" ? 1 : 0)
+      expect(neighbour.querySelector("input")).toBe(neighbourBox)
+      if (action === "remove") {
+        expect(neighbourBox).not.toBeNull()
+        expect(neighbourBox!.checked).toBe(true)
+      } else expect(neighbourBox).toBeNull()
+      expect(checkedSiblingBox.checked).toBe(true)
+      expect(neighbour.innerHTML).toBe(neighbourHtmlBefore)
+      expect(firstText(neighbour)).toBe(neighbourText)
+      expect(
+        shape === "inline"
+          ? neighbour.querySelector("span")
+          : firstText(neighbour)
+      ).toBe(neighbourBody)
+      expect(firstText(target)).toBe(targetText)
+      expect(editor.querySelectorAll("li")[2]).toBe(ordinary)
+      expect(ordinary.firstChild).toBe(ordinaryText)
+      expect(ordinary.querySelector("input")).toBeNull()
+      expect(ordinary.textContent).toBe("ordinary")
+      expect(editor.querySelectorAll("li")[3]).toBe(checkedSibling)
+      expect(checkedSibling.querySelector("input")).toBe(checkedSiblingBox)
+      expect(checkedSiblingBox.checked).toBe(true)
+    }
+  )
+
+  it("adds a control to an explicitly selected empty item without changing its neighbour", () => {
+    const editor = mountEditor(
+      '<ul><li><br></li><li><input type="checkbox" checked>next</li></ul>'
+    )
+    const item = editor.querySelector("li")!
+    const emptyBody = item.firstChild
+    const neighbour = editor.querySelectorAll("li")[1]
+    const box = neighbour.querySelector("input")!
+    const range = document.createRange()
+    range.selectNode(item)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+    expect(range.collapsed).toBe(false)
+    expect(range.toString()).toBe("")
+    expect(range.startContainer).toBe(item.parentNode)
+    expect(range.endOffset - range.startOffset).toBe(1)
+    makeEditableChecklist(editor)
+    expect(item.querySelectorAll(":scope > input")).toHaveLength(1)
+    expect(item.lastChild).toBe(emptyBody)
+    expect(neighbour.querySelector("input")).toBe(box)
+    expect(box.checked).toBe(true)
+  })
+
+  it("removes an explicitly selected empty task control while preserving its body and neighbour", () => {
+    const editor = mountEditor(
+      '<ul><li><input type="checkbox" checked><br></li><li><input type="checkbox" checked>next</li></ul>'
+    )
+    const item = editor.querySelector("li")!
+    const control = item.querySelector("input")!
+    const emptyBody = item.lastChild
+    const neighbour = editor.querySelectorAll("li")[1]
+    const box = neighbour.querySelector("input")!
+    const range = document.createRange()
+    range.selectNode(control)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+    expect(range.collapsed).toBe(false)
+    expect(range.toString()).toBe("")
+    expect(range.startContainer).toBe(item)
+    expect(range.startOffset).toBe(0)
+    expect(range.endOffset).toBe(1)
+    removeEditableTaskControls(editor)
+    expect(item.querySelector("input")).toBeNull()
+    expect(item.firstChild).toBe(emptyBody)
+    expect(neighbour.querySelector("input")).toBe(box)
+    expect(box.checked).toBe(true)
+  })
+
   it("retains ordinal starts, nested list structure and checked tasks after a body edit", () => {
     const editor = mountEditor(
       markdownToWysiwygHtml(

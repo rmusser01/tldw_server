@@ -1800,13 +1800,38 @@ const selectedEditableListItems = (root: HTMLElement): HTMLLIElement[] => {
     return item && root.contains(item) ? [item] : []
   }
   return Array.from(root.querySelectorAll("li")).filter((item) =>
-    Array.from(item.childNodes).some(
-      (body) =>
-        !(
-          body instanceof Element &&
-          (body.tagName === "UL" || body.tagName === "OL")
-        ) && range.intersectsNode(body)
-    )
+    Array.from(item.childNodes).some((body) => {
+      if (
+        body instanceof Element &&
+        (body.tagName === "UL" || body.tagName === "OL")
+      )
+        return false
+      const walker = root.ownerDocument.createTreeWalker(
+        body,
+        NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT
+      )
+      let content: Node | null = body
+      do {
+        if (content.nodeType === Node.TEXT_NODE) {
+          const contentRange = root.ownerDocument.createRange()
+          contentRange.selectNodeContents(content)
+          if (
+            !contentRange.collapsed &&
+            range.compareBoundaryPoints(Range.START_TO_END, contentRange) > 0 &&
+            range.compareBoundaryPoints(Range.END_TO_START, contentRange) < 0
+          )
+            return true
+        } else if (
+          content instanceof Element &&
+          content.childNodes.length === 0 &&
+          range.intersectsNode(content)
+        ) {
+          return true
+        }
+        content = walker.nextNode()
+      } while (content)
+      return false
+    })
   )
 }
 
