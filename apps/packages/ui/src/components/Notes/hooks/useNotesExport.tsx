@@ -441,7 +441,7 @@ export function useNotesExport(deps: UseNotesExportDeps) {
       )
       return
     }
-    const printWindow = window.open('', '_blank', 'noopener,noreferrer,width=1024,height=768')
+    const printWindow = window.open('', '_blank', 'width=1024,height=768')
     if (!printWindow) {
       message.error(
         t('option:notesSearch.notesPrintPopupError', {
@@ -450,6 +450,8 @@ export function useNotesExport(deps: UseNotesExportDeps) {
       )
       return
     }
+
+    printWindow.opener = null
 
     let printableHtml = ''
     if (selectedStudioState?.studio_document && !selectedStudioState.is_stale) {
