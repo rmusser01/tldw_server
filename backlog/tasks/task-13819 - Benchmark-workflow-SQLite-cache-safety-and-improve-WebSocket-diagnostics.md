@@ -19,7 +19,7 @@ Clean up retired task-owned worktrees, measure the merged reusable SQLite cache-
 - [x] #1 Retired task worktrees are archived with needed local evidence preserved
 - [x] #2 Reproducible real-database benchmark reports latency throughput and correctness with environment and methodology
 - [x] #3 WebSocket failures expose stable safe reason and close-code diagnostics with regression coverage
-- [ ] #4 Connected tests security checks independent exact-head review and human Change summary complete before merge
+- [x] #4 Connected tests security checks independent exact-head review and human Change summary complete before merge
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -32,19 +32,21 @@ Cleanup verified complete: native archive requests stayed queued with checkout d
 Completed paired macOS/Python 3.12.13/SQLite 3.50.4 and Linux arm64 container/Python 3.12.14/SQLite 3.46.1 runs, each 476,000 operations per cache setting; uncached all correct and all pools retained. Serial costs about 2–5us macOS and 6–15us Linux; concurrent cached controls invalid on both. Raw trial JSON and method/limits report in Docs/Performance. Initial independent code review found no actionable issues; final report/exact-head follow-up pending.
 Final report/raw JSON independently recomputed and reviewed with no actionable findings. Final scoped Ruff, Black for new files, scope-predicate exact baseline and production Bandit pass (zero findings/errors). Test Bandit excludes assertion B101 and narrowly documents fixed-local-CLI subprocess and synthetic leak-detection credential sentinels; zero remaining findings. Final focused suite rerun pending exit. New PR and requester Change summary remain required merge gates.
 Final focused24/24 pass with exit0 (including benchmark6 and full extras18); connected172/172 also exit0. Pre-commit all selected files passes; production Bandit zero findings/errors, test scan zero remaining after assertions exclusion and narrow fixed-local CLI/synthetic sentinel annotations. Report and safe diagnostics guide independently reviewed without findings. Integration stage remains open pending new PR, human-written rationale, exact-head hosted checks, latest-dev merge.
+PR https://github.com/rmusser01/tldw_server/pull/3254 targets dev. Independent exact code/report head54799cb9e6bfeab53dd653fa6169638318eea890 approved with no findings; all production fingerprints match benchmark reports. Requester supplied the PR-specific human Change summary directly in this task; copied verbatim into PR body. All local deliverables/acceptance checks complete. Hosted checks and latest-dev serial merge remain operational gates; do not merge before all pass. The implementation plan is retired after local delivery; integration progress is tracked in PR3254.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Delivered reproducible paired macOS/Linux SQLite cache benchmark and raw reports, repaired borrowed connection return after pool exhaustion, and added safe fixed WebSocket failure diagnostics with operator guidance. Both platforms completed476000 correct uncached operations per setting; concurrent cached controls invalid. Focused24 and connected172 tests exit0; scoped lint, security, predicate baseline and precommit pass. Independent exact-code/report review found no issues. Requester-owned PR3254 rationale recorded; hosted CI and merge must still complete before operational closure.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
