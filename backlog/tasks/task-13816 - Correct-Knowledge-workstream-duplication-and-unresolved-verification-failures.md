@@ -1,7 +1,7 @@
 ---
 id: TASK-13816
 title: Correct Knowledge workstream duplication and unresolved verification failures
-status: Done
+status: In Progress
 labels:
 - knowledge
 - research
@@ -23,7 +23,7 @@ Audit merged PR3196, PR3205, PR3211 and PR3213 against pre-existing mechanisms a
 - [x] #2 Public capture uses existing governed backend selection and transports; any required boundary repair is shared and demonstrated, with no HTTPX-only or curl prohibition justified by missing local dependencies.
 - [x] #3 Four quota-eviction and one split-storage failures are reproduced and repaired under their owning project harnesses with unchanged assertions.
 - [x] #4 The historical CSV failure and affected default-harness, lint and format qualifications are diagnosed and resolved or remain explicitly blocked with evidence rather than silently closed.
-- [x] #5 Affected backend and client tests, security checks, types and builds pass; TASK13812 and related tracking accurately describe corrected and unfinished work.
+- [ ] #5 Affected backend and client tests, security checks, types and builds pass; TASK13812 and related tracking accurately describe corrected and unfinished work.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -875,23 +875,23 @@ Unit I chosen design: use the existing native CI matrix mechanism to split the o
 UnitI partition verification: native2 intended contractRED,92GREEN; exact2497=1140m+1113n+244o-r disjoint collection union; native coverage0newuncovered/actionlint1.7.12PASS. Fresh80 exposed21 preexisting errors only in newly touched CI test. Root accepted exact two-site existing mapping assertion/truthful list-set annotation; owner/native80/quality/security/scoped review and actual new-head hosted capacity remain pending. No timeout/gate/product changes; AC5/DoD1 open.
 UnitI local completion: final92workflowcontractsPASS/0skip/6warnings; correctednative80types0issues;2497nativecollectionIDs exactdisjoint; coverageguard0newuncovered/actionlintPASS. Ruff0/Black inheriteddebt/Bandit2newLOWtestB101 only qualified. Independent scopedSpecPASSQualityPASS0C/I/introducedMinor; root364executionbindings0bad. Normal exact4pathpublication and actualnewhead208fullsuite/newDBpartitions/aggregate/all7trustedgates/reviews/latestdev remain before readiness. AC5/DoD1 stayopen; no merge requested.
 Final source completion: dafd27c actual208/208Ubuntu3.12shards/aggregate/downstreamSUCCESS, all7exactheadtrustedgatesSUCCESS,229CIjobs220success9skip/noqueuedrunningfailure. Nativeall3DBowners2489PASS8explicitSKIP;176NotesOwnerPASSincl83PG,13newcleanupJUnitPASS0skip; Notes29/UX6noflaky/coverage16/native70MyPy0issues/integrations3418PASS46skip/all8WorkflowownersPASS. Root6850hostedbindings0bad. AC5/DoD1fulfilled, Done for bounded corrections; no wholebackend/workstream/device/diagnostic-retention closure. Final metadata sourceunchanged and requires ownexactheadgates before separatePRreadiness declaration. No merge/auto/archive/cleanup.
+UnitJ reopened for actual4490 frontend coverage6 failure: NotesGraphWorkspace.permission.test.tsx line177 BEFORERefresh click expectspermissionText/receivesgenericloaderror;1432PASS1FAIL. Verifiedblobartifact12098815128/rawjob117373969810 retained. Fresh readonlyownerdiagnosis active; no runtime/source change or rerun. Allotherhostedchecks continue. Existing parentdafdall208/currentcodebyteequivalence does not override currentfailure; AC5DoD1/Stage5 reopened.
+UnitJ exact source-backed design accepted: realnativeQueryClient.fetchQuery/service403-vs500 cached-error/offline control; no state setter or scheduler patch. Conditional sharedhook denial addscurrentquery403 toexistingauthoritylatch, retaining enable/refresh/cancellation policy. Native2-case403RED/500PASS thenconditional2GREEN +3deduplicatedowners/bothclienttypes/quality/security/scopedreview/newheadCI required. Historical4490request/error/render values absent, so invariantproof is not historicalcausalclosure. ADRno:existing403policy/nativequeryclient, no durable newrule.
+UnitJ local verification:62 owningPASS, true403 classificationRED/500PASS then2GREEN, actual webtypes0 and extension native compile -p tsconfig.compile.json0, installedESLint0/newfragmentsformat/3274ASTequal. Root95bindings0bad. Fresh scoped independent review active; no commit/push/readiness yet. TS-onlyBanditNA; existing shared403 boundary/noADR. All tooling mistakes/raw historical4490 failure retained; no retry/gate changes.
+UnitJ independent scoped SpecPASS/QualityApproved0Critical0Important; reviewer independently95bindings0bad/reverseBASE2sourcebytes/original18preserved. Inherited ESLint pages-directory stderr and wholefileformatdebt qualified as Minor/no introduced defect. Root4reviewbindings0bad; source2files de89531a/3719f52c. Normal exact4pathcommit/publication and actual NEW-headCI required; AC5DoD1open. Historical4490cause unproved.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-TASK13816's affected backend and shared Notes repairs are complete and independently reviewed. The original affected 32-file scope went from 640 MyPy errors to zero; the accepted 80-file local union and all 70 changed Python files in hosted MyPy are clean. These are bounded scopes, not whole-backend typing. Existing database adapters, transactions, transport and UI components remain authoritative; no blanket casts/ignores, framework replacement or relaxed gates were introduced.
+PR3253 remains In Progress for actual final-head CI readiness. Unit J now repairs a demonstrated shared Notes graph permission-classification invariant: existing native query403 errors produce permission denial before graph/search rendering, while the original authority latch still governs automatic requests and explicit recovery. Exact real-service403/500 controls produced intended403 RED/500 PASS, then both GREEN; one deduplicated three-owner run passed62 tests (20 permission,18 hook,24 service). Both actual native client type checks and scoped BASE/CURRENT ESLint passed; original18 permission definitions/assertions/timers remain byte-identical. Final formatting preserves3274-node TS AST;95 execution bindings verified. Fresh scoped review/publication/new-head hosted CI still required. Historical4490 error/scheduler cause is not established by the invariant control. Wrong default extension config command was preserved and corrected to the existing native compile config, without source/config changes.
 
-Source head dafd27c31caf3aef16f4eb4587c1a0f8e27088f4 is rebased onto dev0566130c. Actual hosted verification completed all 208 Ubuntu/Python3.12 shards, the full-suite aggregate, downstream rate-limit job and seven trusted required gates. The former DB m-r timeout is resolved by the existing three-way capacity partition with the original deadlines: all 2,497 cases are accounted for as 2,489 passes and eight explicit skips. Native JUnit proves all 176 NotesOwner cases, including 83 PostgreSQL cases, and all 13 new cleanup regression cases passed. Integrations passed 3,418 cases with 46 skips; all eight Workflow owners passed. Frontend coverage completed all 16 shards/aggregate, with 28,246 test passes and seven skips. Hosted Notes/chat passed 29 cases across WebUI/extension, and the six focused UX cases passed with zero skips/flaky results. Both client builds/types and scoped regressions, normal hooks, Bandit and independent reviews are recorded.
-
-AC5 and DoD1 are satisfied for this verified source. The 109-path whole-branch review and subsequent MCP layout/CI partition scoped reviews have no actionable findings. Human Change summary is published verbatim. Final metadata publication retains unchanged source and its own native exact-head gates; merge readiness is reported separately after those checks. No merge, auto-merge, archive or cleanup was requested.
-
-Historical initiating causes are not inferred from passing tests. Existing warnings, explicit skips, inherited formatting debt, incomplete Notes diagnostic retention, absent UX per-case JSON, OS print/PDF and wider browser/device/provider validation remain qualified; separately tracked broader work is not closed. All failed controls, source epochs, rulings and costs are preserved under /private/tmp/task13816-pr3253-landing-20261017.
+Prior sourcedafd actual208full-suite shards plus aggregate/downstream/all7trusted/coverage16/Notes29/UX6/native70types remain sourcebound, not proof for the new fix. AC5/DoD1 stay open. Human Change summary published verbatim. Existing warning/skip/Black/retention/historical limits remain qualified; no merge/auto/archive/cleanup requested. Evidence: /private/tmp/task13816-pr3253-landing-20261017.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [x] #1 Acceptance criteria completed
+- [ ] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip

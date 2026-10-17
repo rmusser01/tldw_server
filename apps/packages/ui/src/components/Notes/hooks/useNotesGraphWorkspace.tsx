@@ -157,7 +157,7 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   activeAuthorityRef.current = authorityScope
   const deniedAuthorityRef = React.useRef(deniedAuthority)
   deniedAuthorityRef.current = deniedAuthority
-  const isPermissionDenied = Boolean(
+  const isAuthorityDenied = Boolean(
     authorityScope && deniedAuthority === authorityScope
   )
   const inputIdentity = JSON.stringify([
@@ -201,7 +201,7 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       options.isOnline &&
       (effectiveNavigation.scope === "all" || centerNoteId)
   )
-  const enabled = canRequest && !isPermissionDenied
+  const enabled = canRequest && !isAuthorityDenied
 
   const queryKey = React.useMemo(
     () =>
@@ -314,6 +314,9 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       return last?.has_more ? last.cursor ?? undefined : undefined
     }
   })
+
+  const isPermissionDenied =
+    isAuthorityDenied || isPermissionError(graphQuery.error)
 
   const graph = React.useMemo(
     () => (isPermissionDenied ? null : aggregatePages(graphQuery.data)),
