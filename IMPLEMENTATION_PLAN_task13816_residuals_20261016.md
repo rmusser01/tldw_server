@@ -68,9 +68,9 @@ Local completion through3b483dc4 remains historical source-bound evidence. The u
 ADR check for PR3253 CI continuation: ADR required: no; generated location refreshes, EOF and existing behavioral test observations introduce no durable architecture or workflow rule. Existing ADR-059 governs canonical task tracking.
 
 ### Actual changed-Python type scope continuation
-- [ ] Clear the actual hosted 63-file scope (28 app + 35 test files), locally reproduced 331 errors in23files using unchanged native flags; no whole-backend claim. Original32 means18app+14tests; boundary union36 means22app+14tests, not36productionfiles.
+- [x] Clear the actual hosted 63-file scope (28 app + 35 test files), locally reproduced 331 errors in23files using unchanged native flags; no whole-backend claim. Original32 means18app+14tests; boundary union36 means22app+14tests, not36productionfiles.
 - [x] Unit A local source: independent review0C/I/M; actual2RED/224PASS and final2PASS; native64 removes39production diagnostics/292tests remain. Existing AllowedAction annotations, truthful optional generation models, narrowed credential runtime and native claims callback compatibility. Two canonical/full-positional regression REDs before implementation, deduplicated six owning suites, native type delta and security/quality review.
-- [ ] Unit B: source-backed existing static DB delegate signatures, then finite remaining fixture contracts; no runtime wrappers, blanket Any/casts/ignores or gate changes. Actual diagnostics and caller behavior govern each patch.
+- [x] Unit B: source-backed existing static DB delegate signatures, then finite remaining fixture contracts; no runtime wrappers, blanket Any/casts/ignores or gate changes. Actual diagnostics and caller behavior govern each patch.
 - [ ] Independently review new units, normal commit/push, require new-head CI; publish supplied human Change summary verbatim after running gates settle, then final fresh dev/rules/reviews/readiness.
 ADR assessment: no new ADR; corrections preserve existing delegated stores, callable and transaction architecture (existing ADR020/031/059 and prior plan authorities).
 
@@ -95,3 +95,7 @@ Unit G finite correction before production: initial6BASE2FAIL4PASS disproves ord
 UnitG authoritative groupV2 refinement: THREEcleanup stars +scopeclassic except preserveordinarynoncritical suppression and ALLscopegroup failure outcomes/originalidentity; V1fourstars wouldnewlyhideknownscopegroups andiswithdrawnprivately. RootFULLread13testdiff/productiondiff/source/artifacthashes. Native7PASS6TypeError baseline required, then13GREEN/323identity/native79/owningSQLitePG/security/review. No newADR; sourcecurrentproductionstillunchanged.
 
 All local affected79 Python types nowclean: UnitG348PASS/323nativeidentities/finalsubclass1PASS/scopedreview0findings, sourcequalifications retained. Stage5 integration stillInProgress: freshdev0566ornewer rebase/consequence tests/fullbranchreview/verbatimhumanbody/normalexactleasepush/newheadCI/trustedissuers/reviews/finalready. No merge requested.
+
+Final current-dev integration locally complete: actual41commit rebase onto0566130c/no conflicts/109branch+11upstream paths/27736bindings verified; task filesystem-mode checkout difference restored with original failure retained. Fresh79MyPy0issues and four nativeWorkflowowners44PASS0skip/1369warnings. Final whole-branch review, humanbody publication, exact-lease push and actualNEW-headCI/trustedissuers/reviews/latestdev checks remain. Stage5/AC5/DoD1 InProgress; no merge requested.
+
+Final whole-branch source review complete: SpecPASS/QualityPASS/0findings, all109paths/374evidencehashes; root109source+53evidencebindings0bad. Generated tenant/import freshness23PASS0skip8warnings. Source remains1a4eabf5; only metadata changes. Normal publication and current-head hosted readiness remain open.
