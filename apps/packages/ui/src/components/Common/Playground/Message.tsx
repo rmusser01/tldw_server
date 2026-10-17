@@ -1551,21 +1551,24 @@ const PlaygroundMessageImpl = (props: Props) => {
   ])
 
   const handleDelete = React.useCallback(() => {
-    if (!props.onDeleteMessage) return
+    const rawDeleteSource = props.onDeleteMessage
+    if (!rawDeleteSource) return
 
-    // Ref-like delete sources (memoized rows, e.g. SidePanelBody) are
-    // resolved once HERE, at confirmation-open time, so the pending onOk
-    // keeps acting on the exact deleteMessage instance and row captured
-    // when the dialog opened, even if later renders replace either the
-    // source or the target. Plain per-render closure props are used
-    // as-is.
-    const deleteSource =
-      typeof (props.onDeleteMessage as { current?: unknown }).current ===
-      "function"
-        ? (props.onDeleteMessage as unknown as {
-            current: () => void | boolean | Promise<void | boolean>
-          }).current
-        : props.onDeleteMessage
+    // Resolve the widened union ONCE into a plain callable. Ref-like
+    // delete sources (memoized rows, e.g. SidePanelBody, whose interned
+    // source is a function carrying a `current` getter) are resolved HERE,
+    // at confirmation-open time, so the pending onOk keeps acting on the
+    // exact deleteMessage instance and row captured when the dialog
+    // opened, even if later renders replace either the source or the
+    // target. Plain per-render closure props are used as-is. Presence of
+    // `current` — not typeof — is the discriminator: the interned source
+    // is itself callable (direct calls live-dispatch per dev's
+    // pending-outcome contract) and must still resolve through `.current`
+    // here.
+    const deleteFn =
+      "current" in rawDeleteSource
+        ? rawDeleteSource.current
+        : rawDeleteSource
 
     Modal.confirm({
       title: t("common:confirmTitle", "Please confirm"),
@@ -1575,7 +1578,7 @@ const PlaygroundMessageImpl = (props: Props) => {
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          const accepted = await deleteSource()
+          const accepted = await deleteFn()
           if (accepted !== false && !props.suppressDeleteSuccessToast) {
             messageApi.success(t("common:deleted", "Deleted"))
           }
