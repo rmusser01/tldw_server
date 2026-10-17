@@ -470,6 +470,13 @@ environment as the frozen tables; the frozen tables above are untouched).
 Note: W1's appended section is not present in this branch's copy of the
 file — the branch base (`3b68f2dbc2`) predates it and W1 owns its own
 append; nothing of W1's was modified here.
+Coverage note (final-review round 1, 2026-10-16): the branch tip is now
+`3c699d4814` — 16 commits. The 14-commit range above already includes the
+Stage 2 backlog-note commits `fa77a7f56b` and `d1b91870b7`;
+`55845325a3` (this delta append) and `3c699d4814` (import-suite test fix,
+review round 2) extend it — all four are docs/test/backlog-only and change
+no measured surface, so the attribution tables and HEAD-`aaf09f42ef` bench
+numbers above remain the record for the perf range.
 
 ### Family C2 — request history (WP-15, commit `3958f1e8d3`)
 
