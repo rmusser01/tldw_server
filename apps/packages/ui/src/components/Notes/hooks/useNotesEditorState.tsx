@@ -86,6 +86,7 @@ import {
   normalizeNotesTitleStrategy,
   deriveAllowedTitleStrategies,
   markdownToWysiwygHtml,
+  notesEditorMaxHeight,
   wysiwygHtmlToMarkdown,
   EMPTY_WYSIWYG_HTML,
   buildSummaryDraft,
@@ -680,10 +681,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     if (!textarea) return
     textarea.style.height = 'auto'
     const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 900
-    const maxHeight = Math.max(
-      280,
-      Math.floor(viewportHeight * (editorMode === 'split' ? 0.42 : 0.62))
-    )
+    const maxHeight = notesEditorMaxHeight(viewportHeight, editorMode === 'split')
     const minHeight = editorMode === 'split' ? 220 : 280
     const nextHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)
     textarea.style.height = `${nextHeight}px`

@@ -2,6 +2,11 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   getEditableCaretOffset,
   getEditableSelectionBlock,
+  syncEditableCheckboxes,
+  makeEditableChecklist,
+  removeEditableTaskControls,
+  continueEditableChecklist,
+  markdownToWysiwygHtml,
   replaceEditableHtml,
   setEditableCaretOffset,
   unwrapListsFromBlocks,
@@ -34,6 +39,187 @@ const firstText = (element: Element | null): Text => {
 afterEach(() => {
   window.getSelection()?.removeAllRanges()
   document.body.innerHTML = ""
+})
+
+describe("edited list roundtrip", () => {
+  it("changes only a selected nested task while preserving parent and siblings", () => {
+    const editor = mountEditor(
+      '<ul><li><input type="checkbox" checked>parent<ul><li><input type="checkbox" checked>child</li><li><input type="checkbox">sibling</li></ul></li><li>outside</li></ul>'
+    )
+    const parent = editor.querySelector("li")!
+    const nested = parent.querySelectorAll("li")
+    const parentBox = parent.querySelector("input")!
+    const sibling = nested[1]
+    const outside = editor.querySelectorAll(":scope > ul > li")[1]
+    const text = nested[0].lastChild!
+    const range = document.createRange()
+    range.setStart(text, 0)
+    range.setEnd(text, text.textContent!.length)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+    removeEditableTaskControls(editor)
+    expect(nested[0].querySelector("input")).toBeNull()
+    expect(parent.querySelector("input")).toBe(parentBox)
+    expect(parentBox.checked).toBe(true)
+    expect(parent.querySelectorAll("li")[1]).toBe(sibling)
+    expect(sibling.querySelector("input")?.checked).toBe(false)
+    makeEditableChecklist(editor)
+    expect(nested[0].querySelector("input")?.checked).toBe(false)
+    expect(editor.querySelectorAll(":scope > ul > li")[1]).toBe(outside)
+    expect(wysiwygHtmlToMarkdown(editor.innerHTML)).toBe(
+      "- [x] parent\n    - [ ] child\n    - [ ] sibling\n- outside"
+    )
+  })
+
+  it("adds direct controls to selected parent and nested child bodies", () => {
+    const editor = mountEditor(
+      '<ul><li>parent<ul><li>child</li><li><input type="checkbox" checked>sibling</li></ul></li></ul>'
+    )
+    const parent = editor.querySelector("li")!
+    const child = parent.querySelector("li")!
+    const sibling = parent.querySelectorAll("li")[1]
+    const siblingBox = sibling.querySelector("input")!
+    const parentText = parent.firstChild!
+    const childText = child.firstChild!
+    const range = document.createRange()
+    range.setStart(parentText, 0)
+    range.setEnd(childText, childText.textContent!.length)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+    expect(range.startContainer).toBe(parentText)
+    expect(range.endContainer).toBe(childText)
+    expect(range.toString()).toBe("parentchild")
+    expect(siblingBox.checked).toBe(true)
+    makeEditableChecklist(editor)
+    expect(parent.querySelectorAll(":scope > input[type=checkbox]")).toHaveLength(
+      1
+    )
+    expect(child.querySelectorAll(":scope > input[type=checkbox]")).toHaveLength(
+      1
+    )
+    expect(parent.firstChild?.nextSibling).toBe(parentText)
+    expect(child.firstChild?.nextSibling).toBe(childText)
+    expect(parent.querySelectorAll("li")[1]).toBe(sibling)
+    expect(sibling.querySelector("input")).toBe(siblingBox)
+    expect(siblingBox.checked).toBe(true)
+    expect(wysiwygHtmlToMarkdown(editor.innerHTML)).toBe(
+      "- [ ] parent\n    - [ ] child\n    - [x] sibling"
+    )
+  })
+
+  it("removes direct controls from selected parent and nested child bodies", () => {
+    const editor = mountEditor(
+      '<ul><li><input type="checkbox" checked>parent<ul><li><input type="checkbox" checked>child</li><li><input type="checkbox" checked>sibling</li></ul></li></ul>'
+    )
+    const parent = editor.querySelector("li")!
+    const child = parent.querySelector("li")!
+    const sibling = parent.querySelectorAll("li")[1]
+    const parentBox = parent.querySelector(":scope > input") as HTMLInputElement
+    const childBox = child.querySelector(":scope > input") as HTMLInputElement
+    const siblingBox = sibling.querySelector("input")!
+    const parentText = parentBox.nextSibling!
+    const childText = childBox.nextSibling!
+    const range = document.createRange()
+    range.setStart(parentText, 0)
+    range.setEnd(childText, childText.textContent!.length)
+    window.getSelection()?.removeAllRanges()
+    window.getSelection()?.addRange(range)
+    expect(range.startContainer).toBe(parentText)
+    expect(range.endContainer).toBe(childText)
+    expect(range.toString()).toBe("parentchild")
+    expect([parentBox.checked, childBox.checked, siblingBox.checked]).toEqual([
+      true,
+      true,
+      true
+    ])
+    removeEditableTaskControls(editor)
+    expect(parent.querySelectorAll(":scope > input[type=checkbox]")).toHaveLength(
+      0
+    )
+    expect(child.querySelectorAll(":scope > input[type=checkbox]")).toHaveLength(
+      0
+    )
+    expect(parent.firstChild).toBe(parentText)
+    expect(child.firstChild).toBe(childText)
+    expect(parent.querySelectorAll("li")[1]).toBe(sibling)
+    expect(sibling.querySelector("input")).toBe(siblingBox)
+    expect(siblingBox.checked).toBe(true)
+    expect(wysiwygHtmlToMarkdown(editor.innerHTML)).toBe(
+      "- parent\n    - child\n    - [x] sibling"
+    )
+  })
+
+  it("retains ordinal starts, nested list structure and checked tasks after a body edit", () => {
+    const editor = mountEditor(
+      markdownToWysiwygHtml(
+        "3. first\n4. second\n    - [x] child\n\n- [ ] next"
+      )
+    )
+    const item = editor.querySelector("li")
+    expect(item).not.toBeNull()
+    item!.append(document.createTextNode(" edited"))
+    expect(wysiwygHtmlToMarkdown(editor.innerHTML)).toBe(
+      "3. first edited\n4. second\n    - [x] child\n\n- [ ] next"
+    )
+  })
+
+  it("keeps a nonsequential explicit ordinal value", () => {
+    const editor = mountEditor(markdownToWysiwygHtml("3. first\n8. next"))
+    expect(wysiwygHtmlToMarkdown(editor.innerHTML)).toBe("3. first\n8. next")
+  })
+  it("records live checkbox state rather than its stale checked attribute", () => {
+    const editor = mountEditor(markdownToWysiwygHtml("- [x] done\n- [ ] open"))
+    const boxes = editor.querySelectorAll<HTMLInputElement>("input")
+    boxes[0].checked = false
+    boxes[1].checked = true
+    syncEditableCheckboxes(editor)
+    const paragraph = document.createElement("p")
+    paragraph.textContent = "Edited"
+    editor.append(paragraph)
+    expect(wysiwygHtmlToMarkdown(editor.innerHTML)).toBe(
+      "- [ ] done\n- [x] open\n\nEdited"
+    )
+  })
+
+  it("adds a checkbox only to the selected list item without replacing text nodes", () => {
+    const editor = mountEditor("<ul><li>first</li><li>second</li></ul>")
+    const text = firstText(editor.querySelector("li"))
+    placeCaret(text, 3)
+    makeEditableChecklist(editor)
+    expect(editor.querySelectorAll("input")).toHaveLength(1)
+    expect(window.getSelection()?.anchorNode).toBe(text)
+    expect(window.getSelection()?.anchorOffset).toBe(3)
+  })
+
+  it("continues a checked rich task unchecked and moves its inline suffix intact", () => {
+    const editor = mountEditor(
+      '<ul><li><input type="checkbox" checked contenteditable="false">hello <a href="https://example.com">suffix</a></li><li>next</li></ul>'
+    )
+    const link = editor.querySelector("a")
+    const neighbour = editor.querySelectorAll("li")[1]
+    placeCaret(firstText(editor.querySelector("li")), 6)
+    expect(continueEditableChecklist(editor)).toBe(true)
+    syncEditableCheckboxes(editor)
+    expect(wysiwygHtmlToMarkdown(editor.innerHTML)).toBe(
+      "- [x] hello\n- [ ] [suffix](https://example.com)\n- next"
+    )
+    expect(editor.querySelector("a")).toBe(link)
+    expect(editor.querySelectorAll("li")[2]).toBe(neighbour)
+    expect(window.getSelection()?.anchorNode).toBe(
+      editor.querySelectorAll("li")[1]
+    )
+  })
+
+  it("exits an empty task between two tasks without losing either neighbour", () => {
+    const editor = mountEditor(
+      '<ul><li>before</li><li><input type="checkbox"><br></li><li>after</li></ul>'
+    )
+    const empty = editor.querySelectorAll("li")[1]
+    placeCaret(empty, 1)
+    expect(continueEditableChecklist(editor)).toBe(true)
+    expect(wysiwygHtmlToMarkdown(editor.innerHTML)).toBe("- before\n\n- after")
+    expect(editor.children[1].tagName).toBe("P")
+  })
 })
 
 describe("WYSIWYG caret helpers", () => {

@@ -1323,6 +1323,11 @@
   "libraryView": "Library View",
   "notes": "Notes",
   "notesSearch": {
+    "toolbarHeading1": "Heading 1",
+    "toolbarHeading2": "Heading 2",
+    "toolbarHeading3": "Heading 3",
+    "toolbarNumberedTooltip": "Numbered list",
+    "toolbarChecklistTooltip": "Checklist",
     "editingManual": "Editing: Manual",
     "latestAssistPrefix": "Latest AI assist",
     "placeholder": "Search titles and contents",
