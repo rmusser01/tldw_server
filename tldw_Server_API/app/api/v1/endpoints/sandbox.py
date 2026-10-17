@@ -2261,27 +2261,19 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
     except _SANDBOX_NONCRITICAL_EXCEPTIONS as e:
         logger.debug(f"WS stream error: {e}")
     finally:
-        try:
-            if hb_task:
-                hb_task.cancel()
-        except _SANDBOX_NONCRITICAL_EXCEPTIONS:
-            pass
-        try:
-            if reader_task:
-                reader_task.cancel()
-        except _SANDBOX_NONCRITICAL_EXCEPTIONS:
-            pass
-        try:
-            if idle_task:
-                idle_task.cancel()
-        except _SANDBOX_NONCRITICAL_EXCEPTIONS:
-            pass
-        # Ensure any synthetic end task is also cancelled if still pending
-        try:
-            if synth_task and not synth_task.done():
-                synth_task.cancel()
-        except _SANDBOX_NONCRITICAL_EXCEPTIONS:
-            pass
+        # Cancel every background task synchronously FIRST (see the ordering
+        # comment below the quota release): cancellation itself must not
+        # await, or a finally unwinding an outer cancellation would skip the
+        # quota release. The cancellations are then awaited, with a short
+        # deadline, just before the socket close so a straggler task cannot
+        # keep the event loop alive at teardown (known issue: the session
+        # hang in tests/sandbox/test_ws_heartbeat_seq.py).
+        for _bg_task in (hb_task, reader_task, idle_task, synth_task):
+            if _bg_task is not None:
+                try:
+                    _bg_task.cancel()
+                except _SANDBOX_NONCRITICAL_EXCEPTIONS:
+                    pass
         with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
             hub.unsubscribe(run_id, q)
         # Release the quota slot before the socket teardown, not after. Everything
@@ -2292,10 +2284,31 @@ async def stream_run_logs(websocket: WebSocket, run_id: str) -> None:
         # how the socket goes away.
         with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
             _sandbox_ws_release_quota(ws_quota_token)
+        _shutdown_deadline = _ws_shutdown_deadline_s()
+        for _bg_task in (hb_task, reader_task, idle_task, synth_task):
+            if _bg_task is None or _bg_task.done():
+                continue
+            with contextlib.suppress(
+                asyncio.CancelledError, asyncio.TimeoutError, _SANDBOX_NONCRITICAL_EXCEPTIONS
+            ):
+                await asyncio.wait_for(_bg_task, timeout=_shutdown_deadline)
         with contextlib.suppress(_SANDBOX_NONCRITICAL_EXCEPTIONS):
             await stream.ws.close()
 
 
+def _ws_shutdown_deadline_s() -> float:
+    """Deadline for awaiting background-task cancellation during WS teardown.
+
+    ``WS_SHUTDOWN_TIMEOUT_MS`` overrides; otherwise test mode gets a tight
+    500 ms default and production 5 s (see Testing_Known_Issues.md).
+    """
+    raw = os.getenv("WS_SHUTDOWN_TIMEOUT_MS")
+    if raw:
+        try:
+            return max(0.001, float(raw) / 1000.0)
+        except _SANDBOX_NONCRITICAL_EXCEPTIONS:
+            pass
+    return 0.5 if is_truthy(os.getenv("TEST_MODE")) else 5.0
 
 
 # -----------------------
