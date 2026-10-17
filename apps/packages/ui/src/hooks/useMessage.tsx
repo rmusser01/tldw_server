@@ -68,12 +68,8 @@ import {
   createRegenerateLastMessage,
 } from "./handlers/messageHandlers";
 import { consumeStreamingChunk } from "@/utils/streaming-chunks";
-import {
-  createStreamingUpdateScheduler,
-  type StreamingUpdateScheduler,
-} from "@/utils/streaming-update-scheduler";
+import { createStreamingTextScheduler } from "@/hooks/chat/streamingThrottle";
 
-type StreamingTextUpdate = { text: string; reasoningTime: number };
 type CommandIdentityPublication = (field: "historyId" | "serverChatId", id: string, publish: () => void) => boolean;
 
 type CompactModeOptions = {
@@ -88,26 +84,6 @@ type CompactModeOptions = {
     "surface" | "historyPreparation" | "historySelection" | "selectionSource" |
     "ownsAbortController" | "releaseAbortControllerIfOwned" | "onServerChatMutated">;
 };
-
-const createStreamingTextScheduler = (
-  generateMessageId: string,
-  setMessages: (updater: (prev: Message[]) => Message[]) => void,
-  shouldFlush: () => boolean
-): StreamingUpdateScheduler<StreamingTextUpdate> =>
-  createStreamingUpdateScheduler<StreamingTextUpdate>({
-    shouldFlush,
-    apply: ({ text, reasoningTime }) =>
-      setMessages((prev) =>
-        prev.map((message) =>
-          message.id === generateMessageId
-            ? updateActiveVariant(message, {
-                message: text,
-                reasoning_time_taken: reasoningTime
-              })
-            : message
-        )
-      )
-  })
 import type { CharacterEmoteEvent } from "@/utils/character-emotes";
 import type { ToolCall } from "@/types/tool-calls";
 import {
@@ -872,10 +848,12 @@ export const useMessage = () => {
     const streamingScheduler = createStreamingTextScheduler(
       generateMessageId,
       setMessages,
-      () =>
-        streamingSourceIsCurrent() &&
-        !executionSignal.aborted &&
-        !scopeInvalidatedSignal.aborted
+      {
+        shouldFlush: () =>
+          streamingSourceIsCurrent() &&
+          !executionSignal.aborted &&
+          !scopeInvalidatedSignal.aborted,
+      }
     )
     try {
       const { chatHistory: applicationChatHistory, humanMessage, sources: source } = await prepareWebsitePrompt({
@@ -938,10 +916,7 @@ export const useMessage = () => {
             reasoningEndTime.getTime() - reasoningStartTime.getTime();
           timetaken = reasoningTime;
         }
-        streamingScheduler.schedule({
-          text: fullText + "▋",
-          reasoningTime: timetaken,
-        });
+        streamingScheduler.schedule(fullText + "▋", timetaken);
         count++;
       }
 
@@ -1229,7 +1204,7 @@ export const useMessage = () => {
     const streamingScheduler = createStreamingTextScheduler(
       generateMessageId,
       setMessages,
-      streamingSourceIsCurrent
+      { shouldFlush: streamingSourceIsCurrent }
     )
 
     try {
@@ -1352,10 +1327,7 @@ export const useMessage = () => {
             reasoningEndTime.getTime() - reasoningStartTime.getTime();
           timetaken = reasoningTime;
         }
-        streamingScheduler.schedule({
-          text: fullText + "▋",
-          reasoningTime: timetaken,
-        });
+        streamingScheduler.schedule(fullText + "▋", timetaken);
         count++;
       }
       // Flush any trailing streamed text before terminal handling so no
@@ -1586,7 +1558,7 @@ export const useMessage = () => {
     const streamingScheduler = createStreamingTextScheduler(
       generateMessageId,
       setMessages,
-      streamingSourceIsCurrent
+      { shouldFlush: streamingSourceIsCurrent }
     )
     const emoteStream = createCharacterEmoteStream();
     const getExplicitEmoteMoodLabel = () =>
@@ -1970,10 +1942,7 @@ export const useMessage = () => {
         applyEmoteEventsToMessage(sanitizedChunkState.emoteEvents);
 
         if (fullText !== previousFullText) {
-          streamingScheduler.schedule({
-            text: fullText + "▋",
-            reasoningTime: timetaken,
-          });
+          streamingScheduler.schedule(fullText + "▋", timetaken);
         }
         if (count === 0) setIsProcessing(true);
 
@@ -2482,7 +2451,7 @@ export const useMessage = () => {
     const streamingScheduler = createStreamingTextScheduler(
       generateMessageId,
       setMessages,
-      streamingSourceIsCurrent
+      { shouldFlush: streamingSourceIsCurrent }
     )
 
     try {
@@ -2570,10 +2539,7 @@ export const useMessage = () => {
             reasoningEndTime.getTime() - reasoningStartTime.getTime();
           timetaken = reasoningTime;
         }
-        streamingScheduler.schedule({
-          text: fullText + "▋",
-          reasoningTime: timetaken,
-        });
+        streamingScheduler.schedule(fullText + "▋", timetaken);
         count++;
       }
 

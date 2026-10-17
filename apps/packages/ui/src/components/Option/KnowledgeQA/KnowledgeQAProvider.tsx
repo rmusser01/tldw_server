@@ -3079,15 +3079,20 @@ function OwnedKnowledgeQAProvider({
     })
   }, [message, state.isSearching])
 
-  const search = useCallback(async () => {
-    const queryLength = state.query.trim().length
+  const search = useCallback(async (queryOverride?: string) => {
+    // SearchBar keeps the raw query in local state and syncs the reducer on a
+    // 250ms debounce; on submit it passes its current text explicitly so the
+    // request never waits on (or races) that sync (WP-08).
+    const queryText =
+      typeof queryOverride === "string" ? queryOverride : state.query
+    const queryLength = queryText.trim().length
     if (queryLength > 0) {
       void trackKnowledgeQaSearchMetric({
         type: "search_submit",
         query_length: queryLength,
       })
     }
-    await runKnowledgeQuery(state.query, true)
+    await runKnowledgeQuery(queryText, true)
   }, [state.query, runKnowledgeQuery])
 
   const rerunWithTokenLimit = useCallback(
