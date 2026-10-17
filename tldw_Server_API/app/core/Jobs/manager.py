@@ -683,6 +683,8 @@ class JobManager:
         "writing": ("writing-review", "writing-ai"),
         "scheduled_tasks": ("scheduled-tasks",),
         "admin_webhooks": ("delivery",),
+        # Long-form TTS jobs, kept off "default", which the audio pipeline worker reads unfiltered.
+        "audio": ("tts",),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---

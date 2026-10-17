@@ -27,7 +27,7 @@ All paths under `tldw_Server_API/` unless noted.
 5. All provider egress goes through the shared HTTP client's egress validation (SSRF allow/deny lists).
 6. Errors map through the TTS exception taxonomy (auth, rate-limit, quota, model-not-found/load, …) to HTTP.
 7. Response: audio bytes with optional sample-rate and alignment headers; metrics record totals, durations, TTFB.
-8. Long-form: `POST /speech/jobs` enqueues an audio-domain job forcing non-streaming; artifacts are listed per job.
+8. Long-form: `POST /speech/jobs` enqueues an audio-domain `tts_longform` job forcing non-streaming; artifacts are listed per job. The job goes on the `tts` queue. `TTS_JOBS_QUEUE` overrides it: set the same value for the API server and the TTS worker, and register a custom name in `JOBS_ALLOWED_QUEUES_AUDIO`. `default` and `transcribe` are refused, because the audio pipeline workers read them without a job-type filter. The TTS jobs worker (`python -m tldw_Server_API.app.core.TTS.tts_jobs_worker`) reads that queue and takes only `tts_longform` jobs; nothing starts it automatically.
 
 ## STT (condensed)
 

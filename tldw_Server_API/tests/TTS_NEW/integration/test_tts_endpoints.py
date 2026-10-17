@@ -5,6 +5,7 @@ Tests the full request/response cycle with real components,
 no mocking except for external API calls.
 """
 
+import asyncio
 import contextlib
 import json
 import base64
@@ -1248,7 +1249,7 @@ class TestTTSJobsHistoryIntegration:
             worker_id = "tts-history-integration-worker"
             job = jm.acquire_next_job(
                 domain="audio",
-                queue="default",
+                queue="tts",
                 job_type="tts_longform",
                 lease_seconds=60,
                 worker_id=worker_id,
@@ -1297,6 +1298,52 @@ class TestTTSJobsHistoryIntegration:
             assert int(row["output_id"]) == output_id
             assert row["status"] == "success"
             assert json.loads(row["artifact_ids"]) == [f"output:{output_id}"]
+        finally:
+            with contextlib.suppress(Exception):
+                audio_jobs._job_manager_cache.clear()
+
+    async def test_audio_jobs_worker_leaves_a_submitted_speech_job_alone(self, test_client, auth_headers, monkeypatch, tmp_path):
+        """The audio pipeline worker must not take a long-form TTS job (TASK-13641)."""
+        import tldw_Server_API.app.services.audio_jobs_worker as audio_worker
+
+        monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+        monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.05")
+
+        async def _unlimited(user_id):
+            return {"concurrent_jobs": None}
+
+        async def _yes(user_id):
+            return True, ""
+
+        async def _noop(user_id):
+            return None
+
+        monkeypatch.setattr(audio_worker, "get_limits_for_user", _unlimited)
+        monkeypatch.setattr(audio_worker, "can_start_job", _yes)
+        monkeypatch.setattr(audio_worker, "increment_jobs_started", _noop)
+        monkeypatch.setattr(audio_worker, "finish_job", _noop)
+        with contextlib.suppress(Exception):
+            audio_jobs._job_manager_cache.clear()
+
+        try:
+            submit_resp = test_client.post(
+                "/api/v1/audio/speech/jobs",
+                json={"input": "Long-form speech", "voice": "alloy", "model": "tts-1", "response_format": "mp3"},
+                headers=auth_headers,
+            )
+            assert submit_resp.status_code == status.HTTP_200_OK
+            job_id = int(submit_resp.json()["job_id"])
+
+            stop = asyncio.Event()
+            task = asyncio.create_task(audio_worker.run_audio_jobs_worker(stop))
+            await asyncio.sleep(0.5)
+            stop.set()
+            await asyncio.wait_for(task, timeout=2.0)
+
+            job = audio_jobs.get_job_manager().get_job(job_id) or {}
+            assert job.get("status") == "queued"
+            assert int(job.get("retry_count") or 0) == 0
+            assert job.get("error_message") in (None, "")
         finally:
             with contextlib.suppress(Exception):
                 audio_jobs._job_manager_cache.clear()
