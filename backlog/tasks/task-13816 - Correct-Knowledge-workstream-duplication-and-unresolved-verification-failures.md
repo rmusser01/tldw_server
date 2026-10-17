@@ -1,7 +1,7 @@
 ---
 id: TASK-13816
 title: Correct Knowledge workstream duplication and unresolved verification failures
-status: In Progress
+status: Done
 labels:
 - knowledge
 - research
@@ -23,7 +23,7 @@ Audit merged PR3196, PR3205, PR3211 and PR3213 against pre-existing mechanisms a
 - [x] #2 Public capture uses existing governed backend selection and transports; any required boundary repair is shared and demonstrated, with no HTTPX-only or curl prohibition justified by missing local dependencies.
 - [x] #3 Four quota-eviction and one split-storage failures are reproduced and repaired under their owning project harnesses with unchanged assertions.
 - [x] #4 The historical CSV failure and affected default-harness, lint and format qualifications are diagnosed and resolved or remain explicitly blocked with evidence rather than silently closed.
-- [ ] #5 Affected backend and client tests, security checks, types and builds pass; TASK13812 and related tracking accurately describe corrected and unfinished work.
+- [x] #5 Affected backend and client tests, security checks, types and builds pass; TASK13812 and related tracking accurately describe corrected and unfinished work.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -874,17 +874,24 @@ PR3253 Unit I opened for the actual new-head d05 full-suite db-management-m-r fa
 Unit I chosen design: use the existing native CI matrix mechanism to split the overloaded db-management-m-r owner into m, n and o-r, with exact134-file disjoint/exhaustive coverage89/20/25 and all278root DB tests exactly once in each of six matrices. Root independently verified240design bindings and all matrix invariants. Every test, marker, plugin,55-minute command limit,300-second test timeout, concurrency cap, issuer and fail-closed aggregate stays unchanged. The private22production/192test-line catalog optimization remains uninstalled; required sequence ownership/locking/high-water/rollback work is preserved. One bounded native profile passed2cases and measured repeated setup cost; it does not prove the hosted initiator. ADR required:no; this reuses the existing partition mechanism documented by TASK13696 and changes no durable gate/architecture rule. Existing ADR002/059 tracking and ADR004 human-summary policy remain governing. Finite existing workflow-contract RED/GREEN, collection partition comparison, shard-coverage/actionlint, actual80-path type union including70changed Python paths, touched test quality/security and scoped review precede normal publication/new-head CI. AC5/DoD1/Stage5 stay open.
 UnitI partition verification: native2 intended contractRED,92GREEN; exact2497=1140m+1113n+244o-r disjoint collection union; native coverage0newuncovered/actionlint1.7.12PASS. Fresh80 exposed21 preexisting errors only in newly touched CI test. Root accepted exact two-site existing mapping assertion/truthful list-set annotation; owner/native80/quality/security/scoped review and actual new-head hosted capacity remain pending. No timeout/gate/product changes; AC5/DoD1 open.
 UnitI local completion: final92workflowcontractsPASS/0skip/6warnings; correctednative80types0issues;2497nativecollectionIDs exactdisjoint; coverageguard0newuncovered/actionlintPASS. Ruff0/Black inheriteddebt/Bandit2newLOWtestB101 only qualified. Independent scopedSpecPASSQualityPASS0C/I/introducedMinor; root364executionbindings0bad. Normal exact4pathpublication and actualnewhead208fullsuite/newDBpartitions/aggregate/all7trustedgates/reviews/latestdev remain before readiness. AC5/DoD1 stayopen; no merge requested.
+Final source completion: dafd27c actual208/208Ubuntu3.12shards/aggregate/downstreamSUCCESS, all7exactheadtrustedgatesSUCCESS,229CIjobs220success9skip/noqueuedrunningfailure. Nativeall3DBowners2489PASS8explicitSKIP;176NotesOwnerPASSincl83PG,13newcleanupJUnitPASS0skip; Notes29/UX6noflaky/coverage16/native70MyPy0issues/integrations3418PASS46skip/all8WorkflowownersPASS. Root6850hostedbindings0bad. AC5/DoD1fulfilled, Done for bounded corrections; no wholebackend/workstream/device/diagnostic-retention closure. Final metadata sourceunchanged and requires ownexactheadgates before separatePRreadiness declaration. No merge/auto/archive/cleanup.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-The affected TASK13816 source repairs are locally complete and independently reviewed, including the new MCP dialog close defect. All 79 affected or retained Python type-check inputs report zero issues; the 69 changed Python files also passed hosted typing on head4545. These are bounded scopes, not whole-repository typing. Notes #3117 and units A–G retain their reviewed, source-bound regression evidence. Unit H has a genuine failing regression before the fix, two controlled passes afterward, and six first-attempt focused cases with no skips or flaky results. Its 48 unit tests, both client type checks and builds passed; final formatting is structurally equivalent, not a claimed runtime replay. The shared Modal repair changes layout without changing callbacks, real payloads, retries, deadlines or gates. Fresh dev0566130 is unchanged. The 109-path whole-branch review and new two-file review are approved; the human Change summary is published verbatim. The repair still needs normal publication and actual new-head hosted CI, trusted issuers and review verification. AC5 and DoD1 remain open and the task remains In Progress until that evidence. Historical initiating causes, existing warnings, skips, formatting debt and platform limits stay qualified. No merge, archive or cleanup is requested. Evidence: /private/tmp/task13816-pr3253-landing-20261017.
+TASK13816's affected backend and shared Notes repairs are complete and independently reviewed. The original affected 32-file scope went from 640 MyPy errors to zero; the accepted 80-file local union and all 70 changed Python files in hosted MyPy are clean. These are bounded scopes, not whole-backend typing. Existing database adapters, transactions, transport and UI components remain authoritative; no blanket casts/ignores, framework replacement or relaxed gates were introduced.
+
+Source head dafd27c31caf3aef16f4eb4587c1a0f8e27088f4 is rebased onto dev0566130c. Actual hosted verification completed all 208 Ubuntu/Python3.12 shards, the full-suite aggregate, downstream rate-limit job and seven trusted required gates. The former DB m-r timeout is resolved by the existing three-way capacity partition with the original deadlines: all 2,497 cases are accounted for as 2,489 passes and eight explicit skips. Native JUnit proves all 176 NotesOwner cases, including 83 PostgreSQL cases, and all 13 new cleanup regression cases passed. Integrations passed 3,418 cases with 46 skips; all eight Workflow owners passed. Frontend coverage completed all 16 shards/aggregate, with 28,246 test passes and seven skips. Hosted Notes/chat passed 29 cases across WebUI/extension, and the six focused UX cases passed with zero skips/flaky results. Both client builds/types and scoped regressions, normal hooks, Bandit and independent reviews are recorded.
+
+AC5 and DoD1 are satisfied for this verified source. The 109-path whole-branch review and subsequent MCP layout/CI partition scoped reviews have no actionable findings. Human Change summary is published verbatim. Final metadata publication retains unchanged source and its own native exact-head gates; merge readiness is reported separately after those checks. No merge, auto-merge, archive or cleanup was requested.
+
+Historical initiating causes are not inferred from passing tests. Existing warnings, explicit skips, inherited formatting debt, incomplete Notes diagnostic retention, absent UX per-case JSON, OS print/PDF and wider browser/device/provider validation remain qualified; separately tracked broader work is not closed. All failed controls, source epochs, rulings and costs are preserved under /private/tmp/task13816-pr3253-landing-20261017.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
