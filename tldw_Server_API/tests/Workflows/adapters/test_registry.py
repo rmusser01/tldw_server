@@ -20,6 +20,7 @@ def test_all_adapters_have_config_models():
     missing = []
     for name in registry.list_adapters():
         spec = registry.get_spec(name)
+        assert spec is not None, f"{name} missing registry spec"
         if spec.config_model is None:
             missing.append(name)
 
@@ -84,6 +85,7 @@ def test_adapter_spec_has_required_fields():
 
     for name in registry.list_adapters():
         spec = registry.get_spec(name)
+        assert spec is not None, f"{name} missing registry spec"
         assert spec.name == name
         assert spec.category, f"{name} missing category"
         assert spec.description, f"{name} missing description"
@@ -98,6 +100,7 @@ def test_adapter_functions_are_async():
 
     for name in registry.list_adapters():
         spec = registry.get_spec(name)
+        assert spec is not None, f"{name} missing registry spec"
         assert asyncio.iscoroutinefunction(spec.func), f"{name} is not an async function"
 
 

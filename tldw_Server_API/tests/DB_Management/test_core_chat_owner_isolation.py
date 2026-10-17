@@ -102,6 +102,7 @@ def test_postgres_inline_tool_call_backfill_consumes_native_result(pg_restricted
         instance = CharactersRAGDB(db_path=":memory:", client_id=str(owner_id), backend=pg_restricted_backend)
         try:
             conversation_id = instance.add_conversation({"title": "Backfill Conversation"})
+            assert conversation_id is not None
             message_id = instance.add_message(
                 {
                     "conversation_id": conversation_id,
@@ -109,6 +110,7 @@ def test_postgres_inline_tool_call_backfill_consumes_native_result(pg_restricted
                     "content": 'Answer [tool_calls]: [{"id":"call-1","type":"function"}]',
                 }
             )
+            assert message_id is not None
             before = instance.get_message_by_id(message_id)
             assert before is not None
             assert instance.get_message_metadata(message_id) is None

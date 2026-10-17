@@ -9,12 +9,14 @@ import pytest
 import tempfile
 import os
 import threading
+import sqlite3
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 from tldw_Server_API.app.core.DB_Management.backends import factory as factory_mod
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseBackend,
+    ConnectionPool,
     DatabaseConfig,
     BackendType,
     BackendFeatures,
@@ -48,14 +50,21 @@ class TestDatabaseBackends:
         return DatabaseConfig(backend_type=BackendType.SQLITE, sqlite_path=temp_db_path, client_id="test_client")
 
     def test_sqlite_native_metadata_and_last_insert_id(self, sqlite_config):
-        from types import SimpleNamespace
-
         from tldw_Server_API.app.core.DB_Management.media_db.runtime.rows import (
             BackendCursorAdapter,
         )
 
+        class _MetadataConnection(sqlite3.Connection):
+            last_cursor: sqlite3.Cursor | None = None
+
+            def cursor(self, factory=sqlite3.Cursor):
+                self.last_cursor = super().cursor(factory)
+                return self.last_cursor
+
         backend = SQLiteBackend(sqlite_config)
-        connection = backend.connect()
+        connection = sqlite3.connect(":memory:", factory=_MetadataConnection, isolation_level=None)
+        assert isinstance(connection, _MetadataConnection)
+        connection.row_factory = sqlite3.Row
         try:
             assert backend.get_last_insert_id(connection=connection) == 0
             backend.execute(
@@ -69,12 +78,12 @@ class TestDatabaseBackends:
             )
             assert inserted.description is None
             assert backend.get_last_insert_id(connection=connection) == inserted.lastrowid
-            cursor = connection.cursor()
             result = backend.execute(
                 "SELECT label, id FROM adapter_contract",
-                connection=SimpleNamespace(cursor=lambda: cursor),
+                connection=connection,
             )
-            assert result.description is cursor.description
+            assert connection.last_cursor is not None
+            assert result.description is connection.last_cursor.description
             assert isinstance(result.description, tuple)
             assert [entry[0] for entry in result.description] == ["label", "id"]
             assert all(len(entry) == 7 for entry in result.description)
@@ -210,7 +219,7 @@ class TestDatabaseBackends:
         )
 
         backend = SQLiteBackend(sqlite_config)
-        results = [None, None]
+        results: list[ConnectionPool | None] = [None, None]
         errors: list[BaseException] = []
 
         def _get_pool(slot: int) -> None:
@@ -356,7 +365,8 @@ class TestDatabaseBackends:
 
     def test_backend_factory_invalid_type(self):
         """Test that factory raises error for invalid backend type."""
-        config = DatabaseConfig(backend_type="invalid_type", client_id="test")  # Invalid
+        config = DatabaseConfig(backend_type=BackendType.SQLITE, client_id="test")
+        object.__setattr__(config, "backend_type", "invalid_type")
 
         with pytest.raises(ValueError):
             BackendFactory.create_backend(config)
@@ -449,25 +459,23 @@ class TestDatabaseBackends:
         """SQLite transactions should take the write lock up front."""
         backend = SQLiteBackend(sqlite_config)
 
-        class _RecordingConnection:
-            def __init__(self):
-                self.in_transaction = False
+        class _RecordingConnection(sqlite3.Connection):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
                 self.statements: list[str] = []
 
-            def execute(self, sql):
+            def execute(self, sql, *args, **kwargs):
                 self.statements.append(sql)
-                normalized = sql.strip().upper()
-                if normalized.startswith("BEGIN"):
-                    self.in_transaction = True
-                elif normalized in {"COMMIT", "ROLLBACK"}:
-                    self.in_transaction = False
+                return super().execute(sql, *args, **kwargs)
 
-        conn = _RecordingConnection()
-
-        with backend.transaction(connection=conn):
-            pass
-
-        assert conn.statements[0] == "BEGIN IMMEDIATE"
+        conn = sqlite3.connect(":memory:", factory=_RecordingConnection)
+        assert isinstance(conn, _RecordingConnection)
+        try:
+            with backend.transaction(connection=conn):
+                pass
+            assert conn.statements[0] == "BEGIN IMMEDIATE"
+        finally:
+            conn.close()
 
 
 class TestPostgreSQLBackend:
@@ -690,12 +698,15 @@ def test_chacha_cursor_wrapper_retains_native_metadata_in_operation(tmp_path):
             wrapper = BackendCursorWrapper(db, db.get_connection(), db.backend)
             wrapper.execute("SELECT 7 AS native_value")
             assert isinstance(wrapper.description, tuple)
+            assert wrapper._result is not None
             assert wrapper.description is wrapper._result.description
+            assert wrapper._adapter is not None
             assert wrapper._adapter.description is wrapper.description
             assert wrapper.fetchone() == {"native_value": 7}
             wrapper.execute("CREATE TEMP TABLE wrapper_contract (value INTEGER)")
             assert wrapper.description is None
             wrapper.executemany("INSERT INTO wrapper_contract VALUES (?)", [(1,), (2,)])
+            assert wrapper._result is not None
             assert wrapper.description is wrapper._result.description is None
             assert wrapper._adapter.description is None
     finally:

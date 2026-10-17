@@ -76,14 +76,16 @@ ADR assessment: no new ADR; corrections preserve existing delegated stores, call
 
 Unit B declaration substage complete locally:22native signatures/runtime AST preserved,101owningPASS/restrictedPG0skip, fresh74union231errors remaining, scopedreviewclear. Remaining test-contract/static Media boundary units remain open; exactfullchanged+acceptedunion required before final type-green claim.
 
-- [ ] Unit C: match actual SyncMaterializer optional-guard contract for chat/attachment domains by rejecting unsupported non-None guard before access, preserving normal projections; three native callback REDs, truthful Notes/Sync fixture contracts and five existing owning suites. Exact5pathV2 design, dataclass constructor retained with supported typed arguments; no guard/callback bypass or weaker validation.
+- [x] Unit C: match actual SyncMaterializer optional-guard contract for chat/attachment domains by rejecting unsupported non-None guard before access, preserving normal projections; three native callback REDs, truthful Notes/Sync fixture contracts and five existing owning suites. Exact5pathV2 design, dataclass constructor retained with supported typed arguments; no guard/callback bypass or weaker validation.
 
 Unit C local review complete:3trueguardRED/180PASS/newguardbehaviorapproved, native76 still193errors; core22contractfollowupmandatory/ACTIVE, no overallgreen.
-- [ ] Unit D: exact8existingtestfiles with truthful Optional/native fixture types, realMoodboardcleanup and observedWorkflow persistence/warning behavior; staticRED/native8ownerverification/security/scopedreview.
+- [x] Unit D: exact8existingtestfiles with truthful Optional/native fixture types, realMoodboardcleanup and observedWorkflow persistence/warning behavior; staticRED/native8ownerverification/security/scopedreview.
 
 Unit D local scoped review complete:182PASS plus focused2PASS after three row-presence assertions; native76 193→154,39removed0added/owned8zero. Normal exact10path commit authorized; no new-head proof yet.
-- [ ] Unit E: exact5path existing Sync identity-boundary checks and native MessageStore declarations;18 actual corrupt-identity RED controls then six native owners including legacy attachment refs, native76/security/scoped review. No new ADR; existing Notes pattern and native stores govern.
+- [x] Unit E: exact5path existing Sync identity-boundary checks and native MessageStore declarations;18 actual corrupt-identity RED controls then six native owners including legacy attachment refs, native76/security/scoped review. No new ADR; existing Notes pattern and native stores govern.
 
 Unit E local scoped review complete:18intendedRED/274PASS/native76 154→132 (22removed0added), safe native failure logs/productstate unchanged, three exact static delegates/runtimeASTsame. Reviewed0findings; normalexact7pathcommit next.
-- [ ] Unit F: exact9testpath same-shape native fixture batch (Native5V3 + backend/migration/transportV2/workflow-hardening), actual120diagnostic target notpassforecast; one deduplicated9owner runtime/native76/security/scopedreview.
+- [x] Unit F: exact9testpath same-shape native fixture batch (Native5V3 + backend/migration/transportV2/workflow-hardening), actual120diagnostic target notpassforecast; one deduplicated9owner runtime/native76/security/scopedreview.
 - [ ] Unit G: three-file native Media binding/cleanup unit, five truefaultREDs+positive subclass control, runtime323identity proof, finite native79 plus relevantSQLite/PG owners/security/review.
+
+Unit F local complete scoped SpecPASS/QualityPASS0findings: actualinitial311PASS9FAIL4SQLite-onlyskip retained, corrected30PASS4skip+2PASS, native76 132→12 removes120/adds0/allowned9zero. Media native-class boundary12 plus separately recorded354implementation diagnostics addressed onlyinUnitG; notwholebackendgreen.

@@ -863,11 +863,14 @@ def test_postgres_source_message_projection_is_one_owner_scoped_statement():
         def fetchall():
             return []
 
-    class _PostgresDb:
+    class _PostgresDb(CharactersRAGDB):
+        def __init__(self) -> None:
+            pass
+
         backend_type = BackendType.POSTGRESQL
 
         @staticmethod
-        def execute_query(query, params, **kwargs):
+        def execute_query(query, params=None, **kwargs):
             captured["query"] = str(query)
             captured["params"] = params
             captured["kwargs"] = kwargs
@@ -891,7 +894,10 @@ def test_postgres_source_message_projection_is_one_owner_scoped_statement():
 
 
 def test_postgres_source_message_projection_requires_owner_scope():
-    class _PostgresDb:
+    class _PostgresDb(CharactersRAGDB):
+        def __init__(self) -> None:
+            pass
+
         backend_type = BackendType.POSTGRESQL
 
         @staticmethod
@@ -908,7 +914,10 @@ def test_postgres_source_message_projection_requires_owner_scope():
 def test_source_message_projection_failure_drops_raw_exception_context():
     secret = "PRIVATE_MESSAGE_FRAGMENT"
 
-    class _FailingDb:
+    class _FailingDb(CharactersRAGDB):
+        def __init__(self) -> None:
+            pass
+
         backend_type = BackendType.SQLITE
 
         @staticmethod
@@ -936,7 +945,10 @@ def test_source_message_projection_redacts_delayed_fetch_failure():
         def fetchall():
             raise sqlite3.OperationalError(f"Could not decode {secret}")
 
-    class _FailingDb:
+    class _FailingDb(CharactersRAGDB):
+        def __init__(self) -> None:
+            pass
+
         backend_type = BackendType.SQLITE
 
         @staticmethod
@@ -1234,9 +1246,11 @@ def test_message_fts_v80_upgrade_preserves_native_data_and_term_ownership(tmp_pa
         instance = CharactersRAGDB(path, client_id="message-store-user")
         try:
             conversation_id = instance.add_conversation({"title": "Message FTS upgrade"})
+            assert conversation_id is not None
             message_id = instance.add_message(
                 {"conversation_id": conversation_id, "sender": "user", "content": "upgradeterm"}
             )
+            assert message_id is not None
             connection = instance.get_connection()
             connection.execute("DROP TRIGGER messages_au")
             connection.execute("DROP TRIGGER messages_ad")

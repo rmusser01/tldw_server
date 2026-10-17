@@ -12,9 +12,11 @@ from typing import Any
 import pytest
 from fastapi import HTTPException
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 
 pytestmark = pytest.mark.integration
@@ -22,15 +24,19 @@ pytestmark = pytest.mark.integration
 
 @pytest.fixture(params=["sqlite", "postgres"])
 def db(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[CharactersRAGDB]:
-    kwargs = {"db_path": str(tmp_path / "workspace.sqlite"), "client_id": "alice"}
-    if request.param == "postgres":
-        kwargs["backend"] = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
-    database = CharactersRAGDB(**kwargs)
+    backend = (
+        DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
+        if request.param == "postgres"
+        else None
+    )
+    database = CharactersRAGDB(
+        db_path=str(tmp_path / "workspace.sqlite"),
+        client_id="alice",
+        backend=backend,
+    )
     database.upsert_workspace("workspace-one", "Workspace One")
     yield database
-    database.close_connection()
-    if request.param == "postgres":
-        kwargs["backend"].get_pool().close_all()
+    database.close_all_connections()
 
 
 def test_soft_final_transition_requires_version_and_rolls_back_caller_work(db: CharactersRAGDB) -> None:
@@ -53,6 +59,7 @@ def test_soft_final_transition_requires_version_and_rolls_back_caller_work(db: C
 
 def test_soft_delete_closure_survives_cascade_failure_and_retry(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Child", "scope_type": "workspace", "workspace_id": "workspace-one"})
+    assert child is not None
     original = db.soft_delete_conversation
 
     def fail_once(conversation_id: str, expected_version: int) -> None:
@@ -69,7 +76,9 @@ def test_soft_delete_closure_survives_cascade_failure_and_retry(db: CharactersRA
     assert bool(updated["native_chat_admission_closed"])
     assert db.delete_workspace("workspace-one", expected_version=updated["version"])
     assert db.get_workspace("workspace-one") is None
-    assert db.get_conversation_by_id(child, include_deleted=True)["deleted"]
+    stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
+    assert stored_conversation is not None
+    assert stored_conversation["deleted"]
 
 
 def test_soft_cascade_second_page_failure_preserves_progress_and_retries(
@@ -77,6 +86,7 @@ def test_soft_cascade_second_page_failure_preserves_progress_and_retries(
 ) -> None:
     """Page-read rollback preserves earlier message deletes and the admission fence."""
     child = db.add_conversation({"character_id": 1, "title": "Paged child", "scope_type": "workspace", "workspace_id": "workspace-one"})
+    assert child is not None
     with db.transaction() as conn:
         conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
         for index in range(101):
@@ -118,7 +128,9 @@ def test_soft_cascade_second_page_failure_preserves_progress_and_retries(
         observer.close_connection()
     assert db.delete_workspace("workspace-one", expected_version=1)
     assert db.get_workspace("workspace-one") is None
-    assert db.get_conversation_by_id(child, include_deleted=True)["deleted"]
+    stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
+    assert stored_conversation is not None
+    assert stored_conversation["deleted"]
     assert db.execute_query(
         "SELECT COUNT(*) AS total FROM messages WHERE conversation_id = ? AND deleted = 0",
         (child,), read_only=True,
@@ -130,7 +142,7 @@ def test_admission_closure_commits_before_conversation_enumeration(db: Character
     enumerating = threading.Event()
     allow_enumeration = threading.Event()
     original = db.execute_query
-    results = {}
+    results: dict[str, bool | Exception] = {}
     enumeration_prefix = (
         "SELECT id FROM conversations WHERE workspace_id"
         if hard else "SELECT id, version FROM conversations WHERE workspace_id"
@@ -147,9 +159,10 @@ def test_admission_closure_commits_before_conversation_enumeration(db: Character
     def delete() -> None:
         try:
             if hard:
-                results["deleted"] = db.hard_delete_workspace("workspace-one")
+                db.hard_delete_workspace("workspace-one")
             else:
                 results["deleted"] = db.delete_workspace("workspace-one", expected_version=1)
+            results["completed"] = True
         except Exception as exc:  # noqa: BLE001 - surfaced below
             results["error"] = exc
         finally:
@@ -169,7 +182,14 @@ def test_admission_closure_commits_before_conversation_enumeration(db: Character
         observer.close_connection()
     assert not thread.is_alive()
     assert "error" not in results
-    assert results["deleted"] is (None if hard else True)
+    assert results["completed"] is True
+    deleted_workspace = db.get_workspace("workspace-one", include_deleted=True)
+    if hard:
+        assert deleted_workspace is None
+    else:
+        assert results["deleted"] is True
+        assert deleted_workspace is not None
+        assert deleted_workspace["deleted"]
 
 
 @pytest.mark.parametrize("hard", [False, True])
@@ -211,6 +231,7 @@ def test_failed_cascade_releases_owned_reads_before_immediate_retry(
 ) -> None:
     """A failed read or child deletion must not leave the next delete nested."""
     child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
+    assert child is not None
     with db.transaction() as conn:
         conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
     method = "get_messages_for_conversation" if failure_at == "messages" else (
@@ -242,13 +263,16 @@ def test_failed_cascade_releases_owned_reads_before_immediate_retry(
         assert db.get_conversation_by_id(child, include_deleted=True) is None
     else:
         assert db.delete_workspace("workspace-one", expected_version=1)
-        assert db.get_conversation_by_id(child, include_deleted=True)["deleted"]
+        stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
+        assert stored_conversation is not None
+        assert stored_conversation["deleted"]
     assert db.get_workspace("workspace-one") is None
 
 
 @pytest.mark.parametrize(("hard", "trashed"), [(False, False), (True, False), (True, True)])
 def test_final_transition_preserves_workspace_when_protected_chat_was_missed(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, hard: bool, trashed: bool) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
+    assert child is not None
     with db.transaction() as conn:
         conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
     if trashed:
@@ -270,13 +294,17 @@ def test_final_transition_preserves_workspace_when_protected_chat_was_missed(db:
     workspace = db.get_workspace("workspace-one", include_deleted=True)
     assert workspace is not None and bool(workspace["native_chat_admission_closed"])
     assert not workspace["deleted"]
-    assert db.get_conversation_by_id(child, include_deleted=True)["workspace_id"] == "workspace-one"
+    stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
+    assert stored_conversation is not None
+    assert stored_conversation["workspace_id"] == "workspace-one"
 
 
 def test_stale_soft_delete_does_not_close_admission(db: CharactersRAGDB) -> None:
     with pytest.raises(ConflictError, match="version mismatch"):
         db.delete_workspace("workspace-one", expected_version=0)
-    assert not bool(db.get_workspace("workspace-one")["native_chat_admission_closed"])
+    stored_workspace = db.get_workspace("workspace-one")
+    assert stored_workspace is not None
+    assert not bool(stored_workspace["native_chat_admission_closed"])
 
 
 def test_other_owner_cannot_close_or_delete_workspace(db: CharactersRAGDB) -> None:
@@ -301,6 +329,7 @@ def test_hard_delete_missing_workspace_remains_idempotent(db: CharactersRAGDB) -
 @pytest.mark.parametrize("typed_asset", [False, True])
 def test_protected_restore_requires_open_workspace(db: CharactersRAGDB, closed: bool, typed_asset: bool) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
+    assert child is not None
     with db.transaction() as conn:
         if typed_asset:
             conn.execute("UPDATE conversations SET native_bundle_json = '{}' WHERE id = ?", (child,))
@@ -312,14 +341,19 @@ def test_protected_restore_requires_open_workspace(db: CharactersRAGDB, closed: 
             conn.execute("UPDATE workspaces SET native_chat_admission_closed = ? WHERE id = ?", (True, "workspace-one"))
         with pytest.raises(ConflictError, match="workspace_native_unavailable"):
             db.restore_conversation(child, expected_version=2)
-        assert db.get_conversation_by_id(child, include_deleted=True)["deleted"]
+        stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
+        assert stored_conversation is not None
+        assert stored_conversation["deleted"]
     else:
         assert db.restore_conversation(child, expected_version=2)
-        assert not db.get_conversation_by_id(child, include_deleted=True)["deleted"]
+        stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
+        assert stored_conversation is not None
+        assert not stored_conversation["deleted"]
 
 
 def test_protected_restore_rejects_other_owner(db: CharactersRAGDB) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
+    assert child is not None
     with db.transaction() as conn:
         conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
     db.soft_delete_conversation(child, expected_version=1)
@@ -327,24 +361,30 @@ def test_protected_restore_rejects_other_owner(db: CharactersRAGDB) -> None:
     try:
         with pytest.raises(ConflictError):
             other.restore_conversation(child, expected_version=2)
-        assert db.get_conversation_by_id(child, include_deleted=True)["deleted"]
+        stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
+        assert stored_conversation is not None
+        assert stored_conversation["deleted"]
     finally:
         other.close_connection()
 
 
 def test_protected_restore_cannot_reopen_deleted_workspace(db: CharactersRAGDB) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
+    assert child is not None
     with db.transaction() as conn:
         conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
     db.soft_delete_conversation(child, expected_version=1)
     assert db.delete_workspace("workspace-one", expected_version=1)
     with pytest.raises(ConflictError, match="workspace_native_unavailable"):
         db.restore_conversation(child, expected_version=2)
-    assert db.get_conversation_by_id(child, include_deleted=True)["deleted"]
+    stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
+    assert stored_conversation is not None
+    assert stored_conversation["deleted"]
 
 
 def test_resume_state_retains_snapshot_bound_assistant_identity(db: CharactersRAGDB) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Snapshot-bound child"})
+    assert child is not None
     with db.transaction() as conn:
         conn.execute(
             "UPDATE conversations SET character_id = NULL, assistant_kind = ?, assistant_id = ? WHERE id = ?",
@@ -382,6 +422,7 @@ def test_postgres_workspace_delete_rejects_caller_owned_driver_transaction(db: C
                 db.delete_workspace("workspace-one", expected_version=1)
         assert raw.info.transaction_status.name == "INTRANS"
         workspace = db.get_workspace("workspace-one")
+        assert workspace is not None
         assert workspace["name"] == "Uncommitted rename"
         assert not bool(workspace["native_chat_admission_closed"])
         if commit:
@@ -391,32 +432,38 @@ def test_postgres_workspace_delete_rejects_caller_owned_driver_transaction(db: C
     finally:
         raw.rollback()
     expected_name = "Uncommitted rename" if commit else "Workspace One"
-    assert db.get_workspace("workspace-one")["name"] == expected_name
+    stored_workspace = db.get_workspace("workspace-one")
+    assert stored_workspace is not None
+    assert stored_workspace["name"] == expected_name
 
 
-def test_workspace_delete_guard_reads_postgres_driver_transaction_status() -> None:
+def test_workspace_delete_guard_reads_postgres_driver_transaction_status(monkeypatch: pytest.MonkeyPatch) -> None:
     raw = SimpleNamespace(info=SimpleNamespace(transaction_status=SimpleNamespace(name="INTRANS")))
     backend = SimpleNamespace(_tx_depth=lambda _connection: 0)
-    fake_db = SimpleNamespace(
-        backend_type=BackendType.POSTGRESQL,
-        backend=backend,
-        get_connection=lambda: SimpleNamespace(_connection=raw, _backend=backend),
-        _connection_state=lambda: SimpleNamespace(tx_depth=0),
-    )
+    fake_db = CharactersRAGDB.__new__(CharactersRAGDB)
+    fake_db._backend = PostgreSQLBackend.__new__(PostgreSQLBackend)
+    fake_db._uses_shared_content_backend = False
+    fake_db._local = threading.local()
+    monkeypatch.setattr(fake_db, "get_connection", lambda: SimpleNamespace(_connection=raw, _backend=backend))
+    monkeypatch.setattr(fake_db, "_connection_state", lambda: SimpleNamespace(tx_depth=0))
     with pytest.raises(ConflictError, match="outermost transaction"):
         CharactersRAGDB._require_outermost_workspace_delete(fake_db, "workspace-one")
 
 
 def test_active_only_restore_validation_never_reactivates_a_deleted_chat(db: CharactersRAGDB) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Child", "scope_type": "workspace", "workspace_id": "workspace-one"})
+    assert child is not None
     db.soft_delete_conversation(child, expected_version=1)
     with pytest.raises(ConflictError, match="chat_restore_state_changed"):
         db.restore_conversation(child, expected_version=2, require_already_active=True)
-    assert db.get_conversation_by_id(child, include_deleted=True)["deleted"]
+    stored_conversation = db.get_conversation_by_id(child, include_deleted=True)
+    assert stored_conversation is not None
+    assert stored_conversation["deleted"]
 
 
 def test_active_restore_endpoint_rejects_delete_between_read_and_validation(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Racing child"})
+    assert child is not None
     original_get = db.get_conversation_by_id
 
     def read_then_delete(conversation_id: str, include_deleted: bool = False) -> Any:
@@ -433,10 +480,11 @@ def test_active_restore_endpoint_rejects_delete_between_read_and_validation(db: 
             scope_type=None,
             workspace_id=None,
             db=db,
-            current_user=SimpleNamespace(id="alice"),
+            current_user=User(id="alice", username="alice"),
         ))
     assert exc_info.value.status_code == 409
     row = original_get(child, include_deleted=True)
+    assert row is not None
     assert row["deleted"] and row["version"] == 2
 
 
@@ -444,6 +492,7 @@ def test_active_restore_endpoint_rejects_delete_between_read_and_validation(db: 
 @pytest.mark.parametrize("trashed", [False, True])
 def test_sync_upsert_cannot_reparent_or_revive_protected_chat(db: CharactersRAGDB, typed_asset: bool, trashed: bool) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
+    assert child is not None
     with db.transaction() as conn:
         if typed_asset:
             conn.execute("UPDATE conversations SET native_bundle_json = '{}' WHERE id = ?", (child,))
@@ -466,6 +515,7 @@ def test_sync_upsert_cannot_reparent_or_revive_protected_chat(db: CharactersRAGD
 
 def test_sync_tombstone_cannot_bypass_protected_delete_adapter(db: CharactersRAGDB) -> None:
     child = db.add_conversation({"character_id": 1, "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one"})
+    assert child is not None
     with db.transaction() as conn:
         conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
     before = db.get_conversation_by_id(child, include_deleted=True)
@@ -494,15 +544,18 @@ def test_generic_identity_update_cannot_rebind_protected_chat(db: CharactersRAGD
         "assistant_kind": "persona", "assistant_id": "persona-original",
         "title": "Protected", "scope_type": "workspace", "workspace_id": "workspace-one",
     })
+    assert child is not None
     with db.transaction() as conn:
         if typed_asset:
             conn.execute("UPDATE conversations SET native_bundle_json = '{}' WHERE id = ?", (child,))
         else:
             conn.execute("UPDATE conversations SET required_projection_version = 'native-fork-v1' WHERE id = ?", (child,))
     before = db.get_conversation_by_id(child)
+    assert before is not None
     with pytest.raises(ConflictError, match="native_assistant_identity_locked"):
         db.update_conversation(child, {identity_field: new_value}, expected_version=before["version"])
     assert db.get_conversation_by_id(child) == before
     assert db.update_conversation(child, {"title": "Retitled"}, expected_version=before["version"])
     after = db.get_conversation_by_id(child)
+    assert after is not None
     assert after["title"] == "Retitled" and after["assistant_id"] == "persona-original"
