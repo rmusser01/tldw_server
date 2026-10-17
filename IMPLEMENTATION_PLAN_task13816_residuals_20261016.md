@@ -54,6 +54,13 @@ Status: Complete
 Goal: satisfy all outstanding TASK13816 criteria with explicit residual dispositions.
 Success Criteria: integrated types/tests/security/builds, independent whole-change review, normal commits; current final summary and AC/DoD reflect actual outcomes. No silent closure of unknown historical initiators or unrelated debt.
 Tests: combined changed backend/MyPy owners, affected frontend/native coverage, WebUI/extension types/builds, Bandit/Ruff/hooks and tracking format.
-Status: Complete
+Status: In Progress
 - [x] Verify remaining obligations and existing TASK12116 ownership against measured results.
 - [x] Complete whole-branch review plus one scoped final fix-wave re-review: ReadyYes locally, zero open Critical/Important/Minor findings. All affected source-bound checks and canonical tracking verification pass; AC5/DoD1 are complete. Source commit 3e8285df; no publication or cleanup claimed. Final report /private/tmp/task13816-final-verification-report-20261016.md; all failed receipts and rulings remain retained.
+
+### PR3253 authorized landing continuation (2026-10-17)
+Local completion through3b483dc4 remains historical source-bound evidence. The user now requests current-dev readiness and all hosted failures fixed.
+- [ ] Preserve original head/check failures, rebase only this unarmed PR onto actual latest dev, resolve conflicts and verify all source/base bindings.
+- [ ] Diagnose and repair actual EOF, tenant-predicate and Notes coverage failures with unchanged gates, owning regressions and scoped independent review.
+- [ ] Normal exact-lease publish; require actual new-head required statuses and relevant full-suite/coverage/Notes outcomes, review findings and trusted issuers.
+- [ ] Final latest-dev/head/queue/rules/readiness verification; retain human-authored Change summary as required external input before merge. No merge is requested by this continuation.
