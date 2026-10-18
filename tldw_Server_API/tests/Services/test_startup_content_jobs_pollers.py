@@ -345,8 +345,28 @@ def test_tts_jobs_worker_runs_in_process_by_default(monkeypatch: pytest.MonkeyPa
     assert spec.enabled(_context(route_enabled=_route_enabled)) is False
     # A sidecar deployment runs it as its own service instead.
     assert spec.enabled(replace(live, sidecar_mode=True)) is False
+    # An explicit true runs it even where the audio route is off, as for media ingest.
+    monkeypatch.setenv("TTS_JOBS_WORKER_ENABLED", "true")
+    assert spec.enabled(replace(live, route_enabled=lambda *_a, **_k: False)) is True
     monkeypatch.setenv("TTS_JOBS_WORKER_ENABLED", "false")
     assert spec.enabled(live) is False
+
+
+def test_tts_jobs_worker_service_runs_the_tts_jobs_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The factory test stubs the service function; this runs its body, so a wrong import fails here."""
+    startup_pollers = _import_startup_content_jobs_pollers()
+    from tldw_Server_API.app.core.TTS import tts_jobs_worker
+
+    received: list[object] = []
+
+    def _run(stop_event: object) -> str:
+        received.append(stop_event)
+        return "running"
+
+    monkeypatch.setattr(tts_jobs_worker, "run_tts_jobs_worker", _run)
+    stop_event = object()
+    assert startup_pollers._run_tts_jobs_worker_service(stop_event) == "running"
+    assert received == [stop_event]
 
 
 def test_standalone_html_composite_worker_uses_slides_route_without_a_second_flag() -> None:
