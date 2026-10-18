@@ -1,7 +1,7 @@
 ---
 id: TASK-13647
 title: 'Admin-webui perf PR #3218 follow-up fixes'
-status: In Progress
+status: Done
 labels:
 - backend
 - frontend
@@ -35,7 +35,7 @@ ADR assessment: no ADR required - three localized bug fixes (query param naming,
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Items 1-3 fixed with RED-first tests (daily-usage start/end params; cost-attribution org-scope semi-join preserving group_by=org row-per-org and SQLite plan sargability; backups vanished-file skip guard) and item 4 root-caused as wall-clock timeout starvation of a deterministic 8.4s-under-load test, stabilized via per-test 20s timeout + explicit popconfirm wait. 27 backend tests, all touched frontend suites, and Bandit clean. Full detail in .task-13647-report.md.
+4/4 items implemented, review-approved (zero Critical/Important), CI green. Commits 10f46c8b42 (items 1-3), 01a925f1bf (item 4), 43590349b4+096fc8fce4 (task records), 01ebf24d10 (dev refresh). getDailyUsage start/end; multi-org semi-join (PG EXISTS / SQLite IN on EXPLAIN evidence, sargability-guard locked); backups OSError skip; password-reset test stabilized (popconfirm race + load budget). Merged via PR #3246.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
