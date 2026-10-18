@@ -61,6 +61,21 @@ def contains_tts_credential_fields(value: Any) -> bool:
     return False
 
 
+def tts_jobs_queue() -> str:
+    """The Jobs queue for long-form TTS jobs, shared by the enqueueing endpoint and the TTS worker.
+
+    The audio pipeline workers read the audio domain's ``default`` and ``transcribe`` queues
+    without a job-type filter, so a TTS job there would be taken and failed as an unknown job
+    type. Those two names are refused rather than silently reviving that collision.
+    """
+    queue = (os.getenv("TTS_JOBS_QUEUE") or "").strip() or "tts"
+    if queue in {"default", "transcribe"}:
+        raise ValueError(
+            f"TTS_JOBS_QUEUE must not be {queue!r}: the audio pipeline workers read it without a job-type filter"
+        )
+    return queue
+
+
 def parse_bool(value: Any, default: bool | None = False) -> bool:
     """Parse a value into a boolean in a tolerant, explicit way.
 
