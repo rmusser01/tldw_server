@@ -22,3 +22,5 @@ ADR check: no new ADR for a benchmark or local responsiveness repair; preserve a
 **Success Criteria**: Scoped lint/Bandit, independent exact-head review, requester Change summary and hosted checks before merge.
 **Tests**: All hosted checks; latest-dev ancestry and merged source verification.
 **Status**: In Progress
+
+Integration rebase: all checks passed on ff733d7976, but dev advanced before merge. Rebased unchanged patches onto e1f7770953; independent review confirms all four measured source hashes and the lifespan-disabled benchmark path are unchanged. Retain the timing evidence; rerun connected tests and require fresh exact-head review/hosted checks before merge.
