@@ -84,8 +84,9 @@ class NeuTTSAdapter(TTSAdapter):
             )
             # Respect auto_download toggle from provider config (default True)
             auto_download = parse_bool(self.config.get("auto_download", True), default=True)
-            self._engine = await run_tts_blocking_call(
-                _NeuTTSAir,
+            # ponytail: loads on the loop, once per process. On a worker thread the registry's 5 s
+            # capability-listing timeout would cancel a slow load and mark NeuTTS failed (TASK-13857).
+            self._engine = _NeuTTSAir(
                 backbone_repo=self.backbone_repo,
                 backbone_device=self.backbone_device,
                 codec_repo=self.codec_repo,

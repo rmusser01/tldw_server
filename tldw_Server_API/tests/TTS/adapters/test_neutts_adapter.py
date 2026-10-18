@@ -2,6 +2,7 @@ import sys
 import types
 import asyncio
 import builtins
+import gc
 import threading
 import time
 import anyio
@@ -376,10 +377,6 @@ class _ThreadRecordingEngine(_FakeNeuTTSEngineStreaming):
 
     calls: list[tuple[str, int]] = []
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.calls.append(("load", threading.get_ident()))
-
     def encode_reference(self, path):
         self.calls.append(("encode_reference", threading.get_ident()))
         return [1, 2, 3]
@@ -418,7 +415,7 @@ async def test_neutts_runs_engine_calls_off_the_event_loop(monkeypatch):
     assert chunks
 
     names = [name for name, _ in _ThreadRecordingEngine.calls]
-    assert names == ["load", "encode_reference", "infer", "encode_reference", "infer_stream", "infer_stream"]
+    assert names == ["encode_reference", "infer", "encode_reference", "infer_stream", "infer_stream"]
     assert [name for name, ident in _ThreadRecordingEngine.calls if ident == loop_thread] == []
 
 
@@ -505,10 +502,10 @@ async def test_neutts_stream_keeps_the_engine_between_chunks():
         adapter.generate(TTSRequest(text="hi", format=AudioFormat.PCM, stream=False, extra_params=extras))
     )
     await asyncio.sleep(0.1)
-    assert [name for name, _ in _ThreadRecordingEngine.calls] == ["load", "infer_stream"]
+    assert [name for name, _ in _ThreadRecordingEngine.calls] == ["infer_stream"]
     assert [c async for c in stream]
     assert (await other).audio_data
-    assert [name for name, _ in _ThreadRecordingEngine.calls] == ["load", "infer_stream", "infer_stream", "infer"]
+    assert [name for name, _ in _ThreadRecordingEngine.calls] == ["infer_stream", "infer_stream", "infer"]
 
 
 class _BlockingEngine(_FakeNeuTTSEngineStreaming):
@@ -582,6 +579,52 @@ async def test_neutts_cancelled_request_keeps_the_engine_until_its_call_returns(
     else:
         with pytest.raises(asyncio.CancelledError):
             await first
+
+
+class _OrphanedErrorEngine(_BlockingEngine):
+    """Fails the call whose caller was cancelled, after that caller has gone."""
+
+    def infer(self, text, ref_codes, ref_text):
+        self.started.append("infer")
+        self.release.wait(5)
+        if text == "fail":
+            raise RuntimeError("RAW_NEUTTS_ORPHANED_SECRET_MARKER token=secret")
+        return np.zeros(12000, dtype=np.float32)
+
+
+@pytest.mark.asyncio
+async def test_neutts_cancelled_request_engine_error_is_not_logged_raw():
+    """Nobody awaits a cancelled caller's engine call, so asyncio would log its error unsanitised."""
+    _install_fake_engine(_OrphanedErrorEngine)
+    _OrphanedErrorEngine.started = []
+    _OrphanedErrorEngine.release = threading.Event()
+    adapter = NeuTTSAdapter(config={"backbone_repo": "neuphonic/neutts-air-q4-gguf"})
+    assert await adapter.ensure_initialized()
+    extras = {"reference_text": "ref", "ref_codes": [1, 2, 3]}
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+    unhandled: list[dict] = []
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+    try:
+        doomed = asyncio.create_task(
+            adapter.generate(TTSRequest(text="fail", format=AudioFormat.PCM, stream=False, extra_params=extras))
+        )
+        while not _OrphanedErrorEngine.started:
+            await asyncio.sleep(0.01)
+        doomed.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await doomed
+        _OrphanedErrorEngine.release.set()
+        # The next call gets the engine only once the failed call has returned.
+        assert (
+            await adapter.generate(TTSRequest(text="ok", format=AudioFormat.PCM, stream=False, extra_params=extras))
+        ).audio_data
+        gc.collect()
+        await asyncio.sleep(0)
+    finally:
+        _OrphanedErrorEngine.release.set()
+        loop.set_exception_handler(previous_handler)
+    assert unhandled == []
 
 
 @pytest.mark.asyncio
