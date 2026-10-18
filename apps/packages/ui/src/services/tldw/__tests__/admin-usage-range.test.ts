@@ -62,8 +62,26 @@ describe("admin usage analytics date-range passthrough", () => {
     })
   })
 
+  it("sends start/end (not start_date/end_date) on getDailyUsage", async () => {
+    vi.mocked(bgRequest).mockResolvedValue({})
+    await adminMethods.getDailyUsage({ start: "2026-09-06", end: "2026-10-06" })
+    expect(bgRequest).toHaveBeenLastCalledWith({
+      path: `/api/v1/admin/usage/daily${queryOf({
+        start: "2026-09-06",
+        end: "2026-10-06"
+      })}`,
+      method: "GET"
+    })
+  })
+
   it("stays backward compatible when start/end are omitted", async () => {
     vi.mocked(bgRequest).mockResolvedValue({})
+    await adminMethods.getDailyUsage()
+    expect(bgRequest).toHaveBeenLastCalledWith({
+      path: "/api/v1/admin/usage/daily",
+      method: "GET"
+    })
+
     await adminMethods.getTopUsage({ limit: 20 })
     expect(bgRequest).toHaveBeenLastCalledWith({
       path: `/api/v1/admin/usage/top${queryOf({ limit: 20 })}`,

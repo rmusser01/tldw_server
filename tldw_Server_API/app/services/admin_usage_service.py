@@ -1235,11 +1235,16 @@ async def get_cost_attribution(
         is_pg = _is_postgres_connection(db)
         # llm_usage_log has no org_id column: org attribution/scoping joins org_members
         # (same pattern as fetch_usage_top / fetch_llm_usage).
-        needs_org_join = org_ids is not None or group_by == "org"
+        # group_by="org" keeps the plain JOIN on purpose: one row per
+        # (usage, membership) is exactly the per-org attribution. group_by="user"
+        # under an org scope must scope with a semi-join instead — the plain
+        # JOIN emits one row per membership and double-counts users who belong
+        # to multiple scoped orgs (TASK-13647; EXISTS on PG, IN-subquery on
+        # SQLite where the planner keeps an indexed (user_id, ts) search).
         group_field = "llm_usage_log.user_id" if group_by == "user" else "om.org_id"
         org_join = (
             " JOIN org_members om ON om.user_id = llm_usage_log.user_id"
-            if needs_org_join
+            if group_by == "org"
             else ""
         )
 
@@ -1247,8 +1252,15 @@ async def get_cost_attribution(
             pg_org_filter = ""
             pg_params: list[Any] = [int(range_days)]
             if org_ids is not None:
-                pg_org_filter = " AND om.org_id = ANY($2)"
                 pg_params.append(org_ids)
+                if group_by == "org":
+                    pg_org_filter = " AND om.org_id = ANY($2)"
+                else:
+                    pg_org_filter = (
+                        " AND EXISTS (SELECT 1 FROM org_members om2"
+                        " WHERE om2.user_id = llm_usage_log.user_id"
+                        " AND om2.org_id = ANY($2))"
+                    )
             pg_query = f"""
                 SELECT
                     {group_field} as entity_id,
@@ -1269,8 +1281,21 @@ async def get_cost_attribution(
             sqlite_params: list[Any] = [f"-{int(range_days)} days"]
             if org_ids is not None:
                 placeholders = ",".join("?" for _ in org_ids)
-                sqlite_org_filter = f" AND om.org_id IN ({placeholders})"
                 sqlite_params.extend(org_ids)
+                if group_by == "org":
+                    sqlite_org_filter = f" AND om.org_id IN ({placeholders})"
+                else:
+                    # Semi-join expressed as IN (EXISTS would also be
+                    # correct, but SQLite plans it as a full llm_usage_log
+                    # index scan; IN keeps the indexed
+                    # (user_id=?, ts>=?) search).
+                    sqlite_org_filter = (
+                        " AND llm_usage_log.user_id IN"
+                        " (SELECT om2.user_id FROM org_members om2"
+                        # only "?" placeholder text is interpolated; org ids
+                        # bind as parameters in sqlite_params
+                        f" WHERE om2.org_id IN ({placeholders}))"  # nosec B608
+                    )
             sqlite_query = f"""
                 SELECT
                     {group_field} as entity_id,
