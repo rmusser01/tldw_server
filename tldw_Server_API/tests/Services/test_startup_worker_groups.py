@@ -163,6 +163,7 @@ def test_collect_startup_worker_specs_accepts_real_provider_graph() -> None:
         "study_pack_jobs_task",
         "study_suggestions_jobs_task",
         "tts_history_cleanup_task",
+        "tts_jobs_task",
         "usage_aggregator",
         "visual_identity_jobs_task",
         "vn_asset_generation_jobs_task",

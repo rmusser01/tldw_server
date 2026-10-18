@@ -30,7 +30,7 @@ One generic `jobs` table (SQLite or PG — PG iff `JOBS_DB_URL` starts with `pos
 ## Execution models
 
 - **In-process pollers**: asyncio loops acquire jobs (poll ~1 s, lease default 120 s), process, and ack with worker+lease+completion-token. Managed by the lifecycle registry; app shutdown closes the acquire gate first so acquisitions return None, then quiesces pollers.
-- **Sidecar mode**: `TLDW_WORKERS_SIDECAR_MODE=true` makes the API skip in-process pollers; `start-sidecars.sh` launches worker processes from `Docs/Deployment/sidecar_workers_manifest.json` (chatbooks, files, data_tables, prompt_studio, privilege_snapshots, audio, media_ingest, reading_import/digest, evals_abtest, optional connectors).
+- **Sidecar mode**: `TLDW_WORKERS_SIDECAR_MODE=true` makes the API skip in-process pollers; `start-sidecars.sh` launches worker processes from `Docs/Deployment/sidecar_workers_manifest.json` (chatbooks, files, data_tables, prompt_studio, privilege_snapshots, audio, tts, media_ingest, reading_import/digest, evals_abtest, optional connectors).
 - **PG concurrency**: single-UPDATE `SKIP LOCKED` acquisition when enabled, else two-step pick+update; expired-lease recovery batched with `FOR UPDATE SKIP LOCKED` and a per-job policy (`consume_retry` vs `requeue_no_attempt`); advisory locks guard the dependency graph. Lease enforcement on ack is on by default (`JOBS_DISABLE_LEASE_ENFORCEMENT` to disable).
 
 ## Jobs vs Scheduler (the decision rule)
