@@ -7198,7 +7198,6 @@ async def create_output(
                 "title": getattr(it, "title", None),
                 "summary": getattr(it, "summary", None),
                 "content": getattr(it, "summary", None) or getattr(it, "title", ""),
-                "metadata_json": getattr(it, "metadata_json", None),
             }
             for it in items
         ]
@@ -7208,7 +7207,6 @@ async def create_output(
                 api_name=llm_provider,
                 model_override=payload.llm_model,
                 custom_prompt=payload.summarize_prompt,
-                db=db,
             )
             for entry in items_for_summary:
                 item_id = entry.get("id")

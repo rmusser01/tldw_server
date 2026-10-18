@@ -349,46 +349,6 @@ class TestLLMSummarization:
         assert result[0]["llm_summary"] == ""
         mock_summarize.assert_not_called()
 
-    @pytest.mark.asyncio
-    async def test_summarize_items_uses_cache(self):
-        """If cached_summary matches content hash, LLM is not called."""
-        from tldw_Server_API.app.services.outputs_service import (
-            _content_cache_key,
-            summarize_items_for_output,
-        )
-
-        content = "Article about AI safety."
-        content_hash = _content_cache_key(content)
-        meta = json.dumps({
-            "cached_summary": {"content_hash": content_hash, "text": "Cached summary."}
-        })
-
-        items = [{"id": 1, "summary": content, "metadata_json": meta}]
-
-        with patch(
-            "tldw_Server_API.app.services.outputs_service._summarize_single_article",
-        ) as mock_summarize:
-            result = await summarize_items_for_output(items, api_name="openai")
-
-        assert result[0]["llm_summary"] == "Cached summary."
-        mock_summarize.assert_not_called()
-
-    def test_content_cache_key_deterministic(self):
-        """Same content always produces the same cache key."""
-        from tldw_Server_API.app.services.outputs_service import _content_cache_key
-
-        key1 = _content_cache_key("hello world")
-        key2 = _content_cache_key("hello world")
-        assert key1 == key2
-        assert len(key1) == 16
-
-    def test_content_cache_key_varies(self):
-        """Different content produces different cache keys."""
-        from tldw_Server_API.app.services.outputs_service import _content_cache_key
-
-        key1 = _content_cache_key("hello world")
-        key2 = _content_cache_key("goodbye world")
-        assert key1 != key2
 
 
 # ---------------------------------------------------------------------------
