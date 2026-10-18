@@ -236,6 +236,14 @@ async def test_summarize_items_for_output_leaves_no_summary_when_the_provider_fa
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("api_name", ["", "None"])
+def test_summarize_single_article_without_a_provider_returns_nothing(adapter: _Adapter, api_name: str) -> None:
+    # analyze() answers a missing provider with an "Error:" string, which is not a summary.
+    assert outputs_service._summarize_single_article("Cedar article body.", api_name=api_name) == ""
+    assert adapter.requests == []
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("helper", ["_summarize_single_article", "_summarize_text_block"])
 def test_a_summary_that_starts_with_error_is_still_the_summary(adapter: _Adapter, helper: str) -> None:
     # Provider failures raise (raise_on_error), so a reply is the model's text, whatever it starts with.

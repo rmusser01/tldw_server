@@ -350,7 +350,6 @@ class TestLLMSummarization:
         mock_summarize.assert_not_called()
 
 
-
 # ---------------------------------------------------------------------------
 # OPML Round-trip (import → export → reimport skips duplicates)
 # ---------------------------------------------------------------------------

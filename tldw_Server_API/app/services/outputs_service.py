@@ -656,6 +656,8 @@ def _llm_reply(prompt: str, *, api_name: str, model_override: str | None) -> str
     """
     from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 
+    if not api_name.strip() or api_name.strip().lower() == "none":
+        return ""  # analyze answers a missing provider with an "Error:" string, not a raise
     try:
         result = analyze(
             api_name,
