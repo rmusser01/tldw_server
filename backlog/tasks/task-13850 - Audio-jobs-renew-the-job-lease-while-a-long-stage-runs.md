@@ -22,6 +22,7 @@ app/services/audio_jobs_worker.py acquires each stage with JOBS_LEASE_SECONDS (d
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+From the clean-session review of PR #3261: lease-renewal patterns to follow are in core/TTS/tts_jobs_worker.py (via WorkerSDK) and core/Jobs/worker_sdk.py (renew_job_lease), besides core_jobs_worker.py. The claim that an expired lease consumes a retry follows the ExpiredLeasePolicy.CONSUME_RETRY default on create_job; confirm it in the lease-recovery path when implementing.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

@@ -24,6 +24,7 @@ The audio pipeline payload carries the transcript about 4-5 times: text, segment
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+From the clean-session review of PR #3261: JobManager.create_job and complete_job also honour JOBS_JSON_TRUNCATE, which replaces an oversized payload with {"_truncated": true} and silently destroys the transcript. Enabling it is not a fix for the payload cap; the transcript must stay intact.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

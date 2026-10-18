@@ -22,6 +22,7 @@ When an audio job is cancelled while a stage runs, that stage is marked cancelle
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+From the clean-session review of PR #3261: app/api/v1/endpoints/audio/audio_jobs.py has no cancel endpoint, so AC #2 means choosing an outcome: add a whole-pipeline cancel (for example one keyed by the first stage's job id), or document the existing Jobs cancel path for each stage.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
