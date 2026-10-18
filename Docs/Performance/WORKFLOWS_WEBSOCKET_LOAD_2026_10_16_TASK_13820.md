@@ -96,6 +96,8 @@ The [original PR-head report](https://github.com/rmusser01/tldw_server/blob/5c4b
 
 Integration rebase: PR #3256 was rebased onto dev `e1f7770953a78224e43f92976e526ae88b155d2b` after the measured runs. All six PR patches and all four measured source hashes remain unchanged. Upstream adds a lazily imported TTS startup worker; the harness disables lifespan, so that worker is outside the measured path. Independent review confirmed the existing timing evidence remains applicable to this scope. Enabled-worker performance remains unmeasured. Fresh rebased-head tests and hosted checks are separate integration gates.
 
+A subsequent integration rebase onto dev `7c94a2efb1edc938070abcaa868d59e319a95112` also retains every measured source hash and all PR patches. Upstream changes sandbox WebSocket teardown and adds a test-quality CI gate; neither changes the measured workflow path. A CI-only chat test fix scopes synthetic exception state to the endpoint instead of Python’s shared `sys` module. No benchmark runtime change or additional performance claim is introduced.
+
 ## Limits and rollback
 
 This synthetic loopback workload does not measure WAN/TLS, PostgreSQL, same-run fanout, many tenants, lifespan/background services, non-compressible payloads or a production soak. Native performance evidence is macOS-only; hosted Linux real-network tests cover behavior, not equivalent capacity. The shared threadpool may queue reads. Setup and single-client costs above remain disclosed. Revert the runtime changes if deployment evidence requires rollback, retaining the harness and regression evidence.

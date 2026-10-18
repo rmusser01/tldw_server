@@ -26,3 +26,5 @@ ADR check: no new ADR for a benchmark or local responsiveness repair; preserve a
 Integration rebase: all checks passed on ff733d7976, but dev advanced before merge. Rebased unchanged patches onto e1f7770953; independent review confirms all four measured source hashes and the lifespan-disabled benchmark path are unchanged. Retain the timing evidence; rerun connected tests and require fresh exact-head review/hosted checks before merge.
 
 CI follow-up: isolate the chat refund test exception-state injection to the endpoint module binding, preserving refund/cleanup assertions and Python/framework exception handling. Verify failing-first with current CI framework versions, then adjacent runtime lifecycle tests and the simplified endpoint suite. No production change or benchmark rerun.
+
+Latest integration: clean8-patch rebase onto dev7c94a2efb1 after upstream sandbox teardown/test-quality changes; exact independent review and four measured hashes unchanged. CI-version chat suite217 passed/1 skipped and9 lifecycle cases passed; new quality ratchet and fresh hosted checks remain integration gates.
