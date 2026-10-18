@@ -115,12 +115,12 @@ index a355b276ad..d09a34dfe3 100644
 @@ -2230,8 +2230,9 @@ async def test_tts_worker_returns_cleanly_when_sdk_stops_before_stop_event(
          def __init__(self, _manager, _config):
              return None
- 
+
 -        async def run(self, *, handler):
 +        async def run(self, *, handler, job_type=None):
              assert handler is tts_jobs_worker._handle_tts_job
 +            assert job_type == tts_jobs_worker.TTS_JOB_TYPE
- 
+
          def stop(self):
              return None
 diff --git a/tldw_Server_API/tests/TTS_NEW/integration/test_tts_endpoints.py b/tldw_Server_API/tests/TTS_NEW/integration/test_tts_endpoints.py
@@ -130,7 +130,7 @@ index 286c754f82..7af92fec22 100644
 @@ -5,6 +5,7 @@ Tests the full request/response cycle with real components,
  no mocking except for external API calls.
  """
- 
+
 +import asyncio
  import contextlib
  import json
@@ -147,7 +147,7 @@ index 286c754f82..7af92fec22 100644
 @@ -1301,6 +1302,52 @@ class TestTTSJobsHistoryIntegration:
              with contextlib.suppress(Exception):
                  audio_jobs._job_manager_cache.clear()
- 
+
 +    async def test_audio_jobs_worker_leaves_a_submitted_speech_job_alone(self, test_client, auth_headers, monkeypatch, tmp_path):
 +        """The audio pipeline worker must not take a long-form TTS job (TASK-13641)."""
 +        import tldw_Server_API.app.services.audio_jobs_worker as audio_worker
@@ -203,8 +203,8 @@ index 3f5327c6db..8d9463db6e 100644
 +++ b/tldw_Server_API/tests/TTS_NEW/unit/test_tts_jobs_worker.py
 @@ -253,6 +253,49 @@ async def test_tts_jobs_worker_output_failure_after_synthesis_is_terminal(
      assert sentinel not in repr(exc_info.value)
- 
- 
+
+
 +@pytest.mark.unit
 +async def test_tts_worker_takes_only_tts_jobs_from_its_queue(monkeypatch, tmp_path):
 +    """On a queue that also holds an audio pipeline job, the TTS worker takes only the TTS job (TASK-13641)."""
@@ -286,9 +286,9 @@ index 9feab126ee..f5ac512df2 100644
 +    tts_jobs_queue,
  )
  from tldw_Server_API.app.core.Utils.pydantic_compat import model_dump_compat
- 
+
 @@ -675,7 +676,7 @@ async def create_speech_job(
- 
+
      job = jm.create_job(
          domain="audio",
 -        queue="default",
@@ -307,7 +307,7 @@ index 7bb58ec913..5842e855a3 100644
 +        # Long-form TTS jobs, kept off "default", which the audio pipeline worker reads unfiltered.
 +        "audio": ("tts",),
      }
- 
+
      # --- Shutdown/acquisition gate (process-wide) ---
 diff --git a/tldw_Server_API/app/core/TTS/tts_jobs_worker.py b/tldw_Server_API/app/core/TTS/tts_jobs_worker.py
 index 07e9c5103b..ab3ec9ffc1 100644
@@ -315,14 +315,14 @@ index 07e9c5103b..ab3ec9ffc1 100644
 +++ b/tldw_Server_API/app/core/TTS/tts_jobs_worker.py
 @@ -2,8 +2,8 @@
  TTS Jobs worker for long-form speech generation.
- 
+
  - domain = "audio"
 -- queue = os.getenv("TTS_JOBS_QUEUE", "default")
 -- job_type = "tts_longform"
 +- queue = utils.tts_jobs_queue(): TTS_JOBS_QUEUE, default "tts"
 +- job_type = "tts_longform", and only that type is acquired
  """
- 
+
  from __future__ import annotations
 @@ -67,6 +67,7 @@ from tldw_Server_API.app.core.TTS.utils import (
      contains_tts_credential_fields,
@@ -330,10 +330,10 @@ index 07e9c5103b..ab3ec9ffc1 100644
      tts_history_text_length,
 +    tts_jobs_queue,
  )
- 
+
  TTS_DOMAIN = "audio"
 @@ -935,7 +936,7 @@ async def _handle_tts_job(job: dict[str, Any]) -> dict[str, Any]:
- 
+
  async def run_tts_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
      worker_id = (os.getenv("TTS_JOBS_WORKER_ID") or f"tts-jobs-{os.getpid()}").strip()
 -    queue = (os.getenv("TTS_JOBS_QUEUE") or "default").strip() or "default"
@@ -342,7 +342,7 @@ index 07e9c5103b..ab3ec9ffc1 100644
      renew_jitter = _coerce_int(
          os.getenv("TTS_JOBS_RENEW_JITTER_SECONDS")
 @@ -967,7 +968,8 @@ async def run_tts_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
- 
+
      logger.info("TTS Jobs worker starting (queue={}, worker_id={})", queue, worker_id)
      try:
 -        await sdk.run(handler=_handle_tts_job)
@@ -357,8 +357,8 @@ index 491239f122..a05d5a51f6 100644
 +++ b/tldw_Server_API/app/core/TTS/utils.py
 @@ -61,6 +61,21 @@ def contains_tts_credential_fields(value: Any) -> bool:
      return False
- 
- 
+
+
 +def tts_jobs_queue() -> str:
 +    """The Jobs queue for long-form TTS jobs, shared by the enqueueing endpoint and the TTS worker.
 +
@@ -376,7 +376,7 @@ index 491239f122..a05d5a51f6 100644
 +
  def parse_bool(value: Any, default: bool | None = False) -> bool:
      """Parse a value into a boolean in a tolerant, explicit way.
- 
+
 ```
 
 - [ ] **Step 5: Run the tests to see them pass**
@@ -398,9 +398,9 @@ index a9157a4385..41e7b3abda 100644
  7. Response: audio bytes with optional sample-rate and alignment headers; metrics record totals, durations, TTFB.
 -8. Long-form: `POST /speech/jobs` enqueues an audio-domain job forcing non-streaming; artifacts are listed per job.
 +8. Long-form: `POST /speech/jobs` enqueues an audio-domain `tts_longform` job forcing non-streaming; artifacts are listed per job. The job goes on the `tts` queue. `TTS_JOBS_QUEUE` overrides it: set the same value for the API server and the TTS worker, and register a custom name in `JOBS_ALLOWED_QUEUES_AUDIO`. `default` and `transcribe` are refused, because the audio pipeline workers read them without a job-type filter. The TTS jobs worker (`python -m tldw_Server_API.app.core.TTS.tts_jobs_worker`) reads that queue and takes only `tts_longform` jobs; nothing starts it automatically.
- 
+
  ## STT (condensed)
- 
+
 ```
 
 Expected: only `Docs/Architecture/audio.md` is modified under `Docs`. The page has no published mirror.
