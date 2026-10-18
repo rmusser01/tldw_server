@@ -1,87 +1,99 @@
 # Workflow WebSocket concurrent-load benchmark — TASK-13820
 
-Baseline: latest remote dev `0566130cbed2670efca6bbfa3c309031d2d3bc3b` on 2026-10-16. The fixed source offloads the workflow WebSocket owner lookup and event poll to Starlette's bounded threadpool, finishes normally when the peer disconnects, and cooperatively yields between history events.
+Final measurement: 2026-10-18, reference dev `42176e5bd45e213e81da81d18091b8d6948a7de7`, candidate `136070c23ee14766099c8e6a6a1be19de211ff78`. The reference includes only the candidate's normal-disconnect return, retaining dev's original read/send behavior. Both variants therefore describe valid service runs without exception-formatting stalls.
 
-## Root cause and behavioral verification
+## Outcome
 
-Both synchronous database reads ran directly on the ASGI event loop. A deterministic regression holds each read pending while an unrelated HTTP request tries to complete on the same server loop. Both cases fail before the repair and pass after it. The real database call still runs after release; ownership, exception diagnostics, event ordering, frames and the one-second polling interval are preserved.
+The requested concurrent large-history regressions are repaired in this bounded, descriptive comparison. At 64 clients with 500 events per run, median trial replay P95 improves **856.82 → 802.14 ms (6.38%)**, and loop-lag P99 improves **6.34 → 2.65 ms (58.22%)**. Both opposite-order invocation pairs improve these measures. Maximum observed loop lag falls **458.43 → 33.56 ms**. At 16 clients, history replay and loop P99 also improve.
 
-The final connected workflow storage, runtime, API, real-TCP harness and WebSocket cookie/JWT authentication suite passed 183 tests, including all three root-cause regressions and all close-code cases. Scoped Ruff, Black and Bandit checks passed with no security findings. Native tests use a private source copy and the CI FastAPI/Starlette versions; optional ONNX telemetry is disabled only in the private runner to avoid an unrelated native teardown crash. No production dependency or telemetry configuration changes.
+This is not a uniform latency improvement. With no history, handshake P95 increases **3.00 → 8.30 ms**, **48.93 → 61.86 ms**, and **183.51 → 205.66 ms** at 1/16/64 clients. Keeping disk reads off the loop carries worker-handoff costs; do not undo the nonblocking-read fix to remove those costs. Single-client history replay P95 changes **16.11 → 16.76 ms**. Live-event P95 remains approximately one second because polling is unchanged. No production SLO, capacity limit or statistical-significance claim is established.
 
-A separate untimed watchdog sampled the main server thread during remaining stalls. It repeatedly found Uvicorn's ASGI exception handler formatting Loguru traceback locals after a routine peer disconnect. The endpoint logged a safe INFO diagnostic but then re-raised `WebSocketDisconnect`, turning ordinary departure into an unhandled server exception. Returning after the diagnostic fixes that lifecycle error. Three failing-first endpoint regressions cover close codes 1000, 1001 and 1006. This also avoids sending the exception into a traceback logger that may inspect sensitive request locals.
+All **72 trials** are valid, with zero server/client errors, zero mismatches and exact ordered delivery of **58,320 live events and 486,000 history frames**. All missing-credential, foreign-owner and missing-run controls reject the handshake with HTTP 403. Server test-mode flags are false; the existing threadpool has 40 tokens.
 
-The final harness counts Uvicorn ERROR records by exception class without retaining exception messages or local values; a non-suppressing standard logging filter preserves the production handlers and formatters. A report with server errors is invalid even if clients received every event. The first exploratory ABBA set preceded that accounting and is excluded from final validated comparisons.
+## Root causes and repair
 
-A second untimed watchdog sampled the two-repair version during large-history stalls and found the main thread in the workflow send loop, through Uvicorn framing and per-message compression. An awaited send can complete immediately on a writable transport, allowing a history burst to monopolize the loop. A failing-first regression uses real database events, JWT verification and Starlette serialization with an immediate ASGI transport: a callback scheduled at the first event does not run until all 500 events are sent. Yielding with `asyncio.sleep(0)` after each successfully sent event lets unrelated work run while preserving every ordered frame, cursor update, page size and polling interval. All six root-cause regression cases pass together.
+Synchronous owner lookup and event reads blocked the ASGI loop. They now use Starlette's existing bounded threadpool. Deterministic regressions hold each real read pending while unrelated HTTP work completes. Authentication and ownership checks still precede history delivery.
+
+Normal peer departure previously re-raised `WebSocketDisconnect` into Uvicorn's exception logger. Returning after the existing safe diagnostic avoids spurious ASGI errors and expensive traceback formatting. Regressions cover close codes 1000/1001/1006. The harness counts server error classes without retaining messages, credentials or traceback locals.
+
+Offloading large SQLite pages exposed repeated SQLite/Python row-transfer and per-payload decode overhead. The SQLite fast path transfers one native JSON page. Bound filtering, ordering and the 500-row limit remain inside the query. Strict JSON checks retain original behavior for JSON5/non-finite values and BLOBs; missing JSON functions, oversized aggregates and aggregate decoder limits fall back to the original per-row path. Other database errors propagate. PostgreSQL, statement-cache safety and connection ownership remain unchanged.
+
+Per-frame `sleep(0)` requeued senders ahead of timer polling and caused replay/P99 regressions. A loop-local shared 1 ms work budget now waits on a timer-backed Event. Senders recheck the deadline after waking, and cancellation remains local to each waiter. Weak ownership releases unused loop state. Event removes the extra callback generation introduced by the rejected shared-Future/shield prototype.
+
+An untimed phase trace then found duplicate metric-label normalization on every frame. `MetricsRegistry.record` already validates and normalizes its labels before constructing a series key; its old key helper repeated that work. The repair constructs the key from those canonical labels. First-pass collision rejection, sensitive-label hashing, raw-label lookup/export normalization and legacy aliases remain intact. No cache, new dependency, global read limiter or schema shortcut was added. Rejected scheduling prototypes and diagnostic profiles do not form acceptance evidence.
 
 ## Method and reproduction
 
-Activate the backend environment in a Git checkout, then run:
+Activate the backend environment in a Git checkout, then run each frozen variant:
 
 ```bash
+source .venv/bin/activate
 python Helper_Scripts/benchmarks/workflows_websocket_load.py \
   --clients 1 16 64 --backlog 0 500 --rounds 30 --trials 3 \
   --output /tmp/workflows-ws-load.json
 ```
 
-Each invocation copies tracked working source into private temporary storage, creates fresh databases and secrets, and starts the production ASGI app over real loopback TCP. There are no dependency or authentication overrides. Lifespan workers are off; observed server test-mode flags must both be false for a valid report. Authentication controls verify HTTP 403 handshake refusals for missing credentials, a different owner, and a missing run.
+Each invocation copies tracked working source, creates fresh disposable databases/secrets and starts the production ASGI app over real loopback TCP. JWT, SQLite, routing and individual frames are real; there are no dependency/authentication overrides. Lifespan workers are off. Each client owns a separate run under one authenticated user. History has zero or 500 events; payloads include a highly compressible 512-byte repeated-character body. Compression defaults are preserved. After all clients drain history, a sequential producer appends through the real database adapter every 137 ms for 30 rounds. Polling remains one second.
 
-Each subscriber has its own run, all owned by one authenticated user. History contains zero or 500 events per run. After every subscriber receives its snapshot and drains history, one independent sequential producer appends a live event to each run through the real database adapter, then waits 137 ms. Thirty rounds span several one-second polling periods. Payloads contain a synthetic, highly compressible 512-byte repeated-character body plus run/index/timing fields; Uvicorn defaults, including compression, are preserved. The harness validates every history/live sequence and run identity, counts errors by class, and exits nonzero for invalid delivery or server shutdown.
+Connection/snapshot/history durations start before connection; history includes setup. Live-event timing includes append/commit, polling and receipt. A 10 ms server-loop probe records one observation after each delayed sleep: a long stall is one extreme sample, not many missed observations. Report maximum lag alongside P99. Do not subtract snapshot and replay percentiles to infer a per-client phase duration; their completion-order arrays differ.
 
-Handshake and snapshot latency start immediately before client connection. History drain includes connection and snapshot time. Live-event latency starts immediately before the SQLite append and includes commit, server polling, framing and client receipt. A 10 ms probe measures lag on the server's own event loop; each trial includes connection setup, history drain and live delivery. Trial metrics retain all samples, median, nearest-rank P95/P99 and maximum. Failed/incomplete trials cannot silently become successful samples.
+The sequence is **reference A / candidate A / candidate B / reference B**, three trials per case per invocation, six trials per variant. All completed trials are retained. The final reference was interrupted at startup by unrelated CPU-bound project tests; that aborted run is excluded before inspecting results. Independent review predeclared completing only reference B in the next quiet window with identical source/runtime/workload. The resumed gap was **48.86 minutes**. Each invocation uses fresh processes/data, so no shared process or database state crosses this gap. This is explicitly an interrupted/resumed ABBA, not a continuous-window experiment.
 
-Runs are sequential on the same host, with no competing test or benchmark jobs, in baseline-A / fixed-A / fixed-B / baseline-B order. The leading baseline is the preceding error-aware baseline run; an untimed diagnostic and regression checks occurred before the final fixed runs. Source, harness, runtime and workload settings are matched throughout. Each run has three trials per case, giving six trials per variant and opposite between-variant order. This reduces run-order bias; it does not establish statistical significance. The database grows across trials in fixed case order. Comparisons match each case between variants; these rows do not isolate client count from all other effects. The timing comparison combines all three repairs; their separate performance contributions are not measured. The earlier five-round pilot is excluded from final comparisons.
+No competing CPU-bound project workers were observed in retained workload snapshots. Desktop activity was not fully idle: early reference B included a brief Sublime Text burst using one core, which then subsided; the host has 18 logical CPUs. End snapshots include filesystem activity from deleting temporary source copies. A later project test/Git burst appeared after reference B's report completed. These observations and the gap remain limitations, not grounds for a production-capacity claim. Cases run in fixed order as the disposable database grows. Comparisons match each case; they do not isolate client count from every other effect or identify the marginal contribution of each repair.
 
 ## Results
 
-Both baseline runs are **invalid service runs**: each logs 486 unhandled `WebSocketDisconnect` exceptions even though every client receives its events. Their timings describe the broken behavior and must not be used as valid service-capacity results. Both repaired runs are valid, with zero Uvicorn errors, zero client errors/mismatches, and exact ordered delivery. Across the four runs, 58,320 live events and 486,000 history frames were validated. All missing-credential, foreign-owner and missing-run controls refused the handshake with HTTP 403.
+Tables show **medians of six trial percentiles**, not pooled-sample percentiles. Values are **reference / candidate**, in milliseconds. The maximum column is the maximum across all six trials.
 
-The repair eliminates 972 spurious ASGI exceptions and protects unrelated loop work during disk reads and history bursts. At 64 clients with no history, median trial P95 handshake latency falls from 1766.50 to 232.29 ms. Live-event P95 remains roughly 0.92–1.00 seconds because polling is unchanged.
-
-**Material tradeoff:** at 64 clients with 500 history events, median trial P95 replay grows from 942.34 to 3170.31 ms. Maximum observed loop lag falls from 558.72 to 135.35 ms, but median trial loop-lag P99 rises from 3.56 to 72.24 ms. Setup timings also vary substantially. This is a lifecycle and scheduling-fairness repair with workload-dependent latency costs, not a general latency improvement. No replay SLO or production capacity target is established here.
-
-Tables show medians of six trial percentiles, not a percentile of pooled samples. `Before / repaired` values are milliseconds. Maximum loop lag is the maximum across all six trials; ranges below are ranges of trial P95s.
-
-| History/run | Clients | Handshake P95 before / repaired | Snapshot P95 before / repaired | Live event P95 before / repaired |
+| History/run | Clients | Handshake P95 | Snapshot P95 | Live event P95 |
 | ---: | ---: | ---: | ---: | ---: |
-| 0 | 1 | 3.14 / 3.96 | 3.25 / 4.02 | 987.97 / 996.05 |
-| 0 | 16 | 340.22 / 56.10 | 340.46 / 56.25 | 924.48 / 956.65 |
-| 0 | 64 | 1766.50 / 232.29 | 1767.63 / 232.51 | 963.71 / 967.24 |
-| 500 | 1 | 4.00 / 3.10 | 4.05 / 3.12 | 995.81 / 997.38 |
-| 500 | 16 | 108.68 / 72.43 | 241.94 / 72.92 | 957.84 / 919.56 |
-| 500 | 64 | 715.70 / 1073.16 | 930.60 / 1094.51 | 950.54 / 968.40 |
+| 0 | 1 | 3.00 / 8.30 | 3.04 / 8.34 | 982.86 / 974.23 |
+| 0 | 16 | 48.93 / 61.86 | 49.04 / 61.93 | 971.97 / 997.95 |
+| 0 | 64 | 183.51 / 205.66 | 183.79 / 205.69 | 959.46 / 957.77 |
+| 500 | 1 | 4.07 / 3.76 | 4.12 / 3.78 | 976.77 / 972.50 |
+| 500 | 16 | 68.16 / 55.16 | 204.01 / 55.20 | 962.65 / 961.62 |
+| 500 | 64 | 663.05 / 222.87 | 845.52 / 224.93 | 952.24 / 948.90 |
 
-| History/run | Clients | Loop-lag P99 before / repaired | Maximum loop lag before / repaired |
-| ---: | ---: | ---: | ---: |
-| 0 | 1 | 1.13 / 1.13 | 2.09 / 7.03 |
-| 0 | 16 | 1.36 / 2.17 | 446.28 / 23.64 |
-| 0 | 64 | 10.62 / 5.61 | 1584.92 / 295.99 |
-| 500 | 1 | 1.14 / 1.15 | 1328.91 / 9.35 |
-| 500 | 16 | 1.75 / 2.27 | 177.95 / 16.36 |
-| 500 | 64 | 3.56 / 72.24 | 558.72 / 135.35 |
-
-| History/run | Clients | Full history P95 before / repaired | Before trial-P95 range | Repaired trial-P95 range |
+| History/run | Clients | Full history P95 | Loop-lag P99 | Maximum observed loop lag |
 | ---: | ---: | ---: | ---: | ---: |
-| 500 | 1 | 16.66 / 31.40 | 14.40–1799.95 | 26.83–38.36 |
-| 500 | 16 | 255.27 / 758.06 | 216.55–267.89 | 458.22–919.82 |
-| 500 | 64 | 942.34 / 3170.31 | 855.61–1012.77 | 2451.20–3480.33 |
+| 0 | 1 | — / — | 1.60 / 2.12 | 10.89 / 3.27 |
+| 0 | 16 | — / — | 1.75 / 2.13 | 13.44 / 13.01 |
+| 0 | 64 | — / — | 6.61 / 3.04 | 251.16 / 223.29 |
+| 500 | 1 | 16.11 / 16.76 | 2.62 / 2.13 | 13.74 / 3.10 |
+| 500 | 16 | 215.16 / 201.32 | 2.69 / 2.14 | 158.12 / 10.71 |
+| 500 | 64 | 856.82 / 802.14 | 6.34 / 2.65 | 458.43 / 33.56 |
 
-The six-trial 64-client/500-event handshake P95 ranges are 641.14–801.49 before and 399.17–1652.57 ms repaired. Do not infer a stable setup speedup in this case.
+No-history 64-client setup still has first-trial maximum stalls around 220 ms in both variants. Retain those outliers; percentile improvements do not prove their removal. Raw reports retain every sample, trial percentile and maximum.
 
-## Environment and source identity
+## Runtime, source identity and verification
 
-Native macOS: Python 3.12.13, SQLite 3.50.4, `macOS-26.5.2-arm64-arm-64bit`, 18 reported CPUs; FastAPI 0.142.4, Starlette 1.8.0, Uvicorn 0.35.0, WebSockets 15.0.1. Both observed test-mode flags are false; the shared threadpool has 40 tokens. There is no Linux timing comparison.
+Native environment: Python 3.12.13, SQLite 3.50.4, macOS 26.5.2 arm64, 18 logical CPUs; FastAPI 0.142.4, Starlette 1.8.0, Uvicorn 0.35.0 and websockets 15.0.1. Private native test infrastructure uses the CI framework versions and disables optional ONNX telemetry only to avoid an unrelated teardown crash. Production dependencies and telemetry configuration are unchanged.
 
-- Repaired `tldw_Server_API/app/api/v1/endpoints/workflows.py` SHA-256: `29b6a3c8cb91e61f0bb807898eae3c1cb02688a5ff8f46319ec52cb0494eafce`.
-- Repaired `tldw_Server_API/app/core/DB_Management/Workflows_DB.py` SHA-256: `f3a8ec457b0fb9b9ffa95286f883c95289e2d683ae4d14c1fec219c78ac4ff89`.
-- Repaired `Helper_Scripts/benchmarks/workflows_websocket_load.py` SHA-256: `6a05ffb80a5dab9333ac3129177747a312e64f1d6984a9db7e2e4008f09e6d76`.
-- Baseline route SHA-256: `deb0c44e05136567192ccbbd7f9960fa22a7e89df518bc495f25a3587840d41f`.
+| Source | Reference SHA-256 | Candidate SHA-256 |
+| --- | --- | --- |
+| `tldw_Server_API/app/api/v1/endpoints/workflows.py` | `cc4f94613fc371e3a5428a16da2390ac9b8e83c738f8b588cecb80efd60af347` | `1e69757f35bec502840227d36b967939183c1c84b174e50d600de24b87074bd6` |
+| `tldw_Server_API/app/core/DB_Management/Workflows_DB.py` | `f3a8ec457b0fb9b9ffa95286f883c95289e2d683ae4d14c1fec219c78ac4ff89` | `fa238d3b877fa1bf658a80a4fc78fd4ff441f151c282b3cef16251fec3d83759` |
+| `Helper_Scripts/benchmarks/workflows_websocket_load.py` | `6a05ffb80a5dab9333ac3129177747a312e64f1d6984a9db7e2e4008f09e6d76` | `6a05ffb80a5dab9333ac3129177747a312e64f1d6984a9db7e2e4008f09e6d76` |
+| `tldw_Server_API/app/core/Metrics/metrics_manager.py` | `76e6a67cd96dab047336489d36daab2d6d5267f3552bd8f78ab4449955db8192` | `50d4d5ad102d4ac3280c6588a94adc78c2ad82bb2a9cf93b47478e6b563576b9` |
 
-Raw reports: [baseline A](workflows_websocket_load_13820_macos_baseline_a.json), [repaired A](workflows_websocket_load_13820_macos_fixed_a.json), [repaired B](workflows_websocket_load_13820_macos_fixed_b.json), [baseline B](workflows_websocket_load_13820_macos_baseline_b.json). Baseline CLI exit 1 is intentional evidence of server errors; repaired CLI exits are 0.
+The unchanged harness records route/DB/helper hashes. Each final raw report additionally retains `supplemental_source_sha256` for the metrics file. External orchestration asserted all four hashes before and after each invocation; the resumption also verified all three preserved report hashes before appending reference B. The [manifest](workflows_websocket_load_13820_macos_manifest.json) retains expected source hashes, report hashes, timestamps, interruption metadata and bounded host snapshots; expected hashes alone are not independent proof of an observed source.
 
+- **310 connected tests pass** on the measured candidate: workflow storage/runtime/API, streaming/authentication, real-TCP harness and all metrics contracts.
+- Failing-first coverage includes pending reads, disconnects, shared scheduling/cancellation/loop cleanup, legacy page/decode/error boundaries and normalization-once behavior with preserved stored labels. Property-based page cases exercise recursive JSON.
+- Scoped Ruff/Black and Bandit pass with zero findings/errors; test assertions exclude B101 only. No test or heavy diagnostic workload overlapped retained timing runs.
+- Independent code/data review confirmed the requested large-history gate and no actionable production findings. Exact final documentation-head review and hosted checks remain required before merge.
 
-## Limits
+ADR assessment: no new durable architecture rule; storage/auth/cache/framing/metrics policies remain intact. ADR-059 governs tracking. TASK-13820 links the plan and verification.
 
-This is a macOS loopback test of unique runs with one owner and one sequential producer. It excludes TLS/WAN latency, network-bandwidth saturation, cookie authentication timing, same-run fanout, multiple tenants, PostgreSQL, workflow execution/LLM time, enabled background services and long-duration production soak. Linux real-network smoke coverage belongs to hosted CI; no Linux capacity claim is made. Windows subprocess cleanup is not verified. The shared threadpool has 40 tokens in this environment and can queue readers; offloading does not remove up to one polling interval of detection delay. Rebenchmark on deployment hardware before capacity planning or defining an SLO.
+Raw acceptance reports:
 
-ADR assessment: no new ADR is required. This measures the existing protocol and repairs blocking I/O without changing storage, authentication, cache safety or event framing policy. ADR-059 governs task tracking.
+- [baseline-a](workflows_websocket_load_13820_macos_baseline_a.json)
+- [fixed-a](workflows_websocket_load_13820_macos_fixed_a.json)
+- [fixed-b](workflows_websocket_load_13820_macos_fixed_b.json)
+- [baseline-b](workflows_websocket_load_13820_macos_baseline_b.json)
+
+The [original PR-head report](https://github.com/rmusser01/tldw_server/blob/5c4bab8e400119bac964d0b75dc94c2e931b0c75/Docs/Performance/WORKFLOWS_WEBSOCKET_LOAD_2026_10_16_TASK_13820.md) documents the rejected per-frame-yield version and invalid unmodified-dev disconnect-error baseline. Those historical numbers and failed Future/shield/Lock diagnostics are not the final acceptance comparison.
+
+## Limits and rollback
+
+This synthetic loopback workload does not measure WAN/TLS, PostgreSQL, same-run fanout, many tenants, lifespan/background services, non-compressible payloads or a production soak. Native performance evidence is macOS-only; hosted Linux real-network tests cover behavior, not equivalent capacity. The shared threadpool may queue reads. Setup and single-client costs above remain disclosed. Revert the runtime changes if deployment evidence requires rollback, retaining the harness and regression evidence.
