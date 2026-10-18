@@ -39,7 +39,7 @@
   - The terminal-stage branch (`audio_store`, no next type) is unchanged.
 - **`JobManager`:**
   - `admit_job` and `create_job` gain `fair_share_exempt: bool = False`, documented in `admit_job`'s Args.
-  - It skips only the fair-share block in `admit_job` (`if owner_user_id and _fair_share_enabled() and not fair_share_exempt:`). The second fair-share check, in `retry_failed_job_admission`, is untouched.
+  - It gates only the `can_submit` refusal inside `admit_job`'s fair-share block (`if not fair_share_exempt and not scheduler.can_submit(...)`); the priority adjustment still applies to an exempt create. The second fair-share check, in `retry_failed_job_admission`, is untouched.
   - No other caller passes it.
 - **Line-number baseline:** this changes `Jobs/manager.py`, whose conditional tenant predicates are recorded by line in `Helper_Scripts/ci/scope_predicate_baseline.txt`. Regenerate it with `Helper_Scripts/ci/scope_predicate_ratchet.py --write-baseline`, and check that the diff only moves existing entries. Without that, `backend-required` fails, as it did on PR #3259.
 - **The GPU worker and the TTS worker are not changed.**

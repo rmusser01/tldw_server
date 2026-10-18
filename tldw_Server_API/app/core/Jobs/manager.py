@@ -3533,8 +3533,9 @@ class JobManager:
             owner_scope_admission: Optional transactional owner/job-scope limits.
             expired_lease_policy: Behavior when a processing lease expires.
             quarantine_threshold: Optional consecutive-failure quarantine limit.
-            fair_share_exempt: Skip the per-user fair-share limit, for a next stage queued by
-                a job that is still running and is about to complete (it replaces that job).
+            fair_share_exempt: Skip the per-user fair-share limit (not the priority adjustment,
+                which still applies), for a next stage queued by a job that is still running and
+                is about to complete (it replaces that job).
 
         ``create_job`` delegates here and maps only the final typed outcome to
         its legacy dict/exception contract.
@@ -3609,11 +3610,11 @@ class JobManager:
             raise error  # noqa: TRY003
 
         # Fair-share scheduling: enforce per-user concurrency limits and adjust priority
-        if owner_user_id and _fair_share_enabled() and not fair_share_exempt:
+        if owner_user_id and _fair_share_enabled():
             try:
                 scheduler = _get_fair_share()
                 active_count = self._count_active_jobs_for_user(owner_user_id)
-                if not scheduler.can_submit(owner_user_id, active_count):
+                if not fair_share_exempt and not scheduler.can_submit(owner_user_id, active_count):
                     raise BadRequestError(
                         f"User {owner_user_id} has reached the maximum concurrent job limit "
                         f"({scheduler.max_per_user})"
