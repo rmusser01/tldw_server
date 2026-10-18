@@ -63,7 +63,7 @@ Tables show **medians of six trial percentiles**, not pooled-sample percentiles.
 | 500 | 16 | 215.16 / 201.32 | 2.69 / 2.14 | 158.12 / 10.71 |
 | 500 | 64 | 856.82 / 802.14 | 6.34 / 2.65 | 458.43 / 33.56 |
 
-No-history 64-client setup still has first-trial maximum stalls around 220 ms in both variants. Retain those outliers; percentile improvements do not prove their removal. Raw reports retain every sample, trial percentile and maximum.
+No-history 64-client setup still has recurring maximum stalls around 220–251 ms across the variants. Retain those outliers; percentile improvements do not prove their removal. Raw reports retain every sample, trial percentile and maximum.
 
 ## Runtime, source identity and verification
 
