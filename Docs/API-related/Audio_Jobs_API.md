@@ -37,7 +37,7 @@ Base path: `/api/v1/audio`
 
 - Service: runs the pipeline stages `audio_download → audio_convert → audio_transcribe → audio_chunk → audio_analyze → audio_store`.
 - Each stage runs as its own job in the `audio` domain; the submit response carries only the first stage's id.
-- Every stage, transcription included, runs in this worker on the `default` queue, unless `AUDIO_JOBS_GPU_TRANSCRIBE` sends transcription to the GPU worker (below). A stage that cannot queue the next one fails with `error_code` `next_stage_enqueue_failed` instead of completing with nothing after it.
+- Every stage, transcription included, runs in this worker on the `default` queue, unless `AUDIO_JOBS_GPU_TRANSCRIBE` sends transcription to the GPU worker (below). A stage that cannot queue the next one fails with `error_code` `next_stage_enqueue_failed` instead of completing with nothing after it. Only a refused queue fails it outright; any other refusal is retried by running the stage again, and the same failure twice in a row quarantines the job (`JOBS_QUARANTINE_THRESHOLD`).
 - Analysis failures: these fail the `audio_analyze` stage job at once, with the reason in that job row's `error_code`: `missing_model`, `authentication`, `configuration`, `invalid_provider`, `adapter_unavailable`, `llm_quota_exceeded` or `empty_transcript`. A missing API key shows up as `authentication` or `configuration`. Every other provider failure is recorded as `rate_limit` or `provider_failure` and retried, including a provider rejecting the request (an unknown model, a transcript too long for the model). The same failure twice in a row quarantines the job (`JOBS_QUARANTINE_THRESHOLD`, default 2).
 - Env flags:
   - `AUDIO_JOBS_WORKER_ENABLED`: `true|false` (default false)
