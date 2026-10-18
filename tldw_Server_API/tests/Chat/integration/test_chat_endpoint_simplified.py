@@ -3404,7 +3404,11 @@ def test_chat_closes_runtime_when_rg_refund_fails_after_stream_response_created(
         patch("tldw_Server_API.app.core.config.rg_enabled", return_value=True),
         patch.object(app.state, "rg_governor", governor, create=True),
         patch.object(app.state, "rg_policy_loader", policy_loader, create=True),
-        patch.object(chat_endpoint.sys, "exc_info", return_value=(PendingResponseError, pending_error, None)),
+        patch.object(
+            chat_endpoint,
+            "sys",
+            SimpleNamespace(exc_info=lambda: (PendingResponseError, pending_error, None)),
+        ),
         patch.object(
             chat_endpoint,
             "execute_streaming_call",
