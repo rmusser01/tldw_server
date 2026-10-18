@@ -1333,6 +1333,10 @@ class TestTTSJobsHistoryIntegration:
             )
             assert submit_resp.status_code == status.HTTP_200_OK
             job_id = int(submit_resp.json()["job_id"])
+            # Positive control: a pipeline job the worker must take, proving it polled (its loop swallows errors).
+            control = audio_jobs.get_job_manager().create_job(
+                domain="audio", queue="default", job_type="audio_store", payload={}, owner_user_id="1"
+            )
 
             stop = asyncio.Event()
             task = asyncio.create_task(audio_worker.run_audio_jobs_worker(stop))
@@ -1340,10 +1344,12 @@ class TestTTSJobsHistoryIntegration:
             stop.set()
             await asyncio.wait_for(task, timeout=2.0)
 
-            job = audio_jobs.get_job_manager().get_job(job_id) or {}
+            jm = audio_jobs.get_job_manager()
+            job = jm.get_job(job_id) or {}
             assert job.get("status") == "queued"
             assert int(job.get("retry_count") or 0) == 0
             assert job.get("error_message") in (None, "")
+            assert (jm.get_job(int(control["id"])) or {}).get("status") == "completed"
         finally:
             with contextlib.suppress(Exception):
                 audio_jobs._job_manager_cache.clear()

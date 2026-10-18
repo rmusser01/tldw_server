@@ -25,6 +25,7 @@ On dev, every POST /api/v1/audio/jobs/submit job stops after audio_convert. The 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+From the clean-session review of PR #3259 (TASK-13641): core/TTS/utils.tts_jobs_queue() refuses default and transcribe because the audio pipeline workers read those queues without a job-type filter; the names are literals copied from audio_jobs_worker.py and audio_transcribe_gpu_worker.py. Any queue this task routes the pipeline through must be added to that refusal set (or the names shared as constants), or the guard goes stale and a TTS queue could again be one an unfiltered worker reads.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
