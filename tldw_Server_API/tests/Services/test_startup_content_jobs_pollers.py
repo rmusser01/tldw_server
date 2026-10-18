@@ -331,13 +331,14 @@ def test_tts_jobs_worker_runs_in_process_by_default(monkeypatch: pytest.MonkeyPa
     monkeypatch.delenv("TTS_JOBS_WORKER_ENABLED", raising=False)
     routes: list[object] = []
 
-    def _route_enabled(route: object, *_args: object, **_kwargs: object) -> bool:
-        routes.append(route)
+    def _route_enabled(route: object, *_args: object, **kwargs: object) -> bool:
+        routes.append((route, kwargs.get("default_stable")))
         return True
 
     live = replace(_context(route_enabled=_route_enabled), test_mode=False)
     assert spec.enabled(live) is True
-    assert routes == ["audio"]
+    # default_stable=True is what turns it on where the audio route has no explicit setting.
+    assert routes == [("audio", True)]
     # It follows the audio route's answer, not just its presence.
     assert spec.enabled(replace(live, route_enabled=lambda *_a, **_k: False)) is False
     # Test runs do not start it unless asked.
