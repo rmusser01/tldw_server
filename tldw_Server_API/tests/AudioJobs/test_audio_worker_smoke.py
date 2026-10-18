@@ -957,3 +957,131 @@ async def test_audio_analyze_provider_failure_still_retries(analyze_worker):
     assert job.get("status") != "failed"
     assert job.get("error_code") == "provider_failure"
     assert len(adapter.requests) >= 1
+
+
+# --- the audio_convert -> audio_transcribe hand-off (TASK-13848) ---
+
+
+@pytest.fixture
+def pipeline_worker(monkeypatch, tmp_path):
+    """The audio worker with quota stubs, a fresh jobs DB, and conversion and STT stubbed out."""
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs_pipeline.db"))
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.05")
+    monkeypatch.delenv("AUDIO_JOBS_GPU_TRANSCRIBE", raising=False)
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    async def _unlimited(user_id: int):
+        return {"concurrent_jobs": None}
+
+    async def _yes(user_id: int):
+        return True, ""
+
+    async def _noop(user_id: int):
+        return None
+
+    monkeypatch.setattr(worker, "get_limits_for_user", _unlimited)
+    monkeypatch.setattr(worker, "can_start_job", _yes)
+    monkeypatch.setattr(worker, "increment_jobs_started", _noop)
+    monkeypatch.setattr(worker, "finish_job", _noop)
+
+    stt_calls = []
+
+    def _fake_stt(wav_path, model, *args, **kwargs):
+        stt_calls.append(wav_path)
+        return {"text": "hello pipeline", "segments": [{"Text": "hello pipeline"}]}
+
+    monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *a, **k: str(path) + ".wav")
+    monkeypatch.setattr(atlib, "run_stt_job_via_registry", _fake_stt)
+    return worker, JobManager(), stt_calls
+
+
+def _convert_job(jm) -> int:
+    row = jm.create_job(
+        domain="audio", queue="default", job_type="audio_convert",
+        payload={"local_path": "/tmp/pipeline.mp3", "model": "whisper-1", "perform_chunking": False, "perform_analysis": False},
+        owner_user_id="7",
+    )
+    return int(row["id"])
+
+
+def _jobs_of(jm, job_type: str):
+    return jm.list_jobs(domain="audio", job_type=job_type, owner_user_id="7")
+
+
+@pytest.mark.unit
+async def test_audio_pipeline_transcribes_in_process_by_default(pipeline_worker):
+    worker, jm, stt_calls = pipeline_worker
+    convert_id = _convert_job(jm)
+    await _run_worker_until(worker, lambda: any(j.get("status") == "completed" for j in _jobs_of(jm, "audio_store")))
+    transcribe = _jobs_of(jm, "audio_transcribe")
+    assert [j["queue"] for j in transcribe] == ["default"]
+    # The key that lets a re-run stage reuse the next stage it already queued.
+    assert transcribe[0]["idempotency_key"] == f"audio-stage:{convert_id}:audio_transcribe"
+    assert [j["status"] for j in _jobs_of(jm, "audio_store")] == ["completed"]
+    assert len(stt_calls) == 1
+
+
+@pytest.mark.unit
+async def test_audio_pipeline_runs_under_a_per_user_job_limit_of_one(pipeline_worker, monkeypatch):
+    # The running stage must not count against its own hand-off under fair-share.
+    worker, jm, stt_calls = pipeline_worker
+    monkeypatch.setenv("JOBS_MAX_PER_USER", "1")
+    _convert_job(jm)
+    await _run_worker_until(worker, lambda: any(j.get("status") == "completed" for j in _jobs_of(jm, "audio_store")))
+    assert [j["status"] for j in _jobs_of(jm, "audio_store")] == ["completed"]
+    assert len(stt_calls) == 1
+
+
+@pytest.mark.unit
+async def test_audio_pipeline_routes_transcription_to_the_gpu_queue_when_enabled(pipeline_worker, monkeypatch):
+    worker, jm, stt_calls = pipeline_worker
+    monkeypatch.setenv("AUDIO_JOBS_GPU_TRANSCRIBE", "true")
+    convert_id = _convert_job(jm)
+    await _run_worker_until(
+        worker,
+        lambda: bool(_jobs_of(jm, "audio_transcribe")) or (jm.get_job(convert_id) or {}).get("status") == "completed",
+    )
+    assert [(j["queue"], j["status"]) for j in _jobs_of(jm, "audio_transcribe")] == [("transcribe", "queued")]
+    assert stt_calls == []
+
+
+@pytest.mark.unit
+async def test_a_failed_stage_hand_off_fails_the_job_visibly(pipeline_worker, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    worker, jm, stt_calls = pipeline_worker
+    monkeypatch.setenv("AUDIO_JOBS_GPU_TRANSCRIBE", "true")
+    monkeypatch.delenv("JOBS_ALLOWED_QUEUES", raising=False)
+    monkeypatch.delenv("JOBS_ALLOWED_QUEUES_AUDIO", raising=False)
+    monkeypatch.setattr(JobManager, "DOMAIN_ALLOWED_QUEUES", {})  # "transcribe" is now refused
+    convert_id = _convert_job(jm)
+    await _run_worker_until(worker, lambda: (jm.get_job(convert_id) or {}).get("status") in {"completed", "failed"})
+    job = jm.get_job(convert_id) or {}
+    assert job.get("status") == "failed"
+    assert job.get("error_code") == "next_stage_enqueue_failed"
+    assert int(job.get("retry_count") or 0) == 0
+    assert _jobs_of(jm, "audio_transcribe") == []
+
+
+@pytest.mark.unit
+async def test_a_transient_hand_off_failure_is_retried(pipeline_worker, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    worker, jm, stt_calls = pipeline_worker
+    original_create = JobManager.create_job
+
+    def _flaky_create(self, **kwargs):
+        if kwargs.get("job_type") == "audio_transcribe":
+            raise RuntimeError("database is locked")
+        return original_create(self, **kwargs)
+
+    monkeypatch.setattr(JobManager, "create_job", _flaky_create)
+    convert_id = _convert_job(jm)
+    await _run_worker_until(worker, lambda: int((jm.get_job(convert_id) or {}).get("retry_count") or 0) >= 1)
+    job = jm.get_job(convert_id) or {}
+    assert int(job.get("retry_count") or 0) >= 1
+    assert job.get("status") != "completed"
+    assert job.get("error_code") == "next_stage_enqueue_failed"

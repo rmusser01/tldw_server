@@ -34,6 +34,13 @@ class _StageFailure(RuntimeError):
         self.retryable = retryable
 
 
+def _next_stage_queue(next_type: str) -> str:
+    """The queue for the next stage: this worker's own ``default``, except that ``audio_transcribe``
+    goes to the GPU transcription worker's ``transcribe`` queue when AUDIO_JOBS_GPU_TRANSCRIBE is set."""
+    gpu = os.getenv("AUDIO_JOBS_GPU_TRANSCRIBE", "false").lower() in {"true", "1", "yes", "y", "on"}
+    return "transcribe" if next_type == "audio_transcribe" and gpu else "default"
+
+
 async def _handle_audio_transcribe_stage(payload: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
     """
     Handle the `audio_transcribe` stage for a single job payload.
@@ -406,21 +413,38 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                 msg_err = str(e)
                 failure = e
 
-            if ok:
-                if next_type:
-                    # Create next stage
-                    jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
+            if ok and next_type:
+                # Queue the next stage before completing this one, so a failed hand-off fails this job
+                # instead of leaving it completed with nothing after it. The key makes a retried stage
+                # reuse the next stage it already queued. The next stage replaces this running job, so
+                # it is exempt from the per-user fair-share limit, which would count this job against it.
+                next_queue = _next_stage_queue(next_type)
+                try:
                     jm.create_job(
                         domain=DOMAIN,
-                        queue=("transcribe" if next_type == "audio_transcribe" else "default"),
+                        queue=next_queue,
                         job_type=next_type,
                         payload=updated_payload,
                         owner_user_id=str(owner),
                         priority=5,
+                        idempotency_key=f"audio-stage:{job['id']}:{next_type}",
+                        fair_share_exempt=True,
+                    )
+                except Exception as e:  # noqa: BLE001 - any failure to queue the next stage fails this one
+                    ok = False
+                    msg_err = f"could not queue {next_type}: {e}"
+                    logger.warning(f"Audio job {job['id']}: {msg_err}")
+                    # A refused queue fails the same way every time; a quota or a transient error may pass on retry.
+                    failure = _StageFailure(
+                        msg_err,
+                        failure_code="next_stage_enqueue_failed",
+                        retryable=next_queue in jm._get_allowed_queues(DOMAIN),
                     )
                 else:
-                    jm.complete_job(int(job["id"]), result={"payload": updated_payload}, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
-            else:
+                    jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
+            elif ok:
+                jm.complete_job(int(job["id"]), result={"payload": updated_payload}, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
+            if not ok:
                 # An error that says it is not retryable (an LLM quota refusal, a _StageFailure) fails the job now.
                 jm.fail_job(
                     int(job["id"]),

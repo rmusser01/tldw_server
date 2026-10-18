@@ -289,6 +289,7 @@ Notes:
 ## Audio Jobs
 - `AUDIO_JOBS_WORKER_ENABLED`: Enable the in-process Audio Jobs worker (`true|false`, default follows route policy for `audio-jobs`). When true, the worker starts at app startup and polls the Jobs backend for the `audio` domain pipeline stages.
 - `AUDIO_JOBS_OWNER_STRICT`: Enable owner-aware acquisition for fairness across users (`true|false`, default `false`). When enabled, the worker preferentially acquires jobs for owners under their concurrent-job caps.
+- `AUDIO_JOBS_GPU_TRANSCRIBE`: Send the `audio_transcribe` stage to the GPU transcription worker's `transcribe` queue instead of transcribing in the audio jobs worker (`true|false`, default `false`). Set it where the audio jobs worker runs, and only when a GPU worker (`Dockerfiles/Dockerfile.audio_gpu_worker`) reads the same Jobs database.
 - `REDIS_URL`: Optional Redis URL used by Resource Governor when `RG_BACKEND=redis`.
 
 ## Media Ingest Jobs
