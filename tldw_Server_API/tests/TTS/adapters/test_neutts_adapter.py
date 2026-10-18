@@ -2,6 +2,9 @@ import sys
 import types
 import asyncio
 import builtins
+import threading
+import time
+import anyio
 import numpy as np
 import pytest
 
@@ -366,6 +369,219 @@ async def test_neutts_streaming_pcm(monkeypatch):
     async for chunk in resp.audio_stream:
         chunks.append(chunk)
     assert chunks
+
+
+class _ThreadRecordingEngine(_FakeNeuTTSEngineStreaming):
+    """Records the thread each engine call runs on (TASK-13855)."""
+
+    calls: list[tuple[str, int]] = []
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.calls.append(("load", threading.get_ident()))
+
+    def encode_reference(self, path):
+        self.calls.append(("encode_reference", threading.get_ident()))
+        return [1, 2, 3]
+
+    def infer(self, text, ref_codes, ref_text):
+        self.calls.append(("infer", threading.get_ident()))
+        return np.zeros(12000, dtype=np.float32)
+
+    def infer_stream(self, text, ref_codes, ref_text):
+        for _ in range(2):
+            self.calls.append(("infer_stream", threading.get_ident()))
+            yield np.zeros(480, dtype=np.float32)
+
+
+@pytest.mark.asyncio
+async def test_neutts_runs_engine_calls_off_the_event_loop(monkeypatch):
+    """In-process long-form jobs share the server's loop; a blocking engine call would freeze it."""
+    _install_fake_engine(_ThreadRecordingEngine)
+    _ThreadRecordingEngine.calls = []
+    monkeypatch.setattr(neutts_mod, "validate_tts_request", lambda *a, **k: None)
+    adapter = NeuTTSAdapter(config={"backbone_repo": "neuphonic/neutts-air-q4-gguf"})
+    assert await adapter.ensure_initialized()
+    loop_thread = threading.get_ident()
+    extras = {"reference_text": "ref"}
+
+    resp = await adapter.generate(
+        TTSRequest(text="hi", format=AudioFormat.PCM, stream=False, voice_reference=b"x", extra_params=extras)
+    )
+    assert resp.audio_data
+    chunks = [
+        c
+        async for c in adapter.generate_stream(
+            TTSRequest(text="hi", format=AudioFormat.PCM, stream=True, voice_reference=b"x", extra_params=extras)
+        )
+    ]
+    assert chunks
+
+    names = [name for name, _ in _ThreadRecordingEngine.calls]
+    assert names == ["load", "encode_reference", "infer", "encode_reference", "infer_stream", "infer_stream"]
+    assert [name for name, ident in _ThreadRecordingEngine.calls if ident == loop_thread] == []
+
+
+class _OverlapRecordingEngine(_FakeNeuTTSEngineStreaming):
+    """Records how many engine calls run at once; a llama-cpp context is not thread-safe."""
+
+    active = 0
+    peak = 0
+    guard = threading.Lock()
+
+    @classmethod
+    def _enter(cls):
+        with cls.guard:
+            cls.active += 1
+            cls.peak = max(cls.peak, cls.active)
+
+    @classmethod
+    def _exit(cls):
+        with cls.guard:
+            cls.active -= 1
+
+    def encode_reference(self, path):
+        self._enter()
+        time.sleep(0.02)
+        self._exit()
+        return [1, 2, 3]
+
+    def infer(self, text, ref_codes, ref_text):
+        self._enter()
+        time.sleep(0.05)
+        self._exit()
+        return np.zeros(12000, dtype=np.float32)
+
+    def infer_stream(self, text, ref_codes, ref_text):
+        self._enter()
+        try:
+            for _ in range(3):
+                time.sleep(0.02)
+                yield np.zeros(480, dtype=np.float32)
+        finally:
+            self._exit()
+
+
+@pytest.mark.asyncio
+async def test_neutts_runs_one_engine_call_at_a_time(monkeypatch):
+    """Off the loop, concurrent requests would otherwise share the engine across threads."""
+    _install_fake_engine(_OverlapRecordingEngine)
+    _OverlapRecordingEngine.active = _OverlapRecordingEngine.peak = 0
+    monkeypatch.setattr(neutts_mod, "validate_tts_request", lambda *a, **k: None)
+    adapter = NeuTTSAdapter(config={"backbone_repo": "neuphonic/neutts-air-q4-gguf"})
+    assert await adapter.ensure_initialized()
+    extras = {"reference_text": "ref"}
+
+    async def _stream() -> list[bytes]:
+        request = TTSRequest(text="hi", format=AudioFormat.PCM, stream=True, extra_params={**extras, "ref_codes": [1]})
+        return [c async for c in adapter.generate_stream(request)]
+
+    *responses, chunks = await asyncio.gather(
+        *(
+            adapter.generate(
+                TTSRequest(text="hi", format=AudioFormat.PCM, stream=False, voice_reference=b"x", extra_params=extras)
+            )
+            for _ in range(3)
+        ),
+        _stream(),
+    )
+    assert all(r.audio_data for r in responses)
+    assert chunks
+    assert _OverlapRecordingEngine.peak == 1
+
+
+@pytest.mark.asyncio
+async def test_neutts_stream_keeps_the_engine_between_chunks():
+    """llama-cpp keeps a stream's state in the shared context, so no other call may run mid-stream."""
+    _install_fake_engine(_ThreadRecordingEngine)
+    _ThreadRecordingEngine.calls = []
+    adapter = NeuTTSAdapter(config={"backbone_repo": "neuphonic/neutts-air-q4-gguf"})
+    assert await adapter.ensure_initialized()
+    extras = {"reference_text": "ref", "ref_codes": [1, 2, 3]}
+
+    stream = adapter.generate_stream(TTSRequest(text="hi", format=AudioFormat.PCM, stream=True, extra_params=extras))
+    assert await stream.__anext__()
+    other = asyncio.create_task(
+        adapter.generate(TTSRequest(text="hi", format=AudioFormat.PCM, stream=False, extra_params=extras))
+    )
+    await asyncio.sleep(0.1)
+    assert [name for name, _ in _ThreadRecordingEngine.calls] == ["load", "infer_stream"]
+    assert [c async for c in stream]
+    assert (await other).audio_data
+    assert [name for name, _ in _ThreadRecordingEngine.calls] == ["load", "infer_stream", "infer_stream", "infer"]
+
+
+class _BlockingEngine(_FakeNeuTTSEngineStreaming):
+    """Engine calls wait for `release`, so a caller can be cancelled mid-call."""
+
+    started: list[str] = []
+    release = threading.Event()
+
+    def infer(self, text, ref_codes, ref_text):
+        self.started.append("infer")
+        self.release.wait(5)
+        return np.zeros(12000, dtype=np.float32)
+
+    def infer_stream(self, text, ref_codes, ref_text):
+        self.started.append("infer_stream")
+        self.release.wait(5)
+        yield np.zeros(480, dtype=np.float32)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("first_streams", "via_anyio_scope"),
+    [(False, False), (True, False), (True, True)],
+    # Starlette cancels a disconnected stream through an anyio cancel scope, which re-cancels on every await.
+    ids=["generate", "stream", "stream-anyio-scope"],
+)
+async def test_neutts_cancelled_request_keeps_the_engine_until_its_call_returns(first_streams, via_anyio_scope):
+    """A client disconnect cancels the request, but asyncio.to_thread cannot stop the engine call."""
+    _install_fake_engine(_BlockingEngine)
+    _BlockingEngine.started = []
+    _BlockingEngine.release = threading.Event()
+    adapter = NeuTTSAdapter(config={"backbone_repo": "neuphonic/neutts-air-q4-gguf"})
+    assert await adapter.ensure_initialized()
+    extras = {"reference_text": "ref", "ref_codes": [1, 2, 3]}
+    scopes: list[anyio.CancelScope] = []
+
+    async def _request():
+        request = TTSRequest(text="hi", format=AudioFormat.PCM, stream=first_streams, extra_params=extras)
+        if first_streams:
+            return [c async for c in adapter.generate_stream(request)]
+        return await adapter.generate(request)
+
+    async def _first():
+        if not via_anyio_scope:
+            return await _request()
+        with anyio.CancelScope() as scope:
+            scopes.append(scope)
+            await _request()
+
+    try:
+        first = asyncio.create_task(_first())
+        while not _BlockingEngine.started:
+            await asyncio.sleep(0.01)
+        second = asyncio.create_task(
+            adapter.generate(TTSRequest(text="hi", format=AudioFormat.PCM, stream=False, extra_params=extras))
+        )
+        await asyncio.sleep(0.05)
+        if via_anyio_scope:
+            scopes[0].cancel()
+        else:
+            first.cancel()
+        await asyncio.sleep(0.1)
+        # The cancelled request's engine call is still running, so the next one has not started.
+        assert len(_BlockingEngine.started) == 1
+    finally:
+        _BlockingEngine.release.set()
+    assert (await second).audio_data
+    assert len(_BlockingEngine.started) == 2
+    if via_anyio_scope:
+        assert await first is None
+    else:
+        with pytest.raises(asyncio.CancelledError):
+            await first
 
 
 @pytest.mark.asyncio
