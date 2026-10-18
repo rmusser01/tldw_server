@@ -111,6 +111,25 @@ const renderNotices = (props: Partial<PlaygroundComposerNoticesProps> = {}) =>
   )
 
 describe("PlaygroundComposerNotices first-run banner", () => {
+  it("omits the duplicate offline action when empty Chat owns connection setup", () => {
+    mockNoFirstRunBanner();
+    renderNotices({ isConnectionReady: false, showDisconnectedNotice: false });
+    expect(screen.queryByTestId("playground-composer-disconnected-notice")).not.toBeInTheDocument();
+  });
+
+  it("retains offline recovery for configured or populated conversations", () => {
+    mockNoFirstRunBanner();
+    renderNotices({ isConnectionReady: false });
+    expect(screen.getByTestId("playground-composer-disconnected-notice")).toBeVisible();
+    expect(screen.getByRole("link", { name: "Open settings" })).toHaveAttribute("href", "/settings/tldw");
+  });
+
+  it("names the startup template launcher for assistive technology", () => {
+    mockNoFirstRunBanner()
+    renderNotices({ isProMode: true })
+    expect(screen.getByRole("combobox", { name: "Launch saved template" })).toBeVisible()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     localStorage.clear()
@@ -255,6 +274,16 @@ describe("PlaygroundComposerNotices first-run banner", () => {
       "href",
       "/characters?from=chat-emote-nudge&focus=expressions&characterId=42"
     )
+  })
+
+  it("defers expression setup while the character opening is pending", () => {
+    mockNoFirstRunBanner()
+    renderNotices({
+      selectedCharacter: { id: 42, name: "Ada", extensions: {} },
+      selectedCharacterName: "Ada",
+      deferCharacterAppearanceSetup: true
+    })
+    expect(screen.queryByRole("link", { name: "Edit expressions" })).not.toBeInTheDocument()
   })
 
   it("does not show the expression nudge when mood images are configured", () => {

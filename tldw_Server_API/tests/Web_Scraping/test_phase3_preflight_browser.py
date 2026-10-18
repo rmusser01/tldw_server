@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Web_Scraping.preflight.context import _CleanupEntr
 from tldw_Server_API.app.core.Web_Scraping.runtime import RuntimeRequestContext
 from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
     FakeBrowserContext,
+    FakeBrowserLocator,
     FakeBrowserPage,
     FakeBrowserRequest,
     FakeBrowserRoute,
@@ -37,8 +38,10 @@ from tldw_Server_API.tests.Web_Scraping.preflight_fakes import (
     FakePlaywrightLauncher,
     FakeProbeEgressGuard,
     FakeWebSocketRoute,
+    RealLikeBrowser,
     RealLikeBrowserContext,
     RealLikeBrowserPage,
+    RealLikePlaywright,
     RealLikePlaywrightLauncher,
 )
 
@@ -106,7 +109,7 @@ async def test_asyncio_timeout_compatibility_uses_async_timeout_when_stdlib_is_a
         return LegacyTimeout()
 
     legacy_module = types.ModuleType("async_timeout")
-    legacy_module.timeout = legacy_timeout
+    monkeypatch.setattr(legacy_module, "timeout", legacy_timeout, raising=False)
     monkeypatch.delattr(compat.asyncio, "timeout", raising=False)
     monkeypatch.setitem(sys.modules, "async_timeout", legacy_module)
 
@@ -145,7 +148,7 @@ def _legacy_reschedule_context(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, An
 
     legacy = LegacyTimeout()
     legacy_module = types.ModuleType("async_timeout")
-    legacy_module.timeout = lambda _delay: legacy
+    monkeypatch.setattr(legacy_module, "timeout", lambda _delay: legacy, raising=False)
     monkeypatch.delattr(compat.asyncio, "timeout", raising=False)
     monkeypatch.setitem(sys.modules, "async_timeout", legacy_module)
     return compat.timeout(None), legacy
@@ -1508,7 +1511,7 @@ async def test_operations_without_playwright_timeout_are_deadline_bounded(
 ) -> None:
     blocker = asyncio.Event()
 
-    class BlockingLocator:
+    class BlockingLocator(FakeBrowserLocator):
         def __init__(self, index: int | None = None) -> None:
             self.index = index
 
@@ -1921,7 +1924,9 @@ async def test_page_and_request_cleanup_share_one_idempotent_close_operation(
     monkeypatch.setattr(adapter, "_BROWSER_CLEANUP_GRACE_S", 0.02, raising=False)
 
     class RealLikePage(FakeBrowserPage):
-        force_close = None
+        pass
+
+    monkeypatch.setattr(RealLikePage, "force_close", None)
 
     controls = _controls()
     launcher = FakePlaywrightLauncher(
@@ -2016,7 +2021,9 @@ async def test_all_real_like_graph_uses_reserved_parent_teardown_window(
     assert launcher.playwright.stop_calls == 1
     assert page.closed
     assert context.closed
+    assert isinstance(launcher.browser, RealLikeBrowser)
     assert launcher.browser.closed
+    assert isinstance(launcher.playwright, RealLikePlaywright)
     assert launcher.playwright.stopped
     assert context.close_started_at is not None
     assert context.close_started_at - started_at < grace_s * 0.75
@@ -2061,15 +2068,13 @@ async def test_guard_and_cleanup_logs_never_include_urls_or_raw_errors() -> None
 class _ControlledBrowserClose:
     """Expose native close completion independently of its shielded waiter."""
 
-    def __init__(self, outcome: str, *, force_available: bool) -> None:
+    def __init__(self, outcome: str) -> None:
         self.outcome = outcome
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.native_calls: list[str] = []
         self.force_calls = 0
         self.closed = False
-        if not force_available:
-            self.force_close = None
 
     async def _native_close(self, method: str) -> None:
         self.native_calls.append(method)
@@ -2098,8 +2103,11 @@ async def test_browser_force_cleanup_checks_native_operation_before_forcing(
     kind: str,
     outcome: str,
     force_available: bool,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resource = _ControlledBrowserClose(outcome, force_available=force_available)
+    resource = _ControlledBrowserClose(outcome)
+    if not force_available:
+        monkeypatch.setattr(resource, "force_close", None)
     handle = _required("_cleanup_handle")(resource, kind=kind)
     controls = _controls()
     entry = _CleanupEntry(handle=handle)
@@ -2169,3 +2177,53 @@ async def test_browser_force_cleanup_checks_native_operation_before_forcing(
         native = handle._operation_task
         if native is not None:
             await asyncio.gather(native, return_exceptions=True)
+
+
+@pytest.mark.parametrize("close_entry_advance_s", [0.0, 0.02])
+def test_cleanup_graceful_deadline_does_not_restart_on_task_entry(
+    monkeypatch: pytest.MonkeyPatch,
+    close_entry_advance_s: float,
+) -> None:
+    # A private loop isolates the controlled clock from pytest's async runner.
+    loop = asyncio.new_event_loop()
+    now = [1000.0]
+    monkeypatch.setattr(loop, "time", lambda: now[0])
+    native_call_at = loop.call_at
+
+    async def exercise() -> None:
+        timer_registered = loop.create_future()
+        release_close = loop.create_future()
+
+        def record_timer(when, callback, *args, context=None):
+            if not timer_registered.done():
+                timer_registered.set_result(when)
+            return native_call_at(when, callback, *args, context=context)
+
+        monkeypatch.setattr(loop, "call_at", record_timer)
+
+        force_calls = []
+
+        class Handle:
+            async def close(self) -> None:
+                now[0] += close_entry_advance_s
+                await release_close
+
+            async def force_close(self) -> None:
+                force_calls.append("force")
+
+        controls = _controls()
+        started_at = now[0]
+        cleanup = loop.create_task(controls._cleanup_with_grace((Handle(),), 0.05))
+        try:
+            scheduled_deadline = await timer_registered
+            assert scheduled_deadline - started_at == pytest.approx(0.025, rel=0, abs=1e-9)
+        finally:
+            if not release_close.done():
+                release_close.set_result(None)
+            await cleanup
+            assert force_calls == []
+
+    try:
+        loop.run_until_complete(exercise())
+    finally:
+        loop.close()

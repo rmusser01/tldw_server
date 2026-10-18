@@ -1,8 +1,9 @@
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { captureChatDraftLoad, captureChatDraftSource, confirmTemporaryChatDiscard } from "@/hooks/chat/chat-draft-transition"
 import React from "react"
 import { message } from "antd"
 
-import { PageAssistDatabase } from "@/db/dexie/chat"
+import { PageAssistDatabase, type OnDeviceHistoryScope } from "@/db/dexie/chat"
 import {
   formatToChatHistory,
   formatToMessage,
@@ -37,21 +38,10 @@ export function useLoadLocalConversation(
   deps: LoadLocalConversationDeps,
   options: UseLoadLocalConversationOptions
 ) {
-  const {
-    setServerChatId,
-    setHistoryId,
-    setHistory,
-    setMessages,
-    setSelectedModel,
-    setSelectedSystemPrompt,
-    setSystemPrompt,
-    setContextFiles
-  } = deps
-
-  const { t, errorLogPrefix, errorDefaultMessage } = options
-
-  const { beginLoad, fence, loadConversation, getCurrent } =
-    useHistorySelectionContext() ?? {}
+  const selection = useHistorySelectionContext()
+  // Inline setters and controller state changes must not restart an effect-owned load.
+  const inputs = React.useRef({ deps, options, selection })
+  inputs.current = { deps, options, selection }
   const dbRef = React.useRef<PageAssistDatabase | null>(null)
   const mountedRef = React.useRef(false)
   const loadGenerationRef = React.useRef(0)
@@ -72,23 +62,47 @@ export function useLoadLocalConversation(
   }
 
   return React.useCallback(
-    async (conversationId: string): Promise<boolean> => {
+    async (conversationId: string, readerScope?: OnDeviceHistoryScope): Promise<boolean> => {
+      if (!mountedRef.current || (readerScope && !readerScope.isCurrent())) return false
+      const source = captureChatDraftSource()
+      if (!confirmTemporaryChatDiscard() || !source.isCurrent()) return false
+      const acceptDraft = captureChatDraftLoad("switch")
+      const {
+        deps: {
+          setServerChatId,
+          setHistoryId,
+          setHistory,
+          setMessages,
+          setSelectedModel,
+          setSelectedSystemPrompt,
+          setSystemPrompt,
+          setContextFiles
+        },
+        options: { t, errorLogPrefix, errorDefaultMessage },
+        selection
+      } = inputs.current
+      const { beginLoad, fence, loadConversation, getCurrent } = selection ?? {}
       const generation = ++loadGenerationRef.current
       const restoreRevision = usePlaygroundSessionStore.getState().restoreRevision
       if (!mountedRef.current) return false
       beginLoad?.()
       let selectionCurrent = fence?.() || (() => true)
       let snapshot: ServicePromptSnapshot | undefined
+      let settled = false
       // The controller advances its own fence while opening. This caller lease
       // must track navigation/account changes independently of that fence.
-      const isCurrentLoad = () => mountedRef.current &&
+      const isCurrentLoad = () => acceptDraft.isCurrent() && (settled || (
+        mountedRef.current && (!readerScope || readerScope.isCurrent()) &&
         !snapshot?.scopeSignal.aborted && !snapshot?.scopeInvalidatedSignal.aborted &&
         generation === loadGenerationRef.current &&
         restoreRevision === usePlaygroundSessionStore.getState().restoreRevision
+      ))
       const isCurrent = () => isCurrentLoad() && selectionCurrent()
       try {
         const db = dbRef.current!
-        const historyDetails = await db.getHistoryInfo(conversationId)
+        if (readerScope && !loadConversation) return false
+        const preview = readerScope ? await db.getOnDeviceChatPreview(conversationId, readerScope) : null
+        const historyDetails = readerScope ? preview?.historyInfo : await db.getHistoryInfo(conversationId)
         if (!isCurrent() || !historyDetails) return false
         // Profile-owned forks browse independently of the inference account.
         // The controller still validates the local profile before publishing.
@@ -99,12 +113,31 @@ export function useLoadLocalConversation(
           snapshot = await loadServicePromptSnapshot([])
           if (!isCurrent() || historyDetails.server_scope_key !== serverChatMirrorOwnerKey(snapshot)) return false
         }
-        const history = await db.getChatHistory(conversationId)
+        const history = preview?.messages ?? await db.getChatHistory(conversationId)
+        if (!isCurrent()) return false
+        // Prepare every fallible read before changing the owned selection or IDs.
+        const isLastUsedChatModel = await lastUsedChatModelEnabled()
+        if (!isCurrent()) return false
+        const lastUsedPrompt = historyDetails.last_used_prompt
+        let promptContent = lastUsedPrompt?.prompt_content ?? ""
+        const prompt = lastUsedPrompt?.prompt_id ? await getPromptById(lastUsedPrompt.prompt_id) : undefined
+        if (!isCurrent()) return false
+        if (prompt && !promptContent.trim()) promptContent = prompt.content
+        const session = await getSessionFiles(conversationId)
         if (!isCurrent()) return false
         if (loadConversation && fence) {
-          if (!await loadConversation({ historyId: conversationId, isCurrent: isCurrentLoad })) return false
+          let accepted = false
+          if (!await loadConversation({ historyId: conversationId, isCurrent: isCurrentLoad, onDeviceScope: readerScope }, null, receipt => { if (!readerScope || receipt.owner.kind === "local") accepted = acceptDraft(receipt) })) return false
           if (generation !== loadGenerationRef.current) return false
           selectionCurrent = fence()
+          const selected = getCurrent?.()
+          if (!accepted && selected?.owner && selected.owner.kind !== "unavailable" &&
+            (!readerScope || selected.owner.kind === "local") && selected.view &&
+            selected.owner.conversation_id === (historyDetails.server_chat_id || conversationId)) {
+            // A review state may locate a private draft; it does not authorize sending.
+            accepted = acceptDraft({ owner: selected.owner, view: selected.view })
+          }
+          if (!accepted) return false
         }
         if (!isCurrent()) return false
         const selected = getCurrent?.()
@@ -116,40 +149,19 @@ export function useLoadLocalConversation(
           setMessages(formatToMessage(history))
         }
 
-        if (!isCurrent()) return false
-        const isLastUsedChatModel = await lastUsedChatModelEnabled()
-        if (!isCurrent()) return false
-        if (isLastUsedChatModel && historyDetails?.model_id) {
-          setSelectedModel(historyDetails.model_id)
-        }
-
-        if (!isCurrent()) return false
-        const lastUsedPrompt = historyDetails?.last_used_prompt
-        if (lastUsedPrompt) {
-          let promptContent = lastUsedPrompt.prompt_content ?? ""
-          if (lastUsedPrompt.prompt_id) {
-            const prompt = await getPromptById(lastUsedPrompt.prompt_id)
-            if (!isCurrent()) return false
-            if (prompt) {
-              setSelectedSystemPrompt(prompt.id)
-              if (!promptContent.trim()) {
-                promptContent = prompt.content
-              }
-            }
-          }
-          if (!isCurrent()) return false
-          setSystemPrompt(promptContent)
-        }
-
-        if (!isCurrent()) return false
-        const session = await getSessionFiles(conversationId)
-        if (!isCurrent()) return false
+        if (isLastUsedChatModel && historyDetails.model_id) setSelectedModel(historyDetails.model_id)
+        if (prompt) setSelectedSystemPrompt(prompt.id)
+        if (lastUsedPrompt) setSystemPrompt(promptContent)
         setContextFiles(session)
 
-        if (!isCurrent()) return false
         updatePageTitle(
           historyDetails?.title || t("common:untitled", { defaultValue: "Untitled" })
         )
+        if (!isCurrent() || (selected && (getCurrent?.().owner !== selected.owner || getCurrent?.().view !== selected.view))) return false
+        // H1 retains this callback in an account-bound owner's lease. Once the
+        // complete destination is accepted, widget lifetime must not revoke it.
+        // Core still fences New/address ABA; H1 owns account/provider lifetime.
+        settled = !!loadConversation
         return true
       } catch (error) {
         if (!isCurrent()) return false
@@ -165,23 +177,7 @@ export function useLoadLocalConversation(
         snapshot?.release()
       }
     },
-    [
-      beginLoad,
-      fence,
-      loadConversation,
-      getCurrent,
-      errorDefaultMessage,
-      errorLogPrefix,
-      setContextFiles,
-      setHistory,
-      setHistoryId,
-      setMessages,
-      setSelectedModel,
-      setSelectedSystemPrompt,
-      setServerChatId,
-      setSystemPrompt,
-      t
-    ]
+    []
   )
 }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 
 import {
   DEFAULT_SIDEBAR_SHORTCUT_SELECTION,
+  SIDEBAR_ACTIVE_TAB_SETTING,
   SIDEBAR_SHORTCUT_SELECTION_SETTING
 } from "@/services/settings/ui-settings"
 import { normalizeSettingValue } from "@/services/settings/registry"
@@ -100,4 +101,16 @@ describe("sidebar shortcut defaults", () => {
 
     expect(normalized).toEqual(customSelection)
   })
+})
+
+it.each(["all", "server", "folders", "local"])("persists the %s conversation view", value => {
+  expect(normalizeSettingValue(SIDEBAR_ACTIVE_TAB_SETTING, value)).toBe(value)
+})
+it("uses All for unknown conversation views", () => {
+  expect(normalizeSettingValue(SIDEBAR_ACTIVE_TAB_SETTING, "other")).toBe("all")
+})
+
+it("calls the new view On this device in the deployed English catalog", async () => {
+  const common = (await import("@/assets/locale/en/common.json")).default
+  expect(common.chatSidebar.tabs.local).toBe("On this device")
 })

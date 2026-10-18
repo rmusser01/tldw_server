@@ -212,3 +212,31 @@ async def test_multi_user_jwt_happy_path_principal_matches_state(
     # Claims on AuthPrincipal, get_current_user, and get_request_user should be aligned
     assert principal["roles"] == user["roles"] == request_user["roles"]
     assert principal["permissions"] == user["permissions"] == request_user["permissions"]
+
+
+@pytest.mark.asyncio
+async def test_docs_info_resume_uses_real_jwt_owner_and_expected_user(isolated_test_environment):
+    client, _db_name = isolated_test_environment
+    _attach_whoami_router(client.app)
+    from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions, character_messages
+
+    paths = {route.path for route in iter_served_routes(client.app.routes)}
+    if "/api/v1/chats/{chat_id}/roleplay/messages" not in paths:
+        client.app.include_router(character_messages.router, prefix="/api/v1")
+    if "/api/v1/chats/{chat_id}/complete-v2" not in paths:
+        client.app.include_router(character_chat_sessions.router, prefix="/api/v1/chats")
+    credentials = {"username": "resume_docs_user", "password": "Test@Pass#2024"}
+    registered = client.post("/api/v1/auth/register", json={**credentials, "email": "resume_docs@example.com"})
+    assert registered.status_code == 200
+    login = client.post("/api/v1/auth/login", data=credentials)
+    assert login.status_code == 200
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    whoami = client.get("/api/v1/authnz/jwt-happy", headers=headers)
+    assert whoami.status_code == 200
+    owner = str(whoami.json()["principal"]["user_id"])
+    response = client.get("/api/v1/config/docs-info", headers={**headers, "X-TLDW-Expected-User-ID": owner})
+    assert response.status_code == 200
+    assert response.json()["capabilities"]["roleplay_resume_contract_version"] == 1
+    assert response.headers["cache-control"] == "no-store"
+    stale = client.get("/api/v1/config/docs-info", headers={**headers, "X-TLDW-Expected-User-ID": "999999"})
+    assert stale.status_code == 412

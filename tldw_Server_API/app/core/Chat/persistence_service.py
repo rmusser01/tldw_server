@@ -180,7 +180,9 @@ def native_history_owner_key(request: Any, user_id: Any) -> str:
     return "native-history-v1:sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-async def prepare_native_history_message(message: dict[str, Any], conversation_id: str, process_content: Any) -> dict[str, Any]:
+async def prepare_native_history_message(
+    message: dict[str, Any], conversation_id: str, process_content: Any
+) -> dict[str, Any]:
     """Prepare validated text/images and role metadata before opening an admission transaction."""
     content = message.get("content")
     parts = content if isinstance(content, list) else []
@@ -206,10 +208,13 @@ async def prepare_native_history_message(message: dict[str, Any], conversation_i
             extra[key] = message[key]
     if message.get("name"):
         extra["tool_name" if role == "tool" else "sender_name"] = message["name"]
-    if not text and not images:
+    if not "\n".join(text) and not images:
         if message.get("tool_calls"):
             text = ["[tool_calls]"]
             extra["content_placeholder_reason"] = "tool_calls"
+        elif role == "tool" and content == "" and message.get("tool_call_id") is not None:
+            text = ["[empty tool result]"]
+            extra["content_placeholder_reason"] = "empty_tool_result"
         elif message.get("function_call"):
             text = ["[function_call]"]
             extra["content_placeholder_reason"] = "function_call"

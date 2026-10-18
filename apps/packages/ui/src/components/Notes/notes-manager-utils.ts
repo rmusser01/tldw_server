@@ -1,8 +1,21 @@
-import type { KnowledgeNoteHead } from "@/utils/knowledge-note-provenance"
-import React from 'react'
-import { Modal, Input } from 'antd'
-import type { NotesTitleSuggestStrategy, NotesNotebookSetting } from '@/services/settings/ui-settings'
-import { createSafeStorage } from '@/utils/safe-storage'
+import {
+  knowledgeNoteHead,
+  knowledgeNoteProvenanceMatches,
+  retainKnowledgeNoteProvenance,
+  resolveKnowledgeNoteProvenance,
+  type KnowledgeNoteHead,
+} from "@/utils/knowledge-note-provenance";
+import React from "react";
+import { Modal, Input } from "antd";
+import type {
+  NotesTitleSuggestStrategy,
+  NotesNotebookSetting,
+} from "@/services/settings/ui-settings";
+import { createSafeStorage } from "@/utils/safe-storage";
+import {
+  withRecordLock,
+  type LocalRegistryRecord,
+} from "@/services/settings/local-bucket";
 import type { NotesStudioHandwritingMode, NotesStudioTemplateType } from './notes-studio-types'
 import type { NoteListItem } from './types'
 
@@ -476,23 +489,213 @@ export type KeywordMergeDraft = {
   source: KeywordManagementItem
   targetKeywordId: number | null
 }
-export type MarkdownToolbarAction = 'bold' | 'italic' | 'heading' | 'list' | 'link' | 'code'
+export type MarkdownToolbarAction = 'bold' | 'italic' | 'heading' | 'heading1' | 'heading2' | 'heading3' | 'list' | 'numbered' | 'checklist' | 'link' | 'code'
+
+/** Apply block formatting to complete logical lines, retaining unselected text. */
+export const formatMarkdownLines = (
+  content: string,
+  start: number,
+  end: number,
+  action:
+    | "heading"
+    | "heading1"
+    | "heading2"
+    | "heading3"
+    | "list"
+    | "numbered"
+    | "checklist"
+): { content: string; start: number; end: number } => {
+  const from = start === 0 ? 0 : content.lastIndexOf("\n", start - 1) + 1
+  const selectedEnd = end > start && content[end - 1] === "\n" ? end - 1 : end
+  const nextBreak = content.indexOf("\n", selectedEnd)
+  const to = nextBreak < 0 ? content.length : nextBreak
+  let ordinal = 0
+  let originalOffset = from
+  let changedOffset = from
+  let nextStart = start
+  let nextEnd = end
+  const replacement = content
+    .slice(from, to)
+    .split("\n")
+    .map((line) => {
+      const indent = line.match(/^[\t ]*/)?.[0] || ""
+      const oldPrefix =
+        line
+          .slice(indent.length)
+          .match(
+            /^(?:#{1,6}\s+|(?:[-*+]|\d+\.)\s+(?:\[[ xX]\](?:\s+|$))?)/
+          )?.[0] || ""
+      const body = line.slice(indent.length + oldPrefix.length)
+      const heading = action.startsWith("heading")
+      const text = body || (heading ? "Heading" : "List item")
+      const prefix = heading
+        ? `${"#".repeat(action === "heading" ? 1 : Number(action.slice(-1)))} `
+        : action === "numbered"
+          ? `${++ordinal}. `
+          : action === "checklist"
+            ? "- [ ] "
+            : "- "
+      const keepBlank = !line.trim() && start !== end
+      if (keepBlank && action === "numbered") ordinal -= 1
+      const changed = keepBlank ? line : `${indent}${prefix}${text}`
+      const map = (position: number) =>
+        changedOffset +
+        (keepBlank
+          ? position - originalOffset
+          : Math.min(
+              changed.length,
+              Math.max(
+                indent.length + prefix.length,
+                position - originalOffset + prefix.length - oldPrefix.length
+              )
+            ))
+      if (start >= originalOffset && start <= originalOffset + line.length)
+        nextStart = map(start)
+      if (end >= originalOffset && end <= originalOffset + line.length)
+        nextEnd = map(end)
+      originalOffset += line.length + 1
+      changedOffset += changed.length + 1
+      return changed
+    })
+    .join("\n")
+  if (start === end && !content.slice(from, to).trim())
+    nextEnd = from + replacement.length
+  if (end > to) nextEnd = changedOffset
+  return {
+    content: content.slice(0, from) + replacement + content.slice(to),
+    start: nextStart,
+    end: nextEnd
+  }
+}
+
+/** Return a list Enter edit; null leaves ordinary browser editing in charge. */
+export const continueMarkdownList = (
+  content: string,
+  start: number,
+  end: number
+): { content: string; cursor: number } | null => {
+  if (start !== end) return null
+  const from = start === 0 ? 0 : content.lastIndexOf("\n", start - 1) + 1
+  let fence: { marker: string; length: number } | null = null
+  for (const line of content.slice(0, from).split("\n")) {
+    const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/)
+    if (!match) continue
+    if (!fence) {
+      if (match[1][0] === "`" && match[2].includes("`")) continue
+      fence = { marker: match[1][0], length: match[1].length }
+    } else if (
+      match[1][0] === fence.marker &&
+      match[1].length >= fence.length &&
+      !match[2].trim()
+    )
+      fence = null
+  }
+  if (fence) return null
+  const nextBreak = content.indexOf("\n", start)
+  const to = nextBreak < 0 ? content.length : nextBreak
+  const line = content.slice(from, to)
+  const match = line.match(
+    /^([\t ]*)([-*+]|\d+\.)[\t ]+(?:\[([ xX])\](?:[\t ]+|$))?/
+  )
+  if (!match || start < from + match[0].length) return null
+  if (!line.slice(match[0].length).trim()) {
+    return {
+      content: content.slice(0, from) + match[1] + content.slice(to),
+      cursor: from + match[1].length
+    }
+  }
+  const number = Number.parseInt(match[2], 10)
+  if (
+    /^\d/.test(match[2]) &&
+    (!Number.isSafeInteger(number) || number >= Number.MAX_SAFE_INTEGER)
+  )
+    return null
+  const marker = /^\d/.test(match[2]) ? `${number + 1}.` : match[2]
+  const insertion = `\n${match[1]}${marker} ${match[3] === undefined ? "" : "[ ] "}`
+  return {
+    content: content.slice(0, start) + insertion + content.slice(start),
+    cursor: start + insertion.length
+  }
+}
+
+export const notesEditorMaxHeight = (
+  viewportHeight: number,
+  split: boolean
+): number => Math.max(280, Math.floor(viewportHeight * (split ? 0.42 : 0.62)))
+
+/** Measure visual wrapping with the textarea's actual computed layout. */
+export const revealTextareaOffset = (
+  textarea: HTMLTextAreaElement,
+  offset: number
+): void => {
+  const mirror = textarea.ownerDocument.createElement("div")
+  const computed =
+    textarea.ownerDocument.defaultView?.getComputedStyle(textarea)
+  if (!computed) return
+  for (const property of Array.from(computed))
+    mirror.style.setProperty(property, computed.getPropertyValue(property))
+  Object.assign(mirror.style, {
+    position: "fixed",
+    left: "-10000px",
+    top: "0",
+    height: "auto",
+    maxHeight: "none",
+    minHeight: "0",
+    overflow: "visible",
+    visibility: "hidden",
+    whiteSpace: "pre-wrap",
+    overflowWrap: "break-word",
+    pointerEvents: "none",
+    width: `${
+      computed.boxSizing === "border-box"
+        ? textarea.clientWidth +
+          Number.parseFloat(computed.borderLeftWidth) +
+          Number.parseFloat(computed.borderRightWidth)
+        : textarea.clientWidth -
+          Number.parseFloat(computed.paddingLeft) -
+          Number.parseFloat(computed.paddingRight)
+    }px`
+  })
+  mirror.setAttribute("aria-hidden", "true")
+  mirror.textContent = textarea.value.slice(0, offset)
+  const marker = textarea.ownerDocument.createElement("span")
+  marker.textContent = "\u200b"
+  mirror.append(
+    marker,
+    textarea.ownerDocument.createTextNode(textarea.value.slice(offset))
+  )
+  textarea.ownerDocument.body.append(mirror)
+  try {
+    const top = marker.offsetTop
+    textarea.scrollTop = Math.max(0, top - textarea.clientHeight / 2)
+  } finally {
+    mirror.remove()
+  }
+}
+
 export type OfflineDraftSyncState = 'queued' | 'syncing' | 'conflict' | 'error'
 export type OfflineDraftEntry = {
-  pendingWrite?: { operation?: 'restore'; key: string; body: Record<string, unknown>; expectedVersion: number | null; previousTitle?: string | null }
-  key: string
-  noteId: string | null
-  baseVersion: number | null
-  title: string
-  content: string
-  keywords: string[]
-  metadata: Record<string, any> | null
-  backlinkConversationId: string | null
-  backlinkMessageId: string | null
-  updatedAt: string
-  syncState: OfflineDraftSyncState
-  lastError: string | null
-}
+  pendingWrite?: {
+    authorityId?: string;
+    operation?: "restore";
+    key: string;
+    body: Record<string, unknown>;
+    expectedVersion: number | null;
+    previousTitle?: string | null;
+  };
+  key: string;
+  noteId: string | null;
+  baseVersion: number | null;
+  title: string;
+  content: string;
+  keywords: string[];
+  metadata: Record<string, any> | null;
+  backlinkConversationId: string | null;
+  backlinkMessageId: string | null;
+  updatedAt: string;
+  syncState: OfflineDraftSyncState;
+  lastError: string | null;
+};
 export type OfflineDraftSyncResult =
   | {
       status: 'synced'
@@ -565,6 +768,386 @@ export const normalizeOfflineDraftQueue = (rawValue: unknown): Record<string, Of
   }
   return normalized
 }
+// Surface-owned operations share this queue, but only their owning editor acknowledges them.
+export const isSurfaceOfflineDraft = (key: string): boolean => key.startsWith('surface:')
+
+export const readOfflineDraftQueue = (storageKey: string): Record<string, OfflineDraftEntry> =>
+  normalizeOfflineDraftQueue(JSON.parse(window.localStorage.getItem(storageKey) || '{}'))
+
+export const writeOfflineDraftQueue = (storageKey: string, queue: Record<string, OfflineDraftEntry>): void => {
+  const serialized = JSON.stringify(queue)
+  window.localStorage.setItem(storageKey, serialized)
+  if (window.localStorage.getItem(storageKey) !== serialized)
+    throw new Error('Could not retain the pending note operation on this device.')
+}
+
+export const writeNotesEditorOfflineDraftQueue = (
+  storageKey: string,
+  queue: Record<string, OfflineDraftEntry>,
+): void => {
+  let readableQueue: Record<string, OfflineDraftEntry> = {};
+  try {
+    readableQueue = readOfflineDraftQueue(storageKey);
+  } catch (error) {
+    if (!(error instanceof SyntaxError)) throw error;
+    // Hydration already treats malformed JSON as an empty ordinary queue.
+  }
+  const surfaceEntries = Object.fromEntries(
+    Object.entries(readableQueue).filter(([key]) => isSurfaceOfflineDraft(key)),
+  );
+  writeOfflineDraftQueue(storageKey, { ...queue, ...surfaceEntries });
+};
+
+const surfaceOfflineDraftPrefix = (authorityScope: string): string => `${NOTES_OFFLINE_DRAFT_QUEUE_STORAGE_KEY}:${authorityScope}:`
+
+export const readSurfaceOfflineDraftQueue = async (
+  authorityScope: string,
+): Promise<Record<string, OfflineDraftEntry>> => {
+  const prefix = surfaceOfflineDraftPrefix(authorityScope);
+  const entries = await notesUiStorage.getAll();
+  const queue: Record<string, OfflineDraftEntry> = {};
+  for (const storageKey of Object.keys(entries).filter((key) =>
+    key.startsWith(`${prefix}surface:`),
+  )) {
+    const record =
+      await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+        storageKey,
+      );
+    if (record == null) continue;
+    const key = storageKey.slice(prefix.length);
+    const draft = normalizeOfflineDraftQueue({ [key]: record.value })[key];
+    if (!draft?.pendingWrite && !isQuickNotesRetainedDraft(draft))
+      throw new Error(
+        "The retained note operation cannot be read safely on this device.",
+      );
+    queue[key] = draft;
+  }
+  return queue
+}
+
+export const isQuickNotesRetainedDraft = (
+  draft?: OfflineDraftEntry,
+): boolean => {
+  const metadata = draft?.metadata;
+  return (
+    !!draft &&
+    !draft.pendingWrite &&
+    typeof metadata?.quickNotesAuthorityId === "string" &&
+    !!metadata.quickNotesAuthorityId &&
+    typeof (
+      metadata.quickNotesAcceptedKey || metadata.quickNotesRejectedKey
+    ) === "string" &&
+    !!(metadata.quickNotesAcceptedKey || metadata.quickNotesRejectedKey) &&
+    typeof metadata.quickNotesDirty === "boolean" &&
+    (metadata.quickNotesWorkspaceId === null ||
+      typeof metadata.quickNotesWorkspaceId === "string") &&
+    typeof metadata.quickNotesWorkspaceTag === "string" &&
+    draft.key.startsWith(
+      `surface:quick-notes:${JSON.stringify([metadata.quickNotesWorkspaceId, metadata.quickNotesWorkspaceTag])}:`,
+    ) &&
+    /^(?:[1-9][0-9]*|[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12})$/i.test(
+      draft.noteId || "",
+    ) &&
+    Number.isSafeInteger(draft.baseVersion) &&
+    draft.baseVersion! > 0
+  );
+};
+
+export const retainSurfaceOfflineDraft = async (
+  authorityScope: string,
+  draft: OfflineDraftEntry,
+): Promise<void> => {
+  const storageKey = surfaceOfflineDraftPrefix(authorityScope) + draft.key;
+  await withRecordLock(storageKey, async () => {
+    const previous =
+      await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+        storageKey,
+      );
+    if (
+      previous?.value?.metadata?.quickNotesAuthorityId &&
+      (typeof navigator === "undefined" || !navigator.locks?.request)
+    )
+      throw new Error(
+        "Safe local note persistence requires a record lock on this device.",
+      );
+    if (
+      previous?.value?.pendingWrite &&
+      JSON.stringify(previous.value.pendingWrite) !==
+        JSON.stringify(draft.pendingWrite)
+    )
+      throw new Error(
+        "Resolve the retained note operation before replacing it.",
+      );
+    if (
+      isQuickNotesRetainedDraft(previous?.value) &&
+      (previous!.value.metadata?.quickNotesAcceptedKey ===
+        draft.pendingWrite?.key ||
+        previous!.value.metadata?.quickNotesRejectedKey ===
+          draft.pendingWrite?.key)
+    )
+      return;
+    // A retry must not replace mutable text with its older submitted snapshot.
+    if (
+      previous?.value?.metadata?.quickNotesAuthorityId &&
+      previous.value.pendingWrite
+    )
+      return;
+    try {
+      await notesUiStorage.set(storageKey, {
+        value: draft,
+        updatedAt: Date.now(),
+      });
+    } catch {
+      throw new Error(
+        "Could not retain the pending note operation on this device.",
+      );
+    }
+    const retained =
+      await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+        storageKey,
+      );
+    if (JSON.stringify(retained?.value) !== JSON.stringify(draft))
+      throw new Error(
+        "Could not retain the pending note operation on this device.",
+      );
+  });
+};
+
+export const retireSurfaceOfflineDraft = async (
+  authorityScope: string,
+  key: string,
+  pendingKey: string,
+): Promise<void> => {
+  const storageKey = surfaceOfflineDraftPrefix(authorityScope) + key;
+  await withRecordLock(storageKey, async () => {
+    const previous =
+      await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+        storageKey,
+      );
+    if (
+      previous?.value?.metadata?.quickNotesAuthorityId &&
+      (typeof navigator === "undefined" || !navigator.locks?.request)
+    )
+      throw new Error(
+        "Safe local note persistence requires a record lock on this device.",
+      );
+    if (previous?.value?.pendingWrite?.key !== pendingKey) return;
+    const draft = previous.value;
+    if (
+      draft.metadata?.quickNotesAuthorityId &&
+      draft.noteId &&
+      Number.isSafeInteger(draft.pendingWrite!.expectedVersion) &&
+      draft.pendingWrite!.expectedVersion! > 0
+    ) {
+      const retainedDraft: OfflineDraftEntry = {
+        ...draft,
+        pendingWrite: undefined,
+        baseVersion: draft.pendingWrite!.expectedVersion,
+        metadata: {
+          ...draft.metadata,
+          quickNotesAcceptedKey: undefined,
+          quickNotesRejectedKey: pendingKey,
+          quickNotesDirty: true,
+        },
+      };
+      if (!isQuickNotesRetainedDraft(retainedDraft))
+        throw new Error(
+          "The rejected Quick Notes draft binding is incomplete.",
+        );
+      await notesUiStorage.set(storageKey, {
+        value: retainedDraft,
+        updatedAt: Date.now(),
+      });
+      const retained =
+        await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+          storageKey,
+        );
+      if (JSON.stringify(retained?.value) !== JSON.stringify(retainedDraft))
+        throw new Error(
+          "Could not retire the rejected note operation while preserving its local draft.",
+        );
+      return;
+    }
+    try {
+      await notesUiStorage.remove(storageKey);
+    } catch {
+      throw new Error(
+        "Could not retire the acknowledged note operation on this device. Retry the same save.",
+      );
+    }
+    const retained =
+      await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+        storageKey,
+      );
+    if (retained?.value?.pendingWrite?.key === pendingKey)
+      throw new Error(
+        "Could not retire the acknowledged note operation on this device. Retry the same save.",
+      );
+  });
+};
+
+type QuickNotesDraftSnapshot = Pick<
+  OfflineDraftEntry,
+  "title" | "content" | "keywords" | "metadata"
+> & { isDirty: boolean };
+
+export const quickNotesDraftMatchesWrite = (
+  draft: Pick<OfflineDraftEntry, "title" | "content" | "keywords" | "metadata">,
+  body: Record<string, unknown>,
+): boolean => {
+  const research = resolveKnowledgeNoteProvenance(draft.metadata, draft.content)
+    .provenance?.research;
+  const keywords = [
+    ...draft.keywords,
+    ...(research ? [`workspace:${research.workspace_id}`] : []),
+    draft.metadata?.quickNotesWorkspaceTag || "",
+  ]
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const normalized = (values: string[]) =>
+    values
+      .filter(
+        (value, index) =>
+          values.findIndex(
+            (other) => other.toLowerCase() === value.toLowerCase(),
+          ) === index,
+      )
+      .sort();
+  if (
+    draft.metadata?.pendingKnowledgeProvenance &&
+    !knowledgeNoteProvenanceMatches(
+      draft.metadata.pendingKnowledgeProvenance,
+      body.knowledge_provenance,
+    )
+  )
+    return false;
+  return (
+    (draft.title || "Untitled Note") === body.title &&
+    retainKnowledgeNoteProvenance(draft.content, draft.metadata) ===
+      body.content &&
+    JSON.stringify(normalized(keywords)) ===
+      JSON.stringify(
+        normalized(Array.isArray(body.keywords) ? body.keywords : []),
+      )
+  );
+};
+
+export const checkpointQuickNotesOfflineDraft = async (
+  authorityScope: string,
+  key: string,
+  pendingKey: string,
+  readCurrentDraft: () => QuickNotesDraftSnapshot | null,
+  accepted?: KnowledgeNoteHead & { id: string | number; version?: number },
+): Promise<OfflineDraftEntry | null> => {
+  const storageKey = surfaceOfflineDraftPrefix(authorityScope) + key;
+  return withRecordLock(
+    storageKey,
+    async () => {
+      const record =
+        await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+          storageKey,
+        );
+      const previous = record?.value;
+      if (
+        !previous ||
+        (previous.pendingWrite?.key !== pendingKey &&
+          !(
+            isQuickNotesRetainedDraft(previous) &&
+            (previous.metadata?.quickNotesAcceptedKey === pendingKey ||
+              previous.metadata?.quickNotesRejectedKey === pendingKey)
+          ))
+      )
+        return null;
+      if (!key.startsWith("surface:quick-notes:"))
+        throw new Error("Only Quick Notes owns this retained draft.");
+      const current = readCurrentDraft();
+      if (
+        current &&
+        (current.metadata?.quickNotesAuthorityId !==
+          (previous.pendingWrite?.authorityId ??
+            previous.metadata?.quickNotesAuthorityId) ||
+          !key.startsWith(
+            `surface:quick-notes:${JSON.stringify([current.metadata?.quickNotesWorkspaceId, current.metadata?.quickNotesWorkspaceTag])}:`,
+          ))
+      )
+        throw new Error(
+          "The local draft does not match the retained Workspace and service authority.",
+        );
+      let next: OfflineDraftEntry = current
+        ? {
+            ...previous,
+            title: current.title,
+            content: current.content,
+            keywords: [...current.keywords],
+            metadata: {
+              ...previous.metadata,
+              ...current.metadata,
+              quickNotesDirty: current.isDirty,
+            },
+          }
+        : previous;
+      if (accepted && previous.pendingWrite) {
+        if (
+          String(accepted.id) !==
+            String(previous.pendingWrite.body.id ?? previous.noteId) ||
+          !Number.isSafeInteger(accepted.version) ||
+          accepted.version! < 1
+        )
+          throw new Error(
+            "The accepted note receipt does not match the retained operation.",
+          );
+        next = {
+          ...next,
+          noteId: String(accepted.id),
+          baseVersion: accepted.version!,
+          pendingWrite: undefined,
+          metadata: {
+            ...next.metadata,
+            ...knowledgeNoteHead(accepted),
+            quickNotesAuthorityId: previous.pendingWrite.authorityId,
+            quickNotesAcceptedKey: pendingKey,
+            quickNotesDirty: !quickNotesDraftMatchesWrite(
+              next,
+              previous.pendingWrite.body,
+            ),
+          },
+        };
+        if (!isQuickNotesRetainedDraft(next))
+          throw new Error(
+            "The accepted Quick Notes draft binding is incomplete.",
+          );
+      } else if (!previous.pendingWrite) {
+        // A checkpoint queued before ACK keeps its exact accepted base and authority.
+        next = {
+          ...next,
+          metadata: {
+            ...next.metadata,
+            ...knowledgeNoteHead(previous.metadata),
+            quickNotesAuthorityId: previous.metadata!.quickNotesAuthorityId,
+            quickNotesAcceptedKey: previous.metadata!.quickNotesAcceptedKey,
+          },
+        };
+      }
+      if (JSON.stringify(next) === JSON.stringify(previous)) return previous;
+      next = { ...next, updatedAt: new Date().toISOString() };
+      await notesUiStorage.set(storageKey, {
+        value: next,
+        updatedAt: Date.now(),
+      });
+      const retained =
+        await notesUiStorage.get<LocalRegistryRecord<OfflineDraftEntry>>(
+          storageKey,
+        );
+      if (JSON.stringify(retained?.value) !== JSON.stringify(next))
+        throw new Error(
+          "Could not retain the current local note draft on this device.",
+        );
+      return next;
+    },
+    true,
+  );
+};
+
 export type RemoteVersionInfo = { version: number; lastModified: string | null }
 export type NotesAssistAction = 'summarize' | 'expand_outline' | 'suggest_keywords'
 export type EditProvenanceState =
@@ -974,11 +1557,12 @@ export const markdownToWysiwygHtml = (markdown: string): string => {
   const lines = String(markdown || '').replace(/\r\n/g, '\n').split('\n')
   const slugCounts = new Map<string, number>()
   const out: string[] = []
-  let inList = false
+  const lists: Array<{ indent: number; tag: 'ul' | 'ol'; ordinal: number }> = []
   const closeList = () => {
-    if (!inList) return
-    out.push('</ul>')
-    inList = false
+    while (lists.length) {
+      out.push(`</li></${lists[lists.length - 1].tag}>`)
+      lists.pop()
+    }
   }
 
   for (const rawLine of lines) {
@@ -998,13 +1582,33 @@ export const markdownToWysiwygHtml = (markdown: string): string => {
       continue
     }
 
-    const listMatch = line.match(/^\s*-\s+(.+?)\s*$/)
+    const listMatch = line.match(/^([\t ]*)([-*+]|\d+\.)\s+(.*)$/)
     if (listMatch) {
-      if (!inList) {
-        out.push('<ul>')
-        inList = true
+      const indent = listMatch[1].replace(/\t/g, '    ').length
+      const tag = /^\d/.test(listMatch[2]) ? 'ol' : 'ul'
+      const ordinal = tag === 'ol' ? Number.parseInt(listMatch[2], 10) : 0
+      while (lists.length && lists[lists.length - 1].indent > indent) {
+        out.push(`</li></${lists[lists.length - 1].tag}>`)
+        lists.pop()
       }
-      out.push(`<li>${markdownInlineToHtml(listMatch[1])}</li>`)
+      if (lists.length && lists[lists.length - 1].indent === indent && lists[lists.length - 1].tag !== tag) {
+        out.push(`</li></${lists[lists.length - 1].tag}>`)
+        lists.pop()
+      }
+      const current = lists[lists.length - 1]
+      if (!current || current.indent < indent) {
+        out.push(tag === 'ol' ? `<ol start="${ordinal}">` : '<ul>')
+        lists.push({ indent, tag, ordinal })
+        out.push('<li>')
+      } else {
+        out.push(`</li><li${tag === 'ol' && ordinal !== current.ordinal + 1 ? ` value="${ordinal}"` : ''}>`)
+        current.ordinal = ordinal
+      }
+      const task = listMatch[3].match(/^\[([ xX])\](?:\s+(.*))?$/)
+      if (task && tag === 'ul') {
+        out.push(`<input type="checkbox" contenteditable="false" aria-label="${escapeHtml(task[2] || 'Task')}"${task[1] !== ' ' ? ' checked' : ''}>`)
+      }
+      out.push(markdownInlineToHtml(task && tag === 'ul' ? task[2] || '' : listMatch[3]))
       continue
     }
 
@@ -1055,9 +1659,25 @@ export const blockNodeToMarkdown = (node: Node): string => {
     return `${'#'.repeat(level)} ${inline}`.trim()
   }
   if (tag === 'ul' || tag === 'ol') {
+    let ordinal = tag === 'ol' ? Number.parseInt(node.getAttribute('start') || '1', 10) : 0
+    if (!Number.isFinite(ordinal)) ordinal = 1
     const items = Array.from(node.children)
       .filter((child) => child.tagName.toLowerCase() === 'li')
-      .map((child) => `- ${Array.from(child.childNodes).map(inlineNodeToMarkdown).join('').trim()}`.trim())
+      .map((child) => {
+        const checkbox = Array.from(child.children).find((element): element is HTMLInputElement =>
+          element instanceof HTMLInputElement && element.type === 'checkbox')
+        if (tag === 'ol' && child.hasAttribute('value')) {
+          const value = Number.parseInt(child.getAttribute('value') || '', 10)
+          if (Number.isFinite(value)) ordinal = value
+        }
+        const prefix = tag === 'ol' ? `${ordinal++}. ` : checkbox ? `- [${checkbox.checked ? 'x' : ' '}] ` : '- '
+        const body = Array.from(child.childNodes).filter((part) =>
+          !(part instanceof HTMLElement && (part.tagName === 'UL' || part.tagName === 'OL' || part === checkbox)))
+          .map(inlineNodeToMarkdown).join('').trim()
+        const nested = Array.from(child.children).filter((element) => element.tagName === 'UL' || element.tagName === 'OL')
+          .map(blockNodeToMarkdown).map((text) => text.split('\n').map((line) => `    ${line}`).join('\n')).join('\n')
+        return `${prefix}${body}${nested ? `\n${nested}` : ''}`.trimEnd()
+      })
       .filter(Boolean)
     return items.join('\n')
   }
@@ -1155,6 +1775,149 @@ export const getEditableSelectionBlock = (root: HTMLElement): HTMLElement | null
 
 export const isHeadingElement = (element: Element | null): boolean =>
   Boolean(element && /^H[1-6]$/.test(element.tagName))
+
+/** Checkbox checked state is a property; persist it before recording innerHTML. */
+export const syncEditableCheckboxes = (root: HTMLElement): void => {
+  for (const checkbox of root.querySelectorAll<HTMLInputElement>(
+    'input[type="checkbox"]'
+  )) {
+    checkbox.toggleAttribute("checked", checkbox.checked)
+  }
+}
+
+/** Add task controls only to list items intersecting the editor's selection. */
+const selectedEditableListItems = (root: HTMLElement): HTMLLIElement[] => {
+  const selection = root.ownerDocument.defaultView?.getSelection()
+  if (!selection || selection.rangeCount === 0) return []
+  const range = selection.getRangeAt(0)
+  if (!root.contains(range.commonAncestorContainer)) return []
+  if (range.collapsed) {
+    const node =
+      range.startContainer instanceof Element
+        ? range.startContainer
+        : range.startContainer.parentElement
+    const item = node?.closest("li")
+    return item && root.contains(item) ? [item] : []
+  }
+  return Array.from(root.querySelectorAll("li")).filter((item) =>
+    Array.from(item.childNodes).some((body) => {
+      if (
+        body instanceof Element &&
+        (body.tagName === "UL" || body.tagName === "OL")
+      )
+        return false
+      const walker = root.ownerDocument.createTreeWalker(
+        body,
+        NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT
+      )
+      let content: Node | null = body
+      do {
+        if (content.nodeType === Node.TEXT_NODE) {
+          const contentRange = root.ownerDocument.createRange()
+          contentRange.selectNodeContents(content)
+          if (
+            !contentRange.collapsed &&
+            range.compareBoundaryPoints(Range.START_TO_END, contentRange) > 0 &&
+            range.compareBoundaryPoints(Range.END_TO_START, contentRange) < 0
+          )
+            return true
+        } else if (
+          content instanceof Element &&
+          content.childNodes.length === 0 &&
+          range.intersectsNode(content)
+        ) {
+          return true
+        }
+        content = walker.nextNode()
+      } while (content)
+      return false
+    })
+  )
+}
+
+export const makeEditableChecklist = (root: HTMLElement): void => {
+  for (const item of selectedEditableListItems(root)) {
+    if (
+      Array.from(item.children).some(
+        (child) =>
+          child instanceof HTMLInputElement && child.type === "checkbox"
+      )
+    )
+      continue
+    const checkbox = root.ownerDocument.createElement("input")
+    checkbox.type = "checkbox"
+    checkbox.contentEditable = "false"
+    checkbox.setAttribute("aria-label", item.textContent?.trim() || "Task")
+    item.prepend(checkbox)
+  }
+}
+
+export const removeEditableTaskControls = (root: HTMLElement): void => {
+  for (const item of selectedEditableListItems(root)) {
+    for (const child of Array.from(item.children)) {
+      if (child instanceof HTMLInputElement && child.type === "checkbox")
+        child.remove()
+    }
+  }
+}
+
+/** Split a rich task in place; native ordinary lists retain browser Enter behavior. */
+export const continueEditableChecklist = (root: HTMLElement): boolean => {
+  const selection = root.ownerDocument.defaultView?.getSelection()
+  if (!selection || selection.rangeCount === 0 || !selection.isCollapsed)
+    return false
+  const range = selection.getRangeAt(0)
+  if (!root.contains(range.startContainer)) return false
+  const block =
+    range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement
+  const item = block?.closest("li")
+  if (!item || !root.contains(item) || item.parentElement?.tagName !== "UL")
+    return false
+  const checkbox = Array.from(item.children).find(
+    (child): child is HTMLInputElement =>
+      child instanceof HTMLInputElement && child.type === "checkbox"
+  )
+  if (!checkbox) return false
+  const ownerDocument = root.ownerDocument
+  let target: HTMLElement
+  if (!item.textContent?.trim() && !item.querySelector("ul,ol")) {
+    const list = item.parentElement
+    const after = ownerDocument.createElement("ul")
+    while (item.nextSibling) after.append(item.nextSibling)
+    target = ownerDocument.createElement("p")
+    target.append(ownerDocument.createElement("br"))
+    list.after(target)
+    if (after.childNodes.length) target.after(after)
+    item.remove()
+    if (!list.childNodes.length) list.remove()
+  } else {
+    const suffix = range.cloneRange()
+    suffix.setEnd(item, item.childNodes.length)
+    const trailing = suffix.extractContents()
+    target = ownerDocument.createElement("li")
+    const nextCheckbox = ownerDocument.createElement("input")
+    nextCheckbox.type = "checkbox"
+    nextCheckbox.contentEditable = "false"
+    nextCheckbox.setAttribute(
+      "aria-label",
+      trailing.textContent?.trim() || "Task"
+    )
+    target.append(nextCheckbox, trailing)
+    if (target.childNodes.length === 1)
+      target.append(ownerDocument.createElement("br"))
+    item.after(target)
+  }
+  const caret = ownerDocument.createRange()
+  caret.selectNodeContents(target)
+  caret.collapse(true)
+  if (target.firstChild instanceof HTMLInputElement)
+    caret.setStartAfter(target.firstChild)
+  selection.removeAllRanges()
+  selection.addRange(caret)
+  return true
+}
 
 /**
  * Chrome's insertUnorderedList builds the list inside the paragraph or heading

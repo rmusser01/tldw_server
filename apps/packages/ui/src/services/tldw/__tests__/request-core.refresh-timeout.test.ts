@@ -259,7 +259,11 @@ describe("tldwRequest timeout bounds", () => {
     // and resolve rather than hang.
     await vi.advanceTimersByTimeAsync(120001)
     const resp = await pending
-    expect(resp.status).toBe(200)
-    expect(resp.data).toBeNull()
+    expect(resp).toMatchObject({
+      ok: false,
+      status: 0,
+      code: "REQUEST_TIMEOUT",
+      error: "Request timed out.",
+    })
   })
 })

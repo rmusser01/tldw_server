@@ -21,7 +21,7 @@ describe("Chat state when its route is unmounted", () => {
     const messages = [{ role: "user" as const, isBot: false, name: "Alice", message: "ALICE PRIVATE", sources: [] }]
     useStoreMessageOption.setState({ messages, history: [{ role: "user", content: "ALICE PRIVATE" }],
       historyId: "alice-history", serverChatId: "alice-chat", serverChatTitle: "Alice private title",
-      selectedModel: "keep-model", contextFiles: [], replyTarget: null })
+      selectedModel: "keep-model", contextFiles: [], replyTarget: null, detachedHistoryResponse: {} })
     useStoreMessage.setState({ messages, history: [{ role: "user", content: "ALICE PRIVATE" }], historyId: "alice-history" })
     usePlaygroundSessionStore.getState().saveSession({ serverChatId: "alice-chat", scopeKey: "alice" })
     useSidepanelChatTabsStore.setState({ tabs: [{ id: "alice-inactive", label: "ALICE PRIVATE TITLE", historyId: "alice-history", serverChatId: null, serverChatTopic: null, updatedAt: 1 }], activeTabId: "alice-inactive", snapshotsById: {} })
@@ -29,7 +29,7 @@ describe("Chat state when its route is unmounted", () => {
 
   const expectCleared = () => {
     expect(useStoreMessageOption.getState()).toMatchObject({ messages: [], history: [], historyId: null,
-      serverChatId: null, serverChatTitle: null, selectedModel: "keep-model" })
+      serverChatId: null, serverChatTitle: null, selectedModel: "keep-model", detachedHistoryResponse: null })
     expect(useStoreMessage.getState()).toMatchObject({ messages: [], history: [], historyId: null })
     expect(usePlaygroundSessionStore.getState().serverChatId).toBeNull()
     expect(useSidepanelChatTabsStore.getState()).toMatchObject({ tabs: [], activeTabId: null, snapshotsById: {} })
@@ -66,5 +66,26 @@ describe("Chat state when its route is unmounted", () => {
     expect(usePlaygroundSessionStore.getState().serverChatId).toBe("alice-chat")
     expect(useSidepanelChatTabsStore.getState().tabs[0].label).toBe("ALICE PRIVATE TITLE")
     expect(useStoreChatModelSettings.getState().getEffectiveSettings("llama:one").systemPrompt).toBe("ALICE MODEL SECRET")
+  })
+})
+
+
+describe("saved server chat acceptance", () => {
+  beforeEach(() => useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true))
+
+  it("atomically retires temporary mode when accepting a saved target", () => {
+    useStoreMessageOption.setState({ temporaryChat: true })
+    const transitions: Array<{ id: string | null; temporary: boolean }> = []
+    const stop = useStoreMessageOption.subscribe(state => transitions.push({ id: state.serverChatId, temporary: state.temporaryChat }))
+    try {
+      useStoreMessageOption.getState().setServerChatId("saved-chat")
+      expect(transitions).toEqual([{ id: "saved-chat", temporary: false }])
+    } finally { stop() }
+  })
+
+  it("retains temporary mode when clearing a server target", () => {
+    useStoreMessageOption.setState({ temporaryChat: true })
+    useStoreMessageOption.getState().setServerChatId(null)
+    expect(useStoreMessageOption.getState().temporaryChat).toBe(true)
   })
 })

@@ -73,6 +73,8 @@ describe("notes export utils", () => {
       }
     )
 
+    expect(new DOMParser().parseFromString(html, "text/html")
+      .querySelector('head > meta[name="referrer"]')?.getAttribute("content")).toBe("no-referrer")
     expect(html).toContain("Printable &lt;Note&gt;")
     expect(html).toContain("<strong>bold</strong>")
     expect(html).toContain("Tags:</strong> research, summary")
@@ -231,6 +233,8 @@ describe("notes export utils", () => {
       }
     )
 
+    expect(new DOMParser().parseFromString(html, "text/html")
+      .querySelector('head > meta[name="referrer"]')?.getAttribute("content")).toBe("no-referrer")
     expect(html).toContain('data-paper-size="A4"')
     expect(html).toContain("studio-template-cornell")
     expect(html).toContain("studio-cornell-layout")

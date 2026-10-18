@@ -28,6 +28,8 @@ import {
   within,
   type PlaygroundView
 } from "./harness/playground-harness"
+import { act } from "@testing-library/react"
+import { getChatTurnSettlement } from "@/hooks/chat/abort-turn-cleanup"
 import { beforeEach, describe, expect, it } from "vitest"
 import { useConnectionStore } from "@/store/connection"
 import { useStoreMessageOption } from "@/store/option"
@@ -147,6 +149,27 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     ).toBe("serverFailed")
   })
 
+  it("a simulated reload drains the destroyed page before another page owns chat activity", async () => {
+    const server = createFakeTldwServer()
+    server.planCompletion({ chunks: ["Old page partial", " never arrives"], pauseAfterChunks: 1 })
+    const view = await renderPlayground({ server })
+    await startSend(view, "Question from the destroyed page")
+    await waitForStreamedText("Old page partial")
+    const response = view.getController()!
+    expect(response).not.toBeNull()
+
+    await simulatePageReload(view)
+
+    expect(response.signal.aborted).toBe(true)
+    expect(getChatTurnSettlement(response.signal)?.pending).toBe(false)
+    await renderPlayground({ server, keepBrowserState: true })
+    await waitFor(() => expect(transcript()).toEqual([
+      { role: "user", text: "Question from the destroyed page" },
+      { role: "assistant", text: "Old page partial", interrupted: true }
+    ]), HARNESS_WAIT)
+    expect(server.completionRequests()).toHaveLength(1)
+  })
+
   it("CS-04: a reply cut off by a dropped connection keeps the partial answer marked Interrupted, and Retry resends the question", async () => {
     const server = createFakeTldwServer()
     const resume = deferred()
@@ -215,6 +238,116 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     expect(within(notice).getByRole("button", { name: /retry/i })).toBeInTheDocument()
     expect(screen.queryByText("Turn needs review")).not.toBeInTheDocument()
   })
+
+  it.each([
+    { temporary: false, control: "form" },
+    { temporary: true, control: "form" },
+    { temporary: false, control: "row" },
+    { temporary: true, control: "row" }
+  ])(
+    "an explicit keyboard Stop returns its removed control to the real composer ($control, temporary=$temporary)",
+    async ({ temporary, control }) => {
+      const server = createFakeTldwServer()
+      server.planCompletion({
+        chunks: ["Partial answer", " not wanted"],
+        pauseAfterChunks: 1
+      })
+      const view = await renderPlayground({ server })
+      if (temporary)
+        act(() => useStoreMessageOption.getState().startNewChatDraft(true))
+      await startSend(view, "Explain the owned keyboard Stop")
+      await waitForStreamedText("Partial answer")
+      const source = useStoreMessageOption.getState()
+      const stop = await screen.findByRole("button", {
+        name: control === "form" ? "Stop Streaming" : "Stop streaming response"
+      }, HARNESS_WAIT)
+      stop.focus()
+      await view.user.keyboard("{Enter}")
+      await waitForChatIdle()
+      await waitFor(() => expect(view.composer).toHaveFocus(), HARNESS_WAIT)
+      expect(stop.isConnected).toBe(false)
+      expect(transcript().find((row) => row.role === "assistant")?.stopped).toBe(
+        true
+      )
+      if (temporary) {
+        expect(source.historyId).toBeNull()
+        expect(useStoreMessageOption.getState().historyId).toBe("temp")
+        expect(useStoreMessageOption.getState().chatDraftAddress).toBe(
+          source.chatDraftAddress
+        )
+        expect(useStoreMessageOption.getState().chatDraftRevision).toBe(
+          source.chatDraftRevision
+        )
+      }
+    }
+  )
+
+  it.each(["form", "row"])(
+    "a held stopped %s history installation cannot focus a replacement chat",
+    async (control) => {
+      const server = createFakeTldwServer()
+      server.planCompletion({
+        chunks: ["Partial answer", " not wanted"],
+        pauseAfterChunks: 1
+      })
+      const read = deferred(),
+        arrived = deferred()
+      let hold = false
+      const fetch = server.fetch
+      server.fetch = async (input, init) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input.url
+        if (
+          hold &&
+          /\/history\/selection$/.test(new URL(url, server.url).pathname)
+        ) {
+          arrived.resolve()
+          await read.promise
+        }
+        return fetch(input, init)
+      }
+      const view = await renderPlayground({ server })
+      await startSend(view, "Keep this stopped reply")
+      await waitForStreamedText("Partial answer")
+      const original = useStoreMessageOption.getState().chatDraftAddress
+      hold = true
+      const stop = screen.getByRole("button", {
+        name: control === "form" ? "Stop Streaming" : "Stop streaming response"
+      })
+      stop.focus()
+      await view.user.keyboard("{Enter}")
+      await arrived.promise
+      act(() => useStoreMessageOption.getState().startNewChatDraft())
+      await waitFor(
+        () =>
+          expect(useStoreMessageOption.getState().chatDraftAddress).not.toBe(
+            original
+          ),
+        HARNESS_WAIT
+      )
+      await view.user.type(view.composer, "Exact replacement draft.  ")
+      const outside = document.createElement("button")
+      document.body.append(outside)
+      outside.focus()
+      outside.blur()
+      try {
+        hold = false
+        read.resolve()
+        await waitForChatIdle()
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        expect(view.composer).toHaveValue("Exact replacement draft.  ")
+        expect(document.body).toHaveFocus()
+        expect(server.completionRequests()).toHaveLength(1)
+      } finally {
+        outside.remove()
+        read.resolve()
+      }
+    }
+  )
 
   it("CS-04: a message sent while Stop's kept turn is still loading waits in the composer, then sends", async () => {
     const server = createFakeTldwServer()

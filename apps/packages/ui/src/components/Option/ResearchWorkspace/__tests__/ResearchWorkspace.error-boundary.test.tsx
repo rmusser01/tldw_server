@@ -1,6 +1,15 @@
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render as renderUI, screen } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ResearchWorkspace } from "../index"
+
+
+// Match the router context provided by both deployed shells.
+const render: typeof renderUI = (ui, options) =>
+  renderUI(ui, {
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
+    ...options
+  })
 
 const testState = {
   isMobile: false,

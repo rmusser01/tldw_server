@@ -14,9 +14,11 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_generation_preset
     supports_saved_character_extensions,
 )
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
+    DEFAULT_PROMPT_PRESET,
     ST_DEFAULT_PROMPT_PRESET,
     build_character_system_prompt,
     build_custom_system_prompt,
+    build_saved_builtin_system_prompt,
 )
 from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
 
@@ -48,6 +50,52 @@ _SUPPORTED_SETTINGS = {
 
 def _unsupported(effect: str) -> None:
     raise HistorySelectionError("unsupported_history_context_" + effect)
+
+
+def render_saved_character_prompt(
+    participant: dict[str, Any],
+    values: dict[str, Any],
+    *,
+    user_name: str = "User",
+) -> dict[str, Any]:
+    """Render a detached saved character and saved preset for both history contracts."""
+    prompt = participant["prompt"]
+    card = deepcopy({key: value for key, value in prompt.items() if key != "prompt_relevant_extensions"})
+    card["name"] = participant["identity"]["name"]
+    preset = values.get(
+        "prompt_preset",
+        participant["prompt"]["prompt_relevant_extensions"].get("prompt_preset"),
+    )
+    if preset is not None:
+        if not isinstance(preset.get("section_order"), list) or not isinstance(preset.get("section_templates"), dict):
+            _unsupported("prompt_preset")
+        source = preset.get("source", {})
+        if preset.get("builtin") is True or source.get("kind") == "builtin_prompt_preset":
+            if (
+                preset.get("builtin") is not True
+                or preset.get("preset_id") not in {DEFAULT_PROMPT_PRESET, ST_DEFAULT_PROMPT_PRESET}
+                or source
+                != {
+                    "kind": "builtin_prompt_preset",
+                    "id": preset["preset_id"],
+                    "version": 1,
+                }
+            ):
+                _unsupported("prompt_preset")
+            card["system_prompt"] = build_saved_builtin_system_prompt(card, card["name"], user_name, preset)
+        else:
+            card["system_prompt"] = build_custom_system_prompt(
+                card,
+                card["name"],
+                user_name,
+                preset["section_order"],
+                preset["section_templates"],
+            )
+    else:
+        card["system_prompt"] = build_character_system_prompt(
+            card, card["name"], user_name, preset=ST_DEFAULT_PROMPT_PRESET
+        )
+    return card
 
 
 def project_history_context(
@@ -143,23 +191,7 @@ def project_history_context(
     card_extensions = extensions.get("character_extensions") or {}
     if not supports_saved_character_extensions(card_extensions):
         _unsupported("character_extensions")
-    card = deepcopy({key: value for key, value in prompt.items() if key != "prompt_relevant_extensions"})
-    card["name"] = participant["identity"]["name"]
-    preset = values.get("prompt_preset", extensions.get("prompt_preset"))
-    if preset is not None:
-        if not isinstance(preset.get("section_order"), list) or not isinstance(preset.get("section_templates"), dict):
-            _unsupported("prompt_preset")
-        card["system_prompt"] = build_custom_system_prompt(
-            card,
-            card["name"],
-            "User",
-            preset["section_order"],
-            preset["section_templates"],
-        )
-    else:
-        card["system_prompt"] = build_character_system_prompt(
-            card, card["name"], "User", preset=ST_DEFAULT_PROMPT_PRESET
-        )
+    card = render_saved_character_prompt(participant, values)
     effective = values.get("effective_completion", state.get("effective_completion"))
     if not effective and any(key in settings for key in ("chatGenerationOverride", "generationOverrides")):
         _unsupported("unbound_sampling")

@@ -11,12 +11,35 @@ from pydantic import BaseModel, Field, StrictBool, field_validator, model_serial
 
 from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import (
     HISTORY_BRANCH_FIELD_DESCRIPTION,
+    HISTORY_EDIT_FIELD_DESCRIPTION,
     HistoryAdmissionReferenceV1,
     HistoryAdmissionV1,
+    HistoryEditTargetV1,
     HistorySelectionV1,
 )
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta, PagePaginationMeta
 from tldw_Server_API.app.core.Character_Chat.emote_directives import CharacterEmoteEvent
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import (
+    CharacterChatCompletionV2Response as CharacterChatCompletionV2Response,
+)
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import (
+    RoleplayResumeCompletionResultV1 as RoleplayResumeCompletionResultV1,
+)
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import (
+    RoleplayResumeCompletionV1 as RoleplayResumeCompletionV1,
+)
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import (
+    RoleplayResumeFenceV1 as RoleplayResumeFenceV1,
+)
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import (
+    RoleplayResumeTailV1 as RoleplayResumeTailV1,
+)
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import (
+    RoleplayResumeUserAppendRequest as RoleplayResumeUserAppendRequest,
+)
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_schemas import (
+    RoleplayResumeUserAppendResponse as RoleplayResumeUserAppendResponse,
+)
 from tldw_Server_API.app.core.Chat.assistant_startup import AssistantStartup, reject_assistant_startup_input
 from tldw_Server_API.app.core.Chat.conversation_create_idempotency import normalize_client_conversation_id
 from tldw_Server_API.app.core.LLM_Calls.routing.models import RoutingOverride
@@ -138,8 +161,10 @@ class AssistantOverlaySettings(BaseModel):
     def _validate_updated_at(cls, value: str) -> str:
         return _validate_iso_timestamp_text(value)
 
+
 class ChatSessionCreate(BaseModel):
     """Schema for creating a new chat session."""
+
     id: str | None = Field(
         None,
         description=(
@@ -192,12 +217,7 @@ class ChatSessionCreate(BaseModel):
     repetition_penalty: float = Field(1.0, ge=0.0, le=3.0)
     stop: list[str] = Field(default_factory=list, max_length=64)
 
-    model_config = {"json_schema_extra": {
-        "example": {
-            "character_id": 1,
-            "title": "Evening Chat with Assistant"
-        }
-    }}
+    model_config = {"json_schema_extra": {"example": {"character_id": 1, "title": "Evening Chat with Assistant"}}}
 
     @field_validator("id")
     @classmethod
@@ -214,9 +234,13 @@ class ChatSessionCreate(BaseModel):
     @classmethod
     def _reject_startup_input(cls, value: Any) -> Any:
         """Reject caller-authored origin and strict selectors without closing legacy extras."""
-        if isinstance(value, Mapping) and any(field in value for field in (
-            "workspace_assistant_selection", "workspace_assistant_default_version",
-        )):
+        if isinstance(value, Mapping) and any(
+            field in value
+            for field in (
+                "workspace_assistant_selection",
+                "workspace_assistant_default_version",
+            )
+        ):
             raise ValueError("Workspace assistant selection requires the strict startup route")
         return reject_assistant_startup_input(value)
 
@@ -261,10 +285,7 @@ class ChatSessionCreate(BaseModel):
             raise ValueError("Persona chats require assistant_id.")
         self.character_id = None
 
-        if (
-            self.persona_memory_mode is not None
-            and self.persona_memory_mode not in ALLOWED_PERSONA_MEMORY_MODES
-        ):
+        if self.persona_memory_mode is not None and self.persona_memory_mode not in ALLOWED_PERSONA_MEMORY_MODES:
             raise ValueError(
                 f"Invalid persona_memory_mode '{self.persona_memory_mode}'. "
                 f"Allowed: {', '.join(ALLOWED_PERSONA_MEMORY_MODES)}"
@@ -274,6 +295,7 @@ class ChatSessionCreate(BaseModel):
 
 class ChatSessionUpdate(BaseModel):
     """Schema for updating a chat session."""
+
     title: Optional[str] = Field(None, description="New title for the chat")
     rating: Optional[int] = Field(None, ge=1, le=5, description="Rating for the conversation")
     state: Optional[str] = Field(None, description="Lifecycle state for the conversation")
@@ -282,12 +304,7 @@ class ChatSessionUpdate(BaseModel):
     source: Optional[str] = Field(None, description="Source of the conversation (e.g., email, issue)")
     external_ref: Optional[str] = Field(None, description="External reference/link for the conversation")
 
-    model_config = {"json_schema_extra": {
-        "example": {
-            "title": "Updated Chat Title",
-            "rating": 5
-        }
-    }}
+    model_config = {"json_schema_extra": {"example": {"title": "Updated Chat Title", "rating": 5}}}
 
     @field_validator("state")
     @classmethod
@@ -303,6 +320,7 @@ class ChatSessionUpdate(BaseModel):
 
 class ChatSessionListItem(BaseModel):
     """Chat list item without authoritative resume-detail fields."""
+
     assistant_startup: AssistantStartup = Field(default_factory=AssistantStartup, json_schema_extra={"readOnly": True})
     id: str = Field(..., description="UUID of the chat session")
     scope_type: Literal["global", "workspace"] = Field(
@@ -353,6 +371,7 @@ class ChatSessionResponse(ChatSessionListItem):
     behavior_snapshot: "BehaviorSnapshotStatus" = Field(
         default_factory=lambda: BehaviorSnapshotStatus(status="missing")
     )
+    resume_completion: Optional["ResumeCompletionDisplay"] = None
     resume_eligible: bool = False
     resume_ineligible_reason: str | None = "behavior_snapshot_missing"
     settings_version: int | None = None
@@ -362,6 +381,13 @@ class ChatSessionResponse(ChatSessionListItem):
     )
 
     model_config = {"from_attributes": True}
+
+
+class ResumeCompletionDisplay(BaseModel):
+    """Original provider/model labels, excluding private prompts and runtime credentials."""
+
+    provider: str = Field(min_length=1, max_length=128)
+    model: str = Field(min_length=1, max_length=512)
 
 
 class BehaviorSnapshotStatus(BaseModel):
@@ -381,6 +407,7 @@ class ConversationTailFence(BaseModel):
 
 class ChatSessionListResponse(BaseModel):
     """Schema for listing chat sessions."""
+
     chats: list[ChatSessionListItem] = Field(..., description="List of chat sessions")
     total: int = Field(..., description="Total number of chats")
     limit: int = Field(..., description="Number of items per page")
@@ -419,11 +446,13 @@ class ChatLinkedResearchRunsListResponse(BaseModel):
 
 class ChatSettingsUpdate(BaseModel):
     """Schema for updating chat settings."""
+
     settings: dict[str, Any] = Field(..., description="Chat settings payload")
 
 
 class ChatSettingsResponse(BaseModel):
     """Schema for chat settings responses."""
+
     conversation_id: str = Field(..., description="Conversation ID")
     settings: dict[str, Any] = Field(..., description="Stored chat settings")
     last_modified: datetime = Field(..., description="Settings last modified timestamp")
@@ -434,17 +463,30 @@ class ChatSettingsResponse(BaseModel):
 # Message Schemas
 # ========================================================================
 
+
 class MessageCreate(BaseModel):
     """Schema for creating a new message."""
+
     id: str | None = Field(None, min_length=1, max_length=255)
     tldw_history_selection_v1: HistorySelectionV1 | None = None
     tldw_history_branch: StrictBool | None = Field(None, description=HISTORY_BRANCH_FIELD_DESCRIPTION)
+    tldw_history_edit_v1: HistoryEditTargetV1 | None = Field(None, description=HISTORY_EDIT_FIELD_DESCRIPTION)
     tldw_history_admission_v1: HistoryAdmissionReferenceV1 | None = None
 
     @model_validator(mode="after")
     def _validate_history_fields(self) -> "MessageCreate":
         if self.tldw_history_branch is not None and self.tldw_history_selection_v1 is None:
             raise ValueError("tldw_history_branch requires tldw_history_selection_v1")
+        if self.tldw_history_edit_v1 is not None:
+            selection = self.tldw_history_selection_v1
+            if (
+                self.tldw_history_branch is not True
+                or selection is None
+                or selection.purpose != "send"
+                or selection.cursor.kind != "before_message"
+                or selection.cursor.message_id != self.tldw_history_edit_v1.message_id
+            ):
+                raise ValueError("Protected Edit requires an explicit branch and matching before-message selection")
         if self.tldw_history_selection_v1 is not None and self.role != "user":
             raise ValueError("Selection requires user role")
         if self.tldw_history_admission_v1 is not None and self.role != "assistant":
@@ -452,6 +494,7 @@ class MessageCreate(BaseModel):
         if (self.tldw_history_selection_v1 is not None or self.tldw_history_admission_v1 is not None) and not self.id:
             raise ValueError("Versioned messages require a stable id")
         return self
+
     role: Literal["user", "assistant", "system"] = Field(..., description="Message sender role")
     content: Optional[str] = Field(
         None,
@@ -461,12 +504,7 @@ class MessageCreate(BaseModel):
     parent_message_id: Optional[str] = Field(None, description="Parent message ID for branching")
     image_base64: Optional[str] = Field(None, description="Optional base64 encoded image")
 
-    model_config = {"json_schema_extra": {
-        "example": {
-            "role": "user",
-            "content": "Hello, how are you today?"
-        }
-    }}
+    model_config = {"json_schema_extra": {"example": {"role": "user", "content": "Hello, how are you today?"}}}
 
     @model_validator(mode="after")
     def _validate_content_or_image(self) -> "MessageCreate":
@@ -483,6 +521,7 @@ class MessageCreate(BaseModel):
 
 class MessageUpdate(BaseModel):
     """Schema for updating a message."""
+
     content: Optional[str] = Field(
         None,
         description="New message content",
@@ -493,11 +532,7 @@ class MessageUpdate(BaseModel):
         description="Optional pin state for this message.",
     )
 
-    model_config = {"json_schema_extra": {
-        "example": {
-            "content": "Updated message content"
-        }
-    }}
+    model_config = {"json_schema_extra": {"example": {"content": "Updated message content"}}}
 
     @model_validator(mode="after")
     def _validate_content_or_pin_update(self) -> "MessageUpdate":
@@ -510,6 +545,7 @@ class MessageUpdate(BaseModel):
 
 class MessageResponse(BaseModel):
     """Schema for message responses."""
+
     tldw_history_admission_v1: HistoryAdmissionV1 | None = None
     id: str = Field(..., description="UUID of the message")
     conversation_id: str = Field(..., description="ID of the parent conversation")
@@ -519,9 +555,13 @@ class MessageResponse(BaseModel):
     timestamp: datetime = Field(..., description="Message timestamp")
     ranking: Optional[int] = Field(None, description="Message ranking/rating")
     has_image: bool = Field(False, description="Whether message has an attached image")
-    images: Optional[list[str]] = Field(None, description="Complete ordered image data URLs, only when explicitly requested")
+    images: Optional[list[str]] = Field(
+        None, description="Complete ordered image data URLs, only when explicitly requested"
+    )
     version: int = Field(1, description="Version number for optimistic locking")
-    tool_calls: Optional[list[dict[str, Any]]] = Field(None, description="Tool calls associated with this message (if any)")
+    tool_calls: Optional[list[dict[str, Any]]] = Field(
+        None, description="Tool calls associated with this message (if any)"
+    )
     metadata_extra: Optional[dict[str, Any]] = Field(
         None,
         description=(
@@ -543,6 +583,7 @@ class MessageResponse(BaseModel):
 
 class MessageListResponse(BaseModel):
     """Schema for listing messages."""
+
     messages: list[MessageResponse] = Field(..., description="List of messages")
     total: int = Field(..., description="Total number of messages")
     limit: int = Field(..., description="Number of items per page")
@@ -560,8 +601,10 @@ class MessageListResponse(BaseModel):
 # Chat Completion Schemas
 # ========================================================================
 
+
 class CharacterChatCompletionV1Request(BaseModel):
     """Schema for character-specific chat completion requests."""
+
     message: str = Field(..., description="User message to respond to", min_length=1)
     max_tokens: Optional[int] = Field(500, ge=1, le=4096, description="Maximum tokens in response")
     temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0, description="Response randomness")
@@ -569,38 +612,40 @@ class CharacterChatCompletionV1Request(BaseModel):
     include_history: bool = Field(True, description="Include conversation history")
     history_limit: Optional[int] = Field(20, ge=0, le=100, description="Number of history messages to include")
 
-    model_config = {"json_schema_extra": {
-        "example": {
-            "message": "What's your favorite color?",
-            "max_tokens": 150,
-            "temperature": 0.8,
-            "stream": False
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "message": "What's your favorite color?",
+                "max_tokens": 150,
+                "temperature": 0.8,
+                "stream": False,
+            }
         }
-    }}
+    }
 
 
 class CharacterChatCompletionV1Response(BaseModel):
     """Schema for chat completion responses."""
+
     response: str = Field(..., description="AI response")
     message_id: str = Field(..., description="ID of the created message")
     usage: Optional[dict[str, int]] = Field(None, description="Token usage statistics")
 
-    model_config = {"json_schema_extra": {
-        "example": {
-            "response": "My favorite color is blue, like the vast ocean!",
-            "message_id": "550e8400-e29b-41d4-a716-446655440000",
-            "usage": {
-                "prompt_tokens": 45,
-                "completion_tokens": 12,
-                "total_tokens": 57
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "response": "My favorite color is blue, like the vast ocean!",
+                "message_id": "550e8400-e29b-41d4-a716-446655440000",
+                "usage": {"prompt_tokens": 45, "completion_tokens": 12, "total_tokens": 57},
             }
         }
-    }}
+    }
 
 
 # ========================================================================
 # Character Chat v2 + Prep Schemas (centralized)
 # ========================================================================
+
 
 class MessageSteeringPromptOverrides(BaseModel):
     """Optional prompt text overrides for single-turn message steering."""
@@ -627,6 +672,7 @@ class CharacterChatCompletionPrepRequest(BaseModel):
 
     Controls pagination and optional user message appending for preparation.
     """
+
     include_character_context: bool = Field(True, description="Include character system context")
     limit: int = Field(100, ge=1, le=1000, description="Max messages to include")
     offset: int = Field(0, ge=0, description="Messages offset")
@@ -764,6 +810,38 @@ class CharacterChatCompletionV2Request(BaseModel):
     Includes provider/model controls, optional appended user message,
     persistence toggle, and streaming control.
     """
+
+    tldw_roleplay_resume_v1: RoleplayResumeCompletionV1 | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _require_protected_resume_controls(cls, value: Any) -> Any:
+        if not isinstance(value, dict) or "tldw_roleplay_resume_v1" not in value:
+            return value
+        if value["tldw_roleplay_resume_v1"] is None:
+            raise ValueError("Protected Resume requires its complete contract")
+        if set(value) - {
+            "tldw_roleplay_resume_v1",
+            "stream",
+            "save_to_db",
+            "append_user_message",
+            "include_character_context",
+        }:
+            raise ValueError("Protected Resume accepts no request-time behavior override")
+        if "save_to_db" in value and value["save_to_db"] is not True:
+            raise ValueError("Protected Resume requires assistant persistence")
+        if "include_character_context" in value and value["include_character_context"] is not True:
+            raise ValueError("Protected Resume requires its saved snapshot context")
+        if (
+            "append_user_message" in value
+            and value["append_user_message"] is not None
+            and value["append_user_message"] is not False
+        ):
+            raise ValueError("Protected Resume uses only its acknowledged input")
+        if "stream" in value and value["stream"] is not False:
+            raise ValueError("Protected streaming Resume is not supported")
+        return {**value, "append_user_message": None, "save_to_db": True}
+
     # Character/context controls
     include_character_context: bool = Field(True, description="Include character system context")
     limit: int = Field(100, ge=1, le=1000, description="Max messages to include")
@@ -859,32 +937,13 @@ class CharacterChatCompletionV2Request(BaseModel):
         return self
 
 
-class CharacterChatCompletionV2Response(BaseModel):
-    chat_id: str
-    character_id: int
-    provider: str
-    model: Optional[str] = None
-    saved: bool = False
-    user_message_id: Optional[str] = None
-    assistant_message_id: Optional[str] = None
-    assistant_content: str
-    speaker_character_id: Optional[int] = None
-    speaker_character_name: Optional[str] = None
-    mood_label: Optional[str] = None
-    mood_confidence: Optional[float] = None
-    mood_topic: Optional[str] = None
-    lorebook_diagnostics: Optional[list[dict[str, Any]]] = Field(
-        None,
-        description="Lorebook/world book trigger diagnostics for this turn",
-    )
-
-
 # New: Persist streamed assistant content after SSE
 class CharacterChatStreamPersistRequest(BaseModel):
     """Persist assistant content produced via streaming.
 
     Use after a streamed completion where the assistant content was not persisted.
     """
+
     tldw_history_admission_v1: HistoryAdmissionReferenceV1 | None = None
 
     @model_validator(mode="after")
@@ -893,7 +952,9 @@ class CharacterChatStreamPersistRequest(BaseModel):
             raise ValueError("Versioned persistence requires assistant_message_id")
         return self
 
-    assistant_content: str = Field(..., min_length=1, max_length=1_000_000, description="Assistant text to persist (max 1MB)")
+    assistant_content: str = Field(
+        ..., min_length=1, max_length=1_000_000, description="Assistant text to persist (max 1MB)"
+    )
     assistant_message_id: Optional[str] = Field(
         None,
         min_length=1,
@@ -932,7 +993,9 @@ class CharacterChatStreamPersistRequest(BaseModel):
         description="Optional sanitized character emote events for this assistant message.",
     )
     tool_calls: Optional[list[dict[str, Any]]] = Field(None, description="Optional tool_calls metadata to store")
-    usage: Optional[dict[str, int]] = Field(None, description="Optional token usage stats: prompt_tokens, completion_tokens, total_tokens")
+    usage: Optional[dict[str, int]] = Field(
+        None, description="Optional token usage stats: prompt_tokens, completion_tokens, total_tokens"
+    )
     chat_rating: Optional[int] = Field(None, ge=1, le=5, description="Optional conversation rating to set (1-5)")
     ranking: Optional[int] = Field(None, description="Optional ranking for the assistant message")
 
@@ -957,8 +1020,10 @@ class CharacterChatStreamPersistResponse(BaseModel):
 # Export Schemas
 # ========================================================================
 
+
 class ChatExportFormat(BaseModel):
     """Schema for chat export format options."""
+
     format: Literal["json", "markdown", "text"] = Field("json", description="Export format")
     include_metadata: bool = Field(True, description="Include chat metadata")
     include_character: bool = Field(True, description="Include character information")
@@ -966,6 +1031,7 @@ class ChatExportFormat(BaseModel):
 
 class ChatHistoryExport(BaseModel):
     """Schema for exported chat history."""
+
     chat_id: str = Field(..., description="Chat session ID")
     character_name: str = Field(..., description="Character name")
     character_id: int = Field(..., description="Character ID")
@@ -974,72 +1040,69 @@ class ChatHistoryExport(BaseModel):
     messages: list[dict[str, Any]] = Field(..., description="Message history")
     metadata: Optional[dict[str, Any]] = Field(None, description="Additional metadata")
 
-    model_config = {"json_schema_extra": {
-        "example": {
-            "chat_id": "550e8400-e29b-41d4-a716-446655440000",
-            "character_name": "Assistant",
-            "character_id": 1,
-            "title": "Evening Chat",
-            "created_at": "2024-01-15T20:30:00Z",
-            "messages": [
-                {
-                    "role": "user",
-                    "content": "Hello!",
-                    "timestamp": "2024-01-15T20:30:00Z"
-                },
-                {
-                    "role": "assistant",
-                    "content": "Hello! How can I help you?",
-                    "timestamp": "2024-01-15T20:30:05Z"
-                }
-            ]
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "chat_id": "550e8400-e29b-41d4-a716-446655440000",
+                "character_name": "Assistant",
+                "character_id": 1,
+                "title": "Evening Chat",
+                "created_at": "2024-01-15T20:30:00Z",
+                "messages": [
+                    {"role": "user", "content": "Hello!", "timestamp": "2024-01-15T20:30:00Z"},
+                    {"role": "assistant", "content": "Hello! How can I help you?", "timestamp": "2024-01-15T20:30:05Z"},
+                ],
+            }
         }
-    }}
+    }
 
 
 # ========================================================================
 # Error Response Schemas
 # ========================================================================
 
+
 class ChatErrorResponse(BaseModel):
     """Schema for chat-related error responses."""
+
     error: str = Field(..., description="Error type")
     detail: str = Field(..., description="Detailed error message")
     chat_id: Optional[str] = Field(None, description="Related chat ID if applicable")
     message_id: Optional[str] = Field(None, description="Related message ID if applicable")
 
-    model_config = {"json_schema_extra": {
-        "example": {
-            "error": "ChatNotFound",
-            "detail": "Chat session with ID '550e8400-e29b-41d4-a716-446655440000' not found",
-            "chat_id": "550e8400-e29b-41d4-a716-446655440000"
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "error": "ChatNotFound",
+                "detail": "Chat session with ID '550e8400-e29b-41d4-a716-446655440000' not found",
+                "chat_id": "550e8400-e29b-41d4-a716-446655440000",
+            }
         }
-    }}
+    }
 
 
 # ========================================================================
 # Filter Schemas
 # ========================================================================
 
+
 class CharacterTagFilter(BaseModel):
     """Schema for filtering characters by tags."""
+
     tags: list[str] = Field(..., description="Tags to filter by", min_length=1)
     match_all: bool = Field(False, description="Require all tags to match (AND) vs any tag (OR)")
 
-    model_config = {"json_schema_extra": {
-        "example": {
-            "tags": ["fantasy", "wizard"],
-            "match_all": False
-        }
-    }}
+    model_config = {"json_schema_extra": {"example": {"tags": ["fantasy", "wizard"], "match_all": False}}}
 
 
 # ========================================================================
 # Greeting List Picker Schemas (PRD 1 Stage A2)
 # ========================================================================
 
+
 class GreetingItem(BaseModel):
     """A single greeting entry from the character card."""
+
     index: int = Field(..., description="Zero-based index into the greetings list")
     text: str = Field(..., description="Full greeting text")
     preview: str = Field(..., description="First 120 characters of the greeting")
@@ -1047,6 +1110,7 @@ class GreetingItem(BaseModel):
 
 class GreetingListResponse(BaseModel):
     """Response for GET /{chat_id}/greetings."""
+
     chat_id: str
     character_id: Optional[str] = None
     character_name: Optional[str] = None
@@ -1057,11 +1121,13 @@ class GreetingListResponse(BaseModel):
 
 class GreetingSelectRequest(BaseModel):
     """Request body for PUT /{chat_id}/greetings/select."""
+
     index: int = Field(..., description="Zero-based index of the greeting to select")
 
 
 class GreetingSelectResponse(BaseModel):
     """Response for PUT /{chat_id}/greetings/select."""
+
     chat_id: str
     selected_index: int
     greeting_preview: str
@@ -1072,8 +1138,10 @@ class GreetingSelectResponse(BaseModel):
 # Author Note Info Schemas (PRD 4 Stage D2)
 # ========================================================================
 
+
 class AuthorNoteInfoResponse(BaseModel):
     """Response for GET /{chat_id}/author-note/info."""
+
     chat_id: str
     text: str = Field("", description="Author note text for UI display")
     text_for_prompt: str = Field("", description="Author note text as injected into LLM prompt")
@@ -1093,8 +1161,10 @@ class AuthorNoteInfoResponse(BaseModel):
 # Lorebook Diagnostic Export Schemas (PRD 6 Stage F2)
 # ========================================================================
 
+
 class DiagnosticTurnEntry(BaseModel):
     """A single turn's lorebook diagnostics."""
+
     message_id: str
     timestamp: Optional[str] = None
     turn_number: int
@@ -1104,6 +1174,7 @@ class DiagnosticTurnEntry(BaseModel):
 
 class LorebookDiagnosticExportResponse(BaseModel):
     """Response for GET /{chat_id}/diagnostics/lorebook."""
+
     chat_id: str
     character_id: Optional[str] = None
     total_turns_with_diagnostics: int = 0
@@ -1117,14 +1188,17 @@ class LorebookDiagnosticExportResponse(BaseModel):
 # Preset Editor Schemas (PRD 2 Stage B2)
 # ========================================================================
 
+
 class PresetTokenInfo(BaseModel):
     """Template token with description."""
+
     token: str = Field(..., description="Template token, e.g. '{{char}}'")
     description: str = Field(..., description="What the token resolves to")
 
 
 class PresetDetail(BaseModel):
     """Full details of a prompt preset."""
+
     preset_id: str
     name: str
     builtin: bool = Field(False, description="Whether this is a built-in preset")
@@ -1136,11 +1210,13 @@ class PresetDetail(BaseModel):
 
 class PresetListResponse(BaseModel):
     """Response for GET /presets."""
+
     presets: list[PresetDetail] = Field(default_factory=list)
 
 
 class PresetCreate(BaseModel):
     """Request body for POST /presets."""
+
     preset_id: str = Field(..., min_length=1, max_length=128, description="Unique identifier for the preset")
     name: str = Field(..., min_length=1, max_length=256, description="Display name")
     section_order: list[str] = Field(..., description="Ordered list of section keys")
@@ -1157,6 +1233,7 @@ class PresetCreate(BaseModel):
 
 class PresetUpdate(BaseModel):
     """Request body for PUT /presets/{preset_id}."""
+
     name: Optional[str] = Field(None, min_length=1, max_length=256)
     section_order: Optional[list[str]] = None
     section_templates: Optional[dict[str, str]] = None

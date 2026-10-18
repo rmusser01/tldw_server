@@ -136,6 +136,89 @@ describe("fetchChatModels", () => {
     expect(mocks.getChatModels).toHaveBeenCalledTimes(2)
   })
 
+  it.each([
+    { requireFresh: false, invalidate: true, forceRefresh: false },
+    { requireFresh: true, invalidate: true, forceRefresh: false },
+    { requireFresh: true, invalidate: true, forceRefresh: true },
+    { requireFresh: false, invalidate: false, forceRefresh: false },
+    { requireFresh: true, invalidate: false, forceRefresh: false }
+  ])(
+    "settles a held config read before sharing discovery (%j)",
+    async (options) => {
+      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+      vi.stubEnv("NEXT_PUBLIC_API_URL", "")
+      const config = {
+        serverUrl: "http://localhost:3000",
+        authMode: "single-user",
+        authSource: "cookie-session"
+      }
+      const heldConfig = deferred<typeof config>()
+      mocks.getConfig
+        .mockImplementationOnce(() => heldConfig.promise)
+        .mockResolvedValue(config)
+      mocks.getChatModels.mockResolvedValue([
+        {
+          id: "current-model",
+          name: "Current model",
+          provider: "llama",
+          type: "chat"
+        }
+      ])
+      const { fetchChatModels } = await importService()
+      const settled = vi.fn()
+      const pending = fetchChatModels({
+        returnEmpty: true,
+        refreshOpenRouter: true,
+        requireFresh: options.requireFresh,
+        forceRefresh: options.forceRefresh
+      }).then(settled)
+      await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledOnce())
+      if (options.invalidate)
+        mocks.invalidationListener?.("config-retired-during-read")
+      heldConfig.resolve(config)
+      await vi.waitFor(() => expect(settled).toHaveBeenCalledOnce())
+      expect(settled).toHaveBeenCalledWith([
+        expect.objectContaining({ model: "tldw:current-model" })
+      ])
+      expect(mocks.getConfig).toHaveBeenCalledTimes(options.invalidate ? 2 : 1)
+      expect(mocks.getChatModels).toHaveBeenCalledTimes(1)
+      expect(mocks.getChatModels).toHaveBeenCalledWith(options.forceRefresh, {
+        refreshOpenRouter: true,
+        ...(options.requireFresh
+          ? { requireFresh: true, throwOnError: true }
+          : {})
+      })
+      await pending
+    }
+  )
+
+  it("rereads a retired held config and shares its already-current successor", async () => {
+    const config = { serverUrl: "http://current", authMode: "multi-user" }
+    const heldConfig = deferred<typeof config>()
+    const heldModels = deferred<Array<Record<string, unknown>>>()
+    mocks.getConfig
+      .mockImplementationOnce(() => heldConfig.promise)
+      .mockResolvedValue(config)
+    mocks.getChatModels.mockImplementation(() => heldModels.promise)
+    const { fetchChatModels } = await importService()
+    const first = fetchChatModels({ requireFresh: true })
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledOnce())
+    mocks.invalidationListener?.("successor-during-config")
+    const current = fetchChatModels({ requireFresh: true })
+    await vi.waitFor(() => expect(mocks.getChatModels).toHaveBeenCalledOnce())
+    heldConfig.resolve(config)
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledTimes(3))
+    heldModels.resolve([
+      { id: "successor", name: "Successor", provider: "llama", type: "chat" }
+    ])
+    await expect(Promise.all([first, current])).resolves.toEqual([
+      [expect.objectContaining({ model: "tldw:successor" })],
+      [expect.objectContaining({ model: "tldw:successor" })]
+    ])
+    expect(mocks.getConfig).toHaveBeenCalledTimes(3)
+    expect(mocks.getChatModels).toHaveBeenCalledOnce()
+  })
+
   it("shares simultaneous cookie requests with the same authentication mode", async () => {
     vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
     vi.stubEnv("NEXT_PUBLIC_API_URL", "")

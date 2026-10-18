@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.unit
+
 ROOT = Path(__file__).resolve().parents[3]
 
 
@@ -14,7 +16,10 @@ ROOT = Path(__file__).resolve().parents[3]
     "scenario",
     ["audit_pending", "audit_failed", "gate_pending", "stale_gate", "changed_head", "success", "success_no_merge"],
 )
-def test_release_helper_requires_success_for_the_current_head(tmp_path, scenario):
+def test_release_helper_requires_success_for_the_current_head(
+    tmp_path: Path, scenario: str
+) -> None:
+    """Only finished checks for an unchanged PR head may authorize merging."""
     gh = tmp_path / "gh"
     gh.write_text("""#!/bin/sh
 case "$1 $2" in

@@ -1,18 +1,21 @@
-import { useQuery } from "@tanstack/react-query"
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { Avatar, Dropdown, Input, Select, Tooltip, type MenuProps } from "antd"
 import { LucideBrain, Star } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
-import { fetchChatModels } from "@/services/tldw-server"
-import { useMessage } from "@/hooks/useMessage"
+import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
+import { SelectedModelSaveFeedback } from "./SelectedModelSaveFeedback"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { ProviderIcons } from "./ProviderIcon"
 import { IconButton } from "./IconButton"
+import { useStoreChatModelSettings } from "@/store/model"
+import { getCanonicalModelKey, resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils"
 
 export type Props = {
   iconClassName?: string
   showSelectedName?: boolean
+  showPicker?: boolean
 }
 
 export type ModelSelectHandle = {
@@ -46,11 +49,12 @@ const LOCAL_PROVIDERS = new Set([
 ])
 
 const ModelSelectBase = (
-  { iconClassName = "size-5", showSelectedName = false }: Props,
+  { iconClassName = "size-5", showSelectedName = false, showPicker = true }: Props,
   ref: React.ForwardedRef<ModelSelectHandle>
 ) => {
   const { t } = useTranslation("common")
-  const { setSelectedModel, selectedModel } = useMessage()
+  const { setSelectedModel, selectedModel, selectedModelSaveFailed, retrySelectedModelSave } = useSelectedModel()
+  const apiProvider = useStoreChatModelSettings(state => state.apiProvider)
   const selectedModelValue =
     typeof selectedModel === "string" ? selectedModel : null
   const [menuDensity] = useStorage("menuDensity", "comfortable")
@@ -75,10 +79,12 @@ const ModelSelectBase = (
     }),
     []
   )
-  const { data, isLoading } = useQuery<ChatModel[]>({
-    queryKey: ["getAllModelsForSelect"],
-    queryFn: () => fetchChatModels({ returnEmpty: true })
-  })
+  const { data, isLoading, isError, refetch } = useChatModelCatalog()
+
+  const selectedSelection = React.useMemo(
+    () => resolveModelSelectorSelection(data, selectedModelValue, apiProvider),
+    [data, selectedModelValue, apiProvider]
+  )
 
   const favoriteSet = React.useMemo(
     () => new Set((favoriteModels || []).map((value) => String(value))),
@@ -162,7 +168,7 @@ const ModelSelectBase = (
         : t("modelSelect.favoriteAdd", "Add to favorites")
 
       return {
-        key: model.model,
+        key: getCanonicalModelKey(model),
         label: (
           <div className="w-56 gap-2 text-sm inline-flex items-start leading-5">
             <div>
@@ -223,11 +229,7 @@ const ModelSelectBase = (
           </div>
         ),
         onClick: () => {
-          if (selectedModelValue === model.model) {
-            setSelectedModel(null)
-          } else {
-            setSelectedModel(model.model)
-          }
+          void setSelectedModel(getCanonicalModelKey(model)).catch(() => undefined)
         }
       }
     }
@@ -313,7 +315,6 @@ const ModelSelectBase = (
   }, [
     favoriteSet,
     filteredData,
-    selectedModelValue,
     setSelectedModel,
     sortMode,
     t,
@@ -323,17 +324,35 @@ const ModelSelectBase = (
   // Get display name for selected model
   const selectedModelDisplay = React.useMemo(() => {
     if (!selectedModelValue || !data) return null
-    const model = data.find(m => m.model === selectedModelValue)
+    const model = selectedSelection.model
     if (!model) return selectedModelValue.split('/').pop() || selectedModelValue
     // Use nickname if available, otherwise extract short name from model ID
     const shortName = model.nickname || model.model.split('/').pop() || model.model
     // Truncate if too long
     return shortName.length > 20 ? shortName.substring(0, 18) + '…' : shortName
-  }, [selectedModelValue, data])
+  }, [selectedModelValue, data, selectedSelection.model])
+
+  const saveFeedback = <SelectedModelSaveFeedback failed={selectedModelSaveFailed} onRetry={retrySelectedModelSave} />
+  // Keep the failed-write owner mounted when a valid selection hides the trigger.
+  if (!showPicker) return saveFeedback
+
+  if (isError) {
+    return (
+      <>{saveFeedback}<IconButton
+        ariaLabel={`${t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")}. ${t("playground:characterChatReadiness.model.retryAction", "Try again")}`}
+        onClick={() => { void refetch() }}
+        dataTestId="chat-model-retry"
+        className="h-11 min-w-11 px-2 text-text-muted"
+      >
+        <LucideBrain className={iconClassName} />
+        <span className="ml-1 text-xs">{t("playground:characterChatReadiness.model.retryAction", "Try again")}</span>
+      </IconButton></>
+    )
+  }
 
   if (isLoading && !data) {
     return (
-      <Tooltip title={t("modelSelect.loading", "Loading models...")}>
+      <>{saveFeedback}<Tooltip title={t("modelSelect.loading", "Loading models...")}>
         <IconButton
           ariaLabel={t("selectAModel") as string}
           disabled
@@ -345,12 +364,13 @@ const ModelSelectBase = (
             {t("modelSelect.loading", "Loading models...")}
           </span>
         </IconButton>
-      </Tooltip>
+      </Tooltip></>
     )
   }
 
   return (
     <>
+      {saveFeedback}
       {data && data.length > 0 && (
         <Dropdown
           open={dropdownOpen}
@@ -363,7 +383,7 @@ const ModelSelectBase = (
           menu={{
             items: menuItems,
             className: `no-scrollbar ${menuDensity === 'compact' ? 'menu-density-compact' : 'menu-density-comfortable'}`,
-            selectedKeys: selectedModelValue ? [selectedModelValue] : [],
+            selectedKeys: selectedSelection.model ? [getCanonicalModelKey(selectedSelection.model)] : [],
             selectable: true
           }}
           popupRender={(menu) => (

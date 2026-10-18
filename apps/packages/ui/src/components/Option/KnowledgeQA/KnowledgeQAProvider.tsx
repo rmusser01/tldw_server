@@ -1,3 +1,8 @@
+import { servicePromptAuthorityKey } from "@/services/tldw/domains/service-prompts";
+import {
+  createNotesGraphAuthorityScope,
+  useNotesGraphAuthorityScope,
+} from "@/components/Notes/hooks/useNotesGraphAuthorityScope";
 /**
  * KnowledgeQAProvider - Context provider for Knowledge QA state management
  */
@@ -13,6 +18,9 @@ import React, {
   useState,
   type ReactNode,
 } from "react"
+import { useTranslation } from "react-i18next"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
+import { removeLocalCopyOfServerChat } from "@/components/Sidepanel/Chat/tab-conversation-actions"
 import { useInRouterContext, useLocation } from "react-router-dom"
 import { parseKnowledgeScope } from "@/utils/knowledge-scope-handoff"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -1763,6 +1771,7 @@ function OwnedKnowledgeQAProvider({
   scopeSearch?: string
   scopeArrivalKey?: string
 }) {
+  const { t } = useTranslation("common")
   const [state, rawDispatch] = useReducer(reducer, initialState)
   const mounted = useRef(true)
   const isCurrent = useCallback(() => mounted.current && authority.isCurrent(), [authority])
@@ -1771,11 +1780,37 @@ function OwnedKnowledgeQAProvider({
     [authority.snapshot, isCurrent]
   )
   const tldwClient = useMemo(() => createKnowledgeQaClient(authority.snapshot, isCurrent), [authority.snapshot, isCurrent])
-  const dispatch = useCallback((action: Action) => {
-    if (isCurrent()) rawDispatch(action)
-  }, [isCurrent])
+  const queryIntentRevisionRef = useRef(0)
+  const dispatch = useCallback(
+    (action: Action) => {
+      if (!isCurrent()) return
+      if (action.type === "SET_QUERY") queryIntentRevisionRef.current += 1
+      rawDispatch(action)
+    },
+    [isCurrent]
+  )
+
   const historyStorageKey = authority.snapshot
     ? getKnowledgeQaHistoryStorageKey(authority.snapshot.requestScope) : null
+  const verifiedNotesAuthorityScope = useNotesGraphAuthorityScope({
+    config: authority.snapshot?.requestScope.config ?? null,
+    loading: !authority.snapshot,
+  });
+  const expectedNotesAuthorityScope =
+    authority.snapshot?.requestScope.userId != null
+      ? createNotesGraphAuthorityScope(
+          authority.snapshot.requestScope.config.serverUrl,
+          authority.snapshot.requestScope.userId,
+        )
+      : verifiedNotesAuthorityScope;
+  const notesAuthorityScope =
+    verifiedNotesAuthorityScope === expectedNotesAuthorityScope
+      ? verifiedNotesAuthorityScope
+      : null;
+  const notesAuthorityId =
+    notesAuthorityScope && authority.snapshot
+      ? servicePromptAuthorityKey(authority.snapshot.requestScope)
+      : null;
   const storageScopeKey = authority.snapshot
     ? getKnowledgeQaStorageScopeKey(authority.snapshot.requestScope) : null
   useEffect(() => {
@@ -2639,7 +2674,7 @@ function OwnedKnowledgeQAProvider({
             })
           }
           const streamingUpdateScheduler = createStreamingUpdateScheduler<null>({
-            shouldFlush: () => !streamEnded,
+            shouldFlush: () => !streamEnded && !isStaleSearchRequest(),
             apply: () => emitPartialAnswer(),
           })
 
@@ -3686,20 +3721,56 @@ function OwnedKnowledgeQAProvider({
     dispatch({ type: "TOGGLE_HISTORY_PIN", payload: id })
   }, [dispatch, markHistoryMutation])
 
+  const deleteHistoryViewRevision = activeThreadHydrationRequestIdRef.current
   const deleteHistoryItem = useCallback(
     async (id: string) => {
       const item = state.searchHistory.find((h) => h.id === id)
       const conversationId = item?.conversationId
 
+      const queryRevision = queryIntentRevisionRef.current
+      const completeDeletion = () => {
+        if (!isCurrent()) return
+        const deletedActiveThread =
+          deleteHistoryViewRevision ===
+            activeThreadHydrationRequestIdRef.current &&
+          Boolean(state.currentThreadId) &&
+          (conversationId === state.currentThreadId ||
+            id === state.currentThreadId)
+        if (deletedActiveThread) {
+          clearResults()
+          if (queryRevision === queryIntentRevisionRef.current) {
+            dispatch({ type: "SET_QUERY", payload: "" })
+          }
+        }
+        markHistoryMutation()
+        dispatch({ type: "REMOVE_HISTORY_ITEM", payload: id })
+      }
       const toastKey = `knowledge-qa-delete-${id}`
       const attemptServerDelete = async () => {
         try {
           await tldwClient.deleteChat(conversationId as string)
+          if (!isCurrent() || !authority.snapshot) return false
+          const removed = await removeLocalCopyOfServerChat(
+            conversationId as string,
+            serverChatMirrorOwnerKey(authority.snapshot),
+            {
+              scope: { type: "global" },
+              signal: authority.snapshot.scopeSignal,
+              validate_lease: isCurrent
+            }
+          )
+          if (!isCurrent()) return false
+          completeDeletion()
           message.open({
             key: toastKey,
-            type: "success",
-            content: "Deleted from server history.",
-            duration: 2.5,
+            type: removed ? "success" : "warning",
+            content: removed
+              ? "Deleted from server history."
+              : t(
+                  "chatSidebar.deletedDeviceCopyRetained",
+                  "Removed from server history. A cached copy remains on this device because it could not be removed."
+                ),
+            duration: 2.5
           })
           return true
         } catch (error) {
@@ -3716,13 +3787,12 @@ function OwnedKnowledgeQAProvider({
                   className="text-primary underline"
                   onClick={() => {
                     attemptServerDelete().catch(() => undefined)
-                  }}
-                >
+                  }}>
                   Retry
                 </button>
               </span>
             ),
-            className: "max-w-sm",
+            className: "max-w-sm"
           })
           return false
         }
@@ -3734,34 +3804,27 @@ function OwnedKnowledgeQAProvider({
           return
         }
       } else {
+        completeDeletion()
         message.open({
           key: toastKey,
           type: "success",
           content: "Removed from local history.",
-          duration: 2,
+          duration: 2
         })
       }
-
-      const deletedActiveThread =
-        Boolean(state.currentThreadId) &&
-        (conversationId === state.currentThreadId || id === state.currentThreadId)
-      if (deletedActiveThread) {
-        clearResults()
-        dispatch({ type: "SET_QUERY", payload: "" })
-      }
-
-      markHistoryMutation()
-      dispatch({ type: "REMOVE_HISTORY_ITEM", payload: id })
     },
     [
+      authority.snapshot,
       clearResults,
+      deleteHistoryViewRevision,
       dispatch,
       isCurrent,
       markHistoryMutation,
       message,
       state.currentThreadId,
       state.searchHistory,
-      tldwClient,
+      t,
+      tldwClient
     ]
   )
 
@@ -3994,6 +4057,8 @@ function OwnedKnowledgeQAProvider({
       client: tldwClient,
       isAuthorityCurrent: isCurrent,
       storageScopeKey,
+      notesAuthorityScope,
+      notesAuthorityId,
       historyHydrated,
       setQuery,
       search,
@@ -4034,6 +4099,8 @@ function OwnedKnowledgeQAProvider({
       isCurrent,
       historyHydrated,
       storageScopeKey,
+      notesAuthorityScope,
+      notesAuthorityId,
       setQuery,
       search,
       cancelSearch,
@@ -4066,8 +4133,8 @@ function OwnedKnowledgeQAProvider({
       persistRagContext,
       scrollToSource,
       scrollToCitation,
-    ]
-  )
+    ],
+  );
 
   return (
     <KnowledgeQAContext.Provider value={contextValue}>

@@ -8,6 +8,12 @@ import {
 export type AssistantKind = "character" | "persona"
 export type AssistantSelectionMode = "tracked" | "overlay"
 
+export const isProtectedTrackedPersonaUnavailable = (
+  hasHistorySelection: boolean,
+  kind: AssistantKind | null | undefined,
+  mode: AssistantSelectionMode | null | undefined
+): boolean => hasHistorySelection && kind === "persona" && mode !== "overlay"
+
 export type AssistantSelection = {
   kind: AssistantKind
   id: string

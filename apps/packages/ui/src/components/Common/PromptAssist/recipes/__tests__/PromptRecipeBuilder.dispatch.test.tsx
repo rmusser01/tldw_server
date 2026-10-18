@@ -49,7 +49,7 @@ vi.mock("@/entries/shared/notification-subscription", () => ({
   startNotificationSubscription: async () => {},
 }));
 vi.mock("wxt/browser", () => {
-  const event = () => ({ addListener: vi.fn() });
+  const event = () => ({ addListener: vi.fn(), removeListener: vi.fn() });
   return {
     browser: {
       runtime: {

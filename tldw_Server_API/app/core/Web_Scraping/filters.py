@@ -166,7 +166,7 @@ class URLPatternFilter(URLFilter):
         return True
 
 
-_RobotsStatus = Literal["allowed", "disallowed", "egress_denied", "unreachable"]
+_RobotsStatus = Literal["allowed", "disallowed", "egress_denied", "egress_error", "unreachable"]
 
 
 @dataclass(slots=True, frozen=True)
@@ -237,8 +237,8 @@ class RobotsFilter:
         if cached is not None:
             parser, ts = cached
             if (now - ts) < self.ttl_seconds:
-                status: Literal["ok", "unreachable"] = "ok" if parser is not None else "unreachable"
-                return _RobotsFetchResult(parser=parser, status=status)
+                cached_status: Literal["ok", "unreachable"] = "ok" if parser is not None else "unreachable"
+                return _RobotsFetchResult(parser=parser, status=cached_status)
 
         # Ensure only one fetch in-flight per host
         lock = self._locks.setdefault(host, asyncio.Lock())
@@ -248,8 +248,8 @@ class RobotsFilter:
             if cached is not None:
                 parser, ts = cached
                 if (time.time() - ts) < self.ttl_seconds:
-                    status: Literal["ok", "unreachable"] = "ok" if parser is not None else "unreachable"
-                    return _RobotsFetchResult(parser=parser, status=status)
+                    cached_status = "ok" if parser is not None else "unreachable"
+                    return _RobotsFetchResult(parser=parser, status=cached_status)
 
             robots_url = self._robots_url_for(url)
             try:
@@ -266,7 +266,7 @@ class RobotsFilter:
                         http_fetch,
                         robots_url,
                         timeout=self.timeout,
-                        backend="httpx",
+                        backend=self.backend,
                         headers=build_browser_headers("chrome_120_win", accept_lang="en-US,en;q=0.9"),
                         follow_redirects=True,
                         trust_env=False,
@@ -282,11 +282,11 @@ class RobotsFilter:
                     )
                 if isinstance(resp, dict):
                     text = resp.get("text")
-                    status = resp.get("status")
+                    http_status = resp.get("status")
                 else:
                     text = getattr(resp, "text", None)
-                    status = getattr(resp, "status_code", None)
-                if not text or (isinstance(status, int) and status >= 400):
+                    http_status = getattr(resp, "status_code", None)
+                if not text or (isinstance(http_status, int) and http_status >= 400):
                     # Treat missing/unreadable robots as unreachable and let the caller
                     # decide whether to fail open or closed.
                     self._cache[host] = (None, time.time())

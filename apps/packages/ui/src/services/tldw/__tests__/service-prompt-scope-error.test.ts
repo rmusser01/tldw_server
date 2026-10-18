@@ -12,6 +12,33 @@ import {
 } from "../service-prompt-scope-error"
 describe("Service Prompt scope policy", () => {
   it.each([
+    ["/api/v1/config/docs-info", "GET", true],
+    ["/api/v1/config/docs-info", "POST", false],
+    ["/api/v1/config/docs-info/extra", "GET", false],
+    ["/api/v1/chats/owned/roleplay/messages", "POST", true],
+    ["/api/v1/chats/owned/roleplay/messages", "GET", false],
+    ["/api/v1/chats/owned/roleplay/messages/extra", "POST", false],
+    ["/api/v1/chats/a%2fb/roleplay/messages", "POST", false],
+    ["/api/v1/chats/%2e%2e/roleplay/messages", "POST", false],
+    ["/api/v1/chats//roleplay/messages", "POST", false]
+  ])("bounds original-scope Roleplay %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
+  it.each([
+    ["/api/v1/files/create", "POST", true],
+    ["/api/v1/files/create", "GET", false],
+    ["/api/v1/files/create", "PUT", false],
+    ["/api/v1/files/create/extra", "POST", false],
+    ["/api/v1/files/create/", "POST", false],
+    ["/api/v1/files/../create", "POST", false],
+    ["/api/v1/files%2fcreate", "POST", false],
+    ["https://other.test/api/v1/files/create", "POST", false]
+  ])("bounds captured image creation %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+
+  it.each([
     ["/api/v1/media/389", "PUT", true],
     ["/api/v1/media/389/metadata", "PATCH", true],
     ["/api/v1/media/389/reprocess", "POST", true],
@@ -119,6 +146,23 @@ describe("Service Prompt scope policy", () => {
     }
 
     expect(servicePromptTargetsMatch(current, captured)).toBe(true)
+  })
+
+  it.each([undefined, null, ""])("keeps implicit manual authentication stable for %s", (authSource) => {
+    const implicit = { serverUrl: "https://api.example.test", authMode: "single-user", authSource }
+    const explicit = { ...implicit, authSource: "manual" }
+    expect(servicePromptTargetsMatch(implicit, explicit)).toBe(true)
+    expect(servicePromptTargetsMatch(explicit, implicit)).toBe(true)
+  })
+
+  it.each([
+    { authSource: "cookie-session" },
+    { serverUrl: "https://other.example.test" },
+    { authMode: "multi-user" },
+    { orgId: "other-org" }
+  ])("keeps changed target authority rejected for %j", (change) => {
+    const original = { serverUrl: "https://api.example.test", authMode: "single-user", orgId: "owned-org" }
+    expect(servicePromptTargetsMatch(original, { ...original, ...change })).toBe(false)
   })
 
   it("requires the captured single-user API-key scope to match", () => {
@@ -268,6 +312,18 @@ it.each([
 
 
 it.each([
+  ["/api/v1/chats/owned/restore","POST",true],
+  ["/api/v1/chats/owned/restore?scope_type=global&expected_version=4","POST",true],
+  ["/api/v1/chats/owned/restore","GET",false],
+  ["/api/v1/chats/owned/restore","PUT",false],
+  ["/api/v1/chats/owned/restore/extra","POST",false],
+  ["/api/v1/chats/a%2fb/restore","POST",false],
+  ["/api/v1/chats/%2e%2e/restore","POST",false],
+])("bounds captured Restore transport %s %s",(path,method,expected)=>{
+  expect(isServicePromptRequestPath(path,method)).toBe(expected)
+})
+
+it.each([
   ['/api/v1/media/7', 'DELETE', true],
   ['/api/v1/media/7/keywords', 'PATCH', true],
   ['/api/v1/media/bulk/keyword-update', 'POST', true],
@@ -350,4 +406,32 @@ describe("canonical raw URL controls", () => {
         expect(isServicePromptRequestPath(path, "GET")).toBe(false)
     }
   )
+})
+
+
+it.each([
+  ["/api/v1/messages/owned", "GET", true],
+  ["/api/v1/messages/owned?scope_type=workspace&workspace_id=original", "PUT", true],
+  ["/api/v1/messages/owned", "DELETE", false],
+  ["/api/v1/messages/owned", "POST", false],
+  ["/api/v1/messages/owned/extra", "PUT", false],
+  ["/api/v1/messages/owned%2Fforeign", "GET", false],
+  ["/api/v1/messages/../foreign", "PUT", false]
+])("native Save admits only the exact scoped message read/write: %s %s", (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+})
+
+// Deployed request contracts are read-only authority for the original native owner.
+it.each([
+  ["/openapi.json", "GET", true],
+  ["/openapi.json", "POST", false],
+  ["/openapi.json", "PUT", false],
+  ["/openapi.json/", "GET", false],
+  ["/openapi.json/other", "GET", false],
+  ["https://foreign.test/openapi.json", "GET", false],
+  ["//foreign.test/openapi.json", "GET", false],
+  ["/api/../openapi.json", "GET", false],
+  ["/openapi%2ejson", "GET", false]
+])("bounds captured schema discovery %s %s", (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed)
 })

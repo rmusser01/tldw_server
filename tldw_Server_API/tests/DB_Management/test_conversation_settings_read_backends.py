@@ -1,4 +1,4 @@
-"""UAT213: real settings rows survive the backend result contract."""
+"""Real settings reads distinguish known absence from unavailable or corrupt data."""
 
 from types import SimpleNamespace
 
@@ -9,7 +9,9 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as chats
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
+    BackendType, CharactersRAGDB, CharactersRAGDBError,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -54,13 +56,61 @@ def test_settings_roundtrip_preserves_document_version_and_timestamp(settings_db
     assert updated["settings_version"] == 2
 
 
-def test_invalid_settings_json_keeps_existing_none_fallback(settings_db):
+@pytest.mark.parametrize("stored", ["invalid json", "[]", "null", "7", '"text"', ""])
+def test_corrupt_settings_are_read_failures_not_known_absence(settings_db, stored):
     conversation_id = _conversation(settings_db)
     assert settings_db.upsert_conversation_settings(conversation_id, {})
     with settings_db.transaction() as conn:
         conn.execute("UPDATE conversation_settings SET settings_json = ? WHERE conversation_id = ?",
-                     ("invalid json", conversation_id))
-    assert settings_db.get_conversation_settings(conversation_id) is None
+                     (stored, conversation_id))
+    with pytest.raises(CharactersRAGDBError, match="Failed to read conversation settings"):
+        settings_db.get_conversation_settings(conversation_id)
+
+
+def _settings_response(db, conversation_id):
+    app = FastAPI()
+    app.include_router(chats.router, prefix="/api/v1/chats")
+    app.dependency_overrides[get_chacha_db_for_user] = lambda: db
+    app.dependency_overrides[chats.get_request_user] = lambda: SimpleNamespace(id=2)
+    app.dependency_overrides[chats.require_expected_user] = lambda: None
+    with TestClient(app, raise_server_exceptions=False) as client:
+        return client.get(f"/api/v1/chats/{conversation_id}/settings")
+
+
+@pytest.mark.parametrize("stored", ["invalid json", "[]", "null", "7", '"text"', ""])
+def test_actual_settings_route_refuses_corrupt_stored_settings(settings_db, stored):
+    conversation_id = _conversation(settings_db)
+    assert settings_db.upsert_conversation_settings(conversation_id, {})
+    with settings_db.transaction() as conn:
+        conn.execute("UPDATE conversation_settings SET settings_json = ? WHERE conversation_id = ?",
+                     (stored, conversation_id))
+    response = _settings_response(settings_db, conversation_id)
+    assert response.status_code == 500, response.text
+
+
+def test_actual_settings_route_certifies_only_genuine_absence(settings_db):
+    conversation_id = _conversation(settings_db)
+    response = _settings_response(settings_db, conversation_id)
+    assert response.status_code == 200, response.text
+    assert response.json()["conversation_id"] == conversation_id
+    assert response.json()["settings"] == {}
+
+
+def test_actual_settings_route_refuses_select_failure(settings_db, monkeypatch):
+    conversation_id = _conversation(settings_db)
+    assert settings_db.upsert_conversation_settings(conversation_id, {"temperature": 0.2})
+    reader = settings_db if settings_db.backend_type == BackendType.SQLITE else settings_db.backend
+    method = "execute_query" if settings_db.backend_type == BackendType.SQLITE else "execute"
+    original = getattr(reader, method)
+
+    def unavailable(query, *args, **kwargs):
+        if query.startswith("SELECT settings_json,"):
+            raise CharactersRAGDBError("Injected settings SELECT failure")
+        return original(query, *args, **kwargs)
+
+    monkeypatch.setattr(reader, method, unavailable)
+    response = _settings_response(settings_db, conversation_id)
+    assert response.status_code == 500, response.text
 
 
 def test_settings_read_does_not_commit_callers_pending_write(settings_db):

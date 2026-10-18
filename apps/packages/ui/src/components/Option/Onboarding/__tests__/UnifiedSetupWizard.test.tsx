@@ -18,6 +18,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: { getConfig: async
 const setupHookMocks = vi.hoisted(() => ({
   authMode: "single_user",
   stateAvailable: true,
+  connectionConfigured: true,
   metadataAvailable: true,
   loadError: null as Error | null,
   navigate: vi.fn(),
@@ -173,6 +174,8 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
     mcpToolsCatalog,
     audioRecommendations: [],
     loading: false,
+    connectionConfigured: setupHookMocks.connectionConfigured,
+    connectionChecking: false,
     error: setupHookMocks.loadError,
     refresh: setupHookMocks.refresh,
     loadProviderCatalog: setupHookMocks.loadProviderCatalog,
@@ -220,6 +223,7 @@ describe("UnifiedSetupWizard", () => {
     useStoreMessageOption.setState({ selectedModel: "tldw:existing-choice" });
     setupHookMocks.authMode = "single_user";
     setupHookMocks.stateAvailable = true;
+    setupHookMocks.connectionConfigured = true;
     setupHookMocks.metadataAvailable = true;
     setupHookMocks.loadError = null;
     window.location.hash = "";
@@ -325,6 +329,23 @@ describe("UnifiedSetupWizard", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it("offers connection settings before unconfigured setup without backend writes or Retry", async () => {
+    setupHookMocks.connectionConfigured = false;
+    setupHookMocks.stateAvailable = false;
+    setupHookMocks.metadataAvailable = false;
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    render(<MemoryRouter><UnifiedSetupWizard /></MemoryRouter>);
+    expect(screen.getByRole("heading", { level: 1, name: "Connect your tldw server" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Open connection settings" }));
+    expect(setupHookMocks.navigate).toHaveBeenCalledWith("/settings/tldw");
+    expect(setupHookMocks.saveStep).not.toHaveBeenCalled();
+    expect(setupHookMocks.loadProviderCatalog).not.toHaveBeenCalled();
+    expect(setupHookMocks.skip).not.toHaveBeenCalled();
+    expect(readinessHookMocks.refresh).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("renders a focused first-run heading and setup path choices", async () => {

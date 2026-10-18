@@ -5,6 +5,7 @@ import inspect
 import sqlite3
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -161,13 +162,28 @@ async def test_profile_evaluations_quotas_have_no_cost_keys(tmp_path, monkeypatc
     limiter = UserRateLimiter(db_path=str(tmp_path / "evals.db"))
     monkeypatch.setattr(user_rate_limiter, "get_user_rate_limiter_for_user", lambda _uid: limiter)
 
-    async def _no_storage():
-        raise RuntimeError("storage not needed for this test")
-
-    monkeypatch.setattr(storage_quota_service, "get_storage_service", _no_storage)
+    storage = AsyncMock(spec=storage_quota_service.StorageQuotaService)
+    storage.calculate_user_storage.return_value = {
+        "quota_mb": 8,
+        "total_mb": 0.75,
+        "legacy_mb": 0.25,
+        "native_mb": 0.5,
+    }
+    monkeypatch.setattr(storage_quota_service, "get_storage_service", AsyncMock(return_value=storage))
 
     service = UserProfileService(object())  # type: ignore[arg-type]
     quotas = await service._build_quotas({"id": 7, "storage_quota_mb": 1, "storage_used_mb": 0.0})
+    storage.calculate_user_storage.assert_awaited_once_with(user_id=7, update_database=False)
+    if {
+        key: quotas[key]
+        for key in ("storage_quota_mb", "storage_used_mb", "legacy_storage_used_mb", "native_storage_used_mb")
+    } != {
+        "storage_quota_mb": 8,
+        "storage_used_mb": 0.75,
+        "legacy_storage_used_mb": 0.25,
+        "native_storage_used_mb": 0.5,
+    }:
+        raise AssertionError("Expected live legacy/native storage totals for the same user")
     block = quotas["evaluations"]
     assert set(block["limits"]["daily"]) == {"evaluations", "tokens"}
     assert set(block["usage"]["today"]) == {"evaluations", "tokens"}

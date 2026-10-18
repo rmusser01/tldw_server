@@ -24,7 +24,8 @@ vi.mock("wxt/browser", () => ({
   }
 }))
 
-vi.mock("@/utils/safe-storage", () => ({
+vi.mock("@/utils/safe-storage", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/utils/safe-storage")>(),
   createSafeStorage: (options?: { area?: string }) => ({
     get: (...args: unknown[]) =>
       options?.area === "session"
@@ -146,7 +147,7 @@ describe("background proxy web token refresh", () => {
       if (String(input).endsWith("/auth/refresh")) {
         const error = new DOMException("Refresh cancelled", "AbortError")
         if (phase === "fetch") throw error
-        const response = new Response("{}", { status: 200 })
+        const response = Response.json({})
         vi.spyOn(response, "json").mockRejectedValueOnce(error)
         return response
       }
@@ -928,6 +929,822 @@ describe("background proxy web token refresh", () => {
       sourceRefreshToken: "refresh-token",
       accessToken: "fresh-access",
       refreshToken: "rotated-refresh"
+    })
+  })
+
+  describe("TASK-13549 coalesced GET preparation lifetime", () => {
+    const original = {
+      serverUrl: "https://api.example.com", authMode: "multi-user" as const,
+      authSource: "manual" as const, accessToken: jwtForUser(42), refreshToken: "original-get-refresh"
+    }
+    const replacement = { ...original, accessToken: jwtForUser(84), refreshToken: "replacement-get-refresh" }
+    const publishAccount = (config: typeof original) => {
+      const previous = mocks.store.tldwConfig
+      mocks.store.tldwConfig = structuredClone(config)
+      window.dispatchEvent(new StorageEvent("storage", {
+        key: "tldwConfig", oldValue: JSON.stringify(previous), newValue: JSON.stringify(config)
+      }))
+    }
+    it.each(["A to B to exact A", "uninterrupted concurrent GETs"] as const)(
+      "guards the first coalesced config read across %s", async boundary => {
+        mocks.store.tldwConfig = structuredClone(original)
+        let releaseConfig!: () => void
+        const heldConfig = new Promise<void>(resolve => { releaseConfig = resolve })
+        let releaseResponse!: () => void
+        const heldResponse = new Promise<void>(resolve => { releaseResponse = resolve })
+        let configEntered = false
+        mocks.storageGet.mockImplementation(async (key: string) => {
+          const value = structuredClone(mocks.store[key] ?? null)
+          if (key === "tldwConfig") {
+            configEntered = true
+            await heldConfig
+          }
+          return value
+        })
+        const requests: { url: string; method?: string; authorization: string | null }[] = []
+        const answer = { note: "Original account coalesced result" }
+        vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input)
+          if (new URL(url).pathname !== "/api/v1/notes/private-note") throw new Error("Undeclared coalesced GET: " + url)
+          requests.push({ url, method: init?.method, authorization: new Headers(init?.headers).get("Authorization") })
+          await heldResponse
+          return Response.json(answer)
+        }))
+        const { watchChatAccountChanges } = await import("@/services/chat-account-boundary")
+        const observed: boolean[] = []
+        const releaseObserver = watchChatAccountChanges(invalidated => observed.push(invalidated))
+        const { bgRequest } = await importProxy()
+        const pending = bgRequest({ path: "/api/v1/notes/private-note", method: "GET", preferDirect: true })
+          .then(value => ({ value }), error => ({ error }))
+        let concurrent: typeof pending | undefined
+        try {
+          await vi.waitFor(() => expect(configEntered).toBe(true))
+          expect(requests).toEqual([])
+          if (boundary === "A to B to exact A") {
+            publishAccount(replacement)
+            publishAccount(original)
+            expect(observed).toEqual([true, true])
+          } else {
+            concurrent = bgRequest({ path: "/api/v1/notes/private-note", method: "GET", preferDirect: true })
+              .then(value => ({ value }), error => ({ error }))
+            await vi.waitFor(() => expect(mocks.storageGet.mock.calls.filter(([key]) => key === "tldwConfig").length).toBeGreaterThanOrEqual(2))
+          }
+          releaseConfig()
+          if (boundary === "uninterrupted concurrent GETs") {
+            await vi.waitFor(() => expect(requests).toHaveLength(1))
+            // Let both actual config resolutions finish while the shared physical
+            // GET remains held, then require exactly one wire operation.
+            await new Promise(resolve => setTimeout(resolve, 0))
+            expect(requests).toHaveLength(1)
+          }
+          releaseResponse()
+          const outcome = await pending
+          if (boundary === "A to B to exact A") {
+            expect(outcome).toMatchObject({ error: { status: 412 } })
+            expect(requests).toEqual([])
+          } else {
+            expect(outcome).toEqual({ value: answer })
+            expect(await concurrent).toEqual({ value: answer })
+            expect(observed).toEqual([])
+            expect(requests).toEqual([{ url: original.serverUrl + "/api/v1/notes/private-note",
+              method: "GET", authorization: "Bearer " + original.accessToken }])
+          }
+          expect(mocks.store.tldwConfig).toEqual(original)
+          expect(mocks.store.tldwRefreshRotation).toBeUndefined()
+        } finally {
+          releaseConfig()
+          releaseResponse()
+          await pending
+          if (concurrent) await concurrent
+          releaseObserver()
+        }
+      }
+    )
+  })
+
+  describe("TASK-13549 actual apiSend recipe preparation lifetime", () => {
+    const original = {
+      serverUrl: "https://api.example.com", authMode: "single-user" as const, authSource: "manual" as const,
+      apiKey: "original-recipe-key", credentialSource: "manual" as const, apiKeyPersistence: "device" as const,
+      apiKeyServerOrigin: "https://api.example.com"
+    }
+    const replacement = { ...original, apiKey: "replacement-recipe-key" }
+    it.each(["A to B to exact A", "uninterrupted"] as const)(
+      "keeps real createPrompt tied to its original account across %s", async boundary => {
+        mocks.store.tldwConfig = structuredClone(original)
+        const { resolveRecipePersistenceOwnerView, acknowledgeRecipePersistenceReceipt, readRecipePersistenceUncertainty } =
+          await import("@/services/recipe-persistence-uncertainty")
+        const owner = await resolveRecipePersistenceOwnerView()
+        expect(owner).toMatchObject({ ownerId: expect.stringMatching(/^recipe-owner:sha256:[0-9a-f]{64}$/) })
+        if (!owner) throw new Error("Actual direct recipe owner unavailable")
+        const { CLEAR_TASK_RECIPE } = await import("@/components/Common/PromptAssist/recipes/built-in-recipes")
+        const payload = { project_id: 42, name: "Original account recipe", prompt_format: "structured" as const,
+          prompt_schema_version: 2, prompt_definition: CLEAR_TASK_RECIPE.definition, change_description: "Original recipe command" }
+        const localId = "original-direct-recipe-" + boundary
+        let releaseConfig!: () => void
+        const heldConfig = new Promise<void>(resolve => { releaseConfig = resolve })
+        let configEntered = false
+        mocks.storageGet.mockImplementation(async (key: string) => {
+          const value = structuredClone(mocks.store[key] ?? null)
+          if (key === "tldwConfig" && !configEntered) {
+            configEntered = true
+            await heldConfig
+          }
+          return value
+        })
+        const requests: { url: string; method?: string; apiKey: string | null; body: unknown }[] = []
+        const answer = { data: { id: 101, ...payload } }
+        vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input)
+          if (new URL(url).pathname !== "/api/v1/prompt-studio/prompts/create") throw new Error("Undeclared recipe transport: " + url)
+          requests.push({ url, method: init?.method, apiKey: new Headers(init?.headers).get("X-API-KEY"), body: JSON.parse(String(init?.body)) })
+          return Response.json(answer)
+        }))
+        const { watchChatAccountChanges } = await import("@/services/chat-account-boundary")
+        const observed: boolean[] = []
+        const releaseObserver = watchChatAccountChanges(invalidated => observed.push(invalidated))
+        const { createPrompt } = await import("@/services/prompt-studio")
+        // Use the public client called by prompt-sync; neither apiSend nor its
+        // original owner/dispatch authority is substituted by this fixture.
+        const pending = createPrompt(payload, { recipePersistence: { mode: "require", expectedOwnerId: owner.ownerId, localId } })
+        try {
+          await vi.waitFor(() => expect(configEntered).toBe(true))
+          expect(requests).toEqual([])
+          if (boundary === "A to B to exact A") {
+            for (const config of [replacement, original]) {
+              const previous = mocks.store.tldwConfig
+              mocks.store.tldwConfig = structuredClone(config)
+              window.dispatchEvent(new StorageEvent("storage", {
+                key: "tldwConfig", oldValue: JSON.stringify(previous), newValue: JSON.stringify(config)
+              }))
+            }
+            expect(observed).toEqual([true, true])
+          }
+          releaseConfig()
+          const response = await pending
+          if (boundary === "A to B to exact A") {
+            expect(response).toMatchObject({ ok: false, status: 412,
+              recipePersistence: { state: "not_dispatched", actualOwnerId: null } })
+            expect(response.recipeDelivery).toBeUndefined()
+            expect(requests).toEqual([])
+            expect(await readRecipePersistenceUncertainty(localId, owner.ownerId)).toBe("clear")
+          } else {
+            expect(response).toMatchObject({ ok: true, status: 200, data: answer,
+              recipePersistence: { state: "dispatched", actualOwnerId: owner.ownerId },
+              recipeDelivery: { id: localId, ownerId: owner.ownerId, operationId: expect.any(String) } })
+            expect(requests).toEqual([{ url: original.serverUrl + "/api/v1/prompt-studio/prompts/create",
+              method: "POST", apiKey: original.apiKey, body: payload }])
+            expect(await readRecipePersistenceUncertainty(localId, owner.ownerId)).toBe("unknown_owner")
+            if (!response.recipeDelivery) throw new Error("Actual direct dispatch receipt unavailable")
+            await expect(acknowledgeRecipePersistenceReceipt(response.recipeDelivery)).resolves.toBeUndefined()
+            expect(await readRecipePersistenceUncertainty(localId, owner.ownerId)).toBe("scoped")
+            expect(observed).toEqual([])
+          }
+          expect(mocks.store.tldwConfig).toEqual(original)
+        } finally {
+          releaseConfig()
+          await pending
+          releaseObserver()
+        }
+      }
+    )
+  })
+
+  describe("TASK-13549 original unscoped direct stream refresh authority", () => {
+    const original = {
+      serverUrl: "https://api.example.com",
+      authMode: "multi-user" as const,
+      authSource: "manual" as const,
+      accessToken: jwtForUser(42),
+      refreshToken: "original-direct-stream-refresh"
+    }
+    const replacement = {
+      ...original,
+      accessToken: jwtForUser(84),
+      refreshToken: "replacement-direct-stream-refresh"
+    }
+    const rotatedAccess = `header.${btoa(JSON.stringify({ sub: "42", nonce: "stream-rotation" }))}.signature`
+    const rotatedRefresh = "rotated-direct-stream-refresh"
+    const streamBody = {
+      stream: true,
+      model: "original-direct-model",
+      messages: [{ role: "user", content: "Exact original direct stream question" }]
+    }
+    const publishAccount = (config: typeof original) => {
+      const previous = mocks.store.tldwConfig
+      mocks.store.tldwConfig = structuredClone(config)
+      // Exercise the actual account observer and serde through physical storage.
+      window.dispatchEvent(new StorageEvent("storage", {
+        key: "tldwConfig",
+        oldValue: JSON.stringify(previous),
+        newValue: JSON.stringify(config)
+      }))
+    }
+    describe("TASK-13549 direct stream refresh failure settlement", () => {
+      it.each([401, 502] as const)("preserves the actual refresh%s failure and retry metadata without reading or replaying the original stream", async status => {
+        mocks.store.tldwConfig = structuredClone(original)
+        const expectedMessage = status === 401 ? "Session expired. Please log in again."
+          : "Original direct authentication service unavailable"
+        const initialResponse = Response.json({ detail: "Original main access token expired" }, {
+          status: 401, headers: { "retry-after": "1" }
+        })
+        const readOriginal = vi.spyOn(initialResponse, "json")
+        const refreshResponse = Response.json({ detail: status === 401 ? "Original refresh session revoked" : expectedMessage }, {
+          status, headers: { "retry-after": "7", "x-original-refresh-response": "original-direct-refresh-response" }
+        })
+        const readRefresh = vi.spyOn(refreshResponse, "json")
+        let releaseRefresh!: () => void
+        const heldRefresh = new Promise<void>(resolve => { releaseRefresh = resolve })
+        const physical: { url: string; method?: string; authorization: string | null;
+          command: string | null; body: unknown; signal: AbortSignal | null }[] = []
+        let mainRequests = 0
+        vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input), path = new URL(url).pathname
+          if (path !== "/api/v1/chat/completions" && path !== "/api/v1/auth/refresh") throw new Error("Undeclared direct refresh failure transport: " + url)
+          const headers = new Headers(init?.headers)
+          physical.push({ url, method: init?.method, authorization: headers.get("Authorization"),
+            command: headers.get("X-Original-Command"), body: JSON.parse(String(init?.body)), signal: init?.signal ?? null })
+          if (path === "/api/v1/auth/refresh") {
+            await heldRefresh
+            return refreshResponse
+          }
+          mainRequests += 1
+          return mainRequests === 1 ? initialResponse : streamResponse()
+        }))
+        const onDispatch = vi.fn()
+        const onOpen = vi.fn()
+        const { bgStream } = await importProxy()
+        const pending = collectStream(bgStream({ path: "/api/v1/chat/completions", method: "POST", body: streamBody,
+          headers: { "X-Original-Command": "original-direct-refresh-failure-command" }, onDispatch, onOpen
+        })).then(value => ({ value }), error => ({ error }))
+        try {
+          await vi.waitFor(() => expect(physical).toHaveLength(2))
+          expect(physical[0]).toMatchObject({ url: original.serverUrl + "/api/v1/chat/completions", method: "POST",
+            authorization: "Bearer " + original.accessToken, command: "original-direct-refresh-failure-command", body: streamBody })
+          expect(physical[1]).toMatchObject({ url: original.serverUrl + "/api/v1/auth/refresh", method: "POST",
+            authorization: null, command: null, body: { refresh_token: original.refreshToken } })
+          expect(physical[0].signal?.aborted).toBe(false)
+          expect(physical[1].signal?.aborted).toBe(false)
+          expect(readOriginal).not.toHaveBeenCalled()
+          expect(readRefresh).not.toHaveBeenCalled()
+          expect(onDispatch).toHaveBeenCalledTimes(1)
+          expect(onOpen).not.toHaveBeenCalled()
+          releaseRefresh()
+          const settled = await pending
+          expect(physical.map(request => new URL(request.url).pathname)).toEqual([
+            "/api/v1/chat/completions", "/api/v1/auth/refresh"
+          ])
+          expect(readRefresh).toHaveBeenCalledTimes(1)
+          expect(settled).toMatchObject({ error: { status, message: expectedMessage,
+            retryAfterMs: 7_000, headers: { "retry-after": "7", "x-original-refresh-response": "original-direct-refresh-response" }
+          } })
+          expect(readOriginal).not.toHaveBeenCalled()
+          expect(onDispatch).toHaveBeenCalledTimes(1)
+          expect(onOpen).not.toHaveBeenCalled()
+          expect(mocks.store.tldwConfig).toEqual(original)
+          expect(mocks.store.tldwRefreshRotation).toBeUndefined()
+          const { refreshSessionInvalidationKey } = await import("@/services/tldw/single-user-credential")
+          const marker = refreshSessionInvalidationKey(original)
+          if (!marker) throw new Error("Actual original direct refresh marker unavailable")
+          if (status === 401) expect(mocks.store[marker]).toBe(true)
+          else expect(mocks.store[marker]).toBeUndefined()
+        } finally {
+          releaseRefresh()
+          await pending
+          readOriginal.mockRestore()
+          readRefresh.mockRestore()
+        }
+      })
+    })
+
+    describe("TASK-13549 original non-stream request lifetime", () => {
+      const requestBody = { stream: false, model: "original-nonstream-model",
+        messages: [{ role: "user", content: "Exact original private nonstream question" }] }
+      const answer = { choices: [{ message: { role: "assistant", content: "Original nonstream answer" } }] }
+      it.each(["A to B to exact A", "uninterrupted"] as const)("guards direct initial 401 across %s", async boundary => {
+        mocks.store.tldwConfig = structuredClone(original)
+        let releaseUnauthorized!: () => void
+        const heldUnauthorized = new Promise<void>(resolve => { releaseUnauthorized = resolve })
+        const requests: { url: string; method?: string; authorization: string | null; command: string | null; body: unknown }[] = []
+        const refreshes: { url: string; method?: string; body: unknown }[] = []
+        vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input), path = new URL(url).pathname
+          if (path === "/api/v1/auth/refresh") {
+            refreshes.push({ url, method: init?.method, body: JSON.parse(String(init?.body)) })
+            return Response.json({ access_token: rotatedAccess, refresh_token: rotatedRefresh, token_type: "bearer" })
+          }
+          if (path !== "/api/v1/chat/completions") throw new Error("Undeclared direct transport: " + url)
+          const headers = new Headers(init?.headers)
+          requests.push({ url, method: init?.method, authorization: headers.get("Authorization"),
+            command: headers.get("X-Original-Command"), body: JSON.parse(String(init?.body)) })
+          if (requests.length === 1) {
+            await heldUnauthorized
+            return new Response("Original nonstream unauthorized", { status: 401 })
+          }
+          return Response.json(answer)
+        }))
+        const { watchChatAccountChanges } = await import("@/services/chat-account-boundary")
+        const accountEvents: boolean[] = []
+        // Observe the same real native storage events without substituting or
+        // granting authority to the request's own missing lifetime guard.
+        const releaseObserver = watchChatAccountChanges(invalidated => accountEvents.push(invalidated))
+        const { bgRequest } = await importProxy()
+        const pending = bgRequest({ path: "/api/v1/chat/completions", method: "POST", body: requestBody,
+          headers: { "X-Original-Command": "original-command-a" }, preferDirect: true
+        }).then(value => ({ value }), error => ({ error }))
+        try {
+          await vi.waitFor(() => expect(requests).toHaveLength(1))
+          expect(requests[0]).toEqual({ url: original.serverUrl + "/api/v1/chat/completions", method: "POST",
+            authorization: "Bearer " + original.accessToken, command: "original-command-a", body: requestBody })
+          expect(refreshes).toEqual([])
+          if (boundary === "A to B to exact A") {
+            publishAccount(replacement)
+            publishAccount(original)
+            expect(accountEvents).toEqual([true, true])
+            expect(mocks.store.tldwConfig).toEqual(original)
+          } else expect(accountEvents).toEqual([])
+          releaseUnauthorized()
+          const outcome = await pending
+          if (boundary === "A to B to exact A") {
+            // Exact restored credentials do not authorize the original command
+            // to start a refresh or replay under a later account lifetime.
+            expect(refreshes).toEqual([])
+            expect(requests).toHaveLength(1)
+            expect(outcome).toMatchObject({ error: { status: 412 } })
+            expect(mocks.store.tldwRefreshRotation).toBeUndefined()
+          } else {
+            expect(outcome).toEqual({ value: answer })
+            expect(refreshes).toEqual([{ url: original.serverUrl + "/api/v1/auth/refresh", method: "POST",
+              body: { refresh_token: original.refreshToken } }])
+            expect(requests).toEqual([{ url: original.serverUrl + "/api/v1/chat/completions", method: "POST",
+              authorization: "Bearer " + original.accessToken, command: "original-command-a", body: requestBody },
+              { url: original.serverUrl + "/api/v1/chat/completions", method: "POST",
+                authorization: "Bearer " + rotatedAccess, command: "original-command-a", body: requestBody }])
+            expect(mocks.store.tldwRefreshRotation).toMatchObject({ sourceAccessToken: original.accessToken,
+              sourceRefreshToken: original.refreshToken, accessToken: rotatedAccess, refreshToken: rotatedRefresh })
+          }
+          expect(mocks.store.tldwConfig).toEqual(original)
+        } finally {
+          releaseUnauthorized()
+          await pending
+          releaseObserver()
+        }
+      })
+    })
+
+    describe("TASK-13549 original extension-port queued settlement", () => {
+      const firstFrame = '{"choices":[{"delta":{"content":"First original port frame"}}]}'
+      const secondFrame = '{"choices":[{"delta":{"content":"Second original port frame"}}]}'
+      it.each(["Stop", "uninterrupted"] as const)("guards the next actual queued port frame after %s", async boundary => {
+        mocks.store.tldwConfig = structuredClone(original)
+        const { browser } = await import("wxt/browser")
+        const runtime = browser.runtime as unknown as Record<string, unknown>
+        const messageListeners = new Set<(message: unknown) => void>()
+        const disconnectListeners = new Set<() => void>()
+        const portPayloads: unknown[] = []
+        const delivered: unknown[] = []
+        let disconnected = false
+        const deliver = (message: unknown) => {
+          delivered.push(message)
+          for (const listener of messageListeners) listener(message)
+        }
+        const port = {
+          postMessage: vi.fn((payload: unknown) => {
+            portPayloads.push(payload)
+            // This is the physical extension-port boundary. The production
+            // bgStream owns its queue and async-generator drain unchanged.
+            deliver({ event: "open" })
+            deliver({ event: "data", data: firstFrame })
+            deliver({ event: "data", data: secondFrame })
+            deliver({ event: "done" })
+          }),
+          disconnect: vi.fn(() => {
+            disconnected = true
+            for (const listener of disconnectListeners) listener()
+          }),
+          onMessage: {
+            addListener: (listener: (message: unknown) => void) => messageListeners.add(listener),
+            removeListener: (listener: (message: unknown) => void) => messageListeners.delete(listener)
+          },
+          onDisconnect: {
+            addListener: (listener: () => void) => disconnectListeners.add(listener),
+            removeListener: (listener: () => void) => disconnectListeners.delete(listener)
+          }
+        }
+        const sendMessage = vi.fn(async (message: { type?: string }) => {
+          if (message?.type !== "tldw:ping") throw new Error("Undeclared runtime transport")
+          return { ok: true, pong: true }
+        })
+        const connect = vi.fn(() => port)
+        runtime.id = "task-13549-physical-port"
+        runtime.sendMessage = sendMessage
+        runtime.connect = connect
+        const fetchSpy = vi.fn(async () => { throw new Error("Queued extension stream must not replay through direct fetch") })
+        vi.stubGlobal("fetch", fetchSpy)
+        const controller = new AbortController()
+        const onDispatch = vi.fn(), onOpen = vi.fn()
+        let stream: AsyncGenerator<string> | undefined
+        try {
+          const { bgStream } = await importProxy()
+          stream = bgStream({ path: "/api/v1/chat/completions", method: "POST", body: streamBody,
+            abortSignal: controller.signal, onDispatch, onOpen })
+          expect(await stream.next()).toEqual({ value: firstFrame, done: false })
+          expect(connect).toHaveBeenCalledWith({ name: "tldw:stream" })
+          expect(sendMessage).toHaveBeenCalledWith({ type: "tldw:ping" })
+          expect(portPayloads).toEqual([{ path: "/api/v1/chat/completions", method: "POST", headers: {},
+            body: streamBody, streamIdleTimeoutMs: undefined }])
+          expect(delivered).toEqual([{ event: "open" }, { event: "data", data: firstFrame },
+            { event: "data", data: secondFrame }, { event: "done" }])
+          expect(onDispatch).toHaveBeenCalledTimes(1)
+          expect(onOpen).toHaveBeenCalledTimes(1)
+          if (boundary === "Stop") {
+            controller.abort()
+            expect(disconnected).toBe(true)
+            await expect(stream.next()).rejects.toMatchObject({ message: expect.stringMatching(/abort/i) })
+          } else {
+            expect(await stream.next()).toEqual({ value: secondFrame, done: false })
+            expect(await stream.next()).toEqual({ value: undefined, done: true })
+          }
+          expect(await stream.next()).toEqual({ value: undefined, done: true })
+          expect(fetchSpy).not.toHaveBeenCalled()
+          expect(port.postMessage).toHaveBeenCalledTimes(1)
+          expect(onDispatch).toHaveBeenCalledTimes(1)
+          expect(onOpen).toHaveBeenCalledTimes(1)
+          expect(mocks.store.tldwConfig).toEqual(original)
+          expect(mocks.store.tldwRefreshRotation).toBeUndefined()
+        } finally {
+          controller.abort()
+          await stream?.return(undefined)
+          delete runtime.id
+          delete runtime.sendMessage
+          delete runtime.connect
+        }
+      })
+    })
+
+    const streamResponse = () => new Response(
+      'data: {"choices":[{"delta":{"content":"Original direct answer"}}]}\n\ndata: [DONE]\n\n',
+      { headers: { "content-type": "text/event-stream" } }
+    )
+
+    describe("TASK-13549 buffered original direct stream settlement", () => {
+      const firstFrame = '{"choices":[{"delta":{"content":"First original frame"}}]}'
+      const secondFrame = '{"choices":[{"delta":{"content":"Second original frame"}}]}'
+      const installBufferedTransport = (includeSecond: boolean) => {
+        const physical: { url: string; method?: string; authorization: string | null; body: unknown; signal?: AbortSignal | null }[] = []
+        const wire = `data: ${firstFrame}\n\n${includeSecond ? `data: ${secondFrame}\n\n` : ""}data: [DONE]\n\n`
+        vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url = String(input)
+          if (new URL(url).pathname !== "/api/v1/chat/completions") throw new Error("Undeclared direct transport: " + url)
+          physical.push({ url, method: init?.method, authorization: new Headers(init?.headers).get("Authorization"),
+            body: JSON.parse(String(init?.body)), signal: init?.signal })
+          // One actual physical body buffer. Abort cannot retract text already
+          // decoded and held across an async-generator yield.
+          return new Response(new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(wire))
+              controller.close()
+            }
+          }), { headers: { "content-type": "text/event-stream" } })
+        }))
+        return physical
+      }
+      const boundaries = (["replacement", "A to B to A", "Stop"] as const).flatMap(boundary => [
+        { boundary, next: "buffered frame", includeSecond: true },
+        { boundary, next: "buffered DONE", includeSecond: false }
+      ])
+
+      it.each(boundaries)("refuses $next after $boundary following the first original yield", async ({ boundary, includeSecond }) => {
+        mocks.store.tldwConfig = structuredClone(original)
+        const physical = installBufferedTransport(includeSecond)
+        const controller = new AbortController()
+        const onDispatch = vi.fn()
+        const onOpen = vi.fn()
+        const { bgStream } = await importProxy()
+        const stream = bgStream({ path: "/api/v1/chat/completions", method: "POST", body: streamBody,
+          abortSignal: controller.signal, onDispatch, onOpen })
+        try {
+          expect(await stream.next()).toEqual({ done: false, value: firstFrame })
+          expect(physical).toHaveLength(1)
+          expect(physical[0]).toMatchObject({ url: original.serverUrl + "/api/v1/chat/completions", method: "POST",
+            authorization: "Bearer " + original.accessToken, body: streamBody })
+          expect(onDispatch).toHaveBeenCalledTimes(1)
+          expect(onOpen).toHaveBeenCalledTimes(1)
+          if (boundary === "Stop") controller.abort()
+          else {
+            publishAccount(replacement)
+            if (boundary === "A to B to A") publishAccount(original)
+          }
+          expect(physical[0].signal?.aborted).toBe(true)
+          const resumed = await stream.next().then(value => ({ value }), error => ({ error }))
+          expect(resumed).toMatchObject({ error: boundary === "Stop"
+            ? { name: "AbortError", code: "REQUEST_ABORTED" }
+            : { status: 412, details: { detail: { code: "request_config_scope_changed" } } } })
+          expect(physical).toHaveLength(1)
+          expect(onDispatch).toHaveBeenCalledTimes(1)
+          expect(onOpen).toHaveBeenCalledTimes(1)
+          expect(mocks.store.tldwConfig).toEqual(boundary === "replacement" ? replacement : original)
+          expect(mocks.store.tldwRefreshRotation).toBeUndefined()
+        } finally {
+          controller.abort()
+          await stream.return(undefined)
+        }
+      })
+
+      it.each([true, false])("preserves uninterrupted original buffered sequence with second frame=%s", async includeSecond => {
+        mocks.store.tldwConfig = structuredClone(original)
+        const physical = installBufferedTransport(includeSecond)
+        const onDispatch = vi.fn()
+        const onOpen = vi.fn()
+        const { bgStream } = await importProxy()
+        const stream = bgStream({ path: "/api/v1/chat/completions", method: "POST", body: streamBody, onDispatch, onOpen })
+        try {
+          expect(await stream.next()).toEqual({ done: false, value: firstFrame })
+          if (includeSecond) expect(await stream.next()).toEqual({ done: false, value: secondFrame })
+          expect(await stream.next()).toEqual({ done: true, value: undefined })
+          expect(await stream.next()).toEqual({ done: true, value: undefined })
+          expect(physical).toHaveLength(1)
+          expect(physical[0]).toMatchObject({ url: original.serverUrl + "/api/v1/chat/completions", method: "POST",
+            authorization: "Bearer " + original.accessToken, body: streamBody })
+          expect(onDispatch).toHaveBeenCalledTimes(1)
+          expect(onOpen).toHaveBeenCalledTimes(1)
+          expect(mocks.store.tldwConfig).toEqual(original)
+          expect(mocks.store.tldwRefreshRotation).toBeUndefined()
+        } finally {
+          await stream.return(undefined)
+        }
+      })
+    })
+
+    const holdInitialUnauthorized = () => {
+      let releaseInitial!: () => void
+      const heldInitial = new Promise<void>(resolve => { releaseInitial = resolve })
+      const streams: { url: string; authorization: string | null; body: unknown }[] = []
+      const refreshes: { url: string; body: unknown }[] = []
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input), path = new URL(url).pathname
+        if (path === "/api/v1/auth/refresh") {
+          refreshes.push({ url, body: JSON.parse(String(init?.body)) })
+          return Response.json({ access_token: rotatedAccess, refresh_token: rotatedRefresh, token_type: "bearer" })
+        }
+        if (path !== "/api/v1/chat/completions") throw new Error("Undeclared direct transport: " + path)
+        streams.push({ url, authorization: new Headers(init?.headers).get("Authorization"), body: JSON.parse(String(init?.body)) })
+        if (streams.length === 1) {
+          await heldInitial
+          return new Response("Original stream unauthorized", { status: 401 })
+        }
+        return streamResponse()
+      }))
+      return { streams, refreshes, releaseInitial }
+    }
+
+    it.each(["replacement", "A to B to A"] as const)(
+      "refuses original unscoped direct refresh or replay after held initial 401 and %s",
+      async boundary => {
+        mocks.store.tldwConfig = structuredClone(original)
+        const physical = holdInitialUnauthorized()
+        const { bgStream } = await importProxy()
+        const pending = collectStream(bgStream({
+          path: "/api/v1/chat/completions", method: "POST", body: streamBody
+        })).then(value => ({ value }), error => ({ error }))
+        try {
+          await vi.waitFor(() => expect(physical.streams).toHaveLength(1))
+          expect(physical.streams[0]).toEqual({
+            url: original.serverUrl + "/api/v1/chat/completions",
+            authorization: "Bearer " + original.accessToken,
+            body: streamBody
+          })
+          expect(physical.refreshes).toEqual([])
+          publishAccount(replacement)
+          if (boundary === "A to B to A") publishAccount(original)
+          const current = boundary === "replacement" ? replacement : original
+          physical.releaseInitial()
+          const settled = await pending
+          // The account boundary occurs after the original physical stream
+          // entry, before refresh. Exact restored A cannot revive that stream.
+          expect(physical.refreshes).toEqual([])
+          expect(settled).toMatchObject({ error: {
+            status: 412, details: { detail: { code: "request_config_scope_changed" } }
+          } })
+          expect(mocks.storageSet.mock.calls.filter(([key]) => key === "tldwRefreshRotation")).toEqual([])
+          expect(mocks.store.tldwRefreshRotation).toBeUndefined()
+          expect(mocks.store.tldwConfig).toEqual(current)
+          expect(physical.streams).toHaveLength(1)
+        } finally {
+          physical.releaseInitial()
+          await pending
+        }
+      }
+    )
+
+    it("reuses a same-principal winner after held initial 401 while preserving the original direct stream", async () => {
+      mocks.store.tldwConfig = structuredClone(original)
+      const physical = holdInitialUnauthorized()
+      const { bgStream } = await importProxy()
+      const pending = collectStream(bgStream({
+        path: "/api/v1/chat/completions", method: "POST", body: streamBody
+      })).then(value => ({ value }), error => ({ error }))
+      const winner = { ...original, accessToken: rotatedAccess, refreshToken: rotatedRefresh }
+      try {
+        await vi.waitFor(() => expect(physical.streams).toHaveLength(1))
+        expect(physical.streams[0]).toEqual({
+          url: original.serverUrl + "/api/v1/chat/completions",
+          authorization: "Bearer " + original.accessToken,
+          body: streamBody
+        })
+        publishAccount(winner)
+        physical.releaseInitial()
+        expect(await pending).toEqual({ value: ['{"choices":[{"delta":{"content":"Original direct answer"}}]}'] })
+        expect(physical.refreshes).toEqual([])
+        expect(physical.streams).toHaveLength(2)
+        expect(physical.streams[1]).toEqual({
+          url: original.serverUrl + "/api/v1/chat/completions",
+          authorization: "Bearer " + rotatedAccess,
+          body: streamBody
+        })
+        expect(mocks.storageSet.mock.calls.filter(([key]) => key === "tldwRefreshRotation")).toEqual([])
+        expect(mocks.store.tldwRefreshRotation).toBeUndefined()
+        expect(mocks.store.tldwConfig).toEqual(winner)
+      } finally {
+        physical.releaseInitial()
+        await pending
+      }
+    })
+
+    it("TASK-13549 detaches direct Stop before the held spent refresh completes and later preserves its original rotation", async () => {
+      mocks.store.tldwConfig = structuredClone(original)
+      let releaseRefresh!: () => void
+      const heldRefresh = new Promise<void>(resolve => { releaseRefresh = resolve })
+      const streams: { authorization: string | null; body: unknown }[] = []
+      const refreshes: { body: unknown; signal?: AbortSignal | null }[] = []
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname
+        if (path === "/api/v1/auth/refresh") {
+          refreshes.push({ body: JSON.parse(String(init?.body)), signal: init?.signal })
+          await heldRefresh
+          return Response.json({ access_token: rotatedAccess, refresh_token: rotatedRefresh, token_type: "bearer" })
+        }
+        if (path !== "/api/v1/chat/completions") throw new Error("Undeclared direct transport: " + path)
+        streams.push({ authorization: new Headers(init?.headers).get("Authorization"), body: JSON.parse(String(init?.body)) })
+        return streams.length === 1 ? new Response("Original stream unauthorized", { status: 401 }) : streamResponse()
+      }))
+      const controller = new AbortController()
+      const { bgStream } = await importProxy()
+      let completion: { value?: string[]; error?: unknown } | undefined
+      let rotationObserved = false
+      const pending = collectStream(bgStream({
+        path: "/api/v1/chat/completions", method: "POST", body: streamBody, abortSignal: controller.signal
+      })).then(value => { completion = { value }; return completion }, error => { completion = { error }; return completion })
+      try {
+        await vi.waitFor(() => expect(refreshes).toHaveLength(1))
+        expect(streams).toEqual([{ authorization: "Bearer " + original.accessToken, body: streamBody }])
+        expect(refreshes[0].body).toEqual({ refresh_token: original.refreshToken })
+        controller.abort()
+        // The original iterator must settle while the declared physical refresh
+        // still waits. The account, rather than this stopped caller, owns it.
+        await vi.waitFor(() => expect(completion).toMatchObject({ error: { name: "AbortError", code: "REQUEST_ABORTED" } }))
+        expect(refreshes[0].signal?.aborted).toBe(false)
+        expect(mocks.store.tldwRefreshRotation).toBeUndefined()
+        expect(streams).toHaveLength(1)
+        releaseRefresh()
+        await pending
+        await vi.waitFor(() => expect(mocks.store.tldwRefreshRotation).toMatchObject({
+          sourceAccessToken: original.accessToken, sourceRefreshToken: original.refreshToken,
+          accessToken: rotatedAccess, refreshToken: rotatedRefresh
+        }))
+        rotationObserved = true
+        expect(mocks.store.tldwConfig).toEqual(original)
+        expect(streams).toHaveLength(1)
+      } finally {
+        controller.abort()
+        releaseRefresh()
+        await pending
+        // A detached caller can finish first. Settle its account-owned token
+        // publication before this fixture's physical store is reset.
+        if (refreshes.length && !rotationObserved) {
+          await vi.waitFor(() => expect(mocks.store.tldwRefreshRotation).toMatchObject({
+            sourceAccessToken: original.accessToken, sourceRefreshToken: original.refreshToken,
+            accessToken: rotatedAccess, refreshToken: rotatedRefresh
+          }))
+        }
+      }
+    })
+
+    it("publishes the spent original rotation after sole Stop without replaying the cancelled stream", async () => {
+      mocks.store.tldwConfig = structuredClone(original)
+      let releaseRefresh!: () => void
+      const heldRefresh = new Promise<void>(resolve => { releaseRefresh = resolve })
+      const streams: { authorization: string | null; body: unknown }[] = []
+      const refreshes: { body: unknown; signal?: AbortSignal | null }[] = []
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname
+        if (path === "/api/v1/auth/refresh") {
+          refreshes.push({ body: JSON.parse(String(init?.body)), signal: init?.signal })
+          await heldRefresh
+          return Response.json({ access_token: rotatedAccess, refresh_token: rotatedRefresh, token_type: "bearer" })
+        }
+        if (path !== "/api/v1/chat/completions") throw new Error("Undeclared direct transport: " + path)
+        streams.push({ authorization: new Headers(init?.headers).get("Authorization"), body: JSON.parse(String(init?.body)) })
+        return streams.length === 1 ? new Response("Original stream unauthorized", { status: 401 }) : streamResponse()
+      }))
+      const controller = new AbortController()
+      const { bgStream } = await importProxy()
+      let rotationObserved = false
+      const pending = collectStream(bgStream({
+        path: "/api/v1/chat/completions", method: "POST", body: streamBody, abortSignal: controller.signal
+      })).then(value => ({ value }), error => ({ error }))
+      try {
+        await vi.waitFor(() => expect(refreshes).toHaveLength(1))
+        expect(streams).toEqual([{ authorization: "Bearer " + original.accessToken, body: streamBody }])
+        expect(refreshes[0].body).toEqual({ refresh_token: original.refreshToken })
+        expect(refreshes[0].signal?.aborted).toBe(false)
+        controller.abort()
+        const rotationWasAbortedByStop = refreshes[0].signal?.aborted
+        releaseRefresh()
+        expect(await pending).toMatchObject({ error: { name: "AbortError", code: "REQUEST_ABORTED" } })
+        expect(rotationWasAbortedByStop).toBe(false)
+        await vi.waitFor(() => expect(mocks.store.tldwRefreshRotation).toMatchObject({
+          sourceAccessToken: original.accessToken,
+          sourceRefreshToken: original.refreshToken,
+          accessToken: rotatedAccess,
+          refreshToken: rotatedRefresh
+        }))
+        rotationObserved = true
+        expect(mocks.store.tldwConfig).toEqual(original)
+        expect(streams).toHaveLength(1)
+        const { createSafeStorage } = await import("@/utils/safe-storage")
+        const { resolveDirectBrowserConfig } = await import("@/services/tldw/direct-browser-config")
+        expect(await resolveDirectBrowserConfig(createSafeStorage({ area: "local" }))).toMatchObject({
+          ...original, accessToken: rotatedAccess, refreshToken: rotatedRefresh
+        })
+      } finally {
+        controller.abort()
+        releaseRefresh()
+        await pending
+        if (refreshes.length && !rotationObserved) {
+          await vi.waitFor(() => expect(mocks.store.tldwRefreshRotation).toMatchObject({
+            sourceAccessToken: original.accessToken,
+            sourceRefreshToken: original.refreshToken,
+            accessToken: rotatedAccess,
+            refreshToken: rotatedRefresh
+          }))
+        }
+      }
+    })
+
+    it("refuses original rotation publication and replay after account ABA during the final storage read", async () => {
+      mocks.store.tldwConfig = structuredClone(original)
+      let releaseFinalRead!: () => void
+      const heldFinalRead = new Promise<void>(resolve => { releaseFinalRead = resolve })
+      let refreshReturned = false
+      let finalReadEntered = false
+      mocks.storageGet.mockImplementation(async (key: string) => {
+        const physicalValue = mocks.store[key] ?? null
+        if (key === "tldwRefreshRotation" && refreshReturned && !finalReadEntered) {
+          finalReadEntered = true
+          // The actual helper has already captured tldwConfig. Hold its last
+          // physical read before publication without substituting its guard.
+          await heldFinalRead
+        }
+        return physicalValue
+      })
+      const streams: { authorization: string | null; body: unknown }[] = []
+      const refreshes: { body: unknown; signal?: AbortSignal | null }[] = []
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname
+        if (path === "/api/v1/auth/refresh") {
+          refreshes.push({ body: JSON.parse(String(init?.body)), signal: init?.signal })
+          refreshReturned = true
+          return Response.json({ access_token: rotatedAccess, refresh_token: rotatedRefresh, token_type: "bearer" })
+        }
+        if (path !== "/api/v1/chat/completions") throw new Error("Undeclared direct transport: " + path)
+        streams.push({ authorization: new Headers(init?.headers).get("Authorization"), body: JSON.parse(String(init?.body)) })
+        return streams.length === 1 ? new Response("Original stream unauthorized", { status: 401 }) : streamResponse()
+      }))
+      const { bgStream } = await importProxy()
+      const pending = collectStream(bgStream({
+        path: "/api/v1/chat/completions", method: "POST", body: streamBody
+      })).then(value => ({ value }), error => ({ error }))
+      try {
+        await vi.waitFor(() => expect(finalReadEntered).toBe(true))
+        expect(refreshes).toHaveLength(1)
+        expect(refreshes[0].body).toEqual({ refresh_token: original.refreshToken })
+        expect(streams).toEqual([{ authorization: "Bearer " + original.accessToken, body: streamBody }])
+        expect(mocks.storageSet.mock.calls.filter(([key]) => key === "tldwRefreshRotation")).toEqual([])
+        publishAccount(replacement)
+        publishAccount(original)
+        releaseFinalRead()
+        expect(await pending).toMatchObject({ error: {
+          status: 412, details: { detail: { code: "request_config_scope_changed" } }
+        } })
+        expect(mocks.storageSet.mock.calls.filter(([key]) => key === "tldwRefreshRotation")).toEqual([])
+        expect(mocks.store.tldwRefreshRotation).toBeUndefined()
+        expect(mocks.store.tldwConfig).toEqual(original)
+        expect(streams).toHaveLength(1)
+      } finally {
+        releaseFinalRead()
+        await pending
+      }
     })
   })
 

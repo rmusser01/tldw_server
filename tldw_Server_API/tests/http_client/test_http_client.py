@@ -1,4 +1,6 @@
 import asyncio
+import builtins
+import sys
 import types
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
@@ -142,12 +144,12 @@ async def test_async_client_head_range_fallback_preserves_egress_denial(
     monkeypatch,
     denial_source,
 ):
+    import httpx
+
     from tldw_Server_API.app.core import http_client as hc
     from tldw_Server_API.app.core.exceptions import EgressPolicyError
 
-    class DummyAsyncClient:
-        async def aclose(self):
-            return None
+    DummyAsyncClient = httpx.AsyncClient
 
     validations = 0
     get_calls = 0
@@ -175,13 +177,15 @@ async def test_async_client_head_range_fallback_preserves_egress_denial(
     monkeypatch.setattr(hc, async_request_io, fail_head)
     monkeypatch.setattr(hc, "create_async_client", lambda **_kwargs: DummyAsyncClient())
 
-    with pytest.raises(EgressPolicyError) as exc:
-        await hc._afetch_httpx(
-            method="HEAD",
-            url="https://93.184.216.34/resource",
-            client=DummyAsyncClient(),
-            retry=hc.RetryPolicy(attempts=1),
-        )
+    async with DummyAsyncClient() as client:
+        with pytest.raises(EgressPolicyError) as exc:
+            await hc._afetch_httpx(
+                method="HEAD",
+                url="https://93.184.216.34/resource",
+                client=client,
+                retry=hc.RetryPolicy(attempts=1),
+            )
+    assert client.is_closed
 
     assert exc.value.reason_code == "tls_pin_mismatch"
     assert get_calls == 0
@@ -240,12 +244,12 @@ def test_sync_client_head_range_fallback_preserves_egress_denial(
     monkeypatch,
     denial_source,
 ):
+    import httpx
+
     from tldw_Server_API.app.core import http_client as hc
     from tldw_Server_API.app.core.exceptions import EgressPolicyError
 
-    class DummySyncClient:
-        def close(self):
-            return None
+    DummySyncClient = httpx.Client
 
     validations = 0
     get_calls = 0
@@ -273,13 +277,15 @@ def test_sync_client_head_range_fallback_preserves_egress_denial(
     monkeypatch.setattr(hc, sync_request_io, fail_head)
     monkeypatch.setattr(hc, "create_client", lambda **_kwargs: DummySyncClient())
 
-    with pytest.raises(EgressPolicyError) as exc:
-        hc._fetch_httpx_response(
-            method="HEAD",
-            url="https://93.184.216.34/resource",
-            client=DummySyncClient(),
-            retry=hc.RetryPolicy(attempts=1),
-        )
+    with DummySyncClient() as client:
+        with pytest.raises(EgressPolicyError) as exc:
+            hc._fetch_httpx_response(
+                method="HEAD",
+                url="https://93.184.216.34/resource",
+                client=client,
+                retry=hc.RetryPolicy(attempts=1),
+            )
+    assert client.is_closed
 
     expected_reason = "origin_mismatch" if denial_source == "policy" else "tls_pin_mismatch"
     assert exc.value.reason_code == expected_reason
@@ -927,6 +933,10 @@ async def test_httpx_bounded_compressed_error_skips_body_and_remains_usable() ->
 
 @pytest.mark.asyncio
 async def test_aiohttp_bounded_response_rejects_compressed_success_before_body_read() -> None:
+    from unittest.mock import create_autospec
+
+    import aiohttp
+
     from tldw_Server_API.app.core import http_client as hc
 
     class Content:
@@ -962,12 +972,15 @@ async def test_aiohttp_bounded_response_rejects_compressed_success_before_body_r
         def request(self, *_args: object, **_kwargs: object) -> RequestContext:
             return RequestContext()
 
+    session = create_autospec(aiohttp.ClientSession, instance=True, spec_set=True)
+    session.request.side_effect = Session().request
+    assert isinstance(session, aiohttp.ClientSession)
     with pytest.raises(
         hc.NetworkError,
         match="^Compressed responses are not allowed with max_response_bytes$",
     ):
         await hc._aiohttp_request_io(
-            session=Session(),
+            session=session,
             method="GET",
             url="http://93.184.216.34/data",
             max_response_bytes=1024,
@@ -979,6 +992,10 @@ async def test_aiohttp_bounded_response_rejects_compressed_success_before_body_r
 
 @pytest.mark.asyncio
 async def test_aiohttp_bounded_response_forces_identity_and_disables_decompression() -> None:
+    from unittest.mock import create_autospec
+
+    import aiohttp
+
     from tldw_Server_API.app.core import http_client as hc
 
     class Content:
@@ -1020,8 +1037,11 @@ async def test_aiohttp_bounded_response_forces_identity_and_disables_decompressi
             request_kwargs.append(kwargs)
             return RequestContext()
 
+    session = create_autospec(aiohttp.ClientSession, instance=True, spec_set=True)
+    session.request.side_effect = Session().request
+    assert isinstance(session, aiohttp.ClientSession)
     response = await hc._aiohttp_request_io(
-        session=Session(),
+        session=session,
         method="GET",
         url="http://93.184.216.34/data",
         headers={"aCcEpT-EnCoDiNg": "gzip, br"},
@@ -1036,6 +1056,10 @@ async def test_aiohttp_bounded_response_forces_identity_and_disables_decompressi
 
 @pytest.mark.asyncio
 async def test_aiohttp_bounded_response_aborts_uncompressed_stream_at_limit_plus_one() -> None:
+    from unittest.mock import create_autospec
+
+    import aiohttp
+
     from tldw_Server_API.app.core import http_client as hc
 
     read_sizes: list[int] = []
@@ -1072,12 +1096,15 @@ async def test_aiohttp_bounded_response_aborts_uncompressed_stream_at_limit_plus
         def request(self, *_args: object, **_kwargs: object) -> RequestContext:
             return RequestContext()
 
+    session = create_autospec(aiohttp.ClientSession, instance=True, spec_set=True)
+    session.request.side_effect = Session().request
+    assert isinstance(session, aiohttp.ClientSession)
     with pytest.raises(
         hc.NetworkError,
         match="^Response exceeds max_response_bytes limit$",
     ):
         await hc._aiohttp_request_io(
-            session=Session(),
+            session=session,
             method="GET",
             url="http://93.184.216.34/data",
             max_response_bytes=1024,
@@ -1089,6 +1116,10 @@ async def test_aiohttp_bounded_response_aborts_uncompressed_stream_at_limit_plus
 
 @pytest.mark.asyncio
 async def test_aiohttp_bounded_compressed_error_skips_body_and_remains_usable() -> None:
+    from unittest.mock import create_autospec
+
+    import aiohttp
+
     from tldw_Server_API.app.core import http_client as hc
 
     class Content:
@@ -1122,8 +1153,11 @@ async def test_aiohttp_bounded_compressed_error_skips_body_and_remains_usable() 
             request_kwargs.append(kwargs)
             return RequestContext()
 
+    session = create_autospec(aiohttp.ClientSession, instance=True, spec_set=True)
+    session.request.side_effect = Session().request
+    assert isinstance(session, aiohttp.ClientSession)
     response = await hc._aiohttp_request_io(
-        session=Session(),
+        session=session,
         method="GET",
         url="http://93.184.216.34/data",
         max_response_bytes=1024,
@@ -1275,7 +1309,7 @@ async def test_apost_runs_egress_validation_off_event_loop(monkeypatch):
 
     import tldw_Server_API.app.core.http_client as hc
 
-    calls: list[object] = []
+    calls: list[tuple[object, tuple[object, ...], dict[str, object]]] = []
 
     async def _fake_to_thread(func, *args, **kwargs):
         calls.append((func, args, kwargs))
@@ -1475,15 +1509,16 @@ async def test_stream_response_callback_httpx_runs_once_before_body_with_case_in
 
     monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
 
-    chunks = [
-        chunk
-        async for chunk in hc._astream_bytes_httpx(
-            method="GET",
-            url="http://93.184.216.34/stream",
-            client=object(),
-            on_response=on_response,
-        )
-    ]
+    async with httpx.AsyncClient() as client:
+        chunks = [
+            chunk
+            async for chunk in hc._astream_bytes_httpx(
+                method="GET",
+                url="http://93.184.216.34/stream",
+                client=client,
+                on_response=on_response,
+            )
+        ]
 
     assert chunks == [b"audio"]
     assert events == ["callback:200", "body", "close"]
@@ -1559,15 +1594,16 @@ async def test_stream_response_callback_httpx_runs_before_non_success_classifica
 
     monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
 
-    with pytest.raises(hc.NetworkError, match=r"^HTTP 404$"):
-        async for _ in hc._astream_bytes_httpx(
-            method="GET",
-            url="http://93.184.216.34/missing",
-            client=object(),
-            retry=hc.RetryPolicy(attempts=1),
-            on_response=on_response,
-        ):
-            pass
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(hc.NetworkError, match=r"^HTTP 404$"):
+            async for _ in hc._astream_bytes_httpx(
+                method="GET",
+                url="http://93.184.216.34/missing",
+                client=client,
+                retry=hc.RetryPolicy(attempts=1),
+                on_response=on_response,
+            ):
+                pass
 
     assert events == ["callback:404:missing", "close"]
 
@@ -1645,14 +1681,15 @@ async def test_stream_response_callback_httpx_exception_is_unchanged_and_closes_
 
     monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
 
-    with pytest.raises(httpx.ReadError) as exc_info:
-        async for _ in hc._astream_bytes_httpx(
-            method="GET",
-            url="http://93.184.216.34/stream",
-            client=object(),
-            on_response=on_response,
-        ):
-            pass
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(httpx.ReadError) as exc_info:
+            async for _ in hc._astream_bytes_httpx(
+                method="GET",
+                url="http://93.184.216.34/stream",
+                client=client,
+                on_response=on_response,
+            ):
+                pass
 
     assert exc_info.value is error
     assert events == ["close"]
@@ -1727,14 +1764,15 @@ async def test_stream_response_callback_httpx_cancellation_propagates_and_closes
 
     monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
 
-    with pytest.raises(asyncio.CancelledError):
-        async for _ in hc._astream_bytes_httpx(
-            method="GET",
-            url="http://93.184.216.34/stream",
-            client=object(),
-            on_response=on_response,
-        ):
-            pass
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(asyncio.CancelledError):
+            async for _ in hc._astream_bytes_httpx(
+                method="GET",
+                url="http://93.184.216.34/stream",
+                client=client,
+                on_response=on_response,
+            ):
+                pass
 
     assert events == ["close"]
 
@@ -1799,14 +1837,15 @@ async def test_stream_response_no_callback_preserves_httpx_body_iteration(monkey
 
     monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
 
-    chunks = [
-        chunk
-        async for chunk in hc._astream_bytes_httpx(
-            method="GET",
-            url="http://93.184.216.34/stream",
-            client=object(),
-        )
-    ]
+    async with httpx.AsyncClient() as client:
+        chunks = [
+            chunk
+            async for chunk in hc._astream_bytes_httpx(
+                method="GET",
+                url="http://93.184.216.34/stream",
+                client=client,
+            )
+        ]
 
     assert chunks == [b"one", b"two"]
 
@@ -1876,15 +1915,16 @@ async def test_stream_response_duplicate_headers_httpx_are_comma_joined(monkeypa
 
     monkeypatch.setattr(hc, "_httpx_stream_io", fake_httpx_stream_io)
 
-    chunks = [
-        chunk
-        async for chunk in hc._astream_bytes_httpx(
-            method="GET",
-            url="http://93.184.216.34/stream",
-            client=object(),
-            on_response=on_response,
-        )
-    ]
+    async with httpx.AsyncClient() as client:
+        chunks = [
+            chunk
+            async for chunk in hc._astream_bytes_httpx(
+                method="GET",
+                url="http://93.184.216.34/stream",
+                client=client,
+                on_response=on_response,
+            )
+        ]
 
     assert chunks == [b"audio"]
     assert seen == {"content-type": "audio/mpeg, audio/wav", "x-trace": "one, two"}
@@ -1935,3 +1975,42 @@ async def test_stream_response_duplicate_headers_aiohttp_are_comma_joined(monkey
 
     assert chunks == [b"audio"]
     assert seen == {"content-type": "audio/mpeg, audio/wav", "x-trace": "one, two"}
+
+
+@pytest.mark.parametrize("grouped", [False, True])
+def test_metric_registration_suppresses_noncritical_failure(monkeypatch, grouped):
+    if grouped and sys.version_info < (3, 12):
+        pytest.skip("contextlib.suppress supports exception groups on Python 3.12+")
+    from tldw_Server_API.app.core import http_client as hc
+
+    def fail_registration(definition):
+        error = ValueError("metric registration failed")
+        raise builtins.ExceptionGroup("metrics", [error]) if grouped else error
+
+    monkeypatch.setattr(hc, "_HTTP_CLIENT_METRICS_REGISTERED", False)
+    monkeypatch.setattr(
+        hc,
+        "get_metrics_registry",
+        lambda: types.SimpleNamespace(register_metric=fail_registration),
+    )
+    hc._register_http_client_metrics_once()
+    assert hc._HTTP_CLIENT_METRICS_REGISTERED is True
+
+
+def test_metric_registration_propagates_unexpected_failure(monkeypatch):
+    from tldw_Server_API.app.core import http_client as hc
+
+    class UnexpectedMetricError(Exception):
+        pass
+
+    def fail_registration(definition):
+        raise UnexpectedMetricError("unexpected metric failure")
+
+    monkeypatch.setattr(hc, "_HTTP_CLIENT_METRICS_REGISTERED", False)
+    monkeypatch.setattr(
+        hc,
+        "get_metrics_registry",
+        lambda: types.SimpleNamespace(register_metric=fail_registration),
+    )
+    with pytest.raises(UnexpectedMetricError, match="unexpected metric failure"):
+        hc._register_http_client_metrics_once()

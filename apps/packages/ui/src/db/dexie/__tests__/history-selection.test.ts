@@ -1261,6 +1261,43 @@ it("terminal recovery outcomes fence late callbacks without erasing another oper
   ).toEqual(["other"])
 })
 
+it.each(["input_text", "selection_digest", "request_context_digest"] as const)("ordinary server memory recovery rejects changed %s", async field => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const bookmark = { profile_id: owner.profile_id, client_session_id: "ordinary-memory" }
+  const pending = { operation_id: "ordinary-memory", persistence: "server" as const, origin_view: origin,
+    owner_key: owner.owner_key, conversation_id: owner.conversation_id, selection_digest: "selected",
+    request_context_digest: "prepared", created_at: 1, input_text: "question", input_images: [],
+    result_text: "Unconfirmed original server text", state: "unknown" as const }
+  await history.saveHistoryTurnRecovery(bookmark, origin, { ...pending, result_text: "", state: "dispatching" })
+  try {
+    await history.retainHistoryTurnRecoveryInMemory(bookmark, origin, pending)
+    expect((await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn).toMatchObject({ result_text: pending.result_text, recovery_storage: "memory" })
+    await expect(history.retainHistoryTurnRecoveryInMemory(bookmark, origin, { ...pending, [field]: "changed" })).rejects.toThrow("history_operation_conflict")
+  } finally { expect(await history.dismissHistoryTurnRecovery(bookmark, origin, pending.operation_id, "dismissed")).toBe(true) }
+})
+
+it("ordinary window recovery replaces streamed prefixes and restores the latest durable text", async () => {
+  const owner = await history.getLocalHistoryOwner("chat"), origin = view(owner)
+  const bookmark = { profile_id: owner.profile_id, client_session_id: "ordinary-prefix" }
+  const pending = { operation_id: "ordinary-prefix", persistence: "server" as const, origin_view: origin,
+    owner_key: owner.owner_key, conversation_id: owner.conversation_id, selection_digest: "selected",
+    request_context_digest: "prepared", created_at: 1, input_text: "question", input_images: [],
+    result_text: "", state: "dispatching" as const }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  try {
+    for (const result_text of ["A", "An", "Answer"])
+      await history.retainHistoryTurnRecoveryInMemory(bookmark, origin, { ...pending, result_text, state: "unknown" })
+    const [entry] = await history.loadHistoryTurnRecoveries(bookmark, owner)
+    expect(entry.turn.result_text).toBe("Answer")
+    expect(entry.turn.retained_result_texts).toBeUndefined()
+    await history.saveHistoryTurnRecovery(bookmark, origin, { ...pending, result_text: "Answer", state: "unknown" })
+    const [saved] = await history.loadHistoryTurnRecoveries(bookmark, owner)
+    expect(saved.turn.retained_result_texts).toBeUndefined()
+    expect(saved.turn.recovery_storage).toBeUndefined()
+  } finally { expect(await history.dismissHistoryTurnRecovery(bookmark, origin, pending.operation_id)).toBe(true) }
+})
+
 it("native recovery begins without canonical IDs and binds monotonically to owner evidence", async () => {
   const owner = await history.getLocalHistoryOwner("chat")
   const origin = view(owner)
@@ -1307,4 +1344,853 @@ it("native recovery begins without canonical IDs and binds monotonically to owne
       input_id: "forged"
     })
   ).rejects.toThrow()
+})
+
+it("a confirmed refused native turn preserves exact input on reopen and cannot regress to uncertain dispatch", async () => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const pending: Parameters<typeof history.saveHistoryTurnRecovery>[2] = {
+    operation_id: "refused-native",
+    persistence: "server",
+    origin_view: origin,
+    owner_key: owner.owner_key,
+    conversation_id: owner.conversation_id,
+    selection_digest: "selected",
+    request_context_digest: "prepared",
+    created_at: 1,
+    input_text: "  exact refused input  ",
+    input_images: [],
+    result_text: "",
+    state: "dispatching"
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  await history.saveHistoryTurnRecovery(bookmark, origin, {
+    ...pending,
+    state: "refused"
+  })
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  const reopened = await history.loadHistoryTurnRecoveries(
+    { ...bookmark, client_session_id: "reopened" },
+    owner
+  )
+  expect(reopened[0].turn).toMatchObject({
+    state: "refused" as const,
+    input_text: "  exact refused input  ",
+    result_text: ""
+  })
+  expect(reopened[0].turn.admission).toBeUndefined()
+  expect(reopened[0].turn.outcome).toBeUndefined()
+  expect(
+    (await history.captureLocalHistorySnapshot(owner, origin, "send")).snapshot
+      .nodes
+  ).toEqual([])
+})
+
+it.each(["client", "admission", "result", "content", "outcome"])(
+  "refused recovery rejects contradictory %s evidence without rewriting durable input",
+  async (contradiction) => {
+    const owner = await history.getLocalHistoryOwner("chat")
+    const origin = view(owner)
+    const pending: Parameters<typeof history.saveHistoryTurnRecovery>[2] = {
+      operation_id: "refused-native",
+      persistence: "server",
+      origin_view: origin,
+      owner_key: owner.owner_key,
+      conversation_id: owner.conversation_id,
+      selection_digest: "selected",
+      request_context_digest: "prepared",
+      created_at: 1,
+      input_text: "exact refused input",
+      input_images: [],
+      result_text: "",
+      state: "dispatching"
+    }
+    await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+    const invalid = {
+      ...pending,
+      state: "refused" as const,
+      ...(contradiction === "client"
+        ? { persistence: "client" as const, input_id: "i", assistant_id: "a" }
+        : contradiction === "admission"
+          ? {
+              input_id: "i",
+              admission: {
+                version: 1 as const,
+                owner_key: owner.owner_key,
+                conversation_id: owner.conversation_id,
+                input_message_id: "i",
+                input_message_revision: "r",
+                selection_digest: "selected"
+              }
+            }
+          : contradiction === "result"
+            ? { assistant_id: "a" }
+            : contradiction === "content"
+              ? { result_text: " " }
+              : { outcome: "stopped" as const })
+    }
+    await expect(
+      history.saveHistoryTurnRecovery(bookmark, origin, invalid)
+    ).rejects.toThrow()
+    expect(
+      (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn
+    ).toMatchObject({ state: "dispatching", input_text: "exact refused input" })
+  }
+)
+
+describe("on-device owner preparation", () => {
+  const reader = { profileId: "profile", serverScopeKey: "realm-A", isCurrent: () => true }
+  it("claims a current scope-only row under its captured profile", async () => {
+    await memory.userSettings.update("main", { history_profile_id: "profile" })
+    await memory.chatHistories.update("chat", { server_scope_key: "realm-A" })
+    expect(await history.getLocalHistoryOwner("chat", reader)).toMatchObject({ profile_id: "profile", owner_key: "local-history-v1:profile" })
+  })
+  it.each(["replaced profile", "foreign realm", "expired reader"])("does not stamp a row after %s", async reason => {
+    await memory.userSettings.update("main", { history_profile_id: reason === "replaced profile" ? "foreign" : "profile" })
+    await memory.chatHistories.update("chat", { server_scope_key: reason === "foreign realm" ? "realm-B" : "realm-A" })
+    const before = JSON.stringify([await memory.userSettings.get("main"), await memory.chatHistories.get("chat")])
+    await expect(history.getLocalHistoryOwner("chat", { ...reader, isCurrent: () => reason !== "expired reader" })).rejects.toMatchObject({ code: "owner_mismatch" })
+    expect(JSON.stringify([await memory.userSettings.get("main"), await memory.chatHistories.get("chat")])).toBe(before)
+  })
+  it("does not initialize a replacement profile for a stale qualified click", async () => {
+    await memory.userSettings.delete("main")
+    await memory.chatHistories.update("chat", { server_scope_key: "realm-A" })
+    await expect(history.getLocalHistoryOwner("chat", reader)).rejects.toMatchObject({ code: "owner_mismatch" })
+    expect(await memory.userSettings.get("main")).toBeUndefined()
+    expect((await memory.chatHistories.get("chat")).local_owner_key).toBeUndefined()
+  })
+})
+
+it.each(["missing", "replaced"])("verifies an expected profile without initializing after it is %s", async reason => {
+  if (reason === "missing") await memory.userSettings.delete("main")
+  else await memory.userSettings.update("main", { history_profile_id: "foreign" })
+  const before = JSON.stringify(await memory.userSettings.get("main"))
+  await expect(history.ensureLocalProfileId("profile")).rejects.toMatchObject({ code: "owner_mismatch" })
+  expect(JSON.stringify(await memory.userSettings.get("main"))).toBe(before)
+})
+
+
+it("explicit edited recovery policy round-trips and cannot become an ordinary checkpoint", async () => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const pending: Parameters<typeof history.saveHistoryTurnRecovery>[2] = {
+    action: "edit_resend",
+    operation_id: "edited",
+    owner_key: owner.owner_key,
+    conversation_id: "chat",
+    origin_view: origin,
+    selection_digest: "selection",
+    request_context_digest: "request",
+    input_id: "input",
+    assistant_id: "result",
+    created_at: 1,
+    input_text: "Exact  \n",
+    input_images: [],
+    result_text: "Reply",
+    state: "generated_unsaved",
+    outcome: "complete",
+    settled_message_id: "result"
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  expect(
+    (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn
+  ).toMatchObject(pending)
+  await expect(
+    history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...pending,
+      action: undefined
+    })
+  ).rejects.toThrow("history_operation_conflict")
+  expect(
+    (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn.action
+  ).toBe("edit_resend")
+})
+
+it("recovery reads refuse an unknown action without downgrading it into automatic ordinary work", async () => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const pending: Parameters<typeof history.saveHistoryTurnRecovery>[2] = {
+    operation_id: "old",
+    owner_key: owner.owner_key,
+    conversation_id: "chat",
+    origin_view: origin,
+    selection_digest: "selection",
+    request_context_digest: "request",
+    input_id: "u",
+    assistant_id: "a",
+    created_at: 1,
+    input_text: "Original",
+    input_images: [],
+    result_text: "Reply",
+    state: "generated_unsaved",
+    outcome: "complete",
+    settled_message_id: "a"
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  const row = await memory.historySelections.get([
+    bookmark.profile_id,
+    bookmark.client_session_id,
+    owner.owner_key,
+    "chat"
+  ])
+  await memory.historySelections.put({
+    ...row,
+    pending_turns: { old: { ...pending, action: "unrecognized" } }
+  })
+  await expect(
+    history.loadHistoryTurnRecoveries(bookmark, owner)
+  ).rejects.toThrow("unsupported_history_action")
+  expect(
+    (
+      await memory.historySelections.get([
+        bookmark.profile_id,
+        bookmark.client_session_id,
+        owner.owner_key,
+        "chat"
+      ])
+    ).pending_turns.old.action
+  ).toBe("unrecognized")
+  await memory.historySelections.put({
+    ...row,
+    pending_turns: { old: pending }
+  })
+  expect(
+    (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn.action
+  ).toBeUndefined()
+})
+
+
+const regenerationRecovery = (origin: HistoryViewSelectionV1): import("../types").HistoryTurnRecovery => ({
+  action: "regenerate", operation_id: "regenerated", persistence: "server", origin_view: origin,
+  owner_key: origin.owner_key, conversation_id: origin.conversation_id, selection_digest: "NEW REGENERATION SELECTION",
+  request_context_digest: "request", created_at: 1, input_text: "  Original input  \n", input_images: ["saved-image"],
+  result_text: "", state: "dispatching"
+})
+it("regeneration recovery retains both the new operation digest and original input admission digest", async () => {
+  const owner = await history.getLocalHistoryOwner("chat"), origin = view(owner)
+  origin.cursor = { kind: "after_message", message_id: "original-assistant" }
+  const pending = regenerationRecovery(origin)
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  const accepted = { ...pending, input_id: "original-input", state: "accepted_unsent" as const, admission: { version: 1 as const,
+    owner_key: owner.owner_key, conversation_id: "chat", input_message_id: "original-input", input_message_revision: "1", selection_digest: "ORIGINAL ADMISSION" } }
+  await history.saveHistoryTurnRecovery(bookmark, origin, accepted)
+  expect((await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn).toMatchObject(accepted)
+  for (const patch of [{ action: undefined }, { selection_digest: "different" }, { admission: { ...accepted.admission, selection_digest: "different" } },
+    { input_id: "foreign-input" }, { admission: { ...accepted.admission, owner_key: "foreign" } }]) {
+    await expect(history.saveHistoryTurnRecovery(bookmark, origin, { ...accepted, ...patch })).rejects.toThrow("history_operation_conflict")
+  }
+  expect((await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn).toMatchObject(accepted)
+})
+it("confirmed saved-image regeneration refusal keeps the exact original attachments without inventing admission", async () => {
+  const owner = await history.getLocalHistoryOwner("chat"), origin = view(owner)
+  origin.cursor = { kind: "after_message", message_id: "original-assistant" }
+  const pending = regenerationRecovery(origin)
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  await history.saveHistoryTurnRecovery(bookmark, origin, { ...pending, state: "refused" })
+  expect((await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn).toMatchObject({ ...pending, state: "refused" })
+})
+it.each(["client", "before_message"])("regeneration recovery refuses unsupported %s persistence or boundary", async boundary => {
+  const owner = await history.getLocalHistoryOwner("chat"), origin = view(owner)
+  origin.cursor = { kind: boundary === "client" ? "after_message" : "before_message", message_id: "original-assistant" }
+  const pending = regenerationRecovery(origin)
+  if (boundary === "client") Object.assign(pending, { persistence: "client", input_id: "u", assistant_id: "a" })
+  await expect(history.saveHistoryTurnRecovery(bookmark, origin, pending)).rejects.toThrow("unsupported_history_action")
+})
+
+
+it("a refused client-managed native attempt keeps candidate IDs and exact input without admission", async () => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  const origin = view(owner)
+  const pending: Parameters<typeof history.saveHistoryTurnRecovery>[2] = {
+    operation_id: "refused-client-native",
+    persistence: "client",
+    origin_view: origin,
+    owner_key: owner.owner_key,
+    conversation_id: owner.conversation_id,
+    selection_digest: "selected",
+    request_context_digest: "prepared",
+    created_at: 1,
+    input_id: "candidate-user",
+    assistant_id: "candidate-assistant",
+    input_text: "  exact unsent input\nsecond line  ",
+    input_images: ["data:image/png;base64,YQ=="],
+    result_text: "",
+    state: "dispatching"
+  }
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  await history.saveHistoryTurnRecovery(bookmark, origin, {
+    ...pending,
+    state: "refused"
+  })
+  await history.saveHistoryTurnRecovery(bookmark, origin, pending)
+  const reopened = await history.loadHistoryTurnRecoveries(
+    { ...bookmark, client_session_id: "reopened" },
+    owner
+  )
+  expect(reopened[0].turn).toMatchObject({ ...pending, state: "refused" })
+  expect(reopened[0].turn.admission).toBeUndefined()
+  expect(
+    (await history.captureLocalHistorySnapshot(owner, origin, "send")).snapshot
+      .nodes
+  ).toEqual([])
+  await expect(
+    history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...pending,
+      state: "unknown",
+      settled_message_id: "invented"
+    })
+  ).rejects.toThrow("history_operation_conflict")
+})
+
+
+describe("acknowledged recovery dismissal", () => {
+  const retained = async () => {
+    const owner = await history.getLocalHistoryOwner("chat")
+    const origin = view(owner)
+    const turn = {
+      operation_id: "dismiss-ack",
+      owner_key: owner.owner_key,
+      conversation_id: "chat",
+      input_id: "input",
+      assistant_id: "result",
+      persistence: "client" as const,
+      created_at: 1,
+      input_text: "  exact input\n  ",
+      input_images: [],
+      result_text: "<think>raw reasoning</think>  exact reply\n  ",
+      state: "generated_unsaved" as const,
+      origin_view: origin,
+      selection_digest: "selected",
+      request_context_digest: "prepared"
+    }
+    await history.saveHistoryTurnRecovery(bookmark, origin, turn)
+    return { owner, turn }
+  }
+
+  it("acknowledges only a committed removal, not an already missing record", async () => {
+    const { owner } = await retained()
+    expect(
+      await history.dismissHistoryTurnRecovery(bookmark, owner, "dismiss-ack")
+    ).toBe(true)
+    expect(
+      await history.dismissHistoryTurnRecovery(bookmark, owner, "dismiss-ack")
+    ).toBe(false)
+    expect(
+      (await history.loadHistoryBookmark(bookmark, owner))
+        ?.history_turn_outcomes
+    ).toEqual({ "dismiss-ack": "dismissed" })
+  })
+
+  it.each(["entry", "profile", "read", "write"])(
+    "rolls back dismissal after its lease retires at %s",
+    async (boundary) => {
+      const { owner, turn } = await retained()
+      let current = boundary !== "entry"
+      const table =
+        boundary === "profile" ? memory.userSettings : memory.historySelections
+      const method = boundary === "write" ? "put" : "get"
+      const original = table[method].bind(table)
+      const spy =
+        boundary === "entry"
+          ? null
+          : vi
+              .spyOn(table, method)
+              .mockImplementationOnce(async (...args: unknown[]) => {
+                const result = await original(...args)
+                current = false
+                return result
+              })
+      try {
+        await expect(
+          history.dismissHistoryTurnRecovery(
+            bookmark,
+            owner,
+            "dismiss-ack",
+            "dismissed",
+            { validate_lease: () => current }
+          )
+        ).rejects.toMatchObject({ code: "request_config_scope_changed" })
+      } finally {
+        spy?.mockRestore()
+      }
+      expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([
+        { scope: bookmark, turn }
+      ])
+      expect(
+        (await history.loadHistoryBookmark(bookmark, owner))
+          ?.history_turn_outcomes
+      ).toBeUndefined()
+    }
+  )
+
+  it("aborts a dismissal retired after its write while the transaction receipt is still pending", async () => {
+    const { owner, turn } = await retained()
+    const original = new Map(memory.historySelections.rows)
+    let finish!: () => void
+    let entered!: () => void
+    const written = new Promise<void>((resolve) => {
+      entered = resolve
+    })
+    memory.transaction.mockImplementationOnce(
+      async (
+        _mode: unknown,
+        _tables: unknown,
+        operation: (tx: { abort: () => void }) => Promise<boolean>
+      ) => {
+        let aborted = false
+        const receipt = await operation({
+          abort() {
+            aborted = true
+          }
+        })
+        entered()
+        await new Promise<void>((resolve) => {
+          finish = resolve
+        })
+        if (aborted) {
+          memory.historySelections.rows.clear()
+          original.forEach((value, key) =>
+            memory.historySelections.rows.set(key, value)
+          )
+          throw new Error("transaction aborted before commit")
+        }
+        return receipt
+      }
+    )
+    const controller = new AbortController()
+    const pending = history.dismissHistoryTurnRecovery(
+      bookmark,
+      owner,
+      "dismiss-ack",
+      "dismissed",
+      { signal: controller.signal }
+    )
+    await written
+    controller.abort()
+    finish()
+    await expect(pending).rejects.toThrow("transaction aborted before commit")
+    expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([
+      { scope: bookmark, turn }
+    ])
+  })
+
+  it("retains the exact journal when storage rejects its removal", async () => {
+    const { owner, turn } = await retained()
+    const spy = vi
+      .spyOn(memory.historySelections, "put")
+      .mockRejectedValueOnce(new Error("journal unavailable"))
+    try {
+      await expect(
+        history.dismissHistoryTurnRecovery(bookmark, owner, "dismiss-ack")
+      ).rejects.toThrow("journal unavailable")
+    } finally {
+      spy.mockRestore()
+    }
+    expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([
+      { scope: bookmark, turn }
+    ])
+  })
+
+  it("refuses an aborted or foreign-profile dismissal without losing the journal", async () => {
+    const { owner, turn } = await retained()
+    const controller = new AbortController()
+    controller.abort()
+    await expect(
+      history.dismissHistoryTurnRecovery(
+        bookmark,
+        owner,
+        "dismiss-ack",
+        "dismissed",
+        { signal: controller.signal }
+      )
+    ).rejects.toMatchObject({ code: "request_config_scope_changed" })
+    await expect(
+      history.dismissHistoryTurnRecovery(
+        { ...bookmark, profile_id: "foreign" },
+        owner,
+        "dismiss-ack"
+      )
+    ).rejects.toMatchObject({ code: "bookmark_owner_mismatch" })
+    expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([
+      { scope: bookmark, turn }
+    ])
+  })
+})
+
+// Production ownership/admission/settlement run against the serialized rollback
+// table-engine double above. These cases do not qualify native IndexedDB commits.
+describe("local assistant settlement with captured document files", () => {
+  const file = (id = "new-file") => ({
+    id, filename: `${id}.txt`, type: "text/plain", content: "  Original file\n",
+    size: 16, uploadedAt: 7, processed: true
+  })
+  const accepted = async () => {
+    const owner = await history.getLocalHistoryOwner("chat")
+    const captured = await history.captureLocalHistorySnapshot(owner, view(owner), "send")
+    const admission = await history.appendLocalSelectedUser(owner, selection(captured), row("file-user"))
+    const result = { ...row("file-reply"), role: "assistant", content: "Original answer" }
+    const originalSession = {
+      sessionId: "chat", files: [file("existing-file")], retrievalEnabled: true, createdAt: 3
+    }
+    await memory.sessionFiles.put(originalSession)
+    return { owner, admission, result, originalSession }
+  }
+
+  it("reuses the exact assistant and file ID without duplicating files or changing session metadata", async () => {
+    const { owner, admission, result, originalSession } = await accepted()
+    const capturedFile = file()
+    await service.settleAcceptedAssistant(owner, admission, result, undefined, [capturedFile])
+    const first = await memory.sessionFiles.get("chat")
+    await service.settleAcceptedAssistant(owner, admission, result, undefined, [capturedFile])
+    expect(await memory.sessionFiles.get("chat")).toEqual(first)
+    expect(first).toEqual({ ...originalSession, files: [...originalSession.files, capturedFile] })
+    expect(await memory.messages.where("history_id").equals("chat").toArray()).toHaveLength(2)
+    expect(await memory.messages.get("file-reply")).toMatchObject({
+      content: result.content, parent_message_id: "file-user"
+    })
+  })
+
+  it("refuses a differing duplicate file ID and retains the original session and accepted assistant", async () => {
+    const { owner, admission, result } = await accepted()
+    await service.settleAcceptedAssistant(owner, admission, result, undefined, [file()])
+    const before = await memory.sessionFiles.get("chat")
+    await expect(service.settleAcceptedAssistant(owner, admission,
+      { ...result, id: "conflicting-file-reply" }, undefined,
+      [{ ...file(), content: "Changed file" }]
+    )).rejects.toMatchObject({ code: "local_file_id_conflict" })
+    expect(await memory.sessionFiles.get("chat")).toEqual(before)
+    expect(await memory.messages.get("conflicting-file-reply")).toBeUndefined()
+    expect(await memory.messages.get("file-reply")).toMatchObject({ content: result.content })
+  })
+
+  it("rolls back both files and assistant when the original owner lease retires after file put", async () => {
+    const { owner, admission, result, originalSession } = await accepted()
+    let current = true
+    const qualifiedOwner = { ...owner, validate_lease: () => current }
+    const put = memory.sessionFiles.put.bind(memory.sessionFiles)
+    const spy = vi.spyOn(memory.sessionFiles, "put").mockImplementationOnce(async value => {
+      await put(value)
+      current = false
+    })
+    try {
+      await expect(service.settleAcceptedAssistant(qualifiedOwner, admission, result, undefined, [file()]))
+        .rejects.toMatchObject({ code: "request_config_scope_changed" })
+    } finally { spy.mockRestore() }
+    expect(await memory.sessionFiles.get("chat")).toEqual(originalSession)
+    expect(await memory.messages.get("file-reply")).toBeUndefined()
+    expect(await memory.messages.get("file-user")).toMatchObject({ content: "file-user" })
+  })
+
+  it("rolls back the new files if the assistant write fails", async () => {
+    const { owner, admission, result, originalSession } = await accepted()
+    const write = vi.spyOn(memory.messages, "add").mockRejectedValueOnce(new Error("assistant write unavailable"))
+    try {
+      await expect(service.settleAcceptedAssistant(owner, admission, result, undefined, [file()]))
+        .rejects.toThrow("assistant write unavailable")
+    } finally { write.mockRestore() }
+    expect(await memory.sessionFiles.get("chat")).toEqual(originalSession)
+    expect(await memory.messages.get("file-reply")).toBeUndefined()
+    expect(await memory.messages.get("file-user")).toMatchObject({ content: "file-user" })
+  })
+
+  it("settles the original captured file proposal when its caller mutates it during a held read", async () => {
+    const { owner, admission, result, originalSession } = await accepted()
+    const proposal = [file()]
+    const originalProposal = structuredClone(proposal)
+    let entered!: () => void
+    let release!: () => void
+    const reading = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<void>(resolve => { release = resolve })
+    const get = memory.sessionFiles.get.bind(memory.sessionFiles)
+    const spy = vi.spyOn(memory.sessionFiles, "get").mockImplementationOnce(async id => {
+      const value = await get(id)
+      entered()
+      await held
+      return value
+    })
+    const pending = service.settleAcceptedAssistant(owner, admission, result, undefined, proposal)
+    try {
+      await reading
+      proposal[0].content = "Newer caller file"
+      proposal.push(file("later-file"))
+      release()
+      await expect(pending).resolves.toMatchObject({ id: "file-reply" })
+    } finally { release(); spy.mockRestore() }
+    expect(await memory.sessionFiles.get("chat")).toEqual({
+      ...originalSession, files: [...originalSession.files, ...originalProposal]
+    })
+  })
+})
+
+
+describe("genuine Roleplay recovery receipt arm", () => {
+  const original = {
+    version: 1 as const,
+    conversation_id: "chat",
+    assistant_message_id: "resume-assistant",
+    input: {
+      message_id: "resume-user",
+      content: "  Exact saved roleplay\n",
+      expected: {
+        version: 1 as const,
+        snapshot_digest: "sha256:" + "b".repeat(64),
+        settings_version: 2,
+        history_version: 1,
+        tail: { message_id: null, message_version: null }
+      }
+    }
+  }
+  const append = {
+    version: 1 as const,
+    conversation_id: "chat",
+    message_id: original.input.message_id,
+    message_version: 1,
+    parent_message_id: null,
+    fence: {
+      ...original.input.expected,
+      history_version: 2,
+      tail: { message_id: original.input.message_id, message_version: 1 }
+    }
+  }
+  const completion = {
+    chat_id: "chat",
+    character_id: 42,
+    provider: "openai",
+    model: "original",
+    saved: true,
+    user_message_id: original.input.message_id,
+    assistant_message_id: original.assistant_message_id,
+    assistant_content: "Exact generated answer",
+    tldw_roleplay_resume_v1: {
+      version: 1 as const,
+      input_message_id: original.input.message_id,
+      input_message_version: 1,
+      assistant_message_id: original.assistant_message_id,
+      assistant_message_version: 1,
+      expected: append.fence,
+      fence: {
+        ...append.fence,
+        history_version: 3,
+        tail: { message_id: original.assistant_message_id, message_version: 1 }
+      },
+      unsaved_reason: null
+    }
+  }
+  const pending = async () => {
+    const owner = await history.getLocalHistoryOwner("chat")
+    const origin = view(owner)
+    const turn: Parameters<typeof history.saveHistoryTurnRecovery>[2] = {
+      operation_id: "resume-original",
+      owner_key: owner.owner_key,
+      conversation_id: "chat",
+      origin_view: origin,
+      persistence: "server",
+      selection_digest: "selected",
+      request_context_digest: "resume-intent",
+      created_at: 1,
+      input_text: original.input.content,
+      input_images: [],
+      result_text: "",
+      state: "dispatching",
+      roleplay_resume: { intent: original }
+    }
+    await history.saveHistoryTurnRecovery(bookmark, origin, turn)
+    return { owner, origin, turn }
+  }
+  it("retains chosen IDs only in immutable intent until a genuine append acknowledgement", async () => {
+    const { owner } = await pending()
+    const [entry] = await history.loadHistoryTurnRecoveries(bookmark, owner)
+    expect(entry.turn.roleplay_resume?.intent).toEqual(original)
+    expect(entry.turn.input_id).toBeUndefined()
+    expect(entry.turn.assistant_id).toBeUndefined()
+    expect(entry.turn.admission).toBeUndefined()
+  })
+  it("promotes original receipts without fabricating H1 admission and keeps them on late downgrade", async () => {
+    const { owner, origin, turn } = await pending()
+    const accepted = {
+      ...turn,
+      input_id: original.input.message_id,
+      state: "accepted_unsent" as const,
+      roleplay_resume: { intent: original, append }
+    }
+    await history.saveHistoryTurnRecovery(bookmark, origin, accepted)
+    const settled = {
+      ...accepted,
+      state: "generated_unsaved" as const,
+      result_text: completion.assistant_content,
+      assistant_id: original.assistant_message_id,
+      settled_message_id: original.assistant_message_id,
+      outcome: "complete" as const,
+      roleplay_resume: { intent: original, append, completion }
+    }
+    await history.saveHistoryTurnRecovery(bookmark, origin, settled)
+    await history.saveHistoryTurnRecovery(bookmark, origin, turn)
+    expect(
+      (await history.loadHistoryTurnRecoveries(bookmark, owner))[0].turn
+    ).toMatchObject(settled)
+  })
+  it.each([
+    "input-id",
+    "assistant-id",
+    "foreign-owner",
+    "changed-input",
+    "images",
+    "h1-admission",
+    "wrong-fence"
+  ])("refuses unsupported Roleplay journal evidence %s", async (change) => {
+    const { origin, turn } = await pending()
+    const patch =
+      change === "input-id"
+        ? { input_id: original.input.message_id }
+        : change === "assistant-id"
+          ? { assistant_id: original.assistant_message_id }
+          : change === "foreign-owner"
+            ? {
+                roleplay_resume: {
+                  intent: { ...original, conversation_id: "foreign" }
+                }
+              }
+            : change === "changed-input"
+              ? {
+                  roleplay_resume: {
+                    intent: {
+                      ...original,
+                      input: { ...original.input, content: "different" }
+                    }
+                  }
+                }
+              : change === "images"
+                ? { input_images: ["image"] }
+                : change === "h1-admission"
+                  ? {
+                      admission: {
+                        version: 1 as const,
+                        owner_key: turn.owner_key,
+                        conversation_id: "chat",
+                        input_message_id: original.input.message_id,
+                        input_message_revision: "1",
+                        selection_digest: "selected"
+                      }
+                    }
+                  : {
+                      roleplay_resume: {
+                        intent: original,
+                        append: {
+                          ...append,
+                          fence: { ...append.fence, settings_version: 3 }
+                        }
+                      }
+                    }
+    await expect(
+      history.saveHistoryTurnRecovery(bookmark, origin, { ...turn, ...patch })
+    ).rejects.toThrow()
+  })
+  it("does not promote an unsaved completion to canonical assistant identity", async () => {
+    const { origin, turn } = await pending()
+    const unsaved = {
+      ...completion,
+      saved: false,
+      assistant_message_id: null,
+      tldw_roleplay_resume_v1: {
+        ...completion.tldw_roleplay_resume_v1,
+        assistant_message_version: null,
+        fence: null,
+        unsaved_reason: "history_fence_changed"
+      }
+    }
+    await expect(
+      history.saveHistoryTurnRecovery(bookmark, origin, {
+        ...turn,
+        input_id: original.input.message_id,
+        assistant_id: original.assistant_message_id,
+        result_text: completion.assistant_content,
+        state: "generated_unsaved",
+        roleplay_resume: { intent: original, append, completion: unsaved }
+      })
+    ).rejects.toThrow()
+  })
+  it("whitelists credential-free recovery but keeps all unacknowledged generated text", async () => {
+    const { owner, origin, turn } = await pending()
+    const roleplay_resume = {
+      ...turn.roleplay_resume!,
+      servicePromptConfig: { apiKey: "never-store" }
+    }
+    await history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...turn,
+      state: "generated_unsaved",
+      result_text: "x".repeat(1_000_001),
+      roleplay_resume
+    })
+    const [entry] = await history.loadHistoryTurnRecoveries(bookmark, owner)
+    expect(entry.turn.roleplay_resume).toEqual({ intent: original })
+    expect(entry.turn.result_text).toHaveLength(1_000_001)
+  })
+  it("freezes original Roleplay recovery before its optional validator is loaded", async () => {
+    const { owner, origin, turn } = await pending()
+    const record = structuredClone(turn)
+    const storing = history.saveHistoryTurnRecovery(bookmark, origin, record)
+    record.input_text = "Replaced input"
+    record.roleplay_resume!.intent.input.content = "Replaced input"
+    await storing
+    const [entry] = await history.loadHistoryTurnRecoveries(bookmark, owner)
+    expect(entry.turn.input_text).toBe(original.input.content)
+    expect(entry.turn.roleplay_resume!.intent.input.content).toBe(
+      original.input.content
+    )
+  })
+
+  it("drops unused nested completion diagnostics before durable recovery", async () => {
+    const { owner, origin, turn } = await pending()
+    await history.saveHistoryTurnRecovery(bookmark, origin, {
+      ...turn,
+      input_id: original.input.message_id,
+      assistant_id: original.assistant_message_id,
+      result_text: completion.assistant_content,
+      state: "generated_unsaved",
+      outcome: "complete",
+      settled_message_id: original.assistant_message_id,
+      roleplay_resume: {
+        intent: original,
+        append,
+        completion: {
+          ...completion,
+          lorebook_diagnostics: [
+            { apiKey: "never-store", nested: { credential: "never-store" } }
+          ]
+        } as unknown as NonNullable<typeof turn.roleplay_resume>
+      }
+    })
+    const [entry] = await history.loadHistoryTurnRecoveries(bookmark, owner)
+    expect(JSON.stringify(entry.turn)).not.toContain("never-store")
+    expect(entry.turn.roleplay_resume?.completion?.saved).toBe(true)
+  })
+
+  it("does not resurrect window-only recovery after another view commits dismissal", async () => {
+    const { owner, origin, turn } = await pending()
+    await history.retainHistoryTurnRecoveryInMemory(bookmark, origin, {
+      ...turn,
+      result_text: "Window-only original reply",
+      state: "generated_unsaved"
+    })
+    const key = [
+      bookmark.profile_id,
+      bookmark.client_session_id,
+      owner.owner_key,
+      owner.conversation_id
+    ]
+    const record = await memory.historySelections.get(key)
+    await memory.historySelections.put({
+      ...record,
+      pending_turns: {},
+      history_turn_outcomes: { [turn.operation_id]: "dismissed" }
+    })
+    expect(await history.loadHistoryTurnRecoveries(bookmark, owner)).toEqual([])
+    expect(
+      await history.dismissHistoryTurnRecovery(
+        bookmark,
+        owner,
+        turn.operation_id
+      )
+    ).toBe(false)
+  })
 })

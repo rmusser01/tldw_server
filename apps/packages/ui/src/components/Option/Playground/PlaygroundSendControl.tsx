@@ -194,6 +194,7 @@ export interface PlaygroundSendControlProps {
   onStopStreaming: () => void
   onStopListening: () => void
   onSubmitForm: () => void
+  submitDisabledReason?: string | null
   characterChatSendBlocker?: PlaygroundSendBlocker | null
 
   // Send menu
@@ -224,6 +225,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       onStopListening,
       onSubmitForm,
       characterChatSendBlocker,
+      submitDisabledReason,
       sendMenuOpen,
       onSendMenuChange,
       t
@@ -231,7 +233,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
 
     const activeCharacterSendBlocker =
       characterChatSendBlocker?.active === true
-    const shouldQueuePrimaryAction = isSending || !isConnectionReady
+    const shouldQueuePrimaryAction = isSending && isConnectionReady
     const primaryActionLabel = activeCharacterSendBlocker
       ? characterChatSendBlocker.actionLabel
       : isPreparingDocuments
@@ -252,6 +254,8 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
         ) as string)
       : activeCharacterSendBlocker
         ? characterChatSendBlocker.title
+        : !isConnectionReady
+          ? (t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") as string)
         : isPreparingDocuments
           ? (t(
               "playground:documentProcessing.preparingForSend",
@@ -263,15 +267,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
             "Conversation history isn't ready yet. Wait for it to load, or start a new chat."
           ) as string)
       : shouldQueuePrimaryAction
-        ? ((isSending
-            ? t(
-                "playground:composer.queue.primaryWhileBusy",
-                "Queue this request to run after the current response."
-              )
-            : t(
-                "playground:composer.queue.primaryWhileOffline",
-                "Queue this request until your tldw server reconnects."
-              )) as string)
+        ? (t("playground:composer.queue.primaryWhileBusy", "Queue this request to run after the current response.") as string)
         : sendWhenEnter
           ? (t(
               "playground:composer.submitAriaEnter",
@@ -334,17 +330,13 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                 : "submit"
             }
             onClick={handlePrimaryButtonClick}
-            disabled={
-              compareNeedsMoreModels ||
-              isPreparingDocuments ||
-              isHistorySelectionPending
-            }
+            disabled={Boolean(submitDisabledReason) || compareNeedsMoreModels || isPreparingDocuments || isHistorySelectionPending || (!isConnectionReady && !activeCharacterSendBlocker)}
             className={
               isMobileViewport
                 ? "min-h-[44px] min-w-[44px]"
                 : undefined
             }
-            title={primaryActionTitle}
+            title={submitDisabledReason ?? primaryActionTitle}
             aria-label={primaryActionAriaLabel}
           >
             <div

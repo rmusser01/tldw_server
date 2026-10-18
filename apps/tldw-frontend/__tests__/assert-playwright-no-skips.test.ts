@@ -37,7 +37,7 @@ describe("assert-playwright-no-skips", () => {
     )
 
     expect(result.status).toBe(0)
-    expect(result.stdout).toContain("executed=5 expected=5")
+    expect(result.stdout).toContain("expected=5 skipped=0 unexpected=0 flaky=0 executed=5")
   })
 
   it("keeps all-failure Playwright runs distinguishable from empty runs", () => {
@@ -53,7 +53,7 @@ describe("assert-playwright-no-skips", () => {
     )
 
     expect(result.status).toBe(1)
-    expect(result.stdout).toContain("executed=2 expected=0")
+    expect(result.stdout).toBe("")
     expect(result.stderr).toContain("Found 2 unexpected failure(s).")
     expect(result.stderr).not.toContain("No tests executed")
   })

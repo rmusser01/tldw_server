@@ -86,7 +86,7 @@ export const FolderToolbar = ({ compact = false }: FolderToolbarProps) => {
       key: 'refresh',
       icon: <RefreshCw className="w-4 h-4" />,
       label: t("common:refresh"),
-      onClick: refreshFromServer
+      onClick: () => void refreshFromServer()
     }
   ]
 
@@ -196,7 +196,7 @@ export const FolderToolbar = ({ compact = false }: FolderToolbarProps) => {
                 icon={<RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />}
                 className={TOOLBAR_FOCUS_RING_CLASS}
                 aria-label={t("common:refresh")}
-                onClick={refreshFromServer}
+                onClick={() => void refreshFromServer()}
                 loading={isLoading}
               />
             </Tooltip>

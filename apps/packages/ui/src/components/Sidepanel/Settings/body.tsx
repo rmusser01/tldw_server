@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
 
 import { ThemePicker } from "@/components/Common/Settings/ThemePicker"
-import { getBrowserRuntime } from "@/utils/browser-runtime"
+import { resolveOptionsHref } from "@/utils/browser-runtime"
 
 const shortcuts = [
   {
@@ -52,19 +52,6 @@ const shortcuts = [
     descriptionDefault: "Open detailed server and subsystem checks."
   }
 ] as const
-
-const resolveOptionsHref = (path: string) => {
-  try {
-    const runtime = getBrowserRuntime()
-    if (runtime?.getURL) {
-      return runtime.getURL(`/options.html#${path}`)
-    }
-  } catch {
-    // Fall back to the hosted WebUI path when extension APIs are unavailable.
-  }
-
-  return path
-}
 
 export const SettingsBody = () => {
   const { t } = useTranslation("settings")

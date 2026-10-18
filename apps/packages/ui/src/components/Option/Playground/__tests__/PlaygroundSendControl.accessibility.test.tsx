@@ -55,3 +55,11 @@ describe("PlaygroundSendControl accessibility", () => {
     expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled()
   })
 })
+
+describe("unavailable delivery", () => {
+  it("shows a disabled Send instead of offering an offline queue", () => {
+    render(<PlaygroundSendControl {...baseProps} isConnectionReady={false} />)
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
+    expect(screen.queryByRole("button", { name: "Queue request" })).not.toBeInTheDocument()
+  })
+})

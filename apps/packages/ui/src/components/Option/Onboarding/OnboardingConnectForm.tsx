@@ -1,3 +1,4 @@
+import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { useState, useEffect, useMemo, useCallback, useRef, useReducer, type ReactNode } from "react"
 import { Input, Button, Checkbox, Tooltip, message, Select } from "antd"
 import type { InputRef } from "antd"
@@ -23,7 +24,6 @@ import {
   Shield,
   BookOpen,
 } from "lucide-react"
-import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useNavigate } from "react-router-dom"
@@ -32,11 +32,7 @@ import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { mapMultiUserLoginErrorMessage } from "@/services/auth-errors"
 import { emitSplashAfterSingleUserAuthSuccess } from "@/services/splash-auth"
-import {
-  getTldwServerURL,
-  DEFAULT_TLDW_API_KEY,
-  fetchChatModels,
-} from "@/services/tldw-server"
+import { getTldwServerURL, DEFAULT_TLDW_API_KEY } from "@/services/tldw-server";
 import {
   useConnectionState,
   useConnectionActions,
@@ -334,14 +330,11 @@ export function OnboardingConnectForm({
     entryIntent === CHARACTER_CHAT_ONBOARDING_INTENT
 
   const {
-    data: availableModels = [],
+    data: availableModels = EMPTY_CHAT_MODELS,
     isLoading: modelsLoading,
-  } = useQuery({
-    queryKey: ["onboarding-chat-models", serverUrl],
-    queryFn: async () => fetchChatModels({ returnEmpty: true }),
-    enabled: showSuccess,
-    staleTime: 5 * 60 * 1000,
-  })
+    isError: modelsDiscoveryFailed,
+    refetch: retryModels,
+  } = useChatModelCatalog(showSuccess)
 
   useEffect(() => {
     if (isConnecting) {
@@ -1303,6 +1296,13 @@ export function OnboardingConnectForm({
                 "settings:onboarding.defaults.loading",
                 "Loading models..."
               )}
+            </div>
+          ) : modelsDiscoveryFailed ? (
+            <div role="alert" className="text-xs text-text">
+              <p>{t("playground:composer.modelsDiscoveryFailed", "Could not check chat models")}</p>
+              <Button onClick={() => { void retryModels() }}>
+                {t("playground:characterChatReadiness.model.retryAction", "Try again")}
+              </Button>
             </div>
           ) : availableModels.length === 0 ? (
             <p className="text-xs text-text-subtle">

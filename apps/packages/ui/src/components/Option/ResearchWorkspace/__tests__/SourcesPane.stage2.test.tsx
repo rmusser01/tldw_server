@@ -1015,3 +1015,81 @@ it("capture and refresh are explicit actions while pinned previews request the e
   )
   expect(await screen.findByText("exact article")).toBeInTheDocument()
 })
+
+
+it("refuses current preview when recovered capture evidence is unavailable", async () => {
+  vi.clearAllMocks();
+  workspaceStoreState.sources = [
+    {
+      ...defaultSources[0],
+      status: "error",
+      statusDetails: {
+        statusReason: "capture_unavailable",
+        retryEligible: false,
+      },
+    },
+  ];
+  render(<SourcesPane />);
+  fireEvent.click(screen.getByTestId("preview-source-s1"));
+  expect(
+    (await screen.findByText("Exact capture version unavailable")).textContent,
+  ).toBe("Exact capture version unavailable");
+  expect(mockGetWorkspaceSourcePreview).not.toHaveBeenCalled();
+});
+
+
+it.each([
+  ["internal Notes", "/notes?source_ref_id=canonical-note"],
+  ["relative URL", "/article"],
+  ["unsupported scheme", "ftp://example.org/article"],
+  ["script URL", "javascript:alert(1)"],
+])("hides Capture article for %s source URLs", (_label, url) => {
+  workspaceStoreState.sources = [{ ...defaultSources[0], url }];
+  render(<SourcesPane onCaptureArticle={vi.fn()} />);
+  expect(screen.queryByRole("button", { name: "Capture article" })).toBeNull();
+});
+
+it.each(["http://example.org/article", "https://example.org/article"])(
+  "retains explicit Capture article for %s",
+  (url) => {
+    const capture = vi.fn();
+    workspaceStoreState.sources = [{ ...defaultSources[0], url }];
+    render(<SourcesPane onCaptureArticle={capture} />);
+    fireEvent.click(screen.getByRole("button", { name: "Capture article" }));
+    expect(capture).toHaveBeenCalledWith(workspaceStoreState.sources[0]);
+  },
+);
+
+it.each([
+  ["/notes?source_ref_id=canonical-note", "https://example.org/article", true],
+  ["https://example.org/article", "/notes?source_ref_id=canonical-note", false],
+])(
+  "uses requested capture target %s -> %s for refresh eligibility",
+  (url, requestedUrl, eligible) => {
+    const capture = vi.fn();
+    const source: WorkspaceSource = {
+      ...defaultSources[0],
+      url,
+      webCapture: {
+        clipId: "clip",
+        requestedUrl,
+        capturedAt: "2026-10-07T00:00:00Z",
+        contentSha256: "digest",
+        refreshOf: null,
+        mediaId: 1,
+        versionNumber: 9,
+        versionUuid: "version-nine",
+      },
+    };
+    workspaceStoreState.sources = [source];
+    render(<SourcesPane onCaptureArticle={capture} />);
+    const action = screen.queryByRole("button", { name: "Refresh capture" });
+    if (eligible) {
+      expect(action).not.toBeNull();
+      fireEvent.click(action!);
+      expect(capture).toHaveBeenCalledWith(source);
+    } else {
+      expect(action).toBeNull();
+    }
+  },
+);

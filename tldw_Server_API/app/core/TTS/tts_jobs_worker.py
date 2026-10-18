@@ -2,8 +2,8 @@
 TTS Jobs worker for long-form speech generation.
 
 - domain = "audio"
-- queue = os.getenv("TTS_JOBS_QUEUE", "default")
-- job_type = "tts_longform"
+- queue = utils.tts_jobs_queue(): TTS_JOBS_QUEUE, default "tts"
+- job_type = "tts_longform", and only that type is acquired
 """
 
 from __future__ import annotations
@@ -67,6 +67,7 @@ from tldw_Server_API.app.core.TTS.utils import (
     contains_tts_credential_fields,
     parse_bool,
     tts_history_text_length,
+    tts_jobs_queue,
 )
 
 TTS_DOMAIN = "audio"
@@ -935,7 +936,7 @@ async def _handle_tts_job(job: dict[str, Any]) -> dict[str, Any]:
 
 async def run_tts_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
     worker_id = (os.getenv("TTS_JOBS_WORKER_ID") or f"tts-jobs-{os.getpid()}").strip()
-    queue = (os.getenv("TTS_JOBS_QUEUE") or "default").strip() or "default"
+    queue = tts_jobs_queue()
     lease_seconds = _coerce_int(os.getenv("TTS_JOBS_LEASE_SECONDS") or os.getenv("JOBS_LEASE_SECONDS"), 60)
     renew_jitter = _coerce_int(
         os.getenv("TTS_JOBS_RENEW_JITTER_SECONDS")
@@ -967,7 +968,8 @@ async def run_tts_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
 
     logger.info("TTS Jobs worker starting (queue={}, worker_id={})", queue, worker_id)
     try:
-        await sdk.run(handler=_handle_tts_job)
+        # The audio domain is shared with the audio pipeline: take only TTS jobs, whatever the queue.
+        await sdk.run(handler=_handle_tts_job, job_type=TTS_JOB_TYPE)
     finally:
         if _stop_watcher_task is not None and not _stop_watcher_task.done():
             _stop_watcher_task.cancel()

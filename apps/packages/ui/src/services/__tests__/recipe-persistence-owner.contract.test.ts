@@ -53,7 +53,9 @@ const extension = vi.hoisted(() => {
 vi.mock("@/utils/safe-storage", () => ({
   safeStorageSerde: {
     serialize: (value: unknown) => value,
-    deserialize: (value: unknown) => value
+    deserialize: (value: unknown) => value,
+    serializer: (value: unknown) => value,
+    deserializer: (value: unknown) => value
   },
   createSafeStorage: () => ({
     get: async (key: string) => extension.values.get(key),
@@ -132,7 +134,7 @@ vi.mock("wxt/browser", () => ({
     storage: {
       local: { get: async () => ({}), set: async () => {} },
       session: { get: async () => ({}), set: async () => {} },
-      onChanged: { addListener: vi.fn() }
+      onChanged: { addListener: vi.fn(), removeListener: vi.fn() }
     },
     alarms: {
       clear: async () => true,
@@ -929,7 +931,7 @@ describe("real sync stack through direct and extension authorities", () => {
         expectedOwnerId: owner!.ownerId
       })
 
-      expect(result).toMatchObject({
+      expect(result, String(result.error ?? "recipe sync failed")).toMatchObject({
         success: true,
         localId: id,
         recipeOwnership: {

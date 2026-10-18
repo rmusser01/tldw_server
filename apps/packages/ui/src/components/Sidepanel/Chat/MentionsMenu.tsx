@@ -43,6 +43,15 @@ export const MentionsMenu: React.FC<MentionsMenuProps> = ({
     () => (items.length > 0 ? `mentions-option-${activeIndex}` : undefined),
     [activeIndex, items.length]
   )
+  const activeOptionRef = React.useRef<HTMLButtonElement>(null)
+  React.useEffect(() => {
+    if (open)
+      activeOptionRef.current?.scrollIntoView?.({
+        block: "nearest",
+        inline: "nearest"
+      })
+  }, [open, activeIndex, items])
+
   if (!open) return null
 
   return (
@@ -61,6 +70,7 @@ export const MentionsMenu: React.FC<MentionsMenuProps> = ({
             {items.map((item, index) => (
               <button
                 key={item.id}
+                ref={index === activeIndex ? activeOptionRef : undefined}
                 id={`mentions-option-${index}`}
                 type="button"
                 role="option"

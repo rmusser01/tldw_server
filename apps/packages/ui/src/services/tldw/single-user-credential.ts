@@ -186,8 +186,10 @@ export const hasInvalidatedRefreshSession = async (
 /** An immutable marker cannot overwrite another tab's login or successful rotation. */
 export const invalidateRefreshSessionIfCurrent = async (
   persistent: CredentialStorage,
-  checked: TldwConfig
+  checked: TldwConfig,
+  assertCurrent?: () => void
 ): Promise<boolean> => {
+  assertCurrent?.()
   const key = refreshSessionInvalidationKey(checked)
   if (!key) return false
   const currentKey = async () => {
@@ -198,6 +200,7 @@ export const invalidateRefreshSessionIfCurrent = async (
     ))
   }
   if (await currentKey() !== key) return false
+  assertCurrent?.()
   await persistent.set(key, true)
   const invalidated = await currentKey() === key
   if (invalidated && typeof window !== "undefined") {
@@ -311,8 +314,10 @@ export const storeRefreshRotationIfCurrent = async (
   persistent: CredentialStorage,
   checked: ServicePromptTargetLock & Readonly<{ accessToken?: unknown }>,
   expectedRefreshToken: string,
-  tokens: Readonly<{ accessToken: string; refreshToken: string }>
+  tokens: Readonly<{ accessToken: string; refreshToken: string }>,
+  assertCurrent?: () => void
 ): Promise<boolean> => {
+  assertCurrent?.()
   const expected = nonEmptySecret(expectedRefreshToken)
   const accessToken = nonEmptySecret(tokens.accessToken)
   const refreshToken = nonEmptySecret(tokens.refreshToken)
@@ -346,6 +351,7 @@ export const storeRefreshRotationIfCurrent = async (
     !sourceRefreshToken
   ) return false
 
+  assertCurrent?.()
   await persistent.set<RefreshRotationRecord>(REFRESH_ROTATION_KEY, {
     version: 1,
     ...(nonEmptySecret(stored.serverUrl)
@@ -359,6 +365,7 @@ export const storeRefreshRotationIfCurrent = async (
     accessToken,
     refreshToken
   })
+  assertCurrent?.()
   return true
 }
 

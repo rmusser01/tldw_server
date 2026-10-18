@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
-from typing import Any, Optional
+from typing import Any, Optional, Protocol, TypeVar
 from urllib.parse import urljoin, urlsplit
 
 from bs4 import BeautifulSoup
@@ -27,12 +27,13 @@ from tldw_Server_API.app.core.Web_Scraping.orchestration.article_browser import 
 from tldw_Server_API.app.core.Web_Scraping.orchestration.article_models import (
     PUBLIC_FAILURE_CODES,
     ArticleFailure,
+    ArticleLimits,
     ArticlePlan,
+    DirectBrowserProfile,
     article_failure_result,
 )
 from tldw_Server_API.app.core.Web_Scraping.orchestration.executor import (
     DEFAULT_EXTRACTION_EXECUTOR,
-    ExtractionExecutorManager,
 )
 from tldw_Server_API.app.core.Web_Scraping.policy import (
     DefaultProbeEgressGuard,
@@ -114,18 +115,29 @@ _JS_REQUIRED_DOMAINS = frozenset(
 )
 
 
+_T = TypeVar("_T")
+
+
+class _ArticleBrowser(Protocol):
+    async def acquire(self, url: str, profile: DirectBrowserProfile, limits: ArticleLimits) -> str: ...
+
+
+class _ArticleExecutor(Protocol):
+    async def run(self, func: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T: ...
+
+
 @dataclass(frozen=True, slots=True)
 class ArticleDependencies:
     """Injectable collaborators for a single standard article request."""
 
-    load_config: Callable[[], Mapping[str, Any]]
+    load_config: Callable[[], Mapping[str, Any] | None]
     resolve_plan: Callable[[str, Mapping[str, Any]], ArticlePlan]
     evaluate_target: Callable[..., Awaitable[Any]]
     run_preflight: Callable[..., Awaitable[Any]]
     apply_preflight_advice: Callable[..., tuple[str, str, Any]]
     fetch_client: FetchClient
-    browser: GuardedArticleBrowser
-    executor: ExtractionExecutorManager
+    browser: _ArticleBrowser
+    executor: _ArticleExecutor
     extract: Callable[..., dict[str, Any]]
     build_preflight_context: Callable[..., Any]
     preflight_options: Callable[[Mapping[str, Any]], Any]
@@ -596,8 +608,6 @@ async def _run_article(
 
     plan = prepared.plan
     advised_backend = prepared.advised_backend
-    if credential_free and advised_backend != _PLAYWRIGHT:
-        advised_backend = "httpx"
     advised_method = prepared.advised_method
     cookies = prepared.cookies
     policy_config = prepared.policy_config
@@ -1114,13 +1124,7 @@ def _build_default_dependencies(
         executor=DEFAULT_EXTRACTION_EXECUTOR,
         extract=extract_article_with_pipeline,
         build_preflight_context=preflight_facade.build_execution_context,
-        preflight_options=lambda values: (
-            replace(
-                preflight_facade.PreflightOptions.from_mapping(values), external_tools_enabled=False, impersonate=False
-            )
-            if credential_free
-            else preflight_facade.PreflightOptions.from_mapping(values)
-        ),
+        preflight_options=preflight_facade.PreflightOptions.from_mapping,
         public_preflight_payload=preflight_facade.public_preflight_payload,
         resolve_handler=resolve_handler,
         js_required=_js_required,

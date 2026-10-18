@@ -11,6 +11,7 @@
 import { test, expect, skipIfServerUnavailable, assertNoCriticalErrors } from "../utils/fixtures"
 import { NotesPage } from "../utils/page-objects"
 import { generateTestId } from "../utils/helpers"
+import { createSeedApi, warmBackendOnce } from "../utils/seed-api"
 
 test.describe("Notes Studio derived note", () => {
   const testTitle = `Studio Derived Note ${generateTestId()}`
@@ -26,8 +27,9 @@ test.describe("Notes Studio derived note", () => {
 
   let notes: NotesPage
 
-  test.beforeEach(async ({ authedPage, serverInfo }) => {
+  test.beforeEach(async ({ authedPage, serverInfo, request }) => {
     skipIfServerUnavailable(serverInfo)
+    await warmBackendOnce(createSeedApi(request))
 
     await authedPage.addInitScript(() => {
       const openCalls: unknown[][] = []

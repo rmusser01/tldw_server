@@ -15,12 +15,11 @@ type ServicePromptTarget = Readonly<{
 export const servicePromptTargetsMatch = (
   current: ServicePromptTarget,
   checked: ServicePromptTarget
-): boolean => ([
-  "serverUrl",
-  "authMode",
-  "authSource",
-  "orgId"
-] as const).every((key) => (current[key] ?? null) === (checked[key] ?? null))
+): boolean =>
+  (current.authSource || "manual") === (checked.authSource || "manual") &&
+  (["serverUrl", "authMode", "orgId"] as const).every(
+    (key) => (current[key] ?? null) === (checked[key] ?? null)
+  )
 
 export const servicePromptPrincipalMatches = (
   current: Readonly<{
@@ -105,11 +104,35 @@ export const isServicePromptRequestPath = (
   const pathname = readCanonicalPathname(path)
   if (!pathname) return false
   const requestMethod = String(method || "GET").toUpperCase()
+  if (pathname === "/openapi.json") return requestMethod === "GET"
+  if (pathname === "/api/v1/config/docs-info") return requestMethod === "GET"
   if (["PUT", "DELETE"].includes(requestMethod) && /^\/api\/v1\/media\/[0-9]+$/.test(pathname)) return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/keywords$/.test(pathname)) return true
   if (requestMethod === "POST" && pathname === "/api/v1/media/bulk/keyword-update") return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/metadata$/.test(pathname)) return true
   if (requestMethod === "POST" && /^\/api\/v1\/media\/[0-9]+\/reprocess$/.test(pathname)) return true
+  if (/^\/api\/v1\/messages\/[^/]+$/.test(pathname)) {
+    if (["GET", "PUT"].includes(requestMethod)) return true
+    if (requestMethod !== "DELETE" || String(path).includes("#")) return false
+    const query = new URLSearchParams(String(path).split("?")[1] || "")
+    const versions = query.getAll("expected_version")
+    const leaves = query.getAll("require_leaf")
+    const revisions = query.getAll("expected_revision")
+    return (
+      versions.length === 1 &&
+      /^[1-9][0-9]*$/.test(versions[0]) &&
+      Number.isSafeInteger(Number(versions[0])) &&
+      Number(versions[0]) < Number.MAX_SAFE_INTEGER &&
+      leaves.length === 1 &&
+      leaves[0] === "true" &&
+      revisions.length === 1 &&
+      revisions[0].length > 0 &&
+      revisions[0].length <= 128
+    )
+  }
+  if (pathname === "/api/v1/chat/dictionaries") return requestMethod === "GET"
+  if (pathname === "/api/v1/files/reference-images") return requestMethod === "GET"
+  if (pathname === "/api/v1/files/create") return requestMethod === "POST"
   if (/^\/api\/v1\/workspaces\/[^/]+\/source-views$/.test(pathname))
     return ["GET", "POST"].includes(requestMethod)
   if (/^\/api\/v1\/workspaces\/[^/]+\/source-views\/[^/]+$/.test(pathname))
@@ -152,6 +175,12 @@ export const isServicePromptRequestPath = (
       pathname === "/api/v1/media/ingest/jobs")) return true
   if (requestMethod === "POST" && (/^\/api\/v1\/media\/(?:ingest\/jobs(?:\/cancel)?|process-(?:audios|videos|pdfs|ebooks|documents|web-scraping)|search|collections)$/.test(pathname) || /^\/api\/v1\/media\/collections\/[0-9]+\/items$/.test(pathname))) return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/collections\/[0-9]+\/items\/[0-9]+$/.test(pathname)) return true
+  if (pathname === "/api/v1/notes/collections" || pathname === "/api/v1/notes/keywords") return ["GET", "POST"].includes(requestMethod)
+  if (pathname === "/api/v1/notes/collections/keyword-links" || pathname === "/api/v1/notes/conversations/keyword-links") return requestMethod === "GET"
+  if (/^\/api\/v1\/notes\/collections\/[0-9]+$/.test(pathname)) return ["PATCH", "DELETE"].includes(requestMethod)
+  if (/^\/api\/v1\/notes\/keywords\/[0-9]+$/.test(pathname)) return requestMethod === "DELETE"
+  if (/^\/api\/v1\/notes\/(?:collections\/[0-9]+|conversations\/[^/]+)\/keywords$/.test(pathname)) return requestMethod === "GET"
+  if (/^\/api\/v1\/notes\/(?:collections\/[0-9]+|conversations\/[^/]+)\/keywords\/[0-9]+$/.test(pathname)) return ["POST", "DELETE"].includes(requestMethod)
   if (requestMethod === "POST" && (/^\/api\/v1\/media\/[0-9]+\/restore$/.test(pathname) || /^\/api\/v1\/notes\/(?!tasks\/|collections\/|trash\/|purge\/|permanent\/|keywords\/|folders\/|moodboards\/|templates\/|import\/|export(?:\.csv)?\/|search\/)[^/]+\/(?:provenance\/)?restore$/.test(pathname))) return true
   if (pathname === "/api/v1/notes/") return requestMethod === "POST"
   if (/^\/api\/v1\/notes\/[^/]+$/.test(pathname)) {
@@ -164,6 +193,7 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/service-prompts\/[^/]+$/.test(pathname)) {
     return ["GET", "PUT", "DELETE"].includes(requestMethod)
   }
+  if (/^\/api\/v1\/chats\/[^/]+\/restore$/.test(pathname)) return requestMethod === "POST"
   if (/^\/api\/v1\/chats\/[^/]+\/settings$/.test(pathname)) return ["GET", "PUT"].includes(requestMethod)
   if (requestMethod === "GET" && /^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return true
   if (/^\/api\/v1\/flashcards\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
@@ -181,7 +211,7 @@ export const isServicePromptRequestPath = (
   if (requestMethod !== "POST") return false
   if (pathname === "/api/v1/flashcards/review" || pathname === "/api/v1/flashcards/review-sessions/end") return true
   if (["/api/v1/flashcards", "/api/v1/flashcards/decks", "/api/v1/flashcards/generate", "/api/v1/flashcards/assets", "/api/v1/flashcards/bulk"].includes(pathname)) return true
-  if (/^\/api\/v1\/chats\/[^/]+\/(?:completions\/persist|complete-v2)$/.test(pathname)) return true
+  if (/^\/api\/v1\/chats\/[^/]+\/(?:completions\/persist|complete-v2|roleplay\/messages)$/.test(pathname)) return true
   if (pathname === "/api/v1/chats/") return true
   if (/^\/api\/v1\/chat\/conversations\/[^/]+\/history\/(?:selection|legacy-projection)$/.test(pathname)) return true
   if (/^\/api\/v1\/chats\/[^/]+\/completions\/persist$/.test(pathname)) return true
@@ -191,11 +221,13 @@ export const isServicePromptRequestPath = (
 )
 }
 
-export const createServicePromptScopeChangedError = () =>
-  Object.assign(new Error(SCOPE_CHANGED_MESSAGE), {
+export const createServicePromptScopeChangedError = (
+  message = SCOPE_CHANGED_MESSAGE
+) =>
+  Object.assign(new Error(message), {
     status: 412,
     details: {
-      detail: { code: SCOPE_CHANGED_CODE, message: SCOPE_CHANGED_MESSAGE }
+      detail: { code: SCOPE_CHANGED_CODE, message }
     }
   })
 

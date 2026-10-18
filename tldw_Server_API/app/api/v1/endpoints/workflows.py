@@ -30,9 +30,15 @@ from fastapi import (
 from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, RequirePermission, RequireRole, TokenScopeGuard, User
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
+    TokenScopeGuard,
+    User,
+    get_request_user,
+)
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
     build_cursor_pagination_meta,
     build_offset_pagination_meta,
@@ -45,8 +51,8 @@ from tldw_Server_API.app.api.v1.schemas.workflows import (
     WorkflowDefinitionResponse,
     WorkflowPreflightRequest,
     WorkflowPreflightResponse,
-    WorkflowRunInvestigationResponse,
     WorkflowRagSearchConfig,
+    WorkflowRunInvestigationResponse,
     WorkflowRunListItem,
     WorkflowRunListResponse,
     WorkflowRunResponse,
@@ -100,12 +106,9 @@ from tldw_Server_API.app.core.Usage.quota_checks import (
     seconds_until_utc_midnight,
     workflows_runs_consume,
 )
-from tldw_Server_API.app.services.workflows_webhook_dlq_service import (
-    record_webhook_delivery_event,
-)
+from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
 from tldw_Server_API.app.core.Workflows import RunMode, WorkflowEngine, WorkflowScheduler
 from tldw_Server_API.app.core.Workflows.adapters._common import artifacts_base_dir, is_subpath
-from tldw_Server_API.app.core.Workflows.capabilities import get_step_capability
 from tldw_Server_API.app.core.Workflows.adapters._registry import get_parallelizable
 from tldw_Server_API.app.core.Workflows.adapters.research._config import (
     DEEP_RESEARCH_CANONICAL_BUNDLE_FIELDS,
@@ -114,11 +117,14 @@ from tldw_Server_API.app.core.Workflows.adapters.research._config import (
     DeepResearchSelectBundleFieldsConfig,
     DeepResearchWaitConfig,
 )
+from tldw_Server_API.app.core.Workflows.capabilities import get_step_capability
 from tldw_Server_API.app.core.Workflows.investigation import build_run_investigation
 from tldw_Server_API.app.core.Workflows.investigation import list_run_steps as build_run_steps
 from tldw_Server_API.app.core.Workflows.investigation import list_step_attempts as build_step_attempts
 from tldw_Server_API.app.core.Workflows.registry import StepTypeRegistry
-from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
+from tldw_Server_API.app.services.workflows_webhook_dlq_service import (
+    record_webhook_delivery_event,
+)
 
 _WORKFLOWS_NONCRITICAL_EXCEPTIONS = (
     asyncio.TimeoutError,
@@ -1282,9 +1288,7 @@ def _collect_preflight_warnings(definition: dict[str, Any]) -> list[dict[str, An
 
 def _format_preflight_validation_message(error: dict[str, Any]) -> str:
     loc = error.get("loc") or ()
-    if isinstance(loc, tuple):
-        loc_parts = [str(part) for part in loc]
-    elif isinstance(loc, list):
+    if isinstance(loc, (tuple, list)):
         loc_parts = [str(part) for part in loc]
     else:
         loc_parts = [str(loc)] if loc else []
@@ -3376,9 +3380,6 @@ async def get_chunker_options():
     }
 
 
-
-
-
 @router.get(
     "/runs/{run_id}/investigation",
     response_model=WorkflowRunInvestigationResponse,
@@ -4572,6 +4573,24 @@ async def reject_step(
 
 # -------------------- WebSocket for events (simple polling bridge) --------------------
 
+
+async def _close_workflows_websocket(
+    websocket: WebSocket, code: int, reason: str, *, error_type: str | None = None
+) -> None:
+    """Record fixed diagnostic labels without credentials, run data or exception contents."""
+    diagnostic = logger.bind(
+        component="workflows", endpoint="workflows_ws", close_code=code, reason=reason, error_type=error_type
+    )
+    diagnostic.log(
+        "ERROR" if code == 1011 else "WARNING",
+        "Workflows WS closed: code={} reason={} error_type={}",
+        code,
+        reason,
+        error_type,
+    )
+    await websocket.close(code=code, reason=reason)
+
+
 @router.websocket("/ws")
 async def workflows_ws(
     websocket: WebSocket,
@@ -4581,16 +4600,19 @@ async def workflows_ws(
     db: WorkflowsDatabase = Depends(_get_db),
 ):
     cookie_identity = await resolve_single_user_cookie_websocket(websocket)
-    authenticated_user_id: str | None = (
-        str(cookie_identity.user_id) if cookie_identity is not None else None
-    )
+    authenticated_user_id: str | None = str(cookie_identity.user_id) if cookie_identity is not None else None
     # Extract token: prefer query param; fallback to Authorization header
     if not token:
         auth_hdr = websocket.headers.get("authorization") or websocket.headers.get("Authorization")
         if auth_hdr and auth_hdr.lower().startswith("bearer "):
             token = auth_hdr.split(" ", 1)[1].strip()
     if not token and authenticated_user_id is None:
-        await websocket.close(code=cookie_websocket_rejection_code(websocket) or 4401)
+        cookie_code = cookie_websocket_rejection_code(websocket)
+        await _close_workflows_websocket(
+            websocket,
+            cookie_code or 4401,
+            "cookie_auth_rejected" if cookie_code is not None else "authentication_required",
+        )
         return
 
     # Verify token
@@ -4599,18 +4621,22 @@ async def workflows_ws(
             jwtm = get_jwt_manager()
             token_data = jwtm.verify_token(token)
             authenticated_user_id = str(token_data.sub)
-        except _WORKFLOWS_NONCRITICAL_EXCEPTIONS:
-            await websocket.close(code=4401)
+        except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
+            await _close_workflows_websocket(websocket, 4401, "invalid_token", error_type=type(exc).__name__)
             return
 
-    # Run-level authorization: owner or admin
-    run = db.get_run(run_id)
+    # Enforce the existing owner-only rule.
+    try:
+        run = db.get_run(run_id)
+    except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
+        await _close_workflows_websocket(websocket, 1011, "run_lookup_error", error_type=type(exc).__name__)
+        return
     if not run:
-        await websocket.close(code=4404)
+        await _close_workflows_websocket(websocket, 4404, "run_not_found")
         return
     # Enforce run-level ownership: subject must match creator
     if authenticated_user_id != str(run.user_id):
-        await websocket.close(code=4403)
+        await _close_workflows_websocket(websocket, 4403, "not_run_owner")
         return
 
     await websocket.accept()
@@ -4622,11 +4648,11 @@ async def workflows_ws(
         close_on_done=False,
         labels={"component": "workflows", "endpoint": "workflows_ws"},
     )
-    await stream.start()
     # Normalize event types if provided for server-side filtering
     types_norm = [t.strip() for t in (types or []) if str(t).strip()]
     last_seq: Optional[int] = None
     try:
+        await stream.start()
         # On connect, send a snapshot event
         await stream.send_json(
             {
@@ -4642,20 +4668,26 @@ async def workflows_ws(
             if events:
                 for e in events:
                     payload = e.get("payload_json") or {}
-                    await stream.send_json({"event_seq": e["event_seq"], "event_type": e["event_type"], "payload": payload, "ts": e["created_at"]})
+                    await stream.send_json(
+                        {
+                            "event_seq": e["event_seq"],
+                            "event_type": e["event_type"],
+                            "payload": payload,
+                            "ts": e["created_at"],
+                        }
+                    )
                     last_seq = e["event_seq"]
             else:
                 # Send a lightweight heartbeat so clients using blocking receive_json() don't hang indefinitely
-                try:
-                    await stream.send_json({"type": "heartbeat", "ts": _utcnow_iso()})
-                except _WORKFLOWS_NONCRITICAL_EXCEPTIONS:
-                    # If sending heartbeat fails (e.g., client disconnect), let outer exception handling close
-                    raise
+                await stream.send_json({"type": "heartbeat", "ts": _utcnow_iso()})
             await asyncio.sleep(1.0)
-    except WebSocketDisconnect:
-        logger.info("Workflows WS disconnected")
+    except WebSocketDisconnect as exc:
+        logger.bind(
+            component="workflows", endpoint="workflows_ws", close_code=exc.code, reason="peer_disconnected"
+        ).info("Workflows WS disconnected: code={}", exc.code)
         raise
-    except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as e:
-        logger.error(f"Workflows WS error: {e}")
+    except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
         with contextlib.suppress(_WORKFLOWS_NONCRITICAL_EXCEPTIONS):
-            await stream.ws.close(code=status.WS_1011_INTERNAL_ERROR)
+            await _close_workflows_websocket(
+                websocket, status.WS_1011_INTERNAL_ERROR, "stream_error", error_type=type(exc).__name__
+            )

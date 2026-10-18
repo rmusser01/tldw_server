@@ -12,12 +12,16 @@ const {
   lastUseChatActionsArgs,
   defaultRagSettings
 } = vi.hoisted(() => {
-  const setSelectedModelSpy = vi.fn((next: string | null) => {
+  const setSelectedModelSpy = vi.fn((next: string | null, options?: { storageHandled?: boolean }) => {
     state.selectedModel = next
+    state.selectedModelRevision++
+    state.selectedModelStorageHandled = options?.storageHandled === true
   })
 
   const state: Record<string, any> = {
     selectedModel: null,
+    selectedModelRevision: 0,
+    selectedModelStorageHandled: false,
     setSelectedModel: setSelectedModelSpy,
     webSearch: false,
     setWebSearch: vi.fn(),
@@ -144,9 +148,10 @@ const {
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({
-    invalidateQueries: vi.fn()
-  })
-}))
+    cancelQueries: vi.fn(),
+    invalidateQueries: vi.fn(),
+  }),
+}));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -265,7 +270,12 @@ vi.mock("@/store/model", () => ({
 
 vi.mock("@/store/option", () => ({
   useStoreMessageOption: Object.assign((selector?: (state: Record<string, unknown>) => unknown) =>
-    selector ? selector(storeState) : storeState, { getState: () => storeState })
+    selector ? selector(storeState) : storeState, {
+      getState: () => storeState,
+      setState: (update: Record<string, unknown> | ((state: typeof storeState) => Record<string, unknown>)) => {
+        Object.assign(storeState, typeof update === "function" ? update(storeState) : update)
+      }
+    })
 }))
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -300,6 +310,8 @@ describe("useMessageOption selected model sync", () => {
     storageSetCalls.length = 0
     lastUseChatActionsArgs.value = null
     storeState.selectedModel = null
+    storeState.selectedModelRevision = 0
+    storeState.selectedModelStorageHandled = false
     storeState.serverChatId = null
     storeState.serverChatAssistantKind = null
     storeState.serverChatAssistantId = null

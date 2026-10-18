@@ -138,8 +138,8 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
           <div className="space-y-1">
             <Tooltip
               title={t(
-                "sidepanel:modelParams.providerTooltip",
-                "Override the API provider for this conversation"
+                'sidepanel:modelParams.providerTooltip',
+                'Override the API provider for this conversation. New chats keep this choice with the selected model.'
               )}
             >
               <label className="text-xs text-text-muted cursor-help">

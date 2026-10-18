@@ -1,21 +1,20 @@
 /**
  * Notes P0 tests from the 2026-10-02 UX review (tracking #3101). NL-01, NS-01
- * and NS-N1 are fixed and guard their fixes with plain assertions. NE-04 is a
- * reproduction that fails loudly once its defect is fixed; see
+ * NS-N1 and NE-04 are fixed and guard their fixes with plain assertions; see
  * e2e/ux-regression/README.md.
  */
 import type { Page, Response } from "@playwright/test"
 import { test, expect, skipIfServerUnavailable } from "../utils/fixtures"
 import { NotesPage } from "../utils/page-objects"
-import { generateTestId, seedAuth } from "../utils/helpers"
-import { expectKnownDefect } from "../utils/known-defect"
+import { generateTestId, seedAuth, TEST_CONFIG } from "../utils/helpers"
+import { launchExtension } from "../utils/extension-sidepanel"
 import { createSeedApi, notesTotal, readNote, seedNotes, warmBackendOnce } from "../utils/seed-api"
 
 const NOTE_EDITOR_PLACEHOLDER = "Write your note here... (Markdown supported)"
 
 type PrintFlowEvent =
   | { kind: "open"; features: string; returnedWindow: boolean }
-  | { kind: "print"; url: string; text: string }
+  | { kind: "print"; url: string; title: string; text: string; referrerPolicy: string | null; openerIsNull: boolean }
 
 const isNotePut = (noteId: string) => (response: Response) =>
   response.request().method() === "PUT" && new URL(response.url()).pathname.replace(/\/$/, "") === `/api/v1/notes/${noteId}`
@@ -37,6 +36,7 @@ async function appendToEditor(page: Page, text: string) {
   await expect(editor).toHaveValue(new RegExp(text.trim()))
 }
 
+test.use({ trace: 'retain-on-failure' });
 test.describe("Notes P0 reproductions", () => {
   test("NL-01: the notes list reports every note in a library larger than 100", async ({
     authedPage,
@@ -194,84 +194,110 @@ test.describe("Notes P0 reproductions", () => {
     ).toEqual({ editorShowsOtherTabsChange: true, serverKeepsOtherTabsChange: true })
   })
 
-  test("NE-04: 'Print / Save as PDF' prints the note without a pop-up error", async ({
-    authedPage,
-    serverInfo,
-    request,
-  }, testInfo) => {
-    skipIfServerUnavailable(serverInfo)
-    const api = createSeedApi(request)
-    await warmBackendOnce(api)
-    const token = generateTestId("uxr-ne04")
-    const [note] = await seedNotes(api, { count: 1, prefix: token })
+  for (const surface of ["WebUI", "extension options"] as const) {
+    test(`NE-04: ${surface} 'Print / Save as PDF' prints the note without a pop-up error`, async ({
+      authedPage,
+      serverInfo,
+      request,
+    }, testInfo) => {
+      skipIfServerUnavailable(serverInfo)
+      const api = createSeedApi(request)
+      await warmBackendOnce(api)
+      const token = generateTestId("uxr-ne04")
+      const [note] = await seedNotes(api, { count: 1, prefix: token })
 
-    // Record window.open() results and print() calls (with the text being
-    // printed) from every document in the context: the page, a pop-up or an
-    // iframe. Stubbing print() also keeps a real print dialog from opening.
-    const context = authedPage.context()
-    const opened: Array<{ features: string; returnedWindow: boolean }> = []
-    const printed: Array<{ url: string; text: string }> = []
-    await context.exposeBinding("__uxrRecord", (_source, event: PrintFlowEvent) => {
-      if (event.kind === "open") opened.push({ features: event.features, returnedWindow: event.returnedWindow })
-      else printed.push({ url: event.url, text: event.text })
-    })
-    await context.addInitScript(() => {
-      const record = (event: unknown) =>
-        void (window as unknown as { __uxrRecord?: (event: unknown) => Promise<void> }).__uxrRecord?.(event)
-      const open = window.open.bind(window)
-      window.open = (url?: string | URL, target?: string, features?: string) => {
-        const win = open(url, target, features)
-        record({ kind: "open", features: String(features ?? ""), returnedWindow: win != null })
-        return win
-      }
-      window.print = () => record({ kind: "print", url: location.href, text: document.body?.innerText ?? "" })
-    })
-    const openedPages: Page[] = []
-    context.on("page", (page) => openedPages.push(page))
+      const extension = surface === "extension options"
+        ? await launchExtension({ serverUrl: TEST_CONFIG.serverUrl, apiKey: TEST_CONFIG.apiKey })
+        : null
+      try {
+        const page = extension ? await extension.context.newPage() : authedPage
 
-    const notes = new NotesPage(authedPage)
-    await notes.goto()
-    await openSeededNote(authedPage, note.id)
-    // The recorder must work before its silence can mean anything.
-    await authedPage.evaluate(() => window.print())
-    await expect.poll(() => printed.length).toBe(1)
-    printed.length = 0
+        // Record window.open() results and print() calls (with the text being
+        // printed) from every document in the context: the page, a pop-up or an
+        // iframe. Stubbing print() also keeps a real print dialog from opening.
+        const context = page.context()
+        const opened: Array<{ features: string; returnedWindow: boolean }> = []
+        const printed: Array<{ url: string; title: string; text: string; referrerPolicy: string | null; openerIsNull: boolean }> = []
+        await context.exposeBinding("__uxrRecord", (_source, event: PrintFlowEvent) => {
+          if (event.kind === "open") opened.push({ features: event.features, returnedWindow: event.returnedWindow })
+          else printed.push({ url: event.url, title: event.title, text: event.text, referrerPolicy: event.referrerPolicy, openerIsNull: event.openerIsNull })
+        })
+        await context.addInitScript(() => {
+          const record = (event: unknown) =>
+            void (window as unknown as { __uxrRecord?: (event: unknown) => Promise<void> }).__uxrRecord?.(event)
+          const open = window.open.bind(window)
+          window.open = (url?: string | URL, target?: string, features?: string) => {
+            const win = open(url, target, features)
+            record({ kind: "open", features: String(features ?? ""), returnedWindow: win != null })
+            return win
+          }
+          window.print = () => record({
+            kind: "print", url: location.href, title: document.title, text: document.body?.innerText ?? "",
+            referrerPolicy: document.querySelector('head > meta[name="referrer"]')?.getAttribute("content") ?? null,
+            openerIsNull: window.opener === null,
+          })
+        })
+        const openedPages: Page[] = []
+        context.on("page", (page) => openedPages.push(page))
 
-    await notes.triggerPrintExport()
-    const popupBlockedError = authedPage.getByText(/please allow pop-ups/i)
-    let popupBlockedErrorShown = false
-    await expect
-      .poll(
-        async () => {
-          if (await popupBlockedError.isVisible().catch(() => false)) popupBlockedErrorShown = true
-          return popupBlockedErrorShown || printed.length > 0
-        },
-        { timeout: 15_000, message: "Print / Save as PDF neither printed nor reported an error" }
-      )
-      .toBe(true)
-    const openedViews = await Promise.all(
-      openedPages.map(async (page) => {
-        await page.waitForLoadState("domcontentloaded").catch(() => {})
-        return { url: page.url(), text: await page.locator("body").innerText().catch(() => "") }
-      })
-    )
-    const printViewShowsNote =
-      printed.some((call) => call.text.includes(note.title)) ||
-      openedViews.some((view) => view.text.includes(note.title))
+        const notes = new NotesPage(page)
+        if (extension) {
+          await page.setViewportSize(authedPage.viewportSize()!)
+          await extension.context.serviceWorkers()[0].evaluate(() =>
+            chrome.storage.local.set({ "notes-tutorial-shown": JSON.stringify("1") })
+          )
+          await page.goto(`chrome-extension://${extension.extensionId}/options.html#/notes`)
+          await expect(page).toHaveURL(/\/options\.html#\/notes$/)
+        } else {
+          await notes.goto()
+        }
+        await openSeededNote(page, note.id)
+        if (extension) {
+          const onboardingPrompt = page.getByText("New to this page?", { exact: true })
+          await expect(onboardingPrompt).toBeVisible()
+          await page.getByRole("button", { name: "Not now", exact: true }).click()
+          await expect(onboardingPrompt).toBeHidden()
+        }
+        // The recorder must work before its silence can mean anything.
+        await page.evaluate(() => window.print())
+        await expect.poll(() => printed.length).toBe(1)
+        printed.length = 0
 
-    await expectKnownDefect(
-      testInfo,
-      {
-        id: "NE-04",
-        issue: 3117,
-        summary: "Print / Save as PDF always fails: opens a blank tab and blames pop-up blocking",
-      },
-      () => {
+        await notes.triggerPrintExport()
+        const popupBlockedError = page.getByText(/please allow pop-ups/i)
+        let popupBlockedErrorShown = false
+        await expect
+          .poll(
+            async () => {
+              if (await popupBlockedError.isVisible().catch(() => false)) popupBlockedErrorShown = true
+              return popupBlockedErrorShown || printed.length > 0
+            },
+            { timeout: 15_000, message: "Print / Save as PDF neither printed nor reported an error" }
+          )
+          .toBe(true)
+        const openedViews = await Promise.all(
+          openedPages.map(async (page) => {
+            await page.waitForLoadState("domcontentloaded").catch(() => {})
+            return { url: page.url(), text: await page.locator("body").innerText().catch(() => "") }
+          })
+        )
+        const printedNote = printed.some((call) =>
+          call.title === `${note.title} - Printable Note` &&
+          call.referrerPolicy === "no-referrer" && call.openerIsNull &&
+          call.text.includes(note.title) &&
+          call.text.includes(`Seeded by the UX regression harness (${token}).`)
+        )
+        await testInfo.attach("notes-print-flow.json", {
+          body: Buffer.from(JSON.stringify({ surface, opened, printed, openedViews, popupBlockedErrorShown }, null, 2)),
+          contentType: "application/json",
+        })
         expect(
-          { popupBlockedError: popupBlockedErrorShown, printViewShowsNote },
+          { popupBlockedError: popupBlockedErrorShown, printedNote },
           `window.open: ${JSON.stringify(opened)}; print(): ${JSON.stringify(printed)}`
-        ).toEqual({ popupBlockedError: false, printViewShowsNote: true })
+        ).toEqual({ popupBlockedError: false, printedNote: true })
+      } finally {
+        await extension?.close()
       }
-    )
-  })
+    })
+  }
 })

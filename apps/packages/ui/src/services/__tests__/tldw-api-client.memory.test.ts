@@ -8,7 +8,19 @@ vi.mock('@/services/background-proxy', () => ({
   bgStream: vi.fn()
 }))
 vi.mock('@/utils/safe-storage', () => ({
-  createSafeStorage: () => ({ get: async () => null, set: async () => {}, remove: async () => {} }),
+  createSafeStorage: () => ({
+    get: async (key: string) => key === 'tldwConfig' ? {
+      serverUrl: 'https://chat.test',
+      authMode: 'single-user',
+      authSource: 'manual',
+      apiKey: 'memory-test-api-key',
+      credentialSource: 'manual',
+      apiKeyPersistence: 'device',
+      apiKeyServerOrigin: 'https://chat.test'
+    } : null,
+    set: async () => {},
+    remove: async () => {}
+  }),
   safeStorageSerde: { serialize: (value: unknown) => value, deserialize: (value: unknown) => value }
 }))
 let client: TldwApiClient

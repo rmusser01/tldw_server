@@ -29,15 +29,15 @@ export const PlaygroundModelCatalogControls = ({
   modelSortMode,
   setModelSortMode,
 }: PlaygroundModelCatalogControlsProps) => (
-  <div className="p-2 border-b border-border flex flex-col gap-2">
-    <div className="flex items-center gap-2">
+  <div className="p-2 border-b border-border flex shrink-0 flex-col gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <button
         type="button"
         data-testid="model-list-scope-toggle"
         aria-pressed={modelListScope === "catalog"}
         className={`rounded border px-2 py-1 text-xs transition-colors ${
           modelListScope === "catalog"
-            ? "border-primary bg-primary/10 text-primary"
+            ? "border-primary bg-primary/10 text-text"
             : "border-border bg-surface2 text-text-muted hover:text-text"
         }`}
         onClick={(event) => {
@@ -51,7 +51,7 @@ export const PlaygroundModelCatalogControls = ({
           ? t("playground:composer.configuredModels", "Configured")
           : t("playground:composer.searchAllModels", "Search all models")}
       </button>
-      <span className="text-[11px] text-text-subtle">
+      <span className="text-[11px] text-text-muted">
         {modelListScope === "catalog"
           ? t("playground:composer.catalogScopeHint", "All known models")
           : t(
@@ -60,7 +60,7 @@ export const PlaygroundModelCatalogControls = ({
             )}
       </span>
     </div>
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Input
         size="small"
         placeholder={t(
@@ -77,12 +77,15 @@ export const PlaygroundModelCatalogControls = ({
         )}
         value={modelSearchQuery}
         allowClear
-        className="flex-1"
+        className="min-w-0 flex-1 basis-36"
         onChange={(event) => setModelSearchQuery(event.target.value)}
-        onKeyDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") event.stopPropagation();
+        }}
       />
       <Select
         size="small"
+        aria-label={t("playground:composer.modelSortLabel", "Sort models")}
         value={modelSortMode}
         onChange={(value) => setModelSortMode(value as ModelSortMode)}
         options={[
@@ -100,8 +103,10 @@ export const PlaygroundModelCatalogControls = ({
             label: t("playground:composer.sort.localFirst", "Local-first"),
           },
         ]}
-        className="min-w-[120px]"
-        onKeyDown={(event) => event.stopPropagation()}
+        className="min-w-0 flex-1 basis-32"
+        onKeyDown={(event) => {
+          if (event.key !== "Escape") event.stopPropagation();
+        }}
       />
     </div>
   </div>

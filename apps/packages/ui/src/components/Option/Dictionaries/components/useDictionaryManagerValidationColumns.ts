@@ -20,7 +20,7 @@ type UseDictionaryManagerValidationColumnsParams = {
   t: (key: string, fallbackOrOptions?: any) => string
   confirmDeactivationIfNeeded: (dictionary: any, nextIsActive: boolean) => Promise<boolean>
   useCompactDictionaryActions: boolean
-  openChatContextFromDictionary: (chatRef: any) => void
+  openChatContextFromDictionary: (chatRef: unknown, dictionary: unknown) => void
   openDictionaryEditModal: (record: any) => void
   openDictionaryEntriesPanel: (dictionaryId: number) => void
   openQuickAssignModal: (record: any) => void

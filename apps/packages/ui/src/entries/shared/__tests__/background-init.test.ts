@@ -67,8 +67,8 @@ vi.mock("wxt/browser", () => ({
 import { initBackground } from "../background-init"
 
 const flushPromises = async () => {
-  await Promise.resolve()
-  await Promise.resolve()
+  // Let all immediately resolved storage reads settle before restoring globals.
+  await new Promise<void>((resolve) => setTimeout(resolve, 0))
 }
 
 describe("background clipper rollout guard", () => {
@@ -244,7 +244,12 @@ describe("background clipper rollout guard", () => {
         onActionIconClickChange: vi.fn(),
         onContextMenuClickChange: vi.fn()
       })
-      await flushPromises()
+      await vi.waitFor(() =>
+        expect(storage.set).toHaveBeenCalledWith(
+          "__tldwOpenApiDriftLastCheckV1",
+          { base: window.location.origin, checkedAt: expect.any(Number) }
+        )
+      )
 
       expect(fetchSpy).toHaveBeenCalledWith(
         `${window.location.origin}/openapi.json`,
@@ -310,7 +315,12 @@ describe("background clipper rollout guard", () => {
         onActionIconClickChange: vi.fn(),
         onContextMenuClickChange: vi.fn()
       })
-      await flushPromises()
+      await vi.waitFor(() =>
+        expect(storage.set).toHaveBeenCalledWith(
+          "__tldwOpenApiDriftLastCheckV1",
+          { base: "https://api.example.test", checkedAt: expect.any(Number) }
+        )
+      )
 
       expect(fetchSpy).toHaveBeenCalledWith(
         "https://api.example.test/openapi.json",

@@ -33,6 +33,8 @@ from tldw_Server_API.app.api.v1.schemas.chat_session_schemas import (
     MessageListResponse,
     MessageResponse,
     MessageUpdate,
+    RoleplayResumeUserAppendRequest,
+    RoleplayResumeUserAppendResponse,
 )
 from tldw_Server_API.app.api.v1.utils.chat_message_images import (
     _detect_image_mime_type,
@@ -62,6 +64,7 @@ from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import (
 from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets import (
     build_character_system_prompt,
 )
+from tldw_Server_API.app.core.Character_Chat.roleplay_resume_contract import RoleplayResumeConflictError
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.chacha.message_store import MAX_CHAT_ATTACHMENT_READ_BYTES
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
@@ -106,7 +109,7 @@ _CHARACTER_MESSAGES_NONCRITICAL_EXCEPTIONS = (
 )
 
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_expected_user)])
 
 _HistoryWrite = TypeVar("_HistoryWrite")
 
@@ -345,10 +348,46 @@ def _resolve_message_scope(
 # Message Endpoints
 # ========================================================================
 
+
+@router.post(
+    "/chats/{chat_id}/roleplay/messages",
+    response_model=RoleplayResumeUserAppendResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Messages"],
+)
+async def append_roleplay_resume_input(
+    body: RoleplayResumeUserAppendRequest,
+    chat_id: str = Path(..., description="Chat session ID"),
+    scope_type: Literal["global", "workspace"] | None = Query(None),
+    workspace_id: str | None = Query(None),
+    db: CharactersRAGDB = Depends(get_chacha_db_for_user),
+    current_user: User = Depends(get_request_user),
+):
+    """Append exactly one owned global Resume input or replay its original receipt."""
+    scope = _resolve_message_scope(scope_type, workspace_id)
+    if scope.scope_type != "global" or scope.workspace_id is not None:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
+    if _active_message_sync_service(current_user, scope) is not None:
+        raise HTTPException(status_code=409, detail=RoleplayResumeConflictError("resume_sync_unsupported").to_detail())
+    limiter = get_character_rate_limiter()
+    await limiter.check_message_send_rate(current_user.id)
+    try:
+        return await run_in_threadpool(
+            db.append_idempotent_user_message,
+            chat_id,
+            body.model_dump(mode="json"),
+            owner_client_id=str(current_user.id),
+            validate_message_count=lambda count: limiter.validate_message_limit(chat_id, count),
+        )
+    except RoleplayResumeConflictError as exc:
+        raise HTTPException(status_code=409, detail=exc.to_detail()) from exc
+    except (NotFoundError, InputError, ConflictError, CharactersRAGDBError) as exc:
+        raise map_db_error_to_http(exc, default_detail="Unable to append the Resume input.") from exc
+
+
 @router.post("/chats/{chat_id}/messages", response_model=MessageResponse,
              status_code=status.HTTP_201_CREATED,
-             summary="Send a message in a chat", tags=["Messages"],
-             dependencies=[Depends(require_expected_user)])
+             summary="Send a message in a chat", tags=["Messages"])
 async def send_message(
     message_data: MessageCreate,
     request: Request,
@@ -406,7 +445,7 @@ async def send_message(
             ) from e
 
         # Validate parent message if provided
-        if message_data.parent_message_id:
+        if message_data.parent_message_id and message_data.tldw_history_selection_v1 is None:
             parent_msg = _verify_message_access(db, message_data.parent_message_id, current_user.id, scope)
             if parent_msg.get('conversation_id') != chat_id:
                 raise HTTPException(
@@ -512,8 +551,18 @@ async def send_message(
 
                 def history_write() -> tuple[str, dict[str, Any] | None]:
                     admission = db.append_selected_history_input(
-                        chat_id, selection, data, owner_client_id=owner_id, owner_key=owner,
-                        history_branch=message_data.tldw_history_branch)
+                        chat_id,
+                        selection,
+                        data,
+                        owner_client_id=owner_id,
+                        owner_key=owner,
+                        history_branch=message_data.tldw_history_branch,
+                        history_edit=(
+                            message_data.tldw_history_edit_v1.model_dump(mode="json")
+                            if message_data.tldw_history_edit_v1 is not None
+                            else None
+                        ),
+                    )
                     return admission["input_message_id"], admission
             else:
                 reference = message_data.tldw_history_admission_v1.model_dump(mode="json")
@@ -1110,15 +1159,15 @@ async def edit_message(
                 detail=f"Chat session {message['conversation_id']} not found",
             )
         with db.transaction() as conn:
-            db.lock_message_for_edit(message_id, conn=conn)
-            if metadata_updated:
-                db.lock_message_metadata_for_edit(message_id, conn=conn)
             resume_state = db.get_roleplay_resume_state(
                 message["conversation_id"],
                 conn=conn,
                 lock_for_update=True,
                 owner_client_id=str(current_user.id),
             )
+            db.lock_message_for_edit(message_id, conn=conn)
+            if metadata_updated:
+                db.lock_message_metadata_for_edit(message_id, conn=conn)
             conversation = resume_state.get("conversation")
             if not isinstance(conversation, Mapping):
                 raise InputError("Conversation resume state is incomplete")
@@ -1267,10 +1316,14 @@ async def edit_message(
 async def delete_message(
     message_id: str = Path(..., description="Message ID"),
     expected_version: int = Query(..., description="Expected version for optimistic locking"),
+    require_leaf: bool = Query(False, description="Refuse deletion of a message with live replies"),
+    expected_revision: str | None = Query(
+        None, min_length=1, max_length=128, description="Expected opaque saved-history message revision"
+    ),
     scope_type: Literal["global", "workspace"] | None = Query(None, description="Conversation scope type"),
     workspace_id: str | None = Query(None, description="Workspace ID when scope_type='workspace'"),
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
-    current_user: User = Depends(get_request_user)
+    current_user: User = Depends(get_request_user),
 ) -> Response:
     """
     Soft delete a message from a conversation.
@@ -1302,7 +1355,13 @@ async def delete_message(
 
         def delete_directly() -> None:
             # Soft delete the message
-            success = remove_message_from_conversation(db, message_id, expected_version)
+            success = (
+                remove_message_from_conversation(
+                    db, message_id, expected_version, require_leaf=require_leaf, expected_revision=expected_revision
+                )
+                if require_leaf or expected_revision is not None
+                else remove_message_from_conversation(db, message_id, expected_version)
+            )
 
             if not success:
                 raise HTTPException(
@@ -1311,6 +1370,11 @@ async def delete_message(
                 )
 
         sync_service = _active_message_sync_service(current_user, scope)
+        if (require_leaf or expected_revision is not None) and sync_service is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="unsupported_native_sync_delete",
+            )
         if sync_service is not None:
             try:
                 # A message Sync never saw (it predates the profile, or was saved by a path

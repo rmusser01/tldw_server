@@ -7,6 +7,7 @@ import {
   parseRetryAfter,
   readBrowserCookie,
   resolveBrowserRequestTransport,
+  waitForAuthRefresh,
   tldwRequest
 } from "@/services/tldw/request-core"
 import { createTokenRefreshError } from "@/services/tldw/auth-refresh-error"
@@ -62,6 +63,7 @@ import {
 } from "@/services/tldw/service-prompt-scope-error"
 import { deriveScopedUserId } from "@/utils/media-navigation-scope"
 import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 
 const ERROR_LOG_THROTTLE_MS = 15_000
 const RATE_LIMIT_LOG_THROTTLE_MS = 60_000
@@ -473,6 +475,7 @@ export interface BgRequestInit<
   sanitizeRagProviderError?: boolean
   servicePromptConfig?: ServicePromptTargetConfig
   configSnapshot?: TldwConfig | null
+  onDispatch?: () => void
 }
 
 const resolveCurrentServicePromptConfig = async (
@@ -564,10 +567,11 @@ const snapshotDirectConfig = (
 ): DirectConfigSnapshot => (config ? Object.freeze({ ...config }) : null)
 
 const resolveDirectGetRequestContext = async (
-  noAuthExplicit: boolean
+  noAuthExplicit: boolean,
+  storage: DirectRuntimeStorage,
+  getConfig: () => Promise<DirectConfigSnapshot>
 ): Promise<DirectRequestContext | null> => {
-  const storage = createSafeStorage({ area: "local" })
-  const config = snapshotDirectConfig(await resolveDirectConfig(storage))
+  const config = snapshotDirectConfig(await getConfig())
   if (!config) return null
   const server = normalizeGetScopeServer(config.serverUrl)
   if (!server) return null
@@ -646,8 +650,7 @@ const pruneRateLimitedGetResults = () => {
 // when many components refetch on a page load) trigger exactly ONE refresh
 // instead of a stampede that would each spend and rotate the refresh token,
 // persisting a dead one.
-let webRefreshInFlight: Promise<void> | null = null
-const scopedWebRefreshes = new Map<string, Promise<void>>()
+const scopedWebRefreshes = new Map<string, { promise: Promise<void>; controller: AbortController }>()
 
 const scopedRefreshKey = (
   checked: ServicePromptTargetConfig,
@@ -660,181 +663,111 @@ const scopedRefreshKey = (
   refreshToken
 ])
 
-const commitDirectRefresh = async (
-  storage: DirectRuntimeStorage,
-  checked: TldwConfig,
-  capturedAccessToken: string,
-  expectedRefreshToken: string,
-  tokens: Readonly<{ accessToken: string; refreshToken: string }>
-): Promise<TldwConfig> => {
-  const stored = await storeRefreshRotationIfCurrent(
-    storage,
-    checked,
-    expectedRefreshToken,
-    tokens
-  )
-  const observedNewerToken = await hasNewerCurrentAccessToken(
-    storage,
-    checked,
-    capturedAccessToken
-  )
-  const latest = await resolveDirectConfig(storage)
-  const responseApplied = Boolean(
-    latest &&
-    String(latest.accessToken || "").trim() === tokens.accessToken &&
-    String(latest.refreshToken || "").trim() === tokens.refreshToken
-  )
-  if (
-    !latest ||
-    latest.authMode !== "multi-user" ||
-    !servicePromptTargetsMatch(latest, checked) ||
-    (!stored && !observedNewerToken) ||
-    (!responseApplied && !observedNewerToken)
-  ) {
-    throw createServicePromptScopeChangedError()
-  }
-  return latest
-}
-
 const refreshAuthDirect = async (
   storage: DirectRuntimeStorage,
-  checked?: ServicePromptTargetConfig,
-  originalConfig?: TldwConfig
+  checked: ServicePromptTargetConfig,
+  originalConfig?: TldwConfig,
+  callerSignal?: AbortSignal,
+  assertRequestCurrent: () => void = () => {}
 ): Promise<void> => {
-  if (checked) {
+  const controller = new AbortController()
+  const releaseAccount = watchChatAccountChanges(invalidated => {
+    if (invalidated) controller.abort(createServicePromptScopeChangedError())
+  })
+  const assertCurrent = () => {
+    assertRequestCurrent()
+    controller.signal.throwIfAborted()
+  }
+  try {
+    callerSignal?.throwIfAborted()
     const cfg = originalConfig ??
       await resolveCurrentServicePromptConfig(storage, checked)
+    assertCurrent()
+    callerSignal?.throwIfAborted()
     const refreshToken = String(cfg.refreshToken || "").trim()
     const capturedAccessToken = String(cfg.accessToken || "").trim()
     if (!refreshToken) {
       throw new Error("Token refresh failed: no refresh token available")
     }
-    if (
-      originalConfig &&
-      await hasNewerCurrentAccessToken(
-        storage,
-        checked,
-        capturedAccessToken
-      )
-    ) {
+    if (originalConfig && await hasNewerCurrentAccessToken(storage, checked, capturedAccessToken)) {
+      assertCurrent()
+      callerSignal?.throwIfAborted()
       return
     }
+    assertCurrent()
+    callerSignal?.throwIfAborted()
     const current = originalConfig
       ? await resolveCurrentServicePromptConfig(storage, checked)
       : cfg
+    assertCurrent()
+    callerSignal?.throwIfAborted()
     if (String(current.refreshToken || "").trim() !== refreshToken) {
       throw createServicePromptScopeChangedError()
     }
     const key = scopedRefreshKey(checked, refreshToken)
-    let refresh = scopedWebRefreshes.get(key)
-    if (!refresh) {
-      refresh = (async () => {
+    let flight = scopedWebRefreshes.get(key)
+    if (flight?.controller.signal.aborted) flight = undefined
+    if (!flight) {
+      const promise = Promise.resolve().then(async () => {
         try {
+          assertCurrent()
           const resp = await tldwRequest(
             {
               path: "/api/v1/auth/refresh",
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: { refresh_token: refreshToken },
-              noAuth: true
+              noAuth: true,
+              abortSignal: controller.signal
             },
-            { getConfig: async () => cfg }
+            {
+              getConfig: async () => cfg,
+              useRuntimeAuthOverride: false,
+              fetchFn: (input, init) => {
+                assertCurrent()
+                return fetch(input, init)
+              }
+            }
           )
+          assertCurrent()
           const tokens = (resp?.ok ? resp.data : null) as
             | { access_token?: string; refresh_token?: string }
             | null
-          if (!tokens?.access_token) {
-            throw createTokenRefreshError(resp)
-          }
+          if (!tokens?.access_token) throw createTokenRefreshError(resp)
           const stored = await storeRefreshRotationIfCurrent(
             storage,
             { ...checked, accessToken: capturedAccessToken },
             refreshToken,
-            {
-              accessToken: tokens.access_token,
-              refreshToken: tokens.refresh_token || refreshToken
-            }
+            { accessToken: tokens.access_token, refreshToken: tokens.refresh_token || refreshToken },
+            assertCurrent
           )
-          if (!stored) {
-            throw createServicePromptScopeChangedError()
-          }
+          assertCurrent()
+          if (!stored) throw createServicePromptScopeChangedError()
         } catch (error) {
+          assertCurrent()
           if (isRequestConfigScopeChangedError(error)) throw error
-          if (
-            originalConfig &&
-            await waitForNewerCurrentAccessToken(
-              storage,
-              checked,
-              capturedAccessToken
-            )
-          ) {
+          if (originalConfig && await waitForNewerCurrentAccessToken(storage, checked, capturedAccessToken)) {
+            assertCurrent()
             return
           }
+          assertCurrent()
           if ((error as { status?: number } | null)?.status === 401 &&
-            !await invalidateRefreshSessionIfCurrent(storage, cfg)) {
+              !await invalidateRefreshSessionIfCurrent(storage, cfg, assertCurrent)) {
             throw createServicePromptScopeChangedError()
           }
           throw error
         } finally {
-          scopedWebRefreshes.delete(key)
+          if (scopedWebRefreshes.get(key)?.promise === promise) scopedWebRefreshes.delete(key)
         }
-      })()
-      scopedWebRefreshes.set(key, refresh)
+      })
+      flight = { promise, controller }
+      scopedWebRefreshes.set(key, flight)
     }
-    await refresh
-    return
+    await flight.promise
+    assertCurrent()
+  } finally {
+    releaseAccount()
   }
-
-  if (!webRefreshInFlight) {
-    webRefreshInFlight = (async () => {
-      const cfg =
-        (await resolveDirectConfig(storage)) || null
-      const refreshToken = String((cfg?.refreshToken as string) || "").trim()
-      const capturedAccessToken = String(cfg?.accessToken || "").trim()
-      // A failed refresh must retain its status and stop the original request.
-      if (!refreshToken) {
-        throw new Error("Token refresh failed: no refresh token available")
-      }
-      const resp = await tldwRequest(
-        {
-          path: "/api/v1/auth/refresh",
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: { refresh_token: refreshToken },
-          noAuth: true
-        },
-        { getConfig: () => resolveDirectConfig(storage) }
-      )
-      const tokens = (resp?.ok ? resp.data : null) as
-        | { access_token?: string; refresh_token?: string }
-        | null
-      if (!tokens?.access_token) {
-        if (resp.status === 401 && cfg?.authMode === "multi-user") {
-          if (await waitForNewerCurrentAccessToken(storage, cfg, capturedAccessToken)) return
-          if (!await invalidateRefreshSessionIfCurrent(storage, cfg)) {
-            throw createServicePromptScopeChangedError()
-          }
-        }
-        throw createTokenRefreshError(resp)
-      }
-      if (!cfg || cfg.authMode !== "multi-user") {
-        throw new Error("Token refresh failed: account configuration changed")
-      }
-      await commitDirectRefresh(
-        storage,
-        cfg,
-        capturedAccessToken,
-        refreshToken,
-        {
-          accessToken: tokens.access_token,
-          refreshToken: tokens.refresh_token || refreshToken
-        }
-      )
-    })().finally(() => {
-      webRefreshInFlight = null
-    })
-  }
-  await webRefreshInFlight
 }
 
 // Runtime for the web/direct fallback. Supplies a working `refreshAuth` so
@@ -843,33 +776,49 @@ const refreshAuthDirect = async (
 export const createDirectRuntime = (
   storage: DirectRuntimeStorage,
   servicePromptConfig?: ServicePromptTargetConfig,
-  initialConfig?: DirectConfigSnapshot
+  initialConfig?: DirectConfigSnapshot,
+  onDispatch?: () => void
 ) => {
   let originalConfig: TldwConfig | undefined
   let hasInitialConfig = typeof initialConfig !== "undefined"
+  const account = new AbortController()
+  const releaseAccount = watchChatAccountChanges(invalidated => {
+    if (invalidated) account.abort(createServicePromptScopeChangedError())
+  })
+  const assertCurrent = () => account.signal.throwIfAborted()
   return {
+    requestScopeSignal: account.signal,
+    assertRequestCurrent: assertCurrent,
+    releaseRequest: releaseAccount,
+    ...(onDispatch ? { fetchFn: (input: RequestInfo | URL, init?: RequestInit) => {
+      init?.signal?.throwIfAborted()
+      onDispatch()
+      return fetch(input, init)
+    } } : {}),
     ...(servicePromptConfig ? { useRuntimeAuthOverride: false } : {}),
-    getConfig: servicePromptConfig
-      ? async () => {
-          const current = await resolveCurrentServicePromptConfig(
-            storage,
-            servicePromptConfig
-          )
-          originalConfig ??= current
-          return current
-        }
-      : () => {
-          if (hasInitialConfig) {
-            hasInitialConfig = false
-            return Promise.resolve(initialConfig || null)
-          }
-          return resolveDirectConfig(storage)
-        },
-    refreshAuth: async () => {
+    getConfig: async () => {
+      const current = servicePromptConfig
+        ? await resolveCurrentServicePromptConfig(storage, servicePromptConfig)
+        : hasInitialConfig
+          ? initialConfig || null
+          : await resolveDirectConfig(storage)
+      hasInitialConfig = false
+      originalConfig ??= current ?? undefined
+      return current
+    },
+    refreshAuth: async (signal?: AbortSignal) => {
+      if (!originalConfig) throw new Error("Token refresh failed: account configuration unavailable")
+      const principal = deriveScopedUserId({ authMode: originalConfig.authMode, accessToken: originalConfig.accessToken })
       await refreshAuthDirect(
         storage,
-        servicePromptConfig,
-        originalConfig
+        servicePromptConfig ?? {
+          serverUrl: originalConfig.serverUrl, authMode: originalConfig.authMode,
+          authSource: originalConfig.authSource, orgId: originalConfig.orgId,
+          expectedUserId: principal === "user:anonymous" ? null : principal.slice("user:".length)
+        },
+        originalConfig,
+        signal,
+        assertCurrent
       )
     }
   }
@@ -894,79 +843,105 @@ export async function bgRequest<
     !init.sanitizeRagProviderError &&
     !init.servicePromptConfig &&
     init.configSnapshot === undefined &&
+    !init.onDispatch &&
     !hasRuntimeMessage
   if (!coalescable) {
     return bgRequestImpl<T, P, M>(init)
   }
-  const directContext = await resolveDirectGetRequestContext(
-    Object.prototype.hasOwnProperty.call(init, "noAuth") && init.noAuth === true
-  )
-  if (!directContext) {
-    return bgRequestImpl<T, P, M>(init)
-  }
-  // Keep timeoutMs in the key so GETs with different timeouts are not merged,
-  // and preserve the distinction between "noAuth omitted" and "noAuth: false"
-  // (bgRequestImpl uses hasOwnProperty(noAuth) to decide cross-origin auth
-  // suppression). Requests with caller headers are excluded above so secret
-  // header values can never enter this module-level key.
-  const expectedStatuses = Array.from(
-    normalizeExpectedStatuses(init.expectedStatuses)
-  ).sort((left, right) => left - right)
-  const key = JSON.stringify({
-    scope: directContext.scope,
-    p: String(init.path),
-    noAuth: Object.prototype.hasOwnProperty.call(init, "noAuth")
-      ? Boolean(init.noAuth)
-      : "__unset__",
-    returnResponse: Boolean(init.returnResponse),
-    expectedStatuses,
-    suppressBackendUnavailableEvent: Boolean(
-      init.suppressBackendUnavailableEvent
-    ),
-    timeoutMs: typeof init.timeoutMs === "number" ? init.timeoutMs : null
-  })
-  const existing = inFlightGetRequests.get(key)
-  if (existing) {
-    return existing as Promise<T>
-  }
-  const rateLimited = rateLimitedGetResults.get(key)
-  if (rateLimited) {
-    if (rateLimited.expiresAt > Date.now()) {
-      return rateLimited.rejected
-        ? Promise.reject(rateLimited.value)
-        : Promise.resolve(rateLimited.value as T)
-    }
-    rateLimitedGetResults.delete(key)
-  }
-  const rememberRateLimit = (value: unknown, rejected: boolean) => {
-    if (!isRateLimitedResult(value)) return
-    pruneRateLimitedGetResults()
-    rateLimitedGetResults.set(key, {
-      expiresAt: Date.now() + readRateLimitCooldownMs(value),
-      rejected,
-      value
-    })
-  }
-  const promise = bgRequestImpl<T, P, M>(init, directContext)
-    .then(
-      (value) => {
-        rememberRateLimit(value, false)
-        return value
-      },
-      (error) => {
-        rememberRateLimit(error, true)
-        throw error
-      }
+  const storage = createSafeStorage({ area: "local" })
+  const runtime = createDirectRuntime(storage)
+  // The outer caller retains observation through its coalesced result publication.
+  const requestRuntime = { ...runtime, releaseRequest: undefined }
+  try {
+    const directContext = await resolveDirectGetRequestContext(
+      Object.prototype.hasOwnProperty.call(init, "noAuth") && init.noAuth === true,
+      storage,
+      runtime.getConfig
     )
-    .finally(() => {
-      // Only clear the entry if it is still the promise we created — defensive in
-      // case the map handling changes to allow overwrites in the future.
-      if (inFlightGetRequests.get(key) === promise) {
-        inFlightGetRequests.delete(key)
-      }
+    runtime.assertRequestCurrent()
+    if (!directContext) {
+      const value = await bgRequestImpl<T, P, M>(init, undefined, requestRuntime)
+      runtime.assertRequestCurrent()
+      return value
+    }
+    // Keep timeoutMs in the key so GETs with different timeouts are not merged,
+    // and preserve the distinction between "noAuth omitted" and "noAuth: false"
+    // (bgRequestImpl uses hasOwnProperty(noAuth) to decide cross-origin auth
+    // suppression). Requests with caller headers are excluded above so secret
+    // header values can never enter this module-level key.
+    const expectedStatuses = Array.from(
+      normalizeExpectedStatuses(init.expectedStatuses)
+    ).sort((left, right) => left - right)
+    const key = JSON.stringify({
+      scope: directContext.scope,
+      p: String(init.path),
+      noAuth: Object.prototype.hasOwnProperty.call(init, "noAuth")
+        ? Boolean(init.noAuth)
+        : "__unset__",
+      returnResponse: Boolean(init.returnResponse),
+      expectedStatuses,
+      suppressBackendUnavailableEvent: Boolean(
+        init.suppressBackendUnavailableEvent
+      ),
+      timeoutMs: typeof init.timeoutMs === "number" ? init.timeoutMs : null
     })
-  inFlightGetRequests.set(key, promise)
-  return promise as Promise<T>
+    const existing = inFlightGetRequests.get(key)
+    if (existing) {
+      const value = await existing as T
+      runtime.assertRequestCurrent()
+      return value
+    }
+    const rateLimited = rateLimitedGetResults.get(key)
+    if (rateLimited) {
+      if (rateLimited.expiresAt > Date.now()) {
+        return rateLimited.rejected
+          ? Promise.reject(rateLimited.value)
+          : Promise.resolve(rateLimited.value as T)
+      }
+      rateLimitedGetResults.delete(key)
+    }
+    let executionConfigPending = true
+    requestRuntime.getConfig = async () => {
+      if (executionConfigPending) {
+        executionConfigPending = false
+        return directContext.config
+      }
+      return runtime.getConfig()
+    }
+    const rememberRateLimit = (value: unknown, rejected: boolean) => {
+      if (!isRateLimitedResult(value)) return
+      pruneRateLimitedGetResults()
+      rateLimitedGetResults.set(key, {
+        expiresAt: Date.now() + readRateLimitCooldownMs(value),
+        rejected,
+        value
+      })
+    }
+    const promise = bgRequestImpl<T, P, M>(init, directContext, requestRuntime)
+      .then(
+        (value) => {
+          rememberRateLimit(value, false)
+          return value
+        },
+        (error) => {
+          rememberRateLimit(error, true)
+          throw error
+        }
+      )
+      .finally(() => {
+        // Only clear the entry if it is still the promise we created — defensive in
+        // case the map handling changes to allow overwrites in the future.
+        if (inFlightGetRequests.get(key) === promise) {
+          inFlightGetRequests.delete(key)
+        }
+      })
+    inFlightGetRequests.set(key, promise)
+    const value = await promise as T
+    runtime.assertRequestCurrent()
+    return value
+  } finally {
+    runtime.releaseRequest()
+  }
 }
 
 async function bgRequestImpl<
@@ -975,7 +950,8 @@ async function bgRequestImpl<
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(
   init: BgRequestInit<P, M>,
-  directContext?: DirectRequestContext
+  directContext?: DirectRequestContext,
+  directRuntime?: Parameters<typeof tldwRequest>[1]
 ): Promise<T> {
   const {
     path: rawPath,
@@ -993,8 +969,16 @@ async function bgRequestImpl<
     expectedStatuses,
     sanitizeRagProviderError = false,
     servicePromptConfig,
-    configSnapshot
+    configSnapshot,
+    onDispatch
   } = init
+  let dispatched = false
+  const notifyDispatch = () => {
+    if (dispatched) return
+    dispatched = true
+    onDispatch?.()
+  }
+  abortSignal?.throwIfAborted()
   if (servicePromptConfig) {
     if (!isServicePromptRequestPath(rawPath, method)) {
       throw new Error(
@@ -1233,7 +1217,7 @@ async function bgRequestImpl<
         responseType,
         maxResponseBytes
       },
-      createDirectRuntime(storage, servicePromptConfig, configSnapshot)
+      createDirectRuntime(storage, servicePromptConfig, configSnapshot, notifyDispatch)
     )
   }
   const resolveArrayBufferResponse = async (
@@ -1288,7 +1272,7 @@ async function bgRequestImpl<
         responseType,
         maxResponseBytes
       },
-      createDirectRuntime(storage, servicePromptConfig, configSnapshot)
+      createDirectRuntime(storage, servicePromptConfig, configSnapshot, notifyDispatch)
     )
     if (!resp?.ok) {
       const failure = await handleFailedResponse(resp, "direct")
@@ -1300,6 +1284,11 @@ async function bgRequestImpl<
     return (returnResponse ? resp : resp.data) as T
   }
 
+  // Validate the captured target before the worker handoff as well as inside it.
+  if (hasRuntimeMessage && servicePromptConfig) {
+    await resolveCurrentServicePromptConfig(createSafeStorage({ area: "local" }), servicePromptConfig)
+  }
+  abortSignal?.throwIfAborted()
   // If extension messaging is available, use it (extension context)
   try {
     if (hasRuntimeMessage) {
@@ -1341,7 +1330,7 @@ async function bgRequestImpl<
         }
       }
       const requestId =
-        servicePromptConfig && abortSignal
+        (servicePromptConfig || configSnapshot !== undefined) && abortSignal
           ? createRuntimeRequestId()
           : undefined
       const payload = {
@@ -1365,6 +1354,7 @@ async function bgRequestImpl<
 
       if (!abortSignal) {
         // Add timeout to extension messaging - if service worker doesn't respond, fall back to direct request
+        notifyDispatch()
         const messagePromiseNoSignal = browser.runtime.sendMessage(payload)
         const timeoutPromiseNoSignal = new Promise<null>((resolve) =>
           setTimeout(() => resolve(null), runtimeMessageTimeoutMs)
@@ -1393,6 +1383,7 @@ async function bgRequestImpl<
         throw markNoFallbackError(createAbortError())
       }
 
+      notifyDispatch()
       const messagePromise = browser.runtime.sendMessage(payload) as Promise<
         { ok: boolean; error?: string; status?: number; data: T } | undefined
       >
@@ -1487,10 +1478,11 @@ async function bgRequestImpl<
       responseType,
       maxResponseBytes
     },
-    createDirectRuntime(
+    directRuntime ?? createDirectRuntime(
       storage,
       servicePromptConfig,
-      directContext ? directContext.config : configSnapshot
+      directContext ? directContext.config : configSnapshot,
+      notifyDispatch
     )
   )
   if (!resp?.ok) {
@@ -1514,6 +1506,7 @@ export interface BgStreamInit<
   streamIdleTimeoutMs?: number
   abortSignal?: AbortSignal
   onOpen?: () => void
+  onDispatch?: () => void
   sanitizeRagProviderStreamError?: boolean
   servicePromptConfig?: ServicePromptTargetConfig
 }
@@ -1600,8 +1593,10 @@ async function* bgStreamDirectUnsafe<
   P extends AllowedPath = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(
-  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen, servicePromptConfig }: BgStreamInit<P, M>
+  { path, method = 'POST' as UpperLower<M>, headers = {}, body, streamIdleTimeoutMs, abortSignal, onOpen, onDispatch, servicePromptConfig }: BgStreamInit<P, M>,
+  accountSignal: AbortSignal
 ): AsyncGenerator<string> {
+  accountSignal.throwIfAborted()
   if (servicePromptConfig && !isServicePromptRequestPath(path, method)) {
     throw new Error(
       "A Service Prompt config can only be used with Service Prompt requests."
@@ -1611,6 +1606,7 @@ async function* bgStreamDirectUnsafe<
   const cfg = servicePromptConfig
     ? await resolveCurrentServicePromptConfig(storage, servicePromptConfig)
     : (await resolveDirectConfig(storage)) || null
+  accountSignal.throwIfAborted()
   const normalizedPath = normalizeKnownPathQuirks(path)
   const isAbsolute = typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath)
   const absolutePath = isAbsolute ? String(normalizedPath) : ""
@@ -1723,6 +1719,9 @@ async function* bgStreamDirectUnsafe<
     resolvedHeaders["Connection"] || "keep-alive"
 
   const controller = new AbortController()
+  const onAccountAbort = () => controller.abort(accountSignal.reason)
+  accountSignal.throwIfAborted()
+  accountSignal.addEventListener("abort", onAccountAbort, { once: true })
   const idleMs = deriveStreamIdleTimeout(
     cfg,
     normalizedPath as string,
@@ -1751,7 +1750,7 @@ async function* bgStreamDirectUnsafe<
   }
 
   const fetchStream = async (): Promise<Response> => {
-    return await fetch(url, {
+    const init: RequestInit = {
       method,
       headers: resolvedHeaders,
       body:
@@ -1761,13 +1760,18 @@ async function* bgStreamDirectUnsafe<
             : JSON.stringify(body)
           : undefined,
       signal: controller.signal
-    })
+    }
+    accountSignal.throwIfAborted()
+    controller.signal.throwIfAborted()
+    onDispatch?.()
+    return await fetch(url, init)
   }
 
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined
   resetIdle()
   try {
     let resp = await fetchStream()
+    accountSignal.throwIfAborted()
     if (
       !shouldSkipAuth &&
       !hostedMode &&
@@ -1776,53 +1780,34 @@ async function* bgStreamDirectUnsafe<
       cfg?.refreshToken
     ) {
       try {
-        if (servicePromptConfig) {
-          await refreshAuthDirect(storage, servicePromptConfig, cfg)
-          const latestCfg = await resolveCurrentServicePromptConfig(
-            storage,
-            servicePromptConfig
-          )
-          if (latestCfg.accessToken) {
-            resolvedHeaders["Authorization"] = `Bearer ${latestCfg.accessToken}`
-            resp = await fetchStream()
-          }
-        } else {
-          const refreshResp = await fetch(`${baseUrl}/api/v1/auth/refresh`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ refresh_token: cfg.refreshToken }),
-            signal: controller.signal
-          })
-          if (refreshResp.ok) {
-            const tokens = await refreshResp.json()
-            if (tokens?.access_token && !controller.signal.aborted) {
-              const latestCfg = await commitDirectRefresh(
-                storage,
-                cfg,
-                String(cfg.accessToken || "").trim(),
-                String(cfg.refreshToken || "").trim(),
-                {
-                  accessToken: tokens.access_token,
-                  refreshToken: tokens.refresh_token || cfg.refreshToken
-                }
-              )
-              resolvedHeaders["Authorization"] =
-                `Bearer ${latestCfg.accessToken}`
-              resp = await fetchStream()
-            }
-          }
+        const principal = deriveScopedUserId({ authMode: cfg.authMode, accessToken: cfg.accessToken })
+        const checked = servicePromptConfig ?? {
+          serverUrl: cfg.serverUrl, authMode: cfg.authMode,
+          authSource: cfg.authSource, orgId: cfg.orgId,
+          expectedUserId: principal === "user:anonymous" ? null : principal.slice("user:".length)
+        }
+        await waitForAuthRefresh(
+          () => refreshAuthDirect(storage, checked, cfg, controller.signal, () => accountSignal.throwIfAborted()),
+          controller.signal
+        )
+        accountSignal.throwIfAborted()
+        controller.signal.throwIfAborted()
+        const latestCfg = await resolveCurrentServicePromptConfig(storage, checked)
+        accountSignal.throwIfAborted()
+        if (latestCfg.accessToken) {
+          resolvedHeaders["Authorization"] = `Bearer ${latestCfg.accessToken}`
+          resp = await fetchStream()
         }
       } catch (error) {
+        accountSignal.throwIfAborted()
         if (isRequestAbort(error, controller.signal)) {
           throw createAbortError(readErrorMessage(error))
         }
-        if (isRequestConfigScopeChangedError(error)) {
-          throw error
-        }
-        // ignore refresh failures and continue with original response
+        throw error
       }
     }
 
+    accountSignal.throwIfAborted()
     if (!resp.ok) {
       const errorInfo = await parseStreamError(resp)
       const error = new Error(
@@ -1847,6 +1832,7 @@ async function* bgStreamDirectUnsafe<
     resetIdle()
     while (true) {
       const { done, value } = await reader.read()
+      accountSignal.throwIfAborted()
       if (done) break
       resetIdle()
       buffer += decoder.decode(value, { stream: true })
@@ -1855,6 +1841,8 @@ async function* bgStreamDirectUnsafe<
       for (const line of lines) {
         const trimmed = line.trim()
         if (!trimmed) continue
+        accountSignal.throwIfAborted()
+        controller.signal.throwIfAborted()
         resetIdle()
         if (trimmed.startsWith("data:")) {
           const data = trimmed.slice(5).trim()
@@ -1870,6 +1858,8 @@ async function* bgStreamDirectUnsafe<
     }
     const tail = buffer.trim()
     if (tail) {
+      accountSignal.throwIfAborted()
+      controller.signal.throwIfAborted()
       if (tail.startsWith("data:")) {
         const data = tail.slice(5).trim()
         if (data !== "[DONE]") {
@@ -1879,7 +1869,10 @@ async function* bgStreamDirectUnsafe<
         yield tail
       }
     }
+    accountSignal.throwIfAborted()
+    controller.signal.throwIfAborted()
   } catch (e: any) {
+    accountSignal.throwIfAborted()
     if (idleError) {
       throw idleError
     }
@@ -1888,6 +1881,7 @@ async function* bgStreamDirectUnsafe<
     }
     throw e
   } finally {
+    accountSignal.removeEventListener("abort", onAccountAbort)
     if (idleTimer) clearTimeout(idleTimer)
     try {
       // An errored response body rejects cancellation too; preserve the primary error.
@@ -1905,8 +1899,12 @@ async function* bgStreamDirect<
   P extends AllowedPath = AllowedPath,
   M extends AllowedMethodFor<P> = AllowedMethodFor<P>
 >(init: BgStreamInit<P, M>): AsyncGenerator<string> {
+  const account = new AbortController()
+  const releaseAccount = watchChatAccountChanges((invalidated) => {
+    if (invalidated) account.abort(createServicePromptScopeChangedError())
+  })
   try {
-    yield* bgStreamDirectUnsafe(init)
+    yield* bgStreamDirectUnsafe(init, account.signal)
   } catch (error) {
     if (!init.sanitizeRagProviderStreamError) {
       throw error
@@ -1915,6 +1913,8 @@ async function* bgStreamDirect<
       throw createSanitizedRagStreamAbortError()
     }
     throw buildSanitizedRagStreamError(error)
+  } finally {
+    releaseAccount()
   }
 }
 
@@ -1930,12 +1930,19 @@ export async function* bgStream<
     streamIdleTimeoutMs,
     abortSignal,
     onOpen,
+    onDispatch,
     sanitizeRagProviderStreamError = false,
     servicePromptConfig
   }: BgStreamInit<P, M>
 ): AsyncGenerator<string> {
   const hasHttpStatus = (value: unknown): boolean =>
     extractHttpStatus(value) !== null
+  let dispatchNotified = false
+  const notifyDispatch = () => {
+    if (dispatchNotified) return
+    dispatchNotified = true
+    onDispatch?.()
+  }
   let openNotified = false
   const notifyOpen = () => {
     if (openNotified) return
@@ -1987,6 +1994,7 @@ export async function* bgStream<
       streamIdleTimeoutMs,
       abortSignal,
       onOpen: notifyOpen,
+      onDispatch: notifyDispatch,
       sanitizeRagProviderStreamError,
       servicePromptConfig
     })
@@ -2005,6 +2013,10 @@ export async function* bgStream<
     (await streamStorage
       .get<Record<string, unknown>>("tldwConfig")
       .catch(() => null)) || null
+  if (servicePromptConfig) {
+    await resolveCurrentServicePromptConfig(streamStorage, servicePromptConfig)
+  }
+  abortSignal?.throwIfAborted()
   const connectionTimeoutMs = deriveStreamIdleTimeout(
     streamCfg,
     String(path),
@@ -2024,6 +2036,7 @@ export async function* bgStream<
         streamIdleTimeoutMs,
         abortSignal,
         onOpen: notifyOpen,
+        onDispatch: notifyDispatch,
         sanitizeRagProviderStreamError,
         servicePromptConfig
       })
@@ -2149,6 +2162,8 @@ export async function* bgStream<
       if (servicePromptConfig) {
         portPayload.servicePromptConfig = servicePromptConfig
       }
+      abortSignal?.throwIfAborted()
+      notifyDispatch()
       port.postMessage(portPayload)
     } catch (e) {
       clearTimeout(connectionTimer)
@@ -2161,6 +2176,10 @@ export async function* bgStream<
     let drainedSinceYield = 0
     let sliceStartedAt = Date.now()
     while (!done || queue.length > 0) {
+      if (abortSignal?.aborted) {
+        if (sanitizeRagProviderStreamError) throw createSanitizedRagStreamAbortError();
+        throw createAbortError("Aborted");
+      }
       if (queue.length > 0) {
         yield queue.shift() as string
         drainedSinceYield += 1
@@ -2193,6 +2212,7 @@ export async function* bgStream<
           streamIdleTimeoutMs,
           abortSignal,
           onOpen: notifyOpen,
+        onDispatch: notifyDispatch,
           sanitizeRagProviderStreamError,
           servicePromptConfig
         })
@@ -2220,6 +2240,7 @@ export async function* bgStream<
           streamIdleTimeoutMs,
           abortSignal,
           onOpen: notifyOpen,
+        onDispatch: notifyDispatch,
           sanitizeRagProviderStreamError,
           servicePromptConfig
         })

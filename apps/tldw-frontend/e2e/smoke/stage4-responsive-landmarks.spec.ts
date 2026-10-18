@@ -194,3 +194,149 @@ test.describe('Stage 4 responsive route landmarks', () => {
     });
   }
 });
+
+// Real page layout over declared auth/readiness/catalog I/O doubles.
+test.describe('Chat mobile first action', () => {
+  for (const width of [320, 390])
+    for (const mode of ['cockpit', 'focus'] as const)
+      for (const catalog of ['available', 'failed'] as const) {
+        test(`${width}px ${mode} ${catalog} keeps the starter and composer visible`, async ({
+          page,
+        }, testInfo) => {
+          await installReadinessMocks(page);
+          await seedAuth(page, { apiKey: 'chat-layout-test-key' });
+          await page.route('**/api/v1/config/providers', (route) =>
+            route.fulfill({
+              json: {
+                providers: [{ name: 'openai', configured: true }],
+                any_configured: true,
+              },
+            }),
+          );
+          let catalogReads = 0;
+          await page.route('**/api/v1/llm/models/metadata**', (route) => {
+            catalogReads++;
+            return route.fulfill(
+              catalog === 'failed'
+                ? {
+                    status: 503,
+                    json: {
+                      detail: 'layout fixture model discovery unavailable',
+                    },
+                  }
+                : {
+                    json: {
+                      models: [
+                        {
+                          id: 'openai/layout-chat',
+                          name: 'Layout chat',
+                          provider: 'openai',
+                          type: 'chat',
+                          is_configured: true,
+                          provider_is_configured: true,
+                          provider_enabled: true,
+                          availability: 'available',
+                          context_length: 8192,
+                        },
+                      ],
+                    },
+                  },
+            );
+          });
+          await page.addInitScript(
+            ({ mode }) => {
+              for (const [key, value] of Object.entries({
+                stickyChatInput: true,
+                playgroundComposerOptionsExpanded: false,
+                playgroundChatLayoutMode: mode,
+                playgroundChatContextRailVisible: false,
+                playgroundChatRuntimeRailVisible: false,
+                playgroundChatMobileCockpitPanel: null,
+                selectedModel: 'tldw:openai/layout-chat',
+              }))
+                localStorage.setItem(key, JSON.stringify(value));
+            },
+            { mode },
+          );
+          await page.setViewportSize({ width, height: 844 });
+          await page.goto('/chat', {
+            waitUntil: 'domcontentloaded',
+            timeout: SMOKE_LOAD_TIMEOUT,
+          });
+          await waitForAppShell(page, SMOKE_LOAD_TIMEOUT);
+          await expect(
+            page.getByTestId('playground-cockpit-shell'),
+          ).toHaveAttribute('data-mode', mode);
+          const empty = page.getByTestId('playground-empty-shell');
+          await expect(empty).toBeVisible({ timeout: SMOKE_LOAD_TIMEOUT });
+          await expect(empty).toContainText(
+            'Choose a model, then write your first message below.',
+          );
+          await expect.poll(() => catalogReads).toBeGreaterThan(0);
+          const modelError = page
+            .getByRole('alert')
+            .filter({ hasText: 'Could not check chat models' });
+          if (catalog === 'failed') await expect(modelError).toBeVisible();
+          else await expect(modelError).toHaveCount(0);
+          await waitForVisualSettle(page, SMOKE_LOAD_TIMEOUT);
+          const action = empty.getByRole('button', {
+            name: 'Start chatting',
+            exact: true,
+          });
+          const actionBox = await action.boundingBox();
+          const transcriptBox = await page
+            .getByTestId('playground-chat-transcript')
+            .boundingBox();
+          const composerBox = await page
+            .getByTestId('playground-chat-composer-dock')
+            .boundingBox();
+          await testInfo.attach('mobile-layout', {
+            body: JSON.stringify({
+              actionBox,
+              transcriptBox,
+              composerBox,
+              mainCount: await page.getByRole('main').count(),
+            }),
+            contentType: 'application/json',
+          });
+          await page.screenshot({
+            path: testInfo.outputPath('chat-mobile-first-action.png'),
+          });
+          expect(actionBox).not.toBeNull();
+          expect(transcriptBox).not.toBeNull();
+          expect(actionBox!.y).toBeGreaterThanOrEqual(transcriptBox!.y);
+          expect(composerBox).not.toBeNull();
+          expect(composerBox!.y).toBeGreaterThanOrEqual(0);
+          expect(composerBox!.y + composerBox!.height).toBeLessThanOrEqual(844);
+          expect(
+            actionBox!.y + actionBox!.height,
+            'Primary action must fit the initial visible transcript above the composer',
+          ).toBeLessThanOrEqual(
+            Math.min(
+              transcriptBox!.y + transcriptBox!.height,
+              composerBox!.y,
+              844,
+            ),
+          );
+          await expect(page.getByRole('main')).toHaveCount(1);
+          await expectOneRouteHeading(
+            page,
+            { path: '/chat', heading: /^Chat$/i },
+            '/chat',
+          );
+          await expectNoPageHorizontalOverflow(page, '/chat');
+          await expectChatComposerInsideViewport(page);
+          if (mode === 'cockpit') {
+            const panels = page.getByTestId('playground-cockpit-mobile-rails');
+            await expect(panels.getByRole('button')).toHaveCount(2);
+            await expect(panels.getByRole('tab')).toHaveCount(0);
+            for (const name of ['Context', 'Chat settings'])
+              await expect(
+                panels.getByRole('button', { name, exact: true }),
+              ).toHaveAttribute('aria-expanded', 'false');
+          }
+          await action.click();
+          await expect(page.getByTestId('chat-input')).toBeFocused();
+        });
+      }
+});

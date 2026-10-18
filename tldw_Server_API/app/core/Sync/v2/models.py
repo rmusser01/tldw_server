@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypedDict, cast
 from uuid import UUID
 
 from .notes_link_contract import (
@@ -307,7 +307,9 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
         AttachmentRefV2Payload,
         AttachmentRefV2TombstonePayload,
     )
+    from .notes_provenance_contract import MAX_PROVENANCE_BYTES, NotesProvenancePayload
 
+    provenance_schema = NotesProvenancePayload.model_json_schema()
     keyword_link_schema = {
         "required": ["subject_type", "subject_id", "keyword_sync_id"],
         "properties": {
@@ -426,6 +428,28 @@ def sync_v2_domain_schemas() -> dict[SyncDomain, dict[str, object]]:
                 "operation": "upsert",
                 "routing_metadata": {"restore_intent": True},
                 "requires_current_base": True,
+            },
+        },
+        "notes.provenance": {
+            "schema_version": 1,
+            "encryption_policy": DEFAULT_M1_ENCRYPTION_POLICY,
+            "upsert": provenance_schema,
+            "tombstone": provenance_schema,
+            "restore": {
+                "operation": "upsert",
+                "routing_metadata": {"restore_intent": True},
+                "requires_current_base": True,
+                "requires_active_parent": True,
+            },
+            "constraints": {
+                "max_canonical_utf8_bytes": MAX_PROVENANCE_BYTES,
+                "max_portable_encoded_characters": MAX_PROVENANCE_BYTES,
+                "text_length_unit": "utf16_code_units",
+                "parent_id": "object_id",
+                "requires_current_base": True,
+                "retained_payload_for_tombstone_and_restore": True,
+                "enrollment_readiness": "notes_provenance_v1",
+                "object_hash": "sha256:canonical_json({payload,deleted})",
             },
         },
         "notes.keyword": {
@@ -794,9 +818,18 @@ def client_private_server_frontend_limitation_warning() -> dict[str, str]:
     }
 
 
+class NotesNoteUpsertPayload(TypedDict):
+    """Lossless validated version-1 ``notes.note`` payload."""
+
+    title: str
+    content: str
+    conversation_id: str | None
+    message_id: str | None
+
+
 def validate_notes_note_upsert_payload(
     payload: Mapping[str, object],
-) -> dict[str, str | None]:
+) -> NotesNoteUpsertPayload:
     """Validate and return the lossless version-1 ``notes.note`` payload."""
 
     unexpected = set(payload).difference(NOTES_NOTE_CANONICAL_PAYLOAD_FIELDS)
@@ -831,7 +864,8 @@ def validate_notes_note_upsert_payload(
     return {
         "title": title,
         "content": content,
-        **backlinks,
+        "conversation_id": backlinks["conversation_id"],
+        "message_id": backlinks["message_id"],
     }
 
 
@@ -2239,6 +2273,7 @@ __all__ = [
     "blob_upload_expires_at",
     "blob_upload_session_is_expired",
     "sync_v2_domain_schemas",
+    "NotesNoteUpsertPayload",
     "validate_notes_note_upsert_payload",
 ]
 

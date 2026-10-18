@@ -2,6 +2,7 @@ import os
 import shutil
 import asyncio
 import tempfile
+from types import SimpleNamespace
 import numpy as np
 import soundfile as sf
 import pytest
@@ -743,3 +744,344 @@ async def test_audio_worker_owner_over_limit_defers_repeatedly_without_quarantin
     finally:
         stop.set()
         await asyncio.wait_for(task, timeout=2.0)
+
+
+# --- audio_analyze through the real analyze() (TASK-13637) ---
+
+
+class _AnalysisAdapter:
+    """The provider adapter below analyze(): records each request and replies or raises."""
+
+    def __init__(self):
+        self.reply = "Model analysis."
+        self.error = None
+        self.requests = []
+
+    def chat(self, request, timeout=None):
+        self.requests.append(request)
+        if self.error is not None:
+            raise self.error
+        return {"choices": [{"message": {"content": self.reply}}]}
+
+
+@pytest.fixture
+def analyze_worker(monkeypatch, tmp_path):
+    """The audio worker with quota stubs, a fresh jobs DB and a fake provider adapter."""
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs_analyze.db"))
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.05")
+
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as summarization
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    async def _unlimited(user_id: int):
+        return {"concurrent_jobs": None}
+
+    async def _yes(user_id: int):
+        return True, ""
+
+    async def _noop(user_id: int):
+        return None
+
+    monkeypatch.setattr(worker, "get_limits_for_user", _unlimited)
+    monkeypatch.setattr(worker, "can_start_job", _yes)
+    monkeypatch.setattr(worker, "increment_jobs_started", _noop)
+    monkeypatch.setattr(worker, "finish_job", _noop)
+
+    adapter = _AnalysisAdapter()
+    monkeypatch.setattr(summarization, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: adapter))
+    monkeypatch.setattr(summarization, "load_and_log_configs", lambda: {"openai_api": {"model": "configured-model"}})
+    return worker, JobManager(), adapter
+
+
+async def _run_worker_until(worker, done) -> None:
+    stop = asyncio.Event()
+    task = asyncio.create_task(worker.run_audio_jobs_worker(stop))
+    try:
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            if task.done():
+                pytest.fail(f"audio worker crashed: {task.exception()!r}")
+            if done():
+                break
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=2.0)
+
+
+def _analyze_job(jm, text: str, api_name: str | None = "openai") -> int:
+    row = jm.create_job(
+        domain="audio", queue="default", job_type="audio_analyze",
+        payload={"text": text, "api_name": api_name, "model": "whisper-1", "perform_analysis": True}, owner_user_id="7",
+    )
+    return int(row["id"])
+
+
+def _failed_or_retried(jm, job_id: int) -> bool:
+    job = jm.get_job(job_id) or {}
+    return job.get("status") in {"failed", "quarantined"} or int(job.get("retry_count") or 0) >= 1
+
+
+@pytest.mark.unit
+async def test_audio_analyze_stores_the_model_analysis(analyze_worker):
+    worker, jm, adapter = analyze_worker
+    _analyze_job(jm, "hello transcript")
+
+    def stored():
+        return jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7")
+
+    await _run_worker_until(worker, stored)
+    assert stored(), "audio_analyze did not hand over to audio_store"
+    assert stored()[0]["payload"]["analysis"] == "Model analysis."
+    assert [r["messages"][0]["content"] for r in adapter.requests] == ["hello transcript"]
+    assert adapter.requests[0]["model"] == "configured-model"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("text", ["", " \n "], ids=["empty", "whitespace"])
+async def test_audio_analyze_empty_transcript_fails_without_retry(analyze_worker, text):
+    worker, jm, adapter = analyze_worker
+    job_id = _analyze_job(jm, text)
+    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
+    job = jm.get_job(job_id) or {}
+    assert job.get("status") == "failed"
+    assert int(job.get("retry_count") or 0) == 0
+    assert job.get("error_code") == "empty_transcript"
+    assert adapter.requests == []
+    assert jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7") == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("error_name", "code"),
+    [("ChatAuthenticationError", "authentication"), ("ChatConfigurationError", "configuration")],
+)
+async def test_audio_analyze_provider_setup_failure_fails_without_retry(analyze_worker, error_name, code):
+    from tldw_Server_API.app.core import exceptions
+
+    worker, jm, adapter = analyze_worker
+    adapter.error = getattr(exceptions, error_name)(provider="openai")
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
+    job = jm.get_job(job_id) or {}
+    assert job.get("status") == "failed"
+    assert int(job.get("retry_count") or 0) == 0
+    assert job.get("error_code") == code
+
+
+@pytest.mark.unit
+async def test_audio_analyze_missing_model_fails_without_retry(analyze_worker, monkeypatch):
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as summarization
+
+    worker, jm, adapter = analyze_worker
+    monkeypatch.setattr(summarization, "load_and_log_configs", lambda: {"openai_api": {}})
+    monkeypatch.delenv("DEFAULT_MODEL_OPENAI", raising=False)
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
+    job = jm.get_job(job_id) or {}
+    assert job.get("status") == "failed"
+    assert int(job.get("retry_count") or 0) == 0
+    assert job.get("error_code") == "missing_model"
+    assert adapter.requests == []
+
+
+@pytest.mark.unit
+async def test_audio_analyze_unavailable_adapter_fails_without_retry(analyze_worker, monkeypatch):
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as summarization
+
+    worker, jm, adapter = analyze_worker
+    monkeypatch.setattr(summarization, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: None))
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
+    job = jm.get_job(job_id) or {}
+    assert job.get("status") == "failed"
+    assert int(job.get("retry_count") or 0) == 0
+    assert job.get("error_code") == "adapter_unavailable"
+
+
+@pytest.mark.unit
+async def test_audio_analyze_rate_limit_still_retries(analyze_worker):
+    from tldw_Server_API.app.core.exceptions import ChatRateLimitError
+
+    worker, jm, adapter = analyze_worker
+    adapter.error = ChatRateLimitError(provider="openai")
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
+    job = jm.get_job(job_id) or {}
+    assert int(job.get("retry_count") or 0) >= 1
+    assert job.get("status") != "failed"
+    assert job.get("error_code") == "rate_limit"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("api_name", [None, "", "None"], ids=["missing", "blank", "None-string"])
+async def test_audio_analyze_without_api_name_skips_analysis(analyze_worker, api_name):
+    worker, jm, adapter = analyze_worker
+    _analyze_job(jm, "hello transcript", api_name=api_name)
+
+    def stored():
+        return jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7")
+
+    await _run_worker_until(worker, stored)
+    assert stored(), "audio_analyze did not hand over to audio_store"
+    payload = stored()[0]["payload"]
+    assert payload.get("analysis_skipped") == "no api_name"
+    assert "analysis" not in payload
+    assert adapter.requests == []
+
+
+@pytest.mark.unit
+async def test_audio_analyze_quota_refusal_fails_the_job_without_retry(analyze_worker):
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    worker, jm, adapter = analyze_worker
+    adapter.error = LLMQuotaExceededError(
+        category="llm_tokens_month", current=12, limit=10, message="over", retry_after=60
+    )
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: (jm.get_job(job_id) or {}).get("status") == "failed")
+    job = jm.get_job(job_id) or {}
+    assert job.get("status") == "failed"
+    assert int(job.get("retry_count") or 0) == 0
+    assert job.get("error_code") == "llm_quota_exceeded"
+
+
+@pytest.mark.unit
+async def test_audio_analyze_provider_failure_still_retries(analyze_worker):
+    worker, jm, adapter = analyze_worker
+    adapter.reply = ""  # no usable analysis: a provider failure, not a refusal
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: int((jm.get_job(job_id) or {}).get("retry_count") or 0) >= 1)
+    job = jm.get_job(job_id) or {}
+    assert int(job.get("retry_count") or 0) >= 1
+    assert job.get("status") != "failed"
+    assert job.get("error_code") == "provider_failure"
+    assert len(adapter.requests) >= 1
+
+
+# --- the audio_convert -> audio_transcribe hand-off (TASK-13848) ---
+
+
+@pytest.fixture
+def pipeline_worker(monkeypatch, tmp_path):
+    """The audio worker with quota stubs, a fresh jobs DB, and conversion and STT stubbed out."""
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs_pipeline.db"))
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.05")
+    monkeypatch.delenv("AUDIO_JOBS_GPU_TRANSCRIBE", raising=False)
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    async def _unlimited(user_id: int):
+        return {"concurrent_jobs": None}
+
+    async def _yes(user_id: int):
+        return True, ""
+
+    async def _noop(user_id: int):
+        return None
+
+    monkeypatch.setattr(worker, "get_limits_for_user", _unlimited)
+    monkeypatch.setattr(worker, "can_start_job", _yes)
+    monkeypatch.setattr(worker, "increment_jobs_started", _noop)
+    monkeypatch.setattr(worker, "finish_job", _noop)
+
+    stt_calls = []
+
+    def _fake_stt(wav_path, model, *args, **kwargs):
+        stt_calls.append(wav_path)
+        return {"text": "hello pipeline", "segments": [{"Text": "hello pipeline"}]}
+
+    monkeypatch.setattr(atlib, "convert_to_wav", lambda path, *a, **k: str(path) + ".wav")
+    monkeypatch.setattr(atlib, "run_stt_job_via_registry", _fake_stt)
+    return worker, JobManager(), stt_calls
+
+
+def _convert_job(jm) -> int:
+    row = jm.create_job(
+        domain="audio", queue="default", job_type="audio_convert",
+        payload={"local_path": "/tmp/pipeline.mp3", "model": "whisper-1", "perform_chunking": False, "perform_analysis": False},
+        owner_user_id="7",
+    )
+    return int(row["id"])
+
+
+def _jobs_of(jm, job_type: str):
+    return jm.list_jobs(domain="audio", job_type=job_type, owner_user_id="7")
+
+
+@pytest.mark.unit
+async def test_audio_pipeline_transcribes_in_process_by_default(pipeline_worker):
+    worker, jm, stt_calls = pipeline_worker
+    convert_id = _convert_job(jm)
+    await _run_worker_until(worker, lambda: any(j.get("status") == "completed" for j in _jobs_of(jm, "audio_store")))
+    transcribe = _jobs_of(jm, "audio_transcribe")
+    assert [j["queue"] for j in transcribe] == ["default"]
+    # The key that lets a re-run stage reuse the next stage it already queued.
+    assert transcribe[0]["idempotency_key"] == f"audio-stage:{convert_id}:audio_transcribe"
+    assert [j["status"] for j in _jobs_of(jm, "audio_store")] == ["completed"]
+    assert len(stt_calls) == 1
+
+
+@pytest.mark.unit
+async def test_audio_pipeline_runs_under_a_per_user_job_limit_of_one(pipeline_worker, monkeypatch):
+    # The running stage must not count against its own hand-off under fair-share.
+    worker, jm, stt_calls = pipeline_worker
+    monkeypatch.setenv("JOBS_MAX_PER_USER", "1")
+    _convert_job(jm)
+    await _run_worker_until(worker, lambda: any(j.get("status") == "completed" for j in _jobs_of(jm, "audio_store")))
+    assert [j["status"] for j in _jobs_of(jm, "audio_store")] == ["completed"]
+    assert len(stt_calls) == 1
+
+
+@pytest.mark.unit
+async def test_audio_pipeline_routes_transcription_to_the_gpu_queue_when_enabled(pipeline_worker, monkeypatch):
+    worker, jm, stt_calls = pipeline_worker
+    monkeypatch.setenv("AUDIO_JOBS_GPU_TRANSCRIBE", "true")
+    convert_id = _convert_job(jm)
+    await _run_worker_until(
+        worker,
+        lambda: bool(_jobs_of(jm, "audio_transcribe")) or (jm.get_job(convert_id) or {}).get("status") == "completed",
+    )
+    assert [(j["queue"], j["status"]) for j in _jobs_of(jm, "audio_transcribe")] == [("transcribe", "queued")]
+    assert stt_calls == []
+
+
+@pytest.mark.unit
+async def test_a_failed_stage_hand_off_fails_the_job_visibly(pipeline_worker, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    worker, jm, stt_calls = pipeline_worker
+    monkeypatch.setenv("AUDIO_JOBS_GPU_TRANSCRIBE", "true")
+    monkeypatch.delenv("JOBS_ALLOWED_QUEUES", raising=False)
+    monkeypatch.delenv("JOBS_ALLOWED_QUEUES_AUDIO", raising=False)
+    monkeypatch.setattr(JobManager, "DOMAIN_ALLOWED_QUEUES", {})  # "transcribe" is now refused
+    convert_id = _convert_job(jm)
+    await _run_worker_until(worker, lambda: (jm.get_job(convert_id) or {}).get("status") in {"completed", "failed"})
+    job = jm.get_job(convert_id) or {}
+    assert job.get("status") == "failed"
+    assert job.get("error_code") == "next_stage_enqueue_failed"
+    assert int(job.get("retry_count") or 0) == 0
+    assert _jobs_of(jm, "audio_transcribe") == []
+
+
+@pytest.mark.unit
+async def test_a_transient_hand_off_failure_is_retried(pipeline_worker, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    worker, jm, stt_calls = pipeline_worker
+    original_create = JobManager.create_job
+
+    def _flaky_create(self, **kwargs):
+        if kwargs.get("job_type") == "audio_transcribe":
+            raise RuntimeError("database is locked")
+        return original_create(self, **kwargs)
+
+    monkeypatch.setattr(JobManager, "create_job", _flaky_create)
+    convert_id = _convert_job(jm)
+    await _run_worker_until(worker, lambda: int((jm.get_job(convert_id) or {}).get("retry_count") or 0) >= 1)
+    job = jm.get_job(convert_id) or {}
+    assert int(job.get("retry_count") or 0) >= 1
+    assert job.get("status") != "completed"
+    assert job.get("error_code") == "next_stage_enqueue_failed"

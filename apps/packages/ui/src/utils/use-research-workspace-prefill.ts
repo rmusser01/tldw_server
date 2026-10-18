@@ -291,7 +291,7 @@ export function useResearchWorkspacePrefill(
               // changed; the completed upload must not be repeated on return.
               await saveResearchWorkspacePrefill(payload)
               assertCurrent()
-            } catch (error) {
+            } catch {
               assertCurrent()
               failed += 1
               for (const item of sources)

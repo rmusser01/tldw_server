@@ -12,7 +12,7 @@ import re
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated, Any, Callable, Literal, Optional, TypeVar
+from typing import Annotated, Any, Callable, Literal, NoReturn, Optional, TypeVar
 from urllib.parse import quote
 from uuid import uuid4
 
@@ -71,6 +71,7 @@ from tldw_Server_API.app.api.v1.schemas.notes_moodboards import (
     MoodboardCreate,
     MoodboardListResponse,
     MoodboardNotesListResponse,
+    MoodboardNoteSummary,
     MoodboardPinResponse,
     MoodboardResponse,
     MoodboardUpdate,
@@ -1099,14 +1100,16 @@ def _capture_notes_organization_plan(
             plain_pair = any(step.domain == "notes.provenance" for step in plan.steps) and all(
                 step.domain in {"notes.note", "notes.provenance"} for step in plan.steps
             )
-            capture = None if plain_pair else coordinator.capture
-            kwargs = {"steps": plan.steps, "source": source, "idempotency_key": idempotency_key}
             result = (
-                capture(**kwargs)
-                if capture
-                else capture_server_origin_mutation_batch(
-                    service=coordinator.service, user_id=coordinator.user_id, **kwargs
+                capture_server_origin_mutation_batch(
+                    service=coordinator.service,
+                    user_id=coordinator.user_id,
+                    steps=plan.steps,
+                    source=source,
+                    idempotency_key=idempotency_key,
                 )
+                if plain_pair
+                else coordinator.capture(steps=plan.steps, source=source, idempotency_key=idempotency_key)
             )
             if not result.fully_applied:
                 raise SyncStoreError("Notes organization projection is incomplete")
@@ -1155,7 +1158,7 @@ def _attach_note_provenance(db: CharactersRAGDB, note: dict[str, Any], *, portab
         head = (
             service.store.get_current_head(dataset.dataset_id, "notes.provenance", str(note["id"])) if dataset else None
         )
-        if head is not None:
+        if head is not None and dataset is not None:
             parent = service.store.get_current_head(dataset.dataset_id, "notes.note", str(note["id"]))
             # Acceptance precedes product projection; checkpoint failures can also
             # leave products ahead of both applied heads. Never mix these snapshots.
@@ -1204,7 +1207,10 @@ def _save_local_provenance_note(
         summary = _sync_note_keywords(db, note_id=saved_id, keywords=keywords) if keywords is not None else None
         if folder_paths is not None:
             db.sync_note_folders(saved_id, folder_paths)
-        response = _attach_folders_inline(db, _attach_keywords_inline(db, db.get_note_by_id(saved_id)))
+        note = db.get_note_by_id(saved_id)
+        if note is None:
+            raise CharactersRAGDBError("Created note could not be retrieved.")
+        response = _attach_folders_inline(db, _attach_keywords_inline(db, note))
         if summary and summary.get("failed_count", 0):
             response["keyword_sync"] = {key: summary[key] for key in ("failed_count", "failed_keywords")}
         return NoteResponse.model_validate(response).model_dump(mode="json")
@@ -1497,7 +1503,12 @@ def _build_title_opts(note_in: Any) -> TitleGenOptions:
         max_len_val = max_bound
 
     opts = TitleGenOptions()
-    opts.strategy = strategy
+    if strategy == "llm":
+        opts.strategy = "llm"
+    elif strategy == "llm_fallback":
+        opts.strategy = "llm_fallback"
+    else:
+        opts.strategy = "heuristic"
     opts.max_len = max_len_val
     try:
         opts.language = getattr(note_in, "language", None)
@@ -1769,7 +1780,9 @@ def _parse_markdown_import_note(content: str, fallback_title: str | None = None)
 
 # --- Keyword attach helper ----------------------------------------------------
 def _attach_keywords_bulk(db: CharactersRAGDB, notes_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    note_ids = [nd.get("id") for nd in notes_data if isinstance(nd, dict) and nd.get("id")]
+    note_ids = [
+        note_id for nd in notes_data if isinstance(nd, dict) and isinstance(note_id := nd.get("id"), str) and note_id
+    ]
     if not note_ids:
         return notes_data
     try:
@@ -1787,7 +1800,9 @@ def _attach_keywords_bulk(db: CharactersRAGDB, notes_data: list[dict[str, Any]])
 
 def _attach_folders_bulk(db: CharactersRAGDB, notes_data: list[dict[str, Any]]) -> list[dict[str, Any]]:
     _attach_provenance_bulk(db, notes_data)
-    note_ids = [nd.get("id") for nd in notes_data if isinstance(nd, dict) and nd.get("id")]
+    note_ids = [
+        note_id for nd in notes_data if isinstance(nd, dict) and isinstance(note_id := nd.get("id"), str) and note_id
+    ]
     if not note_ids:
         return notes_data
     try:
@@ -2085,7 +2100,7 @@ def _sync_collection_keywords(
 
 
 # --- Helper for Exception Handling (largely the same) ---
-def handle_db_errors(e: Exception, entity_type: str = "resource"):
+def handle_db_errors(e: Exception, entity_type: str = "resource") -> NoReturn:
     if isinstance(e, SyncStoreError):
         raise _note_sync_http_error(e)
     if isinstance(e, HTTPException):  # If it's already an HTTPException, re-raise
@@ -2385,7 +2400,7 @@ async def create_note(
         else:
             conversation_id = _normalize_optional_id(note_in.conversation_id)
             message_id = _normalize_optional_id(note_in.message_id)
-        note_payload = {
+        note_payload: dict[str, object] = {
             "title": effective_title,
             "content": note_in.content,
             "conversation_id": conversation_id,
@@ -2426,7 +2441,11 @@ async def create_note(
                 )
             except Exception as sync_exc:
                 raise _note_sync_http_error(sync_exc) from sync_exc
-        elif sync_service is None and compound_note is None and provenance is not None:
+        elif (
+            sync_service is None
+            and compound_note is None
+            and (provenance is not None or request_fingerprint is not None)
+        ):
             compound_note = _save_local_provenance_note(
                 db,
                 note_id=note_id,
@@ -3608,7 +3627,9 @@ async def import_notes(
                         parsed_note["content"]
                     )
                     provenance_version = parsed_note.get("expected_provenance_version")
-                    local_provenance_save = coordinator is None and provenance is not None
+                    local_provenance_save = coordinator is None and (
+                        provenance is not None or bool(request.headers.get("Idempotency-Key", "").strip())
+                    )
                     raw_note_payload = {
                         "title": parsed_note["title"],
                         "content": parsed_note["content"],
@@ -3618,15 +3639,15 @@ async def import_notes(
                     request_fingerprint = None
                     local_receipt_key = request_key if request.headers.get("Idempotency-Key", "").strip() else None
                     if coordinator is None:
-                        request_fingerprint, replayed_note = _replay_local_provenance(
+                        request_fingerprint, local_replayed_note = _replay_local_provenance(
                             db,
                             key=local_receipt_key,
                             operation=f"note.import.{payload.duplicate_strategy}",
                             fields={"item": item.model_dump(), "note_index": note_index},
                         )
-                        if replayed_note is not None:
-                            _attach_note_provenance(db, replayed_note)
-                            if replayed_note["version"] == 1:
+                        if local_replayed_note is not None:
+                            _attach_note_provenance(db, local_replayed_note)
+                            if local_replayed_note["version"] == 1:
                                 file_result.created_count += 1
                             else:
                                 file_result.updated_count += 1
@@ -3721,7 +3742,7 @@ async def import_notes(
                                 raise SyncStoreError(
                                     "Compound note projection did not return a note"
                                 )
-                            overwritten_note = overwrite_result
+                            overwritten_note: dict[str, Any] | None = overwrite_result
                         elif local_provenance_save:
                             overwritten_note = _save_local_provenance_note(
                                 db,
@@ -3809,7 +3830,7 @@ async def import_notes(
                             raise SyncStoreError(
                                 "Compound note projection did not return a note"
                             )
-                        created_note = create_result
+                        created_note: dict[str, Any] | None = create_result
                     elif local_provenance_save:
                         created_note = _save_local_provenance_note(
                             db,
@@ -3934,6 +3955,7 @@ async def import_notes(
 
 @router.get(
     "/keywords",
+    dependencies=[Depends(require_expected_user)],
     response_model=list[KeywordResponse],
     summary="List all keywords for the current user",
     tags=["Keywords (for Notes)"],
@@ -3965,12 +3987,14 @@ async def list_keywords_endpoint_no_trailing_slash(
 
 @router.get(
     "/collections",
+    dependencies=[Depends(require_expected_user)],
     response_model=KeywordCollectionsListResponse,
     summary="List keyword collections for the current user",
     tags=["Notes Collections"],
 )
 @router.get(
     "/collections/",
+    dependencies=[Depends(require_expected_user)],
     response_model=KeywordCollectionsListResponse,
     summary="List keyword collections for the current user",
     tags=["Notes Collections"],
@@ -4032,6 +4056,7 @@ async def list_keyword_collections_endpoint(
 
 @router.post(
     "/collections",
+    dependencies=[Depends(require_expected_user)],
     response_model=KeywordCollectionResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a keyword collection",
@@ -4039,6 +4064,7 @@ async def list_keyword_collections_endpoint(
 )
 @router.post(
     "/collections/",
+    dependencies=[Depends(require_expected_user)],
     response_model=KeywordCollectionResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a keyword collection",
@@ -4094,6 +4120,8 @@ async def create_keyword_collection_endpoint(
                 idempotency_key=request_key,
                 source="notes-api",
             )
+            if not isinstance(collection_data, Mapping):
+                raise SyncStoreError("Notes collection projection did not return a collection")
             return _attach_collection_keywords_inline(db, dict(collection_data))
 
         collection_id = db.add_keyword_collection(
@@ -4121,6 +4149,7 @@ async def create_keyword_collection_endpoint(
 
 @router.get(
     "/collections/keyword-links",
+    dependencies=[Depends(require_expected_user)],
     response_model=CollectionKeywordLinksResponse,
     summary="List collection-keyword links",
     tags=["Notes Collections"],
@@ -4176,6 +4205,7 @@ async def list_collection_keyword_links_endpoint(
 
 @router.patch(
     "/collections/{collection_id}",
+    dependencies=[Depends(require_expected_user)],
     response_model=KeywordCollectionResponse,
     summary="Update a keyword collection",
     tags=["Notes Collections"],
@@ -4251,6 +4281,8 @@ async def update_keyword_collection_endpoint(
                     idempotency_key=request_key,
                     source="notes-api",
                 )
+                if not isinstance(updated_collection, Mapping):
+                    raise SyncStoreError("Notes collection projection did not return a collection")
                 return _attach_collection_keywords_inline(
                     db, dict(updated_collection)
                 )
@@ -4297,6 +4329,8 @@ async def update_keyword_collection_endpoint(
                 idempotency_key=request_key,
                 source="notes-api",
             )
+            if not isinstance(updated_collection, Mapping):
+                raise SyncStoreError("Notes collection projection did not return a collection")
             return _attach_collection_keywords_inline(db, dict(updated_collection))
 
         if update_data:
@@ -4324,6 +4358,7 @@ async def update_keyword_collection_endpoint(
 
 @router.delete(
     "/collections/{collection_id}",
+    dependencies=[Depends(require_expected_user)],
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     summary="Soft-delete a keyword collection",
@@ -4416,6 +4451,7 @@ async def delete_keyword_collection_endpoint(
 
 @router.post(
     "/collections/{collection_id}/keywords/{keyword_id}",
+    dependencies=[Depends(require_expected_user)],
     response_model=CollectionKeywordLinkResponse,
     summary="Link a keyword to a collection",
     tags=["Notes Collections"],
@@ -4481,6 +4517,7 @@ async def link_collection_to_keyword_endpoint(
 
 @router.delete(
     "/collections/{collection_id}/keywords/{keyword_id}",
+    dependencies=[Depends(require_expected_user)],
     response_model=CollectionKeywordLinkResponse,
     summary="Unlink a keyword from a collection",
     tags=["Notes Collections"],
@@ -4543,12 +4580,14 @@ async def unlink_collection_from_keyword_endpoint(
 
 @router.get(
     "/collections/{collection_id}/keywords",
+    dependencies=[Depends(require_expected_user)],
     response_model=list[KeywordResponse],
     summary="List keywords linked to a collection",
     tags=["Notes Collections"],
 )
 @router.get(
     "/collections/{collection_id}/keywords/",
+    dependencies=[Depends(require_expected_user)],
     response_model=list[KeywordResponse],
     summary="List keywords linked to a collection",
     tags=["Notes Collections"],
@@ -4582,6 +4621,7 @@ async def list_keywords_for_collection_endpoint(
 
 @router.get(
     "/conversations/keyword-links",
+    dependencies=[Depends(require_expected_user)],
     response_model=ConversationKeywordLinksResponse,
     summary="List conversation-keyword links",
     tags=["Notes Linking"],
@@ -4666,6 +4706,7 @@ async def list_conversation_keyword_links_endpoint(
 
 @router.post(
     "/conversations/{conversation_id}/keywords/{keyword_id}",
+    dependencies=[Depends(require_expected_user)],
     response_model=ConversationKeywordLinkResponse,
     summary="Link a keyword to a conversation",
     tags=["Notes Linking"],
@@ -4733,6 +4774,7 @@ async def link_conversation_to_keyword_endpoint(
 
 @router.delete(
     "/conversations/{conversation_id}/keywords/{keyword_id}",
+    dependencies=[Depends(require_expected_user)],
     response_model=ConversationKeywordLinkResponse,
     summary="Unlink a keyword from a conversation",
     tags=["Notes Linking"],
@@ -4796,12 +4838,14 @@ async def unlink_conversation_from_keyword_endpoint(
 
 @router.get(
     "/conversations/{conversation_id}/keywords",
+    dependencies=[Depends(require_expected_user)],
     response_model=list[KeywordResponse],
     summary="List keywords linked to a conversation",
     tags=["Notes Linking"],
 )
 @router.get(
     "/conversations/{conversation_id}/keywords/",
+    dependencies=[Depends(require_expected_user)],
     response_model=list[KeywordResponse],
     summary="List keywords linked to a conversation",
     tags=["Notes Linking"],
@@ -4884,9 +4928,10 @@ async def create_moodboard(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Moodboard created but could not be retrieved.",
             )
-        return _normalize_moodboard_payload(moodboard_row)
+        moodboard_payload = _normalize_moodboard_payload(moodboard_row)
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "moodboard")
+    return MoodboardResponse.model_validate(moodboard_payload)
 
 
 @router.get(
@@ -4928,7 +4973,7 @@ async def list_moodboards_endpoint(
             total = await _run_db_call(db.count_moodboards, include_deleted=include_deleted)
         except _NOTES_NONCRITICAL_EXCEPTIONS as count_exc:
             logger.warning("Counting moodboards failed: {}", count_exc)
-        payload = [_normalize_moodboard_payload(row) for row in rows]
+        payload = [MoodboardResponse.model_validate(_normalize_moodboard_payload(row)) for row in rows]
         return MoodboardListResponse(
             items=payload,
             moodboards=payload,
@@ -4975,11 +5020,12 @@ async def get_moodboard_endpoint(
         row = await _run_db_call(db.get_moodboard_by_id, moodboard_id=moodboard_id)
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Moodboard not found")
-        return _normalize_moodboard_payload(row)
+        moodboard_payload = _normalize_moodboard_payload(row)
     except HTTPException:
         raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "moodboard")
+    return MoodboardResponse.model_validate(moodboard_payload)
 
 
 @router.patch(
@@ -5025,11 +5071,12 @@ async def update_moodboard_endpoint(
         row = await _run_db_call(db.get_moodboard_by_id, moodboard_id=moodboard_id)
         if not row:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Moodboard not found")
-        return _normalize_moodboard_payload(row)
+        moodboard_payload = _normalize_moodboard_payload(row)
     except HTTPException:
         raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "moodboard")
+    return MoodboardResponse.model_validate(moodboard_payload)
 
 
 @router.delete(
@@ -5178,9 +5225,10 @@ async def list_moodboard_notes_endpoint(
         notes = await _run_db_call(db.list_moodboard_notes, moodboard_id=moodboard_id, limit=limit, offset=offset)
         total = await _run_db_call(db.count_moodboard_notes, moodboard_id=moodboard_id)
         _attach_provenance_bulk(db, notes)
+        note_summaries = [MoodboardNoteSummary.model_validate(note) for note in notes]
         return MoodboardNotesListResponse(
-            items=notes,
-            notes=notes,
+            items=note_summaries,
+            notes=note_summaries,
             count=len(notes),
             limit=limit,
             offset=offset,
@@ -5434,25 +5482,24 @@ async def upload_note_attachment(
                 headers={"Retry-After": str(meta.get("retry_after", 60))}
             )
         _ensure_note_exists_or_404(db, note_id)
-        if not file.filename:
+        file_name = file.filename
+        if not file_name:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Attachment filename is required")
-        safe_file_name = _sanitize_attachment_file_name(file.filename)
+        safe_file_name = _sanitize_attachment_file_name(file_name)
         coordinator = _active_notes_attachment_coordinator(db, current_user)
         ready: ReadyAttachmentDataset | None = None
         original_file_name = safe_file_name
         active_content_type: str | None = None
         attachment_max_bytes = _NOTES_ATTACHMENT_MAX_BYTES
         if coordinator is not None:
-            _, ready = _require_attachment_context(
+            _context_coordinator, ready = _require_attachment_context(
                 db,
                 current_user,
                 dataset_id=dataset_id,
                 writable=True,
             )
             try:
-                original_file_name = validate_note_attachment_original_file_name(
-                    file.filename
-                )
+                original_file_name = validate_note_attachment_original_file_name(file_name)
                 active_content_type = validate_note_attachment_content_type(
                     file.content_type
                     or mimetypes.guess_type(safe_file_name)[0]
@@ -5465,7 +5512,7 @@ async def upload_note_attachment(
                 ) from exc
             attachment_max_bytes = min(
                 attachment_max_bytes,
-                coordinator.service.settings.max_blob_bytes,
+                coordinator.service.settings.max_blob_bytes or coordinator.service.settings.max_attachment_bytes,
             )
         payload = await file.read(attachment_max_bytes + 1)
         if len(payload) == 0:
@@ -5636,12 +5683,12 @@ async def upload_note_attachment(
         attachment_dir = _get_note_attachments_dir(current_user.id, note_id, create=True)
         target_path = _resolve_unique_attachment_path(attachment_dir, safe_file_name)
         target_path.write_bytes(payload)
-        content_type = file.content_type or mimetypes.guess_type(target_path.name)[0]
+        legacy_content_type = file.content_type or mimetypes.guess_type(target_path.name)[0]
         uploaded_at = datetime.now(timezone.utc)
         _write_attachment_metadata(
             target_path,
-            original_file_name=file.filename,
-            content_type=content_type,
+            original_file_name=file_name,
+            content_type=legacy_content_type,
             size_bytes=len(payload),
             uploaded_at=uploaded_at,
         )
@@ -5689,32 +5736,30 @@ async def list_note_attachments(
         _ensure_note_exists_or_404(db, note_id)
         coordinator = _active_notes_attachment_coordinator(db, current_user)
         if coordinator is not None:
-            _, ready = _require_attachment_context(
+            _context_coordinator, ready = _require_attachment_context(
                 db,
                 current_user,
                 dataset_id=dataset_id,
                 writable=False,
             )
-            attachments: list[NoteAttachment] = []
+            canonical_attachments: list[NoteAttachment] = []
             after_attachment_id: str | None = None
-            while len(attachments) <= _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT:
+            while len(canonical_attachments) <= _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT:
                 page = db.note_attachment_store.list_page(
                     ready.dataset.dataset_id,
                     note_id,
                     after_attachment_id=after_attachment_id,
                     limit=min(
                         200,
-                        _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT
-                        + 1
-                        - len(attachments),
+                        _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT + 1 - len(canonical_attachments),
                     ),
                     state="live",
                 )
-                attachments.extend(page)
+                canonical_attachments.extend(page)
                 if len(page) < 200:
                     break
                 after_attachment_id = page[-1].attachment_id
-            if len(attachments) > _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT:
+            if len(canonical_attachments) > _NOTES_ATTACHMENT_COMPATIBILITY_LIST_LIMIT:
                 raise HTTPException(
                     status_code=status.HTTP_409_CONFLICT,
                     detail={
@@ -5724,11 +5769,8 @@ async def list_note_attachments(
                 )
             return {
                 "note_id": note_id,
-                "attachments": [
-                    _canonical_to_legacy_attachment_response(item)
-                    for item in attachments
-                ],
-                "count": len(attachments),
+                "attachments": [_canonical_to_legacy_attachment_response(item) for item in canonical_attachments],
+                "count": len(canonical_attachments),
             }
         _reject_inactive_attachment_dataset(dataset_id)
         attachment_dir = _get_note_attachments_dir(current_user.id, note_id, create=False)
@@ -5904,7 +5946,7 @@ async def create_note_attachment_from_upload(
             body = _attachment_mutation_response(service, replay)
             response.headers["ETag"] = body.etag
             return body
-        _, blob = service.require_completed_notes_attachment_upload(
+        _upload_session, blob = service.require_completed_notes_attachment_upload(
             user_id=str(current_user.id),
             dataset_id=ready.dataset.dataset_id,
             upload_id=request.upload_id,
@@ -6446,7 +6488,7 @@ async def download_note_attachment(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid attachment filename")
         coordinator = _active_notes_attachment_coordinator(db, current_user)
         if coordinator is not None:
-            _, ready = _require_attachment_context(
+            _context_coordinator, ready = _require_attachment_context(
                 db,
                 current_user,
                 dataset_id=dataset_id,
@@ -6526,7 +6568,7 @@ async def delete_note_attachment(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid attachment filename")
         coordinator = _active_notes_attachment_coordinator(db, current_user)
         if coordinator is not None:
-            _, ready = _require_attachment_context(
+            _context_coordinator, ready = _require_attachment_context(
                 db,
                 current_user,
                 dataset_id=dataset_id,
@@ -6622,13 +6664,19 @@ async def _list_keywords_impl(
             keyword_ids: list[int] = []
             for row in keywords_data:
                 try:
-                    keyword_ids.append(int(row.get("id")))
+                    raw_id = row.get("id")
+                    if raw_id is None:
+                        continue
+                    keyword_ids.append(int(raw_id))
                 except (TypeError, ValueError, AttributeError):
                     continue
             counts = db.get_note_counts_for_keywords(keyword_ids)
             for row in keywords_data:
                 try:
-                    keyword_id = int(row.get("id"))
+                    raw_id = row.get("id")
+                    if raw_id is None:
+                        continue
+                    keyword_id = int(raw_id)
                 except (TypeError, ValueError, AttributeError):
                     continue
                 row["note_count"] = counts.get(keyword_id, 0)
@@ -6899,7 +6947,7 @@ async def update_note(
                     )
                 except Exception as sync_exc:
                     raise _note_sync_http_error(sync_exc) from sync_exc
-            elif provenance is not None:
+            elif provenance is not None or request_fingerprint is not None:
                 compound_note = _save_local_provenance_note(
                     db,
                     note_id=note_id,
@@ -7133,40 +7181,10 @@ async def patch_note(
             data_keys.append("folder_paths")
         logger.info(
             f"User (DB client_id: {db.client_id}) partially updating note: ID='{note_id}', Version={expected_version}, DataKeys={data_keys}")
-        if compound_note is None and coordinator is not None:
-            current = _get_current_note()
-            current_version = current.get("version")
-            if current_version is not None and int(current_version) != int(expected_version):
-                raise ConflictError(
-                    f"Note ID {note_id} update failed: version mismatch (db has {current_version}, client expected {expected_version}).",
-                    entity="notes",
-                    entity_id=note_id,
-                )
-            payload = _note_payload_from_row(current)
-            payload.update(update_data)
-            compound_plan = plan_compound_note(
-                coordinator,
-                note_id=note_id,
-                note_payload=payload,
-                keywords=(kw_list or []) if keywords_supplied else None,
-                folder_paths=(folder_paths or []) if folders_supplied else None,
-                request_key=request_key,
-                request_fingerprint=request_fingerprint or "",
-                provenance=provenance,
-                expected_provenance_version=provenance_version,
-                expected_note_version=expected_version,
-            )
-            compound_result = _capture_notes_organization_plan(
-                coordinator,
-                compound_plan,
-                idempotency_key=request_key,
-                source="notes-api",
-            )
-            if not isinstance(compound_result, dict):
-                raise SyncStoreError("Compound note projection did not return a note")
-            compound_note = compound_result
-        elif compound_note is None and (update_data or provenance is not None):
-            if sync_service is not None:
+        if compound_note is None:
+            if expected_version is None:
+                raise ConflictError("Note version mismatch")
+            if coordinator is not None:
                 current = _get_current_note()
                 current_version = current.get("version")
                 if current_version is not None and int(current_version) != int(expected_version):
@@ -7177,42 +7195,75 @@ async def patch_note(
                     )
                 payload = _note_payload_from_row(current)
                 payload.update(update_data)
-                try:
-                    capture_server_origin_mutation(
-                        sync_service,
-                        user_id=str(current_user.id),
-                        domain="notes.note",
-                        operation="upsert",
-                        object_id=note_id,
-                        payload=payload,
-                        source="server_api",
-                    )
-                except Exception as sync_exc:
-                    raise _note_sync_http_error(sync_exc) from sync_exc
-            elif provenance is not None:
-                compound_note = _save_local_provenance_note(
-                    db,
+                compound_plan = plan_compound_note(
+                    coordinator,
                     note_id=note_id,
-                    fields=update_data or _note_payload_from_row(_get_current_note()),
-                    expected_version=expected_version,
-                    provenance=provenance,
-                    provenance_version=provenance_version,
+                    note_payload=payload,
                     keywords=(kw_list or []) if keywords_supplied else None,
                     folder_paths=(folder_paths or []) if folders_supplied else None,
-                    receipt_key=idempotency_key,
-                    request_fingerprint=request_fingerprint,
-                )
-            else:
-                success = save_local_note(
-                    db,
-                    note_id=note_id,
-                    fields=update_data or _note_payload_from_row(_get_current_note()),
-                    expected_note_version=expected_version,
+                    request_key=request_key,
+                    request_fingerprint=request_fingerprint or "",
                     provenance=provenance,
                     expected_provenance_version=provenance_version,
+                    expected_note_version=expected_version,
                 )
-                if not success:
-                    raise CharactersRAGDBError("Note update reported non-success without specific exception.")
+                compound_result = _capture_notes_organization_plan(
+                    coordinator,
+                    compound_plan,
+                    idempotency_key=request_key,
+                    source="notes-api",
+                )
+                if not isinstance(compound_result, dict):
+                    raise SyncStoreError("Compound note projection did not return a note")
+                compound_note = compound_result
+            elif update_data or provenance is not None:
+                if sync_service is not None:
+                    current = _get_current_note()
+                    current_version = current.get("version")
+                    if current_version is not None and int(current_version) != int(expected_version):
+                        raise ConflictError(
+                            f"Note ID {note_id} update failed: version mismatch (db has {current_version}, client expected {expected_version}).",
+                            entity="notes",
+                            entity_id=note_id,
+                        )
+                    payload = _note_payload_from_row(current)
+                    payload.update(update_data)
+                    try:
+                        capture_server_origin_mutation(
+                            sync_service,
+                            user_id=str(current_user.id),
+                            domain="notes.note",
+                            operation="upsert",
+                            object_id=note_id,
+                            payload=payload,
+                            source="server_api",
+                        )
+                    except Exception as sync_exc:
+                        raise _note_sync_http_error(sync_exc) from sync_exc
+                elif provenance is not None or request_fingerprint is not None:
+                    compound_note = _save_local_provenance_note(
+                        db,
+                        note_id=note_id,
+                        fields=update_data or _note_payload_from_row(_get_current_note()),
+                        expected_version=expected_version,
+                        provenance=provenance,
+                        provenance_version=provenance_version,
+                        keywords=(kw_list or []) if keywords_supplied else None,
+                        folder_paths=(folder_paths or []) if folders_supplied else None,
+                        receipt_key=idempotency_key,
+                        request_fingerprint=request_fingerprint,
+                    )
+                else:
+                    success = save_local_note(
+                        db,
+                        note_id=note_id,
+                        fields=update_data or _note_payload_from_row(_get_current_note()),
+                        expected_note_version=expected_version,
+                        provenance=provenance,
+                        expected_provenance_version=provenance_version,
+                    )
+                    if not success:
+                        raise CharactersRAGDBError("Note update reported non-success without specific exception.")
 
         keyword_sync_summary: dict[str, Any] | None = None
         if sync_service is None and compound_note is None and keywords_supplied:
@@ -7272,7 +7323,7 @@ async def delete_note(
 ) -> Response:
     try:
         existing_note = db.get_note_by_id(note_id=note_id, include_deleted=True)
-        was_active = bool(existing_note) and not bool(existing_note.get("deleted"))
+        was_active = bool(existing_note and not existing_note.get("deleted"))
         note_for_activity = (
             _attach_folders_inline(db, _attach_keywords_inline(db, dict(existing_note)))
             if was_active and existing_note
@@ -7366,7 +7417,7 @@ async def restore_note(
             note_id=note_id,
             include_deleted=True,
         )
-        was_deleted = bool(existing_note) and bool(existing_note.get("deleted"))
+        was_deleted = bool(existing_note and existing_note.get("deleted"))
         # Rate limit: notes.restore
         try:
             allowed, meta = await rate_limiter.check_user_rate_limit(int(current_user.id), "notes.restore")
@@ -7435,20 +7486,22 @@ async def restore_note(
         ] if keywords else []
 
         _attach_note_provenance(db, restored_note)
-        return NoteResponse(
-            **{key: value for key, value in restored_note.items() if key.startswith("knowledge_provenance")},
-            id=str(restored_note["id"]),
-            title=restored_note.get("title", ""),
-            content=restored_note.get("content", ""),
-            created_at=restored_note.get("created_at"),
-            last_modified=restored_note.get("last_modified"),
-            version=restored_note.get("version", 1),
-            client_id=restored_note.get("client_id", ""),
-            deleted=bool(restored_note.get("deleted", False)),
-            keywords=keyword_responses,
-            folders=list(folders or []),
-            conversation_id=restored_note.get("conversation_id"),
-            message_id=restored_note.get("message_id"),
+        return NoteResponse.model_validate(
+            dict(
+                **{key: value for key, value in restored_note.items() if key.startswith("knowledge_provenance")},
+                id=str(restored_note["id"]),
+                title=restored_note.get("title", ""),
+                content=restored_note.get("content", ""),
+                created_at=restored_note.get("created_at"),
+                last_modified=restored_note.get("last_modified"),
+                version=restored_note.get("version", 1),
+                client_id=restored_note.get("client_id", ""),
+                deleted=bool(restored_note.get("deleted", False)),
+                keywords=keyword_responses,
+                folders=list(folders or []),
+                conversation_id=restored_note.get("conversation_id"),
+                message_id=restored_note.get("message_id"),
+            )
         )
     except HTTPException:
         raise
@@ -7489,23 +7542,23 @@ async def restore_note_provenance(
         key = _organization_request_key(idempotency_key)
         fingerprint = None
         if service is None:
-            fingerprint, replay = _replay_local_provenance(
+            fingerprint, local_replay = _replay_local_provenance(
                 db,
                 key=idempotency_key,
                 operation="note.provenance.restore",
                 fields={"note_id": note_id, "expected_version": expected_version, **restore_in.model_dump()},
             )
-            if replay is not None:
-                return _attach_note_provenance(db, replay)
+            if local_replay is not None:
+                return _attach_note_provenance(db, local_replay)
         if coordinator is not None:
-            fingerprint = coordinator.request_fingerprint(
+            sync_fingerprint = coordinator.request_fingerprint(
                 "note.provenance.restore",
                 {"note_id": note_id, "expected_version": expected_version, **restore_in.model_dump()},
             )
             replay = _replay_notes_organization_plan(
                 coordinator,
                 idempotency_key=idempotency_key,
-                request_fingerprint=fingerprint,
+                request_fingerprint=sync_fingerprint,
                 result_domain="notes.note",
                 require_organization=False,
             )
@@ -7532,7 +7585,7 @@ async def restore_note_provenance(
                 keywords=None,
                 folder_paths=None,
                 request_key=key,
-                request_fingerprint=fingerprint,
+                request_fingerprint=sync_fingerprint,
                 provenance=retained["payload"],
                 expected_provenance_version=restore_in.expected_provenance_version,
                 expected_note_version=expected_version,
@@ -7787,7 +7840,11 @@ async def bulk_create_notes(
                     )
                 except Exception as sync_exc:
                     raise _note_sync_http_error(sync_exc) from sync_exc
-            elif sync_service is None and compound_note is None and provenance is not None:
+            elif (
+                sync_service is None
+                and compound_note is None
+                and (provenance is not None or request_fingerprint is not None)
+            ):
                 compound_note = _save_local_provenance_note(
                     db,
                     note_id=note_id,
@@ -7872,7 +7929,11 @@ async def bulk_create_notes(
                     surface="api.notes.bulk",
                 )
             )
-            results.append(NoteBulkCreateItemResult(success=True, note=_attach_note_provenance(db, nd)))
+            results.append(
+                NoteBulkCreateItemResult(
+                    success=True, note=NoteResponse.model_validate(_attach_note_provenance(db, nd))
+                )
+            )
             created += 1
         except _NOTES_NONCRITICAL_EXCEPTIONS as e:
             logger.warning(f"Bulk note create failed for title='{getattr(item, 'title', '')}': {e}")
@@ -7891,6 +7952,7 @@ async def bulk_create_notes(
 
 @router.post(
     "/keywords/",
+    dependencies=[Depends(require_expected_user)],
     response_model=KeywordResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create a new keyword",
@@ -8036,6 +8098,7 @@ async def get_keyword_by_text(
 
 @router.get(
     "/keywords/",
+    dependencies=[Depends(require_expected_user)],
     response_model=list[KeywordResponse],
     summary="List all keywords for the current user",
     tags=["Keywords (for Notes)"]
@@ -8235,6 +8298,7 @@ async def merge_keyword(
 
 @router.delete(
     "/keywords/{keyword_id}",
+    dependencies=[Depends(require_expected_user)],
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
     summary="Soft-delete a keyword",
@@ -8500,7 +8564,10 @@ async def get_keywords_for_note_endpoint(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Note with ID '{note_id}' not found.")
 
         keywords_list = db.get_keywords_for_note(note_id=note_id)
-        return KeywordsForNoteResponse(note_id=note_id, keywords=keywords_list)
+        return KeywordsForNoteResponse(
+            note_id=note_id,
+            keywords=[KeywordResponse.model_validate(keyword) for keyword in keywords_list],
+        )
     except HTTPException:
         raise
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
@@ -8550,7 +8617,7 @@ async def get_notes_for_keyword_endpoint(
         _attach_provenance_bulk(db, notes_list)
         return NotesForKeywordResponse(
             keyword_id=keyword_id,
-            notes=notes_list,
+            notes=[NoteResponse.model_validate(note) for note in notes_list],
             count=len(notes_list),
             limit=limit,
             offset=offset,

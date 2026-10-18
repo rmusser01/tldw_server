@@ -1,8 +1,14 @@
 import React from "react"
-import { act, render } from "@testing-library/react"
+import { act, fireEvent, render, screen } from "@testing-library/react"
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import type { TutorialRun } from "@/store/tutorials"
 import { TutorialPrompt } from "../TutorialPrompt"
+import { useStoreMessageOption } from "@/store/option"
+import {
+  HistorySelectionContext,
+  type HistorySelectionController
+} from "@/hooks/chat/useHistorySelection"
 
 const infoMock = vi.fn()
 const destroyMock = vi.fn()
@@ -15,7 +21,8 @@ const tutorialStoreState = {
   markPromptSeen: markPromptSeenMock,
   startTutorial: startTutorialMock,
   isHelpModalOpen: false,
-  activeTutorialId: null as string | null
+  activeTutorialId: null as string | null,
+  activeRun: null as TutorialRun | null
 }
 
 type TutorialRouteOptions = {
@@ -47,33 +54,17 @@ const NavigatorBridge = () => {
   return null
 }
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (_key: string, defaultValueOrOptions?: unknown) => {
-      if (typeof defaultValueOrOptions === "string") {
-        return defaultValueOrOptions
-      }
-      if (
-        defaultValueOrOptions &&
-        typeof defaultValueOrOptions === "object" &&
-        "defaultValue" in (defaultValueOrOptions as Record<string, unknown>)
-      ) {
-        return String(
-          (defaultValueOrOptions as Record<string, unknown>).defaultValue ?? _key
-        )
-      }
-      return _key
-    }
-  })
-}))
+const translate = (
+  _key: string,
+  fallback?: string | { defaultValue?: string }
+) => (typeof fallback === "string" ? fallback : fallback?.defaultValue ?? _key)
+const notificationApi = { info: infoMock, destroy: destroyMock }
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: translate }) }))
 
 vi.mock("antd", () => ({
   notification: {
     useNotification: () => [
-      {
-        info: infoMock,
-        destroy: destroyMock
-      },
+      notificationApi,
       <div key="tutorial-prompt-holder" data-testid="tutorial-prompt-holder" />
     ]
   },
@@ -89,8 +80,11 @@ vi.mock("antd", () => ({
 }))
 
 vi.mock("@/store/tutorials", () => ({
-  useTutorialStore: (selector: (state: typeof tutorialStoreState) => unknown) =>
-    selector(tutorialStoreState)
+  useTutorialStore: Object.assign(
+    (selector: (state: typeof tutorialStoreState) => unknown) =>
+      selector(tutorialStoreState),
+    { getState: () => tutorialStoreState }
+  )
 }))
 
 vi.mock("@/tutorials", () => ({
@@ -101,6 +95,76 @@ vi.mock("@/tutorials", () => ({
 }))
 
 describe("TutorialPrompt behavior", () => {
+  it.each(["dismiss", "close", "unmount", "same-path navigation"])(
+    "an old notification Start refuses %s",
+    (boundary) => {
+      const mounted = render(
+        <MemoryRouter initialEntries={["/chat"]}>
+          <NavigatorBridge />
+          <TutorialPrompt />
+        </MemoryRouter>
+      )
+      act(() => vi.advanceTimersByTime(2000))
+      const notification = infoMock.mock.calls[0][0]
+      const originalStart = notification.btn.props.children[1].props
+        .onClick as () => void
+      if (boundary === "dismiss")
+        act(() => notification.btn.props.children[0].props.onClick())
+      else if (boundary === "close") act(() => notification.onClose())
+      else if (boundary === "unmount") mounted.unmount()
+      else act(() => capturedNavigate?.("/chat?find=2#help"))
+      act(originalStart)
+      expect(startTutorialMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["before delay", "after display"])(
+    "unchanged source rerender %s retains one prompt",
+    (timing) => {
+      const content = () => (
+        <MemoryRouter initialEntries={["/chat"]}>
+          <TutorialPrompt />
+        </MemoryRouter>
+      )
+      const mounted = render(content())
+      if (timing === "after display") act(() => vi.advanceTimersByTime(2000))
+      mounted.rerender(content())
+      act(() => vi.advanceTimersByTime(2000))
+      expect(infoMock).toHaveBeenCalledOnce()
+      expect(destroyMock).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each(["New", "H1"])(
+    "a prompt's original Start refuses replacement %s",
+    (boundary) => {
+      let epoch = 1
+      const selection = {
+        fence: () => {
+          const captured = epoch
+          return () => captured === epoch
+        }
+      } as unknown as HistorySelectionController
+      render(
+        <MemoryRouter initialEntries={["/chat"]}>
+          <HistorySelectionContext.Provider value={selection}>
+            <TutorialPrompt />
+          </HistorySelectionContext.Provider>
+        </MemoryRouter>
+      )
+      act(() => vi.advanceTimersByTime(2000))
+      const original = infoMock.mock.calls[0][0].btn
+      if (boundary === "New")
+        act(() => useStoreMessageOption.getState().startNewChatDraft())
+      else epoch++
+      render(original)
+      fireEvent.click(screen.getByRole("button", { name: "Start tour" }))
+      expect(startTutorialMock).not.toHaveBeenCalled()
+      expect(destroyMock).not.toHaveBeenCalled()
+      expect(markPromptSeenMock).not.toHaveBeenCalled()
+    }
+  )
+
   beforeEach(() => {
     vi.useFakeTimers()
     vi.clearAllMocks()
@@ -108,10 +172,15 @@ describe("TutorialPrompt behavior", () => {
     tutorialStoreState.completedTutorials = []
     tutorialStoreState.isHelpModalOpen = false
     tutorialStoreState.activeTutorialId = null
+    tutorialStoreState.activeRun = null
+    startTutorialMock.mockImplementation((_id, focusReturn) => {
+      tutorialStoreState.activeRun = { id: 1, focusReturn }
+    })
     capturedNavigate = null
   })
 
   afterEach(() => {
+    startTutorialMock.mock.calls.forEach((call) => call[1]?.dispose?.())
     vi.useRealTimers()
   })
 

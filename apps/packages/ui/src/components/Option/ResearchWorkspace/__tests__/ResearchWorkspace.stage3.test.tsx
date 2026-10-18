@@ -1,9 +1,24 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  fireEvent,
+  render as renderUI,
+  screen,
+  waitFor,
+  within
+} from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import React from "react"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import axe from "axe-core"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { ResearchWorkspace } from "../index"
+
+// Match the router context provided by both deployed shells.
+const render: typeof renderUI = (ui, options) =>
+  renderUI(ui, {
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
+    ...options
+  })
 
 const {
   mockGetMediaDetails,
@@ -22,7 +37,8 @@ const {
   mockRunResearchWorkspaceMigration,
   mockChatPaneProps,
   mockStatusBarProps,
-  mockBgRequest
+  mockBgRequest,
+  mockReadResearchWebCaptures
 } = vi.hoisted(() => ({
   mockGetMediaDetails: vi.fn(),
   mockUpsertWorkspace: vi.fn(),
@@ -49,7 +65,8 @@ const {
     }
     workspaceContextStatus?: unknown
   }>,
-  mockBgRequest: vi.fn()
+  mockBgRequest: vi.fn(),
+  mockReadResearchWebCaptures: vi.fn()
 }))
 
 const { mockScheduleWorkspaceUndoAction, mockUndoWorkspaceAction } = vi.hoisted(
@@ -175,6 +192,12 @@ vi.mock("@/services/service-prompts", () => ({
     scopeInvalidatedSignal: options.signal,
     release: vi.fn()
   })
+}))
+
+// Stage 3 has no captured-article checkpoints; retain the real owner and restore logic.
+vi.mock("@/utils/research-workspace-prefill", async original => ({
+  ...await original<typeof import("@/utils/research-workspace-prefill")>(),
+  readResearchWebCaptures: mockReadResearchWebCaptures
 }))
 
 vi.mock("@/utils/use-research-workspace-prefill", () => ({
@@ -411,12 +434,22 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
       workspace: { id: "workspace-original", name: "Saved Research", created_at: "2026-10-01T00:00:00Z", version: 1 },
       sources: { items: [{ id: "source-original", workspace_id: "workspace-original", media_id: 7, title: "Larch", source_type: "text", selected: true, added_at: "2026-10-01T00:00:00Z" }] },
       partial_errors: []
-    } : [])
+    } : path.includes("/api/v1/notes/search/") ? { notes: [] } : [])
     render(<ResearchWorkspace />)
     await waitFor(() => expect(testState.restoreServerWorkspace).toHaveBeenCalledWith(expect.objectContaining({
       workspaceId: "workspace-original", workspaceName: "Saved Research",
       sources: [expect.objectContaining({ id: "source-original", mediaId: 7 })], selectedSourceIds: ["source-original"]
     })))
+    expect(mockReadResearchWebCaptures).toHaveBeenCalledWith(
+      expect.stringContaining(":auth:multi-user:org:none:user:alice"), "workspace-original"
+    )
+    expect(mockBgRequest).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/notes/search/?tokens=workspace%3Aworkspace-original&limit=100&include_keywords=true",
+      servicePromptConfig: {
+        serverUrl: "https://workspace.test", authMode: "multi-user", expectedUserId: "alice"
+      },
+      headers: { "X-TLDW-Expected-User-ID": "alice" }
+    }))
     expect(testState.initializeWorkspace).not.toHaveBeenCalled()
   })
 
@@ -482,6 +515,7 @@ describe("ResearchWorkspace stage 3 global navigation", () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
+    mockReadResearchWebCaptures.mockReset().mockResolvedValue([])
     ensureLocalStorage()
     delete (window as Window & {
       __tldwResearchWorkspaceFreshInitialization?: Set<string>

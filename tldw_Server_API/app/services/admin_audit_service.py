@@ -34,6 +34,8 @@ async def emit_admin_account_audit_event(
     # A closure over the typed parameters (rather than a dict + **unpacking)
     # keeps mypy able to check the persist call site (PR #3219 CI fix for a
     # pre-existing dev breakage).
+    audit_metadata = dict(metadata or {})
+
     async def _persist_now() -> None:
         await _persist_admin_account_audit_event(
             actor_id=actor_id,
@@ -43,7 +45,7 @@ async def emit_admin_account_audit_event(
             resource_type=resource_type,
             resource_id=resource_id,
             action=action,
-            metadata=dict(metadata or {}),
+            metadata=audit_metadata,
             raise_on_failure=raise_on_failure,
         )
 

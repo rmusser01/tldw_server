@@ -34,3 +34,14 @@ export const getQueryClient = (): QueryClient => {
 }
 
 export const createQueryClient = (): QueryClient => buildQueryClient()
+
+/** A held first page must retire before a write's finder refresh starts. */
+export const invalidateServerChatHistory = async (
+  queryClient: QueryClient,
+  isCurrent: () => boolean = () => true
+): Promise<void> => {
+  if (!isCurrent()) return;
+  const filters = { queryKey: ['serverChatHistory'] };
+  await queryClient.cancelQueries(filters);
+  if (isCurrent()) await queryClient.invalidateQueries(filters);
+};

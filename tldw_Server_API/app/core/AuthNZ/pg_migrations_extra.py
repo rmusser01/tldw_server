@@ -3586,6 +3586,11 @@ async def ensure_authnz_core_tables_pg(pool: DatabasePool | None = None) -> bool
         async with db_pool.transaction() as conn:
             for sql, params in _CREATE_AUTHNZ_CORE_TABLES:
                 await conn.execute(sql, *params)
+            from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
+                native_quota_schema_statements,
+            )
+            for statement in native_quota_schema_statements(postgres=True):
+                await conn.execute(statement)
             await ensure_postgres_session_last_activity(conn)
             has_legacy_uses = await conn.fetchval(
                 "SELECT EXISTS ("

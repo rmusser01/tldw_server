@@ -80,10 +80,13 @@ import {
   NOTES_OFFLINE_NEW_DRAFT_KEY,
   isEditorSaveShortcutContext,
   normalizeOfflineDraftQueue,
+  isSurfaceOfflineDraft,
+  writeNotesEditorOfflineDraftQueue,
   NOTES_TITLE_STRATEGIES,
   normalizeNotesTitleStrategy,
   deriveAllowedTitleStrategies,
   markdownToWysiwygHtml,
+  notesEditorMaxHeight,
   wysiwygHtmlToMarkdown,
   EMPTY_WYSIWYG_HTML,
   buildSummaryDraft,
@@ -342,7 +345,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const lastEditAtRef = React.useRef(0)
   const dirtySinceRef = React.useRef(0)
   const lastFailureAtRef = React.useRef(0)
-  const [originalMetadata, setOriginalMetadataState] = React.useState<Record<string, any> | null>(null)
+  const [originalMetadata, setOriginalMetadataState] = React.useState<(Record<string, unknown> & KnowledgeNoteHead) | null>(null)
   const [selectedStudioSummary, setSelectedStudioSummary] =
     React.useState<NoteStudioDocumentSummary | null>(null)
   const [selectedVersion, setSelectedVersion] = React.useState<number | null>(null)
@@ -557,7 +560,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       const pendingWrite = request ? {
         ...(request.path.endsWith('/provenance/restore') ? { operation: 'restore' as const } : {}),
         key: String(request.headers?.['Idempotency-Key']),
-        body: request.body as Record<string, any>,
+        body: request.body as Record<string, unknown>,
         expectedVersion: request.headers?.['expected-version'] != null ? Number(request.headers['expected-version']) : null,
         previousTitle: pending!.previousTitle
       } : offlineDraftQueueRef.current[key]?.pendingWrite
@@ -632,9 +635,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         [nextDraft.key]: nextDraft
       }
       try {
-        const serializedQueue = JSON.stringify(nextQueue)
-        window.localStorage.setItem(offlineDraftStorageKey, serializedQueue)
-        if (window.localStorage.getItem(offlineDraftStorageKey) !== serializedQueue) return false
+        writeNotesEditorOfflineDraftQueue(offlineDraftStorageKey, nextQueue)
       } catch {
         return false
       }
@@ -650,17 +651,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setOfflineDraftQueue
     ]
   )
-
-  const removeOfflineDraftByKey = React.useCallback((key: string) => {
-    const normalized = String(key || '').trim()
-    if (!normalized) return
-    setOfflineDraftQueue((current) => {
-      if (!current[normalized]) return current
-      const next = { ...current }
-      delete next[normalized]
-      return next
-    })
-  }, [setOfflineDraftQueue])
 
   /** Remove a queued draft before the next await (loadDetail re-applies queued drafts). */
   const dropOfflineDraftNow = React.useCallback((key: string) => {
@@ -691,10 +681,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     if (!textarea) return
     textarea.style.height = 'auto'
     const viewportHeight = typeof window !== 'undefined' ? window.innerHeight : 900
-    const maxHeight = Math.max(
-      280,
-      Math.floor(viewportHeight * (editorMode === 'split' ? 0.42 : 0.62))
-    )
+    const maxHeight = notesEditorMaxHeight(viewportHeight, editorMode === 'split')
     const minHeight = editorMode === 'split' ? 220 : 280
     const nextHeight = Math.min(Math.max(textarea.scrollHeight, minHeight), maxHeight)
     textarea.style.height = `${nextHeight}px`
@@ -1819,8 +1806,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           let expectedVersion = baseVersion
           if (expectedVersion == null) {
             const latest = await request({
-              path: noteResourcePath(noteId) as any,
-              method: 'GET' as any
+              path: noteResourcePath(noteId),
+              method: 'GET'
             })
             expectedVersion = toNoteVersion(latest)
           }
@@ -1833,8 +1820,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             savedTitleRef.current?.noteId === String(noteId) ? savedTitleRef.current.title : null)
           const updated = await request(
             {
-              path: noteResourcePath(noteId) as any,
-              method: 'PUT' as any,
+              path: noteResourcePath(noteId),
+              method: 'PUT',
               headers: {
                 'Content-Type': 'application/json',
                 'expected-version': String(expectedVersion)
@@ -1873,7 +1860,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           if (updatedVersion == null) {
             try {
               const latest = await request({
-                path: noteResourcePath(noteId) as any,
+                path: noteResourcePath(noteId),
                 method: 'GET' as any
               })
               assignSelectedVersion(toNoteVersion(latest))
@@ -1920,7 +1907,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           }
           if (noteId != null && ownedSaveRequest) {
             try {
-              const current = await bgRequest<any>({ ...ownedSaveRequest, path: noteResourcePath(noteId) as any, method: 'GET' })
+              const current = await bgRequest<NotesWriteResponse & KnowledgeNoteHead>({ ...ownedSaveRequest, path: noteResourcePath(noteId), method: 'GET' })
               if (!isCurrent() || controller.signal.aborted) return (result = false)
               setOriginalMetadata(previous => ({ ...previous, ...knowledgeNoteHead(current) }))
             } catch (error) {
@@ -2066,9 +2053,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           pending = { key: crypto.randomUUID(), expectedVersion, previousTitle, body: JSON.parse(JSON.stringify(payload)) }
           const queue = { ...offlineDraftQueueRef.current, [draft.key]: { ...draft, pendingWrite: pending } }
           if (!offlineDraftStorageKey) return cancelledResult
-          const serialized = JSON.stringify(queue)
-          window.localStorage.setItem(offlineDraftStorageKey, serialized)
-          if (window.localStorage.getItem(offlineDraftStorageKey) !== serialized) throw new Error('Could not retain the queued request identity.')
+          writeNotesEditorOfflineDraftQueue(offlineDraftStorageKey, queue)
           offlineDraftQueueRef.current = queue
           setOfflineDraftQueue(queue)
         }
@@ -2267,6 +2252,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     dispatchSave,
     dropOfflineDraftNow,
     offlineDraftQueueHydrated,
+    setDirtyFlag,
     setOfflineDraftQueue,
     isOnline,
     loadDetail,
@@ -2749,7 +2735,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         return
       }
       const parsed = JSON.parse(raw)
-      setOfflineDraftQueue(normalizeOfflineDraftQueue(parsed))
+      setOfflineDraftQueue(Object.fromEntries(Object.entries(normalizeOfflineDraftQueue(parsed)).filter(([key]) => !isSurfaceOfflineDraft(key))))
     } catch {
       setOfflineDraftQueue({})
     } finally {
@@ -2762,10 +2748,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     if (!offlineDraftStorageKey) return
     if (typeof window === 'undefined') return
     try {
-      window.localStorage.setItem(
-        offlineDraftStorageKey,
-        JSON.stringify(offlineDraftQueue)
-      )
+      writeNotesEditorOfflineDraftQueue(offlineDraftStorageKey, offlineDraftQueue)
     } catch {
       // Ignore localStorage quota/transient persistence failures.
     }
@@ -3031,7 +3014,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     let serverVersion: number | null = null
     try {
       serverVersion = toNoteVersion(
-        await bgRequest<any>({ path: noteResourcePath(noteId) as any, method: 'GET' as any })
+        await bgRequest<NotesWriteResponse>({ path: noteResourcePath(noteId), method: 'GET' })
       )
     } catch {
       serverVersion = null
@@ -3312,7 +3295,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         }
         try {
           const detail = await bgRequest<any>({
-            path: noteResourcePath(noteId) as any,
+            path: noteResourcePath(noteId),
             method: 'GET' as any
           })
           return toNoteVersion(detail)

@@ -1,3 +1,4 @@
+import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import "../styles/globals.css"
 // react-pdf layer CSS must stay app-wide: the Next.js pages router forbids
 // importing first-party global CSS outside _app, so the earlier attempt to
@@ -18,6 +19,7 @@ import { FirstRunGate } from "@/components/PersonaGarden/FirstRunGate"
 import { AppProviders } from "@web/components/AppProviders"
 import ErrorBoundary from "@web/components/ErrorBoundary"
 import { ConfigurationGuard } from "@web/components/networking/ConfigurationGuard"
+import { resolveSettingsNavigationUrl, SETTINGS_NAVIGATION_REQUEST_EVENT, type SettingsNavigationRequestDetail } from "@/utils/settings-return"
 import {
   ServerReadinessGate,
   warmServerReadinessHealth
@@ -48,6 +50,11 @@ import {
 
 const OptionLayout = dynamic(
   () => import("@web/components/layout/WebLayout"),
+  { ssr: false }
+)
+
+const ChatServerSetupDialog = dynamic(
+  () => import("@/components/Chat/composer/ChatServerSetupDialog").then(module => module.ChatServerSetupDialog),
   { ssr: false }
 )
 
@@ -280,6 +287,47 @@ export default function App({ Component, pageProps }: AppProps) {
     React.useState<string | null>(null)
   const [authResolved, setAuthResolved] = React.useState(false)
   const [requiresLogin, setRequiresLogin] = React.useState(false)
+  const [chatServerSetupOpen, setChatServerSetupOpen] = React.useState(false)
+  const [beginChatInitialSetup, setBeginChatInitialSetup] = React.useState<SettingsNavigationRequestDetail["beginInitialSetup"]>()
+  const setupRequestRevision = React.useRef(0)
+  const bootstrapSucceeded = React.useRef(false)
+  const closeChatServerSetup = React.useCallback(() => {
+    setupRequestRevision.current++
+    setChatServerSetupOpen(false)
+    setBeginChatInitialSetup(undefined)
+  }, [])
+  const assertInitialSetupAuthority = React.useCallback(() => {
+    if (routePath !== "/chat" || !authResolved || requiresLogin || !bootstrapSucceeded.current ||
+      getRuntimeApiKey() || getRuntimeApiBearer()) throw createServicePromptScopeChangedError()
+  }, [routePath, authResolved, requiresLogin])
+  React.useEffect(() => {
+    if (routePath !== "/chat" || requiresLogin) closeChatServerSetup()
+  }, [routePath, requiresLogin, closeChatServerSetup])
+  React.useEffect(() => {
+    if (routePath !== "/chat" || !authResolved || requiresLogin) return
+    let mounted = true
+    const openSetup = (event: Event) => {
+      if (event.defaultPrevented) return
+      const detail = (event as CustomEvent<SettingsNavigationRequestDetail>).detail
+      const destination = detail?.destination
+      if (destination === "/settings/tldw") {
+        event.preventDefault()
+        setChatServerSetupOpen(true)
+        const revision = ++setupRequestRevision.current
+        queueMicrotask(() => {
+          if (mounted && revision === setupRequestRevision.current) setBeginChatInitialSetup(() => detail.beginInitialSetup)
+        })
+      } else if (destination === "/settings/health") {
+        const url = resolveSettingsNavigationUrl(destination, window.location.href)
+        if (url) {
+          event.preventDefault()
+          window.open(url, "_blank", "noopener")
+        }
+      }
+    }
+    window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, openSetup)
+    return () => { mounted = false; window.removeEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, openSetup) }
+  }, [routePath, authResolved, requiresLogin])
   const didWarmRoutePrefetch = React.useRef(false)
 
   React.useEffect(() => {
@@ -290,8 +338,9 @@ export default function App({ Component, pageProps }: AppProps) {
     const refreshAuthState = async () => {
       const generation = ++refreshGeneration
       const isCurrent = () => !cancelled && generation === refreshGeneration
-      await runtimeBootstrapReady.catch(() => undefined)
+      const bootstrapped = await runtimeBootstrapReady.then(() => true, () => false)
       if (!isCurrent()) return
+      bootstrapSucceeded.current = bootstrapped
 
       const envAuthed =
         hasEnvApiAuth() ||
@@ -483,9 +532,6 @@ export default function App({ Component, pageProps }: AppProps) {
     }),
     [hideShellNav, isSettingsRoute, isSetupRoute, isSidepanelDebugRoute]
   )
-  const enableNotifications =
-    authResolved && isAuthenticated && !isPublicAuthRoute && !isSetupRoute
-
   const enableIndependentBuddy =
     authResolved &&
     isAuthenticated &&
@@ -533,7 +579,7 @@ export default function App({ Component, pageProps }: AppProps) {
   )
 
   return (
-    <AppProviders enableNotifications={enableNotifications}>
+    <AppProviders>
       <ConfigurationGuard>
         <BackendRecoveryUiProvider routeRecoveryEnabled>
           {enableIndependentBuddy ? (
@@ -544,11 +590,16 @@ export default function App({ Component, pageProps }: AppProps) {
           <ErrorBoundary>
             <ServerReadinessGate
               bypass={shouldBypassGates}
+              blocking={routePath !== "/chat"}
               allowDegraded={shouldAllowDegradedReadiness}
               configuredServerUrl={configuredServerUrl}
               nonBlocking={isAuthenticated}>
               {gatedContent}
             </ServerReadinessGate>
+            {routePath === "/chat" && (
+              <ChatServerSetupDialog open={chatServerSetupOpen} onClose={closeChatServerSetup}
+                beginInitialSetup={beginChatInitialSetup} assertInitialSetupAuthority={assertInitialSetupAuthority} />
+            )}
           </ErrorBoundary>
         </BackendRecoveryUiProvider>
       </ConfigurationGuard>

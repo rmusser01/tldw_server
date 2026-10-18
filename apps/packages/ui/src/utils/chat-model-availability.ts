@@ -1,6 +1,10 @@
+import { getCanonicalModelKey } from "@/hooks/playground/modelSelectorUtils"
 import {
   isAutoModelId,
-  parseProviderQualifiedModelSelection
+  normalizeApiProviderKey,
+  normalizeKnownApiProviderKey,
+  parseProviderQualifiedModelSelection,
+  resolveExplicitProviderForSelectedModel
 } from "./resolve-api-provider"
 
 export type ModelDescriptor = {
@@ -97,10 +101,12 @@ export type CharacterChatReadinessReason =
   | "server-unavailable"
   | "missing-character"
   | "models-loading"
+  | "models-discovery-failed"
   | "no-selected-model"
   | "no-models-available"
   | "selected-model-missing"
   | "provider-unconfigured"
+  | "explicit-model-provider-required"
   | "model-unavailable"
   | "selected-model-unavailable"
   | "send-disabled"
@@ -113,6 +119,7 @@ export type CharacterChatReadinessAction =
 
 export type ChatModelUsabilityStatus =
   | "loading"
+  | "discovery_failed"
   | "no_server"
   | "no_selection"
   | "no_models"
@@ -136,8 +143,10 @@ export type ChatModelUsability = {
 export type ChatModelUsabilityInput = {
   isServerConnected?: boolean
   selectedModel?: string | null
+  explicitProvider?: string | null
   availableModels?: ModelDescriptor[] | null
   modelsLoading?: boolean
+  modelsError?: boolean
   allowDegradedSend?: boolean
   serverDegraded?: boolean
 }
@@ -162,11 +171,14 @@ type CharacterChatReadinessInput = {
   isServerConnected?: boolean
   selectedCharacter?: unknown
   selectedModel?: string | null
+  explicitProvider?: string | null
   availableModels?: ModelDescriptor[] | null
   modelsLoading?: boolean
+  modelsError?: boolean
   allowDegradedSend?: boolean
   serverDegraded?: boolean
   isSendBlocked?: boolean
+  requireExplicitProvider?: boolean
 }
 
 type BuildAvailableChatModelIdsOptions = {
@@ -205,73 +217,8 @@ export function normalizeChatModelId(value: string | null | undefined): string {
   return trimmed.replace(/^tldw:/i, "")
 }
 
-const PROVIDER_ALIASES: Record<string, string> = {
-  "llama": "llama.cpp",
-  customopenai: "custom-openai-api",
-  custom_openai_api: "custom-openai-api",
-  custom_openai_api2: "custom-openai-api-2",
-  customopenai2: "custom-openai-api-2",
-  "custom-openai-api2": "custom-openai-api-2",
-  custom_openai_api_2: "custom-openai-api-2",
-  local: "local-llm",
-  local_llm: "local-llm",
-  localllm: "local-llm",
-  "llama-cpp": "llama.cpp",
-  llama_cpp: "llama.cpp",
-  llamacpp: "llama.cpp"
-}
-
 function normalizeProviderValue(value: unknown): string | null {
-  const provider = String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "")
-  if (!provider || provider === "unknown") return null
-  return PROVIDER_ALIASES[provider] ?? provider
-}
-
-const KNOWN_CHAT_PROVIDER_KEYS = new Set<string>([
-  "openai",
-  "anthropic",
-  "cohere",
-  "groq",
-  "qwen",
-  "openrouter",
-  "deepseek",
-  "mistral",
-  "google",
-  "gemini",
-  "huggingface",
-  "moonshot",
-  "zai",
-  "llama.cpp",
-  "kobold",
-  "ooba",
-  "tabbyapi",
-  "vllm",
-  "local-llm",
-  "ollama",
-  "aphrodite",
-  "mlx",
-  "custom-openai-api",
-  "custom-openai-api-2",
-  "custom",
-  "together",
-  "xai",
-  "siliconflow",
-  "volcengine",
-  "tencentcloud",
-  "alibabacloud",
-  "fireworks",
-  "novita",
-  "chutes",
-  "bedrock"
-])
-
-function normalizeKnownChatProviderKey(value: unknown): string | null {
-  const provider = normalizeProviderValue(value)
-  if (!provider || !KNOWN_CHAT_PROVIDER_KEYS.has(provider)) return null
-  return provider
+  return normalizeApiProviderKey(value) || null
 }
 
 function normalizeAvailableModelId(model: ModelDescriptor): string {
@@ -525,7 +472,7 @@ function normalizeProviderQualifiedChatModelId(
       return null
     }
 
-    const provider = normalizeKnownChatProviderKey(
+    const provider = normalizeKnownApiProviderKey(
       normalized.slice(0, separatorIndex)
     )
     const modelId = normalizeChatModelId(
@@ -700,15 +647,23 @@ const buildChatModelUsabilityResult = (
 export function buildChatModelUsability({
   isServerConnected = true,
   selectedModel,
+  explicitProvider,
   availableModels,
   modelsLoading = false,
+  modelsError = false,
   allowDegradedSend = false,
   serverDegraded = false
 }: ChatModelUsabilityInput): ChatModelUsability {
-  const normalizedSelectedModel = normalizeChatModelId(selectedModel)
+  const selection = parseProviderQualifiedModelSelection(selectedModel)
+  const provider = resolveExplicitProviderForSelectedModel({ currentSelectedModel: selectedModel, requestedSelectedModel: selectedModel, explicitProvider })
+  const exactCatalogChoice = (availableModels ?? []).some(model => getCanonicalModelKey(model) === normalizeChatModelId(selection.raw))
+  const qualifiedSelection = !exactCatalogChoice && provider && normalizeChatModelId(selection.modelId)
+    ? `${provider}:${normalizeChatModelId(selection.modelId)}`
+    : selectedModel
+  const normalizedSelectedModel = normalizeChatModelId(qualifiedSelection)
   const selectedModelId = normalizedSelectedModel || null
   const providerQualifiedModelId =
-    normalizeProviderQualifiedChatModelId(selectedModel) ?? null
+    normalizeProviderQualifiedChatModelId(qualifiedSelection) ?? null
 
   if (!isServerConnected) {
     return buildChatModelUsabilityResult("no_server", {
@@ -723,6 +678,13 @@ export function buildChatModelUsability({
     return buildChatModelUsabilityResult("no_selection", {
       canSend: false,
       recommendedAction: "open-model-settings"
+    })
+  }
+
+  if (modelsError) {
+    return buildChatModelUsabilityResult("discovery_failed", {
+      canSend: false, selectedModelId, providerQualifiedModelId,
+      recommendedAction: "retry", detailReason: "models-discovery-failed"
     })
   }
 
@@ -866,10 +828,11 @@ export function buildAvailableChatModelIds(
 
 export function findUnavailableChatModel(
   selectedModelIds: string[],
-  availableModelIds: Set<string>
+  availableModelIds: Set<string>,
+  requireCatalog = false
 ): string | null {
   if (availableModelIds.size === 0) {
-    return null
+    return requireCatalog ? normalizeChatModelId(selectedModelIds[0] || "") || null : null
   }
 
   for (const selectedModelId of selectedModelIds) {
@@ -909,15 +872,28 @@ const blockedCharacterChatReadiness = (
   reason
 })
 
+/** Send-state gates after fresh setup or saved-source qualification; never dispatch authority. */
+export function buildCharacterChatSendReadiness({ isServerConnected = true, isSendBlocked = false }: {
+  isServerConnected?: boolean
+  isSendBlocked?: boolean
+}): CharacterChatReadiness {
+  if (!isServerConnected) return blockedCharacterChatReadiness("server-connection", "server-unavailable", "open-server-settings")
+  if (isSendBlocked) return blockedCharacterChatReadiness("chat-send", "send-disabled", "retry")
+  return { status: "ready", canStart: true, missingRequirement: null, recommendedAction: null, reason: null }
+}
+
 export function buildCharacterChatReadiness({
   isServerConnected = true,
   selectedCharacter,
   selectedModel,
+  explicitProvider,
   availableModels,
   modelsLoading = false,
+  modelsError = false,
   allowDegradedSend = false,
   serverDegraded = false,
-  isSendBlocked = false
+  isSendBlocked = false,
+  requireExplicitProvider = false
 }: CharacterChatReadinessInput): CharacterChatReadiness {
   if (!isServerConnected) {
     return blockedCharacterChatReadiness(
@@ -927,24 +903,29 @@ export function buildCharacterChatReadiness({
     )
   }
 
-  if (!selectedCharacter) {
-    return blockedCharacterChatReadiness(
-      "selected-character",
-      "missing-character",
-      "choose-character"
-    )
+  const selection = parseProviderQualifiedModelSelection(selectedModel)
+  const nativeProvider = requireExplicitProvider ? resolveExplicitProviderForSelectedModel({ currentSelectedModel: selectedModel, requestedSelectedModel: selectedModel, explicitProvider }) : undefined
+  if (requireExplicitProvider && normalizeChatModelId(selection.modelId) && (
+    isAutoModelId(selection.modelId) || !nativeProvider
+  )) {
+    return blockedCharacterChatReadiness("chat-model", "explicit-model-provider-required", "open-model-settings")
   }
 
   const modelUsability = buildChatModelUsability({
     isServerConnected: true,
-    selectedModel,
+    // Native readiness checks the exact route used by strict preflight.
+    selectedModel: requireExplicitProvider && nativeProvider ? `${nativeProvider}:${selection.modelId.replace(/^tldw:/, "").trim()}` : selectedModel,
+    explicitProvider,
     availableModels,
     modelsLoading,
+    modelsError,
     allowDegradedSend,
     serverDegraded
   })
 
   switch (modelUsability.status) {
+    case "discovery_failed":
+      return blockedCharacterChatReadiness("chat-model", "models-discovery-failed", "retry")
     case "loading":
       return blockedCharacterChatReadiness(
         "chat-model",
@@ -1000,21 +981,15 @@ export function buildCharacterChatReadiness({
       break
   }
 
-  if (isSendBlocked) {
+  if (!selectedCharacter) {
     return blockedCharacterChatReadiness(
-      "chat-send",
-      "send-disabled",
-      "retry"
+      "selected-character",
+      "missing-character",
+      "choose-character"
     )
   }
 
-  return {
-    status: "ready",
-    canStart: true,
-    missingRequirement: null,
-    recommendedAction: null,
-    reason: null
-  }
+  return buildCharacterChatSendReadiness({ isServerConnected, isSendBlocked })
 }
 
 export function getMatchingCharacterChatModelUsabilityCopy({
@@ -1026,6 +1001,8 @@ export function getMatchingCharacterChatModelUsabilityCopy({
   readiness: CharacterChatReadiness
   readinessTitle?: string | null
 }): string | null {
+  if (readiness.reason === "explicit-model-provider-required" && readinessTitle) return readinessTitle
+
   if (!modelUsability || modelUsability.status === "ready" || !readinessTitle) {
     return null
   }
@@ -1040,6 +1017,7 @@ export function getMatchingCharacterChatModelUsabilityCopy({
   if (
     (
       modelUsability.status === "loading" ||
+      modelUsability.status === "discovery_failed" ||
       modelUsability.status === "no_selection" ||
       modelUsability.status === "no_models" ||
       modelUsability.status === "selected_missing" ||
@@ -1099,7 +1077,7 @@ export function getCharacterChatReadinessCopy(
       description: translateReadinessCopy(
         t,
         "characterChatReadiness.character.description",
-        "Character chat starts with the character, then checks model readiness before the first message."
+        "Choose an available model with a configured provider, then choose the character for your new chat."
       ),
       actionLabel: translateReadinessCopy(
         t,
@@ -1122,6 +1100,22 @@ export function getCharacterChatReadinessCopy(
       "characterChatReadiness.model.action",
       "Open model settings"
     )
+
+    if (readiness.reason === "explicit-model-provider-required") {
+      return {
+        title: translateReadinessCopy(t, "characterChatReadiness.model.explicitSelectionTitle", "Choose a model and provider before starting character chat"),
+        description: translateReadinessCopy(t, "characterChatReadiness.model.explicitSelectionDescription", "Your character and draft are kept. Open the model selector and choose a model from the provider you want to use."),
+        actionLabel: translateReadinessCopy(t, "characterChatReadiness.model.explicitSelectionAction", "Choose model and provider")
+      }
+    }
+
+    if (readiness.reason === "models-discovery-failed") {
+      return {
+        title: translateReadinessCopy(t, "composer.modelsDiscoveryFailed", "Could not check chat models"),
+        description: translateReadinessCopy(t, "composer.modelsDiscoveryFailedDetail", "Your character selection and draft are kept. Retry checking models before sending."),
+        actionLabel: translateReadinessCopy(t, "characterChatReadiness.model.retryAction", "Try again")
+      }
+    }
 
     if (readiness.reason === "models-loading") {
       return {

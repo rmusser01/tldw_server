@@ -32,7 +32,7 @@ export const useTabMentions = (
       const tabInfos: TabInfo[] = tabs
         .filter(tab => tab.id && tab.title && tab.url)
         .filter(tab => includeActive || !tab.active)
-        .filter(tab => tab?.status === 'complete') 
+        .filter(tab => tab?.status === 'complete')
         .filter(tab => {
           const url = tab.url!.toLowerCase()
           return !url.startsWith('chrome://') &&
@@ -161,6 +161,10 @@ export const useTabMentions = (
     setSelectedDocuments(prev => prev.filter(doc => doc.id !== id))
   }, [])
 
+  const clearSubmittedDocuments = React.useCallback((expected: TabInfo[]) => {
+    setSelectedDocuments(current => current === expected ? [] : current)
+  }, [])
+
   const clearSelectedDocuments = React.useCallback(() => {
     setSelectedDocuments([])
   }, [])
@@ -178,7 +182,8 @@ export const useTabMentions = (
     addDocument,
     removeDocument,
     clearSelectedDocuments,
+    clearSubmittedDocuments,
     reloadTabs: fetchTabs,
-    handleMentionsOpen  
+    handleMentionsOpen
   }
 }

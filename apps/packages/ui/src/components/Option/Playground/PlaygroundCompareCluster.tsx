@@ -69,8 +69,15 @@ type PlaygroundCompareClusterProps = {
   handleKeepGeneratedImageVariant: (payload: any) => void
   handleDeleteGeneratedImageVariant: (payload: any) => void
   handleDeleteAllGeneratedImageVariants: (payload: any) => void
-  editMessage: (index: number, value: string, isUser: boolean, isSend?: boolean) => void
-  deleteMessage: (index: number) => void
+  editMessage: (
+    index: number,
+    value: string,
+    isUser: boolean,
+    isSend?: boolean,
+    isCurrent?: () => boolean,
+    isOriginCurrent?: () => boolean
+  ) => unknown
+  deleteMessage: (index: number) => void | boolean | Promise<void | boolean>
   toggleMessagePinned: (index: number) => Promise<void> | void
   createChatBranch: (messageId: string, comparison?: {model_id: string; cluster_id: string | null}, onOpened?: (childId: string) => void) => Promise<ForkResultV1>
   stopStreamingRequest: (...args: any[]) => void
@@ -430,11 +437,18 @@ export const PlaygroundCompareCluster = ({
         isProcessing={isProcessing}
         isSearchingInternet={isSearchingInternet}
         sources={userMessage.sources}
-        onEditFormSubmit={(value, isSend) => {
-          editMessage(block.userIndex, value, !userMessage.isBot, isSend)
+        onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
+          return editMessage(
+            block.userIndex,
+            value,
+            !userMessage.isBot,
+            isSend,
+            editIsCurrent,
+            editOriginIsCurrent
+          )
         }}
         onDeleteMessage={() => {
-          deleteMessage(block.userIndex)
+          return deleteMessage(block.userIndex)
         }}
         onTogglePinned={() => {
           void toggleMessagePinned(block.userIndex)
@@ -973,11 +987,18 @@ export const PlaygroundCompareCluster = ({
                 isProcessing={isProcessing}
                 isSearchingInternet={isSearchingInternet}
                 sources={message.sources}
-                onEditFormSubmit={(value, isSend) => {
-                  editMessage(index, value, !message.isBot, isSend)
+                onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
+                  return editMessage(
+                    index,
+                    value,
+                    !message.isBot,
+                    isSend,
+                    editIsCurrent,
+                    editOriginIsCurrent
+                  )
                 }}
                 onDeleteMessage={() => {
-                  deleteMessage(index)
+                  return deleteMessage(index)
                 }}
                 onTogglePinned={() => {
                   void toggleMessagePinned(index)

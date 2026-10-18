@@ -33,6 +33,7 @@ type ContinueChatModeParams = {
   systemPromptAppendix?: string
   assistantMessageId?: string
   assistantParentMessageId?: string | null
+  onResponseDispatch?: () => void
 }
 
 const continueChatModeDefinition: ChatModeDefinition<ContinueChatModeParams> = {

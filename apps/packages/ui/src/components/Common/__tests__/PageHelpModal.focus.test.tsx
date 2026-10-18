@@ -1,0 +1,87 @@
+import React from "react"
+import { describe, expect, it, vi } from "vitest"
+import { act, render, screen } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
+import { PageHelpModalHost } from "../PageHelpModalHost"
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, fallback?: string) => fallback ?? key
+  })
+}))
+
+vi.mock("@/hooks/keyboard/useShortcutConfig", () => ({
+  useShortcutConfig: () => ({
+    shortcuts: {
+      focusTextarea: { key: "Escape", shiftKey: true },
+      newChat: { key: "u", ctrlKey: true, shiftKey: true },
+      toggleSidebar: { key: "b", ctrlKey: true },
+      toggleChatMode: { key: "e", ctrlKey: true },
+      toggleWebSearch: { key: "w", altKey: true },
+      toggleQuickChatHelper: { key: "h", ctrlKey: true, shiftKey: true },
+      modePlayground: { key: "1", altKey: true },
+      modeSources: { key: "2", altKey: true },
+      modeMedia: { key: "3", altKey: true },
+      modeKnowledge: { key: "4", altKey: true },
+      modeNotes: { key: "5", altKey: true },
+      modePrompts: { key: "6", altKey: true },
+      modeFlashcards: { key: "7", altKey: true },
+      modeWorldBooks: { key: "8", altKey: true },
+      modeDictionaries: { key: "9", altKey: true },
+      modeCharacters: { key: "0", altKey: true }
+    }
+  }),
+  formatShortcut: ({
+    key,
+    altKey,
+    ctrlKey,
+    shiftKey
+  }: {
+    key: string
+    altKey?: boolean
+    ctrlKey?: boolean
+    shiftKey?: boolean
+  }) =>
+    [
+      ...(ctrlKey ? ["Ctrl"] : []),
+      ...(altKey ? ["Alt"] : []),
+      ...(shiftKey ? ["Shift"] : []),
+      key
+    ].join(" + ")
+}))
+
+vi.mock("@/hooks/keyboard/useKeyboardShortcuts", () => ({
+  isMac: false
+}))
+
+describe("PageHelpModal focus styling", () => {
+  it("applies focus-visible classes to the close button in modal context", async () => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <PageHelpModalHost />
+      </MemoryRouter>
+    )
+    act(() =>
+      window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal"))
+    )
+
+    const closeButton = await screen.findByRole("button", { name: "Close" })
+    expect(closeButton.className).toContain("focus-visible:outline")
+    expect(closeButton.className).toContain("focus-visible:outline-2")
+    expect(closeButton.className).toContain("focus-visible:outline-focus")
+  })
+
+  it("lists the Sources navigation shortcut", async () => {
+    render(
+      <MemoryRouter initialEntries={["/chat"]}>
+        <PageHelpModalHost />
+      </MemoryRouter>
+    )
+    act(() =>
+      window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal"))
+    )
+
+    expect(await screen.findByText("Go to Sources")).toBeVisible()
+    expect(screen.getByText("Alt + 2")).toBeVisible()
+  })
+})

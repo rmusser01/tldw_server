@@ -20,6 +20,25 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
 from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 
 DOMAIN = "audio"
+# Analysis failures a retry can fix. The other SummaryProviderError codes (missing model or
+# credentials, bad configuration or authentication, an unknown provider) fail the same way every time.
+_RETRYABLE_ANALYSIS_CODES = frozenset({"rate_limit", "provider_failure"})
+
+
+class _StageFailure(RuntimeError):
+    """A stage failure carrying its job error code and whether a retry can fix it."""
+
+    def __init__(self, message: str, *, failure_code: str, retryable: bool) -> None:
+        super().__init__(message)
+        self.failure_code = failure_code
+        self.retryable = retryable
+
+
+def _next_stage_queue(next_type: str) -> str:
+    """The queue for the next stage: this worker's own ``default``, except that ``audio_transcribe``
+    goes to the GPU transcription worker's ``transcribe`` queue when AUDIO_JOBS_GPU_TRANSCRIBE is set."""
+    gpu = os.getenv("AUDIO_JOBS_GPU_TRANSCRIBE", "false").lower() in {"true", "1", "yes", "y", "on"}
+    return "transcribe" if next_type == "audio_transcribe" and gpu else "default"
 
 
 async def _handle_audio_transcribe_stage(payload: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
@@ -303,6 +322,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
             updated_payload = dict(payload)
             ok = True
             msg_err = ""
+            failure: Exception | None = None
             try:
                 if jtype == "audio_download":
                     # Download to temp path
@@ -344,15 +364,41 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                     updated_payload["chunks"] = chunks
                     next_type = payload.get("perform_analysis") and "audio_analyze" or "audio_store"
                 elif jtype == "audio_analyze":
-                    from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
+                    from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
+                        SummaryProviderError,
+                        analyze,
+                    )
                     text = updated_payload.get("text")
                     if not text:
                         # Fallback to segments
                         segs = updated_payload.get("segments") or []
                         text = " ".join((s.get("Text", "").strip() if isinstance(s, dict) else "") for s in segs).strip()
-                    with llm_call_root(owner):
-                        analysis = await asyncio.to_thread(analyze, text, payload.get("api_name") or "openai")
-                    updated_payload["analysis"] = analysis
+                    api_name = str(payload.get("api_name") or "").strip()
+                    if not api_name or api_name.lower() == "none":
+                        # No provider named: skip analysis, as /media/process-audios does.
+                        updated_payload["analysis_skipped"] = "no api_name"
+                    elif not text.strip():
+                        raise _StageFailure(
+                            "empty transcript: nothing to analyze", failure_code="empty_transcript", retryable=False
+                        )
+                    else:
+                        try:
+                            with llm_call_root(owner):
+                                analysis = await asyncio.to_thread(
+                                    analyze,
+                                    api_name,
+                                    text,
+                                    None,  # jobs carry no prompt: analyze's default system prompt (bulleted notes)
+                                    input_is_literal_text=True,
+                                    raise_on_error=True,
+                                )
+                        except SummaryProviderError as exc:
+                            raise _StageFailure(
+                                str(exc), failure_code=exc.code, retryable=exc.code in _RETRYABLE_ANALYSIS_CODES
+                            ) from exc
+                        if isinstance(analysis, str) and analysis.startswith("Error:"):
+                            raise RuntimeError(analysis)
+                        updated_payload["analysis"] = analysis
                     next_type = "audio_store"
                 elif jtype == "audio_store":
                     # Placeholder: integration to store into DB or export artifacts
@@ -365,23 +411,50 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
             except Exception as e:
                 ok = False
                 msg_err = str(e)
+                failure = e
 
-            if ok:
-                if next_type:
-                    # Create next stage
-                    jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
+            if ok and next_type:
+                # Queue the next stage before completing this one, so a failed hand-off fails this job
+                # instead of leaving it completed with nothing after it. The key makes a retried stage
+                # reuse the next stage it already queued. The next stage replaces this running job, so
+                # it is exempt from the per-user fair-share limit, which would count this job against it.
+                next_queue = _next_stage_queue(next_type)
+                try:
                     jm.create_job(
                         domain=DOMAIN,
-                        queue=("transcribe" if next_type == "audio_transcribe" else "default"),
+                        queue=next_queue,
                         job_type=next_type,
                         payload=updated_payload,
                         owner_user_id=str(owner),
                         priority=5,
+                        idempotency_key=f"audio-stage:{job['id']}:{next_type}",
+                        fair_share_exempt=True,
+                    )
+                except Exception as e:  # noqa: BLE001 - any failure to queue the next stage fails this one
+                    ok = False
+                    msg_err = f"could not queue {next_type}: {e}"
+                    logger.warning(f"Audio job {job['id']}: {msg_err}")
+                    # A refused queue fails the same way every time; a quota or a transient error may pass on retry.
+                    failure = _StageFailure(
+                        msg_err,
+                        failure_code="next_stage_enqueue_failed",
+                        retryable=next_queue in jm._get_allowed_queues(DOMAIN),
                     )
                 else:
-                    jm.complete_job(int(job["id"]), result={"payload": updated_payload}, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
-            else:
-                jm.fail_job(int(job["id"]), error=msg_err, retryable=True, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
+                    jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
+            elif ok:
+                jm.complete_job(int(job["id"]), result={"payload": updated_payload}, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
+            if not ok:
+                # An error that says it is not retryable (an LLM quota refusal, a _StageFailure) fails the job now.
+                jm.fail_job(
+                    int(job["id"]),
+                    error=msg_err,
+                    retryable=bool(getattr(failure, "retryable", True)),
+                    error_code=getattr(failure, "failure_code", None),
+                    worker_id=worker_id,
+                    lease_id=str(job.get("lease_id")),
+                    completion_token=str(job.get("lease_id")),
+                )
 
         except asyncio.CancelledError:
             raise

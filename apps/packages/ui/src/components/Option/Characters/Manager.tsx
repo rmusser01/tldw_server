@@ -1,5 +1,6 @@
+import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { useDefaultCharacterSelection } from "@/hooks/useDefaultCharacterSelection"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Button,
   Form,
@@ -7,7 +8,7 @@ import {
 } from "antd"
 import type { InputRef, FormInstance } from "antd"
 import React from "react"
-import { fetchChatModels } from "@/services/tldw-server"
+import { getCanonicalModelKey, getModelId, getModelProvider } from "@/hooks/playground/modelSelectorUtils"
 import {
   useCharacterFiltering,
   useCharacterInlineEdit,
@@ -240,11 +241,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
   // serverQueryRolloutFlag moved to useCharacterData
 
   // Fetch models to get provider for selected model
-  const { data: generationModels } = useQuery<Array<{ model: string; provider?: string }>>({
-    queryKey: ["getModelsForFieldGeneration"],
-    queryFn: () => fetchChatModels({ returnEmpty: true }),
-    staleTime: 5 * 60 * 1000 // 5 minutes
-  })
+  const { data: generationModels } = useChatModelCatalog()
 
   // Get the provider for the selected generation model
   const selectedGenModelProvider = React.useMemo(() => {
@@ -258,12 +255,9 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
       (generationModels || [])
         .filter((model) => typeof model.model === "string" && model.model.trim())
         .map((model) => {
-          const modelName = model.model.trim()
           return {
-            value: modelName,
-            label: model.provider
-              ? `${modelName} (${model.provider})`
-              : modelName
+            value: getCanonicalModelKey(model),
+            label: `${getModelId(model)} (${getModelProvider(model)})`
           }
         }),
     [generationModels]
@@ -275,7 +269,6 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
   const activeQuickChatModel =
     quickChatModelOverride ||
     selectedChatModel ||
-    quickChatModelOptions[0]?.value ||
     null
 
   const quickChat = useCharacterQuickChat({
@@ -285,12 +278,15 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     availableModels: generationModels ?? []
   })
   const {
-    quickChatCharacter, setQuickChatCharacter,
-    quickChatMessages, setQuickChatMessages,
+    quickChatCharacter,
+    quickChatMessages,
     quickChatDraft, setQuickChatDraft,
-    quickChatSessionId, setQuickChatSessionId,
+    quickChatSessionId,
     quickChatSending,
-    quickChatError, setQuickChatError,
+    quickChatNeedsReview,
+    quickChatReadiness, quickChatOwnerReady, quickChatCardReady, quickChatCanRetry, quickChatLoading, quickChatCopied,
+    retryQuickChat, copyQuickChatDraft,
+    quickChatError,
     openQuickChat,
     closeQuickChat,
     sendQuickChatMessage,
@@ -301,8 +297,7 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     React.useState<CharacterChatIntentBlocker | null>(null)
   const clearChatIntentBlocker = React.useCallback(async () => {
     setChatIntentBlocker(null)
-    await setSelectedCharacter(null)
-  }, [setSelectedCharacter])
+  }, [])
 
   const versionHistory = useCharacterVersionHistory({ t, notification, qc, confirmDanger })
   const {
@@ -1304,6 +1299,16 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
         quickChatDraft={quickChatDraft}
         setQuickChatDraft={setQuickChatDraft}
         quickChatSending={quickChatSending}
+        quickChatSessionId={quickChatSessionId}
+        quickChatNeedsReview={quickChatNeedsReview}
+        quickChatReadiness={quickChatReadiness}
+        quickChatOwnerReady={quickChatOwnerReady}
+        quickChatCardReady={quickChatCardReady}
+        quickChatCanRetry={quickChatCanRetry}
+        quickChatLoading={quickChatLoading}
+        quickChatCopied={quickChatCopied}
+        retryQuickChat={retryQuickChat}
+        copyQuickChatDraft={copyQuickChatDraft}
         sendQuickChatMessage={sendQuickChatMessage}
         handlePromoteQuickChat={handlePromoteQuickChat}
         // full-chat intent blocker

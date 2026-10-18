@@ -1,5 +1,6 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render as renderUI, screen, waitFor } from "@testing-library/react"
+import { MemoryRouter } from "react-router-dom"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 const state = vi.hoisted(() => {
@@ -129,6 +130,12 @@ vi.mock("react-router-dom", async () => {
 })
 
 import { ChatWorkflowsPage } from "../ChatWorkflowsPage"
+
+const render: typeof renderUI = (ui, options) =>
+  renderUI(ui, {
+    wrapper: ({ children }) => <MemoryRouter>{children}</MemoryRouter>,
+    ...options
+  })
 
 describe("ChatWorkflowsPage", () => {
   beforeEach(() => {

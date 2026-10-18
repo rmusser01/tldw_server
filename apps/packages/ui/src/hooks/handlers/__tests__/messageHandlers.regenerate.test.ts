@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from "vitest"
-import type { ChatHistory, Message } from "@/store/option"
+import { useStoreMessageOption, type ChatHistory, type Message } from "@/store/option"
+import type { ActorSceneSend } from "@/hooks/chat/actor-scene-source"
+import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
+import { freshChatDraftAddress } from "@/utils/chat-draft-address"
+import { createDefaultActorSettings } from "@/types/actor"
+import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 import { createRegenerateLastMessage } from "../messageHandlers"
 
 const buildMessages = (): Message[] => [
@@ -28,7 +33,98 @@ const buildHistory = (): ChatHistory => [
   }
 ]
 
+// The helper forwards an issued private Scene as an opaque command proof.
+// It creates no selected-history owner/view from transcript or server IDs.
+const originalSceneProof = (isCurrent = () => true): ActorSceneSend => {
+  const requestScope = { config: {
+    serverUrl: "https://chat.test", authMode: "single-user" as const,
+    expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope("single-user", "synthetic-a")!
+  }, userId: null }
+  const target = captureActorSettingsTarget({ address: freshChatDraftAddress(false),
+    requestScope, accountIsCurrent: isCurrent, isCurrent })!
+  const settings = createDefaultActorSettings()
+  const proof: ActorSceneSend = { scene: { target, settings,
+    originalRecord: { value: settings, updatedAt: 1700000000000 },
+    origin: "scene", profileUnavailable: false }, requestScope, isCurrent,
+    commandIsCurrent: isCurrent }
+  return Object.freeze(proof)
+}
+
 describe("createRegenerateLastMessage", () => {
+  it("forwards the exact original SDK Scene through held regenerate preparation", async () => {
+    const original = originalSceneProof()
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    const onSubmit = vi.fn().mockResolvedValue({ status: "submitted" })
+    const regenerate = createRegenerateLastMessage({
+      allowOrdinaryRetry: true, validateBeforeSubmitFn: () => true,
+      history: buildHistory(), messages: buildMessages(),
+      setHistory: vi.fn(), setMessages: vi.fn(), onSubmit,
+      beforeSubmit: async () => { await pending }
+    })
+    const result = regenerate({ actorSceneSend: original })
+    expect(onSubmit).not.toHaveBeenCalled()
+    release()
+    await result
+    expect(onSubmit.mock.calls[0][0].actorSceneSend).toBe(original)
+    expect(onSubmit.mock.calls[0][0].actorSceneSend.scene.originalRecord).toBe(original.scene.originalRecord)
+  })
+
+  it.each(["entry", "preparation"] as const)(
+    "refuses a retired supplied SDK Scene during %s before truncation or submission",
+    async boundary => {
+      let current = true
+      const original = originalSceneProof(() => current)
+      let release!: () => void
+      const pending = new Promise<void>(resolve => { release = resolve })
+      const onSubmit = vi.fn()
+      const setHistory = vi.fn(), setMessages = vi.fn()
+      const regenerate = createRegenerateLastMessage({
+        allowOrdinaryRetry: true, validateBeforeSubmitFn: () => true,
+        history: buildHistory(), messages: buildMessages(), setHistory, setMessages, onSubmit,
+        beforeSubmit: async () => { await pending }
+      })
+      if (boundary === "entry") current = false
+      const result = regenerate({ actorSceneSend: original })
+      current = false
+      release()
+      expect(await result).toMatchObject({ status: "skipped" })
+      expect(onSubmit).not.toHaveBeenCalled()
+      expect(setHistory).not.toHaveBeenCalled()
+      expect(setMessages).not.toHaveBeenCalled()
+    }
+  )
+  it("rechecks the original SDK Scene after a synchronous Retry setter subscriber replaces work", async () => {
+    const before = useStoreMessageOption.getState()
+    let current = true
+    const original = originalSceneProof(() => current)
+    const history = buildHistory(), messages = buildMessages()
+    const replacement = [{ ...messages[0], message: "Keep replacement work" }]
+    useStoreMessageOption.setState({ history, messages, streaming: false, isProcessing: false })
+    const state = useStoreMessageOption.getState()
+    const onSubmit = vi.fn(), setMessages = vi.fn(state.setMessages)
+    const regenerate = createRegenerateLastMessage({
+      allowOrdinaryRetry: true, validateBeforeSubmitFn: () => true,
+      history, messages, setHistory: state.setHistory, setMessages, onSubmit
+    })
+    const unsubscribe = useStoreMessageOption.subscribe(next => {
+      if (next.history === history) return
+      unsubscribe()
+      current = false
+      next.startNewChatDraft(false)
+      useStoreMessageOption.setState({ messages: replacement })
+    })
+    try {
+      expect(await regenerate({ actorSceneSend: original })).toMatchObject({ status: "skipped" })
+      expect(useStoreMessageOption.getState().messages).toBe(replacement)
+      expect(setMessages).not.toHaveBeenCalled()
+      expect(onSubmit).not.toHaveBeenCalled()
+    } finally {
+      unsubscribe()
+      useStoreMessageOption.setState(before, true)
+    }
+  })
+
   it("retirement during regenerate preparation prevents truncation and submission", async () => {
     let release!: () => void
     const pending = new Promise<void>((resolve) => { release = resolve })

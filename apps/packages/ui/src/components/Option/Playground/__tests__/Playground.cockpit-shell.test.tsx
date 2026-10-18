@@ -3,15 +3,38 @@ import React from "react";
 import {
   act,
   fireEvent,
-  render,
+  render as renderTestingLibrary,
   screen,
   waitFor,
   within,
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { historySelectionExpansionPath } from "@/hooks/chat/useHistorySelection";
+import type { HistoryBookmark } from "@/db/dexie/types";
 
 import { Playground } from "../Playground";
 import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell";
+import { usePlaygroundSessionStore } from "@/store/playground-session";
+import { useStoreMessageOption } from "@/store/option";
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
+import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition";
+import { characterToAssistantSelection } from "@/types/assistant-selection";
+import { resolveHistorySelection } from "@/utils/history-selection";
+
+// Keep the real query lifecycle: the shared no-provider fallback intentionally
+// does not execute catalog reads and cannot prove root readiness outcomes.
+const render = (ui: React.ReactElement) => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  function QueryFixture({ children }: { children: React.ReactNode }) {
+    return (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+  }
+  return renderTestingLibrary(ui, { wrapper: QueryFixture });
+};
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -66,10 +89,12 @@ const messageOptionState = vi.hoisted(() => ({
 
 const sessionPersistenceState = vi.hoisted(() => ({
   value: {
-    restoreSession: vi.fn(async () => false),
+    restoreSession: vi.fn(async (): Promise<"restored" | "not-restored" | "cancelled"> => "not-restored"),
     clearPersistedSession: vi.fn(async () => undefined),
     sessionScopeReady: true,
     hasPersistedSession: false,
+    hasPersistedDraftHandle: false,
+    hasPersistedFreshDraft: false,
     persistedHistoryId: null as string | null,
     persistedServerChatId: null as string | null,
   },
@@ -78,6 +103,29 @@ const sessionPersistenceState = vi.hoisted(() => ({
 const storageState = vi.hoisted(() => ({
   values: new Map<string, unknown>(),
 }));
+const connectionState = vi.hoisted(() => ({ isConnected: true, phase: "connected" }))
+vi.mock("@/hooks/useConnectionState", () => ({ useConnectionState: () => connectionState }))
+const recentChatState = vi.hoisted(() => ({
+  enabled: false,
+  recent: vi.fn(),
+  capture: vi.fn(),
+  bookmark: vi.fn(),
+}));
+vi.mock("@/db/dexie/chat", () => ({
+  PageAssistDatabase: class {
+    getHistoryInfo = async (id: string) => ({ id, local_owner_key: "local-owner" });
+  }
+}));
+vi.mock("@/db/dexie/history-selection", () => ({
+  ensureLocalProfileId: async () => "profile",
+  getLocalHistoryOwner: async (id: string) => ({ kind: "local", profile_id: "profile", owner_key: "local-owner", conversation_id: id }),
+  loadHistoryTurnRecoveries: async () => [],
+  dismissHistoryTurnRecovery: async () => {},
+  loadHistoryBookmark: (...args: unknown[]) => recentChatState.bookmark(...args),
+  saveHistoryBookmark: async () => {}
+}));
+vi.mock("@/db/dexie/fork-operations", () => ({ findForkCandidate: async () => null, loadForkOperations: async () => [] }));
+vi.mock("@/services/chat-history-selection", () => ({ captureHistorySnapshot: (...args: unknown[]) => recentChatState.capture(...args) }));
 
 const darkModeState = vi.hoisted(() => ({
   mode: "dark" as "system" | "dark" | "light",
@@ -132,7 +180,8 @@ const routerNavigateState = vi.hoisted(() => ({
 
 vi.mock("@/services/service-prompts", async importOriginal => ({
   ...await importOriginal<typeof import("@/services/service-prompts")>(),
-  resolveServicePromptScope: async () => ({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" })
+  resolveServicePromptScope: async () => ({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" }),
+  loadServicePromptSnapshot: async () => ({ requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" }, scopeSignal: new AbortController().signal, scopeInvalidatedSignal: new AbortController().signal, release: vi.fn() })
 }));
 
 vi.mock("react-i18next", () => ({
@@ -153,22 +202,30 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
+// The root fixture stubs the Form acceptance boundary; actual preflight/retention
+// behavior is exercised in PlaygroundForm.role-play-starter.integration.test.tsx.
+const routeApplyOutcome = vi.hoisted(() => ({ value: null as string | null }))
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
-  PlaygroundForm: ({
-    onDraftPresenceChange,
-  }: {
-    onDraftPresenceChange?: (hasDraft: boolean) => void;
-  }) => (
-    <div data-testid="playground-form">
-      <textarea
-        aria-label="Composer draft"
-        data-testid="composer-textarea"
-        onChange={(event) =>
-          onDraftPresenceChange?.(event.currentTarget.value.trim().length > 0)
-        }
-      />
-    </div>
-  ),
+  PlaygroundForm: ({ onDraftPresenceChange, onCharacterRouteApplyReady }: React.ComponentProps<typeof import("../PlaygroundForm").PlaygroundForm>) => {
+    React.useEffect(() => {
+      onCharacterRouteApplyReady?.(async (id: string, isCurrent: () => boolean) => {
+        const character = await tldwClientState.getCharacter(id, { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" } })
+        if (!isCurrent()) return "retired"
+        if (routeApplyOutcome.value) return routeApplyOutcome.value
+        if (!character) return "missing"
+        await messageOptionState.value.setSelectedCharacter(character)
+        if (!isCurrent()) return "retired"
+        messageOptionState.value.setHistoryId(null, { preserveServerChatId: false })
+        messageOptionState.value.setHistory([])
+        messageOptionState.value.setMessages([])
+        messageOptionState.value.setServerChatId(null)
+        return "applied"
+      })
+      return () => onCharacterRouteApplyReady?.(null)
+    }, [onCharacterRouteApplyReady])
+    return <div data-testid="playground-form"><textarea aria-label="Composer draft" data-testid="composer-textarea"
+      onChange={event => onDraftPresenceChange?.(event.currentTarget.value.trim().length > 0)} /></div>
+  },
 }));
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
@@ -192,22 +249,31 @@ vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
 }));
 
 vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => messageOptionState.value,
+  useMessageOption: () => {
+    // The real hook derives selectedCharacter from the unified assistant. Older
+    // cases use the character shorthand to arrange a tracked draft selection.
+    const character = characterToAssistantSelection(messageOptionState.value.selectedCharacter);
+    const selectedAssistant = messageOptionState.value.selectedAssistant ?? (character && {
+      ...character, metadata: { ...character.metadata, selectionMode: "tracked" }
+    });
+    return { ...messageOptionState.value, selectedAssistant, effectiveAssistantState: resolveEffectiveAssistantState({
+      tracked: { assistantKind: messageOptionState.value.serverChatAssistantKind, assistantId: messageOptionState.value.serverChatAssistantId, characterId: messageOptionState.value.serverChatCharacterId },
+      draftSelection: selectedAssistant
+    }) };
+  },
 }));
 
 vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
   usePlaygroundSessionPersistence: () => sessionPersistenceState.value,
 }));
 
-vi.mock("@/hooks/playground-session-restore", () => ({
-  shouldRestorePersistedPlaygroundSession: () => false,
-}));
 
 vi.mock("@/services/app", () => ({
-  webUIResumeLastChat: vi.fn(async () => false),
+  webUIResumeLastChat: vi.fn(async () => recentChatState.enabled),
 }));
 
-vi.mock("@/services/chat-settings", () => ({
+vi.mock("@/services/chat-settings", async importOriginal => ({
+  ...await importOriginal<typeof import("@/services/chat-settings")>(),
   syncChatSettingsForServerChat: (params: unknown) =>
     chatSettingsState.syncChatSettingsForServerChat(params),
 }));
@@ -231,17 +297,16 @@ vi.mock("@/components/Option/Playground/CharacterChatSessionsPanel", () => ({
   },
 }));
 
-vi.mock("@/db/dexie/helpers", () => ({
+vi.mock("@/db/dexie/helpers", async importOriginal => ({
+  ...await importOriginal<typeof import("@/db/dexie/helpers")>(),
   formatToChatHistory: vi.fn(),
   formatToMessage: vi.fn(),
   getHistoryByServerChatId: vi.fn(async () => null),
   getPromptById: vi.fn(async () => null),
-  getRecentChatFromWebUI: vi.fn(async () => null),
+  getRecentChatFromWebUI: (...args: unknown[]) => recentChatState.recent(...args),
 }));
 
-vi.mock("@/store/model", () => ({
-  useStoreChatModelSettings: () => ({ setSystemPrompt: vi.fn() }),
-}));
+
 
 vi.mock("@/hooks/useSmartScroll", () => ({
   useSmartScroll: () => ({
@@ -269,17 +334,6 @@ vi.mock("@/services/settings/ui-settings", () => ({
 
 vi.mock("../Knowledge/utils/unsupported-types", () => ({
   otherUnsupportedTypes: [],
-}));
-
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (
-    selector?: (state: {
-      compareParentByHistory: Record<string, never>;
-    }) => unknown,
-  ) =>
-    typeof selector === "function"
-      ? selector({ compareParentByHistory: {} })
-      : { compareParentByHistory: {} },
 }));
 
 vi.mock("@/store/artifacts", () => ({
@@ -347,7 +401,10 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useDesktop: () => true,
 }));
 
-vi.mock("@/hooks/useLoadLocalConversation", () => ({
+vi.mock("@/hooks/useLoadLocalConversation", async (importOriginal) => ({
+  ...(await importOriginal<
+    typeof import("@/hooks/useLoadLocalConversation")
+  >()),
   useLoadLocalConversation: () => vi.fn(async () => {}),
 }));
 
@@ -382,7 +439,20 @@ vi.mock("react-router-dom", async () => {
 
 describe("Playground cockpit shell", () => {
   beforeEach(() => {
+    connectionState.isConnected = true
+    connectionState.phase = "connected"
+    routeApplyOutcome.value = null
     vi.clearAllMocks();
+    recentChatState.enabled = false;
+    recentChatState.recent.mockReset().mockResolvedValue(null);
+    recentChatState.bookmark.mockReset().mockResolvedValue(null);
+    recentChatState.capture.mockReset().mockImplementation(async (owner, request) => {
+      const view = { ...request, owner_key: "local-owner" };
+      const snapshot = { version: 1, owner_key: "local-owner", conversation_id: owner.conversation_id, source_digest: "source", storage_context_digest: "storage", fences: {}, interpretation_status: { kind: "parent_graph_v1" }, nodes: [] };
+      const result = resolveHistorySelection(snapshot, view, "send", "");
+      if (result.status !== "ready") return { ...result, view, snapshot };
+      return { status: "captured", view, snapshot, rows: result.rows, selected_content: [], storage_context_digest: "storage", purpose: "send" };
+    });
     window.history.replaceState({}, "", "/chat");
     storageState.values.clear();
     storageState.values.set("playgroundChatContextRailVisible", true);
@@ -411,6 +481,13 @@ describe("Playground cockpit shell", () => {
     messageOptionState.value.contextFiles = [];
     messageOptionState.value.regenerateLastMessage = vi.fn();
     sessionPersistenceState.value.sessionScopeReady = true;
+    sessionPersistenceState.value.hasPersistedSession = false;
+    sessionPersistenceState.value.hasPersistedDraftHandle = false;
+    sessionPersistenceState.value.hasPersistedFreshDraft = false;
+    sessionPersistenceState.value.restoreSession.mockReset().mockResolvedValue("not-restored");
+    sessionStorage.removeItem("tldw-h1-playground-reference");
+    useStoreMessageOption.setState({ chatDraftAddress: null, chatDraftRevision: 0, chatDraftTransition: null, historyId: null, serverChatId: null, compareParentByHistory: {} });
+    usePlaygroundSessionStore.getState().clearSession();
     sessionPersistenceState.value.clearPersistedSession.mockClear();
     chatSettingsState.syncChatSettingsForServerChat.mockClear();
     darkModeState.mode = "dark";
@@ -469,7 +546,7 @@ describe("Playground cockpit shell", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByTestId("playground-cockpit-mode-summary"),
-    ).toHaveTextContent("Context and runtime rails visible.");
+    ).toHaveTextContent("Context and chat settings visible.");
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
     expect(
@@ -477,8 +554,7 @@ describe("Playground cockpit shell", () => {
     ).not.toBeInTheDocument();
     await waitFor(() => {
       expect(tldwServerState.fetchChatModels).toHaveBeenCalledWith({
-        returnEmpty: true,
-        forceRefresh: true,
+        requireFresh: true,
       });
     });
   });
@@ -628,6 +704,266 @@ describe("Playground cockpit shell", () => {
     ).toBeInTheDocument();
   });
 
+  it("restores a verified fresh handle despite a malformed older H1 bookmark", async () => {
+    sessionPersistenceState.value.hasPersistedSession = true;
+    sessionPersistenceState.value.hasPersistedDraftHandle = true;
+    sessionPersistenceState.value.hasPersistedFreshDraft = true;
+    sessionPersistenceState.value.restoreSession.mockResolvedValue("restored");
+    sessionStorage.setItem("tldw-h1-playground-reference", "{broken");
+    render(<Playground />);
+    await waitFor(() => expect(sessionPersistenceState.value.restoreSession).toHaveBeenCalledTimes(1));
+  });
+
+  it("publishes the canonical draft address when the actual H1 recent-chat fallback opens a local conversation", async () => {
+    useStoreMessageOption.getState().startNewChatDraft();
+    recentChatState.enabled = true;
+    recentChatState.recent.mockResolvedValue({ history: { id: "local-resume", local_owner_key: "local-owner" }, messages: [] });
+    messageOptionState.value.setHistoryId = vi.fn((id, options) => useStoreMessageOption.getState().setHistoryId(id, options));
+    messageOptionState.value.setServerChatId = vi.fn((id) => useStoreMessageOption.getState().setServerChatId(id));
+    render(<Playground />);
+    await waitFor(() => expect(useStoreMessageOption.getState()).toMatchObject({ historyId: "local-resume", serverChatId: null, chatDraftAddress: { kind: "local", id: "local-resume", profileId: "profile" } }));
+    expect(recentChatState.capture).toHaveBeenCalledTimes(1);
+    expect(useStoreMessageOption.getState().chatDraftTransition?.kind).toBe("switch");
+  });
+
+  // Actual route/H1/core; the Form action, database rows, owner resolution and
+  // backend reads remain the existing declared fixture boundaries.
+  it.each([
+    [
+      "same query character",
+      "/chat?mode=character&characterId=foreign-card&handoff=opaque-copy",
+    ],
+    [
+      "hash-router character",
+      "/options.html#/chat?mode=character&characterId=foreign-card&handoff=opaque-copy",
+    ],
+    [
+      "search copy with hash character",
+      "/chat?handoff=opaque-copy#/chat?mode=character&characterId=foreign-card",
+    ],
+    [
+      "bare fragment copy with search character",
+      "/chat?mode=character&characterId=foreign-card#handoff=opaque-copy",
+    ],
+    [
+      "same query chatId",
+      "/chat?mode=character&characterId=foreign-card&chatId=foreign-chat&handoff=opaque-copy",
+    ],
+    [
+      "hash chat_id with search copy",
+      "/chat?handoff=opaque-copy#/chat?mode=character&chat_id=foreign-chat",
+    ],
+    [
+      "search serverChatId with hash-query copy",
+      "/chat?mode=character&serverChatId=foreign-chat#?handoff=opaque-copy",
+    ],
+    [
+      "search server_chat_id with bare fragment copy",
+      "/chat?mode=character&server_chat_id=foreign-chat#handoff=opaque-copy",
+    ],
+  ])(
+    "keeps %s in literal-copy review without adopting bare character or chat identity",
+    async (_case, url) => {
+      window.history.replaceState({}, "", url);
+      render(<Playground />);
+      await screen.findByTestId("playground-cockpit-shell");
+      await act(async () => {});
+
+      expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+      expect(
+        messageOptionState.value.setSelectedCharacter,
+      ).not.toHaveBeenCalled();
+      expect(messageOptionState.value.setHistoryId).not.toHaveBeenCalled();
+      expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled();
+      expect(
+        usePlaygroundSessionStore.getState().serverChatSelectionIntent,
+      ).toBeNull();
+      expect(
+        screen.getByTestId("playground-active-chat-mode"),
+      ).toHaveTextContent("Standard chat");
+    },
+  );
+
+  it.each([
+    ["outer character pointer", ""],
+    ["outer character pointer and copy token", "&handoff=ambient-copy"],
+  ])(
+    "retires %s after copy cleanup while allowing a new explicit router character link",
+    async (_case, outerCopy) => {
+      const ambientSearch =
+        "?mode=character&characterId=foreign-card" + outerCopy;
+      window.history.replaceState(
+        {},
+        "",
+        "/options.html" + ambientSearch + "#/chat?handoff=opaque-copy",
+      );
+      routerLocationState.value = {
+        pathname: "/chat",
+        search: "?handoff=opaque-copy",
+        hash: "",
+        key: "copy",
+      };
+      const { rerender } = render(<Playground />);
+      await screen.findByTestId("playground-cockpit-shell");
+      await act(async () => {});
+      expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+
+      window.history.replaceState(
+        {},
+        "",
+        "/options.html" + ambientSearch + "#/chat",
+      );
+      routerLocationState.value = {
+        pathname: "/chat",
+        search: "",
+        hash: "",
+        key: "copy-cleaned",
+      };
+      rerender(<Playground />);
+      await act(async () => {});
+      expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+      expect(
+        usePlaygroundSessionStore.getState().serverChatSelectionIntent,
+      ).toBeNull();
+      expect(
+        screen.getByTestId("playground-active-chat-mode"),
+      ).toHaveTextContent("Standard chat");
+
+      window.history.replaceState(
+        {},
+        "",
+        "/options.html" +
+          ambientSearch +
+          "#/chat?mode=character&characterId=chosen-card",
+      );
+      routerLocationState.value = {
+        pathname: "/chat",
+        search: "?mode=character&characterId=chosen-card",
+        hash: "",
+        key: "explicit-character",
+      };
+      rerender(<Playground />);
+      await waitFor(() =>
+        expect(tldwClientState.getCharacter).toHaveBeenCalledOnce(),
+      );
+      expect(tldwClientState.getCharacter.mock.calls[0]?.[0]).toBe(
+        "chosen-card",
+      );
+      expect(
+        messageOptionState.value.setSelectedCharacter,
+      ).toHaveBeenCalledWith({ id: "chosen-card", name: "Route Character" });
+    },
+  );
+
+  it("does not introduce bare-fragment character commands without a copy", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat#mode=character&characterId=foreign-card&chatId=foreign-chat",
+    );
+    render(<Playground />);
+    await screen.findByTestId("playground-cockpit-shell");
+    await act(async () => {});
+    expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+    expect(
+      usePlaygroundSessionStore.getState().serverChatSelectionIntent,
+    ).toBeNull();
+    expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled();
+    expect(screen.getByTestId("playground-active-chat-mode")).toHaveTextContent(
+      "Standard chat",
+    );
+  });
+
+  it("still loads an owner-qualified history selection while a literal-copy token awaits review", async () => {
+    useStoreMessageOption.getState().startNewChatDraft();
+    const reference = {
+      profile_id: "profile",
+      client_session_id: "source-session",
+      owner_key: "local-owner",
+      conversation_id: "qualified-local-chat",
+    };
+    const bookmark: HistoryBookmark = {
+      profile_id: reference.profile_id,
+      client_session_id: reference.client_session_id,
+      owner_key: reference.owner_key,
+      conversation_id: reference.conversation_id,
+      view: {
+        view_session_id: "source-view",
+        owner_key: reference.owner_key,
+        conversation_id: reference.conversation_id,
+        interpretation: { kind: "parent_graph_v1" },
+        cursor: { kind: "empty" },
+        selection_revision: 1,
+      },
+    };
+    recentChatState.bookmark.mockResolvedValue(bookmark);
+    const path = historySelectionExpansionPath({
+      reference,
+      owner: {
+        kind: "local",
+        profile_id: "profile",
+        owner_key: "local-owner",
+        conversation_id: "qualified-local-chat",
+      },
+    });
+    window.history.replaceState({}, "", path + "&handoff=opaque-copy");
+    messageOptionState.value.setHistoryId = vi.fn((id, options) =>
+      useStoreMessageOption.getState().setHistoryId(id, options),
+    );
+    messageOptionState.value.setServerChatId = vi.fn((id) =>
+      useStoreMessageOption.getState().setServerChatId(id),
+    );
+    render(<Playground />);
+
+    await waitFor(() =>
+      expect(useStoreMessageOption.getState()).toMatchObject({
+        historyId: "qualified-local-chat",
+        serverChatId: null,
+        chatDraftAddress: {
+          kind: "local",
+          id: "qualified-local-chat",
+          profileId: "profile",
+        },
+      }),
+    );
+    expect(recentChatState.capture).toHaveBeenCalledOnce();
+    expect(recentChatState.capture.mock.calls[0]?.[0]).toMatchObject({
+      kind: "local",
+      owner_key: "local-owner",
+      conversation_id: "qualified-local-chat",
+    });
+    expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+    expect(
+      usePlaygroundSessionStore.getState().serverChatSelectionIntent,
+    ).toBeNull();
+  });
+
+  it("qualifies an explicit saved-character URL through the shared draft selection callback", async () => {
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=char-route&chatId=route-chat");
+    render(<Playground />);
+    await waitFor(() => expect(usePlaygroundSessionStore.getState().serverChatSelectionIntent).toMatchObject({ chatId: "route-chat", onLoaded: expect.any(Function), isCurrent: expect.any(Function) }));
+    const intent = usePlaygroundSessionStore.getState().serverChatSelectionIntent!;
+    expect(intent.isCurrent?.()).toBe(true);
+    act(() => useStoreMessageOption.getState().startNewChatDraft());
+    expect(intent.isCurrent?.()).toBe(false);
+  });
+
+  it("lets a current incoming sidebar selection own initialization before a fresh restore", async () => {
+    sessionPersistenceState.value.hasPersistedSession = true;
+    sessionPersistenceState.value.hasPersistedDraftHandle = true;
+    sessionPersistenceState.value.hasPersistedFreshDraft = true;
+    useStoreMessageOption.getState().startNewChatDraft();
+    const accept = captureChatDraftLoad("switch");
+    usePlaygroundSessionStore.getState().requestServerChatSelection("sidebar-B", accept);
+    useStoreMessageOption.getState().setServerChatId("sidebar-B");
+    messageOptionState.value.serverChatId = "sidebar-B";
+    render(<Playground />);
+    await screen.findByTestId("playground-cockpit-shell");
+    await act(async () => { await Promise.resolve(); });
+    expect(sessionPersistenceState.value.restoreSession).not.toHaveBeenCalled();
+    expect(accept.isCurrent()).toBe(true);
+  });
+
   it("does not report standard chat runtime ready when no chat models are usable", async () => {
     messageOptionState.value.selectedModel = "tldw:gpt-4o";
     tldwServerState.fetchChatModels.mockResolvedValue([]);
@@ -636,8 +972,7 @@ describe("Playground cockpit shell", () => {
 
     await waitFor(() => {
       expect(tldwServerState.fetchChatModels).toHaveBeenCalledWith({
-        returnEmpty: true,
-        forceRefresh: true,
+        requireFresh: true,
       });
     });
 
@@ -650,6 +985,125 @@ describe("Playground cockpit shell", () => {
       screen.queryByRole("status", { name: "Chat status" }),
     ).not.toBeInTheDocument();
   });
+
+  it('keeps a current unapplied character route and lets Retry accept it', async () => {
+    window.history.replaceState({}, '', '/chat?mode=character&characterId=char-route&keep=1');
+    messageOptionState.value.serverChatId = 'ordinary-source';
+    messageOptionState.value.historyId = 'ordinary-history';
+    routeApplyOutcome.value = 'retired';
+    render(<Playground />);
+    const status = await screen.findByRole('status', { name: 'Character Chat setup status' });
+    expect(status).toHaveTextContent('Character setup was not applied');
+    expect(routerNavigateState.navigate).not.toHaveBeenCalled();
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
+    expect(messageOptionState.value.setMessages).not.toHaveBeenCalled();
+    expect(messageOptionState.value.serverChatId).toBe('ordinary-source');
+    routeApplyOutcome.value = null;
+    fireEvent.click(within(status).getByRole('button', { name: 'Retry', exact: true }));
+    await waitFor(() =>
+      expect(routerNavigateState.navigate).toHaveBeenCalledWith(
+        expect.objectContaining({ search: '?mode=character&keep=1' }),
+        { replace: true }
+      )
+    );
+    expect(tldwClientState.getCharacter).toHaveBeenCalledTimes(2);
+    expect(messageOptionState.value.setSelectedCharacter).toHaveBeenCalledOnce();
+  });
+
+  it('keeps catalog discovery and a character route pending until the connection is ready', async () => {
+    window.history.replaceState({}, '', '/chat?mode=character&characterId=char-route');
+    connectionState.isConnected = false;
+    connectionState.phase = 'checking';
+    const view = render(<Playground />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(tldwServerState.fetchChatModels).not.toHaveBeenCalled();
+    expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+    connectionState.isConnected = true;
+    view.rerender(<Playground />);
+    await act(async () => { await Promise.resolve(); });
+    expect(tldwServerState.fetchChatModels).not.toHaveBeenCalled();
+    expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+    connectionState.phase = 'connected';
+    view.rerender(<Playground />);
+    await waitFor(() => expect(tldwServerState.fetchChatModels).toHaveBeenCalledOnce());
+    await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalledOnce());
+  });
+
+  it('waits for the initial model catalog before applying a fresh character route', async () => {
+    window.history.replaceState({}, '', '/chat?mode=character&characterId=char-route');
+    let finish!: (models: Awaited<ReturnType<typeof tldwServerState.fetchChatModels>>) => void;
+    tldwServerState.fetchChatModels.mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    render(<Playground />);
+    try {
+      await waitFor(() => expect(tldwServerState.fetchChatModels).toHaveBeenCalledOnce());
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
+      expect(messageOptionState.value.setMessages).not.toHaveBeenCalled();
+      expect(routerNavigateState.navigate).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        finish([
+          {
+            model: 'openai:gpt-4.1-mini',
+            provider: 'openai',
+            is_configured: true,
+            provider_is_configured: true,
+          },
+        ]);
+      });
+    }
+    await waitFor(() =>
+      expect(routerNavigateState.navigate).toHaveBeenCalledWith(
+        expect.objectContaining({ search: '?mode=character' }),
+        { replace: true }
+      )
+    );
+    expect(tldwClientState.getCharacter).toHaveBeenCalledOnce();
+  });
+
+  it("keeps an accepted fresh command consumed after the router commits", async () => {
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=char-route")
+    messageOptionState.value.setSelectedCharacter.mockImplementation((next: { id: string | number; name: string }) => {
+      messageOptionState.value.selectedCharacter = next
+      messageOptionState.value.selectedAssistant = { kind: "character", id: String(next.id), name: next.name, metadata: { selectionMode: "tracked" } }
+    })
+    const { rerender } = render(<Playground />)
+    await waitFor(() => expect(routerNavigateState.navigate).toHaveBeenCalledWith(expect.objectContaining({ search: "?mode=character" }), { replace: true }))
+    routerNavigateState.navigate.mockClear()
+    window.history.replaceState({}, "", "/chat?mode=character")
+    routerLocationState.value = { pathname: "/chat", search: "?mode=character", hash: "", key: "consumed-entry" }
+    rerender(<Playground />)
+    await act(async () => { await Promise.resolve(); await Promise.resolve() })
+    expect(routerNavigateState.navigate).not.toHaveBeenCalled()
+    expect(tldwClientState.getCharacter).toHaveBeenCalledOnce()
+  })
+
+  it.each(["held", "missing"])("preserves the source before a %s fresh route card resolves", async outcome => {
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=char-route")
+    messageOptionState.value.serverChatId = "source-chat"
+    messageOptionState.value.historyId = "source-history"
+    messageOptionState.value.messages = [{ message: "Source transcript", isBot: true }]
+    let finish!: (value: unknown) => void
+    const pending = new Promise(resolve => { finish = resolve })
+    tldwClientState.getCharacter.mockReturnValueOnce(outcome === "held" ? pending : Promise.resolve(null))
+    render(<Playground />)
+    await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalledOnce())
+    await act(async () => { await Promise.resolve() })
+    expect(messageOptionState.value.setHistoryId).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setHistory).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setMessages).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setServerChatId).not.toHaveBeenCalled()
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
+    if (outcome === "held") await act(async () => finish(null))
+    await screen.findByText("Character char-route could not be loaded")
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled()
+  })
 
 	  it("honors first-class character route intent in the chat shell", async () => {
     window.history.replaceState(
@@ -1004,48 +1458,21 @@ describe("Playground cockpit shell", () => {
     });
   });
 
-  it("adds the selected character id to a mode-only character route", async () => {
+  it("keeps a consumed mode-only route without recreating an unsaved entry command", async () => {
     window.history.replaceState({}, "", "/chat?mode=character");
-    messageOptionState.value.selectedCharacter = {
-      id: "manual-character",
-      name: "Manual Character",
-    };
-
+    messageOptionState.value.selectedCharacter = { id: "manual-character", name: "Manual Character" };
     render(<Playground />);
-
-    await waitFor(() => {
-      expect(routerNavigateState.navigate).toHaveBeenCalledWith(
-        {
-          pathname: "/chat",
-          search: "?mode=character&characterId=manual-character",
-          hash: "",
-        },
-        { replace: true },
-      );
-    });
+    await act(async () => { await Promise.resolve(); });
+    expect(routerNavigateState.navigate).not.toHaveBeenCalled();
+    expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
   });
 
-  it("uses a typed fallback when route character hydration returns no character", async () => {
-    window.history.replaceState(
-      {},
-      "",
-      "/chat?mode=character&characterId=missing-character",
-    );
+  it("offers recovery without inventing a character when route loading returns none", async () => {
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=missing-character");
     tldwClientState.getCharacter.mockResolvedValueOnce(null);
-
     render(<Playground />);
-
-    await waitFor(() => {
-      expect(
-        messageOptionState.value.setSelectedCharacter,
-      ).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: "missing-character",
-          name: "Character missing-character",
-          metadata: expect.objectContaining({ selectionMode: "tracked" }),
-        }),
-      );
-    });
+    await screen.findByText("Character missing-character could not be loaded");
+    expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
   });
 
   it("shows recovery when a restored route character can no longer be loaded", async () => {
@@ -1178,26 +1605,17 @@ describe("Playground cockpit shell", () => {
       name: "Ariadne",
     };
     messageOptionState.value.selectedModel = "openai:gpt-4.1-mini";
-    let resolveInitialModels:
-      | ((models: Array<{
-          model: string
-          provider: string
-          is_configured: boolean
-          provider_is_configured: boolean
-        }>) => void)
-      | null = null;
+    let rejectInitialModels: ((reason?: unknown) => void) | null = null;
     const initialModels = new Promise<
       Array<{
-        model: string
-        provider: string
-        is_configured: boolean
-        provider_is_configured: boolean
+        model: string;
+        provider: string;
+        is_configured: boolean;
+        provider_is_configured: boolean;
       }>
-    >(
-      (resolve) => {
-        resolveInitialModels = resolve;
-      },
-    );
+    >((_resolve, reject) => {
+      rejectInitialModels = reject;
+    });
     tldwServerState.fetchChatModels
       .mockImplementationOnce(() => initialModels)
       .mockResolvedValueOnce([
@@ -1217,17 +1635,26 @@ describe("Playground cockpit shell", () => {
       ).getByText("Checking chat model readiness"),
     ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await act(async () =>
+      rejectInitialModels?.(new Error("Fixture catalog read failed")),
+    );
+    const readinessPanel = within(
+      screen.getByTestId("character-chat-readiness-panel"),
+    );
+    await readinessPanel.findByText("Could not check chat models");
+    fireEvent.click(readinessPanel.getByRole("button", { name: "Try again" }));
 
     await waitFor(() => {
       expect(tldwServerState.fetchChatModels).toHaveBeenCalledTimes(2);
     });
     expect(tldwServerState.fetchChatModels).toHaveBeenLastCalledWith({
-      returnEmpty: true,
-      forceRefresh: true,
+      requireFresh: true,
     });
-
-    resolveInitialModels?.([]);
+    await waitFor(() =>
+      expect(
+        screen.queryByTestId("character-chat-readiness-panel"),
+      ).not.toBeInTheDocument(),
+    );
   });
 
   it("surfaces unavailable selected chat models from the model catalog", async () => {
@@ -1236,7 +1663,7 @@ describe("Playground cockpit shell", () => {
       id: "char-1",
       name: "Ariadne",
     };
-    messageOptionState.value.selectedModel = "missing-model";
+    messageOptionState.value.selectedModel = "openai:missing-model";
     tldwServerState.fetchChatModels.mockResolvedValueOnce([
       {
         model: "openai:gpt-4.1-mini",
@@ -1308,7 +1735,7 @@ describe("Playground cockpit shell", () => {
     expect(
       within(
         await screen.findByTestId("character-chat-readiness-panel"),
-      ).getByText("Configure the selected model provider before chatting as Ariadne"),
+      ).getByText("Choose a model and provider before starting character chat"),
     ).toBeInTheDocument();
   });
 
@@ -1374,6 +1801,8 @@ describe("Playground cockpit shell", () => {
       name: "Ariadne",
     };
     const modelSettingsListener = vi.fn();
+    const serverSettingsListener = vi.fn();
+    window.addEventListener("tldw:settings-navigation-request", serverSettingsListener);
     window.addEventListener("tldw:open-model-settings", modelSettingsListener);
 
     try {
@@ -1396,11 +1825,13 @@ describe("Playground cockpit shell", () => {
         screen.getByRole("button", { name: "Open server settings" }),
       );
 
-      const event = modelSettingsListener.mock.calls[0]?.[0] as CustomEvent;
+      expect(modelSettingsListener).not.toHaveBeenCalled();
+      const event = serverSettingsListener.mock.calls[0]?.[0] as CustomEvent;
       expect(event.detail).toMatchObject({
-        settingsScope: null,
+        destination: "/settings/tldw",
       });
     } finally {
+      window.removeEventListener("tldw:settings-navigation-request", serverSettingsListener);
       window.removeEventListener(
         "tldw:open-model-settings",
         modelSettingsListener,
@@ -1562,7 +1993,7 @@ describe("Playground cockpit shell", () => {
     );
 
     const contextCollapseTooltips = await screen.findAllByRole("tooltip", {
-      name: "Collapse context sidechannel",
+      name: "Hide context",
     });
     const tooltipIds = contextCollapseTooltips.map((tooltip) => tooltip.id);
 
@@ -1621,13 +2052,13 @@ describe("Playground cockpit shell", () => {
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-left-rail")).getByRole(
         "button",
-        { name: /collapse context sidechannel/i },
+        { name: /hide context/i },
       ),
     );
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-right-rail")).getByRole(
         "button",
-        { name: /collapse runtime sidechannel/i },
+        { name: /hide chat settings/i },
       ),
     );
 
@@ -1693,7 +2124,7 @@ describe("Playground cockpit shell", () => {
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-left-rail")).getByRole(
         "button",
-        { name: /collapse context sidechannel/i },
+        { name: /hide context/i },
       ),
     );
 
@@ -1702,7 +2133,7 @@ describe("Playground cockpit shell", () => {
     });
     expect(
       screen.getByTestId("playground-cockpit-mode-summary"),
-    ).toHaveTextContent("Context rail hidden. Runtime rail visible.");
+    ).toHaveTextContent("Context hidden. Chat settings visible.");
     expect(
       screen.getByTestId("playground-cockpit-right-rail"),
     ).toBeInTheDocument();
@@ -1710,13 +2141,13 @@ describe("Playground cockpit shell", () => {
       false,
     );
     expect(
-      screen.getByRole("button", { name: /restore context sidechannel/i }),
+      screen.getByRole("button", { name: /show context/i }),
     ).toBeInTheDocument();
 
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-right-rail")).getByRole(
         "button",
-        { name: /collapse runtime sidechannel/i },
+        { name: /hide chat settings/i },
       ),
     );
 
@@ -1733,10 +2164,10 @@ describe("Playground cockpit shell", () => {
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
 
     fireEvent.click(
-      screen.getByRole("button", { name: /restore context sidechannel/i }),
+      screen.getByRole("button", { name: /show context/i }),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: /restore runtime sidechannel/i }),
+      screen.getByRole("button", { name: /show chat settings/i }),
     );
 
     await waitFor(() => {
@@ -1762,10 +2193,10 @@ describe("Playground cockpit shell", () => {
       "playground-cockpit-left-rail",
     );
     const collapseContextButton = within(contextRail).getByRole("button", {
-      name: /collapse context sidechannel/i,
+      name: /hide context/i,
     });
     const collapseContextTooltip = screen.getByRole("tooltip", {
-      name: "Collapse context sidechannel",
+      name: "Hide context",
     });
     expect(collapseContextButton).toHaveAttribute(
       "aria-describedby",
@@ -1778,10 +2209,10 @@ describe("Playground cockpit shell", () => {
       expect(screen.queryByTestId("playground-cockpit-left-rail")).toBeNull();
     });
     const restoreContextButton = screen.getByRole("button", {
-      name: /restore context sidechannel/i,
+      name: /show context/i,
     });
     const restoreContextTooltip = screen.getByRole("tooltip", {
-      name: "Restore context sidechannel",
+      name: "Show context",
     });
     expect(restoreContextButton).toHaveAttribute(
       "aria-describedby",
@@ -1813,11 +2244,11 @@ describe("Playground cockpit shell", () => {
     const collapseRuntimeButton = within(runtimeRailAfterRestore).getByRole(
       "button",
       {
-        name: /collapse runtime sidechannel/i,
+        name: /hide chat settings/i,
       },
     );
     const collapseRuntimeTooltip = screen.getByRole("tooltip", {
-      name: "Collapse runtime sidechannel",
+      name: "Hide chat settings",
     });
     expect(collapseRuntimeButton).toHaveAttribute(
       "aria-describedby",
@@ -1830,10 +2261,10 @@ describe("Playground cockpit shell", () => {
       expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
     });
     const restoreRuntimeButton = screen.getByRole("button", {
-      name: /restore runtime sidechannel/i,
+      name: /show chat settings/i,
     });
     const restoreRuntimeTooltip = screen.getByRole("tooltip", {
-      name: "Restore runtime sidechannel",
+      name: "Show chat settings",
     });
     expect(restoreRuntimeButton).toHaveAttribute(
       "aria-describedby",

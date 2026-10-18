@@ -516,13 +516,13 @@
     "message": "Status Filters"
   },
   "worldBooks_basics_filtersContent": {
-    "message": "Filter by enabled/disabled state and attachment status before editing or exporting."
+    "message": "Filter by status and attachment before editing or exporting. On smaller screens, open Filters to show these controls."
   },
   "worldBooks_basics_tableTitle": {
     "message": "World Book Library"
   },
   "worldBooks_basics_tableContent": {
-    "message": "Select a row to manage entries, attachments, and advanced actions for each world book."
+    "message": "Select a saved world book to manage entries and attachments. If the library is empty, create or import your first world book."
   },
   "worldBooks_basics_actionsTitle": {
     "message": "Create and Import"
@@ -655,5 +655,14 @@
   },
   "monitoring_basics_historyContent": {
     "message": "When alerts trigger, they appear here. You can assign alerts to yourself, snooze them, or escalate to critical."
+  },
+  "playground_basics_customizeTitle": {
+    "message": "Customize Responses"
+  },
+  "playground_basics_customizeContent": {
+    "message": "A system prompt guides how the assistant replies. Use chat customization controls to choose one or adjust the response; create reusable prompts in the Prompts workspace."
+  },
+  "playground_basics_newChatContentV2": {
+    "message": "Start a new conversation from the sidebar or with the New chat shortcut listed in keyboard help. Saved conversations can be reopened with Find conversations. A Temporary conversation asks before you discard it."
   }
 }

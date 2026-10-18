@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest"
 
 import {
   beginServerChatWrite,
+  recordServerChatHistoryEvidence,
   getServerChatSaveStatus,
   resetServerChatSaveStatus,
   trackServerChatWrite
@@ -62,6 +63,35 @@ describe("server chat save status", () => {
     expect(getServerChatSaveStatus("chat-1")).toBe("saved")
   })
 
+  it.each(["unknown", "saved", "failed"] as const)(
+    "a definite unchanged write preserves the previous %s outcome and original error",
+    async (previous) => {
+      if (previous !== "unknown") beginServerChatWrite("chat-1")(previous)
+      const refusal = new Error("input was not admitted")
+      await expect(
+        trackServerChatWrite("chat-1", () => Promise.reject(refusal), {
+          isUnchangedError: (error) => error === refusal
+        })
+      ).rejects.toBe(refusal)
+      expect(getServerChatSaveStatus("chat-1")).toBe(previous)
+    }
+  )
+
+  it.each(["isAcknowledgedError", "isUnchangedError"] as const)(
+    "a failed %s classifier ends saving as failed and preserves the original write error",
+    async (classifier) => {
+      const original = new Error("write failed")
+      await expect(
+        trackServerChatWrite("chat-1", () => Promise.reject(original), {
+          [classifier]: () => {
+            throw new Error("classification failed")
+          }
+        })
+      ).rejects.toBe(original)
+      expect(getServerChatSaveStatus("chat-1")).toBe("failed")
+    }
+  )
+
   it("stays saving until every overlapping write settles", () => {
     const endFirst = beginServerChatWrite("chat-1")
     const endSecond = beginServerChatWrite("chat-1")
@@ -107,5 +137,34 @@ describe("server chat save status", () => {
     expect(getServerChatSaveStatus("42")).toBe("failed")
     expect(getServerChatSaveStatus("chat-2")).toBe("saved")
     expect(getServerChatSaveStatus("chat-3")).toBe("unknown")
+  })
+})
+
+describe('owner-verified history evidence', () => {
+  beforeEach(() => resetServerChatSaveStatus())
+  it('cannot retain saved confidence after its original owner lease retires', () => {
+    let current = true
+    recordServerChatHistoryEvidence('chat', 'confirmed', () => current)
+    expect(getServerChatSaveStatus('chat')).toBe('saved')
+    current = false
+    expect(getServerChatSaveStatus('chat')).toBe('unconfirmed')
+  })
+  it('keeps unresolved journal evidence above an earlier write acknowledgement', () => {
+    beginServerChatWrite('chat')('saved')
+    recordServerChatHistoryEvidence('chat', 'unconfirmed', () => true)
+    expect(getServerChatSaveStatus('chat')).toBe('unconfirmed')
+  })
+  it('keeps a live write pending until its owned journal is reconciled', () => {
+    const finish = beginServerChatWrite('chat')
+    recordServerChatHistoryEvidence('chat', 'unconfirmed', () => true)
+    expect(getServerChatSaveStatus('chat')).toBe('saving')
+    finish('saved')
+    expect(getServerChatSaveStatus('chat')).toBe('unconfirmed')
+    recordServerChatHistoryEvidence('chat', 'confirmed', () => true)
+    expect(getServerChatSaveStatus('chat')).toBe('saved')
+  })
+  it('refuses publication by a retired reader', () => {
+    recordServerChatHistoryEvidence('chat', 'confirmed', () => false)
+    expect(getServerChatSaveStatus('chat')).toBe('unknown')
   })
 })

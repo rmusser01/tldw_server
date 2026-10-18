@@ -22,6 +22,7 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
   onOpenChange,
   children,
 }) => {
+  const panelId = React.useId()
   const [open, setOpen] = React.useState(() => {
     if (storageKey) {
       try {
@@ -55,6 +56,7 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
           onClick={toggle}
           className="flex min-w-0 flex-1 items-center justify-between py-1.5 text-[11px] uppercase tracking-[0.08em] text-text-muted hover:text-text transition-colors"
           aria-expanded={open}
+          aria-controls={panelId}
           data-testid={testId ? `${testId}-toggle` : undefined}
         >
           <span className="flex min-w-0 items-center gap-1.5">
@@ -76,7 +78,7 @@ const CollapsibleSection: React.FC<CollapsibleSectionProps> = ({
         </button>
         {titleAccessory ? <div className="flex items-center">{titleAccessory}</div> : null}
       </div>
-      {open && <div className="space-y-2 pb-2">{children}</div>}
+      <div id={panelId} hidden={!open} className="space-y-2 pb-2">{open && children}</div>
     </div>
   )
 }

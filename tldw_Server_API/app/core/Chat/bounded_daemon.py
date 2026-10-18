@@ -11,7 +11,7 @@ import threading
 from collections.abc import Awaitable, Callable, Iterator
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeoutError
-from typing import Any
+from typing import Any, TypeVar
 
 from tldw_Server_API.app.core.Usage.llm_call_context import (
     capture_llm_call_state,
@@ -41,12 +41,15 @@ async def _drain_owned_task(task: asyncio.Future[Any]) -> tuple[bool, Any]:
     return True, task.result()
 
 
+_WorkerResult = TypeVar("_WorkerResult")
+
+
 async def await_owned_worker(
-    awaitable: Awaitable[Any],
+    awaitable: Awaitable[_WorkerResult],
     *,
     on_cancel_success: Callable[[], Awaitable[None] | None] | None = None,
-    on_cancel_result: Callable[[Any], Awaitable[None] | None] | None = None,
-) -> Any:
+    on_cancel_result: Callable[[_WorkerResult], Awaitable[None] | None] | None = None,
+) -> _WorkerResult:
     """Keep owned work alive through caller cancellation, then re-raise it.
 
     This is for work whose surrounding async scope owns resources used by a

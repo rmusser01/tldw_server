@@ -13,6 +13,7 @@ WORKDIR /app/apps
 # invalidate this layer.
 COPY apps/package.json /app/apps/package.json
 COPY apps/bun.lock /app/apps/bun.lock
+COPY apps/patches /app/apps/patches
 COPY apps/scripts /app/apps/scripts
 COPY apps/extension/package.json /app/apps/extension/package.json
 COPY apps/extension/scripts/wxt-prepare.mjs /app/apps/extension/scripts/wxt-prepare.mjs
@@ -20,6 +21,8 @@ COPY apps/packages/api-types/package.json /app/apps/packages/api-types/package.j
 COPY apps/packages/voice-assistant-sdk/package.json /app/apps/packages/voice-assistant-sdk/package.json
 COPY apps/tldw-frontend /app/apps/tldw-frontend
 COPY apps/packages/ui /app/apps/packages/ui
+COPY apps/packages/api-types/index.d.ts /app/apps/packages/api-types/index.d.ts
+COPY apps/packages/api-types/paths.d.ts /app/apps/packages/api-types/paths.d.ts
 
 # Keep the root workspace graph aligned with bun.lock while skipping extension prepare.
 ENV SKIP_WXT_PREPARE=1

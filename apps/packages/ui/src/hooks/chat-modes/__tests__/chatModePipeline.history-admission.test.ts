@@ -361,17 +361,20 @@ describe("replies that end early after admission (CS-04)", () => {
     expect(reply.generationInfo.stopped).toBeUndefined()
   })
 
-  it("records a reply that finished but could not be saved as complete", async () => {
+  it.each([false, true])("distinguishes a lost save receipt from acknowledged cleanup failure (acknowledged=%s)", async acknowledged => {
     const turn = makeTurn()
     const save = vi.fn(async () => {
-      throw new Error("request_config_scope_changed")
+      if (acknowledged) turn.resultId = "assistant-new"
+      throw new Error("Save response or cleanup lost")
     })
-    await invoke(turn, { saveMessageOnSuccess: save })
-    expect(turn.outcome).toBe("complete")
+    const result = await invoke(turn, { saveMessageOnSuccess: save })
+    expect(result.status).toBe(acknowledged ? "submitted" : "failed")
+    expect(turn.outcome).toBe(acknowledged ? "complete" : undefined)
     expect(turn.recover).toHaveBeenCalledWith(
-      expect.objectContaining({ content: "answer", outcome: "complete" }),
+      expect.objectContaining({ content: "answer", outcome: acknowledged ? "complete" : undefined }),
       expect.anything()
     )
+    expect(save).toHaveBeenCalledOnce()
   })
 
   it("leaves a failure with nothing to show, or a changed account, in review", async () => {

@@ -25,13 +25,13 @@ export function WebArticleCaptureModal({
       <p className="mb-3">
         {t(
           "sources.captureDisclosure",
-          "Save creates an additional capture Note and a new source containing the complete extracted article snapshot. Original retrieved evidence stays intact."
+          "Save creates an additional capture Note and a new source containing the complete extracted article snapshot. Original retrieved evidence stays intact.",
         )}
       </p>
       <p className="mb-3 text-sm">
         {t(
           "sources.capturePublicOnly",
-          "Public readable text only. Website sign-ins, browser cookies, and private-page access are not used."
+          "Public readable text only. Website sign-ins, browser cookies, and private-page access are not used.",
         )}
       </p>
       {text != null && (
@@ -72,14 +72,19 @@ export function WebArticleCaptureModal({
           <p className="my-2 text-sm">
             {t(
               "sources.captureCompleteText",
-              "The complete text is saved; it is never silently shortened."
+              "The complete text is saved; it is never silently shortened.",
             )}
           </p>
         </>
       )}
       {capture.error && (
         <p role="alert" className="my-3 text-error">
-          {capture.error}
+          {capture.error === "browser_transport_unavailable"
+            ? t(
+                "sources.captureBrowserUnavailable",
+                "Safe browser capture is unavailable for this page. Try another public URL, or use the Web Clipper or import readable content you can provide.",
+              )
+            : capture.error}
         </p>
       )}
       {capture.notice && (
@@ -114,5 +119,5 @@ export function WebArticleCaptureModal({
         )}
       </div>
     </Modal>
-  )
+  );
 }

@@ -29,7 +29,7 @@ describe("ComposerToolbar layout guard", () => {
       'data-testid="composer-casual-runtime-context-chip"'
     )
     expect(source).toContain("playgroundComposerAdvancedControlsOpen")
-    expect(source).toContain("playgroundComposerCasualAdvancedControlsOpen")
+    expect(fs.readFileSync(path.resolve(__dirname, "../hooks/useCasualComposerDisclosure.ts"), "utf8")).toContain("playgroundComposerCasualAdvancedControlsOpen")
     expect(source).toContain(
       "PLAYGROUND_APPEND_FORMATTING_GUIDE_PROMPT_STORAGE_KEY"
     )

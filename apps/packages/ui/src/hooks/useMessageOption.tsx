@@ -1,32 +1,33 @@
-import React from "react";
-import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection";
-import { useQueryClient } from "@tanstack/react-query";
-import { useStoreMessageOption } from "~/store/option";
-import { useShallow } from "zustand/react/shallow";
-import { useTranslation } from "react-i18next";
-import { usePageAssist } from "@/context";
-import { useWebUI } from "@/store/webui";
-import { useStorage } from "@plasmohq/storage/hook";
-import { useStoreChatModelSettings } from "@/store/model";
-import { formatFileSize } from "@/utils/format";
-import { useAntdNotification } from "./useAntdNotification";
-import { useChatBaseState } from "@/hooks/chat/useChatBaseState";
-import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat";
-import { useServerChatHistoryId } from "@/hooks/chat/useServerChatHistoryId";
-import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror";
-import { useServerChatLoader } from "@/hooks/chat/useServerChatLoader";
-import { useClearChat } from "@/hooks/chat/useClearChat";
-import { useCompareMode } from "@/hooks/chat/useCompareMode";
-import { useChatActions } from "@/hooks/chat/useChatActions";
-import { useSelectedModel } from "@/hooks/chat/useSelectedModel";
-import { usePromptPersistence } from "@/hooks/chat/usePromptPersistence";
-import { useRagSettings } from "@/hooks/chat/useRagSettings";
-import { useFileUpload } from "@/hooks/chat/useFileUpload";
-import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
-import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
-import { useSelectedAssistant } from "@/hooks/useSelectedAssistant";
-import type { AssistantSelection } from "@/types/assistant-selection";
-import type { Character } from "@/types/character";
+import React from 'react';
+import { useHistorySelectionContext } from '@/hooks/chat/useHistorySelection';
+import { useQueryClient } from '@tanstack/react-query';
+import { invalidateServerChatHistory as refreshServerChatHistory } from '@/services/query-client';
+import { useStoreMessageOption } from '~/store/option';
+import { useShallow } from 'zustand/react/shallow';
+import { useTranslation } from 'react-i18next';
+import { usePageAssist } from '@/context';
+import { useWebUI } from '@/store/webui';
+import { useStorage } from '@plasmohq/storage/hook';
+import { useStoreChatModelSettings } from '@/store/model';
+import { formatFileSize } from '@/utils/format';
+import { useAntdNotification } from './useAntdNotification';
+import { useChatBaseState } from '@/hooks/chat/useChatBaseState';
+import { useSelectServerChat } from '@/hooks/chat/useSelectServerChat';
+import { useServerChatHistoryId } from '@/hooks/chat/useServerChatHistoryId';
+import { serverChatMirrorOwnerKey } from '@/db/dexie/server-chat-mirror';
+import { useServerChatLoader } from '@/hooks/chat/useServerChatLoader';
+import { useClearChat } from '@/hooks/chat/useClearChat';
+import { useCompareMode } from '@/hooks/chat/useCompareMode';
+import { useChatActions } from '@/hooks/chat/useChatActions';
+import { useSelectedModel } from '@/hooks/chat/useSelectedModel';
+import { usePromptPersistence } from '@/hooks/chat/usePromptPersistence';
+import { useRagSettings } from '@/hooks/chat/useRagSettings';
+import { useFileUpload } from '@/hooks/chat/useFileUpload';
+import { useChatSettingsRecord } from '@/hooks/chat/useChatSettingsRecord';
+import { resolveEffectiveAssistantState } from '@/hooks/chat/effective-assistant-state';
+import { useSelectedAssistant } from '@/hooks/useSelectedAssistant';
+import type { AssistantSelection } from '@/types/assistant-selection';
+import type { Character } from '@/types/character';
 import {
   assistantSelectionToCharacter,
   characterToAssistantSelection,
@@ -85,8 +86,11 @@ export const useMessageOption = (
 ) => {
   const historySelection = useHistorySelectionContext();
   // Controllers come from Context (for aborting streaming requests)
-  const { controller: abortController, setController: setAbortController } =
-    usePageAssist();
+  const {
+    controller: abortController,
+    setController: setAbortController,
+    getController: getAbortController,
+  } = usePageAssist();
 
   const {
     messages,
@@ -335,8 +339,14 @@ export const useMessageOption = (
   } = useCompareMode({ historyId, forceEnabled: opts.forceCompareEnabled });
 
   const currentChatModelSettings = useStoreChatModelSettings();
-  const { selectedModel, setSelectedModel, selectedModelIsLoading } =
-    useSelectedModel();
+  const {
+    selectedModel,
+    setSelectedModel,
+    beginSelectedModelSave,
+    retrySelectedModelSave,
+    selectedModelSaveFailed,
+    selectedModelIsLoading
+  } = useSelectedModel()
   const [selectedAssistant, setSelectedAssistant, assistantSelectionMeta] = useSelectedAssistant(null);
   const selectedCharacter = React.useMemo(
     () => assistantSelectionToCharacter<Character>(selectedAssistant),
@@ -383,9 +393,10 @@ export const useMessageOption = (
     [maxContextFileSizeBytes],
   );
   const queryClient = useQueryClient();
-  const invalidateServerChatHistory = React.useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] });
-  }, [queryClient]);
+  const invalidateServerChatHistory = React.useCallback(
+    (isCurrent?: () => boolean) => refreshServerChatHistory(queryClient, isCurrent),
+    [queryClient]
+  );
   const notification = useAntdNotification();
 
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
@@ -574,6 +585,7 @@ export const useMessageOption = (
     void ensureServerChatHistoryId(serverChatId, serverChatTitle || undefined, controller.signal, {
       ownerKey: serverChatMirrorOwnerKey({ requestScope: current.owner.request_scope }),
       validateLease: current.owner.validate_lease,
+      scope: current.owner.scope,
     }).catch(error => {
       if (!controller.signal.aborted) console.error("Failed to bind selected server chat mirror", error);
     });
@@ -583,8 +595,6 @@ export const useMessageOption = (
   usePromptPersistence({
     selectedSystemPrompt,
     setSelectedSystemPrompt,
-    selectedQuickPrompt,
-    setSelectedQuickPrompt,
   });
 
   useRagSettings({
@@ -635,6 +645,7 @@ export const useMessageOption = (
     notification,
     abortController,
     setAbortController,
+    getAbortController,
     messages,
     setMessages,
     history,
@@ -747,6 +758,9 @@ export const useMessageOption = (
     selectedModel,
     selectedModelIsLoading,
     setSelectedModel,
+    beginSelectedModelSave,
+    retrySelectedModelSave,
+    selectedModelSaveFailed,
     chatMode,
     setChatMode,
     isEmbedding,

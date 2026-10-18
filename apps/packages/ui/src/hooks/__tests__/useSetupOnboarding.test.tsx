@@ -5,6 +5,8 @@ import type { FirstRunState } from "@/types/setup-onboarding"
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    getConfig: vi.fn().mockResolvedValue({ serverUrl: "https://declared-setup.test", authMode: "single-user", apiKey: "declared-setup-key" }),
+    initialize: vi.fn().mockResolvedValue(undefined),
     getFirstRunState: vi.fn().mockResolvedValue({
       status: "not_started",
       completed_steps: [],

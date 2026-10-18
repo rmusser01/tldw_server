@@ -215,6 +215,20 @@ describe('Notes editor save state machine', () => {
     document.body.innerHTML = ''
   })
 
+  it('characterizes first-save identity assignment resetting Split to Edit', async () => {
+    const view = renderEditor()
+    act(() => {
+      view.result.current.setTitle('New note')
+      view.result.current.setContentDirty('New body')
+      view.result.current.setEditorMode('split')
+    })
+    expect(view.result.current.selectedId).toBeNull()
+    expect(view.result.current.editorMode).toBe('split')
+    await act(async () => { await view.result.current.saveNote({ showSuccessMessage: false }) })
+    expect(view.result.current.selectedId).not.toBeNull()
+    expect(view.result.current.editorMode).toBe('edit')
+  })
+
   it('says "saved" only after the server acknowledges the save', async () => {
     const view = renderEditor()
     await openNote(view)

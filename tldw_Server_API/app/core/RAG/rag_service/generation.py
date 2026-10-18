@@ -11,7 +11,7 @@ import json
 import re
 import time
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import TYPE_CHECKING, Any, Optional, Protocol, Union, cast
@@ -93,7 +93,7 @@ class GenerationStrategy(Protocol):
 class GenerationConfig:
     """Configuration for response generation."""
     provider: str = "openai"
-    model: str = "gpt-4"
+    model: str | None = "gpt-4"
     temperature: float = 0.7
     max_tokens: int = 1024
     streaming: bool = False
@@ -114,7 +114,7 @@ class GenerationResult:
     tokens_used: int
     generation_time: float
     provider: str
-    model: str
+    model: str | None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -415,7 +415,7 @@ class BaseGenerator(ABC):
         context: Any,
         query: str,
         **kwargs
-    ) -> AsyncIterator[str]:
+    ) -> AsyncGenerator[str, None]:
         """Generate a streaming response."""
         # Default implementation: yield complete response
         result = await self.generate(context, query, **kwargs)
@@ -517,6 +517,7 @@ class LLMGenerator(BaseGenerator):
             "stream": streaming,
         }
         if credential_runtime is not None:
+            stream_credential_runtime = credential_runtime
             credential_handle = await credential_runtime.resolve(provider, model=model)
             call_kwargs.update(
                 api_key=credential_handle.api_key,
@@ -549,7 +550,7 @@ class LLMGenerator(BaseGenerator):
                                 _extract_stream_text(chunk)
                             )
                             if output_emitted:
-                                await credential_runtime.mark_used(credential_handle)
+                                await stream_credential_runtime.mark_used(credential_handle)
                         yield chunk
                 else:
                     for chunk in response:
@@ -558,14 +559,14 @@ class LLMGenerator(BaseGenerator):
                                 _extract_stream_text(chunk)
                             )
                             if output_emitted:
-                                await credential_runtime.mark_used(credential_handle)
+                                await stream_credential_runtime.mark_used(credential_handle)
                         yield chunk
                         await asyncio.sleep(0)
                 completed = True
             finally:
                 try:
                     if completed and not output_emitted:
-                        await credential_runtime.mark_used(credential_handle)
+                        await stream_credential_runtime.mark_used(credential_handle)
                 finally:
                     await close_provider_stream(response)
 
@@ -580,7 +581,7 @@ class StreamingGenerator(LLMGenerator):
         context: Any,
         query: str,
         **kwargs
-    ) -> AsyncIterator[str]:
+    ) -> AsyncGenerator[str, None]:
         """Generate a streaming response."""
         # Enable streaming in config
         original_streaming = self.config.streaming
@@ -855,9 +856,7 @@ async def generate_streaming_response(context: Any, **kwargs) -> Any:
     if claims_engine_type is not None:
         try:
 
-            def _analyze(api_name: str, input_data: Any, custom_prompt_arg: Optional[str] = None,
-                         api_key: Optional[str] = None, system_message: Optional[str] = None,
-                         temp: Optional[float] = None, **k):
+            def _analyze(*_args: object, **_kwargs: object) -> str:
                 # For streaming overlay, avoid heavy LLM calls; use heuristic path via empty analyze
                 return "{\"claims\": []}"
 

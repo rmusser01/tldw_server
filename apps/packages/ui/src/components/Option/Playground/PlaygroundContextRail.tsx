@@ -119,7 +119,7 @@ const sourceStateClass = (state: PlaygroundContextSourceState = "active") => {
   if (state === "degraded") return cockpitRailToneClass("warning");
   if (state === "disabled") return cockpitRailToneClass("muted");
   if (state === "available") return cockpitRailToneClass("info");
-  return cockpitRailToneClass("success");
+  return cockpitRailToneClass("muted");
 };
 
 const sessionStatusClass = (
@@ -167,17 +167,20 @@ export const PlaygroundContextRail = ({
       ?.querySelector<HTMLElement>(PROMPT_SELECT_TRIGGER_SELECTOR)
       ?.focus();
   }, [onClearPrompt]);
-  const activeSourceCount = contextSources.filter(
+  const selectedSourceCount = contextSources.filter(
     (source) => source.state !== "disabled",
   ).length;
   const effectivePromptSummary = promptSummary || {
     state: "none" as const,
     label: t("cockpit.noPromptSelected", "No prompt selected"),
-    detail: t("cockpit.noPromptContext", "No system prompt will be added."),
+    detail: t(
+      "cockpit.noAdditionalSystemPrompt",
+      "No additional system prompt selected.",
+    ),
   };
-  const promptActive = effectivePromptSummary.state !== "none";
+  const promptSelected = effectivePromptSummary.state !== "none";
   const showActionablePromptEmptyState =
-    !promptActive && Boolean(compositionPreviewSummary);
+    !promptSelected && Boolean(compositionPreviewSummary);
   const promptManagementLabel = showActionablePromptEmptyState
     ? t("cockpit.promptReady", "Ready to add prompt")
     : effectivePromptSummary.label;
@@ -197,10 +200,10 @@ export const PlaygroundContextRail = ({
           ? t("cockpit.sessionReady", READY_STATE_LABEL)
           : t("cockpit.sessionIdle", "Idle"));
   const sourceCountLabel =
-    activeSourceCount === 1
-      ? t("cockpit.activeSourceCountOne", "1 active source")
-      : t("cockpit.activeSourceCountMany", "{{count}} active sources", {
-          count: activeSourceCount,
+    selectedSourceCount === 1
+      ? t("cockpit.selectedSourceCountOne", "1 selected source")
+      : t("cockpit.selectedSourceCountMany", "{{count}} selected sources", {
+          count: selectedSourceCount,
         });
   const countLabels = (
     [
@@ -305,15 +308,15 @@ export const PlaygroundContextRail = ({
           <div className="min-w-0">
             <p className={cockpitRailStyles.value}>
               {hasContext
-                ? t("cockpit.contextActive", "Context active")
+                ? t("cockpit.contextSelected", "Context selected")
                 : t("cockpit.noExtraContext", "No extra context")}
             </p>
             <p className={cockpitRailStyles.muted}>
               {hasContext
                 ? sourceCountLabel
                 : t(
-                    "cockpit.noContextDetail",
-                    "Nothing extra will be added to the next reply.",
+                    "cockpit.noAdditionalContextSelectedDetail",
+                    "No additional context sources selected.",
                   )}
             </p>
           </div>
@@ -323,7 +326,7 @@ export const PlaygroundContextRail = ({
             )}`}
           >
             {hasContext
-              ? t("cockpit.armed", "Armed")
+              ? t("cockpit.selected", "Selected")
               : t("cockpit.idle", "Idle")}
           </span>
         </div>
@@ -380,7 +383,7 @@ export const PlaygroundContextRail = ({
                               ? t("cockpit.degraded", DEGRADED_STATE_LABEL)
                               : source.state === "available"
                                 ? t("cockpit.available", "Available")
-                                : t("cockpit.active", "Active")}
+                                : t("cockpit.selected", "Selected")}
                         </span>
                       </div>
                       <p className="mt-1 truncate text-sm font-medium text-text">
@@ -448,17 +451,17 @@ export const PlaygroundContextRail = ({
           </div>
           <span
             className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sourceStateClass(
-              promptActive ? "active" : "disabled",
+              promptSelected ? "active" : "disabled",
             )}`}
           >
-            {promptActive
-              ? t("cockpit.active", "Active")
+            {promptSelected
+              ? t("cockpit.selected", "Selected")
               : t("cockpit.idle", "Idle")}
           </span>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
           {promptSelectControl}
-          {promptActive && onClearPrompt ? (
+          {promptSelected && onClearPrompt ? (
             <button
               type="button"
               className={railActionClass}

@@ -34,11 +34,11 @@ The queue uses only the built-in `GITHUB_TOKEN`. It never enables auto-merge, ne
 ## Consequences
 
 - A queued PR is tested once per position at the front instead of once per merge that happens anywhere.
-- The seven required statuses are produced by `workflow_dispatch` on the rebased head, because a `GITHUB_TOKEN` rebase starts no workflow runs. Five gates take `dev`'s tip as `base_sha`; without it change detection would compare only the last commit.
+- After a rebase the queue approves the six held `pull_request` gate runs GitHub creates for the new head and dispatches only the license gate on `dev`; a dispatched gate's check would not count (amendment below).
 - Non-required workflows are not re-run on the rebased head. They ran on the author's last pushed head, and `dev`'s push workflows run after the merge.
 - The queue cannot rebase a PR across a change to workflow files on `dev`: an Actions token may not write under `.github/workflows`. Such a PR is removed from the line with hand-rebase steps. This is the price of using no personal access token or App key.
 - Review threads do not affect the queue, because `dev`'s rules do not require conversations to be resolved.
-- `frontend-required.yml` keeps its guard against a hand-started run publishing the protected check name, narrowed to exempt dispatches made by `github-actions[bot]`.
+- `frontend-required.yml` keeps its guard: no dispatch publishes the protected check name.
 - A required gate whose change-detection job failed now reports red on every event instead of being skipped. This is the one behaviour change that applies with the queue off.
 - Auto-merge must be enabled in repository settings before the queue can be switched on. Agents follow mode-dependent merge rules in `AGENTS.md` and `CLAUDE.md`.
 - Fork PRs and PRs opened by bots or apps are never queued.
@@ -47,3 +47,13 @@ The queue uses only the built-in `GITHUB_TOKEN`. It never enables auto-merge, ne
 
 - Run the `dry` comparison and the one-PR trial in the spec's rollout section; the trial settles the platform questions that cannot be checked without a real run on this repository.
 - Set this ADR to Accepted when `MERGE_QUEUE=on` is in effect for all traffic.
+
+## Amendment (2026-10-14): approve held runs, never dispatch a gate
+
+The queue as first merged (#3188) could not land a PR: a `workflow_dispatch` run's check never enters the PR's status
+rollup (probe #3220). Probe #3221 showed that a `GITHUB_TOKEN` rebase makes GitHub hold a `pull_request` run for every
+workflow, and that approving a gate's held run makes its check count. The queue now approves the six gate runs,
+re-runs a failed gate in place, deletes the other held runs, and wakes itself through a `security-required.yml` kick
+on `dev`. Spec: `Docs/superpowers/specs/2026-10-11-merge-queue-approve-held-runs-design.md` (TASK-13639). Owner decisions
+D1-D3 (2026-10-14): delete the non-gate held runs; remove the `frontend-required` bot exemption; host the kick in
+`security-required.yml`.

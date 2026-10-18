@@ -45,9 +45,7 @@ _BROWSER_TRANSPORT_CAPABILITY_KEYS = frozenset(
         "reason",
     }
 )
-_BROWSER_TRANSPORT_CONFIGURED_MODES = frozenset(
-    {"auto", "disabled", "url_guarded", "attested_proxy"}
-)
+_BROWSER_TRANSPORT_CONFIGURED_MODES = frozenset({"auto", "disabled", "url_guarded", "attested_proxy"})
 _BROWSER_TRANSPORT_DENIAL_REASONS = frozenset(
     {
         "browser_transport_disabled",
@@ -308,7 +306,6 @@ class ArticlePlan:
             headers=headers,
             cookies={},
             llm_settings=None,
-            backend="playwright" if self.backend == "playwright" else "httpx",
             browser=replace(self.browser, custom_cookies=(), user_agent=headers.get("User-Agent", "")),
         )
 

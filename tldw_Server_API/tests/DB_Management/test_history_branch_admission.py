@@ -269,3 +269,156 @@ def test_server_completion_consumed_selection_keeps_its_code(history_db):
     server_turn(db, cid, tip, history_branch=False)
     with pytest.raises(HistorySelectionError, match="selection_already_consumed"):
         server_turn(db, cid, tip, history_branch=False)
+
+
+@pytest.mark.parametrize("writer", ["replace", "merge"])
+def test_metadata_undo_cannot_restore_the_original_opaque_revision(history_db, writer):
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
+
+    db, cid = history_db
+    admit(db, cid, selected(db, cid), "metadata-target")
+    if db.backend_type == BackendType.SQLITE:
+        # A declared fixed SQL clock qualifies the actual same-second writer window.
+        db.get_connection().create_function("current_timestamp", 0, lambda: "2026-10-10 12:00:00")
+    try:
+        with db.transaction() as conn:
+            assert db.add_message_metadata("metadata-target", extra={"sender_role": "user"}, conn=conn)
+            before = snapshot_to_wire(db.get_conversation_history_snapshot(cid, conn=conn, **OWNER))
+            original = next(row for row in before["nodes"] if row["id"] == "metadata-target")
+            stamp = db.get_message_metadata("metadata-target", conn=conn)["last_modified"]
+            if writer == "replace":
+                assert db.add_message_metadata(
+                    "metadata-target", extra={"sender_role": "user", "changed": True}, conn=conn
+                )
+                assert db.add_message_metadata("metadata-target", extra={"sender_role": "user"}, conn=conn)
+            else:
+                assert db.set_message_metadata_extra(
+                    "metadata-target", {"sender_role": "user", "changed": True}, merge=False, conn=conn
+                )
+                assert db.set_message_metadata_extra("metadata-target", {"sender_role": "user"}, merge=False, conn=conn)
+            after = snapshot_to_wire(db.get_conversation_history_snapshot(cid, conn=conn, **OWNER))
+            current = next(row for row in after["nodes"] if row["id"] == "metadata-target")
+            assert db.get_message_metadata("metadata-target", conn=conn)["last_modified"] == stamp
+            assert current["revision"] != original["revision"]
+    finally:
+        if db.backend_type == BackendType.SQLITE:
+            db.get_connection().create_function("current_timestamp", 0, None)
+
+
+@pytest.mark.parametrize("writer", ["replace", "merge"])
+def test_initial_metadata_and_true_noop_preserve_the_accepted_input_version(history_db, writer):
+    db, cid = history_db
+    accepted = admit(db, cid, selected(db, cid), "initial-metadata")
+    if writer == "replace":
+        assert db.add_message_metadata("initial-metadata", extra={"sender_role": "user"})
+        assert db.add_message_metadata("initial-metadata", extra={"sender_role": "user"})
+    else:
+        assert db.set_message_metadata_extra("initial-metadata", {"sender_role": "user"}, merge=False)
+        assert db.set_message_metadata_extra("initial-metadata", {"sender_role": "user"}, merge=False)
+    assert str(db.get_message_by_id("initial-metadata")["version"]) == accepted["input_message_revision"]
+
+
+@pytest.mark.parametrize("operation", ["client", "server"])
+@pytest.mark.parametrize("mutation", [None, "content", "deleted", "ancestor"])
+def test_protected_reviewed_legacy_edit_checks_original_before_projection(history_db, operation, mutation):
+    db, cid = history_db
+    for mid in ("legacy-a", "legacy-b"):
+        db.add_message({"id": mid, "conversation_id": cid, "sender": "user", "content": mid, "parent_message_id": None})
+    raw = snapshot_to_wire(db.get_conversation_history_snapshot(cid, **OWNER))
+    db.confirm_legacy_history_projection(
+        {
+            "version": 1,
+            "projection_id": "reviewed-edit",
+            "owner_key": OWNER_KEY,
+            "conversation_id": cid,
+            "source_digest": raw["source_digest"],
+            "fences": raw["fences"],
+            "source_members": [{"id": row["id"], "revision": row["revision"]} for row in raw["nodes"]],
+            "ordered_path_ids": ["legacy-a", "legacy-b"],
+            "cursor": {"kind": "after_message", "message_id": "legacy-b"},
+            "selection_revision": 1,
+        },
+        **OWNER,
+    )
+    reviewed = snapshot_to_wire(db.get_conversation_history_snapshot(cid, projection_id="reviewed-edit", **OWNER))
+    selection = resolve_history_selection(
+        reviewed,
+        {
+            "owner_key": OWNER_KEY,
+            "conversation_id": cid,
+            "interpretation": {"kind": "legacy_linear_v1", "projection_id": "reviewed-edit"},
+            "cursor": {"kind": "before_message", "message_id": "legacy-b"},
+            "selection_revision": 2,
+        },
+        "send",
+        "legacy-edit",
+    )["selection"]
+    target = {
+        "version": 1,
+        "message_id": "legacy-b",
+        "message_revision": next(row["revision"] for row in reviewed["nodes"] if row["id"] == "legacy-b"),
+    }
+    assert db.get_message_by_id("legacy-b")["parent_message_id"] is None
+    assert selection["messages"][-1]["id"] == "legacy-a"
+    if mutation == "content":
+        assert db.update_message("legacy-b", {"content": "Changed excluded legacy target"}, 1)
+    elif mutation == "deleted":
+        assert db.soft_delete_message("legacy-b", expected_version=1)
+    if mutation == "ancestor":
+        assert db.update_message("legacy-a", {"content": "Independently changed reviewed ancestry"}, 1)
+    before = (db.count_messages_for_conversation(cid), db.get_conversation_by_id(cid)["history_version"])
+
+    def call():
+        if operation == "client":
+            return admit(db, cid, selection, "legacy-edit-input", history_branch=True, history_edit=target)
+        return server_turn(db, cid, selection, history_branch=True, history_edit=target)
+
+    if mutation is None:
+        accepted = call()
+        assert db.get_message_by_id(accepted["input_message_id"])["parent_message_id"] == "legacy-a"
+    else:
+        with pytest.raises(HistorySelectionError) as caught:
+            call()
+        if mutation == "ancestor":
+            assert caught.value.code == "stale_projection"
+            assert caught.value.details == {}
+        else:
+            assert caught.value.code == "history_edit_target_changed"
+            assert caught.value.details == {
+                "conversation_id": cid,
+                "message_id": "legacy-b",
+                "message_revision": target["message_revision"],
+                "selection_digest": selection["selection_digest"],
+            }
+        assert (db.count_messages_for_conversation(cid), db.get_conversation_by_id(cid)["history_version"]) == before
+
+
+@pytest.mark.parametrize("operation", ["client", "server"])
+def test_protected_edit_never_admits_an_assistant_target(history_db, operation):
+    db, cid = history_db
+    answered_turn(db, cid)
+    wire = snapshot_to_wire(db.get_conversation_history_snapshot(cid, **OWNER))
+    selection = resolve_history_selection(
+        wire,
+        {
+            "owner_key": OWNER_KEY,
+            "conversation_id": cid,
+            "interpretation": {"kind": "parent_graph_v1"},
+            "cursor": {"kind": "before_message", "message_id": "a1"},
+            "selection_revision": 2,
+        },
+        "send",
+        "invalid-target-role",
+    )["selection"]
+    target = {
+        "version": 1,
+        "message_id": "a1",
+        "message_revision": next(row["revision"] for row in wire["nodes"] if row["id"] == "a1"),
+    }
+    before = (db.count_messages_for_conversation(cid), db.get_conversation_by_id(cid)["history_version"])
+    with pytest.raises(HistorySelectionError, match="history_edit_target_changed"):
+        if operation == "client":
+            admit(db, cid, selection, "invalid-role-edit", history_branch=True, history_edit=target)
+        else:
+            server_turn(db, cid, selection, history_branch=True, history_edit=target)
+    assert (db.count_messages_for_conversation(cid), db.get_conversation_by_id(cid)["history_version"]) == before

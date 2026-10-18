@@ -683,6 +683,8 @@ class JobManager:
         "writing": ("writing-review", "writing-ai"),
         "scheduled_tasks": ("scheduled-tasks",),
         "admin_webhooks": ("delivery",),
+        # Long-form TTS jobs (off "default", read unfiltered by the pipeline); GPU transcription.
+        "audio": ("tts", "transcribe"),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---
@@ -3512,6 +3514,7 @@ class JobManager:
         owner_scope_admission: OwnerScopeAdmissionPolicy | None = None,
         expired_lease_policy: ExpiredLeasePolicy = ExpiredLeasePolicy.CONSUME_RETRY,
         quarantine_threshold: int | None = None,
+        fair_share_exempt: bool = False,
     ) -> AdmissionResult:
         """Run the complete admission pipeline and return its typed outcome.
 
@@ -3530,6 +3533,9 @@ class JobManager:
             owner_scope_admission: Optional transactional owner/job-scope limits.
             expired_lease_policy: Behavior when a processing lease expires.
             quarantine_threshold: Optional consecutive-failure quarantine limit.
+            fair_share_exempt: Skip the per-user fair-share limit (not the priority adjustment,
+                which still applies), for a next stage queued by a job that is still running and
+                is about to complete (it replaces that job).
 
         ``create_job`` delegates here and maps only the final typed outcome to
         its legacy dict/exception contract.
@@ -3608,7 +3614,7 @@ class JobManager:
             try:
                 scheduler = _get_fair_share()
                 active_count = self._count_active_jobs_for_user(owner_user_id)
-                if not scheduler.can_submit(owner_user_id, active_count):
+                if not fair_share_exempt and not scheduler.can_submit(owner_user_id, active_count):
                     raise BadRequestError(
                         f"User {owner_user_id} has reached the maximum concurrent job limit "
                         f"({scheduler.max_per_user})"
@@ -3970,6 +3976,7 @@ class JobManager:
         owner_scope_admission: OwnerScopeAdmissionPolicy | None = None,
         expired_lease_policy: ExpiredLeasePolicy = ExpiredLeasePolicy.CONSUME_RETRY,
         quarantine_threshold: int | None = None,
+        fair_share_exempt: bool = False,
     ) -> dict[str, Any]:
         """Create a job using the typed admission pipeline and legacy mapping."""
 
@@ -3990,6 +3997,7 @@ class JobManager:
             owner_scope_admission=owner_scope_admission,
             expired_lease_policy=expired_lease_policy,
             quarantine_threshold=quarantine_threshold,
+            fair_share_exempt=fair_share_exempt,
         )
         return self._map_admission_result(result)
 

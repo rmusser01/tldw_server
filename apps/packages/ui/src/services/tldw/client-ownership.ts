@@ -185,6 +185,7 @@ export const TRANSITIONAL_DOMAIN_OVERLAPS = {
   ],
   "chat-rag": [
     "addChatMessage",
+    "appendRoleplayResumeInput",
     "addDictionaryEntry",
     "addWorldBookEntry",
     "attachWorldBookToCharacter",

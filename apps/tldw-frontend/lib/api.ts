@@ -331,7 +331,7 @@ function resolveCredentials(config: ApiRequestConfig): RequestCredentials {
   return withCredentials ? 'include' : 'omit';
 }
 
-function createAbortSignal(config: ApiRequestConfig): {
+function createAbortSignal(config: ApiRequestConfig, requestUrl: string): {
   signal?: AbortSignal;
   cleanup: () => void;
   didTimeout: () => boolean;
@@ -341,7 +341,7 @@ function createAbortSignal(config: ApiRequestConfig): {
   // requestTimeoutMs so generic paths keep today's behavior.
   const timeout = deriveRequestTimeout(
     { requestTimeoutMs: api.defaults.timeout },
-    (config.url ?? '') as Parameters<typeof deriveRequestTimeout>[1],
+    requestUrl as Parameters<typeof deriveRequestTimeout>[1],
     config.timeout
   );
   const callerSignal = config.signal;
@@ -593,7 +593,7 @@ async function request<T = unknown>(
   applyBrowserHeaders(headers, method);
 
   const requestConfig = buildRequestHistoryConfig(method, url, baseURL, headers, data, metadata);
-  const abort = createAbortSignal(config);
+  const abort = createAbortSignal(config, requestUrl);
 
   let response: Response;
   try {

@@ -11,7 +11,7 @@ import os
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Any
@@ -300,7 +300,7 @@ class BillingEnforcer:
         if org_id in self._usage_cache:
             cached, cached_at = self._usage_cache[org_id]
             if now - cached_at < self._cache_ttl:
-                return cached
+                return await self._with_native_storage(cached)
 
         summary = UsageSummary(org_id=org_id)
 
@@ -340,17 +340,17 @@ class BillingEnforcer:
             if org_id in self._usage_cache:
                 cached, _ = self._usage_cache[org_id]
                 logger.warning(f"Using stale cached usage for org {org_id}")
-                return cached
+                return await self._with_native_storage(cached)
             if self._fail_closed_on_data_error():
                 logger.error(
                     "No cached usage for org {}; returning restrictive usage (fail-closed).",
                     org_id,
                 )
-                return self._restrictive_usage_fallback(org_id)
+                return await self._with_native_storage(self._restrictive_usage_fallback(org_id))
             # Otherwise return zeros (fail-open) but log warning
             logger.warning(f"No cached usage for org {org_id}, returning zeros (fail-open)")
 
-        return summary
+        return await self._with_native_storage(summary)
 
     async def _get_api_calls_today(self, org_id: int) -> int:
         """Read today's canonical user-scoped API rollup for the organization."""
@@ -557,6 +557,21 @@ class BillingEnforcer:
             if self._fail_closed_on_data_error():
                 raise
             return 0
+
+    async def _with_native_storage(self, legacy: UsageSummary) -> UsageSummary:
+        """Never cache a native aggregate or turn an unknown ledger into empty usage."""
+        from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+        from tldw_Server_API.app.core.DB_Management.storage_quota_reservation_store import (
+            NativeQuotaReservationStore,
+            NativeQuotaUnavailableError,
+        )
+        try:
+            native = await NativeQuotaReservationStore(await get_db_pool()).org_member_usage(legacy.org_id)
+        except NativeQuotaUnavailableError:
+            raise
+        except Exception as exc:
+            raise NativeQuotaUnavailableError('Native retained storage usage is unavailable') from exc
+        return replace(legacy, storage_bytes=legacy.storage_bytes + native)
 
     async def _get_storage_bytes(self, org_id: int) -> int:
         """Sum storage_used_mb from users table for all org members."""

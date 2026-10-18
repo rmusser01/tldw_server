@@ -17,7 +17,7 @@ type ShortcutEvent = {
 
 
 /**
- * Whether a keydown should open the playground shortcuts help panel.
+ * Whether a keydown should open the keyboard shortcuts reference.
  *
  * "?" is an ordinary typed character, so this must stay false while the caret
  * sits in the composer or any other editable target — otherwise every question

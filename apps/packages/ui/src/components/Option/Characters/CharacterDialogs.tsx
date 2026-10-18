@@ -49,7 +49,7 @@ import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { updatePageTitle } from "@/utils/update-page-title"
 import { focusComposer } from "@/hooks/useComposerFocus"
 import {
-  buildCharacterChatReadiness,
+  type CharacterChatReadiness,
   CHARACTER_CHAT_MODEL_SETTINGS_PATH,
   getCharacterChatReadinessCopy
 } from "@/utils/chat-model-availability"
@@ -123,10 +123,20 @@ export type CharacterDialogsProps = {
   isServerConnected: boolean
   setQuickChatModelOverride: (v: string | null) => void
   quickChatError: string | null
-  quickChatMessages: Array<{ id: string; role: string; content: string }>
+  quickChatMessages: Array<{ id: string; role: string; content: string; preview?: boolean }>
   quickChatDraft: string
   setQuickChatDraft: (v: string) => void
   quickChatSending: boolean
+  quickChatSessionId: string | null
+  quickChatNeedsReview: boolean
+  quickChatReadiness: CharacterChatReadiness
+  quickChatOwnerReady: boolean
+  quickChatCardReady: boolean
+  quickChatCanRetry: boolean
+  quickChatLoading: boolean
+  quickChatCopied: boolean
+  retryQuickChat: () => Promise<void>
+  copyQuickChatDraft: () => Promise<void>
   sendQuickChatMessage: () => Promise<void>
   handlePromoteQuickChat: () => Promise<void>
   chatIntentBlocker: CharacterChatIntentBlocker | null
@@ -327,13 +337,16 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
     closeQuickChat,
     quickChatModelOptions,
     activeQuickChatModel,
-    isServerConnected,
     setQuickChatModelOverride,
     quickChatError,
     quickChatMessages,
     quickChatDraft,
     setQuickChatDraft,
     quickChatSending,
+    quickChatSessionId,
+    quickChatNeedsReview,
+    quickChatReadiness, quickChatOwnerReady, quickChatCardReady, quickChatCanRetry, quickChatLoading, quickChatCopied,
+    retryQuickChat, copyQuickChatDraft,
     sendQuickChatMessage,
     handlePromoteQuickChat,
     chatIntentBlocker,
@@ -487,25 +500,6 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
     data
   } = props
 
-  const quickChatReadiness = React.useMemo(
-    () =>
-      buildCharacterChatReadiness({
-        isServerConnected,
-        selectedCharacter: quickChatCharacter,
-        selectedModel: activeQuickChatModel,
-        availableModels: quickChatModelOptions.map((option) => ({
-          model: option.value
-        })),
-        isSendBlocked: quickChatSending
-      }),
-    [
-      activeQuickChatModel,
-      isServerConnected,
-      quickChatCharacter,
-      quickChatModelOptions,
-      quickChatSending
-    ]
-  )
   const quickChatReadinessCopy = React.useMemo(
     () =>
       getCharacterChatReadinessCopy(quickChatReadiness, t, {
@@ -887,6 +881,20 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
         width={560}
         rootClassName="characters-motion-modal">
         <div className="space-y-3">
+          <p className="text-xs text-text-muted">
+            {t("settings:manageCharacters.quickChat.savingPolicy", { defaultValue: "Confirmed replies are saved in Conversations. If a save is unconfirmed, review it before sending again. Closing keeps the saved chat and retains your unsent draft on this browser." })}
+          </p>
+          {(!quickChatOwnerReady || quickChatLoading || quickChatCanRetry) && <div role="status" className="flex items-center justify-between gap-2 text-sm">
+            <span>{t(quickChatOwnerReady ? (quickChatLoading ? "settings:manageCharacters.quickChat.loadingCharacter" : "settings:manageCharacters.quickChat.characterNotLoaded") : "settings:manageCharacters.quickChat.verifyingAccount", { defaultValue: quickChatOwnerReady ? (quickChatLoading ? "Loading character…" : "Character not loaded") : "Verify your account before chatting." })}</span>
+            {!quickChatLoading && <Button size="small" onClick={() => void retryQuickChat()}>{t(quickChatOwnerReady ? "settings:manageCharacters.quickChat.retryCharacter" : "settings:manageCharacters.quickChat.retryAccount", { defaultValue: quickChatOwnerReady ? "Retry character" : "Retry verification" })}</Button>}
+          </div>}
+          {quickChatSessionId ? (
+            <p role="status" className="text-xs text-text-muted">
+              {t("settings:manageCharacters.quickChat.savedModelGuidance", {
+                defaultValue: "This chat uses its saved model and provider. Review its settings in full chat."
+              })}
+            </p>
+          ) : (
           <div className="flex items-center gap-2">
             <span className="text-xs text-text-muted">
               {t("settings:manageCharacters.quickChat.modelLabel", {
@@ -895,6 +903,8 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
             </span>
             <Select
               className="flex-1"
+              aria-label={t("settings:manageCharacters.quickChat.modelLabel")}
+              disabled={quickChatSending}
               size="small"
               showSearch
               placeholder={t("settings:manageCharacters.quickChat.modelPlaceholder", {
@@ -907,6 +917,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
               allowClear
             />
           </div>
+          )}
 
           {showQuickChatModelBlocker && (
             <DesignSystemAlert
@@ -917,9 +928,11 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                 <span>{quickChatReadinessCopy.description}</span>
                 <a
                   href={CHARACTER_CHAT_MODEL_SETTINGS_PATH}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="shrink-0 text-primary hover:underline"
                 >
-                  {quickChatReadinessCopy.actionLabel}
+                  {quickChatReadinessCopy.actionLabel} <span className="text-xs">{t("settings:manageCharacters.quickChat.newTab", { defaultValue: "(opens in a new tab)" })}</span>
                 </a>
               </div>
             </DesignSystemAlert>
@@ -956,6 +969,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
                         ? "bg-primary text-white"
                         : "bg-surface text-text border border-border"
                     }`}>
+                    {message.preview && <div className="mb-1 text-xs font-medium">{t("settings:manageCharacters.quickChat.previewOnly", { defaultValue: "Opening preview · not sent or saved" })}</div>}
                     {message.content}
                   </div>
                 </div>
@@ -965,6 +979,7 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
 
           <div className="flex gap-2">
             <Input.TextArea
+              aria-label={t("settings:manageCharacters.quickChat.messageLabel", { defaultValue: "Quick chat message" })}
               value={quickChatDraft}
               onChange={(event) => setQuickChatDraft(event.target.value)}
               placeholder={t("settings:manageCharacters.quickChat.placeholder", {
@@ -972,12 +987,12 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
               })}
               autoSize={{ minRows: 1, maxRows: 4 }}
               onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
+                if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) {
                   event.preventDefault()
                   void sendQuickChatMessage()
                 }
               }}
-              disabled={quickChatSending}
+              disabled={quickChatSending || quickChatLoading || !quickChatOwnerReady}
             />
             <Button
               type="primary"
@@ -985,21 +1000,24 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
               onClick={() => {
                 void sendQuickChatMessage()
               }}
-              disabled={!quickChatDraft.trim() || !quickChatReadiness.canStart}>
+              disabled={!quickChatDraft.trim() || !quickChatReadiness.canStart || quickChatSending || quickChatNeedsReview}>
               {t("settings:manageCharacters.quickChat.send", {
                 defaultValue: "Send"
               })}
             </Button>
           </div>
+          {quickChatDraft && <Button size="small" disabled={quickChatSending || !quickChatOwnerReady} onClick={() => void copyQuickChatDraft()}>{t("settings:manageCharacters.quickChat.copyDraft", { defaultValue: "Copy draft" })}</Button>}
+          {quickChatCopied && <p role="status" className="text-xs text-text-muted">{t("settings:manageCharacters.quickChat.copied", { defaultValue: "Draft copied. Your popup is still open." })}</p>}
+          {quickChatDraft && <p className="text-xs text-text-muted">{t("settings:manageCharacters.quickChat.copyExplanation", { defaultValue: "Copies your next message for pasting. Your draft in full chat stays unchanged." })}</p>}
           <div className="flex justify-end">
             <Button
               onClick={() => {
                 void handlePromoteQuickChat()
               }}
-              disabled={!quickChatCharacter || quickChatSending}>
-              {t("settings:manageCharacters.quickChat.openFullChat", {
-                defaultValue: "Open full chat"
-              })}
+              disabled={!quickChatCharacter || !quickChatCardReady || quickChatSending}>
+              {quickChatDraft
+                ? t(quickChatNeedsReview ? "settings:manageCharacters.quickChat.copyAndReview" : "settings:manageCharacters.quickChat.copyAndContinue", { defaultValue: quickChatNeedsReview ? "Copy draft and review" : "Copy draft and continue" })
+                : t(quickChatNeedsReview ? "settings:manageCharacters.quickChat.reviewFullChat" : quickChatSessionId ? "settings:manageCharacters.quickChat.continueFullChat" : "settings:manageCharacters.quickChat.startFullChat", { defaultValue: quickChatNeedsReview ? "Review in full chat" : quickChatSessionId ? "Continue in full chat" : "Start in full chat" })}
             </Button>
           </div>
         </div>

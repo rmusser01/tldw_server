@@ -526,7 +526,7 @@ ci-local-lane:       ## One area: make ci-local-lane LANE=tldw_Server_API/tests/
 	@test -n "$(LANE)" || (echo "Usage: make ci-local-lane LANE=<path> [CI_ARGS=...]" && exit 2)
 	$(RUN_LOCAL_CI) --lane $(LANE) $(CI_ARGS)
 
-test-triage:         ## Ranked test-quality triage report (see audits/2026-07-04-test-suite-audit-round2.md)
+test-triage:         ## Ranked test-quality triage report (see Docs/Audit/2026-07-04-test-suite-audit-round2.md)
 	$(CI_LOCAL_PYTHON) Helper_Scripts/ci/test_quality_triage.py $(CI_ARGS)
 
 minimal-env-smoke:   ## Boot the app in a scrubbed env and probe /health (#2590-class guard)
@@ -536,7 +536,7 @@ openapi-fingerprint: ## Refresh the checked-in OpenAPI drift fingerprint
 	$(CI_LOCAL_PYTHON) Helper_Scripts/export_openapi_schema.py --fingerprint apps/packages/api-types/openapi.fingerprint.json
 
 openapi-drift-check: ## Fail if the OpenAPI contract drifted from the checked-in fingerprint
-	$(CI_LOCAL_PYTHON) Helper_Scripts/export_openapi_schema.py --check apps/packages/api-types/openapi.fingerprint.json
+	$(CI_LOCAL_PYTHON) Helper_Scripts/export_openapi_schema.py --check apps/packages/api-types/openapi.fingerprint.json --check-paths apps/packages/api-types/paths.d.ts
 
 # -----------------------------------------------------------------------------
 # Chat Streaming Load Harness (Scenario A starter)

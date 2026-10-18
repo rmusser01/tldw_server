@@ -8,13 +8,17 @@ import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { useStoreMessageOption } from "@/store/option"
 import { ModelsBody } from "../index"
 
+const discovery = vi.hoisted(() => ({ fetch: vi.fn(), refresh: vi.fn(), success: vi.fn(), error: vi.fn() }))
+vi.mock("wxt/browser", () => ({ browser: { runtime: {
+  sendMessage: (...args: unknown[]) => discovery.refresh(...args)
+} } }))
 const models = [
   { id: "old.gguf", model: "tldw:old.gguf", provider: "llama", is_configured: true },
   { id: "ready.gguf", model: "tldw:ready.gguf", provider: "llama", is_configured: true }
 ]
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string, fallback?: string | { defaultValue?: string }) => typeof fallback === "string" ? fallback : fallback?.defaultValue ?? key }) }))
-vi.mock("@/hooks/useAntdNotification", () => ({ useAntdNotification: () => ({ error: vi.fn(), success: vi.fn(), info: vi.fn() }) }))
-vi.mock("@/services/tldw-server", () => ({ fetchChatModels: async () => models }))
+vi.mock("@/hooks/useAntdNotification", () => ({ useAntdNotification: () => ({ error: discovery.error, success: discovery.success, info: vi.fn() }) }))
+vi.mock("@/services/tldw-server", () => ({ fetchChatModels: discovery.fetch }))
 vi.mock("@/services/tldw", () => ({ tldwClient: {
   getOpenAIOAuthStatus: async () => ({}), listUserProviderKeys: async () => ({ items: [] })
 }, tldwModels: { warmCache: vi.fn() } }))
@@ -77,6 +81,10 @@ const installSyncStorage = () => {
 
 describe("Settings model selection with a live Chat owner", () => {
   beforeEach(async () => {
+    discovery.refresh.mockReset().mockResolvedValue(null)
+    discovery.fetch.mockReset().mockResolvedValue(models)
+    discovery.success.mockClear()
+    discovery.error.mockClear()
     localStorage.clear()
     syncStorageValues.clear()
     syncStorageListeners.clear()
@@ -91,6 +99,30 @@ describe("Settings model selection with a live Chat owner", () => {
     syncStorageValues.clear()
     syncStorageListeners.clear()
     vi.unstubAllGlobals()
+  })
+
+  it.each([[true, false], [false, false], [true, true], [false, true]])("retries failed shared discovery without false success (recovers=%s, runtime rejects=%s)", async (recovers, runtimeRejects) => {
+    if (runtimeRejects) discovery.refresh.mockRejectedValueOnce(new Error("Background unavailable"));
+    discovery.fetch.mockRejectedValueOnce(new Error("Metadata unavailable"));
+    if (!recovers) discovery.fetch.mockRejectedValue(new Error("Metadata unavailable"));
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<QueryClientProvider client={queryClient}><MemoryRouter><ModelsBody /></MemoryRouter></QueryClientProvider>);
+    const retry = await screen.findByRole("button", { name: "Try again" });
+    expect(screen.getByRole("alert")).toHaveTextContent("Could not check chat models");
+    fireEvent.click(retry);
+    await waitFor(() => expect(discovery.fetch).toHaveBeenCalledTimes(2));
+    if (recovers) {
+      await screen.findByRole("option", { name: /ready.gguf/ });
+      await waitFor(() => expect(discovery.success).toHaveBeenCalledOnce());
+      expect(discovery.error).not.toHaveBeenCalled();
+    } else {
+      await waitFor(() => expect(discovery.error).toHaveBeenCalledOnce());
+      expect(discovery.success).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent("Could not check chat models");
+    }
+    expect(discovery.fetch).toHaveBeenLastCalledWith({ requireFresh: true });
+    expect(discovery.refresh).toHaveBeenCalledOnce();
+    expect(discovery.refresh).toHaveBeenCalledWith({ type: "tldw:models:refresh" });
   })
 
   it("commits a deliberate Settings selection to the live owner and survives remount", async () => {

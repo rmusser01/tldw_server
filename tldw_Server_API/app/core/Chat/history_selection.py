@@ -28,6 +28,21 @@ class HistorySelectionError(ValueError):
         return self.code
 
 
+class HistoryEditTargetChangedError(HistorySelectionError):
+    """The original excluded Edit target changed; no input was admitted."""
+
+    def __init__(self, *, conversation_id: str, message_id: str, message_revision: str, selection_digest: str) -> None:
+        super().__init__(
+            "history_edit_target_changed",
+            details={
+                "conversation_id": conversation_id,
+                "message_id": message_id,
+                "message_revision": message_revision,
+                "selection_digest": selection_digest,
+            },
+        )
+
+
 class HistoryBranchChangedError(HistorySelectionError):
     """A "must extend the latest message" admission found the selected tip already continued.
 
@@ -355,7 +370,6 @@ def resolve_legacy_projection(
     base = path[: positions[current_id] + 1] if current_id is not None else []
     resolved = base + list(reversed(descendants))
     return resolved if cursor["kind"] == "after_message" else resolved[:-1]
-
 
 
 def canonical_selection_tuple(selection: Mapping[str, Any]) -> list[Any]:

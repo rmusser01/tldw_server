@@ -126,6 +126,8 @@ const OptionIndex = () => {
     state: firstRunState,
     metadata: firstRunMetadata,
     loading: setupLoading,
+    connectionConfigured: setupConnectionConfigured,
+    connectionChecking: setupConnectionChecking,
     adoptState: adoptFirstRunState
   } = useSetupOnboarding()
   const [didHydrate, setDidHydrate] = React.useState(false)
@@ -279,7 +281,7 @@ const OptionIndex = () => {
   const wizardRequired = isSetupStatusRequiringWizard(setupStatus)
   const connectionReady = phase === ConnectionPhase.CONNECTED
 
-  if (wizardRequired && !connectionReady) {
+  if ((wizardRequired || (setupConnectionConfigured === false && !setupConnectionChecking)) && !connectionReady) {
     return (
       <OptionLayout hideHeader hideSidebar>
         <React.Suspense fallback={<PageAssistLoader />}>

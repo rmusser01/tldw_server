@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import React from "react";
-import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render as renderComponent, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { Playground } from "../Playground";
+import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state";
 
 const messageOptionState = vi.hoisted(() => ({
   value: {
@@ -129,8 +131,11 @@ vi.mock("@/components/Sidepanel/Chat/ArtifactsPanel", () => ({
 }));
 
 vi.mock("@/hooks/useMessageOption", () => ({
-  useMessageOption: () => messageOptionState.value,
-}));
+  useMessageOption: () => ({
+    ...messageOptionState.value,
+    effectiveAssistantState: resolveEffectiveAssistantState({})
+  })
+}))
 
 vi.mock("@/hooks/usePlaygroundSessionPersistence", () => ({
   usePlaygroundSessionPersistence: () => sessionPersistenceState.value,
@@ -181,11 +186,16 @@ vi.mock("../Knowledge/utils/unsupported-types", () => ({
   otherUnsupportedTypes: [],
 }));
 
-vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (
-    selector: (state: typeof storeOptionState.value) => unknown,
-  ) => selector(storeOptionState.value),
-}));
+vi.mock("@/store/option", () => {
+  const getState = () => ({
+    ...messageOptionState.value,
+    ...storeOptionState.value
+  })
+  const useOptions = (
+    selector?: (state: ReturnType<typeof getState>) => unknown
+  ) => (typeof selector === "function" ? selector(getState()) : getState())
+  return { useStoreMessageOption: Object.assign(useOptions, { getState }) }
+})
 
 vi.mock("@/store/artifacts", () => ({
   useArtifactsStore: (
@@ -225,12 +235,18 @@ vi.mock("@/hooks/useMediaQuery", () => ({
   useDesktop: () => true,
 }));
 
-vi.mock("@/services/chat-settings", () => ({
-  syncChatSettingsForServerChat: (params: ChatSettingsSyncParams) =>
-    chatSettingsState.syncChatSettingsForServerChat(params),
-  applyChatSettingsPatch: (params: ChatSettingsPatchParams) =>
-    chatSettingsState.applyChatSettingsPatch(params),
-}));
+vi.mock("@/services/chat-settings", async () => {
+  const actual = await vi.importActual<
+    typeof import("@/services/chat-settings")
+  >("@/services/chat-settings");
+  return {
+    ...actual,
+    syncChatSettingsForServerChat: (params: ChatSettingsSyncParams) =>
+      chatSettingsState.syncChatSettingsForServerChat(params),
+    applyChatSettingsPatch: (params: ChatSettingsPatchParams) =>
+      chatSettingsState.applyChatSettingsPatch(params),
+  };
+});
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: researchClientMocks,
@@ -274,6 +290,13 @@ const findCenteredWidthContract = (
       typeof node.className === "string" &&
       node.className.includes("max-w-[64rem]"),
   );
+
+let queryClient: QueryClient
+beforeEach(() => { queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }) })
+afterEach(() => queryClient.clear())
+const render = (ui: React.ReactElement) => renderComponent(ui, {
+  wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+})
 
 describe("Playground sticky composer layout integration", () => {
   beforeEach(() => {
@@ -331,3 +354,8 @@ describe("Playground sticky composer layout integration", () => {
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
   });
 });
+
+vi.mock("@/services/tldw-server", async original => ({
+  ...await original<typeof import("@/services/tldw-server")>(),
+  fetchChatModels: async () => []
+}))

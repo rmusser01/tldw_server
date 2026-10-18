@@ -38,7 +38,9 @@ describe("playground composition preview summary", () => {
     const summary = buildPlaygroundCompositionPreviewSummary(baseInput());
 
     expect(summary.overallState).toBe("unavailable");
-    expect(summary.entries.map((entry) => [entry.kind, entry.state, entry.title])).toEqual([
+    expect(
+      summary.entries.map((entry) => [entry.kind, entry.state, entry.title]),
+    ).toEqual([
       ["prompt", "disabled", "No prompt selected"],
       ["assistant", "disabled", "No assistant attached to next message"],
       ["model", "unavailable", "No model selected"],
@@ -130,15 +132,23 @@ describe("playground composition preview summary", () => {
 
     expect(summary.overallState).toBe("ready");
     expect(summary.settingsScopeLabel).toBe("openai:gpt-4.1-mini");
-    expect(summary.entries.map((entry) => [entry.kind, entry.state, entry.title])).toEqual([
+    expect(
+      summary.entries.map((entry) => [entry.kind, entry.state, entry.title]),
+    ).toEqual([
       ["prompt", "active", "Research brief"],
       ["assistant", "active", "Research Persona"],
       ["model", "active", "openai:gpt-4.1-mini"],
       ["settings", "active", "openai:gpt-4.1-mini"],
-      ["context", "active", "1 active source"],
+      ["context", "active", "1 selected source"],
       ["tools", "active", "MCP tools"],
     ]);
-    expect(summary.contextStack.map((entry) => [entry.kind, entry.state, entry.title])).toEqual([
+    expect(
+      summary.contextStack.map((entry) => [
+        entry.kind,
+        entry.state,
+        entry.title,
+      ]),
+    ).toEqual([
       ["prompt", "active", "Research brief"],
       ["assistant", "active", "Research Persona"],
       ["knowledge", "active", "Launch notes"],
@@ -167,7 +177,9 @@ describe("playground composition preview summary", () => {
     );
 
     expect(summary.overallState).toBe("unavailable");
-    expect(summary.entries.find((entry) => entry.kind === "model")).toMatchObject({
+    expect(
+      summary.entries.find((entry) => entry.kind === "model"),
+    ).toMatchObject({
       state: "unavailable",
       title: "tldw:gpt-4o",
       detail: "Choose a chat model before chatting as Ada",
@@ -189,7 +201,9 @@ describe("playground composition preview summary", () => {
     );
 
     expect(summary.overallState).toBe("unavailable");
-    expect(summary.entries.find((entry) => entry.kind === "model")).toMatchObject({
+    expect(
+      summary.entries.find((entry) => entry.kind === "model"),
+    ).toMatchObject({
       state: "unavailable",
       title: "openai:gpt-4o",
       detail: "Configure the selected model provider before chatting as Ada",
@@ -210,7 +224,9 @@ describe("playground composition preview summary", () => {
     );
 
     expect(summary.overallState).toBe("unavailable");
-    expect(summary.entries.find((entry) => entry.kind === "model")).toMatchObject({
+    expect(
+      summary.entries.find((entry) => entry.kind === "model"),
+    ).toMatchObject({
       state: "loading",
       title: "openai:gpt-4o",
       detail: "Checking chat model readiness",
@@ -232,13 +248,15 @@ describe("playground composition preview summary", () => {
     );
 
     expect(summary.overallState).toBe("unavailable");
-    expect(summary.entries.find((entry) => entry.kind === "model")).toMatchObject({
+    expect(
+      summary.entries.find((entry) => entry.kind === "model"),
+    ).toMatchObject({
       state: "unavailable",
       title: "No model selected",
     });
-    expect(summary.entries.find((entry) => entry.kind === "model")?.detail).not.toBe(
-      "Choose a character to start character chat",
-    );
+    expect(
+      summary.entries.find((entry) => entry.kind === "model")?.detail,
+    ).not.toBe("Choose a character to start character chat");
   });
 
   it("treats disallowed degraded model usability as unavailable", () => {
@@ -256,7 +274,9 @@ describe("playground composition preview summary", () => {
     );
 
     expect(summary.overallState).toBe("unavailable");
-    expect(summary.entries.find((entry) => entry.kind === "model")).toMatchObject({
+    expect(
+      summary.entries.find((entry) => entry.kind === "model"),
+    ).toMatchObject({
       state: "unavailable",
       title: "openai:gpt-4o",
       detail: "Character chat is preparing",
@@ -295,12 +315,20 @@ describe("playground composition preview summary", () => {
     );
 
     expect(summary.overallState).toBe("degraded");
-    expect(summary.entries.find((entry) => entry.kind === "tools")).toMatchObject({
+    expect(
+      summary.entries.find((entry) => entry.kind === "tools"),
+    ).toMatchObject({
       state: "unavailable",
       title: "MCP unavailable",
       detail: "MCP tools unavailable",
     });
-    expect(summary.contextStack.map((entry) => [entry.kind, entry.state, entry.title])).toEqual([
+    expect(
+      summary.contextStack.map((entry) => [
+        entry.kind,
+        entry.state,
+        entry.title,
+      ]),
+    ).toEqual([
       ["assistant", "active", "Ada"],
       ["tools", "unavailable", "MCP unavailable"],
     ]);
@@ -342,15 +370,21 @@ describe("playground composition preview summary", () => {
     );
 
     expect(summary.overallState).toBe("degraded");
-    expect(summary.entries.find((entry) => entry.kind === "context")).toMatchObject({
+    expect(
+      summary.entries.find((entry) => entry.kind === "context"),
+    ).toMatchObject({
       state: "degraded",
-      title: "1 active source",
+      title: "1 selected source",
     });
-    expect(summary.entries.find((entry) => entry.kind === "tools")).toMatchObject({
+    expect(
+      summary.entries.find((entry) => entry.kind === "tools"),
+    ).toMatchObject({
       state: "degraded",
       title: "MCP tools",
     });
-    expect(summary.entries.find((entry) => entry.kind === "composition")).toMatchObject({
+    expect(
+      summary.entries.find((entry) => entry.kind === "composition"),
+    ).toMatchObject({
       state: "unavailable",
       title: "Context preview unavailable",
     });
@@ -377,12 +411,14 @@ describe("playground composition preview summary", () => {
       }),
     );
 
-    expect(summary.entries.find((entry) => entry.kind === "context")).toMatchObject({
+    expect(
+      summary.entries.find((entry) => entry.kind === "context"),
+    ).toMatchObject({
       state: "disabled",
       title: "No extra context",
       detail: "1 configured source",
     });
-    expect(summary.overallState).toBe("ready");
+    expect(summary.overallState).toBe("planned");
   });
 
   it("uses semantic assistant preview copy instead of English fallback comparisons", () => {
@@ -398,11 +434,33 @@ describe("playground composition preview summary", () => {
       }),
     );
 
-    const assistant = summary.entries.find((entry) => entry.kind === "assistant");
+    const assistant = summary.entries.find(
+      (entry) => entry.kind === "assistant",
+    );
     expect(assistant).toMatchObject({
       title: "TR no assistant attached",
       detail: null,
       state: "disabled",
+    });
+  });
+  it("keeps an unassembled healthy selection planned with an unknown footprint", () => {
+    const result = buildPlaygroundCompositionPreviewSummary(
+      baseInput({
+        providerRoute: {
+          selectedProvider: "openai",
+          selectedModel: "gpt-4.1",
+          providerRouteLabel: "openai:gpt-4.1",
+        },
+      }),
+    );
+    expect(result).toMatchObject({
+      overallState: "planned",
+      footprint: {
+        providerMessageCount: null,
+        previewSectionCount: null,
+        contextPieceCount: null,
+        warningCount: null,
+      },
     });
   });
 });

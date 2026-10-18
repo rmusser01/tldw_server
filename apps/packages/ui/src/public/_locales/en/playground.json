@@ -240,7 +240,7 @@
     "message": "Start a new chat"
   },
   "empty_description": {
-    "message": "Experiment with different models, prompts, and knowledge sources here."
+    "message": "Choose a model, then write your first message below."
   },
   "empty_demoDescription": {
     "message": "You're in demo mode — try asking a question to see how the assistant responds. You can connect your own tldw server later to save chats, ingest media, and use Knowledge search."
@@ -702,7 +702,7 @@
     "message": "Live transcript will appear here while recording."
   },
   "actions_temporaryOn": {
-    "message": "Temporary chat (not saved)"
+    "message": "Temporary chat (on this device)"
   },
   "actions_temporaryOff": {
     "message": "Save chat to history"
@@ -978,7 +978,7 @@
     "message": "Close Search & Context"
   },
   "composer_persistence_ephemeral": {
-    "message": "Temporary chat: not saved in history and cleared when you close this window."
+    "message": "Temporary chat can stay on this device across reloads until closed or cleared. It is not added to server history."
   },
   "composer_persistence_local": {
     "message": "Saved on this device only. This chat is not on your tldw server."
@@ -2811,7 +2811,7 @@
     "message": "Context"
   },
   "cockpit_runtime": {
-    "message": "Runtime"
+    "message": "Chat settings"
   },
   "cockpit_focus": {
     "message": "Focus"
@@ -3464,11 +3464,20 @@
   "historySelection_expandDescription": {
     "message": "Opens this selected history in the extension full page. Active streaming stays in this panel."
   },
+  "historySelection_refusedTitle": {
+    "message": "Message not added"
+  },
+  "historySelection_refusedMessage": {
+    "message": "This saved chat uses unsupported context. Your original input is kept here; copy it and review the saved setup or start a compatible chat. It will not be sent again automatically."
+  },
   "historySelection_recoveryTitle": {
     "message": "Turn needs review"
   },
   "historySelection_recoveryMessage": {
     "message": "The original send outcome is retained separately from history. It will not be sent again automatically."
+  },
+  "historySelection_nativeRecoveryMessage": {
+    "message": "The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically."
   },
   "historySelection_inspectRecovery": {
     "message": "Inspect original input and result"
@@ -3734,6 +3743,390 @@
   "mediaHandoff_cancel": {
     "message": "Cancel import"
   },
+  "draftRecovery_unavailable": {
+    "message": "This draft is no longer available. Your current text is unchanged."
+  },
+  "draftRecovery_notOpened": {
+    "message": "Could not open this draft. Your current text and saved draft are kept."
+  },
+  "draftRecovery_open": {
+    "message": "Recover drafts"
+  },
+  "draftRecovery_title": {
+    "message": "Retained drafts"
+  },
+  "draftRecovery_help": {
+    "message": "Opening a draft starts a fresh conversation in its original mode, using your current chat setup. Your current unsent text stays available. Review retained text before sending it again. Attachments and conversation messages are not included."
+  },
+  "draftRecovery_loading": {
+    "message": "Loading drafts…"
+  },
+  "draftRecovery_partial": {
+    "message": "Some saved drafts could not be read. Retry to check again."
+  },
+  "draftRecovery_retry": {
+    "message": "Retry"
+  },
+  "draftRecovery_empty": {
+    "message": "No other retained drafts on this browser."
+  },
+  "draftRecovery_temporary": {
+    "message": "Temporary draft"
+  },
+  "draftRecovery_saved": {
+    "message": "New chat draft"
+  },
+  "composer_persistence_historyModeTitle": {
+    "message": "History on"
+  },
+  "composer_persistence_historyModeHelp": {
+    "message": "New messages can be stored in chat history."
+  },
+  "composer_persistence_temporaryModeTitle": {
+    "message": "Temporary"
+  },
+  "composer_persistence_temporaryModeHelp": {
+    "message": "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device."
+  },
+  "composer_persistence_historyControl": {
+    "message": "Chat history"
+  },
+  "characterChatSessions_regionLabel": {
+    "message": "Character chat sessions"
+  },
+  "characterChatSessions_label": {
+    "message": "Character sessions"
+  },
+  "characterChatSessions_title": {
+    "message": "Character conversations"
+  },
+  "characterChatSessions_resumeTitle": {
+    "message": "Resume role-play"
+  },
+  "characterChatSessions_resumeDetail": {
+    "message": "Recent character conversations stay separate from saved role-play setups."
+  },
+  "characterChatSessions_characterFallback": {
+    "message": "Character {{id}}"
+  },
+  "characterChatSessions_untitled": {
+    "message": "Untitled character chat"
+  },
+  "characterChatSessions_saved": {
+    "message": "Saved"
+  },
+  "characterChatSessions_messageCount": {
+    "message": "{{count}} messages"
+  },
+  "characterChatSessions_messageCount_one": {
+    "message": "{{count}} message"
+  },
+  "characterChatSessions_messageCount_other": {
+    "message": "{{count}} messages"
+  },
+  "characterChatSessions_current": {
+    "message": "Current"
+  },
+  "characterChatSessions_resume": {
+    "message": "Resume"
+  },
+  "characterChatSessions_currentSessionAction": {
+    "message": "Current {{title}}"
+  },
+  "characterChatSessions_resumeSessionAction": {
+    "message": "Resume {{title}}"
+  },
+  "characterChatSessions_resumeLast": {
+    "message": "Resume last character chat"
+  },
+  "characterChatSessions_resumeLastAction": {
+    "message": "Resume last character chat: {{title}}"
+  },
+  "characterChatSessions_currentCharacterListLabel": {
+    "message": "Recent sessions for {{name}}"
+  },
+  "characterChatSessions_allCharacterListLabel": {
+    "message": "All sessions for {{name}}"
+  },
+  "characterChatSessions_currentCharacterFallbackLabel": {
+    "message": "Recent character sessions"
+  },
+  "characterChatSessions_otherCharactersListLabel": {
+    "message": "Other character sessions"
+  },
+  "characterChatSessions_loading": {
+    "message": "Loading character sessions..."
+  },
+  "characterChatSessions_refreshFailed": {
+    "message": "Unable to refresh character sessions right now."
+  },
+  "characterChatSessions_loadFailed": {
+    "message": "Character sessions could not be loaded."
+  },
+  "characterChatSessions_stale": {
+    "message": "Showing character sessions from the last successful refresh."
+  },
+  "characterChatSessions_offlineCached": {
+    "message": "Reconnect to load or resume character sessions. Showing the last loaded page."
+  },
+  "characterChatSessions_unavailable": {
+    "message": "Connect to your server to view character sessions."
+  },
+  "characterChatSessions_localCard": {
+    "message": "Server sessions are available for characters saved on this server."
+  },
+  "characterChatSessions_retry": {
+    "message": "Retry character sessions"
+  },
+  "characterChatSessions_otherEmpty": {
+    "message": "No other characters in this recent sample."
+  },
+  "characterChatSessions_pageEmpty": {
+    "message": "No sessions on this page. Return to the previous page to see earlier results."
+  },
+  "characterChatSessions_characterEmpty": {
+    "message": "No conversations with this character yet."
+  },
+  "characterChatSessions_empty": {
+    "message": "No character conversations yet."
+  },
+  "characterChatSessions_unverified": {
+    "message": "Some sessions in this page could not be verified for this character. Retry to refresh."
+  },
+  "characterChatSessions_backToRecent": {
+    "message": "Back to recent sessions"
+  },
+  "characterChatSessions_allSessions": {
+    "message": "All sessions for this character"
+  },
+  "characterChatSessions_allCharacters": {
+    "message": "All character sessions"
+  },
+  "characterChatSessions_pagination": {
+    "message": "Character sessions pages"
+  },
+  "characterChatSessions_previousPage": {
+    "message": "Previous sessions page"
+  },
+  "characterChatSessions_nextPage": {
+    "message": "Next sessions page"
+  },
+  "characterChatSessions_previous": {
+    "message": "Previous"
+  },
+  "characterChatSessions_next": {
+    "message": "Next"
+  },
+  "characterChatSessions_page": {
+    "message": "Page {{page}}"
+  },
+  "characterChatSessions_otherRecents": {
+    "message": "Recent chats with other characters"
+  },
+  "characterChatSessions_otherSample": {
+    "message": "A sample from the {{count}} most recent character chats; older chats may not appear here."
+  },
+  "characterChatSessions_verifyingAccount": {
+    "message": "Verifying your server account..."
+  },
+  "characterChatSessions_verificationFailed": {
+    "message": "Could not verify your server account. Retry or check your connection settings."
+  },
+  "characterChatSessions_retryVerification": {
+    "message": "Retry account verification"
+  },
+  "characterChatSessions_titleReference": {
+    "message": "{{title}}, session {{id}}"
+  },
+  "characterChatSessions_sessionReference": {
+    "message": "Session {{id}}"
+  },
+  "composer_customizeChat": {
+    "message": "Customize chat"
+  },
+  "composer_mcpSelectedSummary": {
+    "message": "MCP tools selected: {{choice}}"
+  },
+  "composer_formattingGuideActive": {
+    "message": "Formatting guide on"
+  },
+  "composer_interactiveResponseActive": {
+    "message": "Interactive response on"
+  },
+  "composer_customizePreferenceUnavailable": {
+    "message": "Display preference unavailable. Customize chat still works for this visit."
+  },
+  "composer_groups_researchContext": {
+    "message": "Research & context"
+  },
+  "composer_groups_characterRole": {
+    "message": "Character & your role"
+  },
+  "composer_groups_responseSettings": {
+    "message": "Response settings"
+  },
+  "draftRecovery_creationReviewFailed": {
+    "message": "Could not verify the created chat. Your draft and recovery record are kept."
+  },
+  "draftRecovery_creationBound": {
+    "message": "Chat already created"
+  },
+  "draftRecovery_creationPrepared": {
+    "message": "Chat creation not started"
+  },
+  "draftRecovery_creationUnconfirmed": {
+    "message": "Server save unconfirmed"
+  },
+  "draftRecovery_creationPreparedHelp": {
+    "message": "No chat creation was dispatched. Review your setup and send when ready; your attempted text is retained."
+  },
+  "draftRecovery_creationBoundHelp": {
+    "message": "This chat was already created. Review it before sending retained text again; starting another chat may create a duplicate."
+  },
+  "draftRecovery_creationHelp": {
+    "message": "The server may have created this chat. Review conversations before starting again; another chat may create a duplicate. Your original attempted text is retained."
+  },
+  "draftRecovery_creationOriginalText": {
+    "message": "Original attempted text"
+  },
+  "draftRecovery_creationEmptyText": {
+    "message": "No user message was submitted with this creation."
+  },
+  "draftRecovery_creationCopyFailed": {
+    "message": "Could not copy the text. You can select and copy it above."
+  },
+  "draftRecovery_creationCopy": {
+    "message": "Copy attempted text"
+  },
+  "draftRecovery_findConversations": {
+    "message": "Find conversations"
+  },
+  "draftRecovery_reviewCreated": {
+    "message": "Review created chat"
+  },
+  "draftRecovery_creationStorageUnavailable": {
+    "message": "Creation recovery could not be read. Keep your draft and check retained drafts before starting again."
+  },
+  "draftRecovery_creationDraftHelp": {
+    "message": "Open this draft to review its creation before sending. Starting another chat may create a duplicate."
+  },
+  "composer_chooseProvider": {
+    "message": "Choose provider"
+  },
+  "composer_chooseModelAndProvider": {
+    "message": "Choose model and provider"
+  },
+  "characterChatReadiness_model_explicitSelectionTitle": {
+    "message": "Choose a model and provider before starting character chat"
+  },
+  "characterChatReadiness_model_explicitSelectionDescription": {
+    "message": "Your character and draft are kept. Open the model selector and choose a model from the provider you want to use."
+  },
+  "characterChatReadiness_model_explicitSelectionAction": {
+    "message": "Choose model and provider"
+  },
+  "composer_returnToChat": {
+    "message": "Return to chat"
+  },
+  "composer_serverSetupTitle": {
+    "message": "Server settings"
+  },
+  "composer_discardSettingsTitle": {
+    "message": "Discard connection changes?"
+  },
+  "composer_discardSettingsAction": {
+    "message": "Discard changes"
+  },
+  "composer_keepEditingSettings": {
+    "message": "Keep editing"
+  },
+  "composer_connectionRequired": {
+    "message": "Connect to your tldw server before sending. Your draft has not been queued."
+  },
+  "composer_queueRestoredRequest": {
+    "message": "This request was restored. Review the conversation for an existing response before running it."
+  },
+  "composer_queueConnectionUnavailable": {
+    "message": "Connection was interrupted. Review this request and run it after reconnecting."
+  },
+  "characterRail_nativePersonaUnavailable": {
+    "message": "Saved persona chats cannot start in this view. Use an overlay personality instead; your current chat and draft are still here."
+  },
+  "characterRail_selectionError": {
+    "message": "The assistant could not be selected. Your current chat and draft are still here; try choosing again."
+  },
+  "composer_advancedPreferenceUnavailable": {
+    "message": "Display preference unavailable. Advanced controls still work for this visit."
+  },
+  "composer_assistant_selection_restore_failed": {
+    "message": "Assistant preferences could not be restored. Your chat and draft are still here; try choosing the assistant again."
+  },
+  "composer_native_history_context_refused": {
+    "message": "Your message was not added because this saved chat uses unsupported context. Your input is kept separately; copy it and review the saved setup or start a compatible chat."
+  },
+  "composer_native_history_response_pending": {
+    "message": "Wait for the current response to finish before starting a character chat. Your chat and draft are still here."
+  },
+  "composer_queueChatChanged": {
+    "message": "This chat or setup changed. Review the queued request before running it again."
+  },
+  "characterChatReadiness_routeSetupPending": {
+    "message": "Finish character setup before sending."
+  },
+  "characterChatReadiness_routeSetupFailed_title": {
+    "message": "Character setup was not applied"
+  },
+  "characterChatReadiness_routeSetupFailed_description": {
+    "message": "Your current chat and draft are still here. Review the setup error, then retry."
+  },
+  "draftRecovery_checkCreated": {
+    "message": "Check server for this chat"
+  },
+  "draftRecovery_copyAndCheckCreated": {
+    "message": "Copy draft and check server"
+  },
+  "draftRecovery_copyAndReviewCreated": {
+    "message": "Copy draft and review saved chat"
+  },
+  "draftRecovery_savedChatDraft": {
+    "message": "Retained message for a saved chat"
+  },
+  "composer_modelSearchLabel": {
+    "message": "Search models"
+  },
+  "composer_modelSortLabel": {
+    "message": "Sort models"
+  },
+  "sidepanelHandoff_checkingCopy": {
+    "message": "Checking the copy…"
+  },
+  "sidepanelHandoff_draftChanged": {
+    "message": "Your draft changed while the copy was checked. Review it, then choose Insert or Replace again."
+  },
+  "sidepanelHandoff_readFailed": {
+    "message": "The copy could not be checked. Your draft remains here. Try Insert or Replace again."
+  },
+  "sidepanelHandoff_unavailableCopyDescription": {
+    "message": "The copy expired or could not be read. Your destination draft remains here. Copy again from the sidepanel to try again."
+  },
+  "composer_modelsDiscoveryFailed": {
+    "message": "Could not check chat models"
+  },
+  "composer_modelsDiscoveryFailedDetail": {
+    "message": "Your character selection and draft are kept. Retry checking models before sending."
+  },
+  "sidepanelHandoff_conflictDescription": {
+    "message": "Review the copied draft below. Insert it, replace your current draft, or cancel the import."
+  },
+  "sidepanelHandoff_copiedDraft": {
+    "message": "Copied draft"
+  },
+  "sidepanelHandoff_historyNotTransferred": {
+    "message": "History was not transferred"
+  },
+  "sidepanelHandoff_chooseDestinationHistory": {
+    "message": "This copy does not identify the source account and server. Open the Chats sidebar and choose a conversation available here before continuing its history."
+  },
   "composer_persistence_serverSaving": {
     "message": "Saved on this device. Waiting for your tldw server to confirm the latest changes."
   },
@@ -3745,6 +4138,186 @@
   },
   "composer_persistence_serverFailedPill": {
     "message": "Couldn't save to server"
+  },
+  "sidepanelHandoff_skippedSettings": {
+    "message": "Settings"
+  },
+  "sidepanelHandoff_skippedHistory": {
+    "message": "Conversation history"
+  },
+  "sidepanelHandoff_skippedAttachments": {
+    "message": "Attachments and retrieval sources"
+  },
+  "sidepanelHandoff_notImported": {
+    "message": "Not imported"
+  },
+  "sidepanelHandoff_chooseHere": {
+    "message": "Choose these in the destination chat."
+  },
+  "sidepanelHandoff_draftImported": {
+    "message": "Draft text imported."
+  },
+  "sidepanelHandoff_noTextTitle": {
+    "message": "Copy contains no draft text"
+  },
+  "sidepanelHandoff_noTextDescription": {
+    "message": "Your draft remains here. Dismiss this copy, then choose the settings or attachments you need."
+  },
+  "sidepanelHandoff_dismissCopy": {
+    "message": "Dismiss copy"
+  },
+  "sidepanelHandoff_dismissReceipt": {
+    "message": "Dismiss notice"
+  },
+  "imageGeneration_settingsLoadFailedTitle": {
+    "message": "Image settings unavailable"
+  },
+  "imageGeneration_settingsLoadFailedBody": {
+    "message": "Could not load saved image settings. Your current settings were kept."
+  },
+  "imageGeneration_referenceImagesFailed": {
+    "message": "Could not load reference images. Retry, or clear the selection to continue without one."
+  },
+  "imageGeneration_referenceImageSelectionUnavailable": {
+    "message": "The selected reference image could not be verified. Retry loading reference images or clear the selection before generating."
+  },
+  "sidepanelHandoff_optionModel": {
+    "message": "Model and provider"
+  },
+  "sidepanelHandoff_optionMode": {
+    "message": "Chat mode"
+  },
+  "sidepanelHandoff_optionWebSearch": {
+    "message": "Web search"
+  },
+  "sidepanelHandoff_optionTools": {
+    "message": "Tool choice"
+  },
+  "sidepanelHandoff_optionOCR": {
+    "message": "OCR"
+  },
+  "sidepanelHandoff_copiedSettings": {
+    "message": "Copied settings"
+  },
+  "sidepanelHandoff_setting": {
+    "message": "Setting"
+  },
+  "sidepanelHandoff_currentValue": {
+    "message": "Current"
+  },
+  "sidepanelHandoff_copiedValue": {
+    "message": "Copied"
+  },
+  "sidepanelHandoff_applySupportedSettings": {
+    "message": "Apply supported settings"
+  },
+  "sidepanelHandoff_applySettings": {
+    "message": "Apply settings"
+  },
+  "sidepanelHandoff_settingsIntent": {
+    "message": "These preferences do not copy prompts, chat privacy, attachments or retrieval sources. Availability is checked when sending."
+  },
+  "sidepanelHandoff_settingsOnlyDescription": {
+    "message": "Your draft remains here. Review the copied settings below, apply them if wanted, or dismiss this copy."
+  },
+  "sidepanelHandoff_skippedCommandsPrivacy": {
+    "message": "Prompts and chat privacy"
+  },
+  "sidepanelHandoff_settingsApplied": {
+    "message": "Supported settings applied here."
+  },
+  "sidepanelHandoff_modelSaving": {
+    "message": "Saving the model preference…"
+  },
+  "sidepanelHandoff_modelSaved": {
+    "message": "Model preference saved."
+  },
+  "sidepanelHandoff_modelSaveFailed": {
+    "message": "The model preference could not be saved. Select the model again to retry saving."
+  },
+  "sidepanelHandoff_destinationChanged": {
+    "message": "Your draft or settings changed while the copy was checked. Review them, then choose again."
+  },
+  "sidepanelHandoff_settingsUnavailable": {
+    "message": "Wait for this conversation to finish loading, or uncheck settings to import text only."
+  },
+  "sidepanelHandoff_modelUnavailable": {
+    "message": "The copied model and provider could not be verified. Choose them here, or uncheck settings to import text only."
+  },
+  "sidepanelHandoff_optionsCheckFailed": {
+    "message": "The copied settings could not be checked. Your draft and settings remain here. Try again, or uncheck settings to import text only."
+  },
+  "sidepanelHandoff_conflictLabel": {
+    "message": "Review copied chat"
+  },
+  "sidepanelHandoff_sourceAccountUnverified": {
+    "message": "This copy does not identify its source account. Review the content before importing."
+  },
+  "sidepanelHandoff_copyShortened": {
+    "message": "Some copied text or page references were shortened."
+  },
+  "sidepanelHandoff_contextOnlyTitle": {
+    "message": "Import page references?"
+  },
+  "sidepanelHandoff_contextOnlyDescription": {
+    "message": "Review the copied page references, add them to this chat, or cancel. Your current draft will be kept."
+  },
+  "sidepanelHandoff_addPageReferences": {
+    "message": "Add page references"
+  },
+  "sidepanelHandoff_copiedPageReferences": {
+    "message": "Copied page references"
+  },
+  "sidepanelHandoff_copiedSnippet": {
+    "message": "Snippet {{number}}"
+  },
+  "sidepanelHandoff_pageReferencesImported": {
+    "message": "Page references imported."
+  },
+  "draftRecovery_accountPending": {
+    "message": "Checking your account before restoring or saving drafts…"
+  },
+  "draftRecovery_accountVerificationFailed": {
+    "message": "Your account could not be verified. Draft saving, recovery, and imports are paused. Retry or check your connection settings."
+  },
+  "draftRecovery_retryAccountVerification": {
+    "message": "Retry account verification"
+  },
+  "composer_sceneLoadError": {
+    "message": "Scene settings could not be loaded. Existing chat setup was left unchanged."
+  },
+  "composer_sceneSaveError": {
+    "message": "Scene settings could not be saved. Your edits are still here; retry Save."
+  },
+  "composer_sceneSourceUnavailable": {
+    "message": "Close this panel and check your account verification and selected chat before reopening scene settings."
+  },
+  "header_newTemporaryChat": {
+    "message": "Temporary chat (on this device)"
+  },
+  "errorRecovery_interruptedLabel": {
+    "message": "Interrupted"
+  },
+  "errorRecovery_savedInterruptedSummary": {
+    "message": "This reply ended early. The saved content is kept."
+  },
+  "errorRecovery_stoppedLabel": {
+    "message": "Stopped"
+  },
+  "errorRecovery_savedStoppedSummary": {
+    "message": "This reply was stopped. The saved content is kept."
+  },
+  "errorRecovery_lengthLabel": {
+    "message": "Output limit reached"
+  },
+  "errorRecovery_lengthSummary": {
+    "message": "This reply reached the model's output limit. The saved content is kept."
+  },
+  "errorRecovery_generationFailedLabel": {
+    "message": "Generation failed"
+  },
+  "errorRecovery_generationFailedSummary": {
+    "message": "The saved record reports a generation failure. Any saved content is kept."
   },
   "sources_captureArticle": {
     "message": "Capture article"
@@ -3772,6 +4345,9 @@
   },
   "sources_capturePublicOnly": {
     "message": "Public readable text only. Website sign-ins, browser cookies, and private-page access are not used."
+  },
+  "sources_captureBrowserUnavailable": {
+    "message": "Safe browser capture is unavailable for this page. Try another public URL, or use the Web Clipper or import readable content you can provide."
   },
   "sources_captureCompleteText": {
     "message": "The complete text is saved; it is never silently shortened."
@@ -3802,5 +4378,221 @@
   },
   "sources_captureCharacters": {
     "message": "Characters"
+  },
+  "historySelection_savedEditedReplyTitle": {
+    "message": "Edited reply saved"
+  },
+  "historySelection_savedEditedReplyMessage": {
+    "message": "Your edited question and its reply are saved as a separate branch. Open the saved reply when you are ready."
+  },
+  "historySelection_openSavedReply": {
+    "message": "Open saved reply"
+  },
+  "historySelection_finishEditBeforeOpening": {
+    "message": "Finish or cancel your current message edit before opening the saved reply."
+  },
+  "historySelection_openSavedReplyFailed": {
+    "message": "Could not open the saved reply. Your current view and saved reply are retained."
+  },
+  "historySelection_retainedOutcomes": {
+    "message": "Retained outcomes"
+  },
+  "historySelection_savedRegeneratedReplyTitle": {
+    "message": "New reply saved"
+  },
+  "historySelection_savedRegeneratedReplyMessage": {
+    "message": "The new reply is saved as an alternative to the original reply. Your original question is kept once. Open the saved reply when you are ready."
+  },
+  "historySelection_regenerationRefusedTitle": {
+    "message": "New reply refused"
+  },
+  "historySelection_regenerationRefusedMessage": {
+    "message": "This saved chat uses unsupported context. Your original exchange and draft are kept. Review the saved setup before regenerating again."
+  },
+  "historySelection_regenerationUnknownTitle": {
+    "message": "New reply unconfirmed"
+  },
+  "historySelection_regenerationUnknownMessage": {
+    "message": "Your original exchange is kept. Any new text that arrived is retained here; the server may also have saved a new reply. Reload this chat before regenerating again. Recovery will not send it again automatically."
+  },
+  "errorRecovery_interruptedSummary": {
+    "message": "Generation was interrupted. Any text received is kept."
+  },
+  "errorRecovery_missingFinalSummary": {
+    "message": "No final answer was generated."
+  },
+  "shortcuts_openKeyboardHelp": {
+    "message": "Open keyboard shortcuts (?)"
+  },
+  "composer_rolePlayCompatibility_selected": {
+    "message": "Selected"
+  },
+  "composer_rolePlayCompatibility_selectedWithSources": {
+    "message": "Selected with sources"
+  },
+  "composer_context_characterSetup": {
+    "message": "Character setup"
+  },
+  "composer_context_personaSetup": {
+    "message": "Persona setup"
+  },
+  "historySelection_sendRefusedMessage": {
+    "message": "Your original input is kept here; copy it and review the conversation before trying again. It will not be sent again automatically."
+  },
+  "historySelection_sendConflictTitle": {
+    "message": "Updated in another window or tab"
+  },
+  "historySelection_sendConflictMessage": {
+    "message": "Your message was not added. Load the latest messages to continue, or branch from the point shown here. Your input is kept."
+  },
+  "historySelection_freshnessConflictMessage": {
+    "message": "This conversation changed. Your draft and the messages shown here are kept. Load the latest messages to continue, or branch from this point."
+  },
+  "historySelection_loadLatest": {
+    "message": "Load latest messages"
+  },
+  "historySelection_branchHere": {
+    "message": "Branch here"
+  },
+  "historySelection_cancelBranch": {
+    "message": "Cancel branch"
+  },
+  "historySelection_downloadRecoveredImage": {
+    "message": "Download retained image"
+  },
+  "historySelection_branchPending": {
+    "message": "Your next message will branch from this point. The existing conversation is kept."
+  },
+  "characterChatReadiness_character_description": {
+    "message": "Choose an available model with a configured provider, then choose the character for your new chat."
+  },
+  "historySelection_roleplayReplyUnconfirmedMessage": {
+    "message": "Your message is saved. Any reply that arrived is retained here. Explicit Retry may generate another reply if none is already saved, including while an earlier request is still running. It does not add another user message."
+  },
+  "historySelection_roleplayInputUnconfirmedMessage": {
+    "message": "The server may have received this message. Explicit Retry may generate a reply if none is already saved. It keeps the original message identity and your retained input."
+  },
+  "composer_persistence_serverUnconfirmedPill": {
+    "message": "Save status unconfirmed"
+  },
+  "composer_persistence_serverUnconfirmed": {
+    "message": "This chat is linked to server history. Review retained outcomes and reload history to confirm the latest turn before sending again."
+  },
+  "empty_connectTitle": {
+    "message": "Connect to start chatting"
+  },
+  "empty_connectDescription": {
+    "message": "Connect to your tldw server, then choose a model and start chatting."
+  },
+  "empty_connectAction": {
+    "message": "Connect server"
+  },
+  "composer_advancedCustomization": {
+    "message": "Advanced customization"
+  },
+  "composer_previewChanges": {
+    "message": "Preview changes"
+  },
+  "composer_previewCurrent": {
+    "message": "Current"
+  },
+  "composer_previewAfterApplying": {
+    "message": "After applying"
+  },
+  "composer_sceneDetails": {
+    "message": "Scene details"
+  },
+  "cockpit_collapseContextSidechannel": {
+    "message": "Hide context"
+  },
+  "cockpit_collapseRuntimeSidechannel": {
+    "message": "Hide chat settings"
+  },
+  "cockpit_restoreContextSidechannel": {
+    "message": "Show context"
+  },
+  "cockpit_restoreRuntimeSidechannel": {
+    "message": "Show chat settings"
+  },
+  "cockpit_contextRailTab": {
+    "message": "Context"
+  },
+  "cockpit_runtimeRailTab": {
+    "message": "Chat settings"
+  },
+  "cockpit_contextRailHiddenSummary": {
+    "message": "Context hidden. Chat settings visible."
+  },
+  "cockpit_runtimeRailHiddenSummary": {
+    "message": "Chat settings hidden. Context visible."
+  },
+  "cockpit_cockpitRailsVisibleSummary": {
+    "message": "Context and chat settings visible."
+  },
+  "characterRail_characterSessions": {
+    "message": "Character sessions"
+  },
+  "characterRail_sessionsOffline": {
+    "message": "Connect to your server to view character sessions."
+  },
+  "characterRail_sessionsVerifying": {
+    "message": "Verifying your server account..."
+  },
+  "characterRail_sessionsAccountError": {
+    "message": "Your server account could not be verified."
+  },
+  "characterRail_retryVerification": {
+    "message": "Retry account verification"
+  },
+  "characterRail_sessionsLoading": {
+    "message": "Loading character sessions..."
+  },
+  "characterRail_sessionsStale": {
+    "message": "Showing character sessions from the last successful refresh."
+  },
+  "characterRail_sessionsLoadFailed": {
+    "message": "Character sessions could not be loaded."
+  },
+  "characterRail_retrySessions": {
+    "message": "Retry character sessions"
+  },
+  "characterRail_sessionsUnverified": {
+    "message": "Some sessions on this page could not be verified for character chat. Retry to refresh."
+  },
+  "characterRail_currentSession": {
+    "message": "Current"
+  },
+  "characterRail_pageEmpty": {
+    "message": "No sessions on this page. Return to the previous page."
+  },
+  "characterRail_noCharacterSessions": {
+    "message": "No character sessions yet."
+  },
+  "characterRail_sessionReference": {
+    "message": "Session {{id}}"
+  },
+  "characterRail_currentSessionAction": {
+    "message": "Current {{title}}"
+  },
+  "characterRail_resumeSessionAction": {
+    "message": "Resume {{title}}, session {{id}}"
+  },
+  "characterRail_currentSessionReferenceAction": {
+    "message": "Current {{title}}, session {{id}}"
+  },
+  "characterRail_pagesLabel": {
+    "message": "Character sessions pages"
+  },
+  "characterRail_previousPage": {
+    "message": "Previous sessions page"
+  },
+  "characterRail_nextPage": {
+    "message": "Next sessions page"
+  },
+  "characterRail_pageLabel": {
+    "message": "Page"
+  },
+  "composer_advancedPreferenceUnavailable": {
+    "message": "Display preference unavailable. Advanced controls still work for this visit."
   }
 }

@@ -84,7 +84,7 @@ async def test_the_audio_jobs_worker_runs_analysis_for_the_job_owner(monkeypatch
 
     seen: list[int | None] = []
 
-    def _analyze(text: str, api_name: str, *args: object, **kwargs: object) -> str:
+    def _analyze(api_name: str, input_data: str, *args: object, **kwargs: object) -> str:
         """Record the user the analysis runs as."""
         seen.append(current_llm_user_id())
         return "analysis"
@@ -94,7 +94,7 @@ async def test_the_audio_jobs_worker_runs_analysis_for_the_job_owner(monkeypatch
     jm = JobManager()
     jm.create_job(
         domain="audio", queue="default", job_type="audio_analyze",
-        payload={"text": "hello worker", "perform_analysis": True}, owner_user_id="7",
+        payload={"text": "hello worker", "api_name": "openai", "perform_analysis": True}, owner_user_id="7",
     )
     stop = asyncio.Event()
     task = asyncio.create_task(worker.run_audio_jobs_worker(stop))

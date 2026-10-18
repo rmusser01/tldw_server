@@ -11289,6 +11289,11 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     )
     _install_fake_router_module(
         monkeypatch,
+        "tldw_Server_API.app.api.v1.endpoints.storage",
+        path="/storage/usage",
+    )
+    _install_fake_router_module(
+        monkeypatch,
         "tldw_Server_API.app.api.v1.endpoints.files",
         path="/files",
     )
@@ -11382,6 +11387,8 @@ def test_iter_content_router_specs_populates_expected_specs(monkeypatch: pytest.
     assert by_first_path["/service-prompts"].prefix == "/api/v1"
     assert by_first_path["/service-prompts"].tags == ("service-prompts",)
     assert by_first_path["/service-prompts"].route_key == ""
+    assert by_key["storage"].prefix == "/api/v1"
+    assert by_key["storage"].tags == ("storage",)
     assert by_key["outputs"].prefix == "/api/v1"
     assert by_key["outputs"].tags == ("outputs",)
     assert by_key["claims"].prefix == "/api/v1"
@@ -11708,7 +11715,7 @@ def test_iter_admin_router_specs_populates_expected_specs(monkeypatch: pytest.Mo
     assert by_first_path["/sandbox/status"].tags == ("sandbox",)
     assert by_first_path["/sandbox/status"].route_key == "sandbox"
     assert by_first_path["/sandbox/status"].default_stable is False
-    assert by_key["billing"].prefix == "/api/v1"
+    assert by_key["billing"].prefix == "/api/v1/admin"
     assert by_key["billing"].tags == ("billing",)
     assert by_key["mcp-catalogs"].prefix == "/api/v1"
     assert by_key["mcp-catalogs"].tags == ()

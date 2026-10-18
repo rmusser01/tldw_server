@@ -2,7 +2,7 @@
 
 Detects process-global state that one test module leaves mutated for the
 *next* module to inherit — the failure class behind the audit's top-severity
-defects (audits/2026-07-04-test-suite-audit-round2.md, RA5):
+defects (Docs/Audit/2026-07-04-test-suite-audit-round2.md, RA5):
 
 * #2580 — service-layer singleton caches registered against the wrong DB
 * #2581 — Embeddings/TTS drain state corrupting subsequent suites

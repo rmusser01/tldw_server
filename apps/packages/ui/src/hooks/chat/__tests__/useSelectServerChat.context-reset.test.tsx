@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useSelectServerChat } from "../useSelectServerChat";
+import type { ServerChatSummary } from "@/services/tldw/TldwApiClient";
 import { usePlaygroundSessionStore } from "@/store/playground-session";
 
 const navigateMock = vi.hoisted(() => vi.fn());
@@ -22,6 +23,12 @@ const chatBaseState = vi.hoisted(() => ({
 
 const optionState = vi.hoisted(() => ({
   value: {
+    temporaryChat: false, historyId: null as string | null, serverChatId: null as string | null,
+    messages: [] as unknown[], history: [] as unknown[],
+    chatDraftAddress: { kind: "fresh", id: "draft-a", scope: { type: "global" }, temporary: false },
+    chatDraftRevision: 3,
+    setChatDraftAddress: vi.fn(() => true),
+    setTemporaryChat: vi.fn(),
     setIsSearchingInternet: vi.fn(),
     clearReplyTarget: vi.fn(),
     setServerChatId: vi.fn(),
@@ -67,10 +74,10 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 }));
 
 vi.mock("@/store/option", () => ({
-  useStoreMessageOption: (selector?: (state: unknown) => unknown) =>
+  useStoreMessageOption: Object.assign((selector?: (state: unknown) => unknown) =>
     typeof selector === "function"
       ? selector(optionState.value)
-      : optionState.value,
+      : optionState.value, { getState: () => optionState.value }),
 }));
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
@@ -91,6 +98,8 @@ vi.mock("@/utils/update-page-title", () => ({
 
 describe("useSelectServerChat context reset", () => {
   beforeEach(() => {
+    Object.assign(optionState.value, { temporaryChat: false, historyId: null, serverChatId: null, messages: [], history: [] });
+    vi.spyOn(window, "confirm").mockReturnValue(false);
     navigateMock.mockClear();
     setSelectedAssistantMock.mockClear();
     Object.values(chatBaseState.value).forEach((value) => {
@@ -114,9 +123,19 @@ describe("useSelectServerChat context reset", () => {
         cluster_id: "cluster-1",
         source: "webui",
         external_ref: null,
-      } as any);
+      } as ServerChatSummary);
     });
-    expect(usePlaygroundSessionStore.getState().serverChatSelectionIntent).toEqual({ chatId: "chat-2" });
+    const intent = usePlaygroundSessionStore.getState().serverChatSelectionIntent;
+    expect(intent).toMatchObject({ chatId: "chat-2", onLoaded: expect.any(Function) });
+    expect(optionState.value.setChatDraftAddress).not.toHaveBeenCalled();
+    intent?.onLoaded?.({
+      owner: { kind: "native", conversation_id: "chat-2", request_scope: {} as never, validate_lease: () => true },
+      view: { owner_key: "native-owner", conversation_id: "chat-2", view_session_id: "v", selection_revision: 1, cursor: { kind: "empty" }, interpretation: { kind: "parent_graph_v1" } }
+    });
+    expect(optionState.value.setChatDraftAddress).toHaveBeenCalledWith(
+      { kind: "native", id: "chat-2", ownerKey: "native-owner", scope: { type: "global" } },
+      { kind: "switch", expectedRevision: 3, sourceAddress: optionState.value.chatDraftAddress }
+    );
 
     expect(optionState.value.setWebSearch).toHaveBeenCalledWith(false);
     expect(optionState.value.setSelectedSystemPrompt).toHaveBeenCalledWith("");
@@ -129,4 +148,46 @@ describe("useSelectServerChat context reset", () => {
       "Fresh server chat",
     );
   });
+  it("refuses a retired caller before replacement admission", () => {
+    const { result } = renderHook(() => useSelectServerChat());
+    act(() => expect(result.current({ id: "next-saved" } as ServerChatSummary, { isCurrent: () => false })).toBe(false));
+    expect(chatBaseState.value.setMessages).not.toHaveBeenCalled();
+  });
+
+  it.each(["consent", "mode publication"])("keeps rows when caller retires during %s", (change) => {
+    let current = true;
+    if (change === "consent") {
+      Object.assign(optionState.value, { temporaryChat: true, historyId: "temp", messages: [{ message: "Temporary answer" }] });
+      vi.mocked(window.confirm).mockImplementation(() => { current = false; return true; });
+    } else optionState.value.setTemporaryChat.mockImplementationOnce(() => { current = false; });
+    const { result } = renderHook(() => useSelectServerChat());
+    act(() => expect(result.current({ id: "next-saved" } as ServerChatSummary, { temporaryChat: false, isCurrent: () => current })).toBe(false));
+    expect(chatBaseState.value.setMessages).not.toHaveBeenCalled();
+    expect(optionState.value.setServerChatId).not.toHaveBeenCalled();
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("keeps Temporary rows and the pending restore untouched when saved selection is cancelled", () => {
+    Object.assign(optionState.value, { temporaryChat: true, historyId: "temp", messages: [{ message: "Temporary answer" }], history: [{ content: "Temporary answer" }] });
+    usePlaygroundSessionStore.setState({ restoreRevision: 8 });
+    const { result } = renderHook(() => useSelectServerChat());
+    act(() => expect(result.current({ id: "next-saved", title: "Next saved" } as ServerChatSummary)).toBe(false));
+    expect(window.confirm).toHaveBeenCalledOnce();
+    expect(chatBaseState.value.setMessages).not.toHaveBeenCalled();
+    expect(optionState.value.setServerChatId).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(usePlaygroundSessionStore.getState().restoreRevision).toBe(8);
+  });
+
+  it("admits acknowledged Temporary replacement once and reports acceptance", () => {
+    Object.assign(optionState.value, { temporaryChat: true, historyId: "temp", messages: [{ message: "Temporary answer" }] });
+    vi.mocked(window.confirm).mockReturnValue(true);
+    const { result } = renderHook(() => useSelectServerChat());
+    act(() => expect(result.current({ id: "next-saved", title: "Next saved" } as ServerChatSummary)).toBe(true));
+    expect(window.confirm).toHaveBeenCalledOnce();
+    expect(chatBaseState.value.setMessages).toHaveBeenCalledOnce();
+    expect(optionState.value.setServerChatId).toHaveBeenCalledWith("next-saved");
+    expect(navigateMock).toHaveBeenCalledWith("/chat");
+  });
+
 });

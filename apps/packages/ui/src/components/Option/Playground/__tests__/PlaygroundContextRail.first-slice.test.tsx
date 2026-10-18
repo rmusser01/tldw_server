@@ -130,6 +130,31 @@ const noPromptCompositionSummary = (): PlaygroundCompositionPreviewSummary => ({
 });
 
 describe("PlaygroundContextRail first-slice controls", () => {
+  it("labels selected context and prompts without claiming request activation", () => {
+    renderRail({
+      hasContext: true,
+      contextSources: [
+        {
+          id: "prompt",
+          kind: "prompt",
+          label: "Prompt",
+          title: "Selected behavior",
+          state: "active",
+        },
+      ],
+      promptSummary: {
+        state: "custom",
+        label: "Selected behavior",
+        detail: "System prompt selected",
+      },
+    });
+    expect(screen.getByText("Context selected")).toBeInTheDocument();
+    expect(screen.getByText("1 selected source")).toBeInTheDocument();
+    expect(screen.getAllByText("Selected")).toHaveLength(3);
+    expect(screen.queryByText("Active")).not.toBeInTheDocument();
+    expect(screen.queryByText("Armed")).not.toBeInTheDocument();
+  });
+
   it("keeps left rail groups in cockpit comprehension order", () => {
     renderRail({
       compositionPreviewSummary: compositionSummary(),
@@ -338,7 +363,9 @@ describe("PlaygroundContextRail first-slice controls", () => {
       within(rail).queryByRole("button", { name: "Select a prompt" }),
     ).toBeNull();
 
-    fireEvent.click(within(rail).getByRole("button", { name: "Expand Prompt" }));
+    fireEvent.click(
+      within(rail).getByRole("button", { name: "Expand Prompt" }),
+    );
 
     expect(
       within(rail).getByRole("button", { name: "Select a prompt" }),

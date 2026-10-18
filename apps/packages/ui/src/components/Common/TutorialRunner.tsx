@@ -11,20 +11,24 @@ import Joyride, {
   ACTIONS,
   type Step
 } from "react-joyride"
+import { useLocation } from "react-router-dom"
+import { focusComposer } from "@/hooks/useComposerFocus"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { useTranslation } from "react-i18next"
-import { useActiveTutorial } from "@/store/tutorials"
+import { useActiveTutorial, useTutorialStore } from "@/store/tutorials"
 import { getTutorialById, type TutorialDefinition } from "@/tutorials"
+import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 
 const TARGET_RETRY_DELAY_MS = 350
 const MAX_TARGET_RETRY_ATTEMPTS = 4
 
-const resolveTargetElement = (
-  target: Step["target"]
-): HTMLElement | null => {
-  if (!target) return null
+const resolveTargetElement = (target: Step["target"]): HTMLElement | null => {
+  if (!target || typeof document === "undefined") return null
 
   if (typeof target !== "string") {
-    return target instanceof HTMLElement ? target : null
+    return target instanceof HTMLElement && isElementVisible(target)
+      ? target
+      : null
   }
 
   const selectors = target
@@ -33,9 +37,10 @@ const resolveTargetElement = (
     .filter((selector) => selector.length > 0)
 
   for (const selector of selectors) {
-    const element = document.querySelector(selector)
-    if (element instanceof HTMLElement) {
-      return element
+    for (const element of document.querySelectorAll(selector)) {
+      if (element instanceof HTMLElement && isElementVisible(element)) {
+        return element
+      }
     }
   }
 
@@ -44,23 +49,12 @@ const resolveTargetElement = (
 
 const isElementVisible = (element: HTMLElement): boolean => {
   const style = window.getComputedStyle(element)
-  if (
-    style.display === "none" ||
-    style.visibility === "hidden" ||
-    Number(style.opacity || "1") === 0
-  ) {
+  if (isHiddenBySelfOrAncestor(element) || Number(style.opacity || "1") === 0) {
     return false
   }
 
   const rect = element.getBoundingClientRect()
   return rect.width > 0 && rect.height > 0
-}
-
-const isStepTargetReady = (step: Step | undefined): boolean => {
-  if (!step) return false
-  const element = resolveTargetElement(step.target)
-  if (!element) return false
-  return isElementVisible(element)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -125,6 +119,7 @@ export const TutorialRunner: React.FC = () => {
   const { t } = useTranslation(["tutorials", "common"])
   const {
     activeTutorialId,
+    activeRun,
     activeStepIndex,
     endTutorial,
     setStepIndex,
@@ -132,7 +127,101 @@ export const TutorialRunner: React.FC = () => {
   } = useActiveTutorial()
   const retryAttemptsRef = React.useRef<Map<string, number>>(new Map())
   const retryTimersRef = React.useRef<Map<string, number>>(new Map())
-  const activeTutorialRef = React.useRef<string | null>(null)
+  const mounted = React.useRef(true)
+  const location = useLocation()
+  const route = JSON.stringify([
+    location.key,
+    location.pathname,
+    location.search,
+    location.hash
+  ])
+  const routeRef = React.useRef(route)
+  const pendingFocus = React.useRef<{ cancel: () => void } | null>(null)
+  const admittedRun = React.useMemo(
+    () =>
+      !activeRun?.focusReturn ||
+      (activeRun.focusReturn.route === route &&
+        activeRun.focusReturn.isCurrent()),
+    [activeRun, route]
+  )
+  React.useLayoutEffect(() => {
+    if (activeRun || route !== routeRef.current) pendingFocus.current?.cancel()
+    routeRef.current = route
+  }, [activeRun, route])
+  React.useEffect(() => {
+    if (activeRun && !admittedRun) endTutorial(activeRun)
+  }, [activeRun, admittedRun, endTutorial])
+
+  const returnTourFocus = React.useCallback(() => {
+    const intent = activeRun?.focusReturn
+    const active = document.activeElement
+    const lastFocused = intent?.lastFocusedControl?.()
+    // Joyride removes Skip/Finish controls before its TOUR_END callback.
+    const initiator =
+      active instanceof HTMLElement &&
+      active.closest("#react-joyride-portal, .react-joyride__tooltip")
+        ? active
+        : active === document.body && lastFocused && !lastFocused.isConnected
+          ? lastFocused
+          : null
+    if (!intent?.isCurrent() || intent.route !== routeRef.current || !initiator)
+      return
+    pendingFocus.current?.cancel()
+    let frame: number | null = null
+    const cancel = () => {
+      if (frame !== null) cancelAnimationFrame(frame)
+      document.removeEventListener("focusin", onIntent)
+      document.removeEventListener("pointerdown", onIntent)
+      document.removeEventListener("input", onIntent)
+      unsubscribe()
+      stopAccount()
+      if (pendingFocus.current === attempt) pendingFocus.current = null
+    }
+    const onIntent = (event: Event) => {
+      if (event.type === "input" || event.target !== initiator) cancel()
+    }
+    const unsubscribe = useTutorialStore.subscribe((state) => {
+      if (state.activeRun && state.activeRun !== activeRun) cancel()
+    })
+    const stopAccount = watchChatAccountChanges((invalidated) => {
+      if (invalidated) cancel()
+    })
+    const attempt = { cancel }
+    pendingFocus.current = attempt
+    document.addEventListener("focusin", onIntent)
+    document.addEventListener("pointerdown", onIntent)
+    document.addEventListener("input", onIntent)
+    frame = requestAnimationFrame(() => {
+      const current =
+        pendingFocus.current === attempt &&
+        mounted.current &&
+        !useTutorialStore.getState().activeRun &&
+        intent.isCurrent() &&
+        intent.route === routeRef.current &&
+        !initiator.isConnected &&
+        document.activeElement === document.body &&
+        document.visibilityState === "visible" &&
+        !document.querySelector("form[data-chat-message-editor]") &&
+        !Array.from(
+          document.querySelectorAll<HTMLElement>(
+            '[role="dialog"], [aria-modal="true"]'
+          )
+        ).some((dialog) => !isHiddenBySelfOrAncestor(dialog))
+      cancel()
+      if (!current) return
+      const target = intent.target
+      if (
+        target?.isConnected &&
+        !isHiddenBySelfOrAncestor(target) &&
+        !target.closest("[inert]") &&
+        !target.hasAttribute("disabled") &&
+        target.getAttribute("aria-disabled") !== "true"
+      )
+        target.focus()
+      else focusComposer()
+    })
+  }, [activeRun])
+
   const [retryNonce, setRetryNonce] = React.useState(0)
 
   const clearRetryState = React.useCallback(() => {
@@ -144,15 +233,14 @@ export const TutorialRunner: React.FC = () => {
   }, [])
 
   React.useEffect(() => {
-    activeTutorialRef.current = activeTutorialId
-  }, [activeTutorialId])
-
-  React.useEffect(() => {
     clearRetryState()
-  }, [activeTutorialId, clearRetryState])
+  }, [activeRun, clearRetryState])
 
   React.useEffect(() => {
+    mounted.current = true
     return () => {
+      mounted.current = false
+      pendingFocus.current?.cancel()
       clearRetryState()
     }
   }, [clearRetryState])
@@ -165,19 +253,15 @@ export const TutorialRunner: React.FC = () => {
   /**
    * Convert tutorial steps to Joyride format with i18n
    */
-  const joyrideSteps: Step[] = React.useMemo(() => {
-    if (!tutorial) return []
-
-    return tutorial.steps.map((step) => ({
-      target: step.target,
-      title: t(step.titleKey, step.titleFallback),
-      content: t(step.contentKey, step.contentFallback),
-      placement: step.placement || "auto",
-      disableBeacon: step.disableBeacon ?? false,
-      spotlightClicks: step.spotlightClicks ?? false,
-      isFixed: step.isFixed ?? false
-    }))
-  }, [tutorial, t])
+  const joyrideSteps: Step[] = (tutorial?.steps ?? []).map((step) => ({
+    target: resolveTargetElement(step.target) ?? step.target,
+    title: t(step.titleKey, step.titleFallback),
+    content: t(step.contentKey, step.contentFallback),
+    placement: step.placement || "auto",
+    disableBeacon: step.disableBeacon ?? false,
+    spotlightClicks: step.spotlightClicks ?? false,
+    isFixed: step.isFixed ?? false
+  }))
 
   /**
    * Joyride locale strings
@@ -199,21 +283,34 @@ export const TutorialRunner: React.FC = () => {
    */
   const handleCallback = React.useCallback(
     (data: CallBackProps) => {
+      const isRunCurrent = () =>
+        mounted.current &&
+        !!activeRun &&
+        useTutorialStore.getState().activeRun === activeRun
+      if (!isRunCurrent()) return
       const { status, index, type, action } = data
+
+      if (action === ACTIONS.CLOSE) {
+        clearRetryState()
+        returnTourFocus()
+        endTutorial(activeRun!)
+        return
+      }
 
       // Tutorial finished or skipped
       if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
         clearRetryState()
+        returnTourFocus()
         if (status === STATUS.FINISHED && activeTutorialId) {
-          markComplete(activeTutorialId)
+          markComplete(activeTutorialId, activeRun!)
         }
-        endTutorial()
+        if (isRunCurrent()) endTutorial(activeRun!)
         return
       }
 
       // Step progression
       if (type === EVENTS.STEP_AFTER) {
-        const retryKey = `${activeTutorialId ?? "unknown"}:${index}`
+        const retryKey = `${activeRun!.id}:${index}`
         retryAttemptsRef.current.delete(retryKey)
         const retryTimer = retryTimersRef.current.get(retryKey)
         if (typeof retryTimer === "number") {
@@ -222,17 +319,17 @@ export const TutorialRunner: React.FC = () => {
         }
 
         if (action === ACTIONS.NEXT) {
-          setStepIndex(index + 1)
+          setStepIndex(index + 1, activeRun!)
         } else if (action === ACTIONS.PREV) {
-          setStepIndex(index - 1)
+          setStepIndex(index - 1, activeRun!)
         }
       }
 
       // Target not found - retry briefly for delayed mount/collapsed UI, then fallback.
       if (type === EVENTS.TARGET_NOT_FOUND) {
-        const retryKey = `${activeTutorialId ?? "unknown"}:${index}`
+        const retryKey = `${activeRun!.id}:${index}`
         const currentAttempts = retryAttemptsRef.current.get(retryKey) ?? 0
-        const currentStep = joyrideSteps[index]
+        const currentStep = tutorial?.steps[index]
 
         if (currentStep && currentAttempts < MAX_TARGET_RETRY_ATTEMPTS) {
           retryAttemptsRef.current.set(retryKey, currentAttempts + 1)
@@ -242,10 +339,9 @@ export const TutorialRunner: React.FC = () => {
             window.clearTimeout(existingTimer)
           }
 
-          const tutorialIdAtSchedule = activeTutorialId
           const timerId = window.setTimeout(() => {
             retryTimersRef.current.delete(retryKey)
-            if (activeTutorialRef.current !== tutorialIdAtSchedule) {
+            if (!isRunCurrent()) {
               return
             }
 
@@ -258,12 +354,12 @@ export const TutorialRunner: React.FC = () => {
               })
             }
 
-            if (isStepTargetReady(currentStep)) {
+            if (refreshedTarget) {
               retryAttemptsRef.current.delete(retryKey)
             }
 
-            setStepIndex(index)
-            setRetryNonce((value) => value + 1)
+            setStepIndex(index, activeRun!)
+            if (isRunCurrent()) setRetryNonce((value) => value + 1)
           }, TARGET_RETRY_DELAY_MS)
 
           retryTimersRef.current.set(retryKey, timerId)
@@ -284,31 +380,34 @@ export const TutorialRunner: React.FC = () => {
 
         // After retries are exhausted, skip to next step (or end without completion).
         if (index < joyrideSteps.length - 1) {
-          setStepIndex(index + 1)
+          setStepIndex(index + 1, activeRun!)
         } else {
           // Last step target never resolved, so end without granting completion.
-          endTutorial()
+          endTutorial(activeRun!)
         }
       }
     },
     [
       activeTutorialId,
+      activeRun,
+      returnTourFocus,
       clearRetryState,
       endTutorial,
       markComplete,
       setStepIndex,
-      joyrideSteps
+      tutorial,
+      joyrideSteps.length
     ]
   )
 
   // Don't render if no active tutorial
-  if (!tutorial || joyrideSteps.length === 0) {
+  if (!admittedRun || !tutorial || joyrideSteps.length === 0) {
     return null
   }
 
   return (
     <Joyride
-      key={`${activeTutorialId}-${retryNonce}`}
+      key={`${activeRun?.id}-${retryNonce}`}
       steps={joyrideSteps}
       run={true}
       stepIndex={activeStepIndex}

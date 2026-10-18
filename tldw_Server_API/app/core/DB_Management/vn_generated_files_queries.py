@@ -37,8 +37,10 @@ class VNGeneratedFilesQueries:
             return
         await self.conn.fetchrow("SELECT id FROM users WHERE id = $1 FOR UPDATE", user_id)
         if org_id:
+            await self.conn.fetchrow("SELECT id FROM organizations WHERE id = $1 FOR UPDATE", org_id)
             await self.conn.fetchrow("SELECT id FROM storage_quotas WHERE org_id = $1 FOR UPDATE", org_id)
         if team_id:
+            await self.conn.fetchrow("SELECT id FROM teams WHERE id = $1 FOR UPDATE", team_id)
             await self.conn.fetchrow("SELECT id FROM storage_quotas WHERE team_id = $1 FOR UPDATE", team_id)
 
     async def find_live_by_source_ref(

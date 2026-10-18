@@ -13,6 +13,7 @@ import time
 from pathlib import Path
 
 import pytest
+from starlette.requests import Request
 
 from tldw_Server_API.app.core.Workflows.engine import WorkflowEngine, WorkflowScheduler, RunMode
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowRun, WorkflowsDatabase
@@ -50,11 +51,11 @@ def _workflow_run(run_id: str, status: str) -> WorkflowRun:
     )
 
 
-class _TransientMissingRunDB:
+class _TransientMissingRunDB(WorkflowsDatabase):
     def __init__(self) -> None:
         self.calls = 0
 
-    def get_run(self, run_id: str):
+    def get_run(self, run_id: str) -> WorkflowRun | None:
         self.calls += 1
         if self.calls == 1:
             return None
@@ -318,7 +319,9 @@ def test_continue_run_recovers_succeeded_step_outputs_for_exact_resume(
     assert captured["compose_script"] == {
         "sections": [{"speaker": "HOST", "text": "Ready script"}]
     }
-    assert workflows_db.get_run(run_id).status == "succeeded"
+    run = workflows_db.get_run(run_id)
+    assert run is not None
+    assert run.status == "succeeded"
 
 
 def test_adapter_returned_research_checkpoint_wait_sets_run_waiting_human_without_human_timeout(
@@ -418,7 +421,7 @@ def test_run_saved_sync_waits_for_completion(workflows_db: WorkflowsDatabase, mo
         run_saved(
             workflow_id=workflow_id,
             mode="sync",
-            request=None,
+            request=Request({"type": "http", "method": "POST", "path": "/", "headers": []}),
             body=request_body,
             current_user=user,
             db=workflows_db,
@@ -443,6 +446,7 @@ def test_wait_for_run_completion_tolerates_transient_missing_run():
         )
     )
 
+    assert run is not None
     assert run.status == "succeeded"
     assert db.calls == 2
 
@@ -459,5 +463,368 @@ def test_wait_for_run_visibility_tolerates_transient_missing_run():
         )
     )
 
+    assert run is not None
     assert run.status == "succeeded"
     assert db.calls == 2
+
+
+def test_scheduler_releases_admission_when_owner_capture_is_missing(
+    workflows_db: WorkflowsDatabase, monkeypatch: pytest.MonkeyPatch
+):
+    """Release the admitted slot even when the engine cannot re-read its owner."""
+    scheduler = WorkflowScheduler.instance()
+    engine = WorkflowEngine(workflows_db)
+    tenant = "admitted-tenant"
+    definition = {
+        "name": "missing-owner-capture",
+        "steps": [{"id": "log", "type": "log", "config": {"message": "done"}}],
+    }
+    workflow_id = workflows_db.create_definition(
+        tenant_id=tenant,
+        name="missing-owner-capture",
+        version=1,
+        owner_id="user",
+        visibility="private",
+        description=None,
+        tags=None,
+        definition=definition,
+    )
+    run_id = "missing-owner-capture"
+    workflows_db.create_run(
+        run_id=run_id,
+        tenant_id=tenant,
+        user_id="user",
+        inputs={},
+        workflow_id=workflow_id,
+        definition_version=1,
+        definition_snapshot=definition,
+    )
+    spawned: list = []
+    injected_reads = []
+    accounting_reads = []
+    notifications = []
+    notified_scheduler = []
+    native_get_run = workflows_db.get_run
+    native_accounting_read = engine._llm_user_for_run
+    native_start_impl = engine._start_run_impl
+    native_notify = scheduler.notify_finished
+
+    def read_accounting_owner(rid):
+        owner = native_accounting_read(rid)
+        accounting_reads.append((rid, owner))
+        return owner
+
+    async def start_with_missing_owner(*args, **kwargs):
+        # Arm only after native accounting, before the implementation captures ownership.
+        notified_scheduler.append(kwargs.get("scheduler_for_notify"))
+        assert accounting_reads == [(run_id, "user")]
+        with monkeypatch.context() as owner_patch:
+
+            def missing_owner_once(rid):
+                owner_patch.setattr(workflows_db, "get_run", native_get_run)
+                injected_reads.append(rid)
+                return None
+
+            owner_patch.setattr(workflows_db, "get_run", missing_owner_once)
+            await native_start_impl(*args, **kwargs)
+
+    def notify(tenant_id, admitted_workflow_id, run_id=None):
+        notifications.append(
+            {
+                "same_scheduler": scheduler is notified_scheduler[0],
+                "tenant": tenant_id,
+                "workflow_id": admitted_workflow_id,
+                "run_id": run_id,
+            }
+        )
+        native_notify(tenant_id, admitted_workflow_id, run_id=run_id)
+
+    monkeypatch.setattr(WorkflowScheduler, "_spawn", staticmethod(spawned.append))
+    monkeypatch.setattr(engine, "_llm_user_for_run", read_accounting_owner)
+    monkeypatch.setattr(engine, "_start_run_impl", start_with_missing_owner)
+    monkeypatch.setattr(scheduler, "notify_finished", notify)
+    try:
+        engine.submit(run_id, RunMode.SYNC)
+        assert len(spawned) == 1
+        assert scheduler.stats() == {
+            "queue_depth": 0,
+            "active_tenants": 1,
+            "active_workflows": 1,
+        }
+        assert tenant != engine.config.tenant_id
+        asyncio.run(spawned[0])
+    finally:
+        for coroutine in spawned:
+            coroutine.close()
+
+    assert injected_reads == [run_id]
+    persisted_run = native_get_run(run_id)
+    assert persisted_run is not None
+    assert persisted_run.status == "succeeded"
+    assert len(notifications) == 1
+    assert notifications[0]["same_scheduler"] is True
+    assert scheduler.stats() == {
+        "queue_depth": 0,
+        "active_tenants": 0,
+        "active_workflows": 0,
+    }, str(
+        {
+            "admitted": {
+                "run_id": run_id,
+                "tenant": tenant,
+                "workflow_id": workflow_id,
+            },
+            "notifications": notifications,
+            "stats": scheduler.stats(),
+            "active_runs": scheduler._active_runs,
+        }
+    )
+
+
+@pytest.fixture
+def scheduler_admissions(workflows_db: WorkflowsDatabase, monkeypatch):
+    """Hold native run coroutines while exercising admission and release."""
+    scheduler = WorkflowScheduler.instance()
+    engine = WorkflowEngine(workflows_db)
+    spawned: list = []
+    definition = {
+        "name": "admission",
+        "steps": [{"id": "log", "type": "log", "config": {"message": "done"}}],
+    }
+    workflow_id = workflows_db.create_definition(
+        tenant_id="tenant",
+        name="admission",
+        version=1,
+        owner_id="user",
+        visibility="private",
+        description=None,
+        tags=None,
+        definition=definition,
+    )
+
+    def create_run(run_id, tenant="tenant", with_workflow=True):
+        workflows_db.create_run(
+            run_id=run_id,
+            tenant_id=tenant,
+            user_id="user",
+            inputs={},
+            workflow_id=workflow_id if with_workflow else None,
+            definition_version=1,
+            definition_snapshot=definition,
+        )
+        return workflow_id if with_workflow else None
+
+    monkeypatch.setattr(WorkflowScheduler, "_spawn", staticmethod(spawned.append))
+    try:
+        yield scheduler, engine, spawned, create_run
+    finally:
+        for coroutine in spawned:
+            coroutine.close()
+
+
+@pytest.mark.parametrize("tenant", ["tenant", ""])
+@pytest.mark.parametrize("with_workflow", [True, False])
+@pytest.mark.parametrize("matching_keys", [True, False])
+def test_scheduler_releases_recorded_admission(scheduler_admissions, tenant, with_workflow, matching_keys):
+    scheduler, engine, _, create_run = scheduler_admissions
+    workflow_id = create_run("owned", tenant, with_workflow)
+    engine.submit("owned")
+
+    scheduler.notify_finished(
+        tenant if matching_keys else "wrong",
+        workflow_id if matching_keys else -1,
+        run_id="owned",
+    )
+
+    assert scheduler.stats() == {
+        "queue_depth": 0,
+        "active_tenants": 0,
+        "active_workflows": 0,
+    }
+    assert scheduler.drain_pending("owned") is False
+
+
+@pytest.mark.parametrize("notification", ["unknown", "duplicate", "idless"])
+def test_scheduler_unowned_completion_keeps_other_admissions(scheduler_admissions, notification):
+    scheduler, engine, spawned, create_run = scheduler_admissions
+    scheduler.tenant_limit = 1
+    workflow_id = create_run("first")
+    create_run("second")
+    create_run("third")
+    for run_id in ["first", "second", "third"]:
+        engine.submit(run_id)
+    if notification == "duplicate":
+        scheduler.notify_finished("tenant", workflow_id, run_id="first")
+    before = scheduler.stats()
+    started = len(spawned)
+
+    scheduler.notify_finished(
+        "tenant",
+        workflow_id,
+        run_id={"unknown": "absent", "duplicate": "first", "idless": None}[notification],
+    )
+
+    assert scheduler.stats() == before
+    assert len(spawned) == started
+
+
+@pytest.mark.parametrize("duplicate", ["active", "queued"])
+def test_scheduler_duplicate_submission_owns_one_slot(scheduler_admissions, duplicate):
+    scheduler, engine, spawned, create_run = scheduler_admissions
+    scheduler.tenant_limit = 1
+    workflow_id = create_run("first")
+    create_run("second")
+    engine.submit("first")
+    if duplicate == "queued":
+        engine.submit("second")
+    engine.submit("first" if duplicate == "active" else "second")
+    assert len(spawned) == 1
+    assert scheduler.queue_depth() == (1 if duplicate == "queued" else 0)
+
+    scheduler.notify_finished("tenant", workflow_id, run_id="first")
+    if duplicate == "queued":
+        assert len(spawned) == 2
+        assert scheduler.queue_depth() == 0
+        scheduler.notify_finished("tenant", workflow_id, run_id="second")
+    assert scheduler.stats() == {
+        "queue_depth": 0,
+        "active_tenants": 0,
+        "active_workflows": 0,
+    }
+
+
+def test_scheduler_releases_runs_in_fifo_order(scheduler_admissions, workflows_db: WorkflowsDatabase):
+    scheduler, engine, spawned, create_run = scheduler_admissions
+    scheduler.tenant_limit = 1
+    for run_id in ["first", "second", "third"]:
+        create_run(run_id)
+        engine.submit(run_id)
+    asyncio.run(spawned[0])
+    assert len(spawned) == 2
+    asyncio.run(spawned[1])
+    second_run = workflows_db.get_run("second")
+    assert second_run is not None
+    assert second_run.status == "succeeded"
+    third_run = workflows_db.get_run("third")
+    assert third_run is not None
+    assert third_run.status == "queued"
+    assert len(spawned) == 3
+    asyncio.run(spawned[2])
+    assert scheduler.stats() == {
+        "queue_depth": 0,
+        "active_tenants": 0,
+        "active_workflows": 0,
+    }
+
+
+def test_scheduler_drain_preserves_active_and_removes_queued_run(scheduler_admissions, workflows_db: WorkflowsDatabase):
+    scheduler, engine, spawned, create_run = scheduler_admissions
+    scheduler.tenant_limit = 1
+    workflow_id = create_run("first")
+    create_run("second")
+    create_run("third")
+    for run_id in ["first", "second", "third"]:
+        engine.submit(run_id)
+    assert scheduler.drain_pending("first") is True
+    assert scheduler.drain_pending("second") is True
+    assert scheduler.queue_depth() == 1
+    scheduler.notify_finished("tenant", workflow_id, run_id="first")
+    assert len(spawned) == 2
+    asyncio.run(spawned[1])
+    third_run = workflows_db.get_run("third")
+    assert third_run is not None
+    assert third_run.status == "succeeded"
+    second_run = workflows_db.get_run("second")
+    assert second_run is not None
+    assert second_run.status == "queued"
+    assert scheduler.stats() == {
+        "queue_depth": 0,
+        "active_tenants": 0,
+        "active_workflows": 0,
+    }
+
+
+@pytest.mark.parametrize("entry", ["start", "continue"])
+def test_unadmitted_engine_completion_cannot_release_other_run(
+    scheduler_admissions, workflows_db: WorkflowsDatabase, entry
+):
+    scheduler, engine, spawned, create_run = scheduler_admissions
+    scheduler.tenant_limit = 1
+    create_run("admitted")
+    create_run("direct")
+    create_run("queued")
+    engine.submit("admitted")
+    engine.submit("queued")
+    before = scheduler.stats()
+
+    if entry == "continue":
+        workflows_db.update_run_status("direct", status="waiting_human")
+        asyncio.run(engine.continue_run("direct", after_step_id="log"))
+    else:
+        asyncio.run(engine.start_run("direct"))
+
+    direct_run = workflows_db.get_run("direct")
+    assert direct_run is not None
+    assert direct_run.status == "succeeded"
+    assert scheduler.stats() == before
+    assert len(spawned) == 1
+
+
+def test_scheduler_skips_blocked_queue_head_without_losing_fifo_scan(
+    scheduler_admissions, workflows_db: WorkflowsDatabase
+):
+    scheduler, engine, spawned, create_run = scheduler_admissions
+    scheduler.tenant_limit = 1
+    workflow_id = create_run("workflow-owner", tenant="tenant-a")
+    create_run("tenant-owner", tenant="tenant-b", with_workflow=False)
+    create_run("blocked", tenant="tenant-b")
+    create_run("eligible", tenant="tenant-c")
+    for run_id in ["workflow-owner", "tenant-owner", "blocked", "eligible"]:
+        engine.submit(run_id)
+    assert len(spawned) == 2
+    assert scheduler.queue_depth() == 2
+
+    scheduler.notify_finished("tenant-a", workflow_id, run_id="workflow-owner")
+    assert len(spawned) == 3
+    asyncio.run(spawned[2])
+    eligible_run = workflows_db.get_run("eligible")
+    assert eligible_run is not None
+    assert eligible_run.status == "succeeded"
+    blocked_run = workflows_db.get_run("blocked")
+    assert blocked_run is not None
+    assert blocked_run.status == "queued"
+    scheduler.notify_finished("tenant-b", None, run_id="tenant-owner")
+    assert len(spawned) == 4
+    asyncio.run(spawned[3])
+    blocked_run = workflows_db.get_run("blocked")
+    assert blocked_run is not None
+    assert blocked_run.status == "succeeded"
+    assert scheduler.stats() == {
+        "queue_depth": 0,
+        "active_tenants": 0,
+        "active_workflows": 0,
+    }
+
+
+@pytest.mark.parametrize(
+    "capability, expected",
+    [(None, None), ("absent", None), (lambda **kwargs: None, None), (lambda **kwargs: "attempt-id", "attempt-id")],
+)
+def test_step_attempt_optional_database_capability(workflows_db, monkeypatch, capability, expected):
+    class LegacyDatabase:
+        create_step_attempt: object
+
+    engine = WorkflowEngine(workflows_db)
+    legacy = LegacyDatabase()
+    if capability != "absent":
+        legacy.create_step_attempt = capability
+    monkeypatch.setattr(engine, "db", legacy)
+    result = engine._create_step_attempt_record(
+        run_id="run",
+        step_run_id="step-run",
+        step_id="step",
+        step_type="log",
+        attempt_number=1,
+        tenant_id="tenant",
+    )
+    assert result == expected

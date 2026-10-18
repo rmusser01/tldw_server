@@ -105,6 +105,7 @@ TASK5_JOB_POLLER_SPEC_NAMES = {
     "study_suggestions_jobs_task",
     "privilege_snapshot_task",
     "audio_jobs_task",
+    "tts_jobs_task",
     "audiobook_jobs_task",
     "chat_macros_jobs_task",
     "presentation_render_jobs_task",

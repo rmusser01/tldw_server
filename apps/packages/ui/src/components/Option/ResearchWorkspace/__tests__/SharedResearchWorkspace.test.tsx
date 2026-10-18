@@ -450,6 +450,45 @@ describe("SharedResearchWorkspace recipient surface", () => {
     })
   })
 
+  it("preserves the exact case of the server model when catalog IDs differ only by case", async () => {
+    api.bootstrap.mockResolvedValue(
+      buildBootstrap({
+        generation_default: {
+          provider: "openai",
+          model: "Vendor/model",
+          ready: true,
+          reason_code: null
+        }
+      })
+    )
+    fetchChatModels.mockResolvedValue([
+      { model: "Vendor/Model", provider: "openai", configured: true },
+      {
+        model: "Vendor/model",
+        provider: "openai",
+        configured: true,
+        is_server_default: true
+      }
+    ])
+    renderWorkspace()
+    await waitFor(() =>
+      expect(screen.getByTestId("model-selector")).toHaveTextContent(
+        "OpenAI / Vendor/model"
+      )
+    )
+    fireEvent.change(screen.getByLabelText("Ask about shared sources"), {
+      target: { value: "Keep the exact configured model." }
+    })
+    fireEvent.click(
+      screen.getByRole("button", { name: "Ask shared workspace" })
+    )
+    await waitFor(() => expect(api.ask).toHaveBeenCalledOnce())
+    expect(api.ask.mock.calls[0][1]).toMatchObject({
+      provider: "openai",
+      model: "Vendor/model"
+    })
+  })
+
   it("loads older history upward without duplicate IDs or losing the scroll anchor", async () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView

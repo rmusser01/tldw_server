@@ -20,6 +20,7 @@ Important: set `TLDW_WORKERS_SIDECAR_MODE=true` for the API process so it skips 
 - Prompt Studio jobs: `python -m tldw_Server_API.app.core.Prompt_Management.prompt_studio.services.jobs_worker`
 - Privilege snapshots worker: `python -m tldw_Server_API.app.services.privilege_snapshot_worker`
 - Audio jobs worker: `python -m tldw_Server_API.app.services.audio_jobs_worker`
+- Long-form TTS jobs worker: `python -m tldw_Server_API.app.core.TTS.tts_jobs_worker`
 - Media ingest jobs worker: `python -m tldw_Server_API.app.services.media_ingest_jobs_worker`
 - Reading list import jobs worker: `python -m tldw_Server_API.app.core.Collections.reading_import_jobs_worker`
 - Reading digest jobs worker: `python -m tldw_Server_API.app.core.Collections.reading_digest_jobs_worker`
@@ -33,7 +34,7 @@ Important: set `TLDW_WORKERS_SIDECAR_MODE=true` for the API process so it skips 
 ```
 
 Tunable env vars:
-- `TLDW_SIDECAR_WORKERS=chatbooks,files,data_tables,prompt_studio,privilege_snapshots,audio,media_ingest,reading_import,reading_digest,evals_abtest`
+- `TLDW_SIDECAR_WORKERS=chatbooks,files,data_tables,prompt_studio,privilege_snapshots,audio,tts,media_ingest,reading_import,reading_digest,evals_abtest`
   (add connectors if you use those jobs)
 - `TLDW_ENV_FILE=/path/to/.env`
 - `TLDW_LOG_DIR=/path/to/logs`

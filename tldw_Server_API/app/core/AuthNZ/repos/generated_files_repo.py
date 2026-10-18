@@ -96,6 +96,13 @@ class _TransactionBoundPool:
         """Join the owning transaction; only its outer context commits."""
         yield self._conn
 
+    async def execute(self, query: str, *args: Any) -> Any:
+        """Write on the owning connection without committing it."""
+        params = _flatten_params(args)
+        if self.pool is not None:
+            return await self._conn.execute(_convert_question_mark_to_dollar(query, params), *params)
+        return await self._conn.execute(query, params)
+
     async def fetchone(self, query: str, *args: Any) -> dict[str, Any] | None:
         """Read quota information without opening an independent connection."""
         params = _flatten_params(args)
@@ -677,26 +684,25 @@ class AuthnzGeneratedFilesRepo:
             logger.error(f"AuthnzGeneratedFilesRepo.hard_delete_file failed: {exc}")
             raise
 
-    async def bulk_soft_delete(self, file_ids: list[int]) -> int:
-        """Soft delete multiple files. Returns count of deleted files."""
+    async def bulk_soft_delete(self, file_ids: list[int]) -> list[int]:
+        """Soft delete multiple files and return their exact changed IDs."""
         if not file_ids:
-            return 0
+            return []
 
         now_iso = datetime.now(timezone.utc).isoformat()
         try:
             async with self.db_pool.transaction() as conn:
                 if self._is_postgres():
-                    result = await conn.execute(
+                    rows = await conn.fetch(
                         """
                         UPDATE generated_files
                         SET is_deleted = TRUE, deleted_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
                         WHERE id = ANY($1) AND is_deleted = FALSE
+                        RETURNING id
                         """,
                         file_ids,
                     )
-                    # Parse "UPDATE N" to get count
-                    parts = str(result).split()
-                    return int(parts[1]) if len(parts) > 1 else 0
+                    return [int(row["id"]) for row in rows]
                 else:
                     placeholders = ",".join("?" for _ in file_ids)
                     id_list_clause = f"({placeholders})"
@@ -704,13 +710,15 @@ class AuthnzGeneratedFilesRepo:
                         UPDATE generated_files
                         SET is_deleted = 1, deleted_at = ?, updated_at = ?
                         WHERE id IN {id_list_clause} AND is_deleted = 0
+                        RETURNING id
                         """
                     update_sql = update_sql_template.format_map(locals())  # nosec B608
                     cursor = await conn.execute(
                         update_sql,
                         (now_iso, now_iso, *file_ids),
                     )
-                    return cursor.rowcount
+                    async with cursor:
+                        return [int(row[0]) for row in await cursor.fetchall()]
         except Exception as exc:
             logger.error(f"AuthnzGeneratedFilesRepo.bulk_soft_delete failed: {exc}")
             raise

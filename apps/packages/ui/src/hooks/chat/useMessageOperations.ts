@@ -159,7 +159,7 @@ export const useMessageOperations = (opts: UseMessageOperationsOptions) => {
         }
       } catch (err) {
         console.error("[deleteMessage] Failed to delete message", err);
-        return;
+        throw err;
       }
 
       setMessages((prev) => prev.filter((m) => m.id !== targetId));

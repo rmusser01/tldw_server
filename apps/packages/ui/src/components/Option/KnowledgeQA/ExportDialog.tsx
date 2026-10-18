@@ -1,3 +1,9 @@
+import {
+  readSurfaceOfflineDraftQueue,
+  retainSurfaceOfflineDraft,
+  retireSurfaceOfflineDraft,
+  type OfflineDraftEntry,
+} from "@/components/Notes/notes-manager-utils";
 import { isDefinitiveWriteRejection, isNotesProvenancePolicyUnavailable, NOTES_PROVENANCE_UNAVAILABLE_MESSAGE } from "@/services/tldw/api-error"
 import { toPrefillSource } from "@/utils/research-workspace-prefill"
 /**
@@ -92,6 +98,8 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
   const {
     client: tldwClient,
     isAuthorityCurrent,
+    notesAuthorityScope,
+    notesAuthorityId,
     messages,
     currentThreadId,
     results,
@@ -106,13 +114,21 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     settings,
     preset,
     searchDetails,
-  } = useKnowledgeQA()
+  } = useKnowledgeQA();
   const query = resultQuery === undefined ? editableQuery : resultQuery ?? ""
   const message = useAntdMessage()
   const [options, setOptions] = useState<ExportOptions>(DEFAULT_OPTIONS)
   const [isExporting, setIsExporting] = useState(false)
   const [isSavingNote, setIsSavingNote] = useState(false)
-  const pendingNoteRef = useRef<{ session: string; client: typeof tldwClient; content: string; fields: Record<string, unknown>; idempotencyKey: string } | null>(null)
+  const pendingNoteRef = useRef<{
+    authorityScope: string;
+    entry: OfflineDraftEntry;
+    session: string;
+    client: typeof tldwClient;
+    content: string;
+    fields: Record<string, unknown>;
+    idempotencyKey: string;
+  } | null>(null);
   const [savedNoteId, setSavedNoteId] = useState<string | null>(null)
   const [exportedContent, setExportedContent] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
@@ -379,11 +395,15 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
   }, [clearCopiedTimeout, dialogSessionKey, exportedContent, isAuthorityCurrent])
 
   const handleSaveToNotes = useCallback(async () => {
-    if (!isAuthorityCurrent() || !canSubmitExport || isSavingNote) return
-    const requestSessionKey = dialogSessionKey
+    if (!isAuthorityCurrent() || !canSubmitExport || isSavingNote) return;
+    const requestSessionKey = dialogSessionKey;
 
-    setIsSavingNote(true)
+    setIsSavingNote(true);
+    let acknowledged = false;
     try {
+      if (!notesAuthorityScope || !notesAuthorityId)
+        throw new Error("Verify your account before saving to Notes.");
+      const queuePrefix = `surface:knowledge-export:${JSON.stringify(currentThreadId)}:`;
       const noteContent = generateMarkdown(
         query,
         answer,
@@ -397,9 +417,9 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
           searchDetails,
           trustState: answerTrustState,
           evidenceOrigin: answerEvidenceOrigin,
-        }
-      )
-      const trimmedQuery = query.trim()
+        },
+      );
+      const trimmedQuery = query.trim();
       const title =
         trimmedQuery.length > 0
           ? `Knowledge QA: ${
@@ -407,7 +427,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
                 ? `${trimmedQuery.slice(0, 69)}...`
                 : trimmedQuery
             }`
-          : "Knowledge QA export"
+          : "Knowledge QA export";
       const metadata: Record<string, unknown> = {
         origin: "knowledge_qa",
         source: "knowledge_export",
@@ -416,74 +436,217 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
         include_settings_snapshot: options.includeSettingsSnapshot,
         trust_state: answerTrustState,
         evidence_origin: answerEvidenceOrigin,
-      }
+      };
       if (currentThreadId) {
-        metadata.thread_id = currentThreadId
+        metadata.thread_id = currentThreadId;
       }
 
-      let pending = pendingNoteRef.current
-      if (pending?.session !== requestSessionKey || pending.client !== tldwClient) pending = null
+      let pending = pendingNoteRef.current;
+      if (
+        pending?.session !== requestSessionKey ||
+        pending.client !== tldwClient ||
+        pending.authorityScope !== notesAuthorityScope
+      )
+        pending = null;
+      if (!pending) {
+        const candidates = Object.values(
+          await readSurfaceOfflineDraftQueue(notesAuthorityScope),
+        ).filter((entry) => entry.key.startsWith(queuePrefix));
+        if (
+          !isAuthorityCurrent() ||
+          activeDialogSessionKeyRef.current !== requestSessionKey
+        )
+          return;
+        if (candidates.length > 1)
+          throw new Error(
+            "Multiple unresolved exports are retained for this thread; no save was sent.",
+          );
+        const entry = candidates[0];
+        if (entry?.pendingWrite) {
+          const { content, ...fields } = entry.pendingWrite.body;
+          pending = {
+            authorityScope: notesAuthorityScope,
+            entry,
+            session: requestSessionKey,
+            client: tldwClient,
+            content: String(content),
+            fields,
+            idempotencyKey: entry.pendingWrite.key,
+          };
+        }
+      }
       if (!pending) {
         const provenance = validateKnowledgeNoteProvenance({
-          origin: "knowledge_qa", trust_state: answerTrustState,
-          evidence_origin: answerEvidenceOrigin, thread_id: currentThreadId,
-          question: query, trust_reason_codes: answerTrustReasonCodes,
-          scope: lastSearchScope ? {
-            sources: lastSearchScope.sources, include_media_ids: lastSearchScope.includeMediaIds,
-            include_note_ids: lastSearchScope.includeNoteIds, collection_id: lastSearchScope.collectionId,
-            enable_web_fallback: lastSearchScope.webFallback, keyword_filter: lastSearchScope.keywordFilter,
-          } : {
-            sources: settings.sources, include_media_ids: settings.include_media_ids,
-            include_note_ids: settings.include_note_ids, collection_id: settings.collection_id,
-            keyword_filter: settings.keyword_filter, enable_web_fallback: settings.enable_web_fallback,
+          origin: "knowledge_qa",
+          trust_state: answerTrustState,
+          evidence_origin: answerEvidenceOrigin,
+          thread_id: currentThreadId,
+          question: query,
+          trust_reason_codes: answerTrustReasonCodes,
+          scope: lastSearchScope
+            ? {
+                sources: lastSearchScope.sources,
+                include_media_ids: lastSearchScope.includeMediaIds,
+                include_note_ids: lastSearchScope.includeNoteIds,
+                collection_id: lastSearchScope.collectionId,
+                enable_web_fallback: lastSearchScope.webFallback,
+                keyword_filter: lastSearchScope.keywordFilter,
+              }
+            : {
+                sources: settings.sources,
+                include_media_ids: settings.include_media_ids,
+                include_note_ids: settings.include_note_ids,
+                collection_id: settings.collection_id,
+                keyword_filter: settings.keyword_filter,
+                enable_web_fallback: settings.enable_web_fallback,
+              },
+          sources: results.map((result, index) =>
+            toPrefillSource(
+              result,
+              index,
+              new Set(citations.map((citation) => citation.index)),
+            ),
+          ),
+        });
+        if (!provenance)
+          throw new Error("Source history is invalid or too large to save.");
+        const idempotencyKey = crypto.randomUUID();
+        const content = retainKnowledgeNoteProvenance(noteContent, provenance);
+        const fields = {
+          id: crypto.randomUUID(),
+          title,
+          metadata,
+          knowledge_provenance: provenance,
+          expected_provenance_version: 0,
+          ...(currentThreadId && !currentThreadId.startsWith("shared-")
+            ? { conversation_id: currentThreadId }
+            : {}),
+        };
+        const entry: OfflineDraftEntry = {
+          key: `${queuePrefix}${crypto.randomUUID()}`,
+          noteId: null,
+          baseVersion: null,
+          title,
+          content,
+          keywords: [],
+          metadata,
+          backlinkConversationId: currentThreadId,
+          backlinkMessageId: null,
+          updatedAt: new Date().toISOString(),
+          syncState: "queued",
+          lastError: null,
+          pendingWrite: {
+            authorityId: notesAuthorityId,
+            key: idempotencyKey,
+            body: { ...fields, content },
+            expectedVersion: null,
           },
-          sources: results.map((result, index) => toPrefillSource(result, index, new Set(citations.map(citation => citation.index)))),
-        })
-        if (!provenance) throw new Error("Source history is invalid or too large to save.")
+        };
         pending = {
-          session: requestSessionKey, client: tldwClient, idempotencyKey: crypto.randomUUID(),
-          content: retainKnowledgeNoteProvenance(noteContent, provenance),
-          fields: { title, metadata, knowledge_provenance: provenance, expected_provenance_version: 0,
-            ...(currentThreadId && !currentThreadId.startsWith("shared-") ? { conversation_id: currentThreadId } : {}),
-          },
-        }
-        pendingNoteRef.current = pending
+          authorityScope: notesAuthorityScope,
+          entry,
+          session: requestSessionKey,
+          client: tldwClient,
+          idempotencyKey,
+          content,
+          fields,
+        };
       }
-      const savedNote = await tldwClient.createNote(pending.content, pending.fields, { idempotencyKey: pending.idempotencyKey })
-      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
-        return
+      if (pending.entry.pendingWrite?.authorityId !== notesAuthorityId)
+        throw new Error(
+          "The retained export belongs to a different service authority. Restore that connection before retrying.",
+        );
+      pendingNoteRef.current = pending;
+      await retainSurfaceOfflineDraft(notesAuthorityScope, pending.entry);
+      if (
+        !isAuthorityCurrent() ||
+        activeDialogSessionKeyRef.current !== requestSessionKey
+      )
+        return;
+      const savedNote = await tldwClient.createNote(
+        pending.content,
+        pending.fields,
+        { idempotencyKey: pending.idempotencyKey },
+      );
+      if (
+        !isAuthorityCurrent() ||
+        activeDialogSessionKeyRef.current !== requestSessionKey
+      ) {
+        return;
       }
       if (savedNote?.id == null)
-        throw new Error("The saved note response did not include its ID.")
-      pendingNoteRef.current = null
-      setSavedNoteId(String(savedNote.id))
+        throw new Error("The saved note response did not include its ID.");
+      setSavedNoteId(String(savedNote.id));
+      acknowledged = true;
       message.open({
         type: "success",
         content: "Saved to Notes.",
         duration: 3,
-      })
+      });
+      await retireSurfaceOfflineDraft(
+        notesAuthorityScope,
+        pending.entry.key,
+        pending.idempotencyKey,
+      );
+      if (
+        !isAuthorityCurrent() ||
+        activeDialogSessionKeyRef.current !== requestSessionKey
+      )
+        return;
+      pendingNoteRef.current = null;
     } catch (error) {
-      if (!isAuthorityCurrent() || activeDialogSessionKeyRef.current !== requestSessionKey) {
-        return
+      if (
+        !isAuthorityCurrent() ||
+        activeDialogSessionKeyRef.current !== requestSessionKey
+      ) {
+        return;
       }
-      if (isDefinitiveWriteRejection(error)) pendingNoteRef.current = null
+      if (isDefinitiveWriteRejection(error) && pendingNoteRef.current) {
+        const pending = pendingNoteRef.current;
+        try {
+          await retireSurfaceOfflineDraft(
+            pending.authorityScope,
+            pending.entry.key,
+            pending.idempotencyKey,
+          );
+          if (
+            !isAuthorityCurrent() ||
+            activeDialogSessionKeyRef.current !== requestSessionKey
+          )
+            return;
+          pendingNoteRef.current = null;
+        } catch {
+          message.open({
+            type: "error",
+            content:
+              "Could not retire the rejected note operation on this device. Retry before saving another export.",
+            duration: 4,
+          });
+          return;
+        }
+      }
       const mappedError = isNotesProvenancePolicyUnavailable(error)
         ? NOTES_PROVENANCE_UNAVAILABLE_MESSAGE
         : error instanceof Error && error.message
-          ? `Failed to save to Notes. ${error.message}`
-          : "Failed to save to Notes."
+          ? `${acknowledged ? "Saved to Notes." : "Failed to save to Notes."} ${error.message}`
+          : "Failed to save to Notes.";
       message.open({
         type: "error",
         content: mappedError,
         duration: 4,
-      })
+      });
     } finally {
-      if (isAuthorityCurrent() && activeDialogSessionKeyRef.current === requestSessionKey) {
-        setIsSavingNote(false)
+      if (
+        isAuthorityCurrent() &&
+        activeDialogSessionKeyRef.current === requestSessionKey
+      ) {
+        setIsSavingNote(false);
       }
     }
   }, [
     isAuthorityCurrent,
+    notesAuthorityScope,
+    notesAuthorityId,
     canSubmitExport,
     isSavingNote,
     answerTrustReasonCodes,
@@ -503,7 +666,7 @@ export function ExportDialog({ open, onClose, className }: ExportDialogProps) {
     currentThreadId,
     tldwClient,
     message,
-  ])
+  ]);
 
   const handleCopyThreadLink = useCallback(async () => {
     if (!canCopyThreadLink || !currentThreadId) return

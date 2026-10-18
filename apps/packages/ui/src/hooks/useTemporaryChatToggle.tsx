@@ -3,12 +3,16 @@ import { Modal } from "antd"
 import { useTranslation } from "react-i18next"
 import { isFireFoxPrivateMode } from "@/utils/is-private-mode"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
+import {
+  getPersistenceModeLabel as describePersistenceMode,
+  getPersistenceModePillLabel
+} from "@/hooks/playground/usePersistenceMode"
 
 export interface UseTemporaryChatToggleOptions {
   temporaryChat: boolean
   setTemporaryChat: (value: boolean) => void
   messagesLength: number
-  clearChat: () => void
+  clearChat: () => boolean | void
 }
 
 export interface UseTemporaryChatToggleResult {
@@ -31,30 +35,11 @@ export const useTemporaryChatToggle = (
   const notification = useAntdNotification()
 
   const getPersistenceModeLabel = React.useCallback(
-    (isTemporary: boolean) =>
-      isTemporary
-        ? t(
-            "playground:composer.persistence.ephemeral",
-            "Temporary chat: not saved in history and cleared when you close this window."
-          )
-        : t(
-            "playground:composer.persistence.local",
-            "Saved on this device only. This chat is not on your tldw server."
-          ),
+    (isTemporary: boolean) => describePersistenceMode(t, isTemporary),
     [t]
   )
-
   const getPersistenceModeChipLabel = React.useCallback(
-    (isTemporary: boolean) =>
-      isTemporary
-        ? t(
-            "playground:composer.persistence.ephemeralShort",
-            "Temporary (not saved)"
-          )
-        : t(
-            "playground:composer.persistence.localShort",
-            "Saved on this device"
-          ),
+    (isTemporary: boolean) => getPersistenceModePillLabel(t, isTemporary),
     [t]
   )
 
@@ -99,13 +84,13 @@ export const useTemporaryChatToggle = (
           ),
           content: t(
             "sidepanel:composer.tempChatConfirmContent",
-            "This will clear your current conversation. Messages won't be saved."
+            "This will clear your current conversation. New Temporary messages can remain on this device across reloads until you close or clear the chat. They will not be added to server history."
           ),
           okText: t("common:confirm", "Confirm"),
           cancelText: t("common:cancel", "Cancel"),
           onOk: () => {
+            if (clearChat() === false) return
             setTemporaryChat(next)
-            clearChat()
             notification.info({
               message: t(
                 "sidepanel:composer.tempChatClearedMessages",
@@ -128,13 +113,13 @@ export const useTemporaryChatToggle = (
           ),
           content: t(
             "sidepanel:composer.tempChatDisableConfirmContent",
-            "This will clear your current conversation. Messages will start saving again."
+            "This will clear your current Temporary conversation. New messages can be stored in chat history."
           ),
           okText: t("common:confirm", "Confirm"),
           cancelText: t("common:cancel", "Cancel"),
           onOk: () => {
+            if (clearChat() === false) return
             setTemporaryChat(next)
-            clearChat()
             notification.info({
               message: t(
                 "sidepanel:composer.tempChatDisabledClearedMessages",
@@ -149,10 +134,8 @@ export const useTemporaryChatToggle = (
       }
 
       // No confirmation needed when toggling with no messages
+      if (hadMessages && clearChat() === false) return
       setTemporaryChat(next)
-      if (hadMessages) {
-        clearChat()
-      }
 
       const modeLabel = getPersistenceModeLabel(next)
       notification.info({

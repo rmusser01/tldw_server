@@ -2,10 +2,12 @@
 
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 pytestmark = pytest.mark.unit
 
@@ -100,3 +102,59 @@ def test_hanging_dpkg_recovery_is_bounded(tmp_path: Path) -> None:
 
     assert result.returncode == 1
     assert time.monotonic() - start < 25
+
+
+@pytest.mark.parametrize("action", ["setup-ffmpeg", "wait-for-postgres"])
+@pytest.mark.parametrize("layout", ["classic-and-mirror", "mirror-only", "absent"])
+def test_action_preflight_normalizes_active_apt_mirrors(tmp_path: Path, action: str, layout: str) -> None:
+    """Run the owning Linux normalization without touching host apt configuration."""
+    action_path = HELPER.parent / action / "action.yml"
+    steps = yaml.safe_load(action_path.read_text(encoding="utf-8"))["runs"]["steps"]
+    linux_script = next(step["run"] for step in steps if "runner.os == 'Linux'" in step.get("if", ""))
+    preflight = linux_script[linux_script.index("if [ -d /etc/apt/") :].split('source "', 1)[0]
+    apt_dir = tmp_path / "apt"
+    apt_dir.mkdir()
+    original = "http://azure.archive.ubuntu.com/ubuntu\nhttps://security.ubuntu.com/ubuntu\n"
+    normalized = "https://archive.ubuntu.com/ubuntu\nhttps://security.ubuntu.com/ubuntu\n"
+    mirror_list = apt_dir / "apt-mirrors.txt"
+    if layout != "absent":
+        mirror_list.write_text(original, encoding="utf-8")
+    if layout == "classic-and-mirror":
+        sources_dir = apt_dir / "sources.list.d"
+        sources_dir.mkdir()
+        for path in [apt_dir / "sources.list", sources_dir / "ubuntu.sources"]:
+            path.write_text(original, encoding="utf-8")
+        (sources_dir / "microsoft.list").write_text("https://packages.microsoft.com/ubuntu\n", encoding="utf-8")
+        (sources_dir / "unrelated.list").write_text("https://example.com/ubuntu\n", encoding="utf-8")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    sudo = bin_dir / "sudo"
+    # The actions use GNU sed; macOS needs its native in-place spelling for the same expression.
+    sed_compat = (
+        'if [ "$1" = sed ] && [ "$2" = -i ]; then shift 2; exec /usr/bin/sed -i "" "$@"; fi\n'
+        if sys.platform == "darwin"
+        else ""
+    )
+    sudo.write_text("#!/bin/bash\n" + sed_compat + 'exec "$@"\n', encoding="utf-8")
+    sudo.chmod(0o755)
+    preflight = preflight.replace("/etc/apt", str(apt_dir))
+    assert "/etc/apt" not in preflight
+    # Execute fixed repository code with test-owned paths and literal arguments.
+    result = subprocess.run(
+        ["/bin/bash", "-e", "-o", "pipefail", "-c", preflight],
+        env={"PATH": f"{bin_dir}:/usr/bin:/bin"},
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    if layout == "absent":
+        assert list(apt_dir.iterdir()) == []
+    else:
+        assert mirror_list.read_text(encoding="utf-8") == normalized
+    if layout == "classic-and-mirror":
+        for path in [apt_dir / "sources.list", sources_dir / "ubuntu.sources"]:
+            assert path.read_text(encoding="utf-8") == normalized
+        assert not (sources_dir / "microsoft.list").exists()
+        assert (sources_dir / "unrelated.list").read_text(encoding="utf-8") == "https://example.com/ubuntu\n"

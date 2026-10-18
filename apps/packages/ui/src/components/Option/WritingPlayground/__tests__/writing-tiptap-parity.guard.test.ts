@@ -6,10 +6,11 @@ const readSource = (filename: string) =>
   fs.readFileSync(path.resolve(__dirname, "..", filename), "utf8")
 
 describe("writing tiptap parity guards", () => {
-  it("routes tiptap edits through applyPromptValue with prompt_rich", () => {
+  it("routes tiptap edits through the scene-aware editor with prompt_rich", () => {
     const source = readSource("index.tsx")
 
-    expect(source).toContain("applyPromptValue(plain, { promptRich: json })")
+    expect(source).toContain("applyEditorValue(plain, { promptRich: json })")
+    expect(source).toContain("return applyPromptValue(nextValue, options)")
     expect(source).not.toContain("setEditorText(plain)")
   })
 

@@ -1,0 +1,3 @@
+# Cold chat save feedback — TASK-13678
+
+A server ID establishes linkage, not acknowledgement of the latest turn. Unknown cold state must show Save unconfirmed. Reuse the shared save-status source for owned H1 load/journal evidence: active writes remain Saving, unresolved original server turns and failed journal reads remain unconfirmed, and a current acknowledged load with reconciled recovery can establish saved history. Publishing evidence is fenced by the existing epoch, original owner/view/bookmark and account lease. Header and shared persistence projections consume the same status. Preserve write outcomes and temporary/local privacy. No new persistence authority or server protocol; ADR-049 governs.

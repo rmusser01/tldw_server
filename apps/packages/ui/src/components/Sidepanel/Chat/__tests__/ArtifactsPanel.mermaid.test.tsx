@@ -166,7 +166,10 @@ describe("ArtifactsPanel Mermaid artifacts", () => {
     document.body.appendChild(origin)
     const focusArtifactsTrigger = vi.fn()
     const scrollLatest = vi.fn()
-    window.addEventListener("tldw:focus-artifacts-trigger", focusArtifactsTrigger)
+    window.addEventListener(
+      "tldw:focus-artifacts-trigger",
+      focusArtifactsTrigger
+    )
     window.addEventListener("tldw:scroll-to-latest", scrollLatest)
     try {
       useArtifactsStore.getState().openArtifact(diagramArtifact)
@@ -194,4 +197,21 @@ describe("ArtifactsPanel Mermaid artifacts", () => {
       window.removeEventListener("tldw:scroll-to-latest", scrollLatest)
     }
   })
+})
+
+it("keeps artifact code rows in a shared column layout with indentation", () => {
+  useArtifactsStore
+    .getState()
+    .openArtifact({
+      ...graphvizArtifact,
+      kind: "code",
+      content: "x = 1\n    longer_value = 2",
+      language: "python"
+    })
+  const { container } = render(<ArtifactsPanel />)
+  const rows = container.querySelectorAll("pre .table-row")
+  expect(rows).toHaveLength(2)
+  expect(rows[0].parentElement).toBe(rows[1].parentElement)
+  expect(rows[0].parentElement).toHaveClass("table")
+  expect(rows[1].lastElementChild?.textContent).toBe("    longer_value = 2")
 })

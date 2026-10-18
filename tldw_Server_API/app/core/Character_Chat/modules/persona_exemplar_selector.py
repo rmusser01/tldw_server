@@ -572,6 +572,27 @@ def select_character_exemplars(
         candidate_pool_size=config.candidate_pool_size,
     )
 
+    return select_materialized_character_exemplars(
+        candidates,
+        turn_text,
+        config,
+        embedding_score_fn,
+        character_id=character_id,
+    )
+
+
+def select_materialized_character_exemplars(
+    candidates: list[dict[str, Any]],
+    user_turn: str,
+    config: PersonaExemplarSelectorConfig,
+    embedding_score_fn: EmbeddingScoreFn | None = None,
+    *,
+    character_id: int | None = None,
+) -> PersonaExemplarSelectionResult:
+    """Apply the existing safety, ranking and packing rules to detached rows."""
+    turn_text = str(user_turn or "").strip()
+    if not turn_text:
+        candidates = []
     if not candidates:
         return PersonaExemplarSelectionResult(
             selected=[],
@@ -636,4 +657,5 @@ __all__ = [
     "PersonaTurnHeuristics",
     "classify_user_turn",
     "select_character_exemplars",
+    "select_materialized_character_exemplars",
 ]

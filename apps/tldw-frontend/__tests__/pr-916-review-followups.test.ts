@@ -35,6 +35,24 @@ describe("PR 916 review follow-ups", () => {
     )
   })
 
+  it("includes the committed API contract exports in the Docker builder workspace", () => {
+    const dockerfile = readRepoFile("Dockerfiles/Dockerfile.webui")
+    const pkg = JSON.parse(readRepoFile("apps/packages/api-types/package.json"))
+    const copies = [...dockerfile.matchAll(/^COPY (\S+) (\S+)$/gm)]
+    for (const declaration of [pkg.types, pkg.exports["./paths"]]) {
+      const source = path.posix.join("apps/packages/api-types", declaration)
+      const target = `/app/${source}`
+      expect(
+        copies.some(
+          ([, from, to]) =>
+            (from === source && to === target) ||
+            (source.startsWith(`${from}/`) &&
+              target === `${to}/${source.slice(from.length + 1)}`)
+        )
+      ).toBe(true)
+    }
+  })
+
   it("waits for healthy backing services in the host-storage compose stack", () => {
     const compose = readRepoFile("Dockerfiles/docker-compose.host-storage.yml")
 

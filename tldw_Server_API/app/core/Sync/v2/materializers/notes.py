@@ -9,9 +9,17 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
-from ..models import SyncEnvelope, SyncObjectState, validate_notes_note_upsert_payload
+from ..errors import SyncMaterializationContractError
+from ..models import (
+    NotesNoteUpsertPayload,
+    SyncDomain,
+    SyncEnvelope,
+    SyncObjectState,
+    validate_notes_note_upsert_payload,
+)
 from ..store import SyncV2Store
 from .base import MaterializationResult
+from .guarded_product_mutation import GuardedProductMutation
 
 _INGESTION_EXPECTED_VERSION_KEY = "notes_ingestion_expected_product_version"
 _SERVER_ORIGIN_DEVICE_ID = "server-origin"
@@ -49,16 +57,19 @@ class NotesMaterializer:
     """Apply `notes.note` upserts and tombstones to the ChaChaNotes note store."""
 
     note_db: CharactersRAGDB
-    domain: str = "notes.note"
+    domain: SyncDomain = "notes.note"
 
     def apply(
         self,
         envelope: SyncEnvelope,
         *,
         store: SyncV2Store,
+        guarded_mutation: GuardedProductMutation | None = None,
     ) -> MaterializationResult:
         """Project one accepted note envelope and record apply status."""
 
+        if guarded_mutation is not None:
+            raise SyncMaterializationContractError()
         if envelope.domain != self.domain:
             return MaterializationResult(status="skipped")
         if envelope.server_cursor is None:
@@ -68,10 +79,25 @@ class NotesMaterializer:
                 message="Stored Sync envelope is missing a server cursor",
             )
 
+        object_id = envelope.object_id
+        if not isinstance(object_id, str) or not object_id:
+            message = "Stored notes.note envelope requires a non-empty string object ID"
+            store.mark_envelope_apply_status(
+                envelope.server_cursor,
+                apply_status="failed",
+                apply_error_code="notes_projection_failed",
+                apply_error_message=message,
+            )
+            return MaterializationResult(
+                status="failed",
+                error_code="notes_projection_failed",
+                message=message,
+            )
+
         current_state = store.get_object_state(
             envelope.dataset_id,
             envelope.domain,
-            envelope.object_id,
+            object_id,
         )
         if self._is_already_materialized(envelope, current_state):
             try:
@@ -120,7 +146,7 @@ class NotesMaterializer:
                 SyncObjectState(
                     dataset_id=envelope.dataset_id,
                     domain=envelope.domain,
-                    object_id=envelope.object_id,
+                    object_id=object_id,
                     object_revision=object_revision,
                     object_hash=object_hash,
                     latest_server_cursor=envelope.server_cursor,
@@ -155,6 +181,9 @@ class NotesMaterializer:
     def project_product(self, envelope: SyncEnvelope, *, object_revision: int, conn: Any | None) -> None:
         """Project core bytes using the caller transaction when a sidecar is paired."""
 
+        object_id = envelope.object_id
+        if not isinstance(object_id, str) or not object_id:
+            raise ValueError("Stored notes.note envelope requires a non-empty string object ID")
         object_hash = envelope.payload_hash or ""
         if envelope.operation == "upsert":
             payload = _note_payload(envelope.payload)
@@ -176,7 +205,7 @@ class NotesMaterializer:
                         "Trusted ingestion envelope is missing a server timestamp"
                     )
             self.note_db.upsert_note_from_sync(
-                note_id=envelope.object_id,
+                note_id=object_id,
                 title=payload["title"],
                 content=payload["content"],
                 conversation_id=payload.get("conversation_id"),
@@ -191,7 +220,7 @@ class NotesMaterializer:
 
         elif envelope.operation == "tombstone":
             self.note_db.tombstone_note_from_sync(
-                note_id=envelope.object_id,
+                note_id=object_id,
                 sync_client_id=_projection_client_id(self.note_db),
                 object_revision=object_revision,
                 object_hash=object_hash,
@@ -288,7 +317,7 @@ class NotesMaterializer:
         return current_state.deleted == (envelope.operation == "tombstone")
 
 
-def _note_payload(payload: dict[str, Any]) -> dict[str, str | None]:
+def _note_payload(payload: dict[str, Any]) -> NotesNoteUpsertPayload:
     return validate_notes_note_upsert_payload(payload)
 
 

@@ -1,5 +1,5 @@
 import React from "react"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, expect, it, vi } from "vitest"
 import {
   VirtualChatTimeline,
@@ -92,7 +92,7 @@ beforeEach(() => {
 
 it.each(["save", "cancel"])(
   "retains the editor and draft outside the visible range until explicit %s",
-  (action) => {
+  async (action) => {
     const view = render(timeline())
     fireEvent.click(screen.getByText("Edit message-1"))
     fireEvent.change(screen.getByRole("textbox"), {
@@ -112,6 +112,7 @@ it.each(["save", "cancel"])(
     expect(save.mock.calls).toEqual(
       action === "save" ? [["message-1", "Unsaved draft"]] : []
     )
+    await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull())
     windowRange.start = 190
     windowRange.end = 193
     view.rerender(timeline())

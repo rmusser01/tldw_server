@@ -10,6 +10,12 @@ Guidance for sizing and tuning the Workflows module under different backends.
 - Tune busy timeout via `PRAGMA busy_timeout=5000` (default in code) and keep batch writes small.
 - Consider Litestream or sqlite-backup for continuous backups; ensure I/O doesn’t starve the main process.
 
+### Workflow statement caching
+
+Reusable SQLite workflow connections deliberately use `cached_statements=0`: concurrent cached reads have returned incorrect run/owner identities. Keep this correctness safeguard enabled. Borrowed pool connections are returned even when contention temporarily empties the pool.
+
+The [paired cache benchmark and raw results](../Performance/WORKFLOWS_SQLITE_CACHE_2026_10_16_TASK_13819.md) measure the adapter cost, validate every read, and separate valid timings from corrupt cached controls. Reproduce locally with `python Helper_Scripts/benchmarks/workflows_sqlite_cache.py --output /tmp/workflows-cache.json` after activating the project environment. It creates disposable databases and does not change server configuration.
+
 ## PostgreSQL (Recommended for Production)
 
 - Connection Pooling

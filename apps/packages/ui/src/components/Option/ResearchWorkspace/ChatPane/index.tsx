@@ -1,3 +1,4 @@
+import { isChatSubmitSuccess } from "@/hooks/chat/chat-action-utils"
 import { sha256Text } from "@/store/workspace-migration"
 import { appendCapturedNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
@@ -1558,8 +1559,6 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const switchWorkspace = useWorkspaceStore((s) => s.switchWorkspace)
 
   // Model settings for model badge (UX-009)
-  const selectedModel = useStoreMessageOption((s) => s.selectedModel)
-  const setSelectedModel = useStoreMessageOption((s) => s.setSelectedModel)
   const chatScope = React.useMemo<ChatScope | undefined>(
     () =>
       workspaceId
@@ -1573,6 +1572,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
   // Message option hook
   const {
+    selectedModel,
+    setSelectedModel,
     messages,
     setMessages,
     history,
@@ -1590,7 +1591,8 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     historyId,
     setHistoryId,
     serverChatId,
-    setServerChatId
+    setServerChatId,
+    selectedModelIsLoading
   } = useMessageOption({ scope: chatScope, hydrateServerChat: true })
 
   // RAG state from store
@@ -2873,7 +2875,10 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         (_entry, index) => index !== messageIndex
       )
 
-      await deleteMessage(messageIndex)
+      const accepted = await deleteMessage(messageIndex)
+      if (accepted === false) return false
+      // A canonical server tombstone cannot be undone by restoring browser rows.
+      if (previousServerChatId) return true
 
       const undoHandle = scheduleWorkspaceUndoAction({
         apply: () => {
@@ -3289,7 +3294,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       currentModel: selectedModel,
       models: composerModels,
       preferredModelIds: favoriteModels,
-      isCurrentModelHydrating: false,
+      isCurrentModelHydrating: selectedModelIsLoading,
       arePreferencesHydrating: favoriteModelsIsLoading
     })
     if (nextModel && typeof setSelectedModel === "function") {
@@ -3300,6 +3305,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     favoriteModels,
     favoriteModelsIsLoading,
     selectedModel,
+    selectedModelIsLoading,
     setSelectedModel
   ])
 
@@ -3395,7 +3401,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       {/* Context indicator */}
       <ChatContextIndicator statusGuardrailsEnabled={statusGuardrailsEnabled} />
 
-      {/* Connection banner */}
+      {/* Context indicator */}
       {showConnectionBanner && (
         <div className="border-b border-error/30 bg-error/5 px-4 py-2">
           <div className={`mx-auto flex w-full ${contentMaxWidthClass} items-center justify-between gap-3`}>
@@ -3405,13 +3411,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                 {submitError === "Snapshot changed outside refresh"
                   ? t(
                       "playground:sources.snapshotChanged",
-                      "Snapshot changed outside refresh"
+                      "Snapshot changed outside refresh",
                     )
-                  : t(
+                  : `${t(
                       "playground:chat.connectionBanner",
-                      "Unable to reach server"
-                    )}
-                : {connectionDescription}
+                      "Unable to reach server",
+                    )}: ${connectionDescription}`}
               </span>
             </div>
             <button
@@ -3428,7 +3433,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         </div>
       )}
 
-      {/* Chat controls */}
+      {/* Context indicator */}
       <div className="border-b border-border bg-surface px-4 py-2">
         <div className={`mx-auto flex w-full ${contentMaxWidthClass} items-center justify-end gap-1.5`}>
           <Tooltip
@@ -3556,7 +3561,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         </div>
       )}
 
-      {/* Chat messages area */}
+      {/* Context indicator */}
       <div className="relative flex min-h-0 flex-1 flex-col">
         <div
           ref={containerRef}
@@ -3662,21 +3667,36 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                         }
                         onDeleteMessage={() => handleDeleteMessageWithUndo(idx)}
                         suppressDeleteSuccessToast
-                        onEditFormSubmit={(value: string, isSend: boolean) => {
+                        onEditFormSubmit={(
+                          value: string,
+                          isSend: boolean,
+                          editIsCurrent?: () => boolean,
+                          editOriginIsCurrent?: () => boolean
+                        ) => {
                           if (isSend)
-                            void withCurrentCaptureHeads(
+                            return withCurrentCaptureHeads(
                               async (_options, assertCurrent) => {
                                 assertCurrent?.()
-                                await editMessage(
-                                  idx,
-                                  value,
-                                  !msg.isBot,
-                                  isSend
+                                return isChatSubmitSuccess(
+                                  await editMessage(
+                                    idx,
+                                    value,
+                                    !msg.isBot,
+                                    isSend,
+                                    editIsCurrent,
+                                    editOriginIsCurrent
+                                  )
                                 )
-                                return true
                               }
                             )
-                          else editMessage(idx, value, !msg.isBot, isSend)
+                          return editMessage(
+                            idx,
+                            value,
+                            !msg.isBot,
+                            isSend,
+                            editIsCurrent,
+                            editOriginIsCurrent
+                          )
                         }}
                         hideEditAndRegenerate={!msg.isBot && idx !== messages.length - 1}
                         hideContinue={true}
@@ -3711,7 +3731,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
           </div>
         </div>
 
-        {/* Scroll to bottom button */}
+        {/* Horizontally scrollable source tags */}
         {!isAutoScrollToBottom && hasMessages && (
           <div className="pointer-events-none absolute bottom-24 left-0 right-0 flex justify-center">
             <button
@@ -3734,7 +3754,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         )}
       </div>
 
-      {/* Chat input */}
+      {/* Context indicator */}
       <div
         data-testid="chat-drop-zone"
         data-drop-active={dropZoneActive ? "true" : "false"}

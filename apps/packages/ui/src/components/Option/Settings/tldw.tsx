@@ -1,3 +1,4 @@
+import type { InitialChatSetupAttempt } from "@/utils/settings-return"
 import {
   Alert,
   Form,
@@ -10,12 +11,14 @@ import { Link, useNavigate } from "react-router-dom"
 import React, { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { isQuickstartWebUiSameOriginServerUrl, tldwClient, TldwConfig } from "@/services/tldw/TldwApiClient"
+import { connectionAuthoritiesMatch } from "@/services/chat-surface-scope"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { assertAuthConnectionAttempt, type AuthConnectionAttempt } from "@/services/tldw/auth-connection-target"
 import { createServicePromptScopeChangedError, isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { SettingsSkeleton } from "@/components/Common/Settings/SettingsSkeleton"
 import { DEFAULT_TLDW_API_KEY } from "@/services/tldw-server"
+import { getStoredTldwServerURL } from "@/services/tldw-server-url"
 import { apiSend } from "@/services/api-send"
 import { bgRequest } from "@/services/background-proxy"
 import type { PathOrUrl } from "@/services/tldw/openapi-guard"
@@ -53,7 +56,13 @@ const BILLING_SUCCESS_URL = `${BILLING_BASE_URL}/billing/success`
 const BILLING_CANCEL_URL = `${BILLING_BASE_URL}/billing/cancel`
 const BILLING_RETURN_URL = `${BILLING_BASE_URL}/billing`
 
-export const TldwSettings = () => {
+export const TldwSettings = ({ onDirtyChange, onSavingChange, onOpenDiagnostics, beginInitialSetup, assertInitialSetupAuthority }: {
+  onDirtyChange?: (dirty: boolean) => void
+  onSavingChange?: (saving: boolean) => void
+  onOpenDiagnostics?: () => void
+  beginInitialSetup?: () => InitialChatSetupAttempt | null
+  assertInitialSetupAuthority?: () => void
+} = {}) => {
   const { t } = useTranslation(["settings", "common"])
   const message = useAntdMessage()
   const navigate = useNavigate()
@@ -64,6 +73,7 @@ export const TldwSettings = () => {
   const [loadedFormValues, setLoadedFormValues] = useState<Record<string, unknown> | null>(null)
   const configLoadGeneration = useRef(0)
   const [connectionDirty, setConnectionDirty] = useState(false)
+  useEffect(() => { onDirtyChange?.(connectionDirty) }, [connectionDirty, onDirtyChange])
   const connectionDirtyRef = useRef(false)
   const savedConnectionValuesRef = useRef<Record<string, unknown> | null>(null)
   const refreshConnectionDirty = () => {
@@ -97,12 +107,14 @@ export const TldwSettings = () => {
   const [rememberApiKey, setRememberApiKey] = useState(true)
   const { isLoggedIn, setIsLoggedIn, signInTargetSaved, refreshLoginStatus } = useSettingsLoginStatus(form, !initializing)
   const authAttempt = useRef<AbortController | null>(null)
+  const saveAttempt = useRef<AbortController | null>(null)
+  const initialSave = useRef<InitialChatSetupAttempt | null>(null)
   const authBoundaryRevision = useRef(0)
   useEffect(() => {
     const unwatch = watchChatAccountChanges(invalidated => {
       if (invalidated) authBoundaryRevision.current += 1
     })
-    return () => { authAttempt.current?.abort(); unwatch() }
+    return () => { authAttempt.current?.abort(); saveAttempt.current?.abort(); initialSave.current?.cancel(); unwatch() }
   }, [])
   const beginAuthAttempt = (): AuthConnectionAttempt => {
     authAttempt.current?.abort()
@@ -242,11 +254,13 @@ export const TldwSettings = () => {
           rememberApiKey: config.apiKeyPersistence !== 'session'
         })
       } else {
+        const urlHint = await getStoredTldwServerURL()
+        if (generation !== configLoadGeneration.current) return
         setAuthMode('single-user')
         setAuthSource(undefined)
         setRememberApiKey(true)
         setIsLoggedIn(false)
-        setServerUrl("")
+        setServerUrl(urlHint || "")
         setMagicEmail("")
         setMagicToken("")
         setMagicSent(false)
@@ -256,7 +270,7 @@ export const TldwSettings = () => {
         setRagStatus("unknown")
         setTimeoutPreset('balanced')
         setLoadedFormValues({
-          serverUrl: '',
+          serverUrl: urlHint || '',
           apiKey: '',
           authMode: 'single-user',
           username: '',
@@ -285,12 +299,53 @@ export const TldwSettings = () => {
   // ── Save handler ─────────────────────────────────────────────────
 
   const handleSave = async () => {
+    if (saveAttempt.current) return
+    const attempt = new AbortController()
+    saveAttempt.current = attempt
+    const source = form.getFieldsValue()
+    const revision = authBoundaryRevision.current
+    let expectedRevision = revision
+    const assertSource = () => {
+      const current = form.getFieldsValue()
+      if (attempt.signal.aborted || ['serverUrl', 'authMode', 'apiKey', 'rememberApiKey'].some(key => current[key] !== source[key])) {
+        throw createServicePromptScopeChangedError()
+      }
+    }
+    const assertCurrent = () => {
+      assertSource()
+      if (expectedRevision !== authBoundaryRevision.current) throw createServicePromptScopeChangedError()
+    }
+    let initialSetup: InitialChatSetupAttempt | null = null
+    let initialSetupAttempted = false
+    let draftRetained = false
     setLoading(true)
+    onSavingChange?.(true)
     try {
+      const checkpoint = source.authMode === "single-user" && authSource !== "cookie-session" ? beginInitialSetup?.() : null
+      if (checkpoint) {
+        initialSetupAttempted = true
+        initialSetup = {
+          ...checkpoint,
+          assertCurrent: () => { assertCurrent(); assertInitialSetupAuthority?.(); checkpoint.assertCurrent() },
+          afterBoundary: config => {
+            if (authBoundaryRevision.current !== revision + 1) throw createServicePromptScopeChangedError()
+            checkpoint.afterBoundary(config)
+            expectedRevision = authBoundaryRevision.current
+          },
+          cancel: () => { checkpoint.cancel(); initialSetup = null }
+        }
+        initialSave.current = initialSetup
+        initialSetup.assertCurrent()
+        if (typeof navigator !== "undefined" && navigator.locks?.request && await tldwClient.hasNoWebUiConnectionConfiguration()) {
+          initialSetup.assertCurrent()
+          initialSetup.admit()
+        } else { initialSetup.cancel(); initialSave.current = null }
+      }
       // Connection persistence is independent of the separate Login action.
       const fields = ['serverUrl', 'authMode', 'rememberApiKey']
       if (authMode === 'single-user' && authSource !== 'cookie-session') fields.push('apiKey')
       const values = await form.validateFields(fields)
+      assertCurrent()
       const requestedRememberApiKey = values.rememberApiKey !== false
       const config: Partial<TldwConfig & {
         requestTimeoutMs?: number
@@ -338,8 +393,11 @@ export const TldwSettings = () => {
         achievedPersistence = await commitManualServerTransition({
           serverUrl: values.serverUrl,
           apiKey: values.apiKey,
-          persistence: requestedPersistence
+          persistence: requestedPersistence,
+          assertCurrent: initialSetup?.assertCurrent || assertCurrent,
+          ...(initialSetup ? { initialSetup } : {})
         })
+        assertSource()
         setAuthSource('manual')
         const {
           serverUrl: _serverUrl,
@@ -349,7 +407,12 @@ export const TldwSettings = () => {
           refreshToken: _refreshToken,
           ...settingsConfig
         } = config
-        await tldwClient.updateConfig(settingsConfig)
+        const expected = { serverUrl: values.serverUrl, authMode: 'single-user' as const, authSource: 'manual' as const, apiKey: values.apiKey }
+        await tldwClient.updateConfig(settingsConfig, current => {
+          assertSource()
+          initialSetup?.assertCurrent()
+          if (!connectionAuthoritiesMatch(current, expected)) throw createServicePromptScopeChangedError()
+        }, () => { assertSource(); initialSetup?.assertCurrent() }, initialSetup?.token)
       } else if (values.authMode === 'single-user') {
         const {
           serverUrl: _serverUrl,
@@ -359,9 +422,21 @@ export const TldwSettings = () => {
           refreshToken: _refreshToken,
           ...settingsConfig
         } = config
-        await tldwClient.updateConfig(settingsConfig)
+        await tldwClient.updateConfig(settingsConfig, assertCurrent, assertSource)
       } else {
-        await tldwClient.updateConfig(config)
+        await tldwClient.updateConfig(config, assertCurrent, assertSource)
+      }
+      assertSource()
+      if (initialSetup) {
+        initialSetup.assertCurrent()
+        const config = await tldwClient.getConfig()
+        initialSetup.assertCurrent()
+        draftRetained = config ? await initialSetup.complete(config) : false
+        assertCurrent()
+      }
+      if (initialSetupAttempted) {
+        if (draftRetained) message.info(t('settings:tldw.draftRetained', 'Your draft is retained in this chat. Send it when you are ready.'))
+        else message.warning(t('settings:tldw.draftNotRetained', 'The draft could not be retained through this connection change.'))
       }
       setServerUrl(values.serverUrl)
       savedConnectionValuesRef.current = {
@@ -399,11 +474,14 @@ export const TldwSettings = () => {
         })
       }
     } catch (error) {
+      initialSetup?.cancel()
       // Ant Design displays field validation failures beside the inputs.
       if (error && typeof error === 'object' && 'errorFields' in error) return
       message.error(t("settings:saveFailed"))
       console.error('Failed to save config:', error)
     } finally {
+      if (saveAttempt.current === attempt) saveAttempt.current = null
+      onSavingChange?.(false)
       setLoading(false)
     }
   }
@@ -960,7 +1038,8 @@ export const TldwSettings = () => {
   }
 
   const openHealthDiagnostics = () => {
-    navigate("/settings/health")
+    if (onOpenDiagnostics) onOpenDiagnostics()
+    else navigate("/settings/health")
   }
 
   // ── Render ───────────────────────────────────────────────────────
@@ -1031,9 +1110,13 @@ export const TldwSettings = () => {
             <span className="text-text-muted break-all">{serverUrl || t('settings:tldw.notConfigured', 'Not configured')}</span>
           </div>
           <Space>
-            <Link to="/settings/health">
+            {onOpenDiagnostics ? (
+              <Button onClick={openHealthDiagnostics} title={t('common:opensInNewTab', 'Opens in a new tab')}>
+                {t('settings:tldw.buttons.health', 'Health')}
+              </Button>
+            ) : <Link to="/settings/health">
               <Button>{t('settings:tldw.buttons.health', 'Health')}</Button>
-            </Link>
+            </Link>}
             <Button type="primary" onClick={() => { void testConnection() }} loading={testingConnection}>{t('settings:tldw.buttons.recheck', 'Recheck')}</Button>
           </Space>
         </div>
@@ -1055,6 +1138,7 @@ export const TldwSettings = () => {
           form={form}
           onValuesChange={(changed) => {
             refreshConnectionDirty()
+            if (['serverUrl', 'authMode', 'apiKey', 'rememberApiKey'].some(key => Object.hasOwn(changed, key))) saveAttempt.current?.abort()
             if (Object.hasOwn(changed, "serverUrl") || Object.hasOwn(changed, "authMode")) authAttempt.current?.abort()
             void refreshLoginStatus()
           }}

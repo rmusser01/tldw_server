@@ -2,7 +2,7 @@
 
 Branch: `codex/api-client-unification-13526` (off `origin/dev` @ 4d6a85c4c6)
 Worktree: `.worktrees/api-client-unification`
-ADR check: **required — ADR-065** (`Docs/ADR/065-frontend-api-contract-package.md`), because this establishes a durable rule: one neutral workspace package owns the frontend API contract artifacts, and no second contract source may be introduced.
+ADR check: **required — ADR-069** (`Docs/ADR/069-frontend-api-contract-package.md`), because this establishes a durable rule: one neutral workspace package owns the frontend API contract artifacts, and no second contract source may be introduced.
 
 ## Stage 1a: Create `apps/packages/api-types`
 **Goal**: Neutral `@tldw/api-types` package owning generation, fingerprint, and path union.

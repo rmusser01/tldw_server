@@ -190,12 +190,24 @@ const renderSuccessScreen = async ({
     }
   }))
 
-  vi.doMock("@tanstack/react-query", () => ({
-    useQuery: () => ({
-      data: [],
-      isLoading: false
-    })
-  }))
+  vi.doMock("@tanstack/react-query", async () => {
+    const actual = await vi.importActual<typeof import("@tanstack/react-query")>(
+      "@tanstack/react-query"
+    )
+    const queryClient = new actual.QueryClient()
+    return {
+      ...actual,
+      useQueryClient: () => queryClient,
+      useQuery: () => ({
+        data: [],
+        isLoading: false,
+        isFetching: false,
+        isSuccess: true,
+        isError: false,
+        refetch: vi.fn().mockResolvedValue({ data: [] })
+      })
+    }
+  })
 
   vi.doMock("@plasmohq/storage/hook", () => ({
     useStorage: (_key: string, initialValue: string | null) =>

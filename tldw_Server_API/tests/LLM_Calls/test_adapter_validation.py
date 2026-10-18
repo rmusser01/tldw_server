@@ -272,3 +272,36 @@ def test_google_adapter_validates_config_defaults(monkeypatch):
             }
         )
     assert "response_format" in str(exc.value)
+
+
+def test_ordered_leading_system_prefix_keeps_later_placement_and_original_input():
+    from copy import deepcopy
+
+    from tldw_Server_API.app.core.LLM_Calls.adapter_utils import split_system_message
+
+    messages = [
+        {"role": "system", "content": "Saved note"},
+        {"role": "system", "content": "Saved character"},
+        {"role": "user", "content": "Continue."},
+        {"role": "system", "content": "Depth note"},
+    ]
+    original = deepcopy(messages)
+    assert split_system_message(messages, leading_only=True) == (
+        "Saved note\n\nSaved character",
+        messages[2:],
+    )
+    assert messages == original
+
+
+def test_default_system_extraction_preserves_existing_nonleading_contract():
+    from tldw_Server_API.app.core.LLM_Calls.adapter_utils import split_system_message
+
+    messages = [
+        {"role": "user", "content": "Earlier"},
+        {"role": "system", "content": "Legacy system"},
+        {"role": "system", "content": "Later system"},
+    ]
+    assert split_system_message(messages) == (
+        "Legacy system",
+        [messages[0], messages[2]],
+    )

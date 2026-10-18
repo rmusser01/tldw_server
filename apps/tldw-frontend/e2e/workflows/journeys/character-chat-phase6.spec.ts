@@ -6,6 +6,7 @@
  * still expose the setup/recovery surfaces without layout overflow.
  */
 import { type Page } from "@playwright/test"
+import { ChatPage } from "../../utils/page-objects/ChatPage"
 import {
   assertNoCriticalErrors,
   expect,
@@ -31,6 +32,7 @@ const VIEWPORTS: ViewportTarget[] = [
 ]
 
 async function openRolePlaySetup(page: Page): Promise<void> {
+  await new ChatPage(page).openConversationControls()
   const directSetupButtons = page.getByTestId("composer-role-play-setup")
   const directSetupCount = await directSetupButtons.count()
   let openedDirectly = false
@@ -44,13 +46,8 @@ async function openRolePlaySetup(page: Page): Promise<void> {
   }
 
   if (!openedDirectly) {
-    // Mobile cockpit deliberately hides the full toolbar. Its visible Buddy
-    // entry keeps conversation Persona and behavior settings reachable.
-    await page.getByRole("button", { name: "Buddy & Persona", exact: true }).click()
-    await page
-      .getByRole("dialog", { name: "Buddy & Persona Management" })
-      .getByRole("button", { name: "Edit conversation Persona & behavior", exact: true })
-      .click()
+    await page.getByRole("button", { name: "More options", exact: true }).click()
+    await page.getByRole("button", { name: "Role-play setup", exact: true }).filter({ visible: true }).first().click()
   }
 
   const dialog = page.getByRole("dialog", { name: "Role-play setup" })
@@ -85,13 +82,13 @@ async function expectCharacterSessionsReachable(page: Page): Promise<void> {
 
   // Rail visibility is independent of focus mode and defaults to collapsed.
   const restoreContext = page.getByRole("button", {
-    name: "Restore context sidechannel", exact: true,
+    name: "Show context", exact: true,
   })
   if (await restoreContext.isVisible()) {
     await restoreContext.click()
   } else {
-    await page.getByRole("tab", {
-      name: /^(Context|Restore context sidechannel)$/,
+    await page.getByRole("button", {
+      name: "Context", exact: true,
     }).click()
   }
 

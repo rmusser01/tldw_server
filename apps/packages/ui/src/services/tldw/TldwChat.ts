@@ -1,3 +1,4 @@
+import type { ChatScope } from '@/types/chat-scope';
 import {
   tldwClient,
   ChatMessage,
@@ -144,11 +145,12 @@ const resolveStreamTimeoutError = (
 }
 
 const sanitizeUserContent = (
-  content: string | ChatCompletionContentPart[]
+  content: string | ChatCompletionContentPart[],
+  preserveTextWhitespace = false
 ): string | ChatCompletionContentPart[] | null => {
   if (typeof content === "string") {
     const trimmed = content.trim()
-    return trimmed.length > 0 ? trimmed : null
+    return trimmed.length > 0 ? content : null
   }
   if (!Array.isArray(content)) return null
 
@@ -156,8 +158,8 @@ const sanitizeUserContent = (
     .map((part) => {
       if (!part || typeof part !== "object") return null
       if (part.type === "text") {
-        const text = typeof part.text === "string" ? part.text.trim() : ""
-        return text.length > 0 ? { type: "text", text } : null
+        const text = typeof part.text === "string" ? part.text : ""
+        return (preserveTextWhitespace ? text.length : text.trim().length) > 0 ? { type: "text", text } : null
       }
       if (part.type === "image_url") {
         const candidate = part.image_url
@@ -176,7 +178,7 @@ const sanitizeUserContent = (
   return cleaned.length > 0 ? cleaned : null
 }
 
-const sanitizeMessages = (messages: ChatMessage[]): ChatMessage[] => {
+const sanitizeMessages = (messages: ChatMessage[], preserveTextWhitespace = false): ChatMessage[] => {
   return messages
     .map((message) => {
       if (message.role === "system") {
@@ -186,7 +188,7 @@ const sanitizeMessages = (messages: ChatMessage[]): ChatMessage[] => {
       }
 
       if (message.role === "user") {
-        const content = sanitizeUserContent(message.content)
+        const content = sanitizeUserContent(message.content, preserveTextWhitespace)
         if (content == null) return null
         return { ...message, content } as ChatMessage
       }
@@ -226,7 +228,7 @@ const buildRequestMessages = (
   messages: ChatMessage[],
   options: TldwChatOptions
 ): ChatMessage[] => {
-  const sanitizedMessages = sanitizeMessages(messages)
+  const sanitizedMessages = sanitizeMessages(messages, Boolean(options.regenerateFromMessageId))
   const systemPrompt = normalizeSystemPrompt(options.systemPrompt)
   let withSystemPrompt: ChatMessage[]
   if (systemPrompt) {
@@ -330,6 +332,7 @@ export const prepareChatCompletionRequest = (
 }
 
 export interface TldwChatOptions {
+  onDispatch?: () => void
   preparedRequest?: ChatCompletionRequest
   model: string
   routing?: ChatCompletionRequest["routing"]
@@ -366,13 +369,15 @@ export interface TldwChatOptions {
   chatDebugMetadata?: ChatRequestDebugMetadata
   // Caller-owned AbortSignal (e.g. the UI Stop signal). When it fires, the
   // internal per-call controller is aborted so the underlying request stops.
-  signal?: AbortSignal
-  requestScope?: ServicePromptRequestScope
+  signal?: AbortSignal;
+  requestScope?: ServicePromptRequestScope;
+  scope?: ChatScope;
 }
 export { getLastChatCompletionDebugSnapshot }
 export type { ChatCompletionDebugSnapshot }
 
 export interface ChatStreamChunk {
+  additional_kwargs?: { reasoning_content?: string }
   id?: string
   object?: string
   created?: number
@@ -382,6 +387,7 @@ export interface ChatStreamChunk {
     delta: {
       role?: string
       content?: string
+      reasoning_content?: string
       tool_calls?: Array<{
         index?: number
         id?: string
@@ -496,9 +502,10 @@ export class TldwChatService {
       const response = await tldwClient.createChatCompletion(request, {
         debugMetadata: options.chatDebugMetadata,
         signal: options.signal,
-        requestScope: options.requestScope
-      })
-      const data = await response.json().catch(() => null)
+        requestScope: options.requestScope,
+        scope: options.scope,
+      });
+      const data = await response.json().catch(() => null);
       if (onResponse) {
         onResponse(data)
       }
@@ -519,11 +526,23 @@ export class TldwChatService {
   /**
    * Send a streaming chat completion request
    */
+  streamMessage(
+    messages: ChatMessage[],
+    options: TldwChatOptions,
+    onChunk?: (chunk: ChatStreamChunk) => void | Promise<void>
+  ): AsyncGenerator<string, void, unknown>
+  streamMessage(
+    messages: ChatMessage[],
+    options: TldwChatOptions,
+    onChunk: ((chunk: ChatStreamChunk) => void | Promise<void>) | undefined,
+    includeReasoning: true
+  ): AsyncGenerator<string | ChatStreamChunk, void, unknown>
   async *streamMessage(
     messages: ChatMessage[],
     options: TldwChatOptions,
-    onChunk?: (chunk: ChatStreamChunk) => void
-  ): AsyncGenerator<string, void, unknown> {
+    onChunk?: (chunk: ChatStreamChunk) => void | Promise<void>,
+    includeReasoning = false
+  ): AsyncGenerator<string | ChatStreamChunk, void, unknown> {
     // Per-call abort controller: concurrent streams must not cancel each other.
     const controller = new AbortController()
     this.activeControllers.add(controller)
@@ -581,11 +600,13 @@ export class TldwChatService {
       // at least the startup budget or it cuts off a slow first token (#3107).
       const transportIdleTimeoutMs = Math.max(startupTimeoutMs, streamIdleTimeoutMs)
       const stream = tldwClient.streamChatCompletion(request, {
+        onDispatch: options.onDispatch,
         signal: controller.signal,
         streamIdleTimeoutMs: transportIdleTimeoutMs,
         debugMetadata: options.chatDebugMetadata,
-        requestScope: options.requestScope
-      })
+        requestScope: options.requestScope,
+        scope: options.scope,
+      });
 
       let idleTimer: ReturnType<typeof setTimeout> | null = null
       let startupTimer: ReturnType<typeof setTimeout> | null = null
@@ -642,12 +663,14 @@ export class TldwChatService {
 
             // Call the onChunk callback if provided
             if (onChunk) {
-              onChunk(chunk)
+              await onChunk(chunk);
             }
 
-            const token = extractTokenFromChunk(chunk)
-            if (token) {
-              yield token
+            if (includeReasoning && hasReasoningProgress(chunk)) {
+              yield chunk
+            } else {
+              const token = extractTokenFromChunk(chunk)
+              if (token) yield token
             }
           }
         } catch (error) {

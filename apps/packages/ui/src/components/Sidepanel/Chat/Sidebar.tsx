@@ -28,7 +28,7 @@ import { useUiModeStore } from "@/store/ui-mode"
 import { useDebounce } from "@/hooks/useDebounce"
 import { useConnectionState } from "@/hooks/useConnectionState"
 import { useServerChatHistory, type ServerChatHistoryItem } from "@/hooks/useServerChatHistory"
-import { PageAssistDatabase } from "@/db/dexie/chat"
+import { PageAssistDatabase, watchOnDeviceHistoryChanges } from "@/db/dexie/chat"
 import type { HistoryInfo } from "@/db/dexie/types"
 import type { SidepanelChatOwner } from "@/hooks/useSidepanelChatOwner"
 import { useFolderStore } from "@/store/folder"
@@ -39,7 +39,6 @@ import { ModeToggle } from "./ModeToggle"
 import { ConversationContextMenu } from "./ConversationContextMenu"
 import { FolderPickerModal } from "./FolderPickerModal"
 import { exportTabToJSON, exportTabToMarkdown } from "@/utils/conversation-export"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { useUndoNotification } from "@/hooks/useUndoNotification"
 import {
   moveServerChatToTrash,
@@ -66,24 +65,28 @@ type SidebarGroup = {
 }
 
 type SidepanelChatSidebarProps = {
-  owner?: Pick<SidepanelChatOwner, "ownerKey" | "isCurrent"> & {
-    snapshot: Pick<SidepanelChatOwner["snapshot"], "requestScope">
-  }
-  open: boolean
-  variant: "docked" | "overlay"
-  tabs: SidepanelChatTab[]
-  activeTabId: string | null
-  onSelectTab: (tabId: string) => void
-  onCloseTab: (tabId: string) => void
-  onNewTab: () => void
-  searchQuery: string
-  onSearchQueryChange: (value: string) => void
-  searchInputRef?: React.RefObject<HTMLInputElement>
-  focusSearchTrigger?: number
-  onOpenLocalHistory?: (historyId: string) => void
-  onOpenServerChat?: (chat: ServerChatHistoryItem) => void
-  onClose?: () => void
-}
+  owner?: Pick<SidepanelChatOwner, 'ownerKey' | 'isCurrent'> & {
+    snapshot: Pick<SidepanelChatOwner['snapshot'], 'requestScope'>;
+  };
+  open: boolean;
+  variant: 'docked' | 'overlay';
+  tabs: SidepanelChatTab[];
+  activeTabId: string | null;
+  onSelectTab: (tabId: string) => boolean | void | Promise<boolean | void>;
+  onCloseTab: (
+    tabId: string,
+    options?: { discardTemporaryConfirmed: true; isCurrent?: () => boolean }
+  ) => void | boolean | Promise<void | boolean>;
+  onNewTab: () => boolean | void | Promise<boolean | void>;
+  searchQuery: string;
+  onSearchQueryChange: (value: string) => void;
+  searchInputRef?: React.RefObject<HTMLInputElement>;
+  focusSearchTrigger?: number;
+  onSearchFocus?: () => void;
+  onOpenLocalHistory?: (historyId: string) => boolean | void | Promise<boolean | void>;
+  onOpenServerChat?: (chat: ServerChatHistoryItem) => boolean | void | Promise<boolean | void>;
+  onClose?: () => void;
+};
 
 /**
  * Status indicator component
@@ -225,6 +228,7 @@ export const SidepanelChatSidebar = ({
   onSearchQueryChange,
   searchInputRef,
   focusSearchTrigger,
+  onSearchFocus,
   onOpenLocalHistory,
   onOpenServerChat,
   onClose
@@ -338,6 +342,14 @@ export const SidepanelChatSidebar = ({
   // latest handler, whose tab list no longer holds the deleted tab.
   const openServerChatRef = React.useRef(onOpenServerChat)
   openServerChatRef.current = onOpenServerChat
+  const tabsRef = React.useRef(tabs)
+  tabsRef.current = tabs
+  const mountedRef = React.useRef(true)
+  const bulkActionRevisionRef = React.useRef(0)
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
   const unverifiedAccountMessage = t(
     "sidepanel:contextMenu.accountUnverified",
     "This conversation can't be changed until your account is verified."
@@ -393,10 +405,8 @@ export const SidepanelChatSidebar = ({
     async (tabId: string): Promise<boolean> => {
       const tab = tabs.find((item) => item.id === tabId)
       const chatId = tab?.serverChatId
-      if (!tab || !chatId) {
-        onCloseTab(tabId)
-        return true
-      }
+      if (!tab) return false
+      if (!chatId) return (await onCloseTab(tabId)) !== false
       if (!owner?.isCurrent()) {
         message.error(unverifiedAccountMessage)
         return false
@@ -404,6 +414,14 @@ export const SidepanelChatSidebar = ({
       try {
         await moveServerChatToTrash(chatId, owner.snapshot.requestScope)
       } catch (error) {
+        const currentTab = tabsRef.current.find((item) => item.id === tabId)
+        if (
+          !owner.isCurrent() ||
+          !mountedRef.current ||
+          currentTab?.serverChatId !== chatId ||
+          currentTab.historyId !== tab.historyId
+        )
+          return false
         console.error("[sidepanel] Failed to move chat to Trash", error)
         message.error(
           t(
@@ -414,21 +432,51 @@ export const SidepanelChatSidebar = ({
         return false
       }
       void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
-      if (!owner.isCurrent()) return true
-      onCloseTab(tabId)
-      await removeLocalCopyOfServerChat(chatId, owner.ownerKey)
+      if (!owner.isCurrent() || !mountedRef.current) return true
+      const currentTarget = () => {
+        const currentTab = tabsRef.current.find((item) => item.id === tabId)
+        return (
+          owner.isCurrent() &&
+          mountedRef.current &&
+          currentTab?.serverChatId === chatId &&
+          currentTab.historyId === tab.historyId
+        )
+      }
+      const removed = await removeLocalCopyOfServerChat(
+        chatId,
+        owner.ownerKey,
+        {
+          scope: { type: "global" },
+          validate_lease: currentTarget
+        }
+      )
+      if (!owner.isCurrent() || !mountedRef.current) return true
+      if (!removed && currentTarget())
+        message.warning(
+          t(
+            "common:chatSidebar.deletedDeviceCopyRetained",
+            "Removed from server history. A cached copy remains on this device because it could not be removed."
+          )
+        )
+      if (currentTarget()) await onCloseTab(tabId)
+      if (!owner.isCurrent() || !mountedRef.current) return true
       showUndoNotification({
         title: t("sidepanel:contextMenu.movedToTrash", "Moved to Trash"),
         description: t("sidepanel:contextMenu.movedToTrashDescription", {
-          defaultValue: "\"{{title}}\" is in Trash.",
+          defaultValue: '"{{title}}" is in Trash.',
           title: tab.label
         }),
         onUndo: async () => {
           if (!owner.isCurrent()) {
             throw new Error(unverifiedAccountMessage)
           }
-          const restored = await restoreServerChatFromTrash(chatId)
-          void queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
+          const restored = await restoreServerChatFromTrash(
+            chatId,
+            owner.snapshot.requestScope
+          )
+          void queryClient.invalidateQueries({
+            queryKey: ["serverChatHistory"]
+          })
           if (!owner.isCurrent()) return
           const createdAtMs = Date.parse(restored?.created_at ?? "")
           openServerChatRef.current?.({
@@ -473,12 +521,23 @@ export const SidepanelChatSidebar = ({
   const { isConnected } = useConnectionState()
   const dbRef = React.useRef<PageAssistDatabase | null>(null)
   const [localSearchRetry, setLocalSearchRetry] = React.useState(0)
+  const localSearchRevision = React.useRef(0)
+  const invalidateLocalSearch = React.useCallback(() => {
+    const revision = ++localSearchRevision.current
+    setLocalSearchRetry(revision)
+  }, [])
+  React.useEffect(
+    () => watchOnDeviceHistoryChanges(invalidateLocalSearch),
+    [invalidateLocalSearch]
+  )
   const [localSearch, setLocalSearch] = React.useState<{
     owner: typeof owner
+    revision: number
     query: string
     status: "idle" | "pending" | "success" | "error"
     results: HistoryInfo[]
-  }>({ owner: undefined, query: "", status: "idle", results: [] })
+  }>({ owner: undefined, revision: 0, query: "", status: "idle", results: [] })
+
   const serverSearch = useServerChatHistory(
     debouncedSearchQuery,
     {
@@ -487,7 +546,12 @@ export const SidepanelChatSidebar = ({
       mode: "search"
     }
   )
-  const localSearchCurrent = localSearch.owner === owner && localSearch.query === normalizedQuery
+  const localSearchCurrent =
+    localSearch.owner === owner &&
+    localSearch.query === normalizedQuery &&
+    localSearch.revision === localSearchRetry &&
+    localSearch.revision === localSearchRevision.current
+
   const localSearchPending = ownerCurrent && hasSearch && (
     isSearchDebouncing || !localSearchCurrent || localSearch.status === "pending"
   )
@@ -504,7 +568,7 @@ export const SidepanelChatSidebar = ({
   }
   const retryLocalSearch = () => {
     if (!owner?.isCurrent() || isSearchDebouncing || !hasSearch || localSearchPending) return
-    setLocalSearchRetry(value => value + 1)
+    invalidateLocalSearch()
   }
 
   React.useEffect(() => {
@@ -526,36 +590,54 @@ export const SidepanelChatSidebar = ({
   }, [hasDebouncedSearchQuery, markPanelEngaged])
 
   React.useEffect(() => {
-    if (!focusSearchTrigger) return
-    if (searchInputRef?.current) {
-      searchInputRef.current.focus()
-      searchInputRef.current.select()
-    }
-  }, [focusSearchTrigger, searchInputRef])
+    if (open && focusSearchTrigger) onSearchFocus?.();
+  }, [open, focusSearchTrigger, onSearchFocus]);
 
   React.useEffect(() => {
     const normalized = debouncedSearchQuery.trim()
     const query = normalized.toLowerCase()
+    const revision = localSearchRetry
     if (!normalized || !owner?.isCurrent()) {
-      setLocalSearch({ owner, query, status: "idle", results: [] })
+      setLocalSearch({ owner, revision, query, status: "idle", results: [] })
       return
     }
     let isActive = true
-    setLocalSearch({ owner, query, status: "pending", results: [] })
+    setLocalSearch({ owner, revision, query, status: "pending", results: [] })
     if (!dbRef.current) {
       dbRef.current = new PageAssistDatabase()
     }
     const fetchResults = async () => {
       try {
-        const results = await dbRef.current!.fullTextSearchChatHistories(
-          normalized
-        )
-        if (isActive && owner.isCurrent()) {
-          setLocalSearch({ owner, query, status: "success", results: results.filter(history => history.server_scope_key === owner.ownerKey) })
+        const results =
+          await dbRef.current!.fullTextSearchChatHistories(normalized)
+        if (
+          isActive &&
+          revision === localSearchRevision.current &&
+          owner.isCurrent()
+        ) {
+          setLocalSearch({
+            owner,
+            revision,
+            query,
+            status: "success",
+            results: results.filter(
+              (history) => history.server_scope_key === owner.ownerKey
+            )
+          })
         }
       } catch {
-        if (isActive && owner.isCurrent()) {
-          setLocalSearch({ owner, query, status: "error", results: [] })
+        if (
+          isActive &&
+          revision === localSearchRevision.current &&
+          owner.isCurrent()
+        ) {
+          setLocalSearch({
+            owner,
+            revision,
+            query,
+            status: "error",
+            results: []
+          })
         }
       }
     }
@@ -572,6 +654,10 @@ export const SidepanelChatSidebar = ({
   const [bulkTagPickerOpen, setBulkTagPickerOpen] = React.useState(false)
   const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = React.useState(false)
   const [isBulkDeleting, setIsBulkDeleting] = React.useState(false)
+  const retireBulkAction = React.useCallback(() => {
+    bulkActionRevisionRef.current++
+    setIsBulkDeleting(false)
+  }, [])
 
   const { folderApiAvailable } = useFolderStore(
     (state) => ({
@@ -631,14 +717,16 @@ export const SidepanelChatSidebar = ({
   const groupSpacing = isPro ? "mb-3" : "mb-4"
 
   const toggleSelectionMode = React.useCallback(() => {
+    retireBulkAction()
     setSelectionMode((prev) => !prev)
-  }, [])
+  }, [retireBulkAction])
 
   const toggleTabSelected = React.useCallback((tabId: string) => {
+    retireBulkAction()
     setSelectedTabIds((prev) =>
       prev.includes(tabId) ? prev.filter((id) => id !== tabId) : [...prev, tabId]
     )
-  }, [])
+  }, [retireBulkAction])
 
   const handleRowClick = React.useCallback(
     (tabId: string) => {
@@ -920,15 +1008,14 @@ export const SidepanelChatSidebar = ({
     [selectedTabs]
   )
 
-  const localOnlySelectedCount = React.useMemo(
-    () => selectedTabs.filter((tab) => !tab.serverChatId).length,
-    [selectedTabs]
-  )
   const { openBulkFolderPicker, openBulkTagPicker, applyBulkDelete } =
     useBulkChatOperations({
       selectedConversationIds,
       folderApiAvailable,
-      deleteConversation: (conversationId) => tldwClient.deleteChat(conversationId),
+      deleteConversation: (conversationId) => {
+        if (!owner?.isCurrent()) return Promise.reject(new Error("server_history_action_expired"))
+        return moveServerChatToTrash(conversationId, owner.snapshot.requestScope)
+      },
       t,
       setBulkFolderPickerOpen,
       setBulkTagPickerOpen
@@ -953,16 +1040,19 @@ export const SidepanelChatSidebar = ({
   }, [selectionMode, visibleTabIds])
 
   const handleSelectAllVisible = React.useCallback(() => {
+    retireBulkAction()
     setSelectedTabIds(visibleTabIds)
-  }, [visibleTabIds])
+  }, [retireBulkAction, visibleTabIds])
 
   const clearSelection = React.useCallback(() => {
+    retireBulkAction()
     setSelectedTabIds([])
-  }, [])
+  }, [retireBulkAction])
 
   const openBulkDeleteConfirm = React.useCallback(() => {
+    retireBulkAction()
     setBulkDeleteConfirmOpen(true)
-  }, [])
+  }, [retireBulkAction])
 
   const handleBulkFolderPickerClose = React.useCallback(() => {
     setBulkFolderPickerOpen(false)
@@ -973,36 +1063,92 @@ export const SidepanelChatSidebar = ({
   }, [])
 
   const handleBulkDeleteConfirmClose = React.useCallback(() => {
+    retireBulkAction()
     setBulkDeleteConfirmOpen(false)
-  }, [])
+  }, [retireBulkAction])
 
   const handleBulkDelete = async () => {
-    if (selectedTabs.length === 0) return
+    if (isBulkDeleting || selectedTabs.length === 0 || !owner?.isCurrent())
+      return
+    const revision = bulkActionRevisionRef.current
+    const isCurrent = () =>
+      mountedRef.current &&
+      owner.isCurrent() &&
+      revision === bulkActionRevisionRef.current
+    const targetIsCurrent = (tab: SidepanelChatTab) =>
+      tabsRef.current.some(
+        (current) =>
+          current.id === tab.id &&
+          current.serverChatId === tab.serverChatId &&
+          current.historyId === tab.historyId
+      )
+    if (!selectedTabs.every(targetIsCurrent)) return
 
     setIsBulkDeleting(true)
     try {
       const failedConversationIds = new Set<string>()
       if (selectedConversationIds.length > 0) {
-        const result = await applyBulkDelete()
-        if (!result) return
-        result.failedConversationIds.forEach((id) => failedConversationIds.add(id))
+        const result = await applyBulkDelete(
+          () => isCurrent() && selectedTabs.every(targetIsCurrent)
+        )
+        if (!result || !isCurrent() || !selectedTabs.every(targetIsCurrent))
+          return
+        result.failedConversationIds.forEach((id) =>
+          failedConversationIds.add(id)
+        )
         queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
       }
 
       const remainingSelection: string[] = []
-      selectedTabs.forEach((tab) => {
-        if (tab.serverChatId && failedConversationIds.has(tab.serverChatId)) {
+      let localClosedCount = 0
+      let localCleanupFailed = false
+      for (const tab of selectedTabs) {
+        if (!isCurrent()) return
+        if (
+          !targetIsCurrent(tab) ||
+          (tab.serverChatId && failedConversationIds.has(tab.serverChatId))
+        ) {
           remainingSelection.push(tab.id)
-          return
+          continue
         }
-        onCloseTab(tab.id)
-      })
+        if (tab.serverChatId) {
+          const removed = await removeLocalCopyOfServerChat(
+            tab.serverChatId,
+            owner.ownerKey,
+            {
+              scope: { type: "global" },
+              validate_lease: () => isCurrent() && targetIsCurrent(tab)
+            }
+          )
+          if (!isCurrent()) return
+          if (!removed) localCleanupFailed = true
+          if (!targetIsCurrent(tab)) {
+            remainingSelection.push(tab.id)
+            continue
+          }
+        }
+        const closed =
+          (await onCloseTab(tab.id, {
+            discardTemporaryConfirmed: true,
+            isCurrent: () => isCurrent() && targetIsCurrent(tab)
+          })) !== false
+        if (!isCurrent()) return
+        if (!closed) remainingSelection.push(tab.id)
+        else if (!tab.serverChatId) localClosedCount++
+      }
 
-      if (localOnlySelectedCount > 0) {
+      if (localCleanupFailed)
+        message.warning(
+          t(
+            "common:chatSidebar.deletedDeviceCopyRetained",
+            "Removed from server history. A cached copy remains on this device because it could not be removed."
+          )
+        )
+      if (localClosedCount > 0) {
         message.info(
           t("sidepanel:multiSelect.localOnlyClosed", {
             defaultValue: "{{count}} local chat(s) were closed.",
-            count: localOnlySelectedCount
+            count: localClosedCount
           })
         )
       }
@@ -1010,23 +1156,24 @@ export const SidepanelChatSidebar = ({
       setSelectedTabIds(remainingSelection)
       setBulkDeleteConfirmOpen(false)
     } finally {
-      setIsBulkDeleting(false)
+      if (mountedRef.current && revision === bulkActionRevisionRef.current)
+        setIsBulkDeleting(false)
     }
   }
 
   const panelClass = classNames(
-    "relative flex h-full min-h-0 flex-col border-r border-border bg-surface",
-    variant === "overlay"
-      ? `fixed left-0 top-0 z-40 w-72 shadow-card transition-transform ${
-          open ? "translate-x-0" : "-translate-x-full"
-        }`
-      : "shadow-none"
-  )
+    'relative flex h-full min-h-0 flex-col border-r border-border bg-surface',
+    variant === 'overlay' ? 'w-full' : 'shadow-none'
+  );
 
   return (
     <aside
       className={panelClass}
       data-testid="sidepanel-chat-sidebar"
+      onKeyDown={(event) => {
+        if (variant === 'overlay' && event.key !== 'Escape' && event.key !== 'Tab')
+          event.stopPropagation();
+      }}
       style={variant === "docked" ? { width: sidebarWidth } : undefined}
     >
       <div
@@ -1035,8 +1182,8 @@ export const SidepanelChatSidebar = ({
           isPro ? "px-4 py-2" : "px-4 py-3"
         )}
       >
-        <div className="text-body font-semibold text-text">
-          {t("common:chatSidebar.title", "Chats")}
+        <div className={variant === 'overlay' ? 'sr-only' : 'text-body font-semibold text-text'}>
+          {t('common:chatSidebar.title', 'Chats')}
         </div>
         <div className="flex items-center gap-1">
           <Tooltip title={t("common:chatSidebar.newChat", "New Chat")}>
@@ -1077,20 +1224,8 @@ export const SidepanelChatSidebar = ({
               <CheckSquare className="size-4" />
             </button>
           </Tooltip>
-          {variant === "overlay" ? (
-            <Tooltip title={t("common:close", "Close")}>
-              <button
-                type="button"
-                aria-label={t("common:close", "Close")}
-                onClick={() => onClose?.()}
-                className="rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text"
-                title={t("common:close", "Close")}
-              >
-                <X className="size-4" />
-              </button>
-            </Tooltip>
-          ) : (
-            <Tooltip title={t("common:chatSidebar.collapse", "Collapse sidebar")}>
+          {variant === 'docked' && (
+            <Tooltip title={t('common:chatSidebar.collapse', 'Collapse sidebar')}>
               <button
                 type="button"
                 aria-label={t("common:chatSidebar.collapse", "Collapse sidebar")}
@@ -1112,7 +1247,8 @@ export const SidepanelChatSidebar = ({
             type="text"
             value={searchQuery}
             onChange={(event) => onSearchQueryChange(event.target.value)}
-            placeholder={t("common:chatSidebar.search", "Search chats...")}
+            placeholder={t('common:chatSidebar.search', 'Search chats...')}
+            aria-label={t('common:chatSidebar.searchLabel', 'Search chats')}
             data-testid="sidepanel-sidebar-search"
             className="w-full bg-transparent text-body text-text outline-none placeholder:text-text-subtle"
             ref={searchInputRef}
@@ -1341,10 +1477,12 @@ export const SidepanelChatSidebar = ({
                         item.title ||
                         t("common:untitled", { defaultValue: "Untitled" }),
                       metaLabel:
-                        item.kind === "server"
-                          ? t("common:chatSidebar.serverLabel", "Server")
-                          : t("common:chatSidebar.localLabel", "Local"),
-                      topic: item.kind === "server" ? item.chat.topic_label ?? null : null,
+                        item.kind === 'server'
+                          ? t('common:chatSidebar.serverLabel', 'Server')
+                          : item.origin === 'server-copy'
+                            ? t('common:chatSidebar.serverCopyLabel', 'Server copy')
+                            : t('common:chatSidebar.localLabel', 'Local'),
+                      topic: item.kind === 'server' ? (item.chat.topic_label ?? null) : null,
                       // Each opens in its own tab (XS-01).
                       onOpen: () =>
                         item.kind === "server"
@@ -1403,8 +1541,8 @@ export const SidepanelChatSidebar = ({
       >
         <p>
           {t(
-            "sidepanel:multiSelect.deleteConfirmBody",
-            "This will delete the selected chats from the server."
+            "sidepanel:multiSelect.deleteAndCloseConfirmBody",
+            "Saved chats go to Trash. Selected tabs close on this device. Closing a Temporary tab discards its messages."
           )}
         </p>
       </Modal>

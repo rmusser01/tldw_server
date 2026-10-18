@@ -327,6 +327,17 @@ describe("NotesManagerPage stage 7 wikilinks", { timeout: 60_000 }, () => {
     })
   })
 
+  it.each(['Enter', 'Tab'])('accepts a wikilink before list continuation with %s', async (key) => {
+    renderPage()
+    const textarea = getEditor() as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: '- [[Li' } })
+    textarea.setSelectionRange(6, 6)
+    fireEvent.select(textarea)
+    expect(await screen.findByTestId('notes-wikilink-suggestions')).toHaveTextContent('Linked note')
+    fireEvent.keyDown(textarea, { key })
+    await waitFor(() => expect(getEditor()).toHaveValue('- [[Linked note]]'))
+  })
+
   it("opens resolved wikilink when clicked in preview mode", async () => {
     renderPage()
 

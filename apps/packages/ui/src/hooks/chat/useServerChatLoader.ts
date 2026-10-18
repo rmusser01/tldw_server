@@ -1,3 +1,4 @@
+import { readSavedRoleplayPresentation } from "@/services/tldw/roleplay-resume"
 import { useHistorySelectionContext } from "./useHistorySelection"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { excludeLocalRagDiagnostics } from "@/utils/local-rag-diagnostic"
@@ -193,9 +194,10 @@ export const fetchAllServerChatMessages = async (
       signal: options?.signal
     })
     options?.signal?.throwIfAborted()
-    if (!Array.isArray(batch) || batch.length === 0) {
-      break
-    }
+    if (!Array.isArray(batch)) throw new Error("The saved message page could not be verified.")
+    if (batch.length === 0) break
+    if (page === maxPages - 1 && batch.length >= limit)
+      throw new Error("The saved conversation reached the pagination limit. Its complete history could not be verified.")
     imageCharacters += batch.reduce((total, message) => total + (message.images || []).reduce((size, image) => size + image.length, 0), 0)
     if (imageCharacters > SERVER_CHAT_IMAGES_MAX_ENCODED_CHARS) {
       throw new Error("Saved chat attachments exceed the image history limit. Local work has been retained.")
@@ -831,13 +833,26 @@ export const useServerChatLoader = ({
             if (usePlaygroundSessionStore.getState().serverChatSelectionIntent !== selectionIntent) return
             handledSelectionIntent.current = selectionIntent
             const control = selectionRef.current
+            let accepted = !selectionIntent?.onLoaded
+            let selectionAccepted = false
             if (control && !await control.loadConversation({ serverChatId, scope, temporary: temporaryChat,
-              isCurrent: () => !controller.signal.aborted &&
-                usePlaygroundSessionStore.getState().serverChatSelectionIntent === selectionIntent &&
+              isCurrent: () => selectionIntent?.isCurrent?.() !== false && !controller.signal.aborted &&
+                (usePlaygroundSessionStore.getState().serverChatSelectionIntent === selectionIntent ||
+                  (selectionAccepted && usePlaygroundSessionStore.getState().serverChatSelectionIntent === null)) &&
                 useStoreMessageOption.getState().serverChatId === serverChatId
-            })) return
+            }, null, receipt => { accepted = selectionIntent?.onLoaded?.(receipt) ?? true })) return
             selectionCurrent = control?.fence() || (() => true)
+            const selected = control?.getCurrent()
+            if (!accepted && selected?.owner?.kind === "native" && selected.owner.conversation_id === serverChatId && selected.view) {
+              accepted = selectionIntent?.onLoaded?.({ owner: selected.owner, view: selected.view }) ?? false
+            }
+            // Temporary history is a display-only read; H1 supplies no owned receipt.
+            if ((!accepted && !temporaryChat) || selectionIntent?.isCurrent?.() === false) return
             if (controller.signal.aborted || usePlaygroundSessionStore.getState().serverChatSelectionIntent !== selectionIntent) return
+            // The qualified navigation has committed. Retire its single-use
+            // callback while preserving this load's H1 lease until a new intent.
+            selectionAccepted = true
+            usePlaygroundSessionStore.getState().completeServerChatSelection(selectionIntent)
           } else if (selectionRef.current?.canAutomaticallyLoad?.() === false) return
           setIsLoading(true)
           setServerChatLoadState("loading")
@@ -872,6 +887,7 @@ export const useServerChatLoader = ({
           if (forkChild && (forkOwner?.kind !== "native" || !forkOwner.validate_lease())) return
           if (!forkChild) await tldwClient.initialize().catch(() => null)
 
+          let savedRoleplay = useStoreMessageOption.getState().serverChatRoleplaySetup
           let assistantName = "Assistant"
           let chatTitle = serverChatTitle || ""
           let characterId = serverChatCharacterId ?? null
@@ -914,6 +930,8 @@ export const useServerChatLoader = ({
                 }
                 return
               }
+              savedRoleplay = readSavedRoleplayPresentation(chat)
+              useStoreMessageOption.getState().setServerChatRoleplaySetup(savedRoleplay)
               const meta = chat as unknown as Record<string, unknown>
               chatTitle = String(meta?.title || chatTitle || "")
               const resolvedAssistantIdentity =
@@ -970,6 +988,9 @@ export const useServerChatLoader = ({
                   historyId: null,
                   serverChatId,
                   scope,
+                  requestScope: snapshot!.requestScope,
+                  signal: snapshot!.scopeSignal,
+                  validate_lease: canCommitCurrentLoad,
                   allowScratchFallback: false
                 })
               } catch {
@@ -977,6 +998,12 @@ export const useServerChatLoader = ({
               }
             }
 
+            if (savedRoleplay && assistantKind === "character") {
+              if (!canCommitCurrentLoad()) return null
+              const selection = characterToAssistantSelection(savedRoleplay)
+              if (!(await applyOwnedAssistantSelection(selection))) return null
+              return { assistantName: savedRoleplay.name, assistantAvatarUrl: null }
+            }
             if (assistantKind === "persona" && assistantId) {
               try {
                 const persona = await tldwClient.getPersonaProfile(assistantId, {
@@ -1201,6 +1228,10 @@ export const useServerChatLoader = ({
                   await syncChatSettingsForServerChat({
                     historyId: localHistoryId,
                     serverChatId,
+                    scope,
+                    requestScope: snapshot.requestScope,
+                    signal: snapshot.scopeSignal,
+                    validate_lease: canCommitCurrentLoad,
                     allowScratchFallback: false
                   })
                 } catch {

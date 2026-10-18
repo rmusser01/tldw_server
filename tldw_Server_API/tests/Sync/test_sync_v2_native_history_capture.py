@@ -321,6 +321,68 @@ def test_capture_succeeds_and_records_nothing(client: TestClient, sync_service: 
     assert _log(sync_service) == before
 
 
+@pytest.mark.parametrize("workspace", [False, True])
+def test_native_completion_capture_qualifies_service_backed_sync_ownership(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+    workspace: bool,
+) -> None:
+    """Global enrolled ownership is unsupported; Workspace uses its independent owner."""
+    query = "?include_native_completion=true"
+    body = dict(CHAT_BODY)
+    if workspace:
+        chacha_db.upsert_workspace("completion-workspace", "Completion workspace")
+        body.update(scope_type="workspace", workspace_id="completion-workspace")
+        query += "&scope_type=workspace&workspace_id=completion-workspace"
+    created = _create_chat(client, body)
+    assert created.status_code == 201, created.text
+    before = _log(sync_service)
+    response = client.post(
+        f"/api/v1/chat/conversations/{CHAT_ID}/history/selection{query}",
+        json={
+            "purpose": "send",
+            "view": {
+                "view_session_id": "completion-scope",
+                "conversation_id": CHAT_ID,
+                "interpretation": {"kind": "parent_graph_v1"},
+                "cursor": {"kind": "empty"},
+                "selection_revision": 0,
+            },
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["native_completion_v1"] == {
+        "policy": "selected_history_v1",
+        "supported": workspace,
+        "storage_context_digest": response.json()["storage_context_digest"],
+    }
+    assert _log(sync_service) == before
+    assert chacha_db.count_messages_for_conversation(CHAT_ID) == 0
+
+
+def test_native_completion_capture_cannot_turn_sync_lookup_failure_into_support(
+    client: TestClient,
+    chacha_db: CharactersRAGDB,
+    sync_service: SyncV2Service,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _create_chat(client).status_code == 201
+    before = _log(sync_service)
+    request = {"purpose": "send", "view": _capture(client, CHAT_ID).json()["view"]}
+
+    def unavailable(_user_id: str):
+        raise RuntimeError("eligibility_unavailable")
+
+    monkeypatch.setattr(messages_endpoint, "get_active_server_origin_sync_service_for_user", unavailable)
+    response = client.post(
+        f"/api/v1/chat/conversations/{CHAT_ID}/history/selection?include_native_completion=true", json=request
+    )
+    assert response.status_code == 500
+    assert _log(sync_service) == before
+    assert chacha_db.count_messages_for_conversation(CHAT_ID) == 0
+
+
 def test_capture_of_a_character_chat_is_still_refused(
     monkeypatch: pytest.MonkeyPatch,
     client: TestClient,

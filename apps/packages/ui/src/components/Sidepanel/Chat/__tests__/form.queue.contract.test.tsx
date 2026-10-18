@@ -62,9 +62,9 @@ describe("sidepanel queued request contract", () => {
     expect(sidepanelFormSource).not.toContain("QueuedMessagesBanner")
   })
 
-  it("treats busy and disconnected submits as queue actions", () => {
+  it("treats connected busy submits as queue actions", () => {
     expect(sidepanelFormSource).toContain(
-      "const shouldQueueInsteadOfSend = isSending || !isConnectionReady"
+      "const shouldQueueInsteadOfSend = isSending"
     )
     expect(sidepanelFormSource).toContain('t("common:queue", "Queue")')
     expect(sidepanelFormSource).toContain(

@@ -1,5 +1,5 @@
+import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import React from "react"
-import { useQuery } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { Select, Tooltip, Switch } from "antd"
 import {
@@ -14,7 +14,6 @@ import { useMessageOption } from "@/hooks/useMessageOption"
 import { PlaygroundMessage } from "@/components/Common/Playground/Message"
 import { PlaygroundEmpty } from "@/components/Option/Playground/PlaygroundEmpty"
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
-import { fetchChatModels } from "@/services/tldw-server"
 import { MAX_COMPARE_MODELS } from "@/hooks/chat/compare-constants"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
 import useDynamicTextareaSize from "@/hooks/useDynamicTextareaSize"
@@ -95,13 +94,9 @@ export const ModelPlaygroundChat: React.FC = () => {
     historyId
   } = useMessageOption({ forceCompareEnabled: true })
 
-  const { data: chatModels = [] } = useQuery({
-    queryKey: ["workspace:chatModels"],
-    queryFn: () => fetchChatModels({ returnEmpty: true }),
-    enabled: true
-  })
+  const { data: chatModels = EMPTY_CHAT_MODELS } = useChatModelCatalog(true)
 
-  useDynamicTextareaSize(textareaRef, message, 200)
+  const attachTextarea = useDynamicTextareaSize(textareaRef, message, 200)
 
   const blocks = React.useMemo(() => buildBlocks(messages), [messages])
 
@@ -208,7 +203,7 @@ export const ModelPlaygroundChat: React.FC = () => {
         </div>
       )}
 
-      {/* Messages */}
+      {/* Empty state */}
       {blocks.map((block, blockIndex) => {
         if (block.kind === "single") {
           const msg = messages[block.index]
@@ -226,11 +221,18 @@ export const ModelPlaygroundChat: React.FC = () => {
               isProcessing={isProcessing}
               isSearchingInternet={false}
               sources={msg.sources}
-              onEditFormSubmit={(value, isSend) => {
-                editMessage(block.index, value, !msg.isBot, isSend)
+              onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
+                return editMessage(
+                  block.index,
+                  value,
+                  !msg.isBot,
+                  isSend,
+                  editIsCurrent,
+                  editOriginIsCurrent
+                )
               }}
               onDeleteMessage={() => {
-                void deleteMessage(block.index)
+                return deleteMessage(block.index)
               }}
               isTTSEnabled={ttsEnabled}
               generationInfo={msg?.generationInfo}
@@ -279,11 +281,18 @@ export const ModelPlaygroundChat: React.FC = () => {
               isProcessing={isProcessing}
               isSearchingInternet={false}
               sources={userMessage.sources}
-              onEditFormSubmit={(value, isSend) => {
-                editMessage(block.userIndex, value, !userMessage.isBot, isSend)
+              onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
+                return editMessage(
+                  block.userIndex,
+                  value,
+                  !userMessage.isBot,
+                  isSend,
+                  editIsCurrent,
+                  editOriginIsCurrent
+                )
               }}
               onDeleteMessage={() => {
-                void deleteMessage(block.userIndex)
+                return deleteMessage(block.userIndex)
               }}
               isTTSEnabled={ttsEnabled}
               generationInfo={userMessage?.generationInfo}
@@ -301,12 +310,13 @@ export const ModelPlaygroundChat: React.FC = () => {
               conversationInstanceId={historyId || "workspace"}
             />
 
-            {/* Compare responses */}
+            {/* User message */}
             <div className="ml-10 space-y-2 border-l-2 border-dashed border-primary/30 pl-4">
               <div className="flex items-center gap-2 text-xs text-text-muted">
                 <GitCompare className="h-3.5 w-3.5 text-primary" />
                 <span className="font-medium">
-                  {t("playground:workspace.compareResponses", "Compare Responses")} ({replyItems.length})
+                  {t("playground:workspace.compareResponses", "Compare Responses")}{" "}
+                  ({replyItems.length})
                 </span>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
@@ -336,11 +346,18 @@ export const ModelPlaygroundChat: React.FC = () => {
                       isProcessing={isProcessing}
                       isSearchingInternet={false}
                       sources={replyMsg.sources}
-                      onEditFormSubmit={(value, isSend) => {
-                        editMessage(index, value, !replyMsg.isBot, isSend)
+                      onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
+                        return editMessage(
+                          index,
+                          value,
+                          !replyMsg.isBot,
+                          isSend,
+                          editIsCurrent,
+                          editOriginIsCurrent
+                        )
                       }}
                       onDeleteMessage={() => {
-                        void deleteMessage(index)
+                        return deleteMessage(index)
                       }}
                       isTTSEnabled={ttsEnabled}
                       generationInfo={replyMsg?.generationInfo}
@@ -365,7 +382,7 @@ export const ModelPlaygroundChat: React.FC = () => {
         )
       })}
 
-      {/* Input area */}
+      {/* Empty state */}
       <div className="sticky bottom-0 mt-4 border-t border-border bg-surface/95 px-4 py-4 backdrop-blur">
         {/* Compare mode controls */}
         <div className="mb-3 flex flex-wrap items-center gap-3">
@@ -453,7 +470,7 @@ export const ModelPlaygroundChat: React.FC = () => {
         {/* Message input */}
         <div className="flex items-end gap-3">
           <textarea
-            ref={textareaRef}
+            ref={attachTextarea}
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             onKeyDown={handleKeyDown}

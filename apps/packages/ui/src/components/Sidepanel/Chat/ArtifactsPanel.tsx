@@ -321,31 +321,33 @@ export const ArtifactsPanel = () => {
               getTokenProps
             }) => (
               <pre
-                className={`${highlightClassName} m-0 rounded-xl bg-surface2/80 px-4 py-3 text-[0.85rem]`}
+                className={`${highlightClassName} m-0 overflow-x-auto rounded-xl bg-surface2/80 px-4 py-3 text-[0.85rem]`}
                 style={{
                   ...style,
                   fontFamily: "var(--font-mono)"
                 }}>
-                {tokens.map((line, i) => {
-                  const { key: _lineKey, ...lineProps } = getLineProps({
-                    line,
-                    key: i
-                  })
-                  return (
-                    <div key={i} {...lineProps} className="table w-full">
-                      <span className="table-cell select-none pr-3 text-right text-xs text-text-subtle">
-                        {i + 1}
-                      </span>
-                      <span className="table-cell whitespace-pre-wrap">
-                        {line.map((token, key) => {
-                          const { key: _tokenKey, ...tokenProps } =
-                            getTokenProps({ token, key })
-                          return <span key={key} {...tokenProps} />
-                        })}
-                      </span>
-                    </div>
-                  )
-                })}
+                <div className="table w-full">
+                  {tokens.map((line, i) => {
+                    const { key: _lineKey, ...lineProps } = getLineProps({
+                      line,
+                      key: i
+                    })
+                    return (
+                      <div key={i} {...lineProps} className="table-row">
+                        <span className="table-cell w-px min-w-[2ch] select-none pr-3 text-right text-xs text-text-subtle">
+                          {i + 1}
+                        </span>
+                        <span className="table-cell whitespace-pre">
+                          {line.map((token, key) => {
+                            const { key: _tokenKey, ...tokenProps } =
+                              getTokenProps({ token, key })
+                            return <span key={key} {...tokenProps} />
+                          })}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
               </pre>
             )}
           </Highlight>

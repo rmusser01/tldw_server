@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader";
 import { useSetupReadinessSummary } from "@/hooks/useSetupReadinessSummary";
 import { useSetupOnboarding } from "@/hooks/useSetupOnboarding";
+import { SetupEntryChoice } from "./SetupEntryChoice";
 import { useConnectionActions } from "@/hooks/useConnectionState";
 import {
   normalizeSelectedModel,
@@ -177,6 +178,8 @@ export function UnifiedSetupWizard({
     audioRecommendations,
     loading,
     error,
+    connectionConfigured,
+    connectionChecking,
     refresh,
     loadProviderCatalog,
     loadMcpToolsCatalog,
@@ -203,7 +206,7 @@ export function UnifiedSetupWizard({
     error: setupReadinessError,
     refresh: refreshSetupReadinessStatus,
   } = useSetupReadinessSummary({
-    enabled: Boolean(metadata) && metadata.auth_mode !== "multi_user",
+    enabled: connectionConfigured !== false && Boolean(metadata) && metadata.auth_mode !== "multi_user",
   });
   const [step, setStep] = React.useState<WizardStep>(() =>
     stepFromState(initialState),
@@ -276,22 +279,22 @@ export function UnifiedSetupWizard({
   }, [state]);
 
   React.useEffect(() => {
-    if (activeStep !== "provider_setup" || providerCatalog.length > 0) return;
+    if (connectionConfigured === false || connectionChecking || activeStep !== "provider_setup" || providerCatalog.length > 0) return;
     void loadProviderCatalog().catch((err) => {
       console.error("Provider catalog could not be loaded", err);
       setStepError("Provider catalog could not be loaded. Try again.");
     });
-  }, [loadProviderCatalog, providerCatalog.length, activeStep]);
+  }, [connectionConfigured, connectionChecking, loadProviderCatalog, providerCatalog.length, activeStep]);
 
   React.useEffect(() => {
-    if (step !== "audio_defaults" || audioRecommendations.length > 0) return;
+    if (connectionConfigured === false || connectionChecking || step !== "audio_defaults" || audioRecommendations.length > 0) return;
     void loadAudioRecommendations().catch((err) => {
       console.error("Audio recommendations could not be loaded", err);
       setStepError(
         "Audio recommendations could not be loaded. You can continue with defaults.",
       );
     });
-  }, [audioRecommendations.length, loadAudioRecommendations, step]);
+  }, [connectionConfigured, connectionChecking, audioRecommendations.length, loadAudioRecommendations, step]);
 
   const persistStep = React.useCallback(
     async (payload: FirstRunStepUpdateRequest) => {
@@ -601,7 +604,22 @@ export function UnifiedSetupWizard({
       });
   }, [onStateChange, refreshSetupReadiness, skip, state]);
 
-  if (loading && !state && !metadata) {
+  if (connectionConfigured === false && !connectionChecking && !error) {
+    return (
+      <div className="mx-auto w-full max-w-4xl px-4 py-8">
+        <SetupEntryChoice
+          state={null}
+          metadata={null}
+          connectionRequired
+          onOpenConnectionSettings={handleOpenConnectionSettings}
+          onStartWebUiSetup={() => setStep("setup_path")}
+          onRefreshSetupState={async () => { await refreshParentState(); }}
+        />
+      </div>
+    );
+  }
+
+  if ((loading || connectionChecking) && !state && !metadata) {
     return (
       <PageAssistLoader
         label="Loading setup..."

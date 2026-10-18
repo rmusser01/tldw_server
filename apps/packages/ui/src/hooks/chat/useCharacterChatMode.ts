@@ -346,7 +346,7 @@ export type CharacterChatModeDeps = {
   setIsProcessing: (isProcessing: boolean) => void;
   setStreaming: (streaming: boolean) => void;
   setAbortController: (controller: AbortController | null) => void;
-  setServerChatId: (id: string | null) => void;
+  setServerChatId: import("@/store/option/types").State["setServerChatId"];
   setServerChatTitle: (title: string | null) => void;
   setServerChatCharacterId: (id: string | number | null) => void;
   setServerChatMetaLoaded: (loaded: boolean) => void;
@@ -541,12 +541,14 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
 
     const flushStreamingUpdate = () => {
       if (pendingStreamingText.length === 0) return;
+      const text = pendingStreamingText;
+      const reasoningTime = pendingReasoningTime;
       setMessages((prev) =>
         prev.map((m) =>
           m.id === generateMessageId
             ? updateActiveVariant(m, {
-                message: pendingStreamingText,
-                reasoning_time_taken: pendingReasoningTime,
+                message: text,
+                reasoning_time_taken: reasoningTime,
               })
             : m,
         ),
@@ -804,7 +806,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
         }
         chatId = normalizedId;
         createdNewChat = true;
-        setServerChatId(normalizedId);
+        setServerChatId(normalizedId, { preserveTemporaryChat: temporaryChat });
         const createdTitle =
           created && typeof created === "object"
             ? String(created.title ?? "")
@@ -1006,7 +1008,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
         apiReasoning = sanitizedChunkState.apiReasoning;
         applyEmoteEventsToMessage(sanitizedChunkState.emoteEvents);
 
-        if (chunkState.token && fullText !== previousFullText) {
+        if (fullText !== previousFullText) {
           scheduleStreamingUpdate(`${fullText}▋`, timetaken);
         }
         if (count === 0) {

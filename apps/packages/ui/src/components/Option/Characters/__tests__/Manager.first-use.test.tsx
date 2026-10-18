@@ -1,4 +1,6 @@
+import { createDefaultActorSettings } from "@/types/actor"
 import React from "react"
+import { ConfigProvider } from "antd"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   act,
@@ -13,7 +15,7 @@ import { CharactersManager, withCharacterNameInLabel } from "../Manager"
 import { DEFAULT_CHARACTER_STORAGE_KEY } from "@/utils/default-character-preference"
 import { ensureLocalStorageApi } from "./testUtils"
 
-const OWNED_DEFAULT_KEY = `${DEFAULT_CHARACTER_STORAGE_KEY}:owner:account-a`
+const OWNED_DEFAULT_KEY = `${DEFAULT_CHARACTER_STORAGE_KEY}:owner:${"a".repeat(64)}`
 const TEMPLATE_CHOOSER_SEEN_KEY = "characters-template-chooser-seen"
 
 const {
@@ -183,8 +185,39 @@ const {
   ]
 }))
 
-vi.mock("@/hooks/useChatDraftOwner", () => ({
-  useChatDraftOwner: () => ({ ownerKey: "account-a", isCurrent: () => true })
+const quickPopupFixture = vi.hoisted(() => ({ retain: vi.fn(), send: vi.fn(), id: "quick-chat-session-default", reply: "Quick chat response", sessionId: null as string | null, characterId: null as string | number | null }))
+const quickOwnerCurrent = () => true
+const quickOwnerScope = { config: { serverUrl: "http://chat.test", authMode: "multi-user" as const }, userId: "account-a" }
+vi.mock("@/hooks/useChatDraftOwner", async original => ({
+  ...await original<typeof import("@/hooks/useChatDraftOwner")>(),
+  useChatDraftOwner: () => ({ ownerKey: "a".repeat(64), serverScopeKey: "account-a", requestScope: quickOwnerScope, isCurrent: quickOwnerCurrent, verificationState: "ready", retryVerification: vi.fn() })
+}))
+// Renderer-level IO adapters; actual native admission, settlement and durability have separate integration regressions.
+vi.mock("@/hooks/useDraftPersistence", () => ({
+  useDraftPersistence: () => ({ draftReady: true, draftSaved: true, retainDraft: quickPopupFixture.retain, clearDraft: vi.fn() })
+}))
+vi.mock("@/services/pending-chat-promotion", async original => ({
+  ...await original<typeof import("@/services/pending-chat-promotion")>(),
+  listChatCreationRecovery: async () => ({ attempts: [], unavailable: false }),
+  readChatCreationRecovery: async () => null
+}))
+vi.mock("@/services/actor-settings", async original => ({
+  ...await original<typeof import("@/services/actor-settings")>(),
+  getActorSceneForChat: async ({ target }: { target: unknown }) => ({
+    target, settings: createDefaultActorSettings(), originalRecord: null,
+    origin: "default", profileUnavailable: false
+  })
+}))
+vi.mock("@/hooks/chat/native-history-character-send", async original => ({
+  ...await original<typeof import("@/hooks/chat/native-history-character-send")>(), sendNativeHistoryCharacter: quickPopupFixture.send
+}))
+vi.mock("@/hooks/chat/useHistorySelection", async original => ({
+  ...await original<typeof import("@/hooks/chat/useHistorySelection")>(),
+  useHistorySelection: () => ({ reset: () => { quickPopupFixture.sessionId = null },
+    getCurrent: () => ({ status: quickPopupFixture.sessionId ? "ready" : "idle", view: null, owner: quickPopupFixture.sessionId ? { kind: "native", conversation_id: quickPopupFixture.sessionId, request_scope: quickOwnerScope, scope: { type: "global" }, validate_lease: () => true } : null }),
+    fence: () => () => true,
+    prepareExpansionPath: async () => `/chat?chatId=${quickPopupFixture.sessionId}&client_session_id=popup-ui-fixture`
+  })
 }))
 vi.mock("@/services/service-prompts", async importOriginal => ({
   ...await importOriginal<typeof import("@/services/service-prompts")>(),
@@ -308,9 +341,11 @@ vi.mock("../CharacterEditorForm", async () => {
 
 const makeUseQueryResult = (value: Record<string, unknown>) => ({
   data: undefined,
-  status: "success",
+  status: value.status ?? "success",
+  isSuccess: (value.status ?? "success") === "success",
+  isError: value.status === "error",
   error: null,
-  isPending: false,
+  isPending: value.status === "pending",
   isFetching: false,
   isLoading: false,
   refetch: vi.fn(),
@@ -355,6 +390,17 @@ const findEditSubmitButton = async (timeout = 15000) =>
 describe("CharactersManager first-use onboarding", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    quickPopupFixture.retain.mockReset().mockResolvedValue(true)
+    quickPopupFixture.id = "quick-chat-session-default"
+    quickPopupFixture.reply = "Quick chat response"
+    quickPopupFixture.sessionId = null
+    quickPopupFixture.characterId = null
+    quickPopupFixture.send.mockImplementation(async params => {
+      quickPopupFixture.sessionId = quickPopupFixture.id
+      quickPopupFixture.characterId = params.characterId
+      params.setServerChatId(quickPopupFixture.id)
+      params.setMessages([{ id: "popup-result", isBot: true, message: quickPopupFixture.reply, name: "Assistant", createdAt: 1, sources: [] }])
+    })
     editorLoad.pending = null
     editorLoad.attempted = false
     ensureLocalStorageApi().clear()
@@ -381,6 +427,7 @@ describe("CharactersManager first-use onboarding", () => {
     )
 
     useQueryClientMock.mockReturnValue({
+      getQueryState: vi.fn(),
       invalidateQueries: vi.fn(),
       setQueryData: vi.fn(),
       cancelQueries: vi.fn(async () => undefined)
@@ -397,7 +444,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -662,7 +709,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -758,7 +805,7 @@ describe("CharactersManager first-use onboarding", () => {
     expect(notificationMock.error).not.toHaveBeenCalled()
   })
 
-  it("degrades to an empty list with notification when query and legacy fallbacks both fail", async () => {
+  it("rejects with notification when query and legacy fallbacks both fail", async () => {
     const routeConflictError = Object.assign(
       new Error(
         "Input should be a valid integer, unable to parse string as an integer (path.character_id)"
@@ -776,13 +823,7 @@ describe("CharactersManager first-use onboarding", () => {
     render(<CharactersManager />)
 
     const listQuery = getListCharactersQueryOptions()
-    await expect(listQuery.queryFn()).resolves.toMatchObject({
-      items: [],
-      total: 0,
-      page: 1,
-      page_size: 10,
-      has_more: false
-    })
+    await expect(listQuery.queryFn()).rejects.toThrow("Legacy all-characters listing unavailable")
     expect(notificationMock.error).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Error"
@@ -1016,7 +1057,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1078,7 +1119,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1150,7 +1191,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1199,7 +1240,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1318,7 +1359,7 @@ describe("CharactersManager first-use onboarding", () => {
           }
         })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1394,7 +1435,7 @@ describe("CharactersManager first-use onboarding", () => {
           }
         })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1489,7 +1530,7 @@ describe("CharactersManager first-use onboarding", () => {
           }
         })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1559,7 +1600,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [galleryRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1603,7 +1644,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1682,7 +1723,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1731,7 +1772,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1794,7 +1835,7 @@ describe("CharactersManager first-use onboarding", () => {
           status: "success"
         })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1854,7 +1895,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -1924,7 +1965,7 @@ describe("CharactersManager first-use onboarding", () => {
           status: "success"
         })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2005,7 +2046,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2048,7 +2089,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2133,7 +2174,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2213,7 +2254,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2288,7 +2329,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2380,7 +2421,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2430,7 +2471,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2496,7 +2537,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2612,7 +2653,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2661,7 +2702,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2708,7 +2749,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2793,7 +2834,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2872,7 +2913,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -2952,7 +2993,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3061,7 +3102,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3206,7 +3247,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3337,7 +3378,7 @@ describe("CharactersManager first-use onboarding", () => {
 
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === "selectedModel") {
-        return ["mock-chat-model", vi.fn(), { isLoading: false }]
+        return ["openai:mock-chat-model", vi.fn(), { isLoading: false }]
       }
       return [defaultValue ?? null, vi.fn(), { isLoading: false }]
     })
@@ -3347,9 +3388,9 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: listCharactersData, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({
-          data: [{ model: "mock-chat-model", provider: "openai" }]
+          data: [{ model: "mock-chat-model", provider: "openai", is_configured: true }]
         })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3444,22 +3485,14 @@ describe("CharactersManager first-use onboarding", () => {
     })
     await user.click(chatButton)
 
-    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "char-1",
-        name: "Writer Coach",
-        system_prompt: expect.any(String),
-        greeting: expect.any(String),
-        metadata: { selectionMode: "tracked" }
-      })
-    )
-    expect(storeSetters.setHistory).toHaveBeenCalledWith([])
-    expect(storeSetters.setMessages).toHaveBeenCalledWith([])
-    expect(storeSetters.setServerChatId).toHaveBeenCalledWith(null)
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
+    expect(storeSetters.setHistory).not.toHaveBeenCalled()
+    expect(storeSetters.setMessages).not.toHaveBeenCalled()
+    expect(storeSetters.setServerChatId).not.toHaveBeenCalled()
     expect(navigateMock).toHaveBeenCalledWith(
       "/chat?mode=character&characterId=char-1"
     )
-    expect(focusComposerMock).toHaveBeenCalled()
+    expect(focusComposerMock).not.toHaveBeenCalled()
   }, 30000)
 
   it("submits edit flow through the shared form component", async () => {
@@ -3493,7 +3526,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3580,7 +3613,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3741,7 +3774,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3779,7 +3812,7 @@ describe("CharactersManager first-use onboarding", () => {
 
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === OWNED_DEFAULT_KEY) {
-        return [{ ownerKey: "account-a", selection: null }, setDefaultCharacterMock, { isLoading: false }]
+        return [{ ownerKey: "a".repeat(64), selection: null }, setDefaultCharacterMock, { isLoading: false }]
       }
       return [defaultValue ?? null, vi.fn(), { isLoading: false }]
     })
@@ -3789,7 +3822,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3808,7 +3841,7 @@ describe("CharactersManager first-use onboarding", () => {
 
     await waitFor(() => {
       expect(setDefaultCharacterMock).toHaveBeenCalledWith(
-        { ownerKey: "account-a", localOnly: false, selection: expect.objectContaining({
+        { ownerKey: "a".repeat(64), localOnly: false, selection: expect.objectContaining({
           id: "char-default",
           name: "Default Candidate",
           system_prompt: "Default system prompt",
@@ -3835,7 +3868,7 @@ describe("CharactersManager first-use onboarding", () => {
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === OWNED_DEFAULT_KEY) {
         return [
-          { ownerKey: "account-a", selection: {
+          { ownerKey: "a".repeat(64), selection: {
             id: "char-default-clear",
             name: "Default Clear Candidate",
             system_prompt: "Default system prompt",
@@ -3853,7 +3886,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3871,7 +3904,7 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Clear default" }))
 
     await waitFor(() => {
-      expect(setDefaultCharacterMock).toHaveBeenCalledWith({ ownerKey: "account-a", localOnly: false, selection: null })
+      expect(setDefaultCharacterMock).toHaveBeenCalledWith({ ownerKey: "a".repeat(64), localOnly: false, selection: null })
     })
     expect(tldwClientMock.setDefaultCharacterPreference).toHaveBeenCalledWith(
       null, { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" } }
@@ -3912,7 +3945,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3954,28 +3987,27 @@ describe("CharactersManager first-use onboarding", () => {
       version: 1
     }
 
+    tldwClientMock.getCharacter.mockResolvedValue(characterRecord)
+
+    let currentModel = "openai:mock-chat-model"
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === "selectedModel") {
-        return ["mock-chat-model", vi.fn(), { isLoading: false }]
+        return [currentModel, vi.fn(), { isLoading: false }]
       }
       return [defaultValue ?? null, vi.fn(), { isLoading: false }]
     })
 
-    tldwClientMock.createChat.mockResolvedValueOnce({
-      id: "quick-chat-session-1"
-    })
-    tldwClientMock.completeCharacterChatTurn.mockResolvedValueOnce({
-      assistant_content: "Character quick reply"
-    })
+    quickPopupFixture.id = "quick-chat-session-1"
+    quickPopupFixture.reply = "Character quick reply"
 
     useQueryMock.mockImplementation((opts: any) => {
       const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({
-          data: [{ model: "mock-chat-model", provider: "openai" }]
+          data: [{ model: "mock-chat-model", provider: "openai", is_configured: true }]
         })
       }
       if (key === "getAllModelsForGeneration") {
@@ -3987,7 +4019,9 @@ describe("CharactersManager first-use onboarding", () => {
       return makeUseQueryResult({})
     })
 
-    render(<CharactersManager />)
+    // jsdom does not finish AntD CSS appear animations.
+    const popup = () => <ConfigProvider theme={{ token: { motion: false } }}><CharactersManager /></ConfigProvider>
+    const mounted = render(popup())
 
     await user.click(await screen.findByRole("button", { name: /More actions/i }))
     await user.click(await screen.findByRole("menuitem", { name: "Test in popup" }))
@@ -3995,26 +4029,59 @@ describe("CharactersManager first-use onboarding", () => {
     const input = await screen.findByPlaceholderText(
       "Ask this character a quick question..."
     )
+    const dialog = input.closest<HTMLElement>('[role="dialog"]')
+    expect(dialog).not.toBeNull()
+    const popupQueries = within(dialog!)
 
+    expect(popupQueries.getByRole("combobox", { name: /modelLabel|^Model$/ })).toBeInTheDocument()
     await user.type(input, "How do you help?")
-    await user.click(screen.getByRole("button", { name: "Send" }))
+    await user.click(popupQueries.getByRole("button", { name: "Send" }))
 
-    await waitFor(() => {
-      expect(tldwClientMock.createChat).toHaveBeenCalledWith(
-        expect.objectContaining({
-          character_id: 101
-        })
-      )
-      expect(tldwClientMock.completeCharacterChatTurn).toHaveBeenCalledWith(
-        "quick-chat-session-1",
-        expect.objectContaining({
-          model: "mock-chat-model",
-          append_user_message: "How do you help?"
-        })
-      )
-    })
+    await waitFor(() => expect(quickPopupFixture.send).toHaveBeenCalledWith(expect.objectContaining({
+      characterId: 101, model: "openai:mock-chat-model", message: "How do you help?", toolChoice: "none",
+      privateDraft: expect.objectContaining({ handle: expect.objectContaining({ address: expect.objectContaining({ kind: "fresh" }) }) })
+    })))
+    expect(tldwClientMock.completeCharacterChatTurn).not.toHaveBeenCalled()
     expect(navigateMock).not.toHaveBeenCalled()
-    expect(await screen.findByText("Character quick reply")).toBeInTheDocument()
+    expect(await popupQueries.findByText("Character quick reply")).toBeInTheDocument()
+    expect(popupQueries.queryByRole("combobox", { name: /modelLabel|^Model$/ })).toBeNull()
+    await waitFor(() => expect(popupQueries.getByText("This chat uses its saved model and provider. Review its settings in full chat.")).toBeVisible())
+    currentModel = "openai:another-default"
+    mounted.rerender(popup())
+    expect(popupQueries.queryByRole("combobox", { name: /modelLabel|^Model$/ })).toBeNull()
+    await user.click(popupQueries.getByRole("button", { name: "Close" }))
+    await waitFor(() => expect(dialog).not.toBeInTheDocument())
+    await user.click(await screen.findByRole("button", { name: /More actions/i }))
+    await user.click(await screen.findByRole("menuitem", { name: "Test in popup" }))
+    const reopenedInput = await screen.findByPlaceholderText("Ask this character a quick question...")
+    const reopened = reopenedInput.closest<HTMLElement>('[role="dialog"]')
+    expect(reopened).not.toBeNull()
+    expect(await within(reopened!).findByRole("combobox", { name: /modelLabel|^Model$/ })).toBeInTheDocument()
+  }, 30000)
+
+  it("keeps the popup draft and does not send when private retention fails", async () => {
+    const user = userEvent.setup()
+    const characterRecord = { id: "101", name: "Retention Character", version: 1 }
+    tldwClientMock.getCharacter.mockResolvedValue(characterRecord)
+    quickPopupFixture.retain.mockResolvedValue(false)
+    useStorageMock.mockImplementation((key: unknown, initial: unknown) => [
+      resolveStorageKey(key) === "selectedModel" ? "openai:mock-chat-model" : initial ?? null,
+      vi.fn(), { isLoading: false }
+    ])
+    useQueryMock.mockImplementation((opts: any) => makeUseQueryResult({ data:
+      opts.queryKey[0] === "tldw:listCharacters" ? [characterRecord] :
+      opts.queryKey[0] === "playground:chatModels" ? [{ model: "mock-chat-model", provider: "openai", is_configured: true }] : []
+    }))
+    render(<CharactersManager />)
+    await user.click(await screen.findByRole("button", { name: /More actions/i }))
+    await user.click(await screen.findByRole("menuitem", { name: "Test in popup" }))
+    const input = await screen.findByPlaceholderText("Ask this character a quick question...")
+    await user.type(input, "Keep this exact draft")
+    await user.click(screen.getByRole("button", { name: "Send" }))
+    await waitFor(() => expect(quickPopupFixture.retain).toHaveBeenCalled())
+    expect(quickPopupFixture.send).not.toHaveBeenCalled()
+    expect(input).toHaveValue("Keep this exact draft")
+    expect(navigateMock).not.toHaveBeenCalled()
   }, 30000)
 
   it("shows an in-context blocker when quick chat has no chat model", async () => {
@@ -4028,6 +4095,8 @@ describe("CharactersManager first-use onboarding", () => {
       version: 1
     }
 
+    tldwClientMock.getCharacter.mockResolvedValue(characterRecord)
+
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === "selectedModel") {
         return [null, vi.fn(), { isLoading: false }]
@@ -4040,7 +4109,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4070,7 +4139,7 @@ describe("CharactersManager first-use onboarding", () => {
     expectDesignSystemAlertForText(
       "Choose a chat model before chatting as No Model Character"
     )
-    expect(screen.getByRole("link", { name: "Open model settings" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Open model settings/ })).toHaveAttribute(
       "href",
       "/settings/model"
     )
@@ -4102,7 +4171,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4120,12 +4189,7 @@ describe("CharactersManager first-use onboarding", () => {
       await screen.findByRole("button", { name: "Chat as Intent Character" })
     )
 
-    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "intent-no-model",
-        name: "Intent Character"
-      })
-    )
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
     expect(
       await screen.findByText(
         "Choose a chat model before chatting as Intent Character"
@@ -4157,7 +4221,7 @@ describe("CharactersManager first-use onboarding", () => {
         )
       ).not.toBeInTheDocument()
     })
-    expect(setSelectedCharacterMock).toHaveBeenLastCalledWith(null)
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
   }, 30000)
 
   it("does not treat the first catalog model as an implicit row chat selection", async () => {
@@ -4183,7 +4247,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({
           data: [{ model: "implicit-catalog-model", provider: "openai" }]
         })
@@ -4203,12 +4267,7 @@ describe("CharactersManager first-use onboarding", () => {
       await screen.findByRole("button", { name: "Chat as Implicit Catalog Character" })
     )
 
-    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "intent-implicit-catalog-model",
-        name: "Implicit Catalog Character"
-      })
-    )
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
     expect(
       await screen.findByText(
         "Choose a chat model before chatting as Implicit Catalog Character"
@@ -4241,7 +4300,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({
           data: undefined,
           status: "pending",
@@ -4264,12 +4323,7 @@ describe("CharactersManager first-use onboarding", () => {
       await screen.findByRole("button", { name: "Chat as Stale Model Character" })
     )
 
-    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "intent-stale-model",
-        name: "Stale Model Character"
-      })
-    )
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
     expect(
       await screen.findByText(
         "Configure a chat model before chatting as Stale Model Character"
@@ -4298,9 +4352,11 @@ describe("CharactersManager first-use onboarding", () => {
       version: 1
     }
 
+    tldwClientMock.getCharacter.mockResolvedValue(characterRecord)
+
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === "selectedModel") {
-        return ["mock-chat-model", vi.fn(), { isLoading: false }]
+        return ["openai:mock-chat-model", vi.fn(), { isLoading: false }]
       }
       return [defaultValue ?? null, vi.fn(), { isLoading: false }]
     })
@@ -4312,9 +4368,9 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({
-          data: [{ model: "mock-chat-model", provider: "openai" }]
+          data: [{ model: "mock-chat-model", provider: "openai", is_configured: true }]
         })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4377,7 +4433,7 @@ describe("CharactersManager first-use onboarding", () => {
           ]
         })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4440,7 +4496,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:characterPreviewWorldBooks") {
         return makeUseQueryResult({ data: [] })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4485,7 +4541,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:characterPreviewWorldBooks") {
         return makeUseQueryResult({ data: [] })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4527,7 +4583,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:characterPreviewWorldBooks") {
         return makeUseQueryResult({ data: [], isFetching: true })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4561,28 +4617,27 @@ describe("CharactersManager first-use onboarding", () => {
       version: 1
     }
 
+    tldwClientMock.getCharacter.mockResolvedValue(characterRecord)
+
     useStorageMock.mockImplementation((key: unknown, defaultValue: unknown) => {
       if (resolveStorageKey(key) === "selectedModel") {
-        return ["mock-chat-model", vi.fn(), { isLoading: false }]
+        return ["openai:mock-chat-model", vi.fn(), { isLoading: false }]
       }
       return [defaultValue ?? null, vi.fn(), { isLoading: false }]
     })
 
-    tldwClientMock.createChat.mockResolvedValueOnce({
-      id: "quick-chat-session-promote"
-    })
-    tldwClientMock.completeCharacterChatTurn.mockResolvedValueOnce({
-      assistant_content: "Promotion reply"
-    })
+    quickPopupFixture.id = "quick-chat-session-promote"
+    quickPopupFixture.reply = "Promotion reply"
+    tldwClientMock.getChat.mockResolvedValueOnce({ id: "quick-chat-session-promote", character_id: 303 })
 
     useQueryMock.mockImplementation((opts: any) => {
       const key = Array.isArray(opts?.queryKey) ? opts.queryKey[0] : undefined
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({
-          data: [{ model: "mock-chat-model", provider: "openai" }]
+          data: [{ model: "mock-chat-model", provider: "openai", is_configured: true }]
         })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4608,26 +4663,37 @@ describe("CharactersManager first-use onboarding", () => {
     await screen.findByText("Promotion reply")
     expect(navigateMock).not.toHaveBeenCalled()
 
-    await user.click(screen.getByRole("button", { name: "Open full chat" }))
+    await user.click(screen.getByRole("button", { name: "Continue in full chat" }))
 
-    await waitFor(() => {
-      expect(navigateMock).toHaveBeenCalledWith(
-        "/chat?mode=character&characterId=303"
-      )
-    })
-    expect(setSelectedCharacterMock).toHaveBeenCalled()
-    expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        name: "Promote Quick Chat Character",
-        alternate_greetings: expect.any(Array),
-        extensions: expect.anything()
-      })
-    )
-    expect(storeSetters.setServerChatCharacterId).toHaveBeenCalledWith("303")
-    expect(storeSetters.setServerChatAssistantKind).toHaveBeenCalledWith("character")
-    expect(storeSetters.setServerChatAssistantId).toHaveBeenCalledWith("303")
-    expect(storeSetters.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith("/chat?chatId=quick-chat-session-promote&client_session_id=popup-ui-fixture"))
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
+    expect(storeSetters.setServerChatCharacterId).not.toHaveBeenCalled()
+    expect(tldwClientMock.completeCharacterChatTurn).not.toHaveBeenCalled()
     expect(tldwClientMock.deleteChat).not.toHaveBeenCalled()
+  }, 30000)
+
+  it("passes ready row Chat as route intent without clearing the source", async () => {
+    const user = userEvent.setup()
+    const record = { id: "ready-card", name: "Ready Card", version: 1 }
+    useStorageMock.mockImplementation((key: unknown, fallback: unknown) => [
+      resolveStorageKey(key) === "selectedModel" ? "openai:gpt-4.1" : fallback,
+      vi.fn(), { isLoading: false }
+    ])
+    useQueryMock.mockImplementation((opts: { queryKey?: readonly unknown[] }) => {
+      const key = opts?.queryKey?.[0]
+      if (key === "tldw:listCharacters") return makeUseQueryResult({ data: [record] })
+      if (key === "playground:chatModels") return makeUseQueryResult({ data: [{ model: "gpt-4.1", provider: "openai", is_configured: true }] })
+      return makeUseQueryResult({ data: [] })
+    })
+    render(<CharactersManager />)
+    await user.click(await screen.findByRole("button", { name: "Chat as Ready Card" }))
+    expect(navigateMock).toHaveBeenCalledWith("/chat?mode=character&characterId=ready-card")
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
+    for (const action of [storeSetters.setHistory, storeSetters.setMessages, storeSetters.setHistoryId, storeSetters.setServerChatId]) {
+      expect(action).not.toHaveBeenCalled()
+    }
+    expect(focusComposerMock).not.toHaveBeenCalled()
+    expect(tldwClientMock.createChat).not.toHaveBeenCalled()
   }, 30000)
 
   it("opens chat in a new tab from row actions without replacing current-tab navigation", async () => {
@@ -4645,7 +4711,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4667,12 +4733,7 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Chat in new tab" }))
 
     await waitFor(() => {
-      expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: "char-new-tab",
-          name: "New Tab Character"
-        })
-      )
+      expect(setSelectedCharacterMock).not.toHaveBeenCalled()
       expect(openSpy).toHaveBeenCalledWith(
         expect.stringContaining("/chat?mode=character&characterId=char-new-tab"),
         "_blank",
@@ -4699,7 +4760,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4721,12 +4782,7 @@ describe("CharactersManager first-use onboarding", () => {
     await user.click(await screen.findByRole("menuitem", { name: "Chat in new tab" }))
 
     await waitFor(() => {
-      expect(setSelectedCharacterMock).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: "char-new-tab-gallery",
-          name: "Gallery New Tab Character"
-        })
-      )
+      expect(setSelectedCharacterMock).not.toHaveBeenCalled()
       expect(openSpy).toHaveBeenCalledWith(
         expect.stringContaining(
           "/chat?mode=character&characterId=char-new-tab-gallery"
@@ -4755,7 +4811,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4781,6 +4837,11 @@ describe("CharactersManager first-use onboarding", () => {
         })
       )
     })
+
+    expect(setSelectedCharacterMock).not.toHaveBeenCalled()
+    expect(navigateMock).not.toHaveBeenCalled()
+    expect(storeSetters.setHistory).not.toHaveBeenCalled()
+    expect(storeSetters.setServerChatId).not.toHaveBeenCalled()
 
     openSpy.mockRestore()
   }, 30000)
@@ -4885,7 +4946,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: records, status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -4954,7 +5015,7 @@ describe("CharactersManager first-use onboarding", () => {
     const okButton = await screen.findByRole("button", { name: /ok/i })
     expect(okButton).toBeEnabled()
     expect(screen.queryByRole("button", { name: "Confirm import" })).not.toBeInTheDocument()
-  })
+  }, 30000)
 
   it("creates a persona from a character and opens Persona Garden on the new profile", async () => {
     const user = userEvent.setup()
@@ -4972,7 +5033,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -5046,7 +5107,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {
@@ -5127,7 +5188,7 @@ describe("CharactersManager first-use onboarding", () => {
       if (key === "tldw:listCharacters") {
         return makeUseQueryResult({ data: [characterRecord], status: "success" })
       }
-      if (key === "getModelsForFieldGeneration") {
+      if (key === "playground:chatModels") {
         return makeUseQueryResult({ data: [] })
       }
       if (key === "getAllModelsForGeneration") {

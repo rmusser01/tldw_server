@@ -1,14 +1,46 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
+
+type ModeTranslator = (key: string, defaultValue: string) => string
+
+/** History eligibility is a mode, never a receipt for the latest write. */
+export const getPersistenceModeLabel = (
+  t: ModeTranslator,
+  temporaryChat: boolean
+) =>
+  temporaryChat
+    ? t(
+        "playground:composer.persistence.temporaryModeHelp",
+        "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device."
+      )
+    : t(
+        "playground:composer.persistence.historyModeHelp",
+        "New messages can be stored in chat history."
+      )
+
+export const getPersistenceModePillLabel = (
+  t: ModeTranslator,
+  temporaryChat: boolean
+) =>
+  temporaryChat
+    ? t("playground:composer.persistence.temporaryModeTitle", "Temporary")
+    : t("playground:composer.persistence.historyModeTitle", "History on")
+
+/** Keep the history toggle's semantic subject stable and include visible state. */
+export const getPersistenceModeControlLabel = (
+  t: ModeTranslator,
+  temporaryChat: boolean
+) =>
+  `${t("playground:composer.persistence.historyControl", "Chat history")}: ${getPersistenceModePillLabel(t, temporaryChat)}`
+
 import { useServerChatSaveStatus } from "@/hooks/chat/useServerChatSaveStatus"
 import {
-  getChatPersistenceCopy,
   resolveChatPersistenceKind
 } from "@/utils/chat-persistence-status"
 
 export type UsePersistenceModeParams = {
   temporaryChat: boolean
-  serverChatId: string | null
+  serverChatId?: string | null
 }
 
 /**
@@ -19,22 +51,18 @@ export type UsePersistenceModeParams = {
  */
 export function usePersistenceMode({
   temporaryChat,
-  serverChatId
+  serverChatId = null
 }: UsePersistenceModeParams) {
   const { t } = useTranslation(["playground", "common"])
+  const persistenceModeLabel = getPersistenceModeLabel(t, temporaryChat)
+  const persistencePillLabel = getPersistenceModePillLabel(t, temporaryChat)
+  const persistenceControlLabel = getPersistenceModeControlLabel(
+    t,
+    temporaryChat
+  )
+
   const serverSaveStatus = useServerChatSaveStatus(serverChatId)
-
-  const persistenceKind = resolveChatPersistenceKind({
-    temporaryChat,
-    serverChatId,
-    serverSaveStatus
-  })
-
-  const { pill: persistencePillLabel, description: persistenceModeLabel } =
-    React.useMemo(
-      () => getChatPersistenceCopy(t, persistenceKind),
-      [persistenceKind, t]
-    )
+  const persistenceKind = resolveChatPersistenceKind({ temporaryChat, serverChatId, serverSaveStatus })
 
   const persistenceTooltip = React.useMemo(
     () => (
@@ -58,8 +86,7 @@ export function usePersistenceMode({
       // ignore DOM errors and fall through to hash navigation
     }
     try {
-      const base =
-        window.location.href.replace(/#.*$/, "") || "/options.html"
+      const base = window.location.href.replace(/#.*$/, "") || "/options.html"
       const target = `${base}#/settings/tldw`
       window.location.href = target
     } catch {
@@ -71,6 +98,7 @@ export function usePersistenceMode({
     persistenceKind,
     persistenceModeLabel,
     persistencePillLabel,
+    persistenceControlLabel,
     persistenceTooltip,
     focusConnectionCard
   }

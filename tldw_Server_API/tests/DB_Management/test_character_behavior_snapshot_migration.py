@@ -1357,6 +1357,12 @@ class _PostgresStoreBackend:
                 [{"conversation_id": message["conversation_id"]}] if message else [],
                 rowcount=1 if message else 0,
             )
+        if normalized == "update messages set version = version + 1 where id = %s":
+            message = self.messages.get(str(values[0]))
+            if message is None:
+                return self._result()
+            message["version"] += 1
+            return self._result(rowcount=1)
         if normalized.startswith("update messages set"):
             message_id = str(values[-2])
             message = self.messages[message_id]
@@ -1755,6 +1761,8 @@ def test_postgres_rag_merge_locks_before_read_and_preserves_interleaved_pin() ->
         )
 
     backend.metadata_lock_interleave = _commit_concurrent_pin
+    before_message_version = backend.messages[message_id]["version"]
+    before_history_version = backend.history_version
     start_index = len(backend.executed)
 
     assert store.set_message_rag_context(
@@ -1781,7 +1789,8 @@ def test_postgres_rag_merge_locks_before_read_and_preserves_interleaved_pin() ->
         if statement.startswith("insert into message_metadata") and index > lock_index
     )
     assert lock_index < write_index
-
+    assert backend.messages[message_id]["version"] == before_message_version + 1
+    assert backend.history_version == before_history_version + 1
 
 @pytest.mark.parametrize("caller_owned", [False, True])
 @pytest.mark.parametrize(
