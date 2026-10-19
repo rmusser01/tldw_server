@@ -12,6 +12,7 @@ import json
 import pytest
 
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+from tldw_Server_API.app.api.v1.schemas import chat_validators
 from tldw_Server_API.app.core.Chat import chat_service
 from tldw_Server_API.app.core.Chat.prompt_cost_envelope import estimate_segment_tokens
 from tldw_Server_API.app.core.LLM_Calls import usage_accounting
@@ -49,6 +50,40 @@ def test_the_estimate_rounds_up():
 @pytest.mark.unit
 def test_an_empty_request_still_costs_one_token():
     assert chat_service.estimate_tokens_from_json("") == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "text",
+    [
+        "data:image," + "x" * 4000,
+        "data:image/png," + "x" * 4000,
+        "data:image/svg+xml," + "%3Csvg%3E" * 450,
+        "data:image/png;base64," + "word\xa0" * 800,
+        "data:image/png;base64," + "word-" * 800,
+    ],
+    ids=["no-media-type", "no-base64-marker", "url-encoded-svg", "nbsp-joined-words", "hyphen-joined-words"],
+)
+def test_data_image_text_without_a_real_image_is_counted(text):
+    # AC4 decision (TASK-13843): only a real base64 image payload is left out of an estimate.
+    body = json.dumps({"messages": [{"role": "user", "content": text}]})
+    assert chat_service.estimate_tokens_from_json(body) >= 4000 // 4
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("line_break", ["\n", "\r\n"], ids=["lf", "crlf"])
+def test_a_wrapped_base64_image_is_still_left_out(line_break):
+    wrapped = "data:image/png;base64," + ("A" * 76 + line_break) * 50
+    body = json.dumps({"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": wrapped}}]}]})
+    assert chat_service.estimate_tokens_from_json(body) < 100
+
+
+@pytest.mark.unit
+def test_the_size_check_counts_data_image_text_without_a_real_image(monkeypatch):
+    monkeypatch.setattr(chat_validators, "MAX_REQUEST_SIZE", 1000)
+    body = json.dumps({"messages": [{"role": "user", "content": "data:image," + "x" * 2000}]})
+    with pytest.raises(ValueError, match="Request too large"):
+        chat_validators.validate_request_size(body)
 
 
 @pytest.mark.unit

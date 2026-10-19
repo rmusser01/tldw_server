@@ -9,6 +9,7 @@ Since TASK-13843 the chat path has one redactor (prompt_cost_envelope._sanitize_
 and one estimate (estimate_segment_tokens) behind every prompt-size estimate.
 """
 
+import json
 import time
 
 import pytest
@@ -22,7 +23,13 @@ _CRAFTED = '"url":"data:image' * 30_000
 # Two shapes: the "url" one engages the endpoint's old "url"-anchored pattern; the quote-free one
 # is a user's text inside one JSON string (its quotes are escaped), so a pattern that stops at a
 # quote but drops the 128-character bound is still caught.
-_CRAFTED_SHAPES = pytest.mark.parametrize("body", [_CRAFTED, "data:image" * 51_000], ids=["url-key", "quote-free"])
+# The third is the worst case for the base64-header pattern: every "data:image/" makes the
+# bounded header scan 128 characters and back off looking for ";base64,".
+_CRAFTED_SHAPES = pytest.mark.parametrize(
+    "body",
+    [_CRAFTED, "data:image" * 51_000, "data:image/" * 46_000],
+    ids=["url-key", "quote-free", "slash"],
+)
 
 
 def _assert_fast(fn, body: str) -> None:
@@ -30,6 +37,15 @@ def _assert_fast(fn, body: str) -> None:
     fn(body)
     elapsed = time.perf_counter() - started
     assert elapsed < 2.0, f"redaction took {elapsed:.1f}s on {len(body)} chars"
+
+
+def _best_time(fn, arg) -> float:
+    times = []
+    for _ in range(3):
+        started = time.perf_counter()
+        fn(arg)
+        times.append(time.perf_counter() - started)
+    return min(times)
 
 
 @pytest.mark.unit
@@ -81,5 +97,21 @@ def test_request_size_validator_redacts_an_uppercase_data_uri(monkeypatch):
 @pytest.mark.unit
 def test_media_type_over_128_chars_is_counted_not_redacted():
     # The bound that keeps redaction linear: such a URI is left whole, so it is over-counted.
-    body = "data:image/" + "x" * 200 + ",payload"
+    body = "data:image/" + "x" * 200 + ";base64,AAAA"
     assert prompt_cost_envelope._sanitize_data_uris(body) == body
+
+
+@pytest.mark.unit
+def test_image_bulk_redacts_within_four_times_the_json_dumps_time():
+    # Ten 4 MB base64 images, about 42 MB of request JSON: the usual large body, which every
+    # estimate site redacts on the event loop. Timing json.dumps of the same request in the same
+    # run keeps the bound independent of machine load. Measured ratios: dev's pattern 2.0-2.5x,
+    # a non-possessive base64 payload alternation 14-44x, the possessive one 0.3-0.6x.
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64," + "A" * (4 * 1024 * 1024)}}
+    request = {"messages": [{"role": "user", "content": [image] * 10}]}
+    body = json.dumps(request)
+
+    build = _best_time(json.dumps, request)
+    redact = _best_time(chat_service.estimate_tokens_from_json, body)
+
+    assert redact <= 4 * build, f"redaction took {redact:.3f}s, json.dumps {build:.3f}s"

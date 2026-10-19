@@ -202,11 +202,15 @@ MAX_BASE64_STRING_LENGTH = int(MAX_BASE64_BYTES * 4 / 3) + 100
 # Regex pattern for data URI validation
 DATA_URI_PATTERN = re.compile(r'^data:([^;]+);base64,(.+)$')
 
-# Finds data:image payloads in free text (a request body, a prompt) for redaction; group 1 is
-# the "data:image/...," prefix to keep. The media-type part is bounded: an unbounded ``[^,]*``
-# rescans to the end of the text for every ``data:image`` with no comma after it, which is
-# quadratic on crafted input.
-DATA_URI_REDACT_RE = re.compile(r'(data:image[^,"\s]{0,128},)[^"\s]+', re.IGNORECASE)
+# Finds base64 image payloads in free text (a request body, a prompt) for redaction; group 1 is
+# the "data:image/...;base64," prefix to keep. Only a real base64 image is redacted: the header
+# names an image type and base64, and the payload is the base64 alphabet (JSON-escaped line
+# breaks allowed, for wrapped base64). Any other text after "data:image" is counted, because a
+# provider bills it as text (TASK-13843). The header is bounded: an unbounded ``[^,]*`` rescans
+# to the end of the text for every ``data:image`` with no comma after it, which is quadratic on
+# crafted input. The payload run is possessive (``++``): it never gives characters back, so
+# image bulk is scanned at about one character per step.
+DATA_URI_REDACT_RE = re.compile(r'((?i:data:image/[^,"\s]{0,128};base64,))(?:[A-Za-z0-9+/=]++|\\[rn])+')
 
 #######################################################################################################################
 #
