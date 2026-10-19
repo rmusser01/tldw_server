@@ -98,7 +98,9 @@ Integration rebase: PR #3256 was rebased onto dev `e1f7770953a78224e43f92976e526
 
 A subsequent integration rebase onto dev `7c94a2efb1edc938070abcaa868d59e319a95112` also retains every measured source hash and all PR patches. Upstream changes sandbox WebSocket teardown and adds a test-quality CI gate; neither changes the measured workflow path. A CI-only chat test fix scopes synthetic exception state to the endpoint instead of Python’s shared `sys` module. No benchmark runtime change or additional performance claim is introduced.
 
-Latest integration base: dev `29fda0d860c7a0d76dd3d9ea0561a32ac8e48148`. Independent review confirms all nine PR patches and the four measured source hashes remain unchanged. Upstream provider/tool usage, Claims, admin, watchlist and TTS changes do not execute in this lifespan-disabled workflow workload. The measurements remain historical evidence for the unchanged path; they are not a new timing run on this integration base.
+Prior integration base: dev `29fda0d860c7a0d76dd3d9ea0561a32ac8e48148`. Independent review confirms all nine PR patches and the four measured source hashes remain unchanged. Upstream provider/tool usage, Claims, admin, watchlist and TTS changes do not execute in this lifespan-disabled workflow workload. The measurements remain historical evidence for the unchanged path; they are not a new timing run on this integration base.
+
+Latest integration base: dev `b5b572c01dd6dfea231b0928d6c9d20f64b181dc`. All ten PR patches and four measured source hashes remain unchanged. Independent review confirms upstream resource-governance middleware bypasses WebSockets; audio/media concurrency leases, audio workers and frontend transport are outside this workload. The database parity addition is documentation only. Historical timings remain evidence for the unchanged measured path, without a new timing run or a capacity claim on this integration base.
 
 ## Limits and rollback
 
