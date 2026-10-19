@@ -118,6 +118,7 @@ Notes
 - When `RG_POLICY_STORE=db` is active, the loader merges the file’s `route_map` into the snapshot containing DB policies. File `route_map` takes precedence on conflicts.
 - IMPORTANT: When `RG_POLICY_STORE=db` is active, YAML `policies:` are not used at runtime. Every `policy_id` referenced by `route_map` must exist in the DB store (`rg_policies`) or ingress enforcement will fail closed for that route (because missing request limits default to deny).
 - Durable daily caps can be specified with `daily_cap` under any category and are enforced via `ResourceDailyLedger` (e.g., `tokens.daily_cap`, `workflows_runs.daily_cap`).
+- A `streams`/`jobs` reservation can carry its own limit: `RGRequest(categories={"jobs": {"units": 1, "max_concurrent": 2, "ttl_sec": 120}})`. That limit and TTL replace the policy's `max_concurrent`/`ttl_sec` for the request, and only the caller's own bucket is charged (never `global`). Per-user concurrency quotas use this (`core/Usage/concurrency_quota.py`, ADR-076).
 - Proxy/IP scoping (opt-in env):
   - `RG_TRUSTED_PROXIES`: comma-separated reverse-proxy hosts/CIDRs.
   - `RG_CLIENT_IP_HEADER`: header to use only with a valid physical peer in that list (for example, `X-Forwarded-For`). Leave either unset to use the physical peer.
