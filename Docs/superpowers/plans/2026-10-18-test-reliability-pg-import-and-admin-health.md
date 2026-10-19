@@ -4,6 +4,12 @@
 
 Independent review and dry run (2026-10-18): 1 Blocker, 2 Important, 9 Minor; all folded in.
 
+**As executed (this note overrides the text below where they differ):**
+- The sibling admin test's first-batch guard is 1.5 s, not the 1.0 s the plan keeps (Review M2). With the 0.5 s budget a 0.6 s event-loop stall failed the 1.0 s guard while the batch was still bounded; 1.5 s passes it and still catches an unbounded batch (5 s). See TASK-13842.
+- The branch is `fix/test-reliability-pg-import-and-admin-health`, not `fix/test-reliability-13841-13842`.
+- The follow-up is TASK-13861, not TASK-13859 (PR #3271 took 13859 first).
+- The ADR-004 Change-summary waiver is claimed in the PR body (owner's "Yes, it covers them all", 2026-10-18), not "not covered" as the last section says.
+
 **Goal:** Make `test_another_owner_reusing_ids_never_touches_the_first_owners_chat[postgres]` pass by removing the connection leak that causes its `PoolTimeout`, and by ending the test's own open transaction before teardown closes the pool (Review B1). Make the flaky Postgres image test and the two admin health-timeout tests deterministic without weakening what they check.
 
 **Architecture:** All three causes are in the tests, not in product code, and each fix changes one test file:
