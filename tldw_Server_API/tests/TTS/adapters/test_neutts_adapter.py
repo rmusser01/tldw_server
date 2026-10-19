@@ -391,6 +391,38 @@ class _ThreadRecordingEngine(_FakeNeuTTSEngineStreaming):
             yield np.zeros(480, dtype=np.float32)
 
 
+class _LoadThreadRecordingEngine(_FakeNeuTTSEngine):
+    """Records the thread its model load runs on (TASK-13857)."""
+
+    load_threads: list[int] = []
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.load_threads.append(threading.get_ident())
+
+
+@pytest.mark.asyncio
+async def test_neutts_imports_and_loads_its_model_off_the_event_loop(monkeypatch):
+    """The vendor import and model load take seconds; on the loop they stall every request and job lease."""
+    _install_fake_engine(_LoadThreadRecordingEngine)
+    _LoadThreadRecordingEngine.load_threads = []
+    import_threads: list[int] = []
+    real_import = builtins.__import__
+
+    def recording_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "tldw_Server_API.app.core.TTS.vendors.neuttsair.neutts":
+            import_threads.append(threading.get_ident())
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", recording_import)
+    adapter = NeuTTSAdapter(config={})
+
+    assert await adapter.initialize()
+    loop_thread = threading.get_ident()
+    assert import_threads and loop_thread not in import_threads
+    assert _LoadThreadRecordingEngine.load_threads and loop_thread not in _LoadThreadRecordingEngine.load_threads
+
+
 @pytest.mark.asyncio
 async def test_neutts_runs_engine_calls_off_the_event_loop(monkeypatch):
     """In-process long-form jobs share the server's loop; a blocking engine call would freeze it."""
