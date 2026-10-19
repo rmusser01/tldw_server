@@ -1478,14 +1478,6 @@ async def websocket_transcribe(
             emit_stt_session_start_total(provider=stt_metrics_provider)
             stt_session_started = True
 
-        ok_stream, msg_stream = await _can_start_stream(user_id_for_usage)
-        if not ok_stream:
-            if _outer_stream:
-                await _outer_stream.send_json({"type": "error", "message": msg_stream})
-            await websocket.close()
-            return
-        acquired_stream = True
-
         query_params = getattr(websocket, "query_params", {}) or {}
         persistence_enabled = _coerce_bool(
             query_params.get("persist_transcript", query_params.get("persist")),
@@ -1790,6 +1782,14 @@ async def websocket_transcribe(
             except EXPECTED_REDIS_EXC as _hb_e:
                 logger.debug(f"Heartbeat failed for user_id={user_id_for_usage}: {_hb_e}")
 
+        # Take the stream slot only here: the finally below is what gives it back (TASK-13435).
+        ok_stream, msg_stream = await _can_start_stream(user_id_for_usage)
+        if not ok_stream:
+            if _outer_stream:
+                await _outer_stream.send_json({"type": "error", "message": msg_stream})
+            await websocket.close()
+            return
+        acquired_stream = True
         try:
             await handle_unified_websocket(
                 policy_websocket,
@@ -4532,8 +4532,9 @@ async def streaming_limits(
             - used_today_minutes (float): Minutes already used today (0.0 if unavailable).
             - remaining_minutes (float|None): Minutes remaining today (0.0 if none left, `None` when there is no daily limit).
             - used_month_minutes / remaining_month_minutes (float|None): Monthly usage and remainder (`None` remainder when no monthly limit).
-            - active_streams (None): Per-user stream concurrency is not tracked.
-            - _can_start_stream (bool): Always True; stream concurrency is not limited per user.
+            - active_streams (None): The count of the user's open streams is not reported.
+            - _can_start_stream (bool): Always True. It is not a live check: open streams are not
+              counted, so a stream over `limits.audio_concurrent_streams` is refused when it starts.
     """
     # Correlate logs with request_id if available
     rid = ensure_request_id(request) if request is not None else None
@@ -4594,7 +4595,7 @@ async def streaming_limits(
             "Failed to get tier for user %s, falling back to 'free': %s", current_user.id, e
         )
         tier = "free"
-    # Stream concurrency isn't limited per user.
+    # Not a live check: open streams aren't counted; a stream over the limit is refused when it starts.
     can_start = True
     return {
         "user_id": current_user.id,

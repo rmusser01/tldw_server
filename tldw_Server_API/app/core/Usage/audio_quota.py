@@ -19,6 +19,7 @@ import contextlib
 import os
 import uuid
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from functools import lru_cache
 from typing import Any
@@ -28,6 +29,7 @@ from loguru import logger
 from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.config import usage_quotas_enabled
 from tldw_Server_API.app.core.exceptions import AudioQuotaStoreUnavailable
+from tldw_Server_API.app.core.Usage import concurrency_quota
 from tldw_Server_API.app.core.Usage.quota_checks import ledger_used_this_month, ledger_used_today
 from tldw_Server_API.app.core.Usage.quota_resolver import user_quota
 
@@ -311,6 +313,12 @@ async def set_user_tier(user_id: int, tier: str) -> None:
         raise
 
 
+STREAMS_KEY = "limits.audio_concurrent_streams"
+# The stream slot the current request task holds. can_start_stream and finish_stream
+# always run in the same handler task, so a task-local binds each release to its own slot.
+_stream_slot: ContextVar[concurrency_quota.ConcurrencySlot | None] = ContextVar("audio_stream_slot", default=None)
+
+
 # Every audio limit when usage quotas are off: no tier applies (spec 2).
 _UNLIMITED_AUDIO_LIMITS: dict[str, float | None] = {
     "daily_minutes": None,
@@ -330,6 +338,7 @@ async def get_limits_for_user(user_id: int) -> dict[str, float | None]:
     limits["daily_minutes"] = await user_quota(uid, "limits.audio_daily_minutes")
     limits["monthly_minutes"] = await user_quota(uid, "limits.transcription_minutes_per_month")
     limits["concurrent_jobs"] = await user_quota(uid, "limits.audio_concurrent_jobs")
+    limits["concurrent_streams"] = await user_quota(uid, STREAMS_KEY)
     return limits
 
 
@@ -760,23 +769,32 @@ async def increment_jobs_started(user_id: int) -> None:
 
 
 async def can_start_job(user_id: int) -> tuple[bool, str]:
-    """Per-user synchronous concurrency is deferred (spec 2 Non-goals); always admits."""
+    """Always admits: queued audio jobs are limited by ``limits.audio_concurrent_jobs`` in the workers."""
     return True, "OK"
 
 
 async def finish_job(user_id: int) -> None:
-    """No-op hook: per-user job concurrency isn't tracked (see TASK-13435)."""
+    """No-op hook: queued audio jobs are counted by the workers, not here."""
     return None
 
 
 async def can_start_stream(user_id: int) -> tuple[bool, str]:
-    """Per-user synchronous concurrency is deferred (spec 2 Non-goals); always admits."""
+    """Hold one of the user's audio stream slots (``limits.audio_concurrent_streams``) for this task."""
+    try:
+        slot = await concurrency_quota.acquire_slot(user_id, STREAMS_KEY, "streams")
+    except concurrency_quota.ConcurrencyQuotaExceeded as exc:
+        _metrics_increment("audio_quota_violations_total", {"type": "concurrent_streams"})
+        return False, f"Concurrent streams limit reached ({exc.limit})"
+    _stream_slot.set(slot)
     return True, "OK"
 
 
 async def finish_stream(user_id: int) -> None:
-    """No-op hook: per-user stream concurrency isn't tracked (see TASK-13435)."""
-    return None
+    """Give back the stream slot this task took in ``can_start_stream``; a no-op when it holds none."""
+    slot = _stream_slot.get()
+    _stream_slot.set(None)
+    if slot is not None:
+        await slot.release()
 
 
 async def check_daily_minutes_allow(user_id: int, minutes_requested: float) -> tuple[bool, float | None]:

@@ -338,10 +338,14 @@ class StreamingLimitsResponse(BaseModel):
     )
     active_streams: Optional[int] = Field(
         default=None,
-        description="Always null: per-user stream concurrency is not tracked.",
+        description="Always null: the count of the user's open streams is not reported.",
     )
     can_start_stream: bool = Field(
-        ..., description="Whether another stream can be started."
+        ...,
+        description=(
+            "Always true. Not a live check: open streams are not counted, so a stream over the "
+            "user's limit is refused when it starts."
+        ),
     )
     legacy_can_start_stream: bool = Field(
         ...,
