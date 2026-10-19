@@ -538,9 +538,6 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
               disabled={!canSave || isSaving}
               icon={(<FilePlusIcon className="w-4 h-4" />)}
               className={touchTargetClass}
-              aria-label={t('option:notesSearch.toolbarSaveAndNewTooltip', {
-                defaultValue: 'Save and start another note'
-              })}
               data-testid="notes-save-and-new-button"
             >
               {t('option:notesSearch.saveAndNewAction', { defaultValue: 'Save & new' })}
