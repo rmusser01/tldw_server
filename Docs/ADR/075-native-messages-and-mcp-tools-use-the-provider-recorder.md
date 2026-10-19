@@ -10,7 +10,7 @@
 
 ## Decision
 
-A provider call that no `ChatProvider` method makes, today only the Messages API native path, records its one `llm_usage_log` row through the provider recorder's public wrappers `record_direct_response` and `accounted_direct_stream` (`LLM_Calls/usage_accounting.py`), and an MCP tool's LLM calls are recorded for the tool's caller even when a caller that records itself runs the tool.
+A provider call that no `ChatProvider` method makes, of which the Messages API native path is the one recorded today, records its one `llm_usage_log` row through the provider recorder's public wrappers `record_direct_response` and `accounted_direct_stream` (`LLM_Calls/usage_accounting.py`), and an MCP tool's LLM calls are recorded for the tool's caller even when a caller that records itself runs the tool.
 
 ## Context
 
@@ -35,4 +35,5 @@ ADR-067 records chat calls in `ChatProvider.__init_subclass__`. The Messages API
 
 ## Follow-up
 
-- The pricing catalog has no Anthropic cache read or write rates, so cache reads are billed at the full prompt rate. A follow-up task, filed with TASK-13610, adds them.
+- The pricing catalog has no Anthropic cache read or write rates, so cache reads are billed at the full prompt rate. A follow-up task, TASK-13858, adds them.
+- Other adapter-less chat-completions calls stay unrecorded: the local OCR backend (`OCR/backends/llamacpp_ocr.py`) and the Local_LLM handlers (`Llamafile_Handler.py`, `LlamaCpp_Handler.py`). They cost $0 by default, but their tokens should count toward `llm_tokens_per_month`. They can adopt the wrappers later.

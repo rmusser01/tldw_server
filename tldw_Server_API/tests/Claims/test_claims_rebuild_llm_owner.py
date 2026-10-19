@@ -10,11 +10,13 @@ from typing import Any
 
 import pytest
 
-from tldw_Server_API.app.core.Claims_Extraction import claims_rebuild_service, claims_service
+from tldw_Server_API.app.core.Claims_Extraction import claims_rebuild_service, claims_service, ingestion_claims
 from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import ClaimsRebuildService, ClaimsRebuildTask
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.providers.base import ChatProvider
 from tldw_Server_API.app.core.Usage import llm_accounting
+from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
+from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls
 
 pytestmark = pytest.mark.unit
 
@@ -126,6 +128,24 @@ def test_a_refusal_during_extraction_leaves_the_media_claims_in_place(monkeypatc
         ClaimsRebuildService(worker_threads=1)._process_task(ClaimsRebuildTask(media_id=7, db_path="/tmp/m.db"))
     assert raised.value is refusal  # unwrapped, so the worker counts it as a refusal, not a fault
     assert deleted == []
+
+
+async def test_the_real_extractor_lets_a_quota_refusal_out(rows, monkeypatch) -> None:
+    """The worker's refusal branch needs the refusal to escape ``extract_claims_for_chunks``, not become a provider_error fallback."""
+    refuse_llm_calls(monkeypatch)
+    registry = type("_Registry", (), {"get_adapter": lambda self, name: _Provider()})()
+    monkeypatch.setattr(ingestion_claims, "get_registry", lambda: registry)
+    monkeypatch.setattr(ingestion_claims, "ensure_app_config", lambda: {})
+    monkeypatch.setattr(ingestion_claims, "resolve_provider_model", lambda name, cfg: "m")
+    monkeypatch.setattr(ingestion_claims, "resolve_provider_api_key_from_config", lambda name, cfg: None)
+
+    def _extract() -> list[dict[str, Any]]:
+        """Run the real LLM extractor as a rebuild worker thread does."""
+        with llm_call_root("5"):
+            return ingestion_claims.extract_claims_for_chunks([{"text": "Paris is in France."}], extractor_mode="openai")
+
+    with pytest.raises(LLMQuotaExceededError):
+        await asyncio.to_thread(_extract)
 
 
 async def test_a_rebuild_task_records_its_llm_calls_for_its_owner(rows, monkeypatch) -> None:

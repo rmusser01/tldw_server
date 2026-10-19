@@ -102,7 +102,7 @@ def _usage_tokens(usage: dict[str, Any]) -> tuple[int, int]:
         return 0
 
     prompt_tokens = _first("prompt_tokens", "input_tokens")
-    if "prompt_tokens" not in usage:
+    if usage.get("prompt_tokens") is None:
         # Anthropic-shaped block: input_tokens is only the uncached remainder (Anthropic, llama.cpp /v1/messages).
         prompt_tokens += _first("cache_creation_input_tokens") + _first("cache_read_input_tokens")
     return prompt_tokens, _first("completion_tokens", "output_tokens")

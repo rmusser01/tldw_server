@@ -3,6 +3,7 @@
 import asyncio
 import gc
 import inspect
+import json
 import time
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
@@ -629,3 +630,12 @@ async def test_with_quotas_off_a_provider_call_hands_nothing_off(rows, monkeypat
         assert (await asyncio.to_thread(_FakeProvider().chat, REQUEST))["usage"] == USAGE
         await _FakeProvider().achat(REQUEST)
     assert len(await _settled(rows)) == 2
+
+
+def test_a_null_prompt_tokens_counts_the_same_streamed_and_not() -> None:
+    """A null ``prompt_tokens`` is absent in both modes, so Anthropic-shaped input and cache counts add up in both."""
+    usage = {"prompt_tokens": None, "input_tokens": 7, "cache_read_input_tokens": 5, "output_tokens": 2}
+    seen = usage_accounting._StreamUsage()
+    seen.feed("data: " + json.dumps({"usage": usage}) + "\n\n")
+    assert seen.usage is not None
+    assert usage_accounting._usage_tokens(usage) == usage_accounting._usage_tokens(seen.usage) == (12, 2)

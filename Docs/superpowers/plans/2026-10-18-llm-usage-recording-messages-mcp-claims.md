@@ -4,14 +4,14 @@
 
 **Goal:** Write one `llm_usage_log` row for the right user for three kinds of LLM call that write none today: MCP tool calls, the in-process claims rebuild, and the Messages API native path (Anthropic, llama.cpp).
 
-**Architecture:** Reuse the PR 1a/1b/2a/2b machinery. MCP tool execution names the caller with `llm_call_context(user_id=..., records_itself=False)` around `module.execute_tool`, so the provider base class (ADR-067) records the tool's calls, including tools that `/chat/completions` tool auto-execution runs (Review I3), and the PR 2b check at the call gates them. A quota refusal becomes the catalogued tool error `llm_quota_exceeded`, which the MCP module circuit breaker ignores. Each claims rebuild task carries its owner and runs under `llm_call_root(owner)`. The rebuild worker treats a quota refusal as one failed task instead of dying. The Messages native path never reaches a `ChatProvider`, so it calls the base class's own recorder through two small public wrappers in `LLM_Calls/usage_accounting.py`; that new recording entry point gets its own ADR, ADR-076 (Review I1). The stream usage reader learns the Anthropic event shape, and a null usage field never erases a count (Review I2). An Anthropic-shaped usage block counts its cached input as prompt tokens (Review B1).
+**Architecture:** Reuse the PR 1a/1b/2a/2b machinery. MCP tool execution names the caller with `llm_call_context(user_id=..., records_itself=False)` around `module.execute_tool`, so the provider base class (ADR-067) records the tool's calls, including tools that `/chat/completions` tool auto-execution runs (Review I3), and the PR 2b check at the call gates them. A quota refusal becomes the catalogued tool error `llm_quota_exceeded`, which the MCP module circuit breaker ignores. Each claims rebuild task carries its owner and runs under `llm_call_root(owner)`. The rebuild worker treats a quota refusal as one failed task instead of dying. The Messages native path never reaches a `ChatProvider`, so it calls the base class's own recorder through two small public wrappers in `LLM_Calls/usage_accounting.py`; that new recording entry point gets its own ADR, ADR-075 (Review I1). The stream usage reader learns the Anthropic event shape, and a null usage field never erases a count (Review I2). An Anthropic-shaped usage block counts its cached input as prompt tokens (Review B1).
 
 **Tech Stack:** Python 3.12, FastAPI/Starlette, pytest (asyncio_mode=auto), loguru, backlog-py.
 
 **Spec:**
 - `backlog/tasks/task-13585 - Record-LLM-usage-for-MCP-tool-calls-and-the-in-process-claims-rebuild.md` (on origin/dev)
 - `backlog/tasks/task-13610 - Record-LLM-usage-for-the-Messages-API-native-path.md` (on origin/dev)
-- Design: `Docs/Design/2026-10-09-llm-usage-accounting-design.md` (§1 roots, §2/§3 recording, §4a/§4b check). Decision: `Docs/ADR/067-llm-calls-accounted-in-provider-base-class.md`; new `Docs/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md` (Proposed, Task 5).
+- Design: `Docs/Design/2026-10-09-llm-usage-accounting-design.md` (§1 roots, §2/§3 recording, §4a/§4b check). Decision: `Docs/ADR/067-llm-calls-accounted-in-provider-base-class.md`; new `Docs/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md` (Proposed, Task 5).
 
 Independent review and dry run (2026-10-18): 1 Blocker, 3 Important, 7 Minor; all folded in.
 
@@ -48,16 +48,16 @@ Re-verified for the review fixes on origin/dev `32eb11ae03` (2026-10-18): none o
   - `services/startup_claims_rebuild.py:146,155` receives `user_id` from `_claims_rebuild_db_session` and discards it as `_`.
 - **Messages native path.** `_handle_messages` (`endpoints/messages.py:2017-2154`) sends `MESSAGES_NATIVE_PROVIDERS = {"anthropic", "llama.cpp"}` (`:67`) through `_native_post_json` (`:2072`) or `_prepare_native_stream_iterator` (`:2054`). It reaches no adapter, and only `perform_chat_api_call_async` on the converted path (`:2104`, `:2131`) is recorded today. A valid native message always carries `usage` with `input_tokens` and `output_tokens`. The validators guarantee this: `_native_message_payload_is_semantic`; `_native_message_start_is_valid` requires `usage` (`:1341-1376`); `message_delta` requires `output_tokens` (`:1379-1415`); the case `missing-usage` is rejected in `test_messages_endpoint_usage.py`.
 - **Messages check at the call (the brief's question).** Both routes into `_handle_messages` declare `Depends(require_llm_quota)` (`messages.py:2221`, `:2252`). That dependency calls `mark_llm_quota_prechecked()` (`API_Deps/usage_quota_deps.py:47-57`), and `user_to_check()` returns `None` when `prechecked` is set (`Usage/llm_quota_gate.py:60-61`). A PR 2b check on the native path would therefore always be skipped. PR 2a already pins the 402 for the native path, streaming and not: `tests/Chat/integration/test_messages_endpoint.py::test_messages_refuses_an_over_quota_user_before_any_provider_call` (its `llama.cpp/test-model` cases, with `stream` False and True). The plan adds no call-site check. `count_tokens` (`:2280-2321`) generates nothing and stays unrecorded and ungated.
-- **Estimates ignore Anthropic shapes (Review M4).** `_response_chars` and `_StreamUsage.chars` count only OpenAI `choices`, and `_prompt_estimate` reads `system_message`, not Anthropic's `system` (`usage_accounting.py:67-89`, `:138-150`). So a native reply whose usage values are all null (the validator accepts it), or a stream that fails before `message_start`, records an estimate with `completion_tokens=0` and no system prompt. The review measured `(9, 0, estimated=True)` for both. An invalid native stream, which the sanitizer ends with an error frame, still writes that estimate row; that is ADR-067's "a stream is recorded once, however it ends". This plan leaves the estimators as they are and says so in ADR-076: `plan_chat_token_estimators.md` rewrites `_prompt_estimate`, so teaching it Anthropic shapes here would collide (see M6 below).
+- **Estimates ignore Anthropic shapes (Review M4).** `_response_chars` and `_StreamUsage.chars` count only OpenAI `choices`, and `_prompt_estimate` reads `system_message`, not Anthropic's `system` (`usage_accounting.py:67-89`, `:138-150`). So a native reply whose usage values are all null (the validator accepts it), or a stream that fails before `message_start`, records an estimate with `completion_tokens=0` and no system prompt. The review measured `(9, 0, estimated=True)` for both. An invalid native stream, which the sanitizer ends with an error frame, still writes that estimate row; that is ADR-067's "a stream is recorded once, however it ends". This plan leaves the estimators as they are and says so in ADR-075: `plan_chat_token_estimators.md` rewrites `_prompt_estimate`, so teaching it Anthropic shapes here would collide (see M6 below).
 - **`/api/v1/tools/execute` and a tool error (Review M7).** The endpoint returns the MCP result inside `ExecuteToolResult(ok=True, result=...)` (`endpoints/tools.py:90-97`), and `ToolExecutor.execute` returns `resp.result` (`Tools/tool_executor.py:119-131`). So an over-quota tool call there is HTTP 200 with `ok: true` and `result.isError: true`, not a 402. That is the MCP tool-error contract, so `Usage_Quotas.md` names it in the MCP bullet.
-- **ADR number (Review I1).** The highest ADR on origin/dev is 071. Open PR #3226 adds ADR-072 to ADR-074 (checked with the paginated files API, because `gh pr list --json files` stops at 100 files per PR; no other open PR adds an ADR above 071). `plan_concurrency_quotas.md` proposes ADR-075. So this plan's ADR is ADR-076; Task 1 Step 0 recomputes it.
+- **ADR number (Review I1).** The highest ADR on origin/dev is 071. Open PR #3226 adds ADR-072 to ADR-074 (checked with the paginated files API, because `gh pr list --json files` stops at 100 files per PR; no other open PR adds an ADR above 071). `plan_concurrency_quotas.md` proposes ADR-075. So this plan's ADR is ADR-075; Task 1 Step 0 recomputes it.
 - **Other plans touch the same files (Review M6).**
   - `plan_chat_token_estimators.md` edits `usage_accounting.py` (imports `:20-30`, `_prompt_estimate` `:67-78`).
   - `plan_audio_analysis.md` edits `Usage_Quotas.md:95`, where this plan inserts after `:95`.
   - `plan_quota_callers_rag_metric.md` edits `Usage_Quotas.md:93`, and `plan_concurrency_quotas.md` edits `Usage_Quotas.md` and adds a `Docs/ADR/README.md` row after ADR-071, as this plan does.
   - This plan's edits are anchored on text, which survives a rebase; its line numbers do not. If one of those plans lands first, find each edit by its quoted text, and recompute the ADR number (Task 1 Step 0).
 - **Line-number baselines.** None of the touched files is listed in `Helper_Scripts/ci/scope_predicate_baseline.txt`.
-- **Mirrors.** `Helper_Scripts/refresh_docs_published.sh` mirrors all of `Docs/ADR` (line 141): ADR-067, the new ADR-076 and `Docs/ADR/README.md` change under `Docs/Published/ADR/`. `Docs/Operations/Usage_Quotas.md` and the design doc are not mirrored (the script copies only `Operations/Env_Vars.md` from Operations). `tests/Docs/test_docs_published_refresh.py::test_refresh_output_matches_tracked_published_files` compares the refreshed tree with `git ls-files Docs/Published`, so a new mirrored file fails it until it is staged (measured: `1 failed, 211 passed` unstaged, `212 passed` staged).
+- **Mirrors.** `Helper_Scripts/refresh_docs_published.sh` mirrors all of `Docs/ADR` (line 141): ADR-067, the new ADR-075 and `Docs/ADR/README.md` change under `Docs/Published/ADR/`. `Docs/Operations/Usage_Quotas.md` and the design doc are not mirrored (the script copies only `Operations/Env_Vars.md` from Operations). `tests/Docs/test_docs_published_refresh.py::test_refresh_output_matches_tracked_published_files` compares the refreshed tree with `git ls-files Docs/Published`, so a new mirrored file fails it until it is staged (measured: `1 failed, 211 passed` unstaged, `212 passed` staged).
 - **Lint and security.**
   - `ruff check` on the touched files reports one error, which is already on dev: unsorted imports in `claims_service.py:62-75`. Leave it.
   - `bandit` is not installed in `.venv`. `uvx bandit` on the touched source reports 0 findings.
@@ -66,10 +66,10 @@ Re-verified for the review fixes on origin/dev `32eb11ae03` (2026-10-18): none o
 ## Global Constraints
 
 - Every PR's final sweep includes `tldw_Server_API/tests/CI/test_test_quality_ratchet.py`: since #3243, dev enforces it, so new tests must not be status-only or tautological.
-- PR targets `dev`. Branch from `origin/dev`. One PR for both tasks: they share `usage_accounting.py` and the same doc pages (ADR-067, the new ADR-076, `Usage_Quotas.md`, the design doc).
+- PR targets `dev`. Branch from `origin/dev`. One PR for both tasks: they share `usage_accounting.py` and the same doc pages (ADR-067, the new ADR-075, `Usage_Quotas.md`, the design doc).
 - Never `--no-verify`. Every commit ends with `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
 - Backlog changes only through backlog-py (ADR-059): `PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task edit ...`. Use `--append-notes`, never `--notes`. Stage with `git add -A backlog/tasks`. One new task is created, the Anthropic cache-pricing follow-up (Review B1). Compute its id with the AGENTS.md command, which scans origin/dev and open PRs (Task 5 Step 8).
-- After editing ADR-067 and adding ADR-076, run `bash Helper_Scripts/refresh_docs_published.sh`, stage the new files, and commit the `Docs/Published` diff in the same PR (Review I1).
+- After editing ADR-067 and adding ADR-075, run `bash Helper_Scripts/refresh_docs_published.sh`, stage the new files, and commit the `Docs/Published` diff in the same PR (Review I1).
 - No report or scratch path hard-codes `/tmp` (ADR-006, Accepted): the Bandit report and the PR body go under `$($PY -c 'import tempfile; print(tempfile.gettempdir())')` (Review M1).
 - Other plans edit `usage_accounting.py`, `Usage_Quotas.md` and `Docs/ADR/README.md` (see Measured, Review M6). After a rebase, find each edit by its quoted text, not its line number.
 - Use `$PY` for `/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python`. Run tests from the repo root as `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -p no:cacheprovider -q <paths>`.
@@ -79,13 +79,13 @@ Re-verified for the review fixes on origin/dev `32eb11ae03` (2026-10-18): none o
 ## ADR assessment
 
 - **Governing:** ADR-067 (Accepted). It is binding: chat calls are accounted by the provider base class's recorder, and the user comes from an explicit `llm_call_context` or the content scope. ADR-006 (Accepted) governs report paths (Review M1).
-- **ADR required: yes. ADR path: `Docs/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md`, `Status: Proposed`. It extends ADR-067 and does not supersede it (Review I1).**
+- **ADR required: yes. ADR path: `Docs/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md`, `Status: Proposed`. It extends ADR-067 and does not supersede it (Review I1).**
   - **The native path is a new decision, not a status update.** ADR-067 decides that chat calls are accounted in `ChatProvider.__init_subclass__`, and the design calls it "One recording point". Two public entry points outside the base class, `record_direct_response` and `accounted_direct_stream`, open that rule to any adapter-less provider call. That is a durable provider-integration rule (`Docs/ADR/README.md`, "ADR Required When"), and README rule 8 and AGENTS.md ("a changed decision needs a new ADR") require a new ADR for it.
-  - **The MCP overlay changes an ADR-067 consequence (Review I3).** ADR-067 says a tool that itself calls an LLM inside the chat pipeline is "recorded by nobody". Clearing `records_itself` records it, so ADR-076 records that change.
-  - **The cached-token sum (Review B1)** is part of how ADR-076's recorder reads an Anthropic-shaped block, so ADR-076 states it.
-  - Rejected alternatives, kept in ADR-076: a fake `ChatProvider` subclass for the native path (its `achat` would record before `_native_message_payload_is_semantic` rejects a bad 200; its stream wrapper would see raw byte chunks split mid-frame; it would be a provider class that is not a provider); a recorder of its own in `messages.py`; recording in `perform_chat_api_call*`.
+  - **The MCP overlay changes an ADR-067 consequence (Review I3).** ADR-067 says a tool that itself calls an LLM inside the chat pipeline is "recorded by nobody". Clearing `records_itself` records it, so ADR-075 records that change.
+  - **The cached-token sum (Review B1)** is part of how ADR-075's recorder reads an Anthropic-shaped block, so ADR-075 states it.
+  - Rejected alternatives, kept in ADR-075: a fake `ChatProvider` subclass for the native path (its `achat` would record before `_native_message_payload_is_semantic` rejects a bad 200; its stream wrapper would see raw byte chunks split mid-frame; it would be a provider class that is not a provider); a recorder of its own in `messages.py`; recording in `perform_chat_api_call*`.
 - **No new ADR for the roots.** The MCP user and the claims-rebuild owner are new roots under ADR-067's existing mechanism (`llm_call_context`, `llm_call_root`). This is the same kind of change PR 1b made, and PR #3224 recorded it as status updates to ADR-067's Consequences and Follow-up.
-- **Update ADR-067's status lines only** (Task 5): MCP's user source, the shorter "Still unrecorded" list, and the Follow-up line. The native-path bullet the first draft added to ADR-067 is dropped; it lives in ADR-076 (Review I1). Refresh the mirror afterwards.
+- **Update ADR-067's status lines only** (Task 5): MCP's user source, the shorter "Still unrecorded" list, and the Follow-up line. The native-path bullet the first draft added to ADR-067 is dropped; it lives in ADR-075 (Review I1). Refresh the mirror afterwards.
 - **The ADR check** (required yes/no, path, reason) goes into the backlog notes and the PR body, as AGENTS.md and `.agents/skills/adr-assessment` require (Review M2).
 
 ## Decisions for the owner
@@ -96,12 +96,12 @@ Recommendations first. The plan implements each recommendation; the alternative 
    - **Recommendation:** count Anthropic's `input_tokens + cache_creation_input_tokens + cache_read_input_tokens` as `prompt_tokens`, for any usage block that has `input_tokens` and no `prompt_tokens`. That is OpenAI's meaning of `prompt_tokens`, which `normalize_llm_usage` and `compute_costs` already assume. Without it, prompt-cached `/v1/messages` traffic is recorded at a tiny fraction: the review's probe recorded 3 tokens and $0.0015 for a call that used 62,003 tokens and $0.19 at catalog rates. Then `limits.llm_tokens_per_month` and both cost limits are barely enforced on the path TASK-13610 exists to account. llama.cpp reports the same way (Measured), so the sum applies to it too.
    - **Implemented in:** Task 1 Step 3 (`_usage_tokens`), with a non-streaming test for Anthropic and llama.cpp and a streaming test.
    - **Until cache rates exist,** cache reads are billed at the full prompt rate, which overstates cost. Task 5 Step 8 files the follow-up task that adds Anthropic cache rates.
-   - **If the owner declines:** delete the `if "prompt_tokens" not in usage:` lines from Task 1 Step 3, the two `..._counts_its_cached_input_as_prompt_tokens` tests and `CACHED_USAGE` from Task 1 Step 1, the "Anthropic-shaped usage counts cached input" consequence from ADR-076, the last sentence of the design doc's "No adapter" bullet, and the follow-up task. Task 1's RED becomes `6 failed, 2 passed` and its GREEN `8 passed`.
+   - **If the owner declines:** delete the `if "prompt_tokens" not in usage:` lines from Task 1 Step 3, the two `..._counts_its_cached_input_as_prompt_tokens` tests and `CACHED_USAGE` from Task 1 Step 1, the "Anthropic-shaped usage counts cached input" consequence from ADR-075, the last sentence of the design doc's "No adapter" bullet, and the follow-up task. Task 1's RED becomes `6 failed, 2 passed` and its GREEN `8 passed`.
 2. **D2: Record MCP tools that `/chat/completions` tool auto-execution runs (Review I3).**
-   - **Recommendation:** record them. The MCP overlay sets `records_itself=False`. TASK-13585's AC #1 covers MCP tool calls, and the chat request's own row covers only its model call, so nothing is counted twice (Measured). The tool keeps the request's `prechecked` mark, so it is recorded but never refused part-way (spec §4a). This changes ADR-067's consequence that such a tool is "recorded by nobody"; ADR-076 records the change.
+   - **Recommendation:** record them. The MCP overlay sets `records_itself=False`. TASK-13585's AC #1 covers MCP tool calls, and the chat request's own row covers only its model call, so nothing is counted twice (Measured). The tool keeps the request's `prechecked` mark, so it is recorded but never refused part-way (spec §4a). This changes ADR-067's consequence that such a tool is "recorded by nobody"; ADR-075 records the change.
    - **Implemented in:** Task 2 Step 5, with `test_a_tool_run_by_chat_tool_auto_exec_is_recorded_for_the_user`.
    - **If the owner declines:** apply "If the owner declines D2" in Task 2 Step 5 and in Task 5 Steps 1 to 3 and 9. Those tools then stay unrecorded and unchecked, as ADR-067 says today.
-3. **D3: Accept ADR-076 (Review I1).** It is written as `Status: Proposed`. If the owner accepts it before merge, set `**Status:** Accepted` in the ADR and its index row, rerun the refresh script, and commit both (Task 5 Step 11). If D1 or D2 is declined, edit ADR-076 first as those alternatives say.
+3. **D3: Accept ADR-075 (Review I1).** It is written as `Status: Proposed`. If the owner accepts it before merge, set `**Status:** Accepted` in the ADR and its index row, rerun the refresh script, and commit both (Task 5 Step 11). If D1 or D2 is declined, edit ADR-075 first as those alternatives say.
 
 Not a decision: the brief's open question has a clear answer (see "Messages check at the call" above). The native path is always admitted by `require_llm_quota` before it runs, so a PR 2b check there would never run. The plan relies on the existing boundary gate and its existing test.
 
@@ -119,7 +119,7 @@ These are the input classes the specs imply that could break for a user. Each ha
 
 Not exercised by these tests (Review M4):
 
-- **Estimate rows on the native path.** A native reply whose usage values are all null, or a stream that fails before `message_start`, records an estimate that counts no Anthropic content and no `system` prompt (Measured). ADR-076 states this; nothing tests it.
+- **Estimate rows on the native path.** A native reply whose usage values are all null, or a stream that fails before `message_start`, records an estimate that counts no Anthropic content and no `system` prompt (Measured). ADR-075 states this; nothing tests it.
 - **An invalid native stream** (the sanitizer sends an error frame) still writes that estimate row, by ADR-067's "recorded once, however it ends". Not tested.
 - **The Anthropic adapter path** drops the cache fields (Measured). The follow-up task covers it.
 
@@ -151,7 +151,7 @@ export PY=/Users/macbook-dev/Documents/GitHub/tldw_server/.venv/bin/python
   done; } | sed -nE 's|^Docs/ADR/([0-9]{3})-.*|\1|p' | sort -n | tail -1
 ```
 
-Expected: `074` (2026-10-18; open PR #3226 adds ADR-072 to ADR-074). The loop reads each PR's files through the paginated API because `gh pr list --json files` stops at 100 files per PR. ADR-075 is reserved by `plan_concurrency_quotas.md`, so this plan's ADR is ADR-076 (Review I1, M6). If the output is 075 or higher, use one more than the output, and replace `076`/`ADR-076` everywhere this plan writes it: the code comments in Task 1 Step 5 and Task 2 Step 5, the ADR file name, its index row, ADR-067's status lines, the design doc, and the backlog notes.
+Expected: `074` (2026-10-18; open PR #3226 adds ADR-072 to ADR-074). The loop reads each PR's files through the paginated API because `gh pr list --json files` stops at 100 files per PR. ADR-075 is reserved by `plan_concurrency_quotas.md`, so this plan's ADR is ADR-075 (Review I1, M6). If the output is 075 or higher, use one more than the output, and replace `076`/`ADR-075` everywhere this plan writes it: the code comments in Task 1 Step 5 and Task 2 Step 5, the ADR file name, its index row, ADR-067's status lines, the design doc, and the backlog notes.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -548,7 +548,7 @@ with:
                     provider=provider,
                     operation="messages.stream",
                 )
-                # This path never reaches a ChatProvider, so it records through the provider recorder (ADR-076).
+                # This path never reaches a ChatProvider, so it records through the provider recorder (ADR-075).
                 response = StreamingResponse(
                     accounted_direct_stream(
                         provider,
@@ -897,7 +897,7 @@ with:
                         # tool's LLM calls (ADR-067). llm_call_context, not llm_call_root: an admitted
                         # request that runs this tool keeps its admission (LLM usage accounting spec §4a).
                         # records_itself is cleared: a caller that records itself (the chat pipeline)
-                        # records only its own chat call, not this tool's calls (ADR-076).
+                        # records only its own chat call, not this tool's calls (ADR-075).
                         llm_user = as_quota_user_id(context.user_id)
                         user = {} if llm_user is None else {"user_id": llm_user}
                         with llm_call_context(records_itself=False, **user):
@@ -972,7 +972,7 @@ user. The tool runtime now names the caller from the RequestContext
 around module.execute_tool, with llm_call_context rather than a root, so
 a tool run by an admitted /chat/completions request keeps its admission.
 It also clears records_itself: the chat pipeline records only its own
-chat call, so a tool it runs now records its own calls (ADR-076). A
+chat call, so a tool it runs now records its own calls (ADR-075). A
 quota refusal becomes the catalogued llm_quota_exceeded tool error,
 which the module circuit breaker ignores; until now, a refusal on
 /api/v1/tools/execute counted as a module failure for everyone.
@@ -1501,10 +1501,10 @@ EOF
 
 ---
 
-### Task 5: ADR-076, docs, the follow-up task, backlog close-out and the PR
+### Task 5: ADR-075, docs, the follow-up task, backlog close-out and the PR
 
 **Files:**
-- Create: `Docs/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md` (Review I1) and its mirror `Docs/Published/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md` (via the refresh script)
+- Create: `Docs/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md` (Review I1) and its mirror `Docs/Published/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md` (via the refresh script)
 - Modify: `Docs/ADR/README.md` (an index row after ADR-071) and its mirror `Docs/Published/ADR/README.md`
 - Modify: `Docs/ADR/067-llm-calls-accounted-in-provider-base-class.md` (status lines in Consequences and Follow-up) and its mirror `Docs/Published/ADR/067-llm-calls-accounted-in-provider-base-class.md`
 - Modify: `Docs/Design/2026-10-09-llm-usage-accounting-design.md` (§1, §3, §4b, Review changes)
@@ -1513,14 +1513,14 @@ EOF
 - Create: one backlog task, the Anthropic cache-pricing follow-up (Review B1, via backlog-py)
 - Modify: `backlog/tasks/task-13585 - ...md`, `backlog/tasks/task-13610 - ...md` (via backlog-py)
 
-- [ ] **Step 1: Write ADR-076, index it, and update ADR-067's status lines (Review I1)**
+- [ ] **Step 1: Write ADR-075, index it, and update ADR-067's status lines (Review I1)**
 
 Use the ADR number from Task 1 Step 0.
 
-1. Create `Docs/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md`:
+1. Create `Docs/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md`:
 
 ```markdown
-# ADR-076: The Messages native path and MCP tools record through the provider recorder
+# ADR-075: The Messages native path and MCP tools record through the provider recorder
 
 **Status:** Proposed
 **Date:** 2026-10-18
@@ -1563,10 +1563,10 @@ ADR-067 records chat calls in `ChatProvider.__init_subclass__`. The Messages API
 2. In `Docs/ADR/README.md`, add this row after the ADR-071 row:
 
 ```markdown
-| [ADR-076](076-native-messages-and-mcp-tools-use-the-provider-recorder.md) | Proposed | A provider call no `ChatProvider` method makes (the Messages API native path) records through the provider recorder's public wrappers, and an MCP tool's LLM calls are recorded for its caller even under a caller that records itself. |
+| [ADR-075](075-native-messages-and-mcp-tools-use-the-provider-recorder.md) | Proposed | A provider call no `ChatProvider` method makes (the Messages API native path) records through the provider recorder's public wrappers, and an MCP tool's LLM calls are recorded for its caller even under a caller that records itself. |
 ```
 
-3. In `Docs/ADR/067-llm-calls-accounted-in-provider-base-class.md`, update the status lines only. The first draft also inserted a "One path calls a provider without an adapter" bullet before `- **Background roots.**`; that is a new decision, so it is dropped here and lives in ADR-076. Replace:
+3. In `Docs/ADR/067-llm-calls-accounted-in-provider-base-class.md`, update the status lines only. The first draft also inserted a "One path calls a provider without an adapter" bullet before `- **Background roots.**`; that is a new decision, so it is dropped here and lives in ADR-075. Replace:
 
 ```markdown
 - **Still unrecorded,** each with its reason:
@@ -1578,21 +1578,21 @@ ADR-067 records chat calls in `ChatProvider.__init_subclass__`. The Messages API
 with:
 
 ```markdown
-- **MCP tool calls** get their user from the tool call's context, which MCP authentication fills in, because it sets no content scope. A tool run by an admitted request keeps the admission (ADR-076).
+- **MCP tool calls** get their user from the tool call's context, which MCP authentication fills in, because it sets no content scope. A tool run by an admitted request keeps the admission (ADR-075).
 - **Still unrecorded:** system jobs with no user, such as the scheduled quality evaluation.
 ```
 
 4. In the same file, replace `- TASK-13585: record MCP tool calls and the in-process claims rebuild.` with:
 
 ```markdown
-- TASK-13585 recorded MCP tool calls and the in-process claims rebuild. TASK-13610 recorded the Messages API native path (ADR-076).
+- TASK-13585 recorded MCP tool calls and the in-process claims rebuild. TASK-13610 recorded the Messages API native path (ADR-075).
 ```
 
 5. Refresh the mirror and stage the two new files:
 
 ```bash
 bash Helper_Scripts/refresh_docs_published.sh
-git add Docs/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md Docs/Published/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md
+git add Docs/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md Docs/Published/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md
 git status --short Docs
 ```
 
@@ -1601,17 +1601,17 @@ Expected (re-measured):
 ```
  M Docs/ADR/067-llm-calls-accounted-in-provider-base-class.md
  M Docs/ADR/README.md
-A  Docs/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md
+A  Docs/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md
  M Docs/Published/ADR/067-llm-calls-accounted-in-provider-base-class.md
  M Docs/Published/ADR/README.md
-A  Docs/Published/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md
+A  Docs/Published/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md
 ```
 
 The new files must be staged before Step 5: `test_refresh_output_matches_tracked_published_files` compares the refreshed tree with `git ls-files Docs/Published`.
 
-**If the owner declines D1:** in ADR-076, delete the Consequences bullet that starts `- **Anthropic-shaped usage counts cached input.**` and the whole Follow-up section.
+**If the owner declines D1:** in ADR-075, delete the Consequences bullet that starts `- **Anthropic-shaped usage counts cached input.**` and the whole Follow-up section.
 
-**If the owner declines D2:** in ADR-076, rename the file to `076-native-messages-path-uses-the-provider-recorder.md` and the title to `ADR-076: The Messages native path records through the provider recorder`. Cut `, and an MCP tool's LLM calls are recorded for the tool's caller even when a caller that records itself runs the tool` from the Decision. Delete the Context from `ADR-067 also marks` to its end, the last Alternatives row, and the last Consequences bullet. Point the index row at the new file name and cut its clause from `, and an MCP tool's LLM calls`. In ADR-067's MCP bullet, write `Only the user is set, so a tool run by an admitted request keeps the admission.` in place of its last sentence.
+**If the owner declines D2:** in ADR-075, rename the file to `075-native-messages-path-uses-the-provider-recorder.md` and the title to `ADR-075: The Messages native path records through the provider recorder`. Cut `, and an MCP tool's LLM calls are recorded for the tool's caller even when a caller that records itself runs the tool` from the Decision. Delete the Context from `ADR-067 also marks` to its end, the last Alternatives row, and the last Consequences bullet. Point the index row at the new file name and cut its clause from `, and an MCP tool's LLM calls`. In ADR-067's MCP bullet, write `Only the user is set, so a tool run by an admitted request keeps the admission.` in place of its last sentence.
 
 - [ ] **Step 2: Update the design doc**
 
@@ -1620,14 +1620,14 @@ In `Docs/Design/2026-10-09-llm-usage-accounting-design.md`:
 1. After the line `  - The other sockets (ACP, prompt studio, persona, meetings, sandbox, watchlists, workflows) make no chat LLM call and are left alone.` (end of §1's roots list) insert:
 
 ```markdown
-- **MCP tool calls:** MCP authentication sets no content scope, so the tool runtime sets the user from the call's `RequestContext` around `module.execute_tool` (`MCP_unified/tool_execution/runtime.py`). It uses `llm_call_context`, not `llm_call_root`, so a tool that an admitted `/chat/completions` request runs keeps the request's `prechecked` mark. It also clears `records_itself`: the chat pipeline's own row covers only its model call, so the tool's calls are recorded (ADR-076).
+- **MCP tool calls:** MCP authentication sets no content scope, so the tool runtime sets the user from the call's `RequestContext` around `module.execute_tool` (`MCP_unified/tool_execution/runtime.py`). It uses `llm_call_context`, not `llm_call_root`, so a tool that an admitted `/chat/completions` request runs keeps the request's `prechecked` mark. It also clears `records_itself`: the chat pipeline's own row covers only its model call, so the tool's calls are recorded (ADR-075).
 - **The in-process claims rebuild:** each `ClaimsRebuildTask` carries its owner, and the worker runs it under `llm_call_root(owner)`. A quota refusal fails that task and the worker goes on.
 ```
 
 2. After the §3 bullet that starts `- **Streaming:** tokens come from a usage chunk` insert:
 
 ```markdown
-- **No adapter:** the Messages API native path (Anthropic, llama.cpp) posts to the provider itself, so no provider method runs. It records through the same functions, `record_direct_response` and `accounted_direct_stream` (ADR-076). An Anthropic stream's input tokens come from `message_start` and its output count from the last `message_delta`. An Anthropic-shaped usage block counts `cache_creation_input_tokens` and `cache_read_input_tokens` as prompt tokens, because its `input_tokens` is only the uncached remainder.
+- **No adapter:** the Messages API native path (Anthropic, llama.cpp) posts to the provider itself, so no provider method runs. It records through the same functions, `record_direct_response` and `accounted_direct_stream` (ADR-075). An Anthropic stream's input tokens come from `message_start` and its output count from the last `message_delta`. An Anthropic-shaped usage block counts `cache_creation_input_tokens` and `cache_read_input_tokens` as prompt tokens, because its `input_tokens` is only the uncached remainder.
 ```
 
 3. In §4b, replace `MCP tool calls carry no user, so they are neither recorded nor checked (§1).` with:
@@ -1711,7 +1711,7 @@ limit, not a module fault, so the module circuit breaker does not count it.
 - [ ] **Step 5: Run the docs tests**
 
 Run: `TLDW_TEST_NO_DOCKER=1 $PY -m pytest -p no:cacheprovider -q tldw_Server_API/tests/Docs`
-Expected: `212 passed` (re-measured, with ADR-076 staged and the mirror refreshed). With the new ADR files unstaged, `test_docs_published_refresh.py::test_refresh_output_matches_tracked_published_files` fails (`1 failed, 211 passed`).
+Expected: `212 passed` (re-measured, with ADR-075 staged and the mirror refreshed). With the new ADR files unstaged, `test_docs_published_refresh.py::test_refresh_output_matches_tracked_published_files` fails (`1 failed, 211 passed`).
 
 - [ ] **Step 6: Run Bandit on the touched source**
 
@@ -1728,11 +1728,11 @@ Expected: `0` (re-measured). `bandit` is not installed in `.venv`, so this uses 
 - [ ] **Step 7: Commit the docs**
 
 ```bash
-git add Docs/ADR/067-llm-calls-accounted-in-provider-base-class.md Docs/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md Docs/ADR/README.md Docs/Published/ADR Docs/Design/2026-10-09-llm-usage-accounting-design.md Docs/Operations/Usage_Quotas.md tldw_Server_API/app/core/MCP_unified/README.md
+git add Docs/ADR/067-llm-calls-accounted-in-provider-base-class.md Docs/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md Docs/ADR/README.md Docs/Published/ADR Docs/Design/2026-10-09-llm-usage-accounting-design.md Docs/Operations/Usage_Quotas.md tldw_Server_API/app/core/MCP_unified/README.md
 git commit -m "$(cat <<'EOF'
-docs(usage): ADR-076, and MCP tools, the claims rebuild and the native Messages path are recorded (TASK-13585, TASK-13610)
+docs(usage): ADR-075, and MCP tools, the claims rebuild and the native Messages path are recorded (TASK-13585, TASK-13610)
 
-ADR-076 (Proposed) extends ADR-067: the Messages native path records
+ADR-075 (Proposed) extends ADR-067: the Messages native path records
 through the provider recorder's public wrappers, an Anthropic-shaped
 usage block counts cached input as prompt tokens, and an MCP tool's LLM
 calls are recorded for its caller inside the chat pipeline too. ADR-067's
@@ -1755,7 +1755,7 @@ NEXT=$(( $( { git ls-tree -r --name-only origin/dev backlog/; gh pr list --state
   | sed -nE 's|^backlog/.*task-([0-9]+)[ .].*|\1|p' | sort -n | tail -1 ) + 1 ))
 echo "TASK-$NEXT"
 PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task create "Price Anthropic prompt-cache tokens, and keep cache fields on the Anthropic adapter path" --id "TASK-$NEXT" -l quotas,backend \
-  -d "TASK-13610 counts Anthropic cache reads and writes as prompt tokens on the Messages API native path (ADR-076). No provider in Config_Files/model_pricing.json has a cache_read or cache_write rate, so compute_costs (Usage/usage_tracker.py) bills cached tokens at the full prompt rate: about ten times Anthropic's cache-read price, and below its cache-write price. The Anthropic adapter (LLM_Calls/providers/anthropic_adapter.py, near lines 373-378) also builds prompt_tokens from input_tokens alone and drops cache_creation_input_tokens and cache_read_input_tokens, so a prompt-cached call through /chat/completions is under-counted the way the native path was. Found by the independent review of the TASK-13585/TASK-13610 plan." \
+  -d "TASK-13610 counts Anthropic cache reads and writes as prompt tokens on the Messages API native path (ADR-075). No provider in Config_Files/model_pricing.json has a cache_read or cache_write rate, so compute_costs (Usage/usage_tracker.py) bills cached tokens at the full prompt rate: about ten times Anthropic's cache-read price, and below its cache-write price. The Anthropic adapter (LLM_Calls/providers/anthropic_adapter.py, near lines 373-378) also builds prompt_tokens from input_tokens alone and drops cache_creation_input_tokens and cache_read_input_tokens, so a prompt-cached call through /chat/completions is under-counted the way the native path was. Found by the independent review of the TASK-13585/TASK-13610 plan." \
   --ac "model_pricing.json gives the Anthropic models cache_read and cache_write rates, and a native /v1/messages row with cache fields is costed with them, with a test" \
   --ac "The Anthropic adapter keeps the cache fields in its usage block and counts them in prompt_tokens, with a test"
 git add -A backlog/tasks
@@ -1770,23 +1770,23 @@ Use the RED/GREEN counts you observed; the counts below are the prototype's. The
 ```bash
 PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task edit TASK-13610 \
   --append-notes "RED: tests/Chat/unit/test_messages_native_usage_recording.py 9 failed, 2 passed on dev (no row written; the two record-nothing tests are guards). GREEN: 11 passed. The first draft's Step 3 failed 4 of them: a null message_delta field gave (0, 9), and the cached cases (3, 100) for (62003, 100) and (60003, 100). Messages, LLM_Calls and Usage suites: 610 passed, 1 skipped. Other tests naming the recorder or the cache fields: 233 passed, 1 skipped (Postgres skipped)." \
-  --append-notes "Owner decisions: D1 (count cache_creation_input_tokens and cache_read_input_tokens as prompt tokens for an Anthropic-shaped block) accepted; D3 (ADR-076) accepted. llama.cpp's /v1/messages reports input_tokens = n_prompt_tokens - n_prompt_tokens_cache with cache_read_input_tokens (llama.cpp tools/server/server-task.cpp), so the sum applies to it too. Cache rates: follow-up TASK-13858." \
-  --append-notes "ADR check: ADR required: yes. ADR path: Docs/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md, extending ADR-067 (governing). Reason: two public recorder entry points outside ChatProvider extend ADR-067's one recording point, a durable provider-integration rule." \
+  --append-notes "Owner decisions: D1 (count cache_creation_input_tokens and cache_read_input_tokens as prompt tokens for an Anthropic-shaped block) accepted; D3 (ADR-075) accepted. llama.cpp's /v1/messages reports input_tokens = n_prompt_tokens - n_prompt_tokens_cache with cache_read_input_tokens (llama.cpp tools/server/server-task.cpp), so the sum applies to it too. Cache rates: follow-up TASK-13858." \
+  --append-notes "ADR check: ADR required: yes. ADR path: Docs/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md, extending ADR-067 (governing). Reason: two public recorder entry points outside ChatProvider extend ADR-067's one recording point, a durable provider-integration rule." \
   --append-notes "No check at the call on the native path: both routes into _handle_messages carry Depends(require_llm_quota) (messages.py:2221, :2252), which marks the request prechecked, so llm_quota_gate.user_to_check() returns None for any call-site check there. test_messages_refuses_an_over_quota_user_before_any_provider_call already pins the 402 for the native path, streaming and not. count_tokens generates nothing and stays unrecorded." \
-  --append-notes "Bandit: uvx bandit on the touched source, 0 findings (bandit is not in .venv). Postgres-only tests skip locally; this change touches no counter or SQL. Not tested, by design: estimate rows on the native path count no Anthropic content and no system prompt (ADR-076)." \
+  --append-notes "Bandit: uvx bandit on the touched source, 0 findings (bandit is not in .venv). Postgres-only tests skip locally; this change touches no counter or SQL. Not tested, by design: estimate rows on the native path count no Anthropic content and no system prompt (ADR-075)." \
   --check-ac 1 --check-ac 2 \
   --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 4 --check-dod 5 --check-dod 6 \
-  --final-summary "Messages API calls to Anthropic and llama.cpp now write one llm_usage_log row for the user, streaming and not, through the provider base class's recorder (record_direct_response, accounted_direct_stream in LLM_Calls/usage_accounting.py; ADR-076). Tokens come from the reply's usage block; for a stream, input tokens from message_start and the final output count from message_delta, and a null field never erases a count. Cache reads and writes count as prompt tokens, because Anthropic's input_tokens is only the uncached remainder. An invalid 200 writes nothing. The boundary check already admits every native call, so no check at the call was added. Cache pricing is follow-up TASK-13858. ADR-076, ADR-067, the spec and Usage_Quotas.md updated." \
+  --final-summary "Messages API calls to Anthropic and llama.cpp now write one llm_usage_log row for the user, streaming and not, through the provider base class's recorder (record_direct_response, accounted_direct_stream in LLM_Calls/usage_accounting.py; ADR-075). Tokens come from the reply's usage block; for a stream, input tokens from message_start and the final output count from message_delta, and a null field never erases a count. Cache reads and writes count as prompt tokens, because Anthropic's input_tokens is only the uncached remainder. An invalid 200 writes nothing. The boundary check already admits every native call, so no check at the call was added. Cache pricing is follow-up TASK-13858. ADR-075, ADR-067, the spec and Usage_Quotas.md updated." \
   -s Done
 PYTHONPATH=tools/backlog-py/src $PY -m backlog_py --cwd . task edit TASK-13585 \
   --append-notes "RED: MCP test_tool_llm_usage_attribution.py 4 failed, 2 passed on dev (no rows; no refusal because no user; a tool under chat tool auto-exec not recorded), plus the outcome catalog test: 5 failed, 6 passed. Claims test_claims_rebuild_llm_owner.py 4 failed, 1 passed (worker thread died on a refusal: (0, 0, [1]); submit has no owner_user_id; owners None), plus the override_db and startup fakes (owner None). GREEN: all pass; MCP suites 4380 passed, 16 skipped; Claims suites 1082 passed, 1 skipped." \
-  --append-notes "MCP uses llm_call_context(user_id=..., records_itself=False) around module.execute_tool, not llm_call_root: the root clears prechecked, which would let §4b refuse a tool that an admitted /chat/completions request runs (tool auto-exec). records_itself is cleared because the chat pipeline records only its own chat call (owner decision D2, accepted; ADR-076). A refusal becomes ExpectedToolFailure(LLM_QUOTA_EXCEEDED, BreakerAction.IGNORE), so the module breaker no longer counts it; this also covers /api/v1/tools/execute, where the content scope made refusals reach the breaker since PR 2b. There the refusal is HTTP 200 with ok: true and result.isError: true." \
+  --append-notes "MCP uses llm_call_context(user_id=..., records_itself=False) around module.execute_tool, not llm_call_root: the root clears prechecked, which would let §4b refuse a tool that an admitted /chat/completions request runs (tool auto-exec). records_itself is cleared because the chat pipeline records only its own chat call (owner decision D2, accepted; ADR-075). A refusal becomes ExpectedToolFailure(LLM_QUOTA_EXCEEDED, BreakerAction.IGNORE), so the module breaker no longer counts it; this also covers /api/v1/tools/execute, where the content scope made refusals reach the breaker since PR 2b. There the refusal is HTTP 200 with ok: true and result.isError: true." \
   --append-notes "AC #1 covers MCP tool calls over the MCP HTTP and WebSocket transports, /api/v1/tools/execute, and tools run by /chat/completions tool auto-execution, each for the caller's numeric user id. A caller with no numeric user id (a service principal) is not recorded. Direct module.execute_tool callers outside the MCP runtime (workflow MCP and LLM steps, speech chat) are covered by their own roots." \
-  --append-notes "ADR check: ADR required: yes. ADR path: Docs/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md, extending ADR-067 (governing). Reason: clearing records_itself for MCP tools changes ADR-067's consequence that a tool calling an LLM inside the chat pipeline is recorded by nobody. The MCP user and the claims owner are new roots under ADR-067's mechanism and need no ADR." \
+  --append-notes "ADR check: ADR required: yes. ADR path: Docs/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md, extending ADR-067 (governing). Reason: clearing records_itself for MCP tools changes ADR-067's consequence that a tool calling an LLM inside the chat pipeline is recorded by nobody. The MCP user and the claims owner are new roots under ADR-067's mechanism and need no ADR." \
   --append-notes "Claims rebuild: the worker now treats LLMQuotaExceededError as one failed task; without that, the new owner would let a refusal end the only worker thread. It logs a refusal at warning and stores llm_quota_exceeded, not the quota details, as the health row's last failure. A refused rebuild keeps the media's claims (extraction runs before the soft delete). Bandit: uvx bandit, 0 findings. Flake seen once: test_claims_jobs_contracts.py::test_review_metrics_payload_inclusive_window_property, green alone, on rerun and on dev." \
   --check-ac 1 --check-ac 2 \
   --check-dod 1 --check-dod 2 --check-dod 3 --check-dod 4 --check-dod 5 --check-dod 6 \
-  --final-summary "MCP tool calls now record and check their LLM calls for the user in the call's RequestContext, over the MCP transports and /api/v1/tools/execute; a tool that /chat/completions tool auto-execution runs is recorded too and, being admitted, never refused (ADR-076). A refusal is the tool error llm_quota_exceeded and does not trip the module circuit breaker. A caller with no numeric user id is not recorded. In-process claims rebuild tasks carry their owner from every caller (per-media and bulk rebuild, claim-edit follow-up, startup loop) and run under llm_call_root(owner); a refusal fails one task, logs a warning, and the worker continues. ADR-076, ADR-067, the spec, Usage_Quotas.md and the MCP README updated." \
+  --final-summary "MCP tool calls now record and check their LLM calls for the user in the call's RequestContext, over the MCP transports and /api/v1/tools/execute; a tool that /chat/completions tool auto-execution runs is recorded too and, being admitted, never refused (ADR-075). A refusal is the tool error llm_quota_exceeded and does not trip the module circuit breaker. A caller with no numeric user id is not recorded. In-process claims rebuild tasks carry their owner from every caller (per-media and bulk rebuild, claim-edit follow-up, startup loop) and run under llm_call_root(owner); a refusal fails one task, logs a warning, and the worker continues. ADR-075, ADR-067, the spec, Usage_Quotas.md and the MCP README updated." \
   -s Done
 git add -A backlog/tasks
 git commit -m "$(cat <<'EOF'
@@ -1814,7 +1814,7 @@ Check the branch for trailing whitespace: `git diff --check origin/dev...HEAD` p
 - [ ] **Step 11: Review, then open the PR against dev**
 
 1. Run `/superpowers:requesting-code-review` in a clean subagent on `origin/dev...HEAD`, and address its findings before merge.
-2. If the owner accepted ADR-076 (D3), set `**Status:** Accepted` in `Docs/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md` and `Accepted` in its `Docs/ADR/README.md` row, run `bash Helper_Scripts/refresh_docs_published.sh`, and commit both with the `Docs/Published` diff.
+2. If the owner accepted ADR-075 (D3), set `**Status:** Accepted` in `Docs/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md` and `Accepted` in its `Docs/ADR/README.md` row, run `bash Helper_Scripts/refresh_docs_published.sh`, and commit both with the `Docs/Published` diff.
 3. Write the PR body under the system temp directory, not a hard-coded `/tmp` (ADR-006, Review M1), then push and open the PR:
 
 ```bash
@@ -1825,7 +1825,7 @@ gh pr create --base dev --title "feat(usage): record LLM usage for MCP tools, th
 
 `$PR_BODY` must contain:
 - A `## Change summary` section. ADR-004 applies; the owner's Change-summary waiver for LLM usage accounting PRs covers this PR, so record it as a full section. Confirm the waiver with the owner if in doubt.
-- An `## ADR check` section (Review M2): `ADR required: yes. ADR path: Docs/ADR/076-native-messages-and-mcp-tools-use-the-provider-recorder.md (Proposed, or Accepted after D3), extending ADR-067. Reason: two public recorder entry points outside ChatProvider, and MCP tools recorded inside a caller that records itself, change ADR-067's one recording point and one of its consequences.`
+- An `## ADR check` section (Review M2): `ADR required: yes. ADR path: Docs/ADR/075-native-messages-and-mcp-tools-use-the-provider-recorder.md (Proposed, or Accepted after D3), extending ADR-067. Reason: two public recorder entry points outside ChatProvider, and MCP tools recorded inside a caller that records itself, change ADR-067's one recording point and one of its consequences.`
 - The owner's answers to D1, D2 and D3, and the follow-up task id from Step 8.
 - A test list: the four new test files and the suites in Task 1 Step 7, Task 2 Step 7, Task 4 Step 7 and Step 10.
 - It ends with:
