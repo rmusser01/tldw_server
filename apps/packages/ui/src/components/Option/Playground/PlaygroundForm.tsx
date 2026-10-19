@@ -227,6 +227,7 @@ import { useFocusShortcuts } from "~/hooks/keyboard";
 import { isFreshChatSelectionPending } from "~/hooks/chat/fresh-chat-selection";
 import { useMessageOption } from "~/hooks/useMessageOption";
 import { useTabMentions } from "~/hooks/useTabMentions";
+import { composerMentionsAvailable, composerPlaceholder } from "./composer-placeholder";
 import { useWebUI } from "~/store/webui";
 
 import { AttachedResearchContextChip } from "./AttachedResearchContextChip";
@@ -7086,10 +7087,7 @@ export const PlaygroundForm = ({
                                     onCompositionEnd={handleCompositionEnd}
                                     onMouseDown={handleTextareaMouseDown}
                                     onMouseUp={handleTextareaMouseUp}
-                                    placeholder={t(
-                                      "playground:composer.placeholderWithMentions",
-                                      "Type a message... (/ commands, @ mentions)",
-                                    )}
+                                    placeholder={composerPlaceholder(t, composerMentionsAvailable(tabMentionsEnabled))}
                                     isProMode={isProMode}
                                     isMobile={isMobileViewport}
                                     isConnectionReady={isConnectionReady}

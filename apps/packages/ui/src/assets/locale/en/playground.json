@@ -745,7 +745,9 @@
     "previewChanges": "Preview changes",
     "previewCurrent": "Current",
     "previewAfterApplying": "After applying",
-    "sceneDetails": "Scene details"
+    "sceneDetails": "Scene details",
+    "placeholderWithMentions": "Type a message... (/ commands, @ mentions)",
+    "placeholderCommands": "Type a message... (/ for commands)"
   },
   "tour": {
     "modelTitle": "Choose a Model",

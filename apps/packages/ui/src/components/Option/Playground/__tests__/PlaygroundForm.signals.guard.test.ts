@@ -30,7 +30,7 @@ describe("PlaygroundForm signal surface guard", () => {
       "utf8"
     )
 
-    expect(formSource).toContain("Type a message... (/ commands, @ mentions)")
+    expect(formSource).toContain("composerPlaceholder(t, composerMentionsAvailable(tabMentionsEnabled))")
     expect(formSource).toContain("Changed since last send:")
     expect(formSource).toContain("playground:composer.providerDegraded")
     expect(formSource).toContain("playground:composer.presetChanged")

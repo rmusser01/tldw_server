@@ -4594,5 +4594,11 @@
   },
   "composer_advancedPreferenceUnavailable": {
     "message": "Display preference unavailable. Advanced controls still work for this visit."
+  },
+  "composer_placeholderWithMentions": {
+    "message": "Type a message... (/ commands, @ mentions)"
+  },
+  "composer_placeholderCommands": {
+    "message": "Type a message... (/ for commands)"
   }
 }

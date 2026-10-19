@@ -79,6 +79,17 @@ describe("Playground slash commands", { timeout: 60_000 }, () => {
     expect(useStoreMessageOption.getState().webSearch).toBe(false)
   })
 
+  // CC-11: '@' mentions are browser tabs, which only the extension can read.
+  it("does not promise @ mentions in the web app's composer", async () => {
+    const server = createFakeTldwServer()
+    const view = await renderPlayground({ server })
+
+    expect(view.composer).toHaveAttribute(
+      "placeholder",
+      "Type a message... (/ for commands)"
+    )
+  })
+
   it("does not open model settings while '/model' is typed, only when the command is chosen", async () => {
     const server = createFakeTldwServer()
     const view = await renderPlayground({ server })
