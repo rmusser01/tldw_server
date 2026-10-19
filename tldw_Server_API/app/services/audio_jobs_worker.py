@@ -505,6 +505,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                         priority=5,
                         idempotency_key=f"audio-stage:{job['id']}:{next_type}",
                         fair_share_exempt=True,
+                        quota_exempt=True,
                     )
                 except Exception as e:  # noqa: BLE001 - any failure to queue the next stage fails this one
                     ok = False

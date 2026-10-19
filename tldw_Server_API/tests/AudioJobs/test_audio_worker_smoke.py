@@ -1378,3 +1378,37 @@ async def test_a_renewal_error_does_not_end_the_renewals(pipeline_worker, monkey
     await _run_worker_until(worker, lambda: _store_completed(jm), workers=2, seconds=20)
     assert len(stt_calls) == 1
     assert [(j["status"], j["retry_count"]) for j in _jobs_of(jm, "audio_transcribe")] == [("completed", 0)]
+
+
+# --- stage hand-offs and the submit quotas (TASK-13853) ---
+
+
+@pytest.mark.unit
+async def test_audio_pipeline_runs_under_a_submit_quota_of_one(pipeline_worker, monkeypatch):
+    worker, jm, stt_calls = pipeline_worker
+    monkeypatch.setenv("JOBS_QUOTA_SUBMITS_PER_MIN_AUDIO", "1")
+    convert_id = _convert_job(jm)
+    await _run_worker_until(
+        worker, lambda: _store_completed(jm) or (jm.get_job(convert_id) or {}).get("status") == "quarantined"
+    )
+    assert [j["status"] for j in _jobs_of(jm, "audio_store")] == ["completed"]
+    assert (jm.get_job(convert_id) or {}).get("retry_count") == 0
+
+
+@pytest.mark.unit
+async def test_a_hand_off_is_not_refused_by_the_queued_job_quota(pipeline_worker, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    worker, jm, stt_calls = pipeline_worker
+    convert_id = _convert_job(jm)
+    later = jm.create_job(  # the same user's next submission, queued for later
+        domain="audio", queue="default", job_type="audio_convert",
+        payload={"local_path": "/tmp/later.mp3", "model": "whisper-1"}, owner_user_id="7",
+        available_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    monkeypatch.setenv("JOBS_QUOTA_MAX_QUEUED_AUDIO", "1")  # that queued job fills the quota
+    await _run_worker_until(
+        worker, lambda: _store_completed(jm) or (jm.get_job(convert_id) or {}).get("status") == "quarantined"
+    )
+    assert [j["status"] for j in _jobs_of(jm, "audio_store")] == ["completed"]
+    assert (jm.get_job(int(later["id"])) or {}).get("status") == "queued"

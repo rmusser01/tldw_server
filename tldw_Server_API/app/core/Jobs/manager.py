@@ -3515,6 +3515,7 @@ class JobManager:
         expired_lease_policy: ExpiredLeasePolicy = ExpiredLeasePolicy.CONSUME_RETRY,
         quarantine_threshold: int | None = None,
         fair_share_exempt: bool = False,
+        quota_exempt: bool = False,
     ) -> AdmissionResult:
         """Run the complete admission pipeline and return its typed outcome.
 
@@ -3536,6 +3537,8 @@ class JobManager:
             fair_share_exempt: Skip the per-user fair-share limit (not the priority adjustment,
                 which still applies), for a next stage queued by a job that is still running and
                 is about to complete (it replaces that job).
+            quota_exempt: Skip the submit quotas (JOBS_QUOTA_MAX_QUEUED*, JOBS_QUOTA_SUBMITS_PER_MIN*), for
+                the same next stage: it continues a job the owner already submitted.
 
         ``create_job`` delegates here and maps only the final typed outcome to
         its legacy dict/exception contract.
@@ -3766,6 +3769,10 @@ class JobManager:
                         return AdmissionResult.existing(row=existing)
                 raise error  # noqa: TRY003
 
+            max_queued_quota = 0 if quota_exempt else self._quota_get("JOBS_QUOTA_MAX_QUEUED", domain, owner_user_id)
+            submits_per_minute_quota = (
+                0 if quota_exempt else self._quota_get("JOBS_QUOTA_SUBMITS_PER_MIN", domain, owner_user_id)
+            )
             if self.backend == "postgres":
                 command = self._build_create_job_command(
                     domain=domain,
@@ -3823,8 +3830,8 @@ class JobManager:
                     command=command,
                     uuid_value=uuid_val,
                     now=_now_dt,
-                    max_queued_quota=self._quota_get("JOBS_QUOTA_MAX_QUEUED", domain, owner_user_id),
-                    submits_per_minute_quota=self._quota_get("JOBS_QUOTA_SUBMITS_PER_MIN", domain, owner_user_id),
+                    max_queued_quota=max_queued_quota,
+                    submits_per_minute_quota=submits_per_minute_quota,
                     counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                     advisory_xact_lock_key=advisory_xact_lock_key,
                     pre_admission_lookup=pre_admission_lookup,
@@ -3914,12 +3921,8 @@ class JobManager:
                             command=command,
                             uuid_value=uuid_val,
                             now=_now_dt,
-                            max_queued_quota=self._quota_get("JOBS_QUOTA_MAX_QUEUED", domain, owner_user_id),
-                            submits_per_minute_quota=self._quota_get(
-                                "JOBS_QUOTA_SUBMITS_PER_MIN",
-                                domain,
-                                owner_user_id,
-                            ),
+                            max_queued_quota=max_queued_quota,
+                            submits_per_minute_quota=submits_per_minute_quota,
                             counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                             begin_immediate=(
                                 slides_generation or owner_scope_admission is not None
@@ -3977,6 +3980,7 @@ class JobManager:
         expired_lease_policy: ExpiredLeasePolicy = ExpiredLeasePolicy.CONSUME_RETRY,
         quarantine_threshold: int | None = None,
         fair_share_exempt: bool = False,
+        quota_exempt: bool = False,
     ) -> dict[str, Any]:
         """Create a job using the typed admission pipeline and legacy mapping."""
 
@@ -3998,6 +4002,7 @@ class JobManager:
             expired_lease_policy=expired_lease_policy,
             quarantine_threshold=quarantine_threshold,
             fair_share_exempt=fair_share_exempt,
+            quota_exempt=quota_exempt,
         )
         return self._map_admission_result(result)
 

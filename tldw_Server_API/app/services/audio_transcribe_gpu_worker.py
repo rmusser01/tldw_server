@@ -135,6 +135,7 @@ async def run_audio_transcribe_gpu_worker(stop_event: asyncio.Event | None = Non
                 payload=updated_payload,
                 owner_user_id=str(owner),
                 priority=5,
+                quota_exempt=True,
             )
 
         except Exception as e:
