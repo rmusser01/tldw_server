@@ -2961,7 +2961,7 @@ it.each(['settlement', 'capture failure', 'later focus', 'retired account'])("re
     if (outcome === 'later focus' || outcome === 'retired account') screen.getByRole('button', { name: 'Other control' }).focus()
     if (outcome === 'retired account') leaseCurrent = false
     await act(async () => { release(); await held })
-    if (outcome === 'settlement') await waitFor(() => expect(screen.getByRole('button', { name: 'Review conversation history', exact: true })).toHaveFocus())
+    if (outcome === 'settlement') await waitFor(() => expect(screen.getByRole('button', { name: 'Choose what the AI remembers', exact: true })).toHaveFocus())
     else if (outcome === 'capture failure') await waitFor(() => expect(screen.getByRole('alert').closest('[tabindex="-1"]')).toHaveFocus())
     else expect(screen.getByRole('button', { name: 'Other control' })).toHaveFocus()
   } finally { release(); mounted.unmount() }

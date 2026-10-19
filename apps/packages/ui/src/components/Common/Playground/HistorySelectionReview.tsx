@@ -10,6 +10,12 @@ import { RecoveryCallout, StatePanel } from "@/components/ui/state"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import type { HistoryCursorV1 } from "@/types/history-selection"
 import { useVirtualizer } from "@tanstack/react-virtual"
+import {
+  chronologicalHistoryNodes,
+  hasReviewableHistory,
+  partialHistoryCoverage,
+  plainHistoryPreview
+} from "./history-review-presentation"
 import React from "react"
 import { useTranslation } from "react-i18next"
 
@@ -409,7 +415,25 @@ export function HistorySelectionReview({
   })
   const olderRecoveries = recoveries.filter((entry) => entry !== currentRecovery)
 
-  const nodes = selection.capture?.snapshot.nodes || []
+  // Conversation order, so a reply is listed after the question it answers (CC-04).
+  const nodes = React.useMemo(
+    () => chronologicalHistoryNodes(selection.capture?.snapshot.nodes || []),
+    [selection.capture]
+  )
+  const coverage = React.useMemo(
+    () =>
+      selection.status === "ready"
+        ? partialHistoryCoverage(selection.capture, selection.view)
+        : null,
+    [selection.status, selection.capture, selection.view]
+  )
+  const restoreAction = React.useRef<HTMLButtonElement>(null)
+  const roleLabel = (role: string) =>
+    role === "user"
+      ? text("roleUser", "You")
+      : role === "assistant"
+        ? text("roleAssistant", "Assistant")
+        : role
   const rowId = (id: string) => `${identity}-${encodeURIComponent(id)}`
   const virtualizer = useVirtualizer({
     count: nodes.length,
@@ -666,7 +690,7 @@ export function HistorySelectionReview({
             {text(
               entry.turn.persistence === 'server' ? 'nativeRecoveryMessage' : 'recoveryMessage',
               entry.turn.persistence === 'server'
-                ? 'The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.'
+                ? 'The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Choose what the AI remembers. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.'
                 : 'The original send outcome is retained separately from history. It will not be sent again automatically.'
             )}
           </p>
@@ -754,6 +778,23 @@ export function HistorySelectionReview({
       </Button>
     </div>
   )
+
+  // Shown once there is something to choose between (CC-04): two or more
+  // turns, alternative replies, a legacy review, a partial choice to undo, or
+  // a retained outcome whose guidance points here.
+  const reviewAvailable =
+    nodes.length > 0 &&
+    (expanded ||
+      selection.status === "legacy_review_required" ||
+      Boolean(coverage) ||
+      recoveries.length > 0 ||
+      hasReviewableHistory(nodes))
+  const startFresh = async () => {
+    setExpanded(false)
+    const chosen = await selection.choose({ kind: "empty" })
+    if (chosen && mounted.current)
+      requestAnimationFrame(() => restoreAction.current?.focus())
+  }
 
   if (selection.status === "idle") return null
   return (
@@ -977,6 +1018,48 @@ export function HistorySelectionReview({
           {olderRecoveries.map(renderRecovery)}
         </details>
       )}
+      {coverage && (!sendInProgress || coverage.seen === 0) && (
+        <div className="mb-2">
+          {coverage.seen === 0 && (
+            <ul
+              className="mb-2 space-y-1 text-sm text-text-muted opacity-70"
+              aria-label={text("hiddenEarlier", "Earlier messages, hidden from the AI")}>
+              {coverage.hidden.map((node) => (
+                <li key={node.id} className="truncate">
+                  {roleLabel(node.role)} · {plainHistoryPreview(node.preview) ||
+                    (node.assets?.length
+                      ? text("imageOnly", "Image or attachment only")
+                      : text("emptyMessage", "Empty message"))}
+                </li>
+              ))}
+            </ul>
+          )}
+          <div
+            role="status"
+            aria-label={t("historySelection.coverage", {
+              defaultValue: "AI sees {{seen}} of {{total}} messages",
+              seen: coverage.seen,
+              total: coverage.total
+            })}
+            className="flex flex-wrap items-center gap-2 border-t border-border pt-2 text-sm text-text-muted">
+            <span>
+              {t("historySelection.coverage", {
+                defaultValue: "AI sees {{seen}} of {{total}} messages",
+                seen: coverage.seen,
+                total: coverage.total
+              })}
+            </span>
+            <Button
+              ref={restoreAction}
+              variant="ghost"
+              size="sm"
+              disabled={sendInProgress || pending}
+              onClick={() => void selection.choose(coverage.restore)}>
+              {text("restoreAll", "Restore all")}
+            </Button>
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         {selection.status === "ready" && selection.owner?.kind === "native" &&
           selection.capture?.status === "captured" && selection.capture.view === selection.view &&
@@ -994,21 +1077,13 @@ export function HistorySelectionReview({
             {text("refresh", "Refresh history")}
           </Button>
         )}
-        {nodes.length > 0 && (
+        {reviewAvailable && (
           <Button
             ref={trigger}
             variant="text"
             onClick={beginReview}
             disabled={pending}>
-            {text("review", "Review conversation history")}
-          </Button>
-        )}
-        {selection.status === "ready" && nodes.length > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => void selection.choose({ kind: "empty" })}>
-            {text("empty", "Use no prior messages")}
+            {text("review", "Choose what the AI remembers")}
           </Button>
         )}
         {onExpand && (
@@ -1020,24 +1095,37 @@ export function HistorySelectionReview({
       {expanded && (
         <div className="mt-2 border-t border-border pt-3">
           <h3 className="text-base font-semibold">
-            {text("review", "Review conversation history")}
+            {text("review", "Choose what the AI remembers")}
           </h3>
           <p className="text-sm text-text-muted">
-            {text("counts", "Complete source / included path")}: {nodes.length}{" "}
-            / {included.length}
+            {t("historySelection.includedCount", {
+              defaultValue: "{{included}} of {{total}} messages included",
+              included: included.length,
+              total: nodes.length
+            })}
           </p>
           <p className="my-2 text-sm text-text-muted">
             {text(
               "instructions",
-              "Include messages in the order to use. Omitted messages remain alternatives. Arrow keys browse rows; Alt + arrow keys reorder included messages."
+              "Tick the messages the AI should see, in order. Messages you leave out stay in the chat; the AI just won't see them. Arrow keys move between messages; Alt + arrow keys reorder them."
             )}
           </p>
+          {selection.status === "ready" && (
+            <Button
+              variant="secondary"
+              size="sm"
+              className="mb-2"
+              disabled={pending}
+              onClick={() => void startFresh()}>
+              {text("startFresh", "Start fresh: the AI sees no earlier messages")}
+            </Button>
+          )}
           <div
             ref={scroller}
             className="max-h-[30rem] overflow-auto"
             style={{ height: Math.min(480, nodes.length * 132) }}
             role="list"
-            aria-label={text("source", "Complete source messages")}>
+            aria-label={text("source", "Messages in this chat")}>
             <div
               style={{
                 height: virtualizer.getTotalSize(),
@@ -1047,7 +1135,7 @@ export function HistorySelectionReview({
                 const node = nodes[item.index]
                 const position = included.indexOf(node.id)
                 const preview =
-                  node.preview ||
+                  plainHistoryPreview(node.preview) ||
                   (node.assets?.length
                     ? text("imageOnly", "Image or attachment only")
                     : text("emptyMessage", "Empty message"))
@@ -1080,17 +1168,20 @@ export function HistorySelectionReview({
                         checked={position >= 0}
                         disabled={pending}
                         onChange={() => changeIncluded(node.id)}
-                        aria-label={`${text("include", "Include")} ${node.role}: ${preview}`}
+                        aria-label={`${text("include", "Include")} ${roleLabel(node.role)}: ${preview}`}
                       />
                       <span>
-                        <strong>{node.role}</strong> · {preview}
+                        <strong>{roleLabel(node.role)}</strong> · {preview}
                       </span>
                     </label>
                     <div className="mt-1 flex flex-wrap items-center gap-2">
                       <span className="text-text-muted">
                         {position < 0
-                          ? text("omitted", "Omitted alternative")
-                          : `${text("position", "Path position")} ${position + 1}`}
+                          ? text("omitted", "Hidden from the AI")
+                          : t("historySelection.includedPosition", {
+                              defaultValue: "AI sees this as message {{position}}",
+                              position: position + 1
+                            })}
                       </span>
                       {position >= 0 && (
                         <>
@@ -1162,7 +1253,7 @@ export function HistorySelectionReview({
           <p className="my-2 text-sm text-text-muted">
             {text(
               "confirmEffect",
-              "Confirm creates a saved interpretation of this complete source. It does not delete omitted alternatives."
+              "Confirming saves this choice for the chat. Nothing is deleted: messages you leave out are only hidden from the AI."
             )}
           </p>
           <div className="flex flex-wrap gap-2">

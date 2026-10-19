@@ -3405,7 +3405,7 @@
     "message": "Connect this conversation"
   },
   "historySelection_review": {
-    "message": "Review conversation history"
+    "message": "Choose what the AI remembers"
   },
   "historySelection_empty": {
     "message": "Use no prior messages"
@@ -3417,10 +3417,10 @@
     "message": "Complete source / included path"
   },
   "historySelection_instructions": {
-    "message": "Include messages in the order to use. Omitted messages remain alternatives. Arrow keys browse rows; Alt + arrow keys reorder included messages."
+    "message": "Tick the messages the AI should see, in order. Messages you leave out stay in the chat; the AI just won't see them. Arrow keys move between messages; Alt + arrow keys reorder them."
   },
   "historySelection_source": {
-    "message": "Complete source messages"
+    "message": "Messages in this chat"
   },
   "historySelection_imageOnly": {
     "message": "Image or attachment only"
@@ -3432,7 +3432,7 @@
     "message": "Include"
   },
   "historySelection_omitted": {
-    "message": "Omitted alternative"
+    "message": "Hidden from the AI"
   },
   "historySelection_position": {
     "message": "Path position"
@@ -3453,7 +3453,7 @@
     "message": "Through last included message"
   },
   "historySelection_confirmEffect": {
-    "message": "Confirm creates a saved interpretation of this complete source. It does not delete omitted alternatives."
+    "message": "Confirming saves this choice for the chat. Nothing is deleted: messages you leave out are only hidden from the AI."
   },
   "historySelection_confirm": {
     "message": "Confirm selected history"
@@ -3477,7 +3477,7 @@
     "message": "The original send outcome is retained separately from history. It will not be sent again automatically."
   },
   "historySelection_nativeRecoveryMessage": {
-    "message": "The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically."
+    "message": "The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Choose what the AI remembers. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically."
   },
   "historySelection_inspectRecovery": {
     "message": "Inspect original input and result"
@@ -4594,5 +4594,29 @@
   },
   "composer_advancedPreferenceUnavailable": {
     "message": "Display preference unavailable. Advanced controls still work for this visit."
+  },
+  "historySelection_includedCount": {
+    "message": "{{included}} of {{total}} messages included"
+  },
+  "historySelection_includedPosition": {
+    "message": "AI sees this as message {{position}}"
+  },
+  "historySelection_startFresh": {
+    "message": "Start fresh: the AI sees no earlier messages"
+  },
+  "historySelection_coverage": {
+    "message": "AI sees {{seen}} of {{total}} messages"
+  },
+  "historySelection_restoreAll": {
+    "message": "Restore all"
+  },
+  "historySelection_hiddenEarlier": {
+    "message": "Earlier messages, hidden from the AI"
+  },
+  "historySelection_roleUser": {
+    "message": "You"
+  },
+  "historySelection_roleAssistant": {
+    "message": "Assistant"
   }
 }
