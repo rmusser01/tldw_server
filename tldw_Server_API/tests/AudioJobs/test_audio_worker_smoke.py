@@ -1418,6 +1418,47 @@ async def test_a_hand_off_is_not_refused_by_the_queued_job_quota(pipeline_worker
 # --- long recordings and refused hand-offs (TASK-13851) ---
 
 
+def _long_transcript(minutes: int) -> dict:
+    """An STT artifact shaped like faster-whisper's: one segment every 5 s, about 150 words a minute."""
+    segments = [
+        {"start_seconds": 5.0 * i, "end_seconds": 5.0 * i + 5, "Time_Start": 5.0 * i, "Time_End": 5.0 * i + 5,
+         "Text": f"Part {i} of the talk, where the speaker keeps on explaining the topic."}
+        for i in range(minutes * 12)
+    ]
+    return {"text": " ".join(s["Text"] for s in segments), "language": "en", "segments": segments,
+            "diarization": {"enabled": False, "speakers": None}, "usage": {"duration_ms": None, "tokens": None},
+            "metadata": {"provider": "faster-whisper", "model": "large-v3"}}
+
+
+@pytest.mark.unit
+async def test_a_three_hour_recording_runs_through_every_stage(pipeline_worker, monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    worker, jm, stt_calls = pipeline_worker
+    artifact = _long_transcript(180)
+
+    def _long_stt(wav_path, model, *args, **kwargs):
+        stt_calls.append(wav_path)
+        return artifact
+
+    monkeypatch.setattr(atlib, "run_stt_job_via_registry", _long_stt)
+    jm.create_job(
+        domain="audio", queue="default", job_type="audio_convert",
+        payload={"local_path": "/tmp/long.mp3", "model": "whisper-1", "perform_chunking": True, "perform_analysis": False},
+        owner_user_id="7",
+    )
+    await _run_worker_until(
+        worker,
+        lambda: _store_completed(jm) or any(j["status"] in {"failed", "quarantined"} for j in jm.list_jobs(domain="audio")),
+        seconds=20,
+    )
+    assert [j["status"] for j in _jobs_of(jm, "audio_store")] == ["completed"], jm.list_jobs(domain="audio")
+    assert len(stt_calls) == 1
+    stored = _jobs_of(jm, "audio_store")[0]["payload"]
+    assert stored["text"] == artifact["text"] and stored["segments"] == artifact["segments"]
+    assert stored["chunks"]
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("env", "value", "segment_extra"),

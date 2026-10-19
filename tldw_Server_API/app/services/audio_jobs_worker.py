@@ -159,7 +159,7 @@ async def _handle_audio_transcribe_stage(payload: dict[str, Any]) -> tuple[dict[
     expected shape for downstream stages:
       - `segments`: list of segment dicts
       - `text`: merged transcript string
-      - `normalized_stt`: full normalized STT artifact
+      - `normalized_stt`: the rest of the STT artifact (language, diarization, usage, metadata)
     """
     wav_path = payload.get("wav_path")
     if not wav_path:
@@ -200,9 +200,9 @@ async def _handle_audio_transcribe_stage(payload: dict[str, Any]) -> tuple[dict[
     updated_payload = dict(payload)
     updated_payload["segments"] = segments_list
     updated_payload["text"] = text_merged
-    # Attach full normalized artifact for future stages without breaking
-    # existing consumers that rely only on 'text' and 'segments'.
-    updated_payload["normalized_stt"] = artifact
+    # The artifact's metadata (language, usage, provider); its text and segments are already above, and
+    # carrying them twice would put a long recording's payload over JOBS_MAX_JSON_BYTES.
+    updated_payload["normalized_stt"] = {k: v for k, v in artifact.items() if k not in ("text", "segments")}
 
     return updated_payload, stage_after_transcription(payload)
 
