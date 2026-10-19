@@ -675,3 +675,34 @@ async def test_rag_quota_refusal_in_a_later_metric_is_raised_not_kept_as_a_parti
         )
 
     assert calls >= 2
+
+
+# Every summary code and the evaluations response it gets (TASK-13844). A new summary code
+# fails the set check until someone chooses its response here.
+_EVAL_RESPONSE_FOR_SUMMARY_CODE = {
+    "authentication": (502, "provider_authentication_failed"),
+    "missing_credentials": (503, "missing_provider_credentials"),
+    "configuration": (503, "provider_configuration_invalid"),
+    "invalid_provider": (503, "provider_configuration_invalid"),
+    "adapter_unavailable": (503, "provider_configuration_invalid"),
+    "missing_model": (503, "provider_configuration_invalid"),
+    "rate_limit": (502, "provider_unavailable"),
+    "provider_quota_exhausted": (502, "provider_unavailable"),
+    "request_rejected": (502, "provider_unavailable"),
+    "provider_failure": (502, "provider_unavailable"),
+}
+
+
+def test_every_summary_code_has_a_chosen_evaluations_response() -> None:
+    from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as sgl
+
+    assert set(_EVAL_RESPONSE_FOR_SUMMARY_CODE) == sgl._SUMMARY_ERROR_CODES
+
+
+@pytest.mark.parametrize(("summary_code", "expected"), sorted(_EVAL_RESPONSE_FOR_SUMMARY_CODE.items()))
+def test_summary_code_maps_to_its_evaluations_response(summary_code: str, expected: tuple[int, str]) -> None:
+    response = eval_endpoint._eval_provider_http_exception(
+        SummaryProviderError(code=summary_code, provider="openai")
+    )
+
+    assert (response.status_code, response.detail["error_code"]) == expected
