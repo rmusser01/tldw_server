@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
         MultiDatabaseRetriever,
@@ -407,6 +409,9 @@ class FVAPipeline:
             *[process_with_semaphore(c) for c in claims],
             return_exceptions=True,
         )
+        refusal = next((r for r in results if isinstance(r, LLMQuotaExceededError)), None)
+        if refusal is not None:
+            raise refusal  # the user's limit fails the batch; a refused claim is not dropped from it
 
         # Filter out exceptions
         valid_results: list[FVAResult] = [

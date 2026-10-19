@@ -68,7 +68,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, RetryExhaustedError
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMQuotaExceededError, RetryExhaustedError
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
@@ -610,6 +610,8 @@ def _fva_claims_analyze_call(
     try:
         response = perform_chat_api_call(**call_kwargs)
         return coerce_llm_response_text(response)
+    except LLMQuotaExceededError:
+        raise  # the user's limit: not an empty reply for the verifier to score without the LLM
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"FVA analyze function failed: {exc}")
         return ""
