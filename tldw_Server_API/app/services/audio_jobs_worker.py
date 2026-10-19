@@ -87,6 +87,62 @@ def _next_stage_queue(next_type: str) -> str:
     return "transcribe" if next_type == "audio_transcribe" and gpu else "default"
 
 
+# Waits between attempts to queue the next stage. An error other than a refusal is retried this way, without
+# running the stage again; after the last attempt the stage fails and is retried as a whole.
+_ENQUEUE_RETRY_DELAYS: tuple[float, ...] = (1.0, 2.0)
+
+
+async def hand_off(
+    jm: JobManager,
+    job: dict[str, Any],
+    next_type: str,
+    payload: dict[str, Any],
+    *,
+    worker_id: str,
+    result: dict[str, Any] | None = None,
+) -> _StageFailure | None:
+    """Queue the next stage, then complete this one with ``result``. Return the failure to record, or None.
+
+    The next stage is queued first, so a failed hand-off fails this stage instead of completing it with nothing
+    after it. The key makes a re-run stage reuse the next stage it already queued, which also makes a repeated
+    enqueue safe. The next stage continues this job, so it is exempt from the per-user fair-share limit and the
+    submit quotas.
+    """
+    next_queue = _next_stage_queue(next_type)
+    for delay in (*_ENQUEUE_RETRY_DELAYS, None):
+        try:
+            jm.create_job(
+                domain=DOMAIN,
+                queue=next_queue,
+                job_type=next_type,
+                payload=payload,
+                owner_user_id=str(job.get("owner_user_id")),
+                priority=5,
+                idempotency_key=f"audio-stage:{job['id']}:{next_type}",
+                fair_share_exempt=True,
+                quota_exempt=True,
+            )
+            break
+        except (TypeError, ValueError) as e:
+            # A refusal (a payload over JOBS_MAX_JSON_BYTES or not JSON, a queue or job type that is not allowed,
+            # a JOBS_SECRET_REJECT match) repeats every time: fail now instead of running the stage again.
+            # The log names only the error type; the job row's error keeps the detail.
+            logger.warning("Audio job {}: could not queue {} ({})", job["id"], next_type, type(e).__name__)
+            return _StageFailure(
+                f"could not queue {next_type}: {e}", failure_code="next_stage_enqueue_failed", retryable=False
+            )
+        except Exception as e:  # noqa: BLE001 - any other error may pass when the enqueue alone is retried
+            logger.warning("Audio job {}: could not queue {} ({})", job["id"], next_type, type(e).__name__)
+            if delay is None:
+                return _StageFailure(
+                    f"could not queue {next_type}: {e}", failure_code="next_stage_enqueue_failed", retryable=True
+                )
+            await asyncio.sleep(delay)
+    lease_id = str(job.get("lease_id"))
+    jm.complete_job(int(job["id"]), result=result, worker_id=worker_id, lease_id=lease_id, completion_token=lease_id)
+    return None
+
+
 def stage_after_transcription(payload: dict[str, Any]) -> str:
     """The stage after audio_transcribe: chunking first if asked, then analysis if asked, then store."""
     if payload.get("perform_chunking"):
@@ -490,43 +546,15 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                 failure = e
 
             if ok and next_type:
-                # Queue the next stage before completing this one, so a failed hand-off fails this job
-                # instead of leaving it completed with nothing after it. The key makes a retried stage
-                # reuse the next stage it already queued. The next stage replaces this running job, so
-                # it is exempt from the per-user fair-share limit, which would count this job against it.
-                next_queue = _next_stage_queue(next_type)
-                try:
-                    jm.create_job(
-                        domain=DOMAIN,
-                        queue=next_queue,
-                        job_type=next_type,
-                        payload=updated_payload,
-                        owner_user_id=str(owner),
-                        priority=5,
-                        idempotency_key=f"audio-stage:{job['id']}:{next_type}",
-                        fair_share_exempt=True,
-                        quota_exempt=True,
-                    )
-                except Exception as e:  # noqa: BLE001 - any failure to queue the next stage fails this one
+                # A failed analysis completes its stage; the result keeps the reason visible on this job.
+                analysis_error = updated_payload.get("analysis_error")
+                failure = await hand_off(
+                    jm, job, next_type, updated_payload, worker_id=worker_id,
+                    result={"analysis_error": analysis_error} if analysis_error else None,
+                )
+                if failure is not None:
                     ok = False
-                    msg_err = f"could not queue {next_type}: {e}"
-                    logger.warning(f"Audio job {job['id']}: {msg_err}")
-                    # A refused queue fails the same way every time; a quota or a transient error may pass on retry.
-                    failure = _StageFailure(
-                        msg_err,
-                        failure_code="next_stage_enqueue_failed",
-                        retryable=next_queue in jm._get_allowed_queues(DOMAIN),
-                    )
-                else:
-                    # A failed analysis completes its stage; the result keeps the reason visible on this job.
-                    analysis_error = updated_payload.get("analysis_error")
-                    jm.complete_job(
-                        int(job["id"]),
-                        result={"analysis_error": analysis_error} if analysis_error else None,
-                        worker_id=worker_id,
-                        lease_id=str(job.get("lease_id")),
-                        completion_token=str(job.get("lease_id")),
-                    )
+                    msg_err = str(failure)
             elif ok:
                 jm.complete_job(int(job["id"]), result={"payload": updated_payload}, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
             if not ok:

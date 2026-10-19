@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     increment_jobs_started,
 )
 from tldw_Server_API.app.services.audio_jobs_worker import (
+    hand_off,
     stage_after_transcription,
     start_lease_renewal,
     stop_lease_renewal,
@@ -105,7 +106,11 @@ async def run_audio_transcribe_gpu_worker(stop_event: asyncio.Event | None = Non
             if not job:
                 await asyncio.sleep(poll_sleep)
                 continue
-            owner = job.get("owner_user_id") or "0"
+            owner = job.get("owner_user_id")
+            if not owner:
+                # As the in-process worker does: a job without an owner fails instead of running as user 0.
+                jm.fail_job(int(job["id"]), error="missing owner_user_id", retryable=False, worker_id=worker_id, lease_id=str(job.get("lease_id")))
+                continue
 
             # Only process audio_transcribe jobs here
             jtype = str(job.get("job_type") or "").lower()
@@ -126,17 +131,19 @@ async def run_audio_transcribe_gpu_worker(stop_event: asyncio.Event | None = Non
             payload: dict[str, Any] = job.get("payload") or {}
             updated_payload = await _handle_gpu_audio_transcribe_stage(payload)
 
-            # Complete and enqueue next stage
-            jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(job.get("lease_id")))
-            jm.create_job(
-                domain=DOMAIN,
-                queue="default",
-                job_type=stage_after_transcription(payload),
-                payload=updated_payload,
-                owner_user_id=str(owner),
-                priority=5,
-                quota_exempt=True,
-            )
+            next_type = stage_after_transcription(payload)
+            failure = await hand_off(jm, job, next_type, updated_payload, worker_id=worker_id)
+            if failure is not None:
+                lease_id = str(job.get("lease_id"))
+                jm.fail_job(
+                    int(job["id"]),
+                    error=str(failure),
+                    retryable=failure.retryable,
+                    error_code=failure.failure_code,
+                    worker_id=worker_id,
+                    lease_id=lease_id,
+                    completion_token=lease_id,
+                )
 
         except Exception as e:
             try:
