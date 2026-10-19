@@ -2065,5 +2065,11 @@
   },
   "table_label": {
     "message": "Table"
+  },
+  "help_tutorialList": {
+    "message": "Tutorial list"
+  },
+  "help_shortcutList": {
+    "message": "Shortcut list"
   }
 }

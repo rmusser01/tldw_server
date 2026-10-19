@@ -702,7 +702,9 @@
     "pageHelp": "Page Help",
     "tutorials": "Tutorials",
     "shortcuts": "Shortcuts",
-    "tutorialsHint": "Complete tutorials to learn the interface"
+    "tutorialsHint": "Complete tutorials to learn the interface",
+    "tutorialList": "Tutorial list",
+    "shortcutList": "Shortcut list"
   },
   "shortcuts": {
     "title": "Keyboard Shortcuts",
