@@ -1326,11 +1326,18 @@ def _store_completed(jm) -> bool:
 
 
 @pytest.mark.unit
-async def test_a_stage_longer_than_its_lease_runs_once(pipeline_worker, monkeypatch):
+@pytest.mark.parametrize(
+    ("lease", "max_lease"),
+    # Acquisition caps the lease at JOBS_LEASE_MAX_SECONDS: an 8 s setting is a 2 s lease, renewed at 1 s, not 4 s.
+    [("2", "3600"), ("8", "2")],
+    ids=["lease", "lease-over-the-max"],
+)
+async def test_a_stage_longer_than_its_lease_runs_once(pipeline_worker, monkeypatch, lease, max_lease):
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
 
     worker, jm, stt_calls = pipeline_worker
-    monkeypatch.setenv("JOBS_LEASE_SECONDS", "2")
+    monkeypatch.setenv("JOBS_LEASE_SECONDS", lease)
+    monkeypatch.setenv("JOBS_LEASE_MAX_SECONDS", max_lease)
 
     def _slow_stt(wav_path, model, *args, **kwargs):
         stt_calls.append(wav_path)
@@ -1412,19 +1419,71 @@ async def test_a_renewal_error_does_not_end_the_renewals(pipeline_worker, monkey
     assert [(j["status"], j["retry_count"]) for j in _jobs_of(jm, "audio_transcribe")] == [("completed", 0)]
 
 
+def _refusing_jobs():
+    """A Jobs stub whose every lease renewal is refused; it records (seconds after the start, seconds renewed)."""
+    started = time.monotonic()
+    renewals = []
+
+    def _renew(job_id, *, seconds, **kwargs):
+        renewals.append((time.monotonic() - started, seconds))
+        return False
+
+    return SimpleNamespace(renew_job_lease=_renew), renewals
+
+
+@pytest.mark.unit
+async def test_lease_renewal_stops_itself_once_a_renewal_is_refused(monkeypatch):
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+
+    monkeypatch.delenv("JOBS_LEASE_MAX_SECONDS", raising=False)
+    jm, renewals = _refusing_jobs()
+    task = worker.start_lease_renewal(jm, {"id": 1, "lease_id": "lease"}, worker_id="w", lease_seconds=2)
+    await asyncio.wait_for(task, timeout=3)  # a renewal at 1 s is refused; one that carried on would run past 3 s
+    assert len(renewals) == 1
+
+
+@pytest.mark.unit
+async def test_an_adaptive_lease_is_renewed_at_half_the_lease_granted(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+
+    jm, renewals = _refusing_jobs()
+    # JOBS_LEASE_SECONDS=0 lets acquisition choose the lease; the job row says what it granted (SQLite's format).
+    leased_until = (datetime.now(timezone.utc) + timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
+    task = worker.start_lease_renewal(
+        jm, {"id": 1, "lease_id": "lease", "leased_until": leased_until}, worker_id="w", lease_seconds=0
+    )
+    await asyncio.wait_for(task, timeout=5)
+    [(at, seconds)] = renewals
+    assert seconds >= 4  # about the 5 s granted, not 1 s
+    assert 1.9 <= at < 4  # half the lease, not every second
+
+
 # --- stage hand-offs and the submit quotas (TASK-13853) ---
 
 
 @pytest.mark.unit
 async def test_audio_pipeline_runs_under_a_submit_quota_of_one(pipeline_worker, monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files as audio_files
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as summarization
+    from tldw_Server_API.app.api.v1.endpoints.audio.audio_jobs import SubmitAudioJobRequest, submit_audio_job
+
     worker, jm, stt_calls = pipeline_worker
-    monkeypatch.setenv("JOBS_QUOTA_SUBMITS_PER_MIN_AUDIO", "1")
-    convert_id = _convert_job(jm)
-    await _run_worker_until(
-        worker, lambda: _store_completed(jm) or (jm.get_job(convert_id) or {}).get("status") == "quarantined"
+    adapter = _AnalysisAdapter()
+    monkeypatch.setattr(audio_files, "download_audio_file", lambda url, *args, **kwargs: "/tmp/pipeline.mp3")
+    monkeypatch.setattr(summarization, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: adapter))
+    monkeypatch.setattr(summarization, "load_and_log_configs", lambda: {"openai_api": {"model": "configured-model"}})
+    monkeypatch.setenv("JOBS_QUOTA_SUBMITS_PER_MIN_AUDIO", "1")  # the submission uses it up
+    request = SubmitAudioJobRequest(
+        url="https://example.com/talk.mp3", model="whisper-1", perform_chunking=True, perform_analysis=True,
+        api_name="openai",
     )
-    assert [j["status"] for j in _jobs_of(jm, "audio_store")] == ["completed"]
-    assert (jm.get_job(convert_id) or {}).get("retry_count") == 0
+    await submit_audio_job(request, SimpleNamespace(id=7), jm, None)
+    await _run_worker_until(worker, lambda: _store_completed(jm))
+    stages = ["audio_download", "audio_convert", "audio_transcribe", "audio_chunk", "audio_analyze", "audio_store"]
+    ran = [(j["job_type"], j["status"], j["retry_count"]) for stage in stages for j in _jobs_of(jm, stage)]
+    assert ran == [(stage, "completed", 0) for stage in stages]
 
 
 @pytest.mark.unit
