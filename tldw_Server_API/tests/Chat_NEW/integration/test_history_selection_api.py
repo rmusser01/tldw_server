@@ -35,6 +35,24 @@ def capture(client, cid, headers, **overrides):
         "selection_revision": 1, **overrides}})
 
 
+def test_regenerate_capture_capability_is_opt_in_and_ordinary_wire_is_unchanged(history_api):
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "capability-question", "conversation_id": cid,
+                               "sender": "user", "content": "why?"})
+    ordinary = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question})
+    assert ordinary.status_code == 200, ordinary.text  # nosec B101 # pytest contract assertion
+    assert "acknowledged_capability" not in ordinary.json()  # nosec B101 # pytest contract assertion
+
+    view = ordinary.json()["view"]
+    opted_in = client.post(f"/api/v1/chat/conversations/{cid}/history/selection", headers=headers, json={
+        "purpose": "send", "view": view,
+        "required_capability": "tldw_history_existing_input_v1"})
+    assert opted_in.status_code == 200, opted_in.text  # nosec B101 # pytest contract assertion
+    assert opted_in.json()["status"] == "captured"  # nosec B101 # pytest contract assertion
+    assert opted_in.json()["acknowledged_capability"] == "tldw_history_existing_input_v1"  # nosec B101 # pytest contract assertion
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101 # pytest contract assertion
+
+
 def test_capture_bootstrap_and_generic_admission_before_assistant(history_api):
     client, db, cid, headers = history_api
     response = capture(client, cid, headers)
@@ -52,6 +70,197 @@ def test_capture_bootstrap_and_generic_admission_before_assistant(history_api):
         "id": "api-reply", "role": "assistant", "content": "hi", "tldw_history_admission_v1": reference})
     assert saved.status_code == 201, saved.text
     assert db.get_message_by_id("api-reply")["parent_message_id"] == "api-input"
+
+
+def test_existing_question_regenerate_keeps_question_and_replays_only_exact_answer(history_api):
+    client, db, cid, headers = history_api
+    ancestor = db.add_message({"id": "ancestor-question", "conversation_id": cid, "sender": "user", "content": "first?"})
+    ancestor_answer = db.add_message({"id": "ancestor-answer", "conversation_id": cid, "sender": "assistant",
+                                      "content": "first answer", "parent_message_id": ancestor})
+    question = db.add_message({"id": "old-question", "conversation_id": cid, "sender": "user",
+                               "content": "why?", "parent_message_id": ancestor_answer})
+    original = db.add_message({"id": "old-answer", "conversation_id": cid, "sender": "assistant",
+                               "content": "because", "parent_message_id": question})
+    later = db.add_message({"id": "later-question", "conversation_id": cid, "sender": "user",
+                            "content": "and then?", "parent_message_id": original})
+    suffix = db.add_message({"id": "later-answer", "conversation_id": cid, "sender": "assistant",
+                             "content": "later", "parent_message_id": later})
+    before_question = db.get_message_by_id(question)
+    before_answer = db.get_message_by_id(original)
+    before_suffix = [db.get_message_by_id(later), db.get_message_by_id(suffix)]
+    with db.transaction() as conn:
+        original_authority = conn.execute(
+            "SELECT history_admission_json FROM messages WHERE id = ?", (question,)
+        ).fetchone()["history_admission_json"]
+    body = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    assert body["status"] == "captured"  # nosec B101 # pytest contract assertion
+    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "prepared-request")["selection"]
+    assert [row["id"] for row in selection["messages"]] == [ancestor, ancestor_answer, question]  # nosec B101 # pytest contract assertion
+    payload = {"id": "new-answer", "role": "assistant", "content": "another reason",
+               "tldw_history_existing_input_v1": selection}
+    first = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json=payload)
+    assert first.status_code == 201, first.text  # nosec B101 # pytest contract assertion
+    assert first.json()["id"] == "new-answer"  # nosec B101 # pytest contract assertion
+    assert db.get_message_by_id("new-answer")["parent_message_id"] == question  # nosec B101 # pytest contract assertion
+    assert db.get_message_by_id(question) == before_question  # nosec B101 # pytest contract assertion
+    assert db.get_message_by_id(original) == before_answer  # nosec B101 # pytest contract assertion
+    assert [db.get_message_by_id(later), db.get_message_by_id(suffix)] == before_suffix  # nosec B101 # pytest contract assertion
+    with db.transaction() as conn:
+        assert conn.execute(  # nosec B101 # pytest contract assertion
+            "SELECT history_admission_json FROM messages WHERE id = ?", (question,)
+        ).fetchone()["history_admission_json"] == original_authority
+    refreshed = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    assert refreshed["status"] == "captured"  # nosec B101 # pytest contract assertion
+    assert refreshed["rows"][-1]["revision"] == body["rows"][-1]["revision"]  # nosec B101 # pytest contract assertion
+    assert db.count_messages_for_conversation(cid) == 7  # nosec B101 # pytest contract assertion
+
+    # A changed retained ancestor makes the original selection stale for a
+    # first write, while exact replay of an already committed ID still works.
+    db.update_message(ancestor, {"content": "changed first question"}, expected_version=1)
+    changed_path = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    assert changed_path["rows"][-1]["revision"] == body["rows"][-1]["revision"]  # nosec B101 # pytest contract assertion
+    stale_new = client.post(f"/api/v1/chats/{cid}/messages", headers=headers,
+                            json={**payload, "id": "new-after-stale-ancestor"})
+    assert stale_new.status_code == 409, stale_new.text  # nosec B101 # pytest contract assertion
+    replay = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json=payload)
+    assert replay.status_code == 201, replay.text  # nosec B101 # pytest contract assertion
+    assert replay.json()["id"] == "new-answer"  # nosec B101 # pytest contract assertion
+    assert db.count_messages_for_conversation(cid) == 7  # nosec B101 # pytest contract assertion
+    conflict = client.post(f"/api/v1/chats/{cid}/messages", headers=headers,
+                           json={**payload, "content": "changed answer"})
+    assert conflict.status_code == 409, conflict.text  # nosec B101 # pytest contract assertion
+    assert db.get_message_by_id("new-answer")["content"] == "another reason"  # nosec B101 # pytest contract assertion
+    db.update_message("new-answer", {"content": "edited later"}, expected_version=1)
+    edited_replay = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json=payload)
+    assert edited_replay.status_code == 409, edited_replay.text  # nosec B101 # pytest contract assertion
+
+
+def test_existing_question_regenerate_rejects_stale_or_foreign_selection_without_write(history_api):
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "stale-question", "conversation_id": cid, "sender": "user", "content": "why?"})
+    body = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "prepared-request")["selection"]
+    payload = {"id": "rejected-answer", "role": "assistant", "content": "answer",
+               "tldw_history_existing_input_v1": selection}
+    foreign = client.post(f"/api/v1/chats/{cid}/messages", headers=headers,
+                          json={**payload, "tldw_history_existing_input_v1": {**selection, "owner_key": "foreign"}})
+    assert foreign.status_code == 409, foreign.text  # nosec B101 # pytest contract assertion
+    db.update_message(question, {"content": "edited?"}, expected_version=1)
+    stale = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json=payload)
+    assert stale.status_code == 409, stale.text  # nosec B101 # pytest contract assertion
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101 # pytest contract assertion
+
+
+def test_existing_question_regenerate_rejects_wrong_role_cursor_and_parent(history_api):
+    client, db, cid, headers = history_api
+    db.add_message({"id": "another-question", "conversation_id": cid,
+                    "sender": "user", "content": "another question"})
+    question = db.add_message({"id": "guard-question", "conversation_id": cid,
+                               "sender": "user", "content": "why?",
+                               "parent_message_id": "another-question"})
+    selected = capture(client, cid, headers,
+                       cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(
+        selected["snapshot"], selected["view"], "send", "prepared-guard"
+    )["selection"]
+    payload = {"id": "guard-answer", "role": "assistant", "content": "because",
+               "tldw_history_existing_input_v1": selection}
+    wrong_role = client.post(f"/api/v1/chats/{cid}/messages", headers=headers,
+                             json={**payload, "role": "user"})
+    assert wrong_role.status_code == 422, wrong_role.text  # nosec B101 # pytest contract assertion
+    competing_contract = client.post(f"/api/v1/chats/{cid}/messages", headers=headers,
+                                     json={**payload, "tldw_history_admission_v1": {
+                                         "version": 1, "owner_key": selection["owner_key"],
+                                         "conversation_id": cid, "input_message_id": question,
+                                         "input_message_revision": selection["messages"][-1]["revision"],
+                                         "selection_digest": selection["selection_digest"]}})
+    assert competing_contract.status_code == 422, competing_contract.text  # nosec B101 # pytest contract assertion
+    wrong_parent = client.post(f"/api/v1/chats/{cid}/messages", headers=headers,
+                               json={**payload, "parent_message_id": "another-question"})
+    assert wrong_parent.status_code == 409, wrong_parent.text  # nosec B101 # pytest contract assertion
+    wrong_cursor = client.post(f"/api/v1/chats/{cid}/messages", headers=headers,
+                               json={**payload, "tldw_history_existing_input_v1": {
+                                   **selection, "cursor": {"kind": "empty"}}})
+    assert wrong_cursor.status_code == 409, wrong_cursor.text  # nosec B101 # pytest contract assertion
+    assert db.count_messages_for_conversation(cid) == 2  # nosec B101 # pytest contract assertion
+
+    answer = db.add_message({"id": "guard-original", "conversation_id": cid,
+                             "sender": "assistant", "content": "original", "parent_message_id": question})
+    selected_answer = capture(client, cid, headers,
+                              cursor={"kind": "after_message", "message_id": answer}).json()
+    answer_selection = resolve_history_selection(
+        selected_answer["snapshot"], selected_answer["view"], "send", "prepared-answer"
+    )["selection"]
+    wrong_terminal_role = client.post(f"/api/v1/chats/{cid}/messages", headers=headers,
+                                      json={**payload, "tldw_history_existing_input_v1": answer_selection})
+    assert wrong_terminal_role.status_code == 409, wrong_terminal_role.text  # nosec B101 # pytest contract assertion
+    assert db.count_messages_for_conversation(cid) == 3  # nosec B101 # pytest contract assertion
+
+
+def test_existing_question_regenerate_refuses_wrong_workspace_scope(history_api):
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "workspace-question", "conversation_id": cid,
+                               "sender": "user", "content": "why?"})
+    body = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "prepared-workspace")["selection"]
+    response = client.post(f"/api/v1/chats/{cid}/messages?scope_type=workspace&workspace_id=other",
+                           headers=headers, json={"id": "wrong-workspace-answer", "role": "assistant",
+                                                  "content": "must not save", "tldw_history_existing_input_v1": selection})
+    assert response.status_code in (403, 404, 409), response.text  # nosec B101 # pytest contract assertion
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101 # pytest contract assertion
+
+
+def test_existing_question_regenerate_preserves_reviewed_legacy_question(history_api):
+    client, db, cid, headers = history_api
+    first = db.add_message({"id": "legacy-first", "conversation_id": cid, "sender": "user", "content": "one"})
+    question = db.add_message({"id": "legacy-question", "conversation_id": cid, "sender": "user", "content": "two"})
+    unreviewed = capture(client, cid, headers).json()
+    assert unreviewed["status"] == "legacy_review_required"  # nosec B101 # pytest contract assertion
+    source = unreviewed["snapshot"]
+    confirmation = {"version": 1, "projection_id": "regenerate-review", "owner_key": source["owner_key"],
+                    "conversation_id": cid, "source_digest": source["source_digest"], "fences": source["fences"],
+                    "source_members": [{"id": row["id"], "revision": row["revision"]} for row in source["nodes"]],
+                    "ordered_path_ids": [first, question],
+                    "cursor": {"kind": "after_message", "message_id": question}, "selection_revision": 2}
+    reviewed = client.post(f"/api/v1/chat/conversations/{cid}/history/legacy-projection",
+                           headers=headers, json={"confirmation": confirmation})
+    assert reviewed.status_code == 200, reviewed.text  # nosec B101 # pytest contract assertion
+    body = capture(client, cid, headers,
+                   interpretation={"kind": "legacy_linear_v1", "projection_id": "regenerate-review"},
+                   cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "prepared-legacy")["selection"]
+    before = db.get_message_by_id(question)
+    response = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json={
+        "id": "legacy-alternative", "role": "assistant", "content": "alternative",
+        "tldw_history_existing_input_v1": selection})
+    assert response.status_code == 201, response.text  # nosec B101 # pytest contract assertion
+    assert response.json()["id"] == "legacy-alternative"  # nosec B101 # pytest contract assertion
+    assert db.get_message_by_id(question) == before  # nosec B101 # pytest contract assertion
+    assert db.get_message_by_id("legacy-alternative")["parent_message_id"] == question  # nosec B101 # pytest contract assertion
+    assert db.count_messages_for_conversation(cid) == 3  # nosec B101 # pytest contract assertion
+    followed = capture(client, cid, headers,
+                       interpretation={"kind": "legacy_linear_v1", "projection_id": "regenerate-review"},
+                       cursor={"kind": "after_message", "message_id": "legacy-alternative"}).json()
+    assert followed["status"] == "captured"  # nosec B101 # pytest contract assertion
+    assert [row["id"] for row in followed["rows"]] == [first, question, "legacy-alternative"]  # nosec B101 # pytest contract assertion
+
+
+def test_existing_question_regenerate_rolls_back_when_protected_proof_fails(history_api, monkeypatch):
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "rollback-question", "conversation_id": cid, "sender": "user", "content": "why?"})
+    body = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "prepared-request")["selection"]
+    from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
+
+    def reject_proof(*_args, **_kwargs):
+        raise HistorySelectionError("proof_write_failed")
+
+    monkeypatch.setattr(db.message_store, "_write_history_authority", reject_proof)
+    response = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json={
+        "id": "rollback-answer", "role": "assistant", "content": "answer",
+        "tldw_history_existing_input_v1": selection})
+    assert response.status_code == 409, response.text  # nosec B101 # pytest contract assertion
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101 # pytest contract assertion
 
 
 @pytest.mark.parametrize("sync_enrolled", [False, True])
@@ -757,6 +966,316 @@ def test_capture_reports_corrupt_selected_metadata_as_conflict(history_api, fiel
     response = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": "corrupt"})
     assert response.status_code == 409, response.text
     assert response.json()["detail"]["code"] == "invalid_metadata"  # nosec B101 - regression assertion
+
+
+def test_native_admission_capture_is_opt_in_read_only_and_binds_the_real_hash(history_api):
+    client, db, cid, headers = history_api
+    empty = capture(client, cid, headers).json()
+    selection = resolve_history_selection(empty["snapshot"], empty["view"], "send", "native retry")["selection"]
+    accepted = client.post(f"/api/v1/chats/{cid}/messages", headers=headers, json={
+        "id": "retry-input", "role": "user", "content": "Reply with ORBIT-742.", "tldw_history_selection_v1": selection})
+    assert accepted.status_code == 201  # nosec B101: Actual native owner admission.
+    reference = {key: accepted.json()["tldw_history_admission_v1"][key] for key in (
+        "version", "owner_key", "conversation_id", "input_message_id", "input_message_revision", "selection_digest")}
+    ordinary = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": "retry-input"}).json()
+    assert "validated_admission" not in ordinary  # nosec B101: Ordinary capture wire remains unchanged.
+    assert ordinary["rows"][-1]["revision"] != reference["input_message_revision"]  # nosec B101: Exercise actual distinct revision domains.
+    payload = {"purpose": "send", "view": ordinary["view"], "accepted_input_admission": reference}
+    checked = client.post(f"/api/v1/chat/conversations/{cid}/history/selection", headers=headers, json=payload)
+    assert checked.status_code == 200, checked.text  # nosec B101: Opt-in accepted-input proof is supported.
+    assert checked.json()["validated_admission"] == {"admission": reference, "input_revision": ordinary["rows"][-1]["revision"]}  # nosec B101: Proof acknowledges the exact receipt and composite capture.
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101: No new message or admission.
+    db.add_message_metadata("retry-input", extra={"changed": True})
+    refused = client.post(f"/api/v1/chat/conversations/{cid}/history/selection", headers=headers, json=payload)
+    assert refused.status_code == 409  # nosec B101: Protected state drift refuses capture before any generation.
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101: Refusal does not append.
+
+
+@pytest.mark.parametrize("invalid", ["fork", "cursor", "regenerate"])
+def test_native_admission_capture_rejects_non_retry_requests(history_api, invalid):
+    client, db, cid, headers = history_api
+    ordinary = capture(client, cid, headers).json()
+    admission = {"version": 1, "owner_key": ordinary["view"]["owner_key"], "conversation_id": cid,
+                 "input_message_id": "question", "input_message_revision": "1", "selection_digest": "receipt"}
+    view = {**ordinary["view"], "cursor": {"kind": "after_message", "message_id": "question"}}
+    payload = {"purpose": "send", "view": view, "accepted_input_admission": admission}
+    if invalid == "fork":
+        payload["purpose"] = "fork"
+    elif invalid == "cursor":
+        view["cursor"] = {"kind": "empty"}
+    else:
+        payload["required_capability"] = "tldw_history_existing_input_v1"
+    response = client.post(f"/api/v1/chat/conversations/{cid}/history/selection", headers=headers, json=payload)
+    assert response.status_code == 422  # nosec B101: Invalid retry/proof request is refused before capture handling.
+    assert db.count_messages_for_conversation(cid) == 0  # nosec B101: Invalid request never admits input.
+
+
+def test_b02_server_existing_input_capability_is_distinct_and_read_only(history_api):
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "b02-capability-question", "conversation_id": cid,
+                               "sender": "user", "content": "saved B02 question"})
+    ordinary = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    before = db.get_message_by_id(question)
+    checked = client.post(f"/api/v1/chat/conversations/{cid}/history/selection", headers=headers, json={
+        "purpose": "send", "view": ordinary["view"],
+        "required_capability": "tldw_history_server_existing_input_v1",
+    })
+    assert checked.status_code == 200, checked.text  # nosec B101 - Explicit completion capability, distinct from message settlement.
+    assert checked.json()["acknowledged_capability"] == "tldw_history_server_existing_input_v1"  # nosec B101 - Old capability cannot authorize new completion semantics.
+    assert db.get_message_by_id(question) == before  # nosec B101 - Capability capture never rewrites the saved question.
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101 - No admission or reply during negotiation.
+
+
+def test_b02_server_existing_input_completion_never_readmits_question(history_api, monkeypatch):
+    import json
+    from unittest.mock import AsyncMock
+
+    from tldw_Server_API.app.api.v1.endpoints import chat
+
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "b02-existing-question", "conversation_id": cid,
+                               "sender": "user", "content": "B02-CANONICAL-QUESTION"})
+    before = db.get_message_by_id(question)
+    captured = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "b02-existing-answer")["selection"]
+    calls = []
+    live_skills = AsyncMock(return_value="LIVE-SKILLS-MUST-NOT-ENTER-FROZEN-CONTEXT")
+    monkeypatch.setattr(chat, "build_system_message_with_skills_async", live_skills)
+
+    def provider(**kwargs):
+        calls.append(kwargs["messages_payload"])
+        yield "data: " + json.dumps({"choices": [{"delta": {"content": "B02-ANSWER"}, "finish_reason": "stop"}]}) + "\n\n"
+        yield "data: [DONE]\n\n"
+
+    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
+        "messages": [], "tldw_history_server_existing_input_v1": selection,
+    })
+    assert response.status_code == 200, response.text  # nosec B101 - Explicit existing-input completion must be supported.
+    live_skills.assert_not_awaited()
+    assert len(calls) == 1  # nosec B101 - Exactly one provider execution.
+    assert len([m for m in calls[0] if m["role"] == "user"]) == 1  # nosec B101 - The canonical question is model context once.
+    assert json.dumps(calls[0]).count("B02-CANONICAL-QUESTION") == 1  # nosec B101 - No duplicate current input is appended.
+    messages = db.get_messages_for_conversation(cid)
+    assert [m["sender"] for m in messages] == ["user", "assistant"]  # nosec B101 - No second user admission.
+    assert db.get_message_by_id(question) == before  # nosec B101 - Preserve the exact original question and its authority.
+    assert messages[1]["content"] == "B02-ANSWER"  # nosec B101 - The actual provider answer is saved.
+    assert messages[1]["parent_message_id"] == question  # nosec B101 - Reply belongs to the existing canonical user.
+    frames = [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ") and line[6:] != "[DONE]"]
+    assert {frame["tldw_message_id"] for frame in frames if "tldw_message_id" in frame} == {messages[1]["id"]}  # nosec B101 - Only owner-persisted assistant settlement is acknowledged.
+    assert not any("tldw_history_admission_v1" in frame for frame in frames)  # nosec B101 - Do not manufacture another input admission.
+
+
+@pytest.mark.parametrize("policy", ["block", "redact"])
+def test_b02_existing_question_retry_keeps_input_policy(history_api, monkeypatch, policy):
+    from unittest.mock import Mock
+
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints import chat
+
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "b02-policy-question", "conversation_id": cid,
+                               "sender": "user", "content": "B02 policy subject"})
+    before = db.get_message_by_id(question)
+    captured = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "b02-input-policy")["selection"]
+    observed = []
+
+    async def input_policy(**kwargs):
+        messages = kwargs["request_data"].messages
+        observed.append([m.content for m in messages if m.role == "user"])
+        if policy == "block":
+            raise HTTPException(403, "Blocked by current input policy")
+        if messages:
+            messages[0].content = "Redacted by current input policy"
+
+    monkeypatch.setattr(chat, "moderate_input_messages", input_policy)
+    provider = Mock(side_effect=AssertionError("denied canonical input must not reach provider"))
+    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
+        "messages": [], "tldw_history_server_existing_input_v1": selection,
+    })
+    assert observed == [["B02 policy subject"]]  # nosec B101 - Moderate the actual saved question, not the empty wire list.
+    assert response.status_code == 403, response.text  # nosec B101 - A saved question cannot bypass current policy or be silently rewritten.
+    provider.assert_not_called()
+    assert db.get_message_by_id(question) == before  # nosec B101 - Refusal never edits the authoritative question.
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101 - No input or reply added after policy refusal.
+
+
+@pytest.mark.parametrize("text", ["saved question exceeds four characters", "x" * 100001])
+def test_b02_existing_question_obeys_payload_text_limit(history_api, monkeypatch, text):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.api.v1.endpoints import chat
+
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "b02-sized-question", "conversation_id": cid,
+                               "sender": "user", "content": text})
+    captured = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "b02-input-size")["selection"]
+    monkeypatch.setattr(chat, "MAX_TEXT_LENGTH", 4)
+    provider = Mock(side_effect=AssertionError("oversized canonical input must not reach provider"))
+    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
+        "messages": [], "tldw_history_server_existing_input_v1": selection,
+    })
+    assert response.status_code == 413, response.text  # nosec B101 - Existing-input replay validates real canonical text length.
+    provider.assert_not_called()
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101 - Rejection has no persistence side effects.
+
+
+@pytest.mark.parametrize("change", ["owner", "question", "answered"])
+def test_b02_existing_question_rejects_changed_authority(history_api, monkeypatch, change):
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.api.v1.endpoints import chat
+
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "b02-changed-question", "conversation_id": cid,
+                               "sender": "user", "content": "original saved question"})
+    captured = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    if change == "question":
+        db.update_message(question, {"content": "edited saved question"}, expected_version=1)
+    elif change == "answered":
+        db.add_message({"id": "b02-already-answered", "conversation_id": cid, "sender": "assistant",
+                        "content": "already answered", "parent_message_id": question})
+        captured = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "b02-changed-boundary")["selection"]
+    if change == "owner":
+        selection["owner_key"] = "different-owner"
+    count = db.count_messages_for_conversation(cid)
+    provider = Mock(side_effect=AssertionError("changed authority must not reach provider"))
+    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
+        "messages": [], "tldw_history_server_existing_input_v1": selection,
+    })
+    assert response.status_code == 409, response.text  # nosec B101 - Reject stale input, foreign owner, and an already answered question.
+    provider.assert_not_called()
+    assert db.count_messages_for_conversation(cid) == count  # nosec B101 - Refusal never appends another question or answer.
+
+
+def test_b02_existing_question_refuses_answer_saved_during_generation(history_api, monkeypatch):
+    import json
+
+    from tldw_Server_API.app.api.v1.endpoints import chat
+
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "b02-racing-question", "conversation_id": cid, "sender": "user", "content": "question"})
+    captured = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "b02-racing-answer")["selection"]
+    def provider(**kwargs):
+        db.add_message({"id": "b02-other-answer", "conversation_id": cid, "sender": "assistant",
+                        "content": "already answered", "parent_message_id": question})
+        yield "data: " + json.dumps({"choices": [{"delta": {"content": "late answer"}, "finish_reason": "stop"}]}) + "\n\n"
+        yield "data: [DONE]\n\n"
+    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
+        "messages": [], "tldw_history_server_existing_input_v1": selection,
+    })
+    assert [m["id"] for m in db.get_messages_for_conversation(cid)] == [question, "b02-other-answer"]  # nosec B101 - A concurrent answer forbids a second settlement.
+    assert "tldw_message_id" not in response.text  # nosec B101 - Failed settlement cannot acknowledge an owner-persisted reply.
+
+
+@pytest.mark.parametrize("conflict", ["messages", "selection", "branch", "stream", "tools", "empty-legacy"])
+def test_b02_existing_question_schema_refuses_ambiguous_or_legacy_intent(history_api, conflict):
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "b02-schema-question", "conversation_id": cid, "sender": "user", "content": "question"})
+    captured = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "b02-schema")["selection"]
+    payload = {"model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
+               "messages": [], "tldw_history_server_existing_input_v1": selection}
+    if conflict == "messages":
+        payload["messages"] = [{"role": "user", "content": "another question"}]
+    elif conflict == "selection":
+        payload["tldw_history_selection_v1"] = selection
+    elif conflict == "branch":
+        payload["tldw_history_branch"] = False
+    elif conflict == "stream":
+        payload["stream"] = False
+    elif conflict == "tools":
+        payload["tools"] = [{"type": "function", "function": {"name": "tool", "parameters": {}}}]
+    else:
+        payload.pop("tldw_history_server_existing_input_v1")
+    response = client.post("/api/v1/chat/completions", headers=headers, json=payload)
+    assert response.status_code == 422, response.text  # nosec B101 - Never fall through to a legacy or new-question completion.
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101 - Refusal cannot admit or settle anything.
+
+
+def test_b02_existing_question_provider_failure_keeps_exact_saved_input(history_api, monkeypatch):
+    from tldw_Server_API.tests.Chat_NEW.integration.test_server_settled_generation_metadata import _install_provider
+
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "b02-failed-existing", "conversation_id": cid, "sender": "user", "content": "saved question"})
+    original = db.get_message_by_id(question)
+    captured = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "b02-existing-failure")["selection"]
+    calls = []
+    async def unavailable():
+        calls.append("called")
+        raise RuntimeError("private-b02-existing-provider-error")
+        yield
+    _install_provider(monkeypatch, unavailable)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
+        "messages": [], "tldw_history_server_existing_input_v1": selection})
+    assert response.status_code == 502, response.text  # nosec B101 - Failed provider preparation retains the existing HTTP refusal contract.
+    assert calls == ["called"]  # nosec B101 - No hidden model retry.
+    assert db.get_messages_for_conversation(cid) == [original]  # nosec B101 - No input duplication or false assistant settlement.
+    assert "private-b02-existing-provider-error" not in response.text  # nosec B101 - Keep provider details private.
+    assert "tldw_history_admission_v1" not in response.text  # nosec B101 - Never invent a new admission for the saved input.
+
+
+def test_b02_existing_question_capability_refuses_sync_owner(history_api, monkeypatch):
+    from tldw_Server_API.app.api.v1.endpoints import character_messages
+
+    client, db, cid, headers = history_api
+    question = db.add_message({"id": "b02-sync-question", "conversation_id": cid, "sender": "user", "content": "saved question"})
+    original = db.get_message_by_id(question)
+    body = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    monkeypatch.setattr(character_messages, "_active_message_sync_service", lambda *_: object())
+    response = client.post(f"/api/v1/chat/conversations/{cid}/history/selection", headers=headers, json={
+        "purpose": "send", "view": body["view"], "required_capability": "tldw_history_server_existing_input_v1"})
+    assert response.status_code == 409, response.text  # nosec B101 - The new capability cannot bypass Sync settlement ownership.
+    assert response.json()["detail"]["code"] == "sync_owner_unsupported"  # nosec B101 - Explicit refusal, never a legacy fallback.
+    assert db.get_messages_for_conversation(cid) == [original]  # nosec B101 - Capability probing is read-only.
+
+
+def test_b02_existing_question_uses_frozen_character_after_live_card_edit(history_api, monkeypatch):
+    import json
+
+    from tldw_Server_API.app.api.v1.endpoints import chat
+    from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import create_character_conversation
+
+    client, db, _, headers = history_api
+    character = db.add_character_card({"name": "B02 frozen character", "description": "FROZEN-B02-CHARACTER", "client_id": "1"})
+    cid = create_character_conversation(db, conversation_data={"character_id": character},
+        provider="openai", model="gpt-4o-mini", prompt_preset_id="st_default")
+    question = db.add_message({"id": "b02-frozen-question", "conversation_id": cid, "sender": "user", "content": "saved question"})
+    captured = capture(client, cid, headers, cursor={"kind": "after_message", "message_id": question}).json()
+    selection = resolve_history_selection(captured["snapshot"], captured["view"], "send", "b02-frozen-context")["selection"]
+    card = db.get_character_card_by_id(character)
+    db.update_character_card(character, {"description": "LIVE-B02-CHARACTER-CHANGED"}, expected_version=card["version"])
+    calls = []
+    def provider(**kwargs):
+        calls.append(kwargs)
+        yield "data: " + json.dumps({"choices": [{"delta": {"content": "answer"}, "finish_reason": "stop"}]}) + "\n\n"
+        yield "data: [DONE]\n\n"
+    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": True,
+        "messages": [], "tldw_history_server_existing_input_v1": selection})
+    assert response.status_code == 200, response.text  # nosec B101 - Saved behavior remains a valid explicit completion context.
+    assert len(calls) == 1  # nosec B101 - One provider execution under the frozen character.
+    model_context = json.dumps({"messages": calls[0]["messages_payload"], "system": calls[0].get("system_message")})
+    assert "FROZEN-B02-CHARACTER" in model_context  # nosec B101 - Required saved character context reaches the model.
+    assert "LIVE-B02-CHARACTER-CHANGED" not in model_context  # nosec B101 - No late mutable card lookup changes this answer.
+    assert [m["sender"] for m in db.get_messages_for_conversation(cid)] == ["user", "assistant"]  # nosec B101 - Existing question is never readmitted.
 
 
 @pytest.mark.parametrize(

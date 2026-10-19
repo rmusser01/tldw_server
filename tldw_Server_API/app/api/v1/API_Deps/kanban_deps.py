@@ -17,6 +17,7 @@ from cachetools import LRUCache
 from fastapi import Depends, HTTPException, status
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_expected_user_if_present
 from tldw_Server_API.app.api.v1.utils.http_errors import map_db_error_to_http
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.config import settings
@@ -263,7 +264,10 @@ async def _get_or_init_db_instance(user_id: int) -> KanbanDB:
     return db_instance
 
 
-async def get_kanban_db_for_user(current_user: User = Depends(get_request_user)) -> KanbanDB:
+async def get_kanban_db_for_user(
+    _expected_user: None = Depends(require_expected_user_if_present),
+    current_user: User = Depends(get_request_user),
+) -> KanbanDB:
     """
     FastAPI dependency to get the KanbanDB instance for the authenticated user.
 

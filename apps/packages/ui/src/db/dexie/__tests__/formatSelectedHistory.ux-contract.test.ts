@@ -83,3 +83,39 @@ describe("formatSelectedHistory UX contract reproductions (#3109)", () => {
     ])
   })
 })
+
+
+describe("B02 canonical partial reply display", () => {
+  it.each(["stopped", "interrupted"])("keeps %s native assistant status after selected-history reload", (status) => {
+    const capture = buildNativeServerCapture()
+    capture.selected_content[1].extra_metadata = { generation_status: status, sender_name: "TestBot", provider: "llama.cpp", local_history: { generationInfo: { custom: "retained", stopped: true } } }
+    const before = JSON.stringify(capture)
+    const display = formatSelectedHistory(capture)
+
+    expect(display.messages[1].generationInfo).toMatchObject({ interrupted: true, stopped: status === "stopped", custom: "retained" })
+    expect(display.messages[1].serverMessageId).toBe("srv-msg-assistant-1")
+    expect(display.messages[1].metadataExtra).toEqual(capture.selected_content[1].extra_metadata)
+    expect(JSON.stringify(capture)).toBe(before)
+    expect(display.history[1]).toMatchObject({ role: "assistant", content: "Retrieval-augmented generation." })
+  })
+
+  it.each(["complete", "length", "unknown", undefined])("does not invent an interruption for native status %s", (status) => {
+    const capture = buildNativeServerCapture()
+    capture.selected_content[1].extra_metadata = status ? { generation_status: status } : null
+    expect(formatSelectedHistory(capture).messages[1].generationInfo).toBeUndefined()
+  })
+
+  it.each(["user", "system"])("does not interpret %s metadata as an assistant interruption", (role) => {
+    const capture = buildNativeServerCapture()
+    capture.rows[0].role = role
+    capture.selected_content[0].extra_metadata = { generation_status: "stopped" }
+    expect(formatSelectedHistory(capture).messages[0].generationInfo).toBeUndefined()
+  })
+
+  it("retains local generation info without treating server-shaped metadata as authority", () => {
+    const capture = buildNativeServerCapture()
+    capture.snapshot.owner_key = "local-history-v1:profile"
+    capture.selected_content[1].extra_metadata = { generation_status: "stopped", local_history: { generationInfo: { custom: "retained" } } }
+    expect(formatSelectedHistory(capture).messages[1].generationInfo).toEqual({ custom: "retained" })
+  })
+})

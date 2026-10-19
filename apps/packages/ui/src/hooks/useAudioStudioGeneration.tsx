@@ -1,51 +1,51 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query"
-import {
-  createAudioStudioExport,
-  createAudioStudioGeneration,
-  createAudioStudioRender,
-  type AudioStudioExportCreateRequest,
-  type AudioStudioGenerationCreateRequest,
-  type AudioStudioRenderCreateRequest
-} from "@/services/audio-studio"
-import { audioStudioProjectQueryKeys } from "@/hooks/useAudioStudioProjects"
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type {
+  AudioStudioAdmissionKind,
+  AudioStudioAdmissionBody,
+  AudioStudioGenerationCreateRequest,
+  AudioStudioRenderCreateRequest,
+  AudioStudioExportCreateRequest,
+} from '@/services/audio-studio';
+import { useAudioStudioSession } from '@/components/Option/AudioStudio/AudioStudioSession';
+import { admitAudioStudioJob } from '@/components/Option/AudioStudio/audioStudioAdmission';
+import { useAudioStudioStore } from '@/store/audio-studio';
+import { audioStudioProjectQueryKeys } from '@/hooks/useAudioStudioProjects';
 
-const invalidateProjectQueries = (
-  queryClient: ReturnType<typeof useQueryClient>
+const useAudioStudioAdmission = <T extends AudioStudioAdmissionBody>(
+  kind: AudioStudioAdmissionKind,
+  projectId: string | null,
+  retryStored = false,
 ) => {
-  queryClient.invalidateQueries({
-    queryKey: audioStudioProjectQueryKeys.projects()
-  })
-}
-
-export const useCreateAudioStudioGeneration = (projectId: string | null) => {
-  const queryClient = useQueryClient()
+  const session = useAudioStudioSession();
+  const client = useQueryClient();
   return useMutation({
-    mutationFn: (payload: AudioStudioGenerationCreateRequest) => {
-      if (!projectId) throw new Error("Audio Studio project is required")
-      return createAudioStudioGeneration(projectId, payload)
+    mutationFn: (payload: T) => {
+      if (!projectId) throw new Error('Audio Studio project is required');
+      if (!session) throw new Error('A verified Audio Studio account is required.');
+      return admitAudioStudioJob(
+        session.ownerKey,
+        projectId,
+        kind,
+        payload,
+        session.options,
+        retryStored,
+      );
     },
-    onSuccess: () => invalidateProjectQueries(queryClient)
-  })
-}
-
-export const useCreateAudioStudioRender = (projectId: string | null) => {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (payload: AudioStudioRenderCreateRequest) => {
-      if (!projectId) throw new Error("Audio Studio project is required")
-      return createAudioStudioRender(projectId, payload)
+    onSettled: () => {
+      void client.invalidateQueries({ queryKey: audioStudioProjectQueryKeys.all });
     },
-    onSuccess: () => invalidateProjectQueries(queryClient)
-  })
-}
-
-export const useCreateAudioStudioExport = (projectId: string | null) => {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (payload: AudioStudioExportCreateRequest) => {
-      if (!projectId) throw new Error("Audio Studio project is required")
-      return createAudioStudioExport(projectId, payload)
-    },
-    onSuccess: () => invalidateProjectQueries(queryClient)
-  })
-}
+  });
+};
+export const useCreateAudioStudioGeneration = (projectId: string | null) =>
+  useAudioStudioAdmission<AudioStudioGenerationCreateRequest>('generation', projectId);
+export const useCreateAudioStudioRender = (projectId: string | null) =>
+  useAudioStudioAdmission<AudioStudioRenderCreateRequest>('render', projectId);
+export const useCreateAudioStudioExport = (projectId: string | null) =>
+  useAudioStudioAdmission<AudioStudioExportCreateRequest>('export', projectId);
+export const useRetryAudioStudioAdmission = (projectId: string | null) => {
+  const intent = useAudioStudioStore((state) =>
+    projectId ? state.jobIntents[projectId] : undefined,
+  );
+  const mutation = useAudioStudioAdmission(intent?.kind ?? 'generation', projectId, true);
+  return { ...mutation, intent };
+};

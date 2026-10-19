@@ -27,6 +27,7 @@ const originalChrome = runtimeGlobals.chrome
 
 describe("SettingsBody", () => {
   afterEach(() => {
+    vi.unstubAllGlobals()
     runtimeGlobals.browser = originalBrowser
     runtimeGlobals.chrome = originalChrome
   })

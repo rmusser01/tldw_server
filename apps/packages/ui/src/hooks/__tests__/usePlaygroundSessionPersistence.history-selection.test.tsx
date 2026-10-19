@@ -200,10 +200,10 @@ function ColdSession({ automaticRestore = true, withDraft = false }: { automatic
     </>
   )
 }
-const mount = (automaticRestore = true, withDraft = false) =>
+const mount = (automaticRestore = true, withDraft = false, storageKey = "cold-h1") =>
   render(
     <HistorySelectionProvider
-      storageKey="cold-h1"
+      storageKey={storageKey}
       onCapture={(capture) => {
         useStoreMessageOption.getState().setMessages(
           capture.selected_content.map((row) => ({
@@ -267,7 +267,7 @@ it.each(["account-local", "profile-fork", "native"])(
     expect(mocks.setPrompt).not.toHaveBeenCalledWith("A prompt")
   }
 )
-function seedBookmark(ref = reference) {
+function seedBookmark(ref = reference, storageKey = "cold-h1") {
   const view = {
     owner_key: ref.owner_key,
     conversation_id: ref.conversation_id,
@@ -277,7 +277,7 @@ function seedBookmark(ref = reference) {
     cursor: { kind: "after_message", message_id: "chosen" }
   }
   mocks.bookmarks.set(bookmarkKey(ref, view), { ...ref, view })
-  sessionStorage.setItem("cold-h1", JSON.stringify(ref))
+  sessionStorage.setItem(storageKey, JSON.stringify(ref))
   return view
 }
 beforeEach(() => {
@@ -751,6 +751,33 @@ it.each(["mounted", "departure"])("retains accepted New before a cancelled held 
   expect(useStoreMessageOption.getState()).toMatchObject({ chatDraftAddress: address, messages: [], historyId: null, serverChatId: null })
   if (path !== "departure") view.unmount()
 })
+it("A01: enters an idle Chat after an unmounted account handoff without reopening the prior native reference", async () => {
+  const storageKey = "tldw-h1-playground-reference"
+  const native = {
+    ...reference,
+    owner_key: "native-previous",
+    owner_kind: "native",
+    conversation_id: "native-A"
+  }
+  seedBookmark(native, storageKey)
+  usePlaygroundSessionStore.getState().saveSession({
+    serverChatId: "native-A",
+    historySelectionReference: native,
+    scopeKey: "previous-account"
+  })
+
+  window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } }))
+  mount(true, false, storageKey)
+
+  await waitFor(() => expect(outcome).toBe("not-restored"))
+  expect(controller.status).toBe("idle")
+  expect(controller.error).toBeNull()
+  expect(mocks.capture).not.toHaveBeenCalled()
+  expect(mocks.recent).toHaveBeenCalledOnce()
+  expect(mocks.bookmarks.has(bookmarkKey(native, native))).toBe(true)
+  expect(screen.getByTestId("transcript")).toBeEmptyDOMElement()
+})
+
 it.each(["remote scope changed", "shared session expired"])(
   "restores the matching local tab before checking whether %s",
   async (scenario) => {

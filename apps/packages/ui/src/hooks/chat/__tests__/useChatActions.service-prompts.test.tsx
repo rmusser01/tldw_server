@@ -409,7 +409,7 @@ const createHookOptions = ({
   setServerChatClusterId: vi.fn(),
   setServerChatSource: vi.fn(),
   setServerChatExternalRef: vi.fn(),
-  ensureServerChatHistoryId: vi.fn(async () => historyId),
+  ensureServerChatHistoryId: vi.fn(async (..._args: Parameters<Parameters<typeof useChatActions>[0]["ensureServerChatHistoryId"]>) => historyId),
   contextFiles: [],
   setContextFiles: vi.fn(),
   documentContext: null,
@@ -1696,7 +1696,7 @@ describe("useChatActions Compare service prompt snapshot", () => {
     {
       label: "tab",
       options: { contextFiles: [], selectedKnowledge: null },
-      submit: { docs: [{ type: "tab", tabId: 7 }] },
+      submit: { docs: [{ type: "tab" as const, tabId: 7 }] },
       ids: ["chat.rag.answer"],
       modeMock: tabChatModeMock,
     },

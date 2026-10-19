@@ -324,7 +324,6 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
   // Store actions
   const updateNoteTitle = useWorkspaceStore((s) => s.updateNoteTitle)
-  const updateNoteContent = useWorkspaceStore((s) => s.updateNoteContent)
   const updateNoteKeywords = useWorkspaceStore((s) => s.updateNoteKeywords)
   const setCurrentNote = useWorkspaceStore((s) => s.setCurrentNote)
   const clearCurrentNote = useWorkspaceStore((s) => s.clearCurrentNote)
@@ -335,6 +334,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
   const [isSaving, setIsSaving] = useState(false)
   const saveControllerRef = useRef<AbortController | null>(null)
   const readControllerRef = useRef<AbortController | null>(null)
+  const conflictCleanupRef = useRef<(() => void) | null>(null)
   const pendingSaveRef = useRef<{
     authorityScope: string;
     entry: OfflineDraftEntry;
@@ -657,6 +657,7 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       clearSavedIndicatorTimer()
       saveControllerRef.current?.abort()
       readControllerRef.current?.abort()
+      conflictCleanupRef.current?.()
     }
   }, [clearSavedIndicatorTimer])
 
@@ -1131,8 +1132,11 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
       return;
     }
 
+    conflictCleanupRef.current?.()
+    conflictCleanupRef.current = null
     const controller = new AbortController()
     saveControllerRef.current = controller
+    let retainForConflict = false
     let acknowledged = false;
     let rejectedOperationCleared = false;
     let attemptedOperation: typeof pendingSaveRef.current = null;
@@ -1681,22 +1685,22 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         messageApi.error(t("playground:studio.sourceHistoryUnavailable", NOTES_PROVENANCE_UNAVAILABLE_MESSAGE))
       } else if (isDefinitiveWriteRejection(error) && (error?.message?.includes("version") || error?.status === 409)) {
         pendingSaveRef.current = null
-        if (draft.id && scope && !String(error?.message).includes("encryption_unsupported")) {
-          try {
-            const remote = await bgRequest<NoteListItem>({ ...requestScopeFields(scope.requestScope), abortSignal: scope.scopeSignal, path: `/api/v1/notes/${encodeURIComponent(String(draft.id))}` as AllowedPath, method: "GET" })
-            if (!isCurrent()) return
-            const latest = useWorkspaceStore.getState().currentNote
-            setCurrentNote({
-              ...latest,
-              ...knowledgeNoteHead(remote),
-              isDirty: true,
-            });
-          } catch { /* Keep the original draft and require another explicit retry. */ }
+        retainForConflict = true
+        const cleanupConflict = () => {
+          controller.abort()
+          stopWatchingNote()
+          stopWatchingOwner()
+          scope?.release()
+          if (conflictCleanupRef.current === cleanupConflict) conflictCleanupRef.current = null
         }
+        conflictCleanupRef.current = cleanupConflict
         messageApi.open({
           type: "error",
           key: "workspace-note-version-conflict",
           duration: 8,
+          onClose: () => {
+            if (conflictCleanupRef.current === cleanupConflict) cleanupConflict()
+          },
           content: (
             <div className="flex items-center gap-2">
               <span>
@@ -1710,8 +1714,10 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
                   size="small"
                   type="link"
                   onClick={() => {
+                    if (!isCurrent() || conflictCleanupRef.current !== cleanupConflict) return
+                    conflictCleanupRef.current = null
                     messageApi.destroy("workspace-note-version-conflict")
-                    void handleReloadLatestAfterConflict()
+                    void handleReloadLatestAfterConflict().finally(cleanupConflict)
                   }}
                 >
                   {t("common:reload", "Reload latest")}
@@ -1728,9 +1734,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         );
       }
     } finally {
-      stopWatchingNote()
-      stopWatchingOwner()
-      scope?.release()
+      if (!retainForConflict) {
+        controller.abort()
+        stopWatchingNote()
+        stopWatchingOwner()
+        scope?.release()
+      }
       if (saveControllerRef.current === controller) {
         saveControllerRef.current = null
         setIsSaving(false)
@@ -2147,12 +2156,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
             value={stripKnowledgeNoteProvenance(currentNote.content)}
             onChange={(e) => {
               hideSavedIndicator()
-              updateNoteContent(
-                retainKnowledgeNoteProvenance(
-                  e.target.value,
-                  currentNote
-                )
-              )
+              setCurrentNote({
+                ...currentNote,
+                ...knowledgeNoteHead(currentNote),
+                content: e.target.value,
+                isDirty: true
+              })
             }}
             aria-label={t("playground:studio.noteContentLabel", "Note content")}
             placeholder={t(

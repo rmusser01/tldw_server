@@ -12,7 +12,7 @@ const listen = async (handler: http.RequestListener) => {
     server.once("error", reject)
     server.listen(0, "127.0.0.1", resolve)
   })
-  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`
+  return `http://127.0.0.1:${(server.address() as AddressInfo).port}` as const
 }
 
 afterEach(async () => {

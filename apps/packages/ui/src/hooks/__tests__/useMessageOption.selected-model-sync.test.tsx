@@ -14,12 +14,14 @@ const {
 } = vi.hoisted(() => {
   const setSelectedModelSpy = vi.fn((next: string | null, options?: { storageHandled?: boolean }) => {
     state.selectedModel = next
+    state.selectedModelInitialized = true
     state.selectedModelRevision++
     state.selectedModelStorageHandled = options?.storageHandled === true
   })
 
   const state: Record<string, any> = {
     selectedModel: null,
+    selectedModelInitialized: false,
     selectedModelRevision: 0,
     selectedModelStorageHandled: false,
     setSelectedModel: setSelectedModelSpy,
@@ -310,6 +312,7 @@ describe("useMessageOption selected model sync", () => {
     storageSetCalls.length = 0
     lastUseChatActionsArgs.value = null
     storeState.selectedModel = null
+    storeState.selectedModelInitialized = false
     storeState.selectedModelRevision = 0
     storeState.selectedModelStorageHandled = false
     storeState.serverChatId = null

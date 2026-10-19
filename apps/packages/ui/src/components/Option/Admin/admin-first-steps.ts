@@ -1,3 +1,4 @@
+import type { AdminQuerySession } from "./AdminQueryProvider"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { withSignalTimeout } from "./admin-module-signals"
 
@@ -26,9 +27,9 @@ const asList = (value: unknown, ...keys: string[]): unknown[] => {
   return []
 }
 
-const STEP_PROBES: Array<() => Promise<AdminFirstStep>> = [
+const stepProbes = (session: AdminQuerySession): Array<() => Promise<AdminFirstStep>> => [
   async () => {
-    const result = await withSignalTimeout(tldwClient.listBackupSchedules())
+    const result = await withSignalTimeout(tldwClient.listBackupSchedules(session.requestOptions()))
     const schedules = asList(result, "schedules", "items")
     return {
       key: "backup-schedule",
@@ -38,7 +39,7 @@ const STEP_PROBES: Array<() => Promise<AdminFirstStep>> = [
     }
   },
   async () => {
-    const result = await withSignalTimeout(tldwClient.listAlertRules())
+    const result = await withSignalTimeout(tldwClient.listAlertRules(session.requestOptions()))
     const rules = asList(result, "rules", "items")
     return {
       key: "alert-rule",
@@ -49,7 +50,7 @@ const STEP_PROBES: Array<() => Promise<AdminFirstStep>> = [
   },
   async () => {
     const coverage = await withSignalTimeout(
-      tldwClient.getGovernorCoverage()
+      tldwClient.getGovernorCoverage(undefined, session.requestOptions())
     )
     const pct = coverage?.coverage_pct
     return {
@@ -63,8 +64,10 @@ const STEP_PROBES: Array<() => Promise<AdminFirstStep>> = [
   }
 ]
 
-export const loadAdminFirstSteps = async (): Promise<AdminFirstStep[]> => {
-  const results = await Promise.allSettled(STEP_PROBES.map((probe) => probe()))
+export const loadAdminFirstSteps = async (session: AdminQuerySession): Promise<AdminFirstStep[]> => {
+  if (!session.scope.isCurrent()) return []
+  const results = await Promise.allSettled(stepProbes(session).map((probe) => probe()))
+  if (!session.scope.isCurrent()) return []
   return results
     .filter(
       (result): result is PromiseFulfilledResult<AdminFirstStep> =>

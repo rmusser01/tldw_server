@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import { dirname, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import * as utils from "../structured-prompt-utils"
 import {
   convertLegacyPromptToStructuredDefinition,
@@ -19,7 +20,10 @@ type RenderCase = {
   expected_repeat?: Repeat
   expected_error_code?: string
 }
-const fixturePath = resolve(process.cwd(), "../../../Docs/fixtures/single-text-recipes")
+const fixturePath = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../../../../../../Docs/fixtures/single-text-recipes"
+)
 const readCases = (name: string): RenderCase[] =>
   JSON.parse(readFileSync(resolve(fixturePath, name), "utf8"))
 const renderCases = readCases("render-cases.json")

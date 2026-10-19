@@ -1,10 +1,13 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { setTTSSettings } from "@/services/tts"
 import TtsPlaygroundPage from "@/components/Option/TTS/TtsPlaygroundPage"
 import { expectInsideDesignSystemAlert } from "@/test-utils/designSystemAlert"
+
+const generationState = vi.hoisted(() => ({ active: false, clear: vi.fn(), generate: vi.fn(async () => []) }))
 
 const DEFAULT_KITTEN_MODEL = "KittenML/kitten-tts-nano-0.8"
 
@@ -78,9 +81,9 @@ vi.mock("@/hooks/useTtsProviderData", () => ({
 vi.mock("@/hooks/useTtsPlayground", () => ({
   useTtsPlayground: () => ({
     segments: [],
-    isGenerating: false,
-    generateSegments: vi.fn(async () => []),
-    clearSegments: vi.fn(() => {})
+    isGenerating: generationState.active,
+    generateSegments: generationState.generate,
+    clearSegments: generationState.clear
   })
 }))
 
@@ -104,6 +107,11 @@ vi.mock("@/components/Common/PageShell", () => ({
 
 describe("TtsPlaygroundPage defaults", () => {
   beforeEach(() => {
+    generationState.active = false
+    generationState.clear.mockReset()
+    generationState.generate.mockReset()
+    generationState.generate.mockResolvedValue([])
+    vi.mocked(setTTSSettings).mockClear()
     capabilitiesState.data = {
       ffmpegAvailable: true
     }
@@ -125,6 +133,37 @@ describe("TtsPlaygroundPage defaults", () => {
       playbackSpeed: 1,
       voice: ""
     }
+  })
+
+  it("B04 Stop cancels pending synthesis before the first segment", async () => {
+    generationState.active = true
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(<QueryClientProvider client={queryClient}><TtsPlaygroundPage /></QueryClientProvider>)
+
+    const stop = await screen.findByRole("button", { name: "Stop", exact: true })
+    expect(stop).toBeEnabled()
+    fireEvent.click(stop)
+    expect(generationState.clear).toHaveBeenCalledOnce()
+  })
+
+  it("B04 cancelled caller does not save captured settings after retirement", async () => {
+    let finish!: (value: never[]) => void
+    generationState.generate.mockImplementationOnce(() => new Promise<never[]>(resolve => { finish = resolve }))
+    ttsSettingsState.data = { ...ttsSettingsState.data, ttsProvider: "tldw" }
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={queryClient}><TtsPlaygroundPage /></QueryClientProvider>)
+    fireEvent.change(await screen.findByTestId("tts-text-input"), { target: { value: "Cancelled speech" } })
+    fireEvent.click(screen.getByTestId("tts-play-button"))
+    await waitFor(() => expect(generationState.generate).toHaveBeenCalledOnce())
+    generationState.active = true
+    generationState.clear.mockClear()
+    view.rerender(<QueryClientProvider client={queryClient}><TtsPlaygroundPage /></QueryClientProvider>)
+    const stop = screen.getByRole("button", { name: "Stop", exact: true })
+    expect(stop).toBeEnabled()
+    fireEvent.click(stop)
+    expect(generationState.clear).toHaveBeenCalledOnce()
+    await act(async () => { finish([]) })
+    expect(setTTSSettings).not.toHaveBeenCalled()
   })
 
   it("materializes the Kitten baseline when tldw settings are otherwise empty", async () => {

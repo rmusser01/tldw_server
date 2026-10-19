@@ -5,7 +5,7 @@ import { browser } from "wxt/browser";
 import { createSafeStorage, safeStorageSerde } from "@/utils/safe-storage";
 import { formatErrorMessage } from "@/utils/format-error-message";
 import { sanitizeRagProviderFailure } from "@/services/rag/provider-error-contract";
-import { tldwClient } from "@/services/tldw/TldwApiClient";
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient";
 import { tldwModels } from "@/services/tldw";
 import { apiSend } from "@/services/api-send";
 import { tldwRequest } from "@/services/tldw/request-core";
@@ -486,17 +486,20 @@ export default defineBackground({
       ) {
         throw createServicePromptScopeChangedError();
       }
-      const effective = current || checked;
-      return {
-        ...effective,
+      if (current) return current;
+      if (typeof checked.serverUrl !== "string" ||
+          (checked.authMode !== "single-user" && checked.authMode !== "multi-user") ||
+          (checked.authSource != null && checked.authSource !== "manual" && checked.authSource !== "cookie-session") ||
+          (checked.orgId != null && typeof checked.orgId !== "number")) {
+        throw createServicePromptScopeChangedError();
+      }
+      const target: TldwConfig = {
         serverUrl: checked.serverUrl,
         authMode: checked.authMode,
-        authSource: checked.authSource,
-        orgId: checked.orgId,
-        apiKey: current?.apiKey,
-        accessToken: current?.accessToken,
-        refreshToken: current?.refreshToken,
+        ...(checked.authSource === "manual" || checked.authSource === "cookie-session" ? { authSource: checked.authSource } : {}),
+        ...(typeof checked.orgId === "number" ? { orgId: checked.orgId } : {}),
       };
+      return target;
     };
     let handleRuntimeMessageRef:
       | ((message: any, sender: any) => Promise<any>)
@@ -706,6 +709,10 @@ export default defineBackground({
             }
             assertFlightCurrent();
             if ((error as { status?: number } | null)?.status === 401) {
+              if (typeof cfg.serverUrl !== "string" ||
+                  (cfg.authMode !== "single-user" && cfg.authMode !== "multi-user") ||
+                  (cfg.authSource != null && cfg.authSource !== "manual" && cfg.authSource !== "cookie-session") ||
+                  (cfg.orgId != null && typeof cfg.orgId !== "number")) throw error;
               const markerKey = refreshSessionInvalidationKey(cfg);
               const publicationStorage = {
                 ...storage,
@@ -1617,19 +1624,19 @@ export default defineBackground({
         if (Array.isArray(files) && files.length > 0) {
           for (const item of files) {
             const result = appendUploadFile(item, item.fieldName || "files");
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           }
         } else if (file?.data !== undefined && file?.data !== null) {
           const trimmedFieldName =
             typeof fileFieldName === "string" ? fileFieldName.trim() : "";
           if (trimmedFieldName) {
             const result = appendUploadFile(file, trimmedFieldName);
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           } else {
             const result = appendUploadFile(file, "files", {
               appendLegacyFileAlias: true,
             });
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           }
         }
         const headers: Record<string, string> = { ...requestHeaders };
@@ -4061,12 +4068,14 @@ export default defineBackground({
       type StoredConfig = Parameters<typeof connectionAuthoritiesMatch>[0];
       const changes = Object.fromEntries(Object.entries(rawChanges || {}).map(([key, change]) => [key, {
         oldValue: safeStorageSerde.deserializer<StoredConfig>(change.oldValue as string),
-        newValue: safeStorageSerde.deserializer<StoredConfig>(change.newValue as string),
+        newValue: key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX)
+          ? safeStorageSerde.deserializer<boolean>(change.newValue as string)
+          : safeStorageSerde.deserializer<StoredConfig>(change.newValue as string),
       }]));
       if (areaName === "session") {
         const change = changes?.[MANUAL_SESSION_KEY];
         if (change) {
-          if (!manualSessionCredentialsMatch(change.oldValue, change.newValue)) {
+          if (!manualSessionCredentialsMatch(change.oldValue, typeof change.newValue === "object" ? change.newValue : undefined)) {
             retireConnectionAuthority();
           }
         }
@@ -4075,7 +4084,7 @@ export default defineBackground({
       if (areaName !== "local") return;
       const retiringChanges = Object.entries(changes || {}).filter(([key, change]) =>
         ((key === "tldwConfig" || key === "tldwCookieSessionConfig") &&
-        (!change.newValue || !connectionAuthoritiesMatch(change.oldValue, change.newValue))) ||
+        (!change.newValue || !connectionAuthoritiesMatch(change.oldValue, typeof change.newValue === "object" ? change.newValue : undefined))) ||
         (key.startsWith(REFRESH_SESSION_INVALIDATION_PREFIX) && change.oldValue !== change.newValue)
       );
       if (retiringChanges.length > 0) {
@@ -4096,7 +4105,7 @@ export default defineBackground({
         return;
       }
       const change = changes.tldwConfig;
-      if (!connectionAuthoritiesMatch(change?.oldValue, change?.newValue)) {
+      if (!connectionAuthoritiesMatch(change?.oldValue, typeof change?.newValue === "object" ? change.newValue : undefined)) {
         quickIngestAuthorityRevision += 1;
         for (const controller of quickIngestAuthorityControllers) controller.abort();
         quickIngestModalSessions.clear();

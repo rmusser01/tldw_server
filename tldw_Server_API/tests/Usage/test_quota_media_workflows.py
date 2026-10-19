@@ -23,7 +23,7 @@ def quota(monkeypatch: pytest.MonkeyPatch) -> dict:
     every call, so two sequential calls against the same state exercise the
     same atomicity the real ledger provides (Qodo Q16/Q17).
     """
-    state: dict = {"limits": {}, "used": 0, "recorded": []}
+    state: dict = {"limits": {}, "used": 0, "recorded": [], "op_ids": set()}
 
     async def _user_quota(_uid: int, key: str) -> object:
         """The test's limit for the key."""
@@ -41,9 +41,12 @@ def quota(monkeypatch: pytest.MonkeyPatch) -> dict:
             """Admit and record only when the write fits the cap, like the real ledger."""
             used = state["used"]
             units = entry.units  # type: ignore[attr-defined]
+            if entry.op_id in state["op_ids"]:
+                return True, max(0, daily_cap - used)
             if used + units > daily_cap:
                 return False, max(0, daily_cap - used)
             state["used"] = used + units
+            state["op_ids"].add(entry.op_id)
             state["recorded"].append(
                 {
                     "entity_scope": entry.entity_scope,  # type: ignore[attr-defined]
@@ -188,7 +191,7 @@ async def test_scheduler_refuses_a_run_past_the_allowance(quota: dict, monkeypat
     quota["limits"]["limits.workflows_runs_per_day"] = 1
     quota["used"] = 1.0
     with pytest.raises(RuntimeError, match="Daily workflow run quota"):
-        await sched.workflow_run({"user_id": 7, "workflow_id": 1, "definition_snapshot": {}})
+        await sched.workflow_run({"user_id": 7, "definition_snapshot": {"steps": []}})
     assert created == []
 
 
@@ -213,3 +216,10 @@ async def test_media_bytes_429_carries_rate_limit_headers(quota: dict) -> None:
     assert headers["X-RateLimit-Limit"] == "10"
     assert headers["X-RateLimit-Remaining"] == "2"
     assert int(headers["Retry-After"]) >= 1
+
+
+async def test_media_job_retry_consumes_bytes_once(quota: dict) -> None:
+    quota["limits"]["limits.media_ingest_mb_per_day"] = 5
+    await persistence._enforce_and_record_media_bytes(7, 3 * MB, op_id="media-ingestion-job:7:owned-job")
+    await persistence._enforce_and_record_media_bytes(7, 3 * MB, op_id="media-ingestion-job:7:owned-job")
+    assert quota["used"] == 3 * MB and len(quota["recorded"]) == 1  # nosec B101 - Same durable job receipt cannot double-charge a retry.

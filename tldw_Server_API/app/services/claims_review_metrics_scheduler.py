@@ -255,15 +255,15 @@ async def run_claims_review_metrics_once(
     target_user_id: str | None = None,
 ) -> int:
     """Preserve the local and caller-owned database compatibility entry point."""
-    if db is not None:
-        return (aggregator or aggregate_claims_review_extractor_metrics_daily)(
-            db=db, target_user_id=target_user_id, report_date=report_date, lookback_days=lookback_days
-        )
     config = resolve_scheduler_config()
     try:
         lookback = max(1, min(366, int(lookback_days))) if lookback_days is not None else config.lookback_days
     except (TypeError, ValueError):
         lookback = 2
+    if db is not None:
+        return (aggregator or aggregate_claims_review_extractor_metrics_daily)(
+            db=db, target_user_id=target_user_id, report_date=report_date, lookback_days=lookback
+        )
     _, start, end = capture_window(datetime.now(timezone.utc), config.interval_seconds, lookback)
     parsed_report_date = _parse_iso_date(report_date)
     if parsed_report_date is not None:

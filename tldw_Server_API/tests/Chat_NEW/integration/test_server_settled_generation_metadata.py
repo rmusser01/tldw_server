@@ -553,3 +553,107 @@ async def test_save_function_stores_only_allow_listed_generation_metadata(chacha
         "usage": {"total_tokens": 3},
     }
     assert _extra(chacha_db, user_id) == {"sender_role": "user"}
+
+
+def test_b02_pre_stream_failure_reports_admitted_input_before_sanitized_error(settled_api, monkeypatch):
+    """A committed question remains identifiable when provider preparation fails."""
+    client, db, cid, headers = settled_api
+    calls = []
+
+    async def unavailable_provider() -> AsyncIterator[str]:
+        calls.append("called")
+        raise RuntimeError("private-upstream-b02-marker: connection refused")
+        yield  # pragma: no cover - the provider fails before its first frame
+
+    _install_provider(monkeypatch, unavailable_provider)
+    selection = _selection(client, cid, headers, "b02-pre-stream-failure")
+    response = client.post(
+        "/api/v1/chat/completions", headers=headers,
+        json=_completion_body(cid, versioned_selection=selection),
+    )
+    messages = db.get_messages_for_conversation(cid)
+    # The real owner transaction committed the input, but no answer exists.
+    assert len(messages) == 1 and messages[0]["sender"] == "user"  # nosec B101 - Pytest causal owner-state check.
+    assert calls == ["called"]  # nosec B101 - No hidden provider retry.
+    assert response.status_code == 200, response.text  # nosec B101 - Admitted native stream preserves its receipt.
+    frames = _frames(response)
+    admission = frames[0]["tldw_history_admission_v1"]
+    assert admission["input_message_id"] == messages[0]["id"]  # nosec B101 - Actual accepted input, not a synthetic token.
+    assert admission["conversation_id"] == cid  # nosec B101 - Receipt remains owner-bound.
+    assert admission["selection_digest"] == selection["selection_digest"]  # nosec B101 - Receipt belongs to this captured request.
+    assert any("error" in frame for frame in frames)  # nosec B101 - No false completion on provider failure.
+    assert not any("tldw_message_id" in frame for frame in frames)  # nosec B101 - No assistant settlement is acknowledged.
+    assert "private-upstream-b02-marker" not in response.text  # nosec B101 - Provider internals remain sanitized.
+
+
+def test_b02_legacy_pre_stream_failure_keeps_http_error(settled_api, monkeypatch):
+    """A caller without native admission keeps the existing HTTP failure contract."""
+    client, _db, cid, headers = settled_api
+
+    async def unavailable_provider() -> AsyncIterator[str]:
+        raise RuntimeError("private-upstream-b02-legacy-marker: connection refused")
+        yield  # pragma: no cover - the provider fails before its first frame
+
+    _install_provider(monkeypatch, unavailable_provider)
+    response = client.post(
+        "/api/v1/chat/completions", headers=headers,
+        json=_completion_body(cid, versioned_selection=None),
+    )
+    assert response.status_code == 502, response.text  # nosec B101 - No native receipt changes legacy HTTP semantics.
+    assert "tldw_history_admission_v1" not in response.text  # nosec B101 - Never invent native authority for a legacy request.
+    assert "private-upstream-b02-legacy-marker" not in response.text  # nosec B101 - Provider internals stay private.
+
+
+def test_b02_admitted_preparation_failure_refunds_and_records_failure(settled_api, monkeypatch):
+    """Receipt delivery cannot turn a failed reserved request into accounting success."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, Mock
+
+    from tldw_Server_API.app.api.v1.endpoints import chat
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
+
+    client, db, cid, headers = settled_api
+    governor = SimpleNamespace(
+        reserve=AsyncMock(return_value=(SimpleNamespace(allowed=True, retry_after=None, details={}), "b02-reserved")),
+        commit=AsyncMock(),
+    )
+    monkeypatch.setattr(client.app.state, "rg_governor", governor, raising=False)
+    monkeypatch.setattr(client.app.state, "rg_policy_loader", SimpleNamespace(get_policy=lambda _policy: {}), raising=False)
+    monkeypatch.setenv("RG_ENABLED", "1")
+    monkeypatch.setattr(chat, "get_rate_limiter", lambda: None)
+    metrics = chat.get_chat_metrics()
+    original_track = metrics.track_request
+    exits = []
+
+    class ObserveRequestExit:
+        def __init__(self, **kwargs):
+            self.original = original_track(**kwargs)
+
+        async def __aenter__(self):
+            return await self.original.__aenter__()
+
+        async def __aexit__(self, exc_type, exc_value, exc_tb):
+            exits.append((exc_type, exc_value))
+            return await self.original.__aexit__(exc_type, exc_value, exc_tb)
+
+    monkeypatch.setattr(metrics, "track_request", ObserveRequestExit)
+
+    def fail_preparation(*_args, **_kwargs):
+        raise ChatConfigurationError("private-b02-configuration-marker", provider="openai")
+
+    monkeypatch.setattr(chat, "apply_prompt_templating", fail_preparation)
+    provider = Mock(side_effect=AssertionError("preparation failure must not call provider"))
+    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    selection = _selection(client, cid, headers, "b02-reserved-preparation")
+    response = client.post(
+        "/api/v1/chat/completions", headers=headers,
+        json=_completion_body(cid, versioned_selection=selection),
+    )
+    assert response.status_code == 200, response.text  # nosec B101 - Native admission is still delivered.
+    assert len(db.get_messages_for_conversation(cid)) == 1  # nosec B101 - Retain exactly the admitted question.
+    assert _frames(response)[0]["tldw_history_admission_v1"]["conversation_id"] == cid  # nosec B101 - Authentic owner receipt.
+    provider.assert_not_called()
+    governor.reserve.assert_awaited_once()
+    governor.commit.assert_awaited_once_with("b02-reserved", actuals={"tokens": 0})
+    assert len(exits) == 1 and exits[0][0] is not None  # nosec B101 - Actual request metrics see failure, not success.
+    assert "private-b02-configuration-marker" not in response.text  # nosec B101 - Accounting carries only sanitized failure data.

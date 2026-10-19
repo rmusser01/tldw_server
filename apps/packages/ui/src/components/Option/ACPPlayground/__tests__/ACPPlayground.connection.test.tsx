@@ -46,7 +46,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 vi.mock("@/hooks/useMediaQuery", () => ({
-  useMobile: () => mediaMocks.isMobile
+  useMobile: () => mediaMocks.isMobile,
+  useDesktop: () => !mediaMocks.isMobile
 }))
 
 vi.mock("@/hooks/useACPSession", () => ({

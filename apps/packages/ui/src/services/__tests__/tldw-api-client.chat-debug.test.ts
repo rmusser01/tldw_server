@@ -163,3 +163,17 @@ it("unparseable native stream is uncertainty instead of a silently successful tr
     "unparseable_native_completion_stream"
   )
 })
+
+
+it("B02 saved-question stream rejects malformed private frames without logging them", async () => {
+  const warning = vi.spyOn(console, "warn").mockImplementation(() => {})
+  mocks.bgStream.mockImplementation(async function* () { yield "private malformed existing-question frame" })
+  try {
+    const consume = async () => {
+      for await (const _frame of new TldwApiClient().streamChatCompletion({model: "m", messages: [],
+        tldw_history_server_existing_input_v1: {} as any})) { /* consume */ }
+    }
+    await expect(consume()).rejects.toThrow("unparseable_native_completion_stream")
+    expect(warning).not.toHaveBeenCalled()
+  } finally { warning.mockRestore() }
+})

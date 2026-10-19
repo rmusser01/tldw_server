@@ -122,7 +122,8 @@ const protectedKey = (key: string) =>
   key.startsWith("tldw_history_") ||
   key === "history_admission" ||
   key === "history_provenance" ||
-  key === "history_settlement"
+  key === "history_settlement" ||
+  key === "history_existing_settlement"
 /** Public writes/imports cannot install authority, even inside ordinary nested metadata. */
 export const stripHistoryAuthority = <T>(value: T): T => {
   if (Array.isArray(value)) return value.map(stripHistoryAuthority) as T
@@ -297,6 +298,24 @@ const transaction = async <T>(
     opts?.signal?.removeEventListener("abort", abort)
   }
 }
+/** Explicit consent binds a plain local import; imported trust fields never do. */
+export const bindUnboundLocalHistory = async (
+  conversation_id: string,
+  opts: HistoryOperationOptions & { signal: AbortSignal; validate_lease: () => boolean }
+): Promise<LocalHistoryOwnerV1> => {
+  assertLease(opts)
+  const profile_id = await ensureLocalProfileId()
+  const owner: LocalHistoryOwnerV1 = { kind: "local", profile_id, owner_key: localKey(profile_id), conversation_id }
+  return transaction("rw", opts, async () => {
+    const record = await ownedHistory(owner)
+    if (record.local_owner_key != null || record.server_scope_key != null || record.server_chat_id != null || record.message_source === "server")
+      fail("not_unbound_local_history")
+    assertNoPendingLocalSettingsWrite(record)
+    await db.chatHistories.update(record.id, { local_owner_key: owner.owner_key })
+    return owner
+  })
+}
+
 const bookmarkKey = (
   scope: HistoryBookmarkScope,
   owner: { owner_key: string; conversation_id: string }
@@ -1070,6 +1089,62 @@ export const settleLocalAcceptedAssistant = (
   })
 }
 
+export const settleLocalSelectedExistingInput = (
+  owner: LocalHistoryOwnerV1,
+  selection: HistorySelectionV1,
+  input: Message,
+  opts?: HistoryOperationOptions
+): Promise<Message> => {
+  selection = structuredClone(selection)
+  input = structuredClone(input)
+  return transaction("rw", opts, async () => {
+    await ownedHistory(owner)
+    const questionId = selection.messages.at(-1)?.id
+    if (
+      selection.version !== 1 || selection.owner_key !== owner.owner_key ||
+      selection.conversation_id !== owner.conversation_id || selection.purpose !== "send" ||
+      selection.cursor.kind !== "after_message" || selection.cursor.message_id !== questionId ||
+      selectionDigest(selection) !== selection.selection_digest || !questionId
+    ) fail("invalid_selection")
+    const question = await db.messages.get(questionId)
+    if (!question || question.history_id !== owner.conversation_id ||
+        question.role !== "user" || messageRevision(question) !== selection.messages.at(-1)?.revision)
+      fail("stale_parent")
+    const message = normalizeMessage(
+      owner, input, "assistant", questionId,
+      selection.interpretation.kind === "legacy_linear_v1"
+        ? selection.interpretation.projection_id : undefined
+    )
+    const intent = historyDigest(messageState(message))
+    const existing = await db.messages.get(message.id)
+    if (existing) {
+      const proof = existing.history_existing_settlement
+      if (!proof || existing.history_id !== owner.conversation_id ||
+          canonicalHistoryJson(proof.selection) !== canonicalHistoryJson(selection) ||
+          proof.intent_digest !== intent || messageRevision(existing) !== proof.result_revision)
+        fail("message_id_conflict")
+      return existing
+    }
+    const current = await capture(owner, { view_session_id: "existing-input", ...selection }, "send")
+    if (current.status !== "captured") fail(current.code)
+    const resolved = resolveHistorySelection(
+      current.snapshot, current.view, "send", selection.request_context_digest
+    )
+    if (resolved.status !== "ready" || resolved.selection.selection_digest !== selection.selection_digest)
+      fail("stale_selection")
+    const result = {
+      ...message,
+      history_existing_settlement: {
+        selection,
+        intent_digest: intent,
+        result_revision: messageRevision(message)
+      }
+    }
+    await db.messages.add(result)
+    return result
+  })
+}
+
 
 const HISTORY_TURN_OUTCOMES = new Set<string>(["complete", "interrupted", "stopped"])
 
@@ -1123,6 +1198,18 @@ const projectHistoryTurnRecovery = async (
     ...(turn.retained_result_texts !== undefined
       ? { retained_result_texts: turn.retained_result_texts }
       : {}),
+    ...(typeof turn.failure_reason === "string" && turn.failure_reason ? { failure_reason: turn.failure_reason } : {}),
+    ...(turn.existing_selection ? {existing_selection: structuredClone(turn.existing_selection)} : {}),
+    ...(turn.settlement_payload ? {settlement_payload: structuredClone({
+      id: turn.settlement_payload.id, history_id: turn.settlement_payload.history_id,
+      role: turn.settlement_payload.role, name: turn.settlement_payload.name,
+      content: turn.settlement_payload.content, createdAt: turn.settlement_payload.createdAt,
+      images: turn.settlement_payload.images, parent_message_id: turn.settlement_payload.parent_message_id,
+      sources: turn.settlement_payload.sources, generationInfo: turn.settlement_payload.generationInfo,
+      metadataExtra: turn.settlement_payload.metadataExtra,
+      reasoning_time_taken: turn.settlement_payload.reasoning_time_taken,
+      modelId: turn.settlement_payload.modelId, messageType: turn.settlement_payload.messageType
+    })} : {}),
     ...(turn.admission
       ? {
           admission: {
@@ -1152,6 +1239,8 @@ const projectHistoryTurnRecovery = async (
       turn.persistence !== "server" ||
       turn.action ||
       turn.admission ||
+      turn.existing_selection ||
+      turn.settlement_payload ||
       turn.input_images.length ||
       roleplay!.intent.conversation_id !== turn.conversation_id ||
       roleplay!.intent.input.content !== turn.input_text ||
@@ -1312,13 +1401,30 @@ export const saveHistoryTurnRecovery = async (
     if (previous?.history_turn_outcomes?.[detached.operation_id]) return
     if (!detached.origin_view || detached.origin_view.owner_key !== view.owner_key || detached.origin_view.conversation_id !== view.conversation_id || !detached.selection_digest || !detached.request_context_digest || (detached.persistence !== "server" && (!detached.input_id || !detached.assistant_id)))
       fail("invalid_history_operation")
-    if (detached.persistence === "server" && !detached.roleplay_resume && ((detached.input_id && !detached.admission) || (detached.assistant_id && !detached.admission)))
-      fail("history_operation_conflict")
+    if (detached.persistence === "server" && !detached.roleplay_resume && (detached.input_id || detached.assistant_id) &&
+        !detached.admission && !detached.existing_selection) fail("history_operation_conflict")
+    if (detached.persistence === "server" && detached.existing_selection &&
+        (detached.roleplay_resume || detached.action || detached.admission || detached.existing_selection.purpose !== "send" ||
+         detached.existing_selection.cursor.kind !== "after_message" ||
+         detached.existing_selection.cursor.message_id !== detached.input_id)) fail("history_operation_conflict")
     if (detached.admission && (detached.admission.owner_key !== detached.owner_key || detached.admission.conversation_id !== detached.conversation_id || detached.admission.input_message_id !== detached.input_id || (detached.action !== "regenerate" && detached.admission.selection_digest !== detached.selection_digest)))
       fail("history_operation_conflict")
+    if (detached.existing_selection && (detached.existing_selection.owner_key !== detached.owner_key ||
+      detached.existing_selection.conversation_id !== detached.conversation_id ||
+      detached.existing_selection.messages.at(-1)?.id !== detached.input_id ||
+      detached.existing_selection.selection_digest !== detached.selection_digest ||
+      detached.existing_selection.request_context_digest !== detached.request_context_digest ||
+      selectionDigest(detached.existing_selection) !== detached.selection_digest)) fail("history_operation_conflict")
+    if (detached.settlement_payload && (!detached.existing_selection ||
+      detached.settlement_payload.id !== detached.assistant_id ||
+      detached.settlement_payload.history_id !== detached.conversation_id ||
+      detached.settlement_payload.role !== "assistant" ||
+      detached.settlement_payload.parent_message_id !== detached.input_id ||
+      detached.settlement_payload.content !== detached.result_text ||
+      detached.settlement_payload.createdAt !== detached.created_at)) fail("history_operation_conflict")
     if (
       detached.state === "refused" &&
-      ((detached.persistence === "server" && (detached.input_id || detached.assistant_id)) ||
+      ((detached.persistence === "server" && ((detached.input_id && !detached.existing_selection) || detached.assistant_id)) ||
         detached.admission ||
         detached.result_text ||
         detached.outcome ||
@@ -1331,7 +1437,7 @@ export const saveHistoryTurnRecovery = async (
     if (prior) {
       const immutable = (value: HistoryTurnRecovery) => ({
         origin_view: value.origin_view, selection_digest: value.selection_digest, request_context_digest: value.request_context_digest,
-        operation_id: value.operation_id, action: value.action, owner_key: value.owner_key, conversation_id: value.conversation_id,
+        operation_id: value.operation_id, action: value.action, existing_selection: value.existing_selection, owner_key: value.owner_key, conversation_id: value.conversation_id,
         persistence: value.persistence ?? "client",
         ...(value.persistence === "server" ? {} : {input_id: value.input_id, assistant_id: value.assistant_id}), created_at: value.created_at,
         input_text: value.input_text, input_images: value.input_images, roleplay_intent: value.roleplay_resume?.intent
@@ -1378,10 +1484,13 @@ export const saveHistoryTurnRecovery = async (
         detached.retained_result_texts = retainedTexts(prior, detached)
       }
       if (prior.persistence === "server") {
+        if (Boolean(prior.existing_selection) !== Boolean(detached.existing_selection)) fail("history_operation_conflict")
         if ((prior.input_id && detached.input_id && prior.input_id !== detached.input_id) || (prior.assistant_id && detached.assistant_id && prior.assistant_id !== detached.assistant_id)) fail("history_operation_conflict")
         if (prior.assistant_id && !detached.assistant_id) return
       }
       if (prior.admission && detached.admission && canonicalHistoryJson(prior.admission) !== canonicalHistoryJson(detached.admission)) fail("history_operation_conflict")
+      if (prior.existing_selection && canonicalHistoryJson(prior.existing_selection) !== canonicalHistoryJson(detached.existing_selection)) fail("history_operation_conflict")
+      if (prior.settlement_payload && canonicalHistoryJson(prior.settlement_payload) !== canonicalHistoryJson(detached.settlement_payload)) fail("history_operation_conflict")
       if (prior.admission && !detached.admission) return
       if (prior.result_text && !detached.result_text) return
     }

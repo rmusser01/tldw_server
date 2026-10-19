@@ -31,7 +31,7 @@ vi.mock("antd", async original => {
     </select> }
 })
 
-const ChatModelOwner = () => { const { selectedModel } = useSelectedModel(); return <output aria-label="Chat selected model">{selectedModel}</output> }
+const ChatModelOwner = () => { const { selectedModel, setSelectedModel } = useSelectedModel(); return <><output aria-label="Chat selected model">{selectedModel}</output><button onClick={() => void setSelectedModel(null)}>Clear model</button></> }
 let storage: Storage
 const syncStorageValues = new Map<string, unknown>()
 const syncStorageListeners = new Set<(
@@ -39,7 +39,7 @@ const syncStorageListeners = new Set<(
   areaName: string
 ) => void>()
 
-const installSyncStorage = () => {
+const installSyncStorage = (pendingRead?: Promise<void>) => {
   vi.stubGlobal("chrome", {
     storage: {
       sync: {
@@ -49,13 +49,15 @@ const installSyncStorage = () => {
             : typeof keys === "string"
               ? [keys]
               : Array.from(syncStorageValues.keys())
-          return Object.fromEntries(
+          const result = Object.fromEntries(
             requested.flatMap((key) =>
               syncStorageValues.has(key)
                 ? [[key, syncStorageValues.get(key)]]
                 : []
             )
           )
+          if (pendingRead) await pendingRead
+          return result
         },
         set: async (values: Record<string, unknown>) => {
           const changes: Record<string, { oldValue?: unknown; newValue?: unknown }> = {}
@@ -138,4 +140,46 @@ describe("Settings model selection with a live Chat owner", () => {
     await act(async () => { render(<ChatModelOwner />) })
     expect(screen.getByLabelText("Chat selected model")).toHaveTextContent("tldw:ready.gguf")
   })
+
+  it("keeps a deliberate blank default blank with another mounted model owner", async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<QueryClientProvider client={queryClient}><MemoryRouter><ModelsBody /><ChatModelOwner /></MemoryRouter></QueryClientProvider>)
+    await screen.findByRole("option", { name: /ready.gguf/ })
+    fireEvent.change(screen.getByRole("combobox", { name: "Default model" }), { target: { value: "" } })
+    await waitFor(() => expect(screen.getByLabelText("Chat selected model")).toBeEmptyDOMElement())
+    await waitFor(async () => expect(await storage.get("selectedModel")).toBeNull())
+    expect(useStoreMessageOption.getState().selectedModel).toBeNull()
+    expect(screen.getByRole("combobox", { name: "Default model" })).toHaveValue("")
+    view.unmount()
+    await act(async () => { render(<ChatModelOwner />) })
+    expect(screen.getByLabelText("Chat selected model")).toBeEmptyDOMElement()
+  })
+
+
+  it("restores the remembered default into a cold model owner", async () => {
+    useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
+    render(<ChatModelOwner />)
+    await waitFor(() => expect(screen.getByLabelText("Chat selected model")).toHaveTextContent("tldw:old.gguf"))
+    expect(useStoreMessageOption.getState().selectedModel).toBe("tldw:old.gguf")
+  })
+
+  it("does not resurrect a remembered model when Clear precedes hydration", async () => {
+    useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    installSyncStorage(pending)
+    render(<><ChatModelOwner /><ChatModelOwner /></>)
+    try {
+      fireEvent.click(screen.getAllByRole("button", { name: "Clear model" })[0])
+      await act(async () => { release(); await pending })
+      await waitFor(() => {
+        for (const output of screen.getAllByLabelText("Chat selected model")) expect(output).toBeEmptyDOMElement()
+        expect(useStoreMessageOption.getState().selectedModel).toBeNull()
+      })
+      await waitFor(async () => expect(await storage.get("selectedModel")).toBeNull())
+    } finally {
+      release()
+    }
+  })
+
 })

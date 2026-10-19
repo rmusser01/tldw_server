@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
+import Dexie from "dexie"
 import i18n from "i18next"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -21,6 +22,33 @@ import type { HistoryInfo, Message as SavedMessage } from "@/db/dexie/types"
 import { reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 
+vi.mock("@/db/dexie/schema", () => {
+  const table = () => ({
+    toArray: vi.fn().mockResolvedValue([]),
+    get: vi.fn().mockResolvedValue(undefined),
+    put: vi.fn().mockResolvedValue(undefined),
+    add: vi.fn().mockResolvedValue(undefined),
+    update: vi.fn().mockResolvedValue(0),
+    delete: vi.fn().mockResolvedValue(undefined),
+    where: vi.fn().mockReturnThis(),
+    equals: vi.fn().mockReturnThis(),
+    first: vi.fn().mockResolvedValue(undefined),
+    count: vi.fn().mockResolvedValue(0),
+    bulkPut: vi.fn().mockResolvedValue(undefined),
+    bulkDelete: vi.fn().mockResolvedValue(undefined)
+  })
+  return {
+    db: {
+      chatHistories: table(),
+      messages: table(),
+      modelNickname: table(),
+      sessionFiles: table(),
+      transaction: vi.fn().mockImplementation(async (_mode, _tables, operation) => operation())
+    },
+    PageAssistDexieDB: vi.fn()
+  }
+})
+
 const {
   getCharacterMock,
   getChatMock,
@@ -40,16 +68,16 @@ const {
   bgStreamMock: vi.fn(),
   saveLocalErrorMock: vi.fn(async (_payload: unknown) => "history-character"),
   saveLocalSuccessMock: vi.fn(async (_payload: unknown) => "history-character"),
-  addChatMessageMock: vi.fn(async () => ({ id: "user-server-1", version: 1 })),
+  addChatMessageMock: vi.fn(async (..._args: Parameters<typeof import("@/services/tldw/TldwApiClient").tldwClient.addChatMessage>) => ({ id: "user-server-1", version: 1 })),
   createChatMock: vi.fn(),
   detectCharacterMoodMock: vi.fn(),
   streamCharacterChatCompletionMock: vi.fn(),
-  persistCharacterCompletionMock: vi.fn(async () => ({
+  persistCharacterCompletionMock: vi.fn(async (..._args: Parameters<typeof import("@/services/tldw/TldwApiClient").tldwClient.persistCharacterCompletion>) => ({
     assistant_message_id: "assistant-server-1",
     version: 1
   })),
   normalChatModeMock: vi.fn(),
-  resolveVisualIdentityBindingMock: vi.fn(async () => ({
+  resolveVisualIdentityBindingMock: vi.fn(async (..._args: Parameters<typeof import("@/services/tldw/TldwApiClient").tldwClient.resolveVisualIdentityBinding>) => ({
     actor_kind: "character",
     actor_id: 12,
     pack_id: 1,
@@ -963,7 +991,7 @@ describe("useChatActions character integration", () => {
       let outcome: unknown
       await act(async () => {
         if (ownerChanges) {
-          result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+          result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] , name: undefined }])
           logout()
           expect(actualAuthority.snapshot!.scopeInvalidatedSignal.aborted).toBe(true)
           expect(actualAuthority.snapshot!.scopeSignal.aborted).toBe(true)
@@ -1019,7 +1047,7 @@ describe("useChatActions character integration", () => {
         const [history, setHistory] = React.useState<ChatHistory>([])
         return { ...useChatActions({ ...options, messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0]), messages, setMessages }
       })
-      replaceDraft = () => result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+      replaceDraft = () => result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] , name: undefined }])
       let outcome: unknown
       await act(async () => { outcome = await result.current.onSubmit({ message: "Owned question", image: "" }) })
       expect(actualAuthority.snapshot!.scopeInvalidatedSignal.aborted).toBe(true)
@@ -1054,7 +1082,7 @@ describe("useChatActions character integration", () => {
       const [messages, setMessages] = React.useState<Message[]>([])
       return { ...useChatActions({ ...options, messages, setMessages } as unknown as Parameters<typeof useChatActions>[0]), messages, setMessages }
     })
-    replaceDraft = () => result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+    replaceDraft = () => result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] , name: undefined }])
     let outcome: unknown
     await act(async () => { outcome = await result.current.onSubmit({ message: "Owned question", image: "" }) })
     expect(createChatMock).toHaveBeenCalledTimes(1)
@@ -1127,7 +1155,7 @@ describe("useChatActions character integration", () => {
       } else if (mode === "caller-abort" || mode === "authority-abort") {
         await act(async () => {
           if (mode === "authority-abort") {
-            result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] }])
+            result.current.setMessages([{ id: "bob-draft", isBot: false, message: "Private Bob draft", sources: [] , name: undefined }])
             recoveryAuthority.controller.abort()
             // Explicit caller cancellation accompanies this invalidated snapshot.
             // Invalidation-only delivery is a separately retained diagnostic.
@@ -1173,7 +1201,7 @@ describe("useChatActions character integration", () => {
       } }), { status: 200, headers: { "content-type": "text/event-stream" } })
     }))
     const { result } = renderHook(() => {
-      const [messages, setMessages] = React.useState<Message[]>([{ id: "greeting", isBot: true, message: "Welcome", role: "assistant", messageType: "character:greeting", serverMessageId: "greeting-server", sources: [] }])
+      const [messages, setMessages] = React.useState<Message[]>([{ id: "greeting", isBot: true, message: "Welcome", role: "assistant", messageType: "character:greeting", serverMessageId: "greeting-server", sources: [] , name: undefined }])
       const [history, setHistory] = React.useState<ChatHistory>([{ role: "assistant", content: "Welcome", messageType: "character:greeting" }])
       const actions = useChatActions({ ...createHookOptions(), messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0])
       return { ...actions, messages, history }
@@ -1478,13 +1506,13 @@ describe("useChatActions character integration", () => {
     const entered = new Promise<void>(resolve => { writeEntered = resolve })
     const held = new Promise<void>(resolve => { finishWrite = resolve })
     const table = boundary === "link" ? db.chatHistories : db.messages
-    vi.spyOn(table, "add").mockImplementationOnce(async (row: any) => {
+    vi.spyOn(table, "add").mockImplementationOnce((row: any) => Dexie.Promise.resolve().then(async () => {
       if (boundary === "link") histories.set(row.id, structuredClone(row))
       else savedMessages.set(row.id, structuredClone(row))
       writeEntered()
       await held
       return row.id
-    })
+    }))
     const options = {
       ...createHookOptions(), historyId: parent.id,
       messages: [
@@ -2274,7 +2302,7 @@ describe("useChatActions character integration", () => {
       })
 
       const tldwAddCalls = addChatMessageMock.mock.calls.filter(
-        ([, payload]: [unknown, any]) => payload?.role === "assistant"
+        ([, payload]) => payload?.role === "assistant"
       )
       expect(tldwAddCalls).toHaveLength(0)
       expect(saveLocalErrorMock).toHaveBeenCalledWith(expect.objectContaining({ assistantServerMessageId: "assistant-degraded-1" }))
@@ -2323,7 +2351,7 @@ describe("useChatActions character integration", () => {
 
     const tldwAddCalls = addChatMessageMock.mock.calls
     const assistantAddCall = tldwAddCalls.find(
-      ([, payload]: [unknown, any]) => payload?.role === "assistant"
+      ([, payload]) => payload?.role === "assistant"
     )
     expect(assistantAddCall?.[1]).toMatchObject({
       role: "assistant",

@@ -294,8 +294,8 @@ index 12376c8463..ebebdaf58c 100644
 +    assert set(lim) == {"evaluations_per_minute", "evaluations_per_day", "tokens_per_day"}
 +    assert set(usage) == {"evaluations_today", "tokens_today"}
 +    assert set(rem) == {"daily_evaluations", "daily_tokens"}
- 
- 
+
+
  def test_rate_limits_daily_caps_are_null_when_unlimited(monkeypatch):
 diff --git a/tldw_Server_API/tests/Evaluations/test_evaluations_core_hardening.py b/tldw_Server_API/tests/Evaluations/test_evaluations_core_hardening.py
 index b064fb47bc..40fe68ea54 100644
@@ -309,10 +309,10 @@ index b064fb47bc..40fe68ea54 100644
 +from tldw_Server_API.app.core.Evaluations.user_rate_limiter import UserRateLimiter
  from tldw_Server_API.app.core.Evaluations.webhook_manager import WebhookPayload, WebhookManager
  from tldw_Server_API.app.core.Evaluations.webhook_security import WebhookSecurityValidator
- 
+
 @@ -318,48 +318,16 @@ def test_postgresql_adapter_is_not_constructible_until_implemented() -> None:
- 
- 
+
+
  @pytest.mark.asyncio
 -async def test_rate_limiter_cost_reservation_is_atomic(tmp_path, monkeypatch) -> None:
 +async def test_daily_cap_reservation_is_atomic_under_concurrency(tmp_path) -> None:
@@ -363,8 +363,8 @@ index b064fb47bc..40fe68ea54 100644
 +    assert sum(1 for allowed, _metadata in results if allowed) == 1  # nosec B101
 +    denied = [metadata for allowed, metadata in results if not allowed]
 +    assert len(denied) == 1 and denied[0]["error"] == "Daily evaluation limit exceeded"  # nosec B101
- 
- 
+
+
  def test_synthetic_workflow_requires_user_for_owner_scoped_operations(tmp_path) -> None:
 diff --git a/tldw_Server_API/tests/Evaluations/test_evaluations_stage2_user_isolation_and_usage_accounting.py b/tldw_Server_API/tests/Evaluations/test_evaluations_stage2_user_isolation_and_usage_accounting.py
 index 03ab8d5406..785cfff125 100644
@@ -381,7 +381,7 @@ index 03ab8d5406..785cfff125 100644
 +            _ = (is_batch, tokens_requested, evaluations_requested)
              self.checked_endpoints.append(endpoint)
              return True, {"retry_after": 0}
- 
+
 @@ -119,7 +118,6 @@ def test_ocr_pdf_uses_consistent_endpoint_key_for_check_and_record(monkeypatch):
              _user_id: str,
              endpoint: str,
@@ -404,7 +404,7 @@ index a92bcef6d2..d637ff4620 100644
 -            _ = (endpoint, is_batch, tokens_requested, estimated_cost, evaluations_requested)
 +            _ = (endpoint, is_batch, tokens_requested, evaluations_requested)
              return True, {"retry_after": 0}
- 
+
      started_items: list[int] = []
 @@ -378,10 +377,9 @@ def test_batch_parallel_sanitizes_item_failure(monkeypatch):
              endpoint: str,
@@ -416,25 +416,25 @@ index a92bcef6d2..d637ff4620 100644
 -            _ = (endpoint, is_batch, tokens_requested, estimated_cost, evaluations_requested)
 +            _ = (endpoint, is_batch, tokens_requested, evaluations_requested)
              return True, {"retry_after": 0}
- 
+
      class _Service:
 diff --git a/tldw_Server_API/tests/Evaluations/test_production_features_integration.py b/tldw_Server_API/tests/Evaluations/test_production_features_integration.py
 index 4362caa258..20baa351e5 100644
 --- a/tldw_Server_API/tests/Evaluations/test_production_features_integration.py
 +++ b/tldw_Server_API/tests/Evaluations/test_production_features_integration.py
 @@ -206,7 +206,7 @@ class TestUserRateLimiter:
- 
+
      @pytest.mark.asyncio
      async def test_rate_limit_enforcement(self, rate_limiter):
 -        """Test current Phase-2 behavior for CUSTOM tier (legacy cost-only path)."""
 +        """Test current Phase-2 behavior for CUSTOM tier (legacy local path)."""
          user_id = "test_user"
          endpoint = "/api/v1/evaluations"
- 
+
 @@ -218,13 +218,13 @@ class TestUserRateLimiter:
              custom_limits={"evaluations_per_minute": 2}
          )
- 
+
 -        # All requests should be allowed in legacy_cost_only mode.
 +        # All requests should be allowed in legacy_local mode.
          for i in range(3):
@@ -444,7 +444,7 @@ index 4362caa258..20baa351e5 100644
              assert allowed is True
 -            assert metadata.get("rate_limit_source") == "legacy_cost_only"
 +            assert metadata.get("rate_limit_source") == "legacy_local"
- 
+
      @pytest.mark.asyncio
      async def test_tier_upgrade(self, rate_limiter):
 @@ -256,8 +256,7 @@ class TestUserRateLimiter:
@@ -455,14 +455,14 @@ index 4362caa258..20baa351e5 100644
 -                estimated_cost=0.01
 +                tokens_requested=100
              )
- 
+
          # Get usage summary
 @@ -266,7 +265,6 @@ class TestUserRateLimiter:
          assert summary["user_id"] == user_id
          assert summary["usage"]["today"]["evaluations"] == 3
          assert summary["usage"]["today"]["tokens"] == 300
 -        assert summary["usage"]["today"]["cost"] == pytest.approx(0.03)
- 
+
      @pytest.mark.asyncio
      async def test_burst_allowance(self, rate_limiter):
 @@ -289,7 +287,7 @@ class TestUserRateLimiter:
@@ -471,8 +471,8 @@ index 4362caa258..20baa351e5 100644
              assert allowed is True
 -            assert metadata.get("rate_limit_source") == "legacy_cost_only"
 +            assert metadata.get("rate_limit_source") == "legacy_local"
- 
- 
+
+
  @pytest_asyncio.fixture
 @@ -749,8 +747,7 @@ class TestIntegration:
          allowed, rate_metadata = await rate_limiter.check_rate_limit(
@@ -483,15 +483,15 @@ index 4362caa258..20baa351e5 100644
 +            tokens_requested=1000
          )
          assert allowed is True
- 
+
 @@ -797,7 +794,7 @@ class TestIntegration:
          # 5. Check usage
          usage = await rate_limiter.get_usage_summary(user_id)
          assert usage["usage"]["today"]["evaluations"] == 1
 -        assert usage["usage"]["today"]["cost"] == pytest.approx(0.10)
 +        assert usage["usage"]["today"]["tokens"] == 1000
- 
- 
+
+
  # Run tests with pytest
 diff --git a/tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py b/tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
 index 9ff39fc78d..9ab45c98e2 100644
@@ -668,8 +668,8 @@ index 22babd55cf..d66ce01d07 100644
 --- a/tldw_Server_API/tests/Evaluations/unit/test_user_rate_limiter_minute_exact_and_reset.py
 +++ b/tldw_Server_API/tests/Evaluations/unit/test_user_rate_limiter_minute_exact_and_reset.py
 @@ -12,8 +12,8 @@ from tldw_Server_API.app.core.Evaluations import user_rate_limiter as evals_rl
- 
- 
+
+
  @pytest.mark.unit
 -def test_custom_tier_enforces_cost_only(tmp_path, monkeypatch):
 -    """Phase 2: CUSTOM tier skips minute/daily checks; only cost caps enforced."""
@@ -686,7 +686,7 @@ index 22babd55cf..d66ce01d07 100644
 -                "max_cost_per_month": 100.0,
              },
          )
- 
+
 @@ -49,10 +47,9 @@ def test_custom_tier_enforces_cost_only(tmp_path, monkeypatch):
                      endpoint=endpoint,
                      is_batch=False,
@@ -697,7 +697,7 @@ index 22babd55cf..d66ce01d07 100644
 -                assert meta.get("rate_limit_source") == "legacy_cost_only"
 +                assert meta.get("rate_limit_source") == "legacy_local"
                  assert meta.get("tier") == "custom"
- 
+
              deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
 diff --git a/tldw_Server_API/tests/Resource_Governance/test_rg_cutover_evals_authnz_character_web.py b/tldw_Server_API/tests/Resource_Governance/test_rg_cutover_evals_authnz_character_web.py
 index 55801c22d0..96c6541d84 100644
@@ -709,10 +709,10 @@ index 55801c22d0..96c6541d84 100644
          tokens_requested=123,
 -        estimated_cost=0.0,
      )
- 
+
      assert allowed is True
 @@ -81,7 +80,7 @@ async def test_evaluations_rg_allows_bypasses_legacy(monkeypatch):
- 
+
  @pytest.mark.asyncio
  async def test_evaluations_rg_unavailable_fail_open(monkeypatch):
 -    """Phase 2: RG returns None → fail-open for eval/token caps, cost-only enforcement."""
@@ -726,11 +726,11 @@ index 55801c22d0..96c6541d84 100644
              tokens_requested=123,
 -            estimated_cost=0.0,
          )
- 
+
          assert allowed is True
 @@ -217,10 +215,10 @@ async def test_web_scraping_rg_unavailable_fail_open(monkeypatch):
- 
- 
+
+
  @pytest.mark.asyncio
 -async def test_evaluations_rg_allows_still_enforces_cost_caps(monkeypatch):
 +async def test_evaluations_rg_allows_still_enforces_local_daily_caps(monkeypatch):
@@ -754,9 +754,9 @@ index 55801c22d0..96c6541d84 100644
 +            "used": 1,
              "retry_after": 3600,
          }
- 
+
      monkeypatch.setattr(limiter, "_reserve_request_usage", _deny_usage)
- 
+
      allowed, meta = await limiter.check_rate_limit(
 -        user_id="user-cost-test",
 +        user_id="user-cap-test",
@@ -764,7 +764,7 @@ index 55801c22d0..96c6541d84 100644
          tokens_requested=0,
 -        estimated_cost=0.5,
      )
- 
+
      assert usage_denied is True
      assert allowed is False
 -    assert "cost" in meta.get("error", "").lower()
@@ -809,8 +809,8 @@ index e765d0a672..43c8b54d59 100644
 -    ok, meta = await limiter._reserve_request_usage("7", "/e", 0, 0.0, config, max_evaluations_per_day=2)
 +    ok, meta = await limiter._reserve_request_usage("7", "/e", 0, max_evaluations_per_day=2)
      assert ok is False and meta["error"] == "Daily evaluation limit exceeded" and meta["limit"] == 2
- 
- 
+
+
  async def test_daily_evaluation_cap_of_zero_refuses_the_first_evaluation(tmp_path) -> None:
      """max_evaluations_per_day == 0 must block, not mean unlimited (spec 2 review B2)."""
      limiter = _limiter(tmp_path)
@@ -818,8 +818,8 @@ index e765d0a672..43c8b54d59 100644
 -    ok, meta = await limiter._reserve_request_usage("7", "/e", 0, 0.0, config, max_evaluations_per_day=0)
 +    ok, meta = await limiter._reserve_request_usage("7", "/e", 0, max_evaluations_per_day=0)
      assert ok is False and meta["error"] == "Daily evaluation limit exceeded" and meta["limit"] == 0
- 
- 
+
+
  async def test_daily_evaluation_token_cap(tmp_path) -> None:
      """A request whose tokens would pass the daily token cap is refused."""
      limiter = _limiter(tmp_path)
@@ -829,8 +829,8 @@ index e765d0a672..43c8b54d59 100644
 +    assert (await limiter._reserve_request_usage("7", "/e", 900, max_tokens_per_day=1000))[0] is True
 +    ok, meta = await limiter._reserve_request_usage("7", "/e", 101, max_tokens_per_day=1000)
      assert ok is False and meta["error"] == "Daily evaluation token limit exceeded"
- 
- 
+
+
  async def test_batch_of_four_is_refused_against_a_cap_of_three(tmp_path) -> None:
      """A batch reserving 4 evaluations against a cap of 3 is refused (Qodo Q1)."""
      limiter = _limiter(tmp_path)
@@ -840,7 +840,7 @@ index e765d0a672..43c8b54d59 100644
 +        "7", "/e", 0, max_evaluations_per_day=3, evaluations_requested=4
      )
      assert ok is False and meta["error"] == "Daily evaluation limit exceeded" and meta["limit"] == 3
- 
+
 @@ -56,9 +52,8 @@ async def test_batch_of_four_is_refused_against_a_cap_of_three(tmp_path) -> None
  async def test_batch_of_three_is_admitted_and_records_three(tmp_path) -> None:
      """A batch reserving 3 evaluations against a cap of 3 is admitted and counts as 3 (Qodo Q1)."""
@@ -868,7 +868,7 @@ index 50d8e4ca9d..a6462ae845 100644
 -      max_cost_per_day: 1.0
 -      max_cost_per_month: 10.0
        description: "Free tier with basic usage limits"
- 
+
      basic:
 @@ -22,8 +20,6 @@ rate_limiting:
        evaluations_per_day: 1000
@@ -877,7 +877,7 @@ index 50d8e4ca9d..a6462ae845 100644
 -      max_cost_per_day: 10.0
 -      max_cost_per_month: 100.0
        description: "Basic paid tier with increased limits"
- 
+
      premium:
 @@ -32,8 +28,6 @@ rate_limiting:
        evaluations_per_day: 10000
@@ -886,7 +886,7 @@ index 50d8e4ca9d..a6462ae845 100644
 -      max_cost_per_day: 100.0
 -      max_cost_per_month: 1000.0
        description: "Premium tier for power users"
- 
+
      enterprise:
 @@ -42,8 +36,6 @@ rate_limiting:
        evaluations_per_day: 100000
@@ -895,7 +895,7 @@ index 50d8e4ca9d..a6462ae845 100644
 -      max_cost_per_day: 1000.0
 -      max_cost_per_month: 10000.0
        description: "Enterprise tier with high limits"
- 
+
      custom:
 @@ -52,8 +44,6 @@ rate_limiting:
        evaluations_per_day: 100
@@ -904,7 +904,7 @@ index 50d8e4ca9d..a6462ae845 100644
 -      max_cost_per_day: 1.0
 -      max_cost_per_month: 10.0
        description: "Custom tier (configured per user)"
- 
+
    # Global rate limiting settings
 diff --git a/tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_auth.py b/tldw_Server_API/app/api/v1/endpoints/evaluations/evaluations_auth.py
 index 8aacb2cad7..8e8d8a1149 100644
@@ -1098,7 +1098,7 @@ index 9f5501d1a5..c509b73464 100644
 -    max_cost_per_day: float
 -    max_cost_per_month: float
      description: str = ""
- 
+
      @classmethod
 @@ -61,8 +59,6 @@ class RateLimitTierConfig:
              evaluations_per_day=data.get("evaluations_per_day", 100),
@@ -1108,7 +1108,7 @@ index 9f5501d1a5..c509b73464 100644
 -            max_cost_per_month=data.get("max_cost_per_month", 10.0),
              description=data.get("description", "")
          )
- 
+
 @@ -268,6 +264,12 @@ class EvaluationsConfigManager:
              try:
                  tier_config = RateLimitTierConfig.from_dict(tier_name, tier_data)
@@ -1121,15 +1121,15 @@ index 9f5501d1a5..c509b73464 100644
 +                    )
              except _EVAL_CONFIG_NONCRITICAL_EXCEPTIONS as e:
                  logger.error(f"Invalid rate limit config for tier '{tier_name}': {e}")
- 
+
 @@ -486,7 +488,7 @@ class EvaluationsConfigManager:
- 
+
                          required_fields = [
                              "evaluations_per_minute", "evaluations_per_day",
 -                            "total_tokens_per_day", "max_cost_per_day"
 +                            "total_tokens_per_day"
                          ]
- 
+
                          for field in required_fields:
 diff --git a/tldw_Server_API/app/core/Evaluations/user_rate_limiter.py b/tldw_Server_API/app/core/Evaluations/user_rate_limiter.py
 index 132401974b..cf339211ce 100644
@@ -1153,14 +1153,14 @@ index 132401974b..cf339211ce 100644
 +- CUSTOM tier bypasses RG with a deprecation warning.
  - This shim will be removed in a future release.
  """
- 
+
 @@ -123,8 +125,6 @@ class RateLimitConfig:
      evaluations_per_day: int
      total_tokens_per_day: int
      burst_size: int
 -    max_cost_per_day: float
 -    max_cost_per_month: float
- 
+
      @classmethod
      def for_tier(cls, tier: UserTier) -> "RateLimitConfig":
 @@ -140,8 +140,6 @@ class RateLimitConfig:
@@ -1170,7 +1170,7 @@ index 132401974b..cf339211ce 100644
 -                max_cost_per_day=tier_config.max_cost_per_day,
 -                max_cost_per_month=tier_config.max_cost_per_month
              )
- 
+
          # Fallback to hardcoded defaults if external config not available
 @@ -153,8 +151,6 @@ class RateLimitConfig:
                  evaluations_per_day=100,
@@ -1216,7 +1216,7 @@ index 132401974b..cf339211ce 100644
 -                max_cost_per_month=10.0
              )
          }
- 
+
 @@ -343,7 +331,6 @@ class UserRateLimiter:
          endpoint: str,
          is_batch: bool = False,
@@ -1232,7 +1232,7 @@ index 132401974b..cf339211ce 100644
 -            estimated_cost: Estimated cost for request
              evaluations_requested: How many evaluation units this call represents
                  against the daily evaluations cap (e.g. item count for a batch)
- 
+
 @@ -378,7 +364,6 @@ class UserRateLimiter:
                  endpoint=endpoint,
                  is_batch=is_batch,
@@ -1244,7 +1244,7 @@ index 132401974b..cf339211ce 100644
 @@ -391,14 +376,12 @@ class UserRateLimiter:
                          "rate_limit_source": "resource_governor",
                      }
- 
+
 -                # Enforce cost caps locally (RG does not handle cost limits)
 -                # and reserve the estimated request usage atomically.
 +                # Enforce the daily caps locally and reserve the estimated
@@ -1259,7 +1259,7 @@ index 132401974b..cf339211ce 100644
                      evaluations_requested=evaluations_requested,
                  )
 @@ -414,13 +397,11 @@ class UserRateLimiter:
- 
+
              _log_rg_evals_fallback("rg_decision_unavailable")
              _emit_evals_legacy_deprecation("rg_decision_unavailable")
 -            # Fail-open for eval/token caps; still enforce cost.
@@ -1276,7 +1276,7 @@ index 132401974b..cf339211ce 100644
 @@ -432,22 +413,20 @@ class UserRateLimiter:
                  **usage_meta,
              }
- 
+
 -        # RG disabled or CUSTOM tier → skip minute/daily checks (Phase 2),
 -        # enforce cost caps only.
 +        # RG disabled or CUSTOM tier → skip the minute checks (Phase 2);
@@ -1346,7 +1346,7 @@ index 132401974b..cf339211ce 100644
 -                    config.max_cost_per_day, config.max_cost_per_month
                  ))
                  conn.commit()
- 
+
                  cursor.execute("""
                      SELECT tier, evaluations_per_minute, batch_evaluations_per_minute,
 -                           evaluations_per_day, total_tokens_per_day, burst_size,
@@ -1363,11 +1363,11 @@ index 132401974b..cf339211ce 100644
 -                        max_cost_per_month=persisted[7],
                      )
              return config
- 
+
 @@ -652,69 +624,21 @@ class UserRateLimiter:
          except _USER_RATE_LIMIT_NONCRITICAL_EXCEPTIONS as exc:  # pragma: no cover - defensive
              logger.debug(f"Evaluations: legacy daily_usage backfill skipped: {exc}")
- 
+
 -    async def _check_cost_limits(
 -        self,
 -        user_id: str,
@@ -1453,13 +1453,13 @@ index 132401974b..cf339211ce 100644
 -            normalized_cost = 0.0
          normalized_tokens = max(0, int(tokens_used or 0))
 -        cost_remaining: Optional[float] = None
- 
+
          # Already dispatched to a worker thread by _reserve_request_usage();
          # keep it synchronous and only take the connection policy from _connect().
 @@ -781,33 +698,6 @@ class UserRateLimiter:
                              "resets_at": reset_at.isoformat(),
                          }, now, normalized_tokens
- 
+
 -                if normalized_cost > 0:
 -                    cursor = conn.cursor()
 -                    cursor.execute(
@@ -1501,12 +1501,12 @@ index 132401974b..cf339211ce 100644
 @@ -825,16 +714,13 @@ class UserRateLimiter:
          finally:
              conn.close()
- 
+
 -        if cost_remaining is None:
 -            return True, {}, now, normalized_tokens
 -        return True, {"cost_remaining": cost_remaining}, now, normalized_tokens
 +        return True, {}, now, normalized_tokens
- 
+
      async def _record_request(
          self,
          user_id: str,
@@ -1563,7 +1563,7 @@ index 132401974b..cf339211ce 100644
 +            "INSERT INTO rate_limit_tracking (user_id, endpoint, timestamp, tokens_used) VALUES (?, ?, ?, ?)",
 +            (user_id, endpoint, now.isoformat(), tokens_used)
          )
- 
+
          # Update daily usage
          conn.execute("""
 -            INSERT INTO daily_usage (user_id, date, total_evaluations, total_tokens, total_cost)
@@ -1577,7 +1577,7 @@ index 132401974b..cf339211ce 100644
 -        """, (user_id, str(today), evaluations_delta, tokens_used, cost, evaluations_delta, tokens_used, cost))
 +                total_tokens = MAX(0, total_tokens + ?)
 +        """, (user_id, str(today), evaluations_delta, tokens_used, evaluations_delta, tokens_used))
- 
+
      async def _shadow_write_daily_usage(
          self,
 @@ -983,7 +863,6 @@ class UserRateLimiter:
@@ -1595,7 +1595,7 @@ index 132401974b..cf339211ce 100644
 +                    else:
 +                        # e.g. the removed max_cost_per_day / max_cost_per_month
 +                        logger.warning(f"Ignoring unknown custom limit {key!r} for user {user_id}")
- 
+
              def _apply(conn: sqlite3.Connection) -> None:
                  cursor = conn.cursor()
 @@ -1029,13 +911,11 @@ class UserRateLimiter:
@@ -1611,7 +1611,7 @@ index 132401974b..cf339211ce 100644
 -                    config.max_cost_per_day, config.max_cost_per_month,
                      expires_at, user_id
                  ))
- 
+
 @@ -1045,13 +925,12 @@ class UserRateLimiter:
                          INSERT INTO user_rate_limits (
                              user_id, tier, evaluations_per_minute, batch_evaluations_per_minute,
@@ -1627,9 +1627,9 @@ index 132401974b..cf339211ce 100644
 -                        config.max_cost_per_day, config.max_cost_per_month,
                          expires_at
                      ))
- 
+
 @@ -1089,7 +968,7 @@ class UserRateLimiter:
- 
+
              # Get today's usage
              cursor.execute("""
 -                SELECT total_evaluations, total_tokens, total_cost
@@ -1639,14 +1639,14 @@ index 132401974b..cf339211ce 100644
              """, (user_id, str(today)))
 @@ -1097,22 +976,13 @@ class UserRateLimiter:
              row = cursor.fetchone()
- 
+
              if row:
 -                total_evaluations, total_tokens, total_cost = row
 +                total_evaluations, total_tokens = row
              else:
 -                total_evaluations = total_tokens = total_cost = 0
 +                total_evaluations = total_tokens = 0
- 
+
 -            # Get monthly cost
 -            month_start = today.replace(day=1)
 -            cursor.execute("""
@@ -1658,10 +1658,10 @@ index 132401974b..cf339211ce 100644
 -            monthly_cost = cursor.fetchone()[0] or 0.0
 -            return total_evaluations, total_tokens, total_cost, monthly_cost
 +            return total_evaluations, total_tokens
- 
+
 -        total_evaluations, total_tokens, total_cost, monthly_cost = await self._run_db(_summary)
 +        total_evaluations, total_tokens = await self._run_db(_summary)
- 
+
          quota_uid = as_quota_user_id(user_id)
          if quota_uid is None:
 @@ -1134,28 +1004,18 @@ class UserRateLimiter:
@@ -1695,7 +1695,7 @@ index 132401974b..cf339211ce 100644
 +                "daily_tokens": None if tokens_cap is None else max(0, tokens_cap - total_tokens)
              }
          }
- 
+
 @@ -1164,7 +1024,6 @@ class UserRateLimiter:
          user_id: str,
          endpoint: str,
@@ -1727,7 +1727,7 @@ index 132401974b..cf339211ce 100644
 -        # Cost/day caps remain legacy-only (and unified eval endpoints currently
 -        # pass estimated_cost=0.0). RG-first enforcement covers evaluations/tokens;
 -        # keep estimated_cost in tags for observability only.
- 
+
          decision, handle = await gov.reserve(
              RGRequest(
 @@ -1409,7 +1263,6 @@ async def _maybe_enforce_with_rg_evaluations(
@@ -1822,7 +1822,7 @@ index 02280eeb72..935b836c41 100644
 +++ b/Docs/API-related/Evaluations_API_Unified_Reference.md
 @@ -96,12 +96,12 @@ curl -H "Authorization: Bearer sk-..." https://api.example.com/api/v1/evaluation
  - **Burst Protection**: 10 requests/second max
- 
+
  ### User-Based Limits (Multi-User Mode)
 -| Tier       | Requests/Min | Tokens/Min | Batch Size | Cost/Month |
 -|------------|-------------|------------|------------|------------|
@@ -1836,7 +1836,7 @@ index 02280eeb72..935b836c41 100644
 +| Basic      | 30          | 50,000     | 50         |
 +| Premium    | 100         | 200,000    | 200        |
 +| Enterprise | Unlimited   | Unlimited  | 1000       |
- 
+
  ### Rate Limit Response Headers
  Unified evaluation endpoints include standard response headers that surface current limits and remaining allowances:
 @@ -112,8 +112,6 @@ Unified evaluation endpoints include standard response headers that surface curr
@@ -1845,34 +1845,34 @@ index 02280eeb72..935b836c41 100644
  - X-RateLimit-Tokens-Remaining
 -- X-RateLimit-Daily-Cost-Remaining
 -- X-RateLimit-Monthly-Cost-Remaining
- 
+
  In addition, draft standard headers are provided for compatibility with proxies and SDKs:
- 
+
 @@ -121,7 +119,7 @@ In addition, draft standard headers are provided for compatibility with proxies
  - RateLimit-Remaining
  - RateLimit-Reset (seconds until the current minute window resets)
- 
+
 -Note: Remaining values are based on the latest limiter decision; actual token/cost usage may adjust after the request completes when providers return precise usage metadata.
 +Note: Remaining values are based on the latest limiter decision; actual token usage may adjust after the request completes when providers return precise usage metadata.
- 
+
  ## Core API Endpoints
- 
+
 @@ -683,8 +681,6 @@ Responses from evaluation endpoints also include standard `X-RateLimit-*` header
  - `X-RateLimit-Daily-Limit`
  - `X-RateLimit-Daily-Remaining`
  - `X-RateLimit-Tokens-Remaining`
 -- `X-RateLimit-Daily-Cost-Remaining`
 -- `X-RateLimit-Monthly-Cost-Remaining`
- 
+
  ### Idempotency
- 
+
 @@ -856,7 +852,7 @@ curl "$BASE/embeddings/abtest/abtest_123/events" -H "X-API-KEY: $API_KEY"
  1. **Monitor token usage** via metrics endpoint
  2. **Use smaller models** for initial testing
  3. **Implement sampling** for large datasets
 -4. **Set spending limits** via configuration
 +4. **Set spending limits** with `limits.llm_cost_per_day_usd` and `limits.llm_cost_per_month_usd` (see `Docs/Operations/Usage_Quotas.md`)
- 
+
  ### Security
  1. **Rotate API keys** regularly
 diff --git a/Docs/Code_Documentation/Guides/Evaluations_Code_Guide.md b/Docs/Code_Documentation/Guides/Evaluations_Code_Guide.md
@@ -1880,25 +1880,25 @@ index 497ae61d3a..c9fd6713b8 100644
 --- a/Docs/Code_Documentation/Guides/Evaluations_Code_Guide.md
 +++ b/Docs/Code_Documentation/Guides/Evaluations_Code_Guide.md
 @@ -133,7 +133,7 @@ results = await rag_eval.evaluate(
- 
+
  **Auth, Limits, and Error Handling**
  - Auth modes handled in `evaluations_auth.verify_api_key`; admin gating is claim-first (`get_auth_principal` + `RequireRole("admin")` / heavy-admin claim checks).
 -- Path limiter (`check_evaluation_rate_limit`) + per‑user `UserRateLimiter` estimate tokens and enforce daily/cost quotas; usage headers are applied by helpers.
 +- Path limiter (`check_evaluation_rate_limit`) + per‑user `UserRateLimiter` estimate tokens and enforce the daily evaluations/tokens quotas (LLM spend is capped by the general `limits.llm_cost_*` quotas); usage headers are applied by helpers.
  - Errors are normalized via `create_error_response` and `sanitize_error_message` for consistent API error shapes.
- 
+
  **API Usage Examples (curl)**
 diff --git a/Docs/User_Guides/Server/Production_Hardening_Checklist.md b/Docs/User_Guides/Server/Production_Hardening_Checklist.md
 index 81a2bbe9c9..3e50026481 100644
 --- a/Docs/User_Guides/Server/Production_Hardening_Checklist.md
 +++ b/Docs/User_Guides/Server/Production_Hardening_Checklist.md
 @@ -45,7 +45,7 @@ CORS & CSRF
- 
+
  Rate Limiting & Abuse Prevention
  - RG (rate gating) global rate limiter is enabled by default in production unless you disable it with `RG_ENABLED=0` or in `config.txt`; in test environments, RG is disabled by default unless you explicitly enable it (for example via `RG_ENABLED=1` or `config.txt`).
 -- Treat `RG_ENABLED=0` as an emergency/debug-only setting. RG enforcement and the general `check_rate_limit` fallback are off, but several independent layers stay on regardless (ADR-056): the auth brute-force floor (`check_auth_rate_limit`, 30/min, `AUTH_DEPS_AUTH_FALLBACK_RATE_LIMIT`); the AuthNZ login lockout ("Too many failed login attempts...", 429, `MAX_LOGIN_ATTEMPTS`/`LOCKOUT_DURATION_MINUTES`); the audio daily-minutes 402 (`AUDIO_TIER_LIMITS_JSON`); the Evaluations legacy cost caps (`max_cost_per_day`/`max_cost_per_month` in `evaluations_config.yaml`); and the kanban per-action limiter (`KANBAN_RATE_LIMIT_*`). Layers entirely outside RG (RBAC rate classes, billing plan limits, virtual-key budgets) also keep their own switches; see `Docs/Operations/Rate_Limits_Troubleshooting.md`.
 +- Treat `RG_ENABLED=0` as an emergency/debug-only setting. RG enforcement and the general `check_rate_limit` fallback are off, but several independent layers stay on regardless (ADR-056): the auth brute-force floor (`check_auth_rate_limit`, 30/min, `AUTH_DEPS_AUTH_FALLBACK_RATE_LIMIT`); the AuthNZ login lockout ("Too many failed login attempts...", 429, `MAX_LOGIN_ATTEMPTS`/`LOCKOUT_DURATION_MINUTES`); the audio daily-minutes 402 (`AUDIO_TIER_LIMITS_JSON`); and the kanban per-action limiter (`KANBAN_RATE_LIMIT_*`). Layers entirely outside RG (RBAC rate classes, billing plan limits, virtual-key budgets) also keep their own switches; see `Docs/Operations/Rate_Limits_Troubleshooting.md`.
  - Tune per-module rate limiters (Chat/RAG/Evals) via their respective settings.
  - Consider a network-level rate limit at the reverse proxy for additional protection.
- 
+
 ```

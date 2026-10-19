@@ -10,6 +10,7 @@ import type {
   HistorySendTurn,
   NativeHistoryEditResend
 } from "@/types/chat-modes"
+import type { HistoryEditAndSendBoundary, HistoryRegenerateBoundary } from "@/types/chat-modes"
 import type { HistoryAdmissionReferenceV1 } from "@/types/history-selection"
 import {
   assertHistoryConversationTarget,
@@ -24,7 +25,8 @@ import {
 import {
   saveHistoryTurnRecovery,
   retainHistoryTurnRecoveryInMemory,
-  dismissHistoryTurnRecovery
+  dismissHistoryTurnRecovery,
+  canonicalHistoryJson
 } from "@/db/dexie/history-selection"
 import type { HistoryTurnRecovery } from "@/db/dexie/types"
 import {
@@ -32,11 +34,13 @@ import {
   markHistoryTurnLive,
   releaseHistoryTurn
 } from "@/services/history-turn-keep"
+import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
 import { beginServerChatWrite } from "@/store/server-chat-save-status"
 import {
   beginChatTurnSettlement,
   wasChatTurnStoppedByUser
 } from "@/hooks/chat/abort-turn-cleanup"
+import { buildFriendlyErrorMessage, decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { resolveChatToolRequest } from "@/utils/chat-tools"
 import { systemPromptForNonRagOption } from "~/services/tldw-server"
@@ -62,7 +66,6 @@ import type { ActorSceneRead } from "@/services/actor-settings"
 import { bindActorSceneAfterLoad } from "@/hooks/chat/actor-scene-source"
 import { buildActorPrompt, maybeInjectActorMessage, shouldInjectActorForTemplates } from "@/utils/actor"
 import { removeReasoning } from "@/libs/reasoning"
-import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { linkServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { getSearchSettings } from "@/services/search"
@@ -87,7 +90,7 @@ import {
   type ChatModeParamsBase
 } from "./chatModePipeline"
 import { appendSystemPromptSuffix } from "@/utils/output-formatting-guide"
-import { chatSubmitFailed, type ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
+import { chatSubmitFailed, chatSubmitSubmitted, type ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 import { createChatWithRecovery, markChatCreationBound, markChatCreationSettled } from "@/services/pending-chat-promotion"
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import type { ChatDraftAddress, ChatDraftHandle } from "@/utils/chat-draft-address"
@@ -208,6 +211,11 @@ type NormalChatModeParams = {
      * already has. The view must stand just before that question.
      */
     retryAdmission?: HistoryAdmissionReferenceV1
+    retryRecoveries?: HistoryTurnRecoveryEntry[]
+    /** The source instruction block explicitly reviewed for this recovery retry. */
+    reviewedSystemPrompts?: string[]
+    editAndSend?: HistoryEditAndSendBoundary
+    regenerate?: HistoryRegenerateBoundary
     editResend?: NativeHistoryEditResend
   }
   historyTurn?: HistorySendTurn
@@ -707,6 +715,16 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
       baseSystemPrompts.push(overlayPrompt)
     }
 
+    const reviewedSystemPrompts = ctx.historySelection?.reviewedSystemPrompts
+    if (reviewedSystemPrompts) {
+      if (ctx.selectedSystemPrompt && !selectedPrompt)
+        throw new Error("retry_prompt_unavailable")
+      // Bind the review to the strings this preparation actually uses. Later
+      // awaits format this captured block; they never reread Prompt/default sources.
+      if (canonicalHistoryJson(baseSystemPrompts) !== canonicalHistoryJson(reviewedSystemPrompts))
+        throw new Error("retry_context_changed")
+    }
+
     let currentSystemMessages: typeof applicationChatHistory = []
     if (baseSystemPrompts.length > 0) {
       const promptMessages = await Promise.all(
@@ -785,6 +803,7 @@ export const captureNormalChatPreparation = (
 const captureNormalHistoryTurn = async (
   params: ChatModeParamsBase & HistoryChatModeParams,
   message: string,
+  image: string,
   snapshot: ServicePromptSnapshot,
   signal: AbortSignal,
   dispatchIsCurrent: () => boolean,
@@ -1099,12 +1118,45 @@ const captureNormalHistoryTurn = async (
         editResend
       )
     : structuredClone(originView)
+  const editAndSend = params.historySelection!.editAndSend
+  const regenerate = params.historySelection!.regenerate
+  if ((editAndSend || regenerate) && current.owner.kind !== "local") throw new Error("unsupported_history_action")
+  if (editAndSend && (
+    current.owner !== editAndSend.owner ||
+    !editAndSend.originIsCurrent() ||
+    canonicalHistoryJson(view) !== canonicalHistoryJson(editAndSend.originView) ||
+    !current.capture.rows.some((row) =>
+      row.id === editAndSend.targetId && row.role === "user"
+    )
+  )) throw new Error("stale_selection")
+  if (regenerate && (
+    current.owner !== regenerate.owner || !regenerate.originIsCurrent() ||
+    canonicalHistoryJson(view) !== canonicalHistoryJson(regenerate.originView) ||
+    current.capture.rows.at(-1)?.id !== regenerate.answerId ||
+    current.capture.rows.at(-2)?.id !== regenerate.questionId ||
+    current.capture.rows.at(-2)?.role !== "user" ||
+    current.capture.rows.at(-2)?.revision !== regenerate.questionRevision ||
+    (view.interpretation.kind === "parent_graph_v1" &&
+      current.capture.rows.at(-1)?.parent_id !== regenerate.questionId)
+  )) throw new Error("stale_selection")
+  const captureView = regenerate
+    ? { ...view, cursor: { kind: "after_message" as const, message_id: regenerate.questionId } }
+    : editAndSend
+    ? { ...view, cursor: { kind: "before_message" as const, message_id: editAndSend.targetId } }
+    : view
   const retryAdmission = params.historySelection!.retryAdmission
   if (retryAdmission &&
     (retryAdmission.owner_key !== view.owner_key || retryAdmission.conversation_id !== view.conversation_id ||
       view.cursor.kind !== "before_message" || view.cursor.message_id !== retryAdmission.input_message_id))
     throw new Error("invalid_history_retry")
   const bookmarkScope = { ...current.bookmarkScope }
+  const retryRecoveries = params.historySelection!.retryRecoveries ?? []
+  if (retryRecoveries.some(entry =>
+    entry.scope.profile_id !== bookmarkScope.profile_id ||
+    entry.turn.owner_key !== view.owner_key ||
+    entry.turn.conversation_id !== view.conversation_id ||
+    !entry.turn.operation_id
+  )) throw new Error("invalid_history_retry")
   const authValid = () => !snapshot.scopeInvalidatedSignal.aborted
   const owner =
     current.owner.kind === "native"
@@ -1126,6 +1178,8 @@ const captureNormalHistoryTurn = async (
   const canUpdateView = () => {
     const now = controller.getCurrent().view
     return (
+      (!editAndSend || editAndSend.originIsCurrent()) &&
+      (!regenerate || regenerate.originIsCurrent()) &&
       draftIsCurrent() && acceptDraftBind?.isCurrent() !== false && selectionCurrent() && controller.getCurrent().owner === originalOwner &&
       !!now &&
       now.owner_key === originView.owner_key &&
@@ -1144,8 +1198,18 @@ const captureNormalHistoryTurn = async (
     editResend?.isOriginCurrent() !== false
   const editPreparationIsCurrent = () =>
     editOriginIsCurrent() && editResend?.isCurrent() !== false
-  const capture = await captureHistorySnapshot(owner, view, "send", signal)
+  const capture = await captureHistorySnapshot(
+    owner, captureView, "send", signal,
+    regenerate && owner.kind === "native" ? "tldw_history_existing_input_v1" : undefined
+  )
   if (capture.status !== "captured") throw new Error(capture.code)
+  if (regenerate && (capture.rows.at(-1)?.id !== regenerate.questionId ||
+      capture.rows.at(-1)?.role !== "user" ||
+      capture.rows.at(-1)?.revision !== regenerate.questionRevision ||
+      capture.selected_content.at(-1)?.message !== message ||
+      canonicalHistoryJson(capture.selected_content.at(-1)?.images ?? []) !==
+        canonicalHistoryJson(image ? [image] : [])))
+    throw new Error("stale_selection")
   if (!canUpdateView()) throw new Error("stale_selection")
   if (editResend) {
     if (!editPreparationIsCurrent()) throw new Error("stale_selection")
@@ -1166,6 +1230,7 @@ const captureNormalHistoryTurn = async (
   // record of the turn.
   let recoveryWrites: Promise<void> = Promise.resolve()
   let lastRecord: HistoryTurnRecovery | null = null
+  let settlementPayload: import("@/db/dexie/types").Message | undefined
   const saveRecord = (next: HistoryTurnRecovery) => {
     const write = recoveryWrites.then(async () => {
       lastRecord = next
@@ -1185,7 +1250,7 @@ const captureNormalHistoryTurn = async (
     state: HistoryTurnRecovery["state"],
     extra: Pick<
       Partial<HistoryTurnRecovery>,
-      "outcome" | "interruption_reason" | "settled_message_id"
+      "outcome" | "interruption_reason" | "failure_reason" | "settled_message_id"
     > = {}
   ): HistoryTurnRecovery => ({
     operation_id: operationId,
@@ -1212,6 +1277,10 @@ const captureNormalHistoryTurn = async (
     ...(turn.admission
       ? { admission: historyAdmissionReference(turn.admission) }
       : {}),
+    ...(turn.existingSelection && turn.selection
+      ? { existing_selection: structuredClone(turn.selection) }
+      : {}),
+    ...(settlementPayload ? { settlement_payload: structuredClone(settlementPayload) } : {}),
     ...extra
   })
   // A server chat holds the question once it is admitted; until the reply is
@@ -1233,7 +1302,7 @@ const captureNormalHistoryTurn = async (
     checkpointTimer = null
     const content = pendingCheckpoint
     pendingCheckpoint = null
-    if (checkpointsStopped || content == null || !turn.admission) return
+    if (checkpointsStopped || content == null || (!turn.admission && !turn.existingSelection)) return
     lastCheckpointAt = Date.now()
     // If the page goes away now, this partial reply was interrupted.
     void saveRecord(
@@ -1243,15 +1312,14 @@ const captureNormalHistoryTurn = async (
   const turn: HistorySendTurn = {
     owner,
     capture,
+    ...(editAndSend || editResend ? { deferProjectionUntilAdmission: true } : {}),
     ...(retryAdmission ? { retryAdmission } : {}),
+    ...(regenerate ? { existingSelection: true } : {}),
     ...(owner.kind === "native" ? { historyBranch: Boolean(editResend || branchIntent) } : {}),
     ...(editResend ? { historyEdit: Object.freeze({ version: 1 as const, message_id: editResend.message_id, message_revision: editResend.message_revision }) } : {}),
-    currentView: () =>
-      editResend
-        ? canUpdateView()
-          ? view
-          : null
-        : controller.getCurrent().view,
+    currentView: () => (regenerate || editAndSend)
+      ? canUpdateView() ? captureView : null
+      : editResend ? canUpdateView() ? view : null : controller.getCurrent().view,
     validateLease,
     canUpdateView,
     preparationIsCurrent: editPreparationIsCurrent,
@@ -1295,8 +1363,16 @@ const captureNormalHistoryTurn = async (
         endReplyWrite = beginServerChatWrite(turn.owner.conversation_id)
       await saveRecord(record(turn, "", "accepted_unsent"))
     },
+    stageSettlementPayload: async (message) => {
+      if (!turn.existingSelection || message.id !== turn.assistantId ||
+          message.parent_message_id !== turn.input?.id)
+        throw new Error("history_operation_conflict")
+      stopCheckpoints()
+      settlementPayload = structuredClone(message)
+      await saveRecord(record(turn, message.content, "generated_unsaved", { outcome: "complete" }))
+    },
     checkpoint: (content) => {
-      if (checkpointsStopped || !turn.admission || !content.trim()) return
+      if (checkpointsStopped || (!turn.admission && !turn.existingSelection) || !content.trim()) return
       pendingCheckpoint = content
       if (checkpointTimer) return
       const wait = Math.max(
@@ -1354,25 +1430,32 @@ const captureNormalHistoryTurn = async (
       }
       // A reply the server never received leaves the server copy incomplete.
       endReplyWrite?.(turn.persistence === "server" ? "unknown" : data.content.trim() ? "failed" : "unknown")
+      const failure = !data.outcome && error != null
+        ? decodeChatErrorPayload(buildFriendlyErrorMessage(error))
+        : null
       await saveRecord(
         record(
           turn,
           data.content,
           data.content
             ? "generated_unsaved"
-            : turn.admission
+            : turn.admission || turn.existingSelection
               ? "accepted_unsent"
               : "unknown",
-          data.outcome
-            ? {
-                outcome: data.outcome,
-                ...(data.interruptionReason
-                  ? { interruption_reason: data.interruptionReason }
-                  : {})
-              }
-            : {}
+          {
+            ...(data.outcome ? {
+              outcome: data.outcome,
+              ...(data.interruptionReason
+                ? { interruption_reason: data.interruptionReason }
+                : {})
+            } : {}),
+            ...(failure ? { failure_reason: `${failure.summary} ${failure.hint}` } : {})
+          }
         )
       )
+      // Keep the admitted question selected so a deliberate no-output retry can reuse it.
+      if (turn.admission && !data.content && !data.outcome && !turn.existingSelection && canUpdateView())
+        await controller.followResult(view, turn.admission.input_message_id)
       await controller.refreshRecovery?.()
     },
     cancelPreparation: async () => {
@@ -1397,10 +1480,12 @@ const captureNormalHistoryTurn = async (
           "generated_unsaved",
           {
             outcome: turn.outcome ?? "complete",
-            settled_message_id: turn.resultId
+            settled_message_id: turn.resultId ?? turn.assistantId
           }
         )
       )
+      for (const entry of retryRecoveries)
+        await dismissHistoryTurnRecovery(entry.scope, view, entry.turn.operation_id, "completed")
       if (creationHandle && owner.kind === "native")
         await markChatCreationSettled(creationHandle, owner.conversation_id)
     },
@@ -1447,7 +1532,7 @@ const captureNormalHistoryTurn = async (
       await recoveryWrites
       if (!lastRecord?.outcome) return
       releaseHistoryTurn(operationId)
-      await keepHistoryTurnRecovery(
+      const kept = await keepHistoryTurnRecovery(
         controller,
         {
           scope: bookmarkScope,
@@ -1455,6 +1540,10 @@ const captureNormalHistoryTurn = async (
         },
         stopSignal
       )
+      if (kept.status === "kept" && kept.settledByKeep) {
+        turn.resultId = kept.resultId
+        await turn.complete?.()
+      }
     },
     release: () => {
       stopCheckpoints()
@@ -1497,6 +1586,7 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
       const historyTurn = await captureNormalHistoryTurn(
         { ...params, historyPreparation: preparation },
         message,
+        image,
         servicePromptSnapshot!,
         executionSignal,
         preparation!.dispatchIsCurrent,
@@ -1541,6 +1631,7 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
       )
         throw new Error("unsupported_history_native_result_metadata")
       const selectedParent = historyTurn.capture.rows.at(-1)?.id ?? null
+      const regenerate = params.historySelection.regenerate
       if (
         params.userParentMessageId &&
         params.userParentMessageId !== selectedParent
@@ -1558,14 +1649,18 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
         ...(historyTurn.retryAdmission
           ? { userMessageId: historyTurn.retryAdmission.input_message_id }
           : {}),
-        userParentMessageId: selectedParent,
-        historyForModel: selected as ChatHistory,
+        ...(regenerate ? { userMessageId: regenerate.questionId } : {}),
+        userParentMessageId: regenerate
+          ? (historyTurn.capture.rows.at(-1)?.parent_id ?? null)
+          : selectedParent,
+        assistantParentMessageId: regenerate ? regenerate.questionId : undefined,
+        historyForModel: (regenerate ? selected.slice(0, -1) : selected) as ChatHistory,
         historyId:
           historyTurn.owner.kind === "local"
             ? historyTurn.owner.conversation_id
             : params.historyId
       }
-      history = selected as ChatHistory
+      history = (regenerate ? selected.slice(0, -1) : selected) as ChatHistory
     }
     const resolvedImage =
       image.length > 0
@@ -1603,6 +1698,8 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
     } else if (historyTurn?.outcome && !params.historySelection?.editResend) {
       // Partial replies stay in the transcript; unknown save receipts stay in review.
       await historyTurn.keep?.()
+      if (historyTurn.outcome === "complete" && historyTurn.resultId)
+        return chatSubmitSubmitted()
     }
     return result
   } finally {

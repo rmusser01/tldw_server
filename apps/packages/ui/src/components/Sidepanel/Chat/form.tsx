@@ -5,7 +5,7 @@ import { captureActorSceneSend, type ActorSceneSend } from "@/hooks/chat/actor-s
 import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { getSelectedAssistantOperationRevision } from "@/hooks/useSelectedAssistant"
 import { isProtectedTrackedPersonaUnavailable, type AssistantSelection } from "@/types/assistant-selection"
-import { validateNativeCharacterConfiguration, nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-preflight"
+import { resolveNativeCharacterConfiguration, nativeCharacterPreflightMessage } from "@/hooks/chat/native-character-preflight"
 import { createDefaultActorSettings } from "@/types/actor"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
 import { useMcpToolsStore } from "@/store/mcp-tools"
@@ -418,6 +418,7 @@ export const SidepanelForm = ({
     captureCompletionGuard,
     captureStopGuard,
     retainCurrentDraft,
+    captureDraftOwnership,
     clearDraft,
     creationRecovery,
     reviewCreatedChat,
@@ -1124,7 +1125,7 @@ export const SidepanelForm = ({
             mode: source.messageSteeringMode,
             forceNarrate: source.messageSteeringForceNarrate
           })
-          const prepared = validateNativeCharacterConfiguration({
+          const prepared = await resolveNativeCharacterConfiguration({
             temporary:
               Boolean(
                 source.temporaryChat &&
@@ -1149,7 +1150,7 @@ export const SidepanelForm = ({
                 steering.impersonateUser ||
                 steering.forceNarrate
             )
-          })
+          }, isCurrent)
           if (
             !buildChatModelUsability({
               selectedModel: `${prepared.provider}:${prepared.model}`,
@@ -1352,7 +1353,7 @@ export const SidepanelForm = ({
       ? [
           {
             id: "image",
-            label: t("playground:actions.upload", "Attach image"),
+            label: form.values.imageFilename || t("playground:actions.upload", "Attach image"),
             previewSrc: form.values.image,
             onRemove: () => {
               form.setFieldValue("image", "")
@@ -1381,8 +1382,10 @@ export const SidepanelForm = ({
   // base64 encoding); we supply Sidepanel-specific toast callbacks.
   const attachmentHandler = useComposerAttachments({
     chatMode: "normal",
+    captureImageOwnership: () => captureDraftOwnership().isImageCurrent,
     setImageField: (base64) => form.setFieldValue("image", base64),
     onImageAccepted: (file) => {
+      form.setFieldValue("imageFilename", file.name)
       message.success({
         content: t("sidepanel:composer.imageUploaded", {
           defaultValue: "Image added: {{name}}",
@@ -1407,7 +1410,7 @@ export const SidepanelForm = ({
       message.error({
         content: t(
           "sidepanel:composer.imageUploadError",
-          "Failed to process image"
+          "This image could not be opened. Choose a valid image file."
         ),
         duration: 3
       })
@@ -1968,37 +1971,74 @@ export const SidepanelForm = ({
     if (draftReady && keyboardShortcutsEnabled) onComposerReady?.();
   }, [draftReady, keyboardShortcutsEnabled, onComposerReady]);
 
-  const ensureEmbeddingModelAvailable = async (): Promise<boolean> => {
+  const activeSubmissionRef = React.useRef<symbol | null>(null);
+  const contextKeyFor = (mode = chatMode, searchEnabled = webSearch) =>
+    JSON.stringify([
+      selectedModel,
+      mode,
+      searchEnabled,
+      selectedSystemPrompt,
+      toolChoice,
+      useOCR,
+      temporaryChat,
+      selectedCharacterId,
+      conversationContextSettings,
+      selectedDocuments.map((doc) => [doc.id, doc.title, doc.url]),
+      currentDocumentSelectionKey,
+      ragPinnedResults,
+      replyTarget,
+      chatWithWebsiteEmbedding,
+      imageBackendDefaultTrimmed,
+    ]);
+  const contextKey = contextKeyFor();
+  const contextRevisionRef = React.useRef({ key: contextKey, revision: 0 });
+  React.useLayoutEffect(() => {
+    if (contextRevisionRef.current.key !== contextKey) {
+      contextRevisionRef.current = {
+        key: contextKey,
+        revision: contextRevisionRef.current.revision + 1,
+      };
+    }
+  }, [contextKey]);
+
+  const ensureEmbeddingModelAvailable = async (
+    isCurrent: () => boolean,
+    mode: string,
+    searchEnabled: boolean,
+  ): Promise<boolean> => {
     // Fast path: no RAG or web search enabled
-    if (chatMode !== "rag" && !webSearch) {
-      return true
+    if (mode !== "rag" && !searchEnabled) {
+      return true;
     }
 
-    let defaultEM: string | null | undefined
+    let defaultEM: string | null | undefined;
 
     // When chatting with the current page via embeddings, require a default embedding model
-    if (chatMode === "rag" && chatWithWebsiteEmbedding) {
-      defaultEM = await defaultEmbeddingModelForRag()
+    if (mode === "rag" && chatWithWebsiteEmbedding) {
+      defaultEM = await defaultEmbeddingModelForRag();
+      if (!isCurrent()) return false;
       if (!defaultEM) {
-        form.setFieldError("message", t("formError.noEmbeddingModel"))
-        return false
+        form.setFieldError("message", t("formError.noEmbeddingModel"));
+        return false;
       }
     }
 
     // When web search is enabled and not in simple-search mode, also require an embedding model
-    if (webSearch) {
+    if (searchEnabled) {
       if (typeof defaultEM === "undefined") {
-        defaultEM = await defaultEmbeddingModelForRag()
+        defaultEM = await defaultEmbeddingModelForRag();
+        if (!isCurrent()) return false;
       }
-      const simpleSearch = await getIsSimpleInternetSearch()
+      const simpleSearch = await getIsSimpleInternetSearch();
+      if (!isCurrent()) return false;
       if (!defaultEM && !simpleSearch) {
-        form.setFieldError("message", t("formError.noEmbeddingModel"))
-        return false
+        form.setFieldError("message", t("formError.noEmbeddingModel"));
+        return false;
       }
     }
 
-    return true
-  }
+    return true;
+  };
 
   const buildPinnedMessage = React.useCallback(
     (message: string, options?: { ignorePinnedResults?: boolean }) => {
@@ -2091,6 +2131,14 @@ export const SidepanelForm = ({
     options?: { ignorePinnedResults?: boolean }
   ): Promise<void> {
     if (!connectionReadyRef.current) return
+    if (activeSubmissionRef.current || !draftReady) return
+    const draftOwnership = captureDraftOwnership()
+    const contextRevision = contextRevisionRef.current.revision
+    let ownSlashKey: string | null = null
+    const contextIsCurrent = () => draftOwnership.isCurrent() &&
+      (contextRevisionRef.current.revision === contextRevision ||
+        (ownSlashKey !== null && contextRevisionRef.current.revision === contextRevision + 1 && contextRevisionRef.current.key === ownSlashKey))
+    if (!contextIsCurrent()) return
     const activePreparation = sidepanelDocumentPreparationRef.current
     if (activePreparation) {
       if (activePreparation.isCurrent()) return
@@ -2100,6 +2148,11 @@ export const SidepanelForm = ({
     const connectionGeneration = connectionGenerationRef.current
     const submittedKnowledgeMentionRevision = knowledgeMentionRevision.current
     const intent = resolveSubmissionIntent(rawMessage, options)
+    const effective = useStoreMessageOption.getState()
+    const effectiveChatMode = effective.chatMode
+    const effectiveWebSearch = effective.webSearch
+    if (intent.handled) ownSlashKey = contextKeyFor(effectiveChatMode, effectiveWebSearch)
+    if (!intent.isImageCommand && !intent.invalidImageCommand && !draftOwnership.normalizeMessage(intent.message)) return
     if (intent.invalidImageCommand) {
       notification.error({
         message: t("error", { defaultValue: "Error" }),
@@ -2144,7 +2197,7 @@ export const SidepanelForm = ({
           selectedModel: selectedModel ?? "",
           selectionSource: { model: "global", toolChoice: "global" }
         })
-    const preparationIsCurrent = () => connectionReadyRef.current && connectionGenerationRef.current === connectionGeneration && completionIsCurrent() && form.getRevision() === inputRevision && dispatchIsCurrent() &&
+    const preparationIsCurrent = () => contextIsCurrent() && connectionReadyRef.current && connectionGenerationRef.current === connectionGeneration && completionIsCurrent() && form.getRevision() === inputRevision && dispatchIsCurrent() &&
       (!documentPreparation || (!documentPreparation.controller.signal.aborted && currentDocumentSelectionKeyRef.current === documentPreparation.selectionKey))
     if (
       savedRoleplay &&
@@ -2189,6 +2242,8 @@ export const SidepanelForm = ({
       }
       sidepanelDocumentPreparationRef.current = documentPreparation
     }
+    const submission = Symbol("sidepanel-submit")
+    activeSubmissionRef.current = submission
     try {
       if (!intent.isImageCommand) {
         try {
@@ -2231,7 +2286,7 @@ export const SidepanelForm = ({
         }
       }
       if (!intent.isImageCommand && !savedRoleplay) {
-        const hasEmbedding = await ensureEmbeddingModelAvailable()
+        const hasEmbedding = await ensureEmbeddingModelAvailable(preparationIsCurrent, effectiveChatMode, effectiveWebSearch)
         if (!preparationIsCurrent() || actorSceneSend?.isCurrent() === false) return
         if (!hasEmbedding) {
           return
@@ -2370,11 +2425,13 @@ export const SidepanelForm = ({
       {
         beforeSend: () => {
           promptAssistAttemptId = beginPromptAssistReset()
+          if (activeSubmissionRef.current === submission) activeSubmissionRef.current = null
           textAreaFocus()
         },
         afterSend: (result) => {
           if (
             promptAssistAttemptId !== null &&
+            draftOwnership.isOwnerCurrent() &&
             isChatSubmitSuccess(normalizeChatSubmitResult(result))
           ) {
             markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
@@ -2395,6 +2452,7 @@ export const SidepanelForm = ({
       }
       )
     } finally {
+      if (activeSubmissionRef.current === submission) activeSubmissionRef.current = null
       if (
         documentPreparation &&
         sidepanelDocumentPreparationRef.current === documentPreparation

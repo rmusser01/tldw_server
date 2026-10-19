@@ -1,0 +1,514 @@
+diff --git a/bun.lock b/bun.lock
+index 9d16969..d0c4dcd 100644
+--- a/bun.lock
++++ b/bun.lock
+@@ -58 +58 @@
+-        "ghostty-web": "github:anomalyco/ghostty-web#main",
++        "ghostty-web": "github:anomalyco/ghostty-web#20bd361",
+diff --git a/packages/app/package.json b/packages/app/package.json
+index 45a58a8..a7f8493 100644
+--- a/packages/app/package.json
++++ b/packages/app/package.json
+@@ -68 +68 @@
+-    "ghostty-web": "github:anomalyco/ghostty-web#main",
++    "ghostty-web": "github:anomalyco/ghostty-web#20bd361",
+diff --git a/packages/opencode/src/acp/agent.ts b/packages/opencode/src/acp/agent.ts
+index 665e371..bb19609 100644
+--- a/packages/opencode/src/acp/agent.ts
++++ b/packages/opencode/src/acp/agent.ts
+@@ -56,0 +57,8 @@ import { ShellID } from "@/tool/shell/id"
++type PromptForwarding = {
++  completed: Set<string>
++  messageID?: string
++  failure?: unknown
++  resolve?: () => void
++  reject?: (error: unknown) => void
++}
++
+@@ -150,0 +159 @@ export class Agent implements ACPAgent {
++  private promptForwarding = new Map<string, PromptForwarding>()
+@@ -162,0 +172,7 @@ export class Agent implements ACPAgent {
++    this.eventAbort.signal.addEventListener(
++      "abort",
++      () => {
++        this.failPromptForwarding(new Error("ACP event subscription aborted"))
++      },
++      { once: true },
++    )
+@@ -169,0 +186 @@ export class Agent implements ACPAgent {
++      this.failPromptForwarding(error)
+@@ -184,0 +202 @@ export class Agent implements ACPAgent {
++        const owners = [...this.promptForwarding]
+@@ -185,0 +204 @@ export class Agent implements ACPAgent {
++          for (const [id, turn] of owners) this.failPromptForwarding(error, id, turn)
+@@ -188,0 +208,35 @@ export class Agent implements ACPAgent {
++      this.failPromptForwarding(new Error("ACP event stream ended before prompt forwarding completed"))
++    }
++  }
++
++  private failPromptForwarding(error: unknown, sessionID?: string, owner?: PromptForwarding) {
++    for (const [id, turn] of this.promptForwarding) {
++      if (sessionID !== undefined && (id !== sessionID || turn !== owner)) continue
++      turn.failure ??= error instanceof Error ? error : new Error("ACP event forwarding failed", { cause: error })
++      turn.reject?.(turn.failure)
++    }
++  }
++
++  private async forwardPrompt(sessionID: string, run: () => Promise<{ data?: { info: AssistantMessage } }>) {
++    if (this.promptForwarding.has(sessionID)) throw RequestError.invalidParams("Session prompt already active")
++    const turn: PromptForwarding = { completed: new Set() }
++    this.promptForwarding.set(sessionID, turn)
++    try {
++      const response = await run()
++      const message = response.data?.info
++      if (!message || message.sessionID !== sessionID || !message.id) {
++        throw new Error("ACP prompt returned no owned assistant message")
++      }
++      if (turn.failure) throw turn.failure
++      // HTTP completion is not an ACP delivery watermark; the sequential event loop is.
++      if (!turn.completed.has(message.id)) {
++        await new Promise<void>((resolve, reject) => {
++          turn.messageID = message.id
++          turn.resolve = resolve
++          turn.reject = reject
++        })
++      }
++      if (turn.failure) throw turn.failure
++      return message
++    } finally {
++      this.promptForwarding.delete(sessionID)
+@@ -193,0 +248,14 @@ export class Agent implements ACPAgent {
++      case "message.updated": {
++        const info = event.properties.info
++        if (
++          info.role !== "assistant" ||
++          info.time.completed === undefined ||
++          info.sessionID !== event.properties.sessionID
++        )
++          return
++        const turn = this.promptForwarding.get(info.sessionID)
++        if (!turn) return
++        turn.completed.add(info.id)
++        if (turn.messageID === info.id) turn.resolve?.()
++        return
++      }
+@@ -197,0 +266 @@ export class Agent implements ACPAgent {
++        const turn = this.promptForwarding.get(session.id)
+@@ -263,0 +333 @@ export class Agent implements ACPAgent {
++            this.failPromptForwarding(error, session.id, turn)
+@@ -280,0 +351 @@ export class Agent implements ACPAgent {
++        const turn = this.promptForwarding.get(session.id)
+@@ -311,0 +383 @@ export class Agent implements ACPAgent {
++                        this.failPromptForwarding(error, session.id, turn)
+@@ -340,0 +413 @@ export class Agent implements ACPAgent {
++                  this.failPromptForwarding(error, session.id, turn)
+@@ -370,0 +444 @@ export class Agent implements ACPAgent {
++                      this.failPromptForwarding(error, session.id, turn)
+@@ -392,0 +467 @@ export class Agent implements ACPAgent {
++                  this.failPromptForwarding(error, session.id, turn)
+@@ -425,0 +501 @@ export class Agent implements ACPAgent {
++                  this.failPromptForwarding(error, session.id, turn)
+@@ -443,0 +520 @@ export class Agent implements ACPAgent {
++        const turn = this.promptForwarding.get(session.id)
+@@ -456,0 +534 @@ export class Agent implements ACPAgent {
++            this.failPromptForwarding(error, session.id, turn)
+@@ -479,0 +558 @@ export class Agent implements ACPAgent {
++              this.failPromptForwarding(error, session.id, turn)
+@@ -498,0 +578 @@ export class Agent implements ACPAgent {
++              this.failPromptForwarding(error, session.id, turn)
+@@ -766,0 +847,5 @@ export class Agent implements ACPAgent {
++    this.failPromptForwarding(
++      new Error("ACP session closed"),
++      params.sessionId,
++      this.promptForwarding.get(params.sessionId),
++    )
+@@ -1044,0 +1130 @@ export class Agent implements ACPAgent {
++    const turn = this.promptForwarding.get(sessionId)
+@@ -1060,0 +1147 @@ export class Agent implements ACPAgent {
++        this.failPromptForwarding(error, sessionId, turn)
+@@ -1436,12 +1523,13 @@ export class Agent implements ACPAgent {
+-      const response = await this.sdk.session.prompt({
+-        sessionID,
+-        model: {
+-          providerID: model.providerID,
+-          modelID: model.modelID,
+-        },
+-        variant: this.sessionManager.getVariant(sessionID),
+-        parts,
+-        agent,
+-        directory,
+-      })
+-      const msg = response.data?.info
++      const msg = await this.forwardPrompt(sessionID, () =>
++        this.sdk.session.prompt({
++          sessionID,
++          model: {
++            providerID: model.providerID,
++            modelID: model.modelID,
++          },
++          variant: this.sessionManager.getVariant(sessionID),
++          parts,
++          agent,
++          directory,
++        }),
++      )
+@@ -1462,9 +1550,10 @@ export class Agent implements ACPAgent {
+-      const response = await this.sdk.session.command({
+-        sessionID,
+-        command: command.name,
+-        arguments: cmd.args,
+-        model: model.providerID + "/" + model.modelID,
+-        agent,
+-        directory,
+-      })
+-      const msg = response.data?.info
++      const msg = await this.forwardPrompt(sessionID, () =>
++        this.sdk.session.command({
++          sessionID,
++          command: command.name,
++          arguments: cmd.args,
++          model: model.providerID + "/" + model.modelID,
++          agent,
++          directory,
++        }),
++      )
+@@ -1503,0 +1593,5 @@ export class Agent implements ACPAgent {
++    this.failPromptForwarding(
++      new Error("ACP prompt cancelled"),
++      params.sessionId,
++      this.promptForwarding.get(params.sessionId),
++    )
+diff --git a/packages/opencode/test/acp/event-subscription.test.ts b/packages/opencode/test/acp/event-subscription.test.ts
+index a01680e..b201a8f 100644
+--- a/packages/opencode/test/acp/event-subscription.test.ts
++++ b/packages/opencode/test/acp/event-subscription.test.ts
+@@ -4,0 +5 @@ import type {
++  AssistantMessage,
+@@ -977,0 +979,327 @@ describe("acp.agent event subscription", () => {
++
++function finalMessage(sessionID: string, id = "msg_final"): AssistantMessage {
++  return {
++    id,
++    sessionID,
++    role: "assistant",
++    time: { created: 1, completed: 2 },
++    parentID: "msg_user",
++    modelID: "big-pickle",
++    providerID: "opencode",
++    mode: "build",
++    agent: "build",
++    path: { cwd: "/tmp/opencode-acp-test", root: "/tmp/opencode-acp-test" },
++    cost: 0,
++    tokens: { input: 1, output: 2, reasoning: 0, cache: { read: 0, write: 0 } },
++  }
++}
++
++function completion(info: AssistantMessage): GlobalEventEnvelope {
++  return { payload: { id: `evt_${info.id}`, type: "message.updated", properties: { sessionID: info.sessionID, info } } }
++}
++
++function finalDelta(sessionID: string, text = "complete answer"): GlobalEventEnvelope {
++  return {
++    payload: {
++      id: "evt_delta",
++      type: "message.part.delta",
++      properties: {
++        sessionID,
++        messageID: "msg_final",
++        partID: "msg_final_part",
++        field: "text",
++        delta: text,
++      },
++    },
++  }
++}
++
++async function promptFixture(fn: (f: Awaited<ReturnType<typeof createPromptFixture>>) => Promise<void>) {
++  await using tmp = await tmpdir()
++  await provideTestInstance({
++    directory: tmp.path,
++    fn: async () => {
++      const f = await createPromptFixture()
++      try {
++        await fn(f)
++      } finally {
++        f.http.resolve({ data: { info: f.message } })
++        f.stop()
++        await Promise.allSettled(f.running)
++      }
++    },
++  })
++}
++
++async function createPromptFixture() {
++  const f = createFakeAgent()
++  const cwd = "/tmp/opencode-acp-test"
++  const sessionID = await f.agent.newSession({ cwd, mcpServers: [] }).then((x) => x.sessionId)
++  const message = finalMessage(sessionID)
++  const http = Promise.withResolvers<{ data: { info: AssistantMessage } }>()
++  const entered = Promise.withResolvers<void>()
++  const running: Array<ReturnType<typeof f.agent.prompt>> = []
++  const status = { settled: false }
++  f.sdk.session.prompt = () => {
++    entered.resolve()
++    return http.promise
++  }
++  f.sdk.session.command = f.sdk.session.prompt
++  f.sdk.session.abort = async () => ({ data: true })
++  f.sdk.session.messages = async () => ({ data: [{ info: message, parts: [] }] })
++  const providers = f.sdk.config.providers
++  f.sdk.config.providers = async () => {
++    const value = await providers()
++    value.data.providers[0].models["big-pickle"].limit = { context: 32000 }
++    return value
++  }
++  const start = (text = "summarize") => {
++    const result = f.agent.prompt({ sessionId: sessionID, prompt: [{ type: "text", text }] })
++    result.then(
++      () => {
++        status.settled = true
++      },
++      () => {
++        status.settled = true
++      },
++    )
++    running.push(result)
++    return result
++  }
++  return { ...f, sessionID, message, http, entered, running, status, start }
++}
++
++// A scheduler turn drains already-resolved SDK promises; it is not a streaming grace period.
++const nextTurn = () => new Promise<void>((resolve) => setImmediate(resolve))
++
++describe("acp.agent prompt forwarding", () => {
++  for (const command of [false, true]) {
++    test(`waits for final forwarding before usage and reply (${command ? "command" : "prompt"})`, async () => {
++      await promptFixture(async (f) => {
++        if (command) f.sdk.command.list = async () => ({ data: [{ name: "summarize" }] })
++        const blocked = Promise.withResolvers<void>()
++        const entered = Promise.withResolvers<void>()
++        const send = f.connection.sessionUpdate.bind(f.connection)
++        f.connection.sessionUpdate = async (params) => {
++          if (params.update.sessionUpdate === "agent_message_chunk") {
++            entered.resolve()
++            await blocked.promise
++          }
++          await send(params)
++        }
++        try {
++          const result = f.start(command ? "/summarize" : "summarize")
++          await f.entered.promise
++          f.controller.push(finalDelta(f.sessionID))
++          await entered.promise
++          f.http.resolve({ data: { info: f.message } })
++          f.controller.push(completion(f.message))
++          await nextTurn()
++          expect(f.status.settled).toBe(false)
++          expect(f.sessionUpdates.some((x) => x.update.sessionUpdate === "usage_update")).toBe(false)
++          blocked.resolve()
++          expect((await result).stopReason).toBe("end_turn")
++          expect(f.chunks.get(f.sessionID)).toBe("complete answer")
++          const kinds = f.sessionUpdates.map((x) => x.update.sessionUpdate)
++          expect(kinds.indexOf("agent_message_chunk")).toBeLessThan(kinds.indexOf("usage_update"))
++        } finally {
++          blocked.resolve()
++        }
++      })
++    })
++  }
++
++  test("retains completion observed before the SDK response without replaying text", async () => {
++    await promptFixture(async (f) => {
++      const result = f.start()
++      await f.entered.promise
++      f.controller.push(completion(f.message))
++      f.controller.push(finalDelta(f.sessionID))
++      await pollUntil(() => f.chunks.get(f.sessionID), "event-loop fence missing")
++      f.http.resolve({ data: { info: f.message } })
++      expect((await result).stopReason).toBe("end_turn")
++      expect(f.chunks.get(f.sessionID)).toBe("complete answer")
++    })
++  })
++
++  test("does not accept another session or another message as completion", async () => {
++    await promptFixture(async (f) => {
++      const result = f.start()
++      await f.entered.promise
++      f.controller.push(completion(finalMessage("ses_foreign")))
++      f.controller.push(completion(finalMessage(f.sessionID, "msg_foreign")))
++      f.controller.push(finalDelta(f.sessionID))
++      await pollUntil(() => f.chunks.get(f.sessionID), "event-loop fence missing")
++      f.http.resolve({ data: { info: f.message } })
++      await nextTurn()
++      expect(f.status.settled).toBe(false)
++      f.controller.push(completion(f.message))
++      expect((await result).stopReason).toBe("end_turn")
++    })
++  })
++
++  for (const action of ["cancel", "close", "eof"] as const) {
++    test(`fails a forwarding wait on ${action}`, async () => {
++      await promptFixture(async (f) => {
++        const result = f.start()
++        await f.entered.promise
++        f.http.resolve({ data: { info: f.message } })
++        await nextTurn()
++        if (action === "cancel") await f.agent.cancel({ sessionId: f.sessionID })
++        if (action === "close") await f.agent.closeSession({ sessionId: f.sessionID })
++        if (action === "eof") {
++          const reconnect = createEventStream()
++          f.sdk.global.event = async (opts: { signal: AbortSignal }) => ({ stream: reconnect.stream(opts.signal) })
++          f.controller.close()
++        }
++        expect(
++          await result.then(
++            () => null,
++            (error) => error,
++          ),
++        ).toBeInstanceOf(Error)
++      })
++    })
++  }
++
++  test("fails instead of completing after a native forwarding error", async () => {
++    await promptFixture(async (f) => {
++      const send = f.connection.sessionUpdate.bind(f.connection)
++      f.connection.sessionUpdate = async (params) => {
++        if (params.update.sessionUpdate === "agent_message_chunk") throw new Error("wire refused")
++        await send(params)
++      }
++      const result = f.start()
++      await f.entered.promise
++      f.controller.push(finalDelta(f.sessionID))
++      f.controller.push(completion(f.message))
++      f.http.resolve({ data: { info: f.message } })
++      expect(
++        await result.then(
++          () => null,
++          (error) => error,
++        ),
++      ).toMatchObject({ message: "wire refused" })
++    })
++  })
++
++  test("clears a failed prompt before a legitimate successor", async () => {
++    await promptFixture(async (f) => {
++      const first = f.start()
++      await f.entered.promise
++      f.http.reject(new Error("SDK failed"))
++      expect(
++        await first.then(
++          () => null,
++          (error) => error,
++        ),
++      ).toMatchObject({ message: "SDK failed" })
++      const message = finalMessage(f.sessionID, "msg_successor")
++      f.sdk.session.prompt = async () => {
++        f.controller.push(completion(message))
++        return { data: { info: message } }
++      }
++      expect((await f.start()).stopReason).toBe("end_turn")
++    })
++  })
++})
++
++describe("acp.agent stale forwarding ownership", () => {
++  for (const permission of [false, true]) {
++    test(`an old ${permission ? "permission" : "native send"} failure cannot reject a successor`, async () => {
++      await promptFixture(async (f) => {
++        const blocked = Promise.withResolvers<never>()
++        const admitted = Promise.withResolvers<void>()
++        const send = f.connection.sessionUpdate.bind(f.connection)
++        if (permission) {
++          f.sdk.permission.reply = async () => {
++            throw new Error("old permission reply failed")
++          }
++          f.connection.requestPermission = async () => {
++            admitted.resolve()
++            return blocked.promise
++          }
++        } else {
++          f.connection.sessionUpdate = async (params) => {
++            if (params.update.sessionUpdate === "agent_message_chunk") {
++              admitted.resolve()
++              await blocked.promise
++            }
++            await send(params)
++          }
++        }
++        const http = Promise.withResolvers<{ data: { info: AssistantMessage } }>()
++        const info = finalMessage(f.sessionID, "msg_successor")
++        try {
++          const first = f.start()
++          await f.entered.promise
++          f.controller.push(
++            permission
++              ? {
++                  payload: {
++                    id: "evt_old_permission",
++                    type: "permission.asked",
++                    properties: {
++                      id: "perm_old",
++                      sessionID: f.sessionID,
++                      permission: "read",
++                      patterns: ["README.md"],
++                      metadata: {},
++                      always: [],
++                    },
++                  },
++                }
++              : finalDelta(f.sessionID),
++          )
++          await admitted.promise
++          f.http.reject(new Error("SDK failed"))
++          expect(
++            await first.then(
++              () => null,
++              (error) => error,
++            ),
++          ).toMatchObject({ message: "SDK failed" })
++          const entered = Promise.withResolvers<void>()
++          f.sdk.session.prompt = () => {
++            entered.resolve()
++            return http.promise
++          }
++          const next = f.start()
++          await entered.promise
++          blocked.reject(new Error("old forwarding failed"))
++          await nextTurn()
++          f.controller.push(completion(info))
++          http.resolve({ data: { info } })
++          expect((await next).stopReason).toBe("end_turn")
++        } finally {
++          http.resolve({ data: { info } })
++          blocked.reject(new Error("cleanup"))
++        }
++      })
++    })
++  }
++
++  test("a falsy forwarding failure cannot become successful completion", async () => {
++    await promptFixture(async (f) => {
++      const foreign = await f.agent.newSession({ cwd: "/tmp/opencode-acp-test", mcpServers: [] })
++      const send = f.connection.sessionUpdate.bind(f.connection)
++      f.connection.sessionUpdate = async (params) => {
++        if (params.sessionId === f.sessionID && params.update.sessionUpdate === "agent_message_chunk") throw undefined
++        await send(params)
++      }
++      const result = f.start()
++      await f.entered.promise
++      f.controller.push(finalDelta(f.sessionID))
++      f.controller.push(completion(f.message))
++      f.controller.push(finalDelta(foreign.sessionId, "fence"))
++      await pollUntil(() => f.chunks.get(foreign.sessionId), "event-loop fence missing")
++      f.http.resolve({ data: { info: f.message } })
++      expect(
++        await result.then(
++          () => null,
++          (error) => error,
++        ),
++      ).toBeInstanceOf(Error)
++    })
++  })
++})

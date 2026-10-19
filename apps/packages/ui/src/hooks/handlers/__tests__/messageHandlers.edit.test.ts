@@ -1,15 +1,23 @@
-import { describe, expect, it, vi } from "vitest"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+import { waitFor } from "@testing-library/react"
 import type { ChatHistory, Message } from "@/store/option"
-const writes = vi.hoisted(() => vi.fn(async () => undefined))
-vi.mock("@/db/dexie/helpers", () => ({ updateMessageById: writes }))
+import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import type { HistorySelectionCaptureV1 } from "@/types/history-selection"
+vi.mock("@/db/dexie/helpers", async (original) => ({
+  ...(await original<typeof import("@/db/dexie/helpers")>()),
+  updateMessageById: vi.fn()
+}))
+vi.mock("@/db/dexie/history-selection", async (original) => ({
+  ...(await original<typeof import("@/db/dexie/history-selection")>()),
+  loadHistoryTurnRecoveries: vi.fn(async () => [])
+}))
 import { createEditMessage } from "../messageHandlers"
+import { formatSelectedHistory, updateMessageById } from "@/db/dexie/helpers"
 
-const fixture = () => {
-  const generationInfo = {
-    mode: "rag",
-    grounded: false,
-    reason: "selected_source_retrieval_failed"
-  }
+beforeEach(() => vi.mocked(updateMessageById).mockClear())
+
+const fixture = (historySelection?: HistorySelectionController) => {
+  const generationInfo = { mode: "rag", grounded: false, reason: "selected_source_retrieval_failed" }
   const messages: Message[] = [
     {
       id: "diagnostic-user",
@@ -34,6 +42,7 @@ const fixture = () => {
       isBot: false,
       name: "You",
       message: "Real question",
+      metadataExtra: { sender_role: "user", local_history: {} },
       sources: [],
       images: []
     },
@@ -46,50 +55,97 @@ const fixture = () => {
       sources: []
     }
   ]
-  const history: ChatHistory = [
-    { role: "user", content: "Real question" },
-    { role: "assistant", content: "Real answer" }
-  ]
+  const history: ChatHistory = [{ role: "user", content: "Real question", images: [] }, { role: "assistant", content: "Real answer" }]
   const setHistory = vi.fn()
-  const onSubmit = vi.fn()
-  return {
-    history,
-    setHistory,
-    onSubmit,
-    edit: createEditMessage({
-      messages,
-      history,
-      setMessages: vi.fn(),
-      setHistory,
-      historyId: "local",
-      validateBeforeSubmitFn: () => true,
-      onSubmit
-    })
+  const setMessages = vi.fn()
+  const onSubmit = vi.fn().mockResolvedValue({ status: "submitted" })
+  return { history, setHistory, setMessages, onSubmit, edit: createEditMessage({ messages, history, setMessages, setHistory, historyId: "local", historySelection, validateBeforeSubmitFn: () => true, onSubmit }) }
+}
+
+const ownerBoundSelection = () => {
+  const view = {
+    view_session_id: "view", owner_key: "owner", conversation_id: "saved-chat",
+    interpretation: { kind: "parent_graph_v1" as const },
+    cursor: { kind: "after_message" as const, message_id: "real-answer" },
+    selection_revision: 1
   }
+  const rows: HistorySelectionCaptureV1["rows"] = [
+    { id: "real-user", revision: "1", role: "user", parent_id: null, settled: true, preview: "Real question" },
+    { id: "real-answer", revision: "1", role: "assistant", parent_id: "real-user", settled: true, preview: "Real answer" }
+  ]
+  const capture: HistorySelectionCaptureV1 = {
+    status: "captured", purpose: "send", view, rows,
+    selected_content: [
+      { id: "real-user", revision: "1", message: "Real question", images: [], extra_metadata: { sender_role: "user", local_history: {} } },
+      { id: "real-answer", revision: "1", message: "Real answer", images: [] }
+    ],
+    snapshot: {
+      version: 1, owner_key: "owner", conversation_id: "saved-chat", nodes: rows,
+      fences: { conversation: "1", history: "1", settings: "1" },
+      source_digest: "source", storage_context_digest: "storage",
+      interpretation_status: { kind: "parent_graph_v1" }
+    },
+    storage_context_digest: "storage"
+  }
+  const owner = {
+    kind: "local" as const,
+    conversation_id: "saved-chat",
+    request_scope: { config: { serverUrl: "https://chat.test", authMode: "multi-user" as const }, userId: "alice" },
+    validate_lease: () => true
+  }
+  const choose = vi.fn()
+  const historySelection = {
+    getCurrent: () => ({ status: "ready", owner, view, capture,
+      bookmarkScope: { profile_id: "profile", client_session_id: "client" } }),
+    fence: () => () => true,
+    choose
+  } as unknown as HistorySelectionController
+  return { owner, view, capture, choose, historySelection }
 }
 
 describe("editing visible rows after a local-only diagnostic", () => {
-  it("refuses an unsupported resend before editing or dispatching the genuine row", async () => {
-    writes.mockClear()
-    const { edit, onSubmit, setHistory } = fixture()
-    await expect(edit(2, "Edited question", true, true)).rejects.toThrow(
-      "unsupported_history_edit_and_send:real-user"
-    )
-    expect(writes).not.toHaveBeenCalled()
-    expect(onSubmit).not.toHaveBeenCalled()
+  it("resends a genuine edited question without retaining its old answer in prompt memory", async () => {
+    const { owner, view, choose, historySelection } = ownerBoundSelection()
+    const { edit, onSubmit, setHistory, setMessages } = fixture(historySelection)
+    await edit(2, "Edited question", true, true)
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Edited question",
+      historyEditBoundary: expect.objectContaining({
+        targetId: "real-user", owner, originView: view
+      })
+    }))
+    expect(onSubmit.mock.calls[0][0].memory).toBeUndefined()
+    expect(choose).not.toHaveBeenCalled()
+    expect(updateMessageById).not.toHaveBeenCalled()
     expect(setHistory).not.toHaveBeenCalled()
+    expect(setMessages).not.toHaveBeenCalled()
+  })
+  it("accepts a plain owner-bound selected user projected by the real history formatter", async () => {
+    const { owner, view, capture, choose, historySelection } = ownerBoundSelection()
+    const projected = formatSelectedHistory(capture)
+    expect(projected.messages[0].metadataExtra).toEqual({ sender_role: "user", local_history: {} })
+    const setMessages = vi.fn()
+    const setHistory = vi.fn()
+    const onSubmit = vi.fn().mockResolvedValue({ status: "submitted" })
+    const edit = createEditMessage({
+      messages: projected.messages, history: projected.history,
+      setMessages, setHistory, historyId: "local", historySelection,
+      validateBeforeSubmitFn: () => true, onSubmit
+    })
+    await edit(0, "Edited question", true, true)
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Edited question",
+      historyEditBoundary: expect.objectContaining({ targetId: "real-user", owner, originView: view })
+    }))
+    expect(choose).not.toHaveBeenCalled()
+    expect(updateMessageById).not.toHaveBeenCalled()
+    expect(setHistory).not.toHaveBeenCalled()
+    expect(setMessages).not.toHaveBeenCalled()
   })
   it("updates the genuine prompt row at its eligible index", async () => {
     const { edit, setHistory } = fixture()
     await edit(2, "Edited question", true, false)
-    expect(
-      setHistory.mock.calls[0][0].map(
-        ({ role, content }: ChatHistory[number]) => ({ role, content })
-      )
-    ).toEqual([
-      { role: "user", content: "Edited question" },
-      { role: "assistant", content: "Real answer" }
-    ])
+    expect(setHistory).toHaveBeenCalledWith([{ role: "user", content: "Edited question", images: [] }, { role: "assistant", content: "Real answer" }])
   })
   it("keeps a local diagnostic edit out of the genuine prompt row", async () => {
     const { edit, setHistory, history } = fixture()
@@ -98,7 +154,7 @@ describe("editing visible rows after a local-only diagnostic", () => {
       setHistory.mock.calls[0][0].map(
         ({ role, content }: ChatHistory[number]) => ({ role, content })
       )
-    ).toEqual(history)
+    ).toEqual(history.map(({ role, content }) => ({ role, content })))
   })
 })
 
@@ -258,6 +314,7 @@ it("native edit-resend submits a detached owned intent without editing or replac
   ]
   const state = {
     status: "ready",
+    bookmarkScope: { profile_id: "profile", client_session_id: "client" },
     owner: {
       kind: "native",
       owner_key: "owner",
@@ -304,7 +361,7 @@ it("native edit-resend submits a detached owned intent without editing or replac
   )
   void attempt.catch(() => {})
   try {
-    expect(onSubmit).toHaveBeenCalledOnce()
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledOnce())
     expect(onSubmit).toHaveBeenCalledWith(
       expect.objectContaining({
         message: "Edited  \n",
@@ -390,6 +447,7 @@ it("native edit intent retires its editor and origin when the draft source is re
   const target = { id: "u", name: "You", isBot: false, message: "Original" }
   const state = {
     status: "ready",
+    bookmarkScope: { profile_id: "profile", client_session_id: "client" },
     owner: { kind: "native" },
     view: {
       owner_key: "owner",
@@ -437,6 +495,7 @@ it("native character edit admits matching backend sender-role metadata without r
   }
   const state = {
     status: "ready",
+    bookmarkScope: { profile_id: "profile", client_session_id: "client" },
     owner: { kind: "native" },
     view: {
       owner_key: "owner",

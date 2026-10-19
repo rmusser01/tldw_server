@@ -568,6 +568,27 @@ def build_workspace_chat_startup_rls_sql() -> list[str]:
     """]
 
 
+def build_dictionary_rls_sql() -> list[str]:
+    """Install catalog isolation only once its registered tables exist."""
+    from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import dictionary_owner_predicates
+
+    return [
+        (
+            f"DO $dictionary_rls$ BEGIN IF to_regclass('{table}') IS NOT NULL "  # nosec B608 - fixed table/predicate inventory
+            "AND EXISTS (SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema=current_schema() AND table_name='chat_dictionaries' "
+            "AND column_name='client_id') THEN "
+            f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY; "
+            f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY; "
+            f"DROP POLICY IF EXISTS {table}_tenant_isolation ON {table}; "
+            f"CREATE POLICY {table}_tenant_isolation ON {table} "
+            f"USING ({predicate}) WITH CHECK ({predicate}); "
+            "END IF; END $dictionary_rls$;"
+        )
+        for table, predicate in dictionary_owner_predicates().items()
+    ]
+
+
 def build_chacha_rls_sql() -> list[str]:
     """RLS for ChaChaNotes (notes, character_cards) using client_id scoping."""
     stmts: list[str] = []
@@ -977,6 +998,7 @@ def build_chacha_rls_sql() -> list[str]:
     stmts.extend(build_workspace_chat_startup_rls_sql())
     stmts.extend(build_notes_provenance_rls_sql())
     stmts.extend(build_notes_provenance_receipts_rls_sql())
+    stmts.extend(build_dictionary_rls_sql())
     # Native fork tables. Written out per table rather than looped over
     # NATIVE_CHAT_TABLES: the RLS coverage ratchet scans source text and cannot
     # see DDL assembled from a loop variable. Keep this list in step with
@@ -1138,11 +1160,26 @@ def _ensure_rls_policy_set(
             raise DatabaseError(f"{name} RLS statement {index} failed: {exc}") from exc
 
 
+def _ensure_prompt_studio_schema(backend: DatabaseBackend) -> None:
+    """Run Prompt Studio migrations before standalone policy installation."""
+    try:
+        is_postgres = backend.backend_type.name == "POSTGRESQL"
+    except AttributeError:
+        return
+    if not is_postgres:
+        return
+    from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
+
+    db = PromptStudioDatabase(":memory:", client_id="pg-rls-bootstrap", backend=backend)
+    db.close()
+
+
 def ensure_prompt_studio_rls(backend: DatabaseBackend) -> bool:
     """Apply Prompt Studio RLS statements if running against PostgreSQL.
 
     Returns True when the full policy set succeeds; False only for explicit no-op cases.
     """
+    _ensure_prompt_studio_schema(backend)
     return _ensure_rls_policy_set(
         backend,
         name="prompt_studio",

@@ -164,6 +164,9 @@ def _candidate_sql(
     if command.job_type:
         sql += " AND job_type = ?"
         params.append(command.job_type)
+    elif command.job_types is not None:
+        sql += f" AND job_type IN ({', '.join('?' for _ in command.job_types)})"
+        params.extend(command.job_types)
 
     if command.tie_break == "fifo":
         tie_direction = "ASC"
@@ -183,6 +186,9 @@ def _candidate_sql(
         if command.job_type:
             scheduled_sql += " AND job_type=?"
             scheduled_params.append(command.job_type)
+        elif command.job_types is not None:
+            scheduled_sql += f" AND job_type IN ({', '.join('?' for _ in command.job_types)})"
+            scheduled_params.extend(command.job_types)
         scheduled_sql += " LIMIT 1"
         tie_direction = "ASC" if conn.execute(scheduled_sql, scheduled_params).fetchone() else "DESC"
 

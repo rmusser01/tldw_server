@@ -255,11 +255,10 @@ async def _execute_external_refresh_tool(server_id: str) -> dict[str, Any]:
     if module is None:
         raise HTTPException(status_code=503, detail="External discovery refresh tool is unavailable")
     result = await module.execute_with_circuit_breaker(
-        module.execute_tool,
-        _MCP_HUB_REFRESH_TOOL_NAME,
-        {"server_id": server_id},
+        _refresh_external_server_discovery_runtime,
+        server_id=server_id,
     )
-    return result if isinstance(result, dict) else {}
+    return result.model_dump()
 
 
 async def get_mcp_hub_external_refresh_executor() -> Callable[[str], Awaitable[dict[str, Any]]]:

@@ -1,9 +1,14 @@
 import { readFileSync } from "node:fs"
 import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
+const uiRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "../../../../../"
+)
 const source = (relativePath: string) =>
-  readFileSync(path.resolve(__dirname, "../../../../..", relativePath), "utf8");
+  readFileSync(path.resolve(uiRoot, relativePath), "utf8")
 
 const composerInputSource = source(
   "src/components/Option/Playground/hooks/useComposerInput.tsx"

@@ -1,7 +1,8 @@
+import { ChatAttachmentImage } from "./ChatAttachmentImage"
 import { getMessageDeleteFeedback } from "@/utils/message-delete-feedback"
 import { replaceUserDisplayNamePlaceholders } from "@/utils/chat-display-name"
 import React, { useEffect, useState, useRef } from "react"
-import { App, Tag, Image, Tooltip, Collapse, Avatar, Modal } from "antd"
+import { App, Tag, Tooltip, Collapse, Avatar, Modal } from "antd"
 import { LoadingStatus } from "./ActionInfo"
 import {
   AlertTriangle,
@@ -2907,10 +2908,8 @@ const PlaygroundMessageImpl = (props: Props) => {
                   .filter((image) => image.length > 0)
                   .map((image, index) => (
                     <div key={index} className="group relative">
-                      <Image
+                      <ChatAttachmentImage
                         src={image}
-                        alt="Uploaded Image"
-                        width={180}
                         className="rounded-md relative"
                       />
                       {showInlineImageActions && (

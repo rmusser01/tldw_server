@@ -1,3 +1,4 @@
+import { useAdminQuerySession } from "@/components/Option/Admin/AdminQueryProvider"
 import { useQuery } from "@tanstack/react-query"
 import { tldwClient } from "./TldwApiClient"
 
@@ -33,26 +34,34 @@ export const adminKeys = {
   governorCoverage: ["admin", "governor-coverage"] as const
 }
 
-export const useSystemStats = (options?: { timeoutMs?: number }) =>
-  useQuery({
+export const useSystemStats = (options?: { timeoutMs?: number }) => {
+  const session = useAdminQuerySession()
+  return useQuery({
     queryKey: adminKeys.systemStats,
-    queryFn: () => tldwClient.getSystemStats(options)
+    queryFn: () => tldwClient.getSystemStats({ ...options, ...session.requestOptions() })
   })
+}
 
-export const useUsersPage = (page: number, limit: number, search?: string) =>
-  useQuery({
+export const useUsersPage = (page: number, limit: number, search?: string) => {
+  const session = useAdminQuerySession()
+  return useQuery({
     queryKey: adminKeys.usersPage(page, limit, search),
-    queryFn: () => tldwClient.listAdminUsers({ page, limit, search })
+    queryFn: () => tldwClient.listAdminUsers({ page, limit, search }, session.requestOptions())
   })
+}
 
-export const useAdminRoles = () =>
-  useQuery({
+export const useAdminRoles = () => {
+  const session = useAdminQuerySession()
+  return useQuery({
     queryKey: adminKeys.roles,
-    queryFn: () => tldwClient.listAdminRoles()
+    queryFn: () => tldwClient.listAdminRoles(session.requestOptions())
   })
+}
 
-export const useAdminPermissions = () =>
-  useQuery({
+export const useAdminPermissions = () => {
+  const session = useAdminQuerySession()
+  return useQuery({
     queryKey: adminKeys.permissions,
-    queryFn: () => tldwClient.listPermissions()
+    queryFn: () => tldwClient.listPermissions(session.requestOptions())
   })
+}

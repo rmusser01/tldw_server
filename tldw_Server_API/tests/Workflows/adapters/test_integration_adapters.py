@@ -486,6 +486,7 @@ async def test_acp_stage_adapter_registers_created_session_and_records_prompt(mo
             "content": "Workflow reply",
             "usage": {"prompt_tokens": 2, "completion_tokens": 4, "total_tokens": 6},
         },
+        assistant_text=None,
     )
 
 

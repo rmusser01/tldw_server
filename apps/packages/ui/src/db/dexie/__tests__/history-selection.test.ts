@@ -86,6 +86,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 import * as service from "@/services/chat-history-selection"
 import * as history from "../history-selection"
 import { PageAssistDatabase } from "../chat"
+import { keepHistoryTurnRecovery } from "@/services/history-turn-keep"
 import { resolveHistorySelection } from "@/utils/history-selection"
 import type { HistoryViewSelectionV1 } from "@/types/history-selection"
 const row = (id: string, parent?: string | null) => ({
@@ -135,6 +136,73 @@ beforeEach(async () => {
   })
 })
 describe("local owner history", () => {
+  it("Regenerate recovery replays the exact rich local answer after a lost acknowledgement", async () => {
+    await memory.messages.put(row("question"))
+    const owner = await history.getLocalHistoryOwner("chat")
+    const origin = view(owner, { kind: "after_message", message_id: "question" })
+    const chosen = selection(await history.captureLocalHistorySnapshot(owner, origin, "send"))
+    const reply: Parameters<typeof history.settleLocalSelectedExistingInput>[2] = {
+      ...row("alternative"), role: "assistant", name: "Assistant",
+      content: "another answer", parent_message_id: "question", createdAt: 2,
+      modelId: "chosen-model", metadataExtra: { finish_reason: "stop" }
+    }
+    await history.settleLocalSelectedExistingInput(owner, chosen, reply)
+    const storedBefore = await memory.messages.get("alternative")
+    const scope = { profile_id: owner.profile_id, client_session_id: "session" }
+    const turn: Parameters<typeof history.saveHistoryTurnRecovery>[2] = {
+      operation_id: "lost-ack", origin_view: origin,
+      selection_digest: chosen.selection_digest,
+      request_context_digest: chosen.request_context_digest,
+      owner_key: owner.owner_key, conversation_id: "chat",
+      input_id: "question", assistant_id: "alternative", created_at: 2,
+      input_text: "question", input_images: [], result_text: "another answer",
+      state: "generated_unsaved", outcome: "complete",
+      existing_selection: chosen, settlement_payload: reply
+    }
+    await history.saveHistoryTurnRecovery(scope, origin, turn)
+    const [entry] = await history.loadHistoryTurnRecoveries(scope, origin)
+    const choose = vi.fn(async () => true)
+    const controller = {
+      fence: () => () => true,
+      getCurrent: () => ({ status: "ready", owner, view: origin, bookmarkScope: scope }),
+      choose, refreshRecovery: vi.fn(async () => {})
+    } as unknown as Parameters<typeof keepHistoryTurnRecovery>[0]
+    await expect(keepHistoryTurnRecovery(controller, entry)).resolves.toMatchObject({
+      status: "kept", resultId: "alternative", settledByKeep: true
+    })
+    expect(await memory.messages.get("alternative")).toEqual(storedBefore)
+    expect(choose).toHaveBeenCalledWith({ kind: "after_message", message_id: "alternative" })
+    expect(remote.capture).not.toHaveBeenCalled()
+  })
+
+  it("settles an existing question as a sibling and replays only its proven answer", async () => {
+    await memory.messages.bulkPut([
+      row("earlier"),
+      { ...row("earlier-answer", "earlier"), role: "assistant" },
+      row("question", "earlier-answer"),
+      { ...row("original-answer", "question"), role: "assistant" }
+    ])
+    const owner = await history.getLocalHistoryOwner("chat")
+    const chosen = selection(await history.captureLocalHistorySnapshot(
+      owner, view(owner, { kind: "after_message", message_id: "question" }), "send"
+    ))
+    const originalQuestion = await memory.messages.get("question")
+    const original = await memory.messages.get("original-answer")
+    const reply = { ...row("alternative"), role: "assistant", content: "another answer" }
+    await expect(history.settleLocalSelectedExistingInput(owner, chosen, reply))
+      .resolves.toMatchObject({ id: "alternative", parent_message_id: "question" })
+    expect(await memory.messages.get("original-answer")).toEqual(original)
+    expect(await memory.messages.get("question")).toEqual(originalQuestion)
+    await memory.messages.update("earlier", { content: "edited ancestor" })
+    await expect(history.settleLocalSelectedExistingInput(owner, chosen,
+      { ...reply, id: "stale-alternative" })).rejects.toMatchObject({ code: "stale_selection" })
+    await expect(history.settleLocalSelectedExistingInput(owner, chosen, reply))
+      .resolves.toMatchObject({ id: "alternative" })
+    await memory.messages.update("alternative", { content: "edited answer" })
+    await expect(history.settleLocalSelectedExistingInput(owner, chosen, reply))
+      .rejects.toMatchObject({ code: "message_id_conflict" })
+  })
+
   it("atomically reuses the profile", async () => {
     await memory.userSettings.delete("main")
     const owners = await Promise.all([
@@ -1346,6 +1414,87 @@ it("native recovery begins without canonical IDs and binds monotonically to owne
   ).rejects.toThrow()
 })
 
+
+describe("explicit imported local binding", () => {
+  const options = () => ({ signal: new AbortController().signal, validate_lease: () => true })
+  it("binds only the current browser profile and preserves imported content", async () => {
+    const original = await memory.chatHistories.get("chat")
+    await memory.messages.put({ ...row("image-question"), images: ["http://asset.test/missing.png"] })
+    const saved = await memory.messages.get("image-question")
+    const owner = await history.bindUnboundLocalHistory("chat", options())
+    expect(owner).toMatchObject({ kind: "local", profile_id: "profile", conversation_id: "chat" })
+    expect(await memory.chatHistories.get("chat")).toEqual({ ...original, local_owner_key: owner.owner_key })
+    expect(await memory.messages.get("image-question")).toEqual(saved)
+  })
+  it.each([
+    { local_owner_key: "foreign-profile" },
+    { server_scope_key: "foreign-account" },
+    { server_chat_id: "native" },
+    { message_source: "server" },
+    { local_settings_guard: { revision: "pending", pending: ["other-write"] } }
+  ])("refuses an existing ownership/native/pending-write fence: %j", async patch => {
+    await memory.chatHistories.update("chat", patch)
+    const original = await memory.chatHistories.get("chat")
+    await expect(history.bindUnboundLocalHistory("chat", options())).rejects.toMatchObject({ name: "HistorySelectionError" })
+    expect(await memory.chatHistories.get("chat")).toEqual(original)
+  })
+  it("does not install authority after its caller lease expires", async () => {
+    const original = await memory.chatHistories.get("chat")
+    await expect(history.bindUnboundLocalHistory("chat", { ...options(), validate_lease: () => false })).rejects.toMatchObject({ code: "request_config_scope_changed" })
+    expect(await memory.chatHistories.get("chat")).toEqual(original)
+  })
+  it("rolls back binding when cancellation interrupts the actual write", async () => {
+    const controller = new AbortController()
+    const original = await memory.chatHistories.get("chat")
+    const update = memory.chatHistories.update
+    memory.chatHistories.update = async (...args: any[]) => { const result = await update(...args); controller.abort(); return result }
+    try {
+      await expect(history.bindUnboundLocalHistory("chat", { signal: controller.signal, validate_lease: () => true })).rejects.toMatchObject({ code: "request_config_scope_changed" })
+      expect(await memory.chatHistories.get("chat")).toEqual(original)
+    } finally { memory.chatHistories.update = update }
+  })
+})
+
+
+it.each([
+  { local_owner_key: "foreign-profile", message_source: "web-ui" },
+  { server_scope_key: "foreign-account", server_chat_id: "native-source", message_source: "server" }
+])("public restoration cannot erase destination ownership and make it adoptable: %j", async ownership => {
+  await memory.chatHistories.update("chat", ownership)
+  await new PageAssistDatabase().importChatHistoryV2([{ history: { id: "chat", title: "Incoming copy", createdAt: 2, is_rag: false, message_source: "web-ui" }, messages: [] }])
+  expect(await memory.chatHistories.get("chat")).toMatchObject(ownership)
+  await expect(history.bindUnboundLocalHistory("chat", { signal: new AbortController().signal, validate_lease: () => true })).rejects.toMatchObject({ name: "HistorySelectionError" })
+})
+
+
+it.each(["valid", "owner", "digest", "question", "promote-unknown"])("B02 server existing-question recovery retains real-store authority (%s)", async mode => {
+  const owner = await history.getLocalHistoryOwner("chat")
+  await memory.messages.put(row("saved-question", null))
+  const origin = view(owner, {kind: "after_message", message_id: "saved-question"})
+  const captured = await history.captureLocalHistorySnapshot(owner, origin, "send")
+  const chosen = selection(captured)
+  const scope = {profile_id: owner.profile_id, client_session_id: "b02-existing"}
+  const pending: any = {operation_id: "new-explicit-answer", persistence: "server", origin_view: origin,
+    owner_key: owner.owner_key, conversation_id: "chat", input_id: "saved-question", existing_selection: chosen,
+    selection_digest: chosen.selection_digest, request_context_digest: chosen.request_context_digest,
+    created_at: 1, input_text: "saved-question", input_images: [], result_text: "", state: "dispatching"}
+  if (mode === "promote-unknown") {
+    await history.saveHistoryTurnRecovery(scope, origin, {...pending, state: "unknown", input_id: undefined, existing_selection: undefined})
+    await expect(history.saveHistoryTurnRecovery(scope, origin, pending)).rejects.toThrow()
+    expect((await history.loadHistoryTurnRecoveries(scope, owner))[0].turn.state).toBe("unknown")
+    return
+  }
+  if (mode === "owner") pending.existing_selection = {...chosen, owner_key: "foreign"}
+  if (mode === "digest") pending.existing_selection = {...chosen, request_context_digest: "changed"}
+  if (mode === "question") pending.input_id = "other"
+  if (mode !== "valid") { await expect(history.saveHistoryTurnRecovery(scope, origin, pending)).rejects.toThrow(); return }
+  await history.saveHistoryTurnRecovery(scope, origin, pending)
+  await history.saveHistoryTurnRecovery(scope, origin, {...pending, state: "accepted_unsent"})
+  const records = await history.loadHistoryTurnRecoveries(scope, owner)
+  expect(records[0].turn).toMatchObject({input_id: "saved-question", state: "accepted_unsent", existing_selection: chosen})
+  expect(records[0].turn.admission).toBeUndefined()
+  await expect(history.saveHistoryTurnRecovery(scope, origin, {...pending, existing_selection: undefined})).rejects.toThrow()
+})
 it("a confirmed refused native turn preserves exact input on reopen and cannot regress to uncertain dispatch", async () => {
   const owner = await history.getLocalHistoryOwner("chat")
   const origin = view(owner)

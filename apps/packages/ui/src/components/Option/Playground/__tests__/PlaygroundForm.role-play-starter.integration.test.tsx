@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
+import { HistorySelectionProvider } from "@/hooks/chat/useHistorySelection"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ConfigProvider } from "antd"
@@ -78,7 +79,7 @@ vi.mock("@/services/chat-document-processing", async original => ({
 const saveActorSettingsMock = vi.hoisted(() =>
   vi.fn<typeof import("@/services/actor-settings").saveActorSettingsForChat>()
 )
-const ownerGuardFixture = vi.hoisted(() => ({ capture: null as null | (() => () => boolean) }))
+const ownerGuardFixture = vi.hoisted(() => ({ capture: null as null | (() => () => boolean), realDrawer: false }))
 type ModelSettingsStore = ReturnType<typeof import("@/store/model").useStoreChatModelSettings.getState>
 const nativeSetupFixture = vi.hoisted(() => ({
   realSettings: false,
@@ -1490,7 +1491,7 @@ vi.mock("../RolePlaySetupDrawer", async (original) => {
   return {
     ...actual,
     RolePlaySetupDrawer: (props: Props) => {
-      if (!nativeSetupFixture.realDrawer) return <StubDrawer {...props} />
+      if (!nativeSetupFixture.realDrawer && !ownerGuardFixture.realDrawer) return <StubDrawer {...props} />
       nativeSetupFixture.drawerProps = props
       return (
         <actual.RolePlaySetupDrawer
@@ -1932,6 +1933,7 @@ beforeEach(async () => {
   selectedAssistantMock.defaultCharacter = null
   selectedAssistantMock.ownedDefaultCharacter = null
   savedSetupFixture.raw = "[]"
+  ownerGuardFixture.realDrawer = false
   startupPreviewFixture.apply = null
   startupPreviewFixture.template = null
   saveActorSettingsMock
@@ -7338,6 +7340,44 @@ describe("PlaygroundForm role-play starter", () => {
     await act(async () => { release(); await pending })
   })
 
+  it.each(["principal", "authority", "equivalent"] as const)("fences the actual Drawer scene continuation at the %s boundary", async (boundary) => {
+    const source = prepareQualifiedSceneSource()
+    nativeSetupFixture.realDrawer = true
+    sceneBucket.records.set(`actorSettings:owned:${source.target.key}`, {
+      value: { ...createDefaultActorSettings(), notes: "Original account scene" }, updatedAt: 1730000000000
+    })
+    let finishScene!: () => void
+    const pending = new Promise<boolean>(resolve => { finishScene = () => resolve(true) })
+    saveActorSettingsMock.mockReturnValueOnce(pending)
+    const user = userEvent.setup()
+    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    try {
+      await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
+      const drawer = await screen.findByRole("dialog", { name: "Role-play setup" })
+      await waitFor(() => expect(within(drawer).getByRole("button", { name: "Apply" })).not.toBeDisabled())
+      await user.click(within(drawer).getByRole("button", { name: "Apply" }))
+      await waitFor(() => expect(saveActorSettingsMock).toHaveBeenCalledTimes(1))
+      const successor = { ...createDefaultActorSettings(), notes: "Successor account scene" }
+      act(() => {
+        useActorStore.setState({ settings: successor, preview: "Successor account preview", tokenCount: 77 })
+        window.dispatchEvent(boundary === "principal" ? new Event("tldw:auth-principal-changed") : new CustomEvent("tldw:config-updated", { detail: { authorityChanged: boundary === "authority" } }))
+      })
+      await act(async () => { finishScene(); await pending })
+      if (boundary === "equivalent") {
+        expect(useActorStore.getState().settings?.notes).toBe("Original account scene")
+        expect(useActorStore.getState().preview).toBe("")
+        expect(useActorStore.getState().tokenCount).toBe(0)
+      } else {
+        expect(useActorStore.getState()).toMatchObject({ settings: successor, preview: "Successor account preview", tokenCount: 77 })
+      }
+    } finally {
+      view.unmount()
+      finishScene()
+      await pending
+      useActorStore.getState().reset()
+    }
+  })
+
   it("clears identity with one awaited canonical selection write", async () => {
     const user = userEvent.setup()
     selectedAssistantMock.initialSelection = { kind: "character", id: "ada", name: "Ada Lovelace" }
@@ -7422,6 +7462,33 @@ describe("PlaygroundForm role-play starter", () => {
         screen.getByRole("button", { name: /helpful ai assistant/i })
       )
     })
+  })
+
+  it.each(["loading", "recovery"])("B02 retains the real composer draft through character %s", async (phase) => {
+    const user = userEvent.setup()
+    const onAction = vi.fn()
+    onSubmitMock.mockResolvedValueOnce({ status: "submitted" } as never)
+    selectedCharacterState.value = { id: "ada", name: "Ada Lovelace" }
+    const blocker = { active: true, title: "Wait for the selected character. Your draft is retained.", actionLabel: phase === "loading" ? "Loading character" : "Retry character", disabled: phase === "loading", onAction }
+    const form = (blocked: typeof blocker | null) => <HistorySelectionProvider><PlaygroundForm droppedFiles={[]} characterChatSendBlocker={blocked} /></HistorySelectionProvider>
+    const { rerender } = render(form(blocker))
+    const composer = screen.getByTestId("composer-textarea")
+    await user.type(composer, "Keep this B02 question.")
+    fireEvent.submit(composer.closest("form")!)
+    expect(onSubmitMock).not.toHaveBeenCalled()
+    expect(composer).toHaveValue("Keep this B02 question.")
+    const button = within(screen.getByTestId("composer-inline-send-control")).getByRole("button", { name: blocker.actionLabel })
+    if (phase === "loading") expect(button).toBeDisabled()
+    else {
+      onAction.mockClear()
+      await user.click(button)
+      expect(onAction).toHaveBeenCalledTimes(1)
+    }
+    rerender(form(null))
+    expect(onSubmitMock).not.toHaveBeenCalled()
+    expect(composer).toHaveValue("Keep this B02 question.")
+    fireEvent.submit(composer.closest("form")!)
+    await waitFor(() => expect(onSubmitMock).toHaveBeenCalledTimes(1))
   })
 
   it("turns blocked character chat composer SEND into setup without dropping the draft", async () => {
@@ -7682,3 +7749,24 @@ it.each(["tracked_character", "overlay", "fresh_character"])(
     }
   }
 )
+
+
+it("names only the server connection when selected-model readiness is unknown", () => {
+  render(<PlaygroundForm droppedFiles={[]} />)
+
+  const selector = screen.getByTestId("model-selector")
+  expect(selector).toHaveTextContent("Server connected")
+  expect(selector).not.toHaveTextContent("Healthy")
+  expect(within(selector).getByText("Server connected")).toHaveAttribute(
+    "title",
+    "Status"
+  )
+})
+
+it("keeps offline connection guidance with a selected model", () => {
+  playgroundFormConnectionState.phase = "disconnected"
+  playgroundFormConnectionState.isConnected = false
+  render(<PlaygroundForm droppedFiles={[]} />)
+
+  expect(screen.getByTestId("model-selector")).toHaveTextContent("Offline")
+})

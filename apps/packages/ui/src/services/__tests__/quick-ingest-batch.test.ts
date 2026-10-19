@@ -471,6 +471,64 @@ describe("submitQuickIngestBatch", () => {
     })
   })
 
+  it.each([
+    { storeRemote: true, ocr: true },
+    { storeRemote: true, ocr: false },
+    { storeRemote: false, ocr: true },
+    { storeRemote: false, ocr: false }
+  ])("sends the PDF OCR toggle to processing (remote=$storeRemote, OCR=$ocr)", async ({ storeRemote, ocr }) => {
+    mocks.bgUpload.mockResolvedValue(storeRemote
+      ? { batch_id: "ocr-batch", jobs: [{ id: 205 }] }
+      : { results: [{ status: "Success", content: "Extracted source" }] })
+    mocks.bgRequest.mockResolvedValue({
+      ok: true,
+      data: { status: "completed", result: { status: "Success", media_id: 205 } }
+    })
+    await submitQuickIngestBatch({
+      entries: [],
+      files: [{ id: "scan", name: "scan.pdf", type: "application/pdf", data: [37, 80, 68, 70] }],
+      storeRemote,
+      processOnly: !storeRemote,
+      fileDefaults: { document: { ocr } }
+    })
+    expect(mocks.bgUpload).toHaveBeenCalledWith(expect.objectContaining({
+      path: storeRemote ? "/api/v1/media/ingest/jobs" : "/api/v1/media/process-pdfs",
+      fields: expect.objectContaining({ enable_ocr: ocr })
+    }))
+  })
+
+  it("retains an explicit PDF OCR override over preset defaults", async () => {
+    mocks.bgUpload.mockResolvedValue({ batch_id: "ocr-override", jobs: [{ id: 206 }] })
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: {
+      status: "completed", result: { status: "Success", media_id: 206 }
+    } })
+    await submitQuickIngestBatch({
+      entries: [{ id: "scan", url: "https://source.test/scan.pdf", type: "pdf" }],
+      files: [], storeRemote: true, processOnly: false,
+      fileDefaults: { document: { ocr: true } },
+      advancedValues: { enable_ocr: false }
+    })
+    expect(mocks.bgUpload).toHaveBeenCalledWith(expect.objectContaining({
+      fields: expect.objectContaining({ enable_ocr: false })
+    }))
+  })
+
+  it("uses per-file PDF OCR settings over the batch preset", async () => {
+    mocks.bgUpload.mockResolvedValue({ batch_id: "ocr-file", jobs: [{ id: 207 }] })
+    mocks.bgRequest.mockResolvedValue({ ok: true, data: {
+      status: "completed", result: { status: "Success", media_id: 207 }
+    } })
+    await submitQuickIngestBatch({
+      entries: [],
+      files: [{ id: "scan", name: "scan.pdf", type: "application/pdf", data: [37, 80, 68, 70], defaults: { document: { ocr: false } } }],
+      storeRemote: true, processOnly: false,
+      fileDefaults: { document: { ocr: true } }
+    })
+    expect(mocks.bgUpload).toHaveBeenCalledWith(expect.objectContaining({
+      fields: expect.objectContaining({ enable_ocr: false })
+    }))
+  })
+
   it("defaults perform_chunking to true when common options are omitted", async () => {
     mocks.bgUpload.mockResolvedValue({
       batch_id: "batch-default-chunking",
@@ -1451,6 +1509,21 @@ describe("submitQuickIngestBatch", () => {
       auto_apply_template: true
     })
     expect(body).not.toHaveProperty("auto_chunking_goal")
+  })
+
+  it("uploads process-only files once through the canonical multipart field", async () => {
+    mocks.bgUpload.mockResolvedValue({ result: "ok" })
+    await submitQuickIngestBatch({
+      entries: [],
+      files: [{ id: "scan", name: "scan.pdf", type: "application/pdf", data: [1, 2, 3] }],
+      storeRemote: true,
+      processOnly: true,
+      common: { perform_analysis: false, perform_chunking: false, overwrite_existing: false }
+    })
+    expect(mocks.bgUpload).toHaveBeenCalledWith(expect.objectContaining({
+      path: "/api/v1/media/process-pdfs", fileFieldName: "files"
+    }))
+    expect(mocks.bgUpload).toHaveBeenCalledTimes(1)
   })
 
   it("routes local files through direct process endpoints in web runtime", async () => {

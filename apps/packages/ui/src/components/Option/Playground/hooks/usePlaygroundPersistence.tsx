@@ -45,6 +45,7 @@ export interface UsePlaygroundPersistenceDeps {
   serverChatSource: string | null
   setServerChatSource: (source: string | null) => void
   setServerChatVersion: (version: number | null) => void
+  setServerChatMetaLoaded: (loaded: boolean) => void
   setServerChatCharacterId: (id: string | number | null) => void
   setServerChatAssistantKind: (kind: "character" | "persona" | null) => void
   setServerChatAssistantId: (id: string | number | null) => void
@@ -256,6 +257,7 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
     const capturedSource = useStoreMessageOption.getState()
     const capturedSession = usePlaygroundSessionStore.getState()
     let createdChatId: string | null = null
+    let confirmedNormalCreate = false
     const acknowledgedIds: string[] = []
     let requestSnapshot: ServicePromptSnapshot | undefined
     const isCurrentSave = () => {
@@ -428,6 +430,8 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
                 throw new Error("Failed to create server chat")
               }
               createdChatId = cid
+              confirmedNormalCreate = Boolean(created && typeof created === "object" &&
+                created.character_id == null && created.assistant_kind == null && created.assistant_id == null)
               endPromotionWrite = beginServerChatWrite(cid)
               setServerChatId(cid)
               if (!isCurrentSave() || useStoreMessageOption.getState().serverChatId !== cid) return
@@ -530,6 +534,14 @@ export function usePlaygroundPersistence(deps: UsePlaygroundPersistenceDeps) {
           }
 
           if (!isCurrentSave()) return
+          if (confirmedNormalCreate) {
+            const current = latestDepsRef.current
+            current.setServerChatCharacterId(null)
+            current.setServerChatAssistantKind(null)
+            current.setServerChatAssistantId(null)
+            current.setServerChatPersonaMemoryMode(null)
+            current.setServerChatMetaLoaded(true)
+          }
           if (!serverPersistenceHintSeenRef.current) {
             serverPersistenceHintSeenRef.current = true
             setServerPersistenceHintSeen(true)

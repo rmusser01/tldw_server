@@ -103,7 +103,7 @@ import { createNotesGraphAuthorityScope } from './useNotesGraphAuthorityScope'
 import type { NoteRenamedEvent } from './useNotesWikilinkRename'
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
-type NotesOwnedRequestOptions = {
+export type NotesOwnedRequestOptions = {
   servicePromptConfig: ServicePromptTargetConfig
   abortSignal: AbortSignal
   headers: Record<string, string>
@@ -213,7 +213,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     t,
     listMode,
     setListMode,
-    data,
     refetch,
     setPage,
     setQuery,
@@ -428,6 +427,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const [taskReconciliation, setTaskReconciliation] =
     React.useState<NoteTaskReconciliationSummary | null>(null)
   const [taskActivityEvents, setTaskActivityEvents] = React.useState<NoteTaskActivityEvent[]>([])
+  const taskActivityEventsRef = React.useRef(taskActivityEvents)
+  taskActivityEventsRef.current = taskActivityEvents
   const [taskConflictNotice, setTaskConflictNotice] = React.useState<string | null>(null)
   const [recentNotes, setRecentNotes] = useNotesAuthorityState<NotesRecentOpenedEntry[]>(authorityScope, [])
   const recentNotesRef = React.useRef<NotesRecentOpenedEntry[]>([])
@@ -587,9 +588,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   )
 
   const applyOfflineDraftToEditor = React.useCallback((draft: OfflineDraftEntry) => {
-    setTitle(String(draft.title || ''))
-    setContent(stripKnowledgeNoteProvenance(String(draft.content || '')))
-    setEditorKeywords(Array.isArray(draft.keywords) ? [...draft.keywords] : [])
+    const title = String(draft.title || '')
+    const content = stripKnowledgeNoteProvenance(String(draft.content || ''))
+    const keywords = Array.isArray(draft.keywords) ? [...draft.keywords] : []
+    setTitle(title)
+    setContent(content)
+    setEditorKeywords(keywords)
     const head = knowledgeNoteHead(draft.metadata, draft.content)
     setOriginalMetadata({ ...(draft.metadata || {}), ...head, ...(head.knowledge_provenance || {}) })
     setBacklinkConversationId(draft.backlinkConversationId)
@@ -608,6 +612,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     replaceWysiwygHtml(markdownToWysiwygHtml(String(draft.content || '')))
     setWysiwygSessionDirty(false)
     markdownBeforeWysiwygRef.current = String(draft.content || '')
+    return { title, content, editorKeywords: keywords,
+      backlinkConversationId: draft.backlinkConversationId, backlinkMessageId: draft.backlinkMessageId }
   }, [assignSelectedVersion, dispatchSave, replaceWysiwygHtml, setDirtyFlag, setEditorKeywords, setMonitoringNotice, setOriginalMetadata])
 
   const upsertOfflineDraft = React.useCallback(
@@ -720,40 +726,97 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setTaskConflictNotice(null)
   }, [])
 
-  const loadTaskActivityForNote = React.useCallback(async (noteId: string | number, ownedRequest?: NotesOwnedRequestOptions) => {
-    const requestEpoch = authorityEpochRef.current
-    const selectionEpoch = noteSelectionEpochRef.current
+  // Page and checklist mutations share the editor's existing owner and draft lifetimes.
+  const captureNoteMutation = React.useCallback(() => {
+    const epoch = authorityEpochRef.current
+    const scope = authorityScopeRef.current
+    const config = connectionConfigRef.current ? { ...connectionConfigRef.current } : null
+    let selection = noteSelectionEpochRef.current
+    let revision = editRevisionRef.current.revision
+    const dirtyRevision = dirtyRevisionRef.current
+    const isOwnerCurrent = () => authorityEpochRef.current === epoch && authorityScopeRef.current === scope
+    return {
+      scope, config,
+      get editRevision() { return revision },
+      isOwnerCurrent,
+      isEditorCurrent: () => isOwnerCurrent() && noteSelectionEpochRef.current === selection &&
+        editRevisionRef.current.revision === revision && dirtyRevisionRef.current === dirtyRevision,
+      acceptSavedDraft: () => {
+        if (isOwnerCurrent() && dirtyRevisionRef.current === dirtyRevision) {
+          selection = noteSelectionEpochRef.current
+          revision = editRevisionRef.current.revision
+        }
+      },
+      register: (controller: AbortController) => {
+        authorityRequestsRef.current.add(controller)
+        return () => { authorityRequestsRef.current.delete(controller) }
+      },
+    }
+  }, [])
+
+  const loadTaskActivityForNote = React.useCallback(async (
+    noteId: string | number, ownedRequest: NotesOwnedRequestOptions, isCurrent: () => boolean
+  ) => {
     try {
-      if (ownedRequest?.abortSignal.aborted) return
+      if (!isCurrent()) return
       const response = await listTaskActivity({ note_id: noteId, limit: 50 }, ownedRequest)
-      if (authorityEpochRef.current !== requestEpoch || noteSelectionEpochRef.current !== selectionEpoch || ownedRequest?.abortSignal.aborted) return
+      if (!isCurrent()) return
       const noteIdText = String(noteId)
       const events = Array.isArray(response.events)
         ? response.events.filter((event) => String(event.note_id || '') === noteIdText)
         : []
       setTaskActivityEvents(events)
     } catch {
-      if (authorityEpochRef.current !== requestEpoch || noteSelectionEpochRef.current !== selectionEpoch || ownedRequest?.abortSignal.aborted) return
+      if (!isCurrent()) return
       setTaskActivityEvents([])
     }
   }, [])
 
   const refreshTaskStateForNote = React.useCallback(async (noteId: string | number, ownedRequest?: NotesOwnedRequestOptions) => {
-    const requestEpoch = authorityEpochRef.current
-    const selectionEpoch = noteSelectionEpochRef.current
+    const selectedNote = selectedIdRef.current
+    if (selectedNote == null || String(selectedNote) !== String(noteId)) return
+    const operation = captureNoteMutation()
+    const controller = ownedRequest ? undefined : new AbortController()
+    const signal = ownedRequest?.abortSignal ?? controller!.signal
+    const unregister = controller ? operation.register(controller) : undefined
+    const isCurrent = () => !signal.aborted && operation.isEditorCurrent() &&
+      String(selectedIdRef.current) === String(selectedNote)
     try {
-      if (ownedRequest?.abortSignal.aborted) return
-      const response = await listNoteTasks(noteId, { limit: 500 }, ownedRequest)
-      if (authorityEpochRef.current !== requestEpoch || noteSelectionEpochRef.current !== selectionEpoch || ownedRequest?.abortSignal.aborted) return
-      setNoteTasks(Array.isArray(response.tasks) ? response.tasks : [])
-      setTaskReconciliation(response.reconciliation ?? null)
+      if (!isCurrent()) return
+      if (!ownedRequest) {
+        if (!operation.scope || !operation.config) return
+        const user = await tldwAuth.getCurrentUser()
+        if (!isCurrent() || !user?.is_active || user.id == null ||
+            createNotesGraphAuthorityScope(operation.config.serverUrl, user.id) !== operation.scope) return
+        ownedRequest = {
+          servicePromptConfig: {
+            serverUrl: operation.config.serverUrl, authMode: operation.config.authMode,
+            authSource: operation.config.authSource, orgId: operation.config.orgId,
+            expectedUserId: user.id,
+            expectedSingleUserApiKeyScope: operation.config.authMode === 'single-user'
+              ? deriveSingleUserApiKeyCredentialScope('single-user', operation.config.apiKey) : undefined
+          },
+          abortSignal: signal, headers: { 'X-TLDW-Expected-User-ID': String(user.id) }
+        }
+      }
+      try {
+        const response = await listNoteTasks(noteId, { limit: 500 }, ownedRequest)
+        if (!isCurrent()) return
+        setNoteTasks(Array.isArray(response.tasks) ? response.tasks : [])
+        setTaskReconciliation(response.reconciliation ?? null)
+      } catch {
+        if (!isCurrent()) return
+        setNoteTasks([])
+        setTaskReconciliation(null)
+      }
+      await loadTaskActivityForNote(noteId, ownedRequest, isCurrent)
     } catch {
-      if (authorityEpochRef.current !== requestEpoch || noteSelectionEpochRef.current !== selectionEpoch || ownedRequest?.abortSignal.aborted) return
-      setNoteTasks([])
-      setTaskReconciliation(null)
+      // Failed ownership lookup cannot publish task or activity state.
+    } finally {
+      controller?.abort()
+      unregister?.()
     }
-    await loadTaskActivityForNote(noteId, ownedRequest)
-  }, [loadTaskActivityForNote])
+  }, [captureNoteMutation, loadTaskActivityForNote])
 
   const toggleTaskCheckboxLocal = React.useCallback(
     (payload: TaskChecklistTogglePayload) => {
@@ -835,12 +898,15 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       const d = await bgRequest<any>({ ...ownedRequest, path: noteResourcePath(id) as any, method: 'GET' as any })
       if (!isCurrent() || editRevisionRef.current.revision !== editRevision) return false
       const loadedTitle = String(d?.title || `Note ${id}`)
+      const documentTitle = String(d?.title || '')
+      const documentContent = stripKnowledgeNoteProvenance(String(d?.content || ''))
+      const documentKeywords = extractKeywords(d)
       savedTitleRef.current = { noteId: String(id), title: String(d?.title || '') }
       selectedIdRef.current = id
       setSelectedId(id)
-      setTitle(String(d?.title || ''))
-      setContent(stripKnowledgeNoteProvenance(String(d?.content || '')))
-      setEditorKeywords(extractKeywords(d))
+      setTitle(documentTitle)
+      setContent(documentContent)
+      setEditorKeywords(documentKeywords)
       assignSelectedVersion(toNoteVersion(d))
       setSelectedLastSavedAt(toNoteLastModified(d))
       const rawMeta = d && typeof d === "object" ? (d as any).metadata : null
@@ -871,14 +937,24 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setWysiwygSessionDirty(false)
       markdownBeforeWysiwygRef.current = String(d?.content || '')
       rememberRecentNote(id, loadedTitle)
+      let acceptedDocument = { title: documentTitle, content: documentContent, editorKeywords: documentKeywords,
+        backlinkConversationId: links.conversation_id, backlinkMessageId: links.message_id }
       const queuedDraft = offlineDraftQueueRef.current[`note:${String(id)}`]
       if (queuedDraft) {
-        applyOfflineDraftToEditor(queuedDraft)
+        acceptedDocument = applyOfflineDraftToEditor(queuedDraft)
       }
+      // Publish our accepted document before refresh captures its editor lifetime.
+      const previous = editRevisionRef.current
+      const acceptedSnapshot = { ...acceptedDocument, originalMetadata: previous.originalMetadata,
+        wysiwygInputCount: previous.wysiwygInputCount }
+      const authoredDraftChanged = (Object.keys(acceptedSnapshot) as Array<keyof typeof acceptedSnapshot>).some(
+        (key) => key !== 'originalMetadata' && previous[key] !== acceptedSnapshot[key]
+      )
+      editRevisionRef.current = { ...acceptedSnapshot, revision: previous.revision + (authoredDraftChanged ? 1 : 0) }
       await refreshTaskStateForNote(id, ownedRequest)
       return isCurrent()
     } catch {
-      if (isCurrent()) message.error('Failed to load note')
+      if (isCurrent() && editRevisionRef.current.revision === editRevision) message.error('Failed to load note')
       return false
     } finally {
       if (pendingSelectionEpochRef.current === noteEpoch) pendingSelectionEpochRef.current = null
@@ -888,16 +964,40 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   const dismissTaskActivity = React.useCallback(async (eventId: string) => {
     const normalizedEventId = String(eventId || '').trim()
-    if (!normalizedEventId) return
+    const noteId = selectedIdRef.current
+    const event = taskActivityEventsRef.current.find((item) => String(item.id) === normalizedEventId &&
+      noteId != null && String(item.note_id) === String(noteId))
+    if (!normalizedEventId || !event) return
+    const operation = captureNoteMutation()
+    const controller = new AbortController()
+    const unregister = operation.register(controller)
+    const isCurrent = () => !controller.signal.aborted && operation.isEditorCurrent() &&
+      taskActivityEventsRef.current.includes(event)
     try {
-      await markTaskActivityRead(normalizedEventId, { dismissed: true })
+      if (!operation.scope || !operation.config) return
+      const user = await tldwAuth.getCurrentUser()
+      if (!isCurrent() || !user?.is_active || user.id == null ||
+          createNotesGraphAuthorityScope(operation.config.serverUrl, user.id) !== operation.scope) return
+      const ownedRequest: NotesOwnedRequestOptions = {
+        servicePromptConfig: {
+          serverUrl: operation.config.serverUrl, authMode: operation.config.authMode,
+          authSource: operation.config.authSource, orgId: operation.config.orgId,
+          expectedUserId: user.id,
+          expectedSingleUserApiKeyScope: operation.config.authMode === 'single-user'
+            ? deriveSingleUserApiKeyCredentialScope('single-user', operation.config.apiKey) : undefined
+        },
+        abortSignal: controller.signal, headers: { 'X-TLDW-Expected-User-ID': String(user.id) }
+      }
+      await markTaskActivityRead(normalizedEventId, { dismissed: true }, ownedRequest)
+      if (!isCurrent()) return
+      setTaskActivityEvents((current) => operation.isEditorCurrent() ? current.filter((item) => item !== event) : current)
     } catch {
-      // Non-critical notice state. Keep the UI moving if the server already marked it.
+      // Keep the original notice until its dismissal is acknowledged.
+    } finally {
+      controller.abort()
+      unregister()
     }
-    setTaskActivityEvents((current) =>
-      current.filter((event) => String(event.id) !== normalizedEventId)
-    )
-  }, [])
+  }, [captureNoteMutation])
 
   const inspectTaskActivity = React.useCallback(() => {
     if (selectedId == null) return
@@ -1005,12 +1105,15 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
    */
   const settlePendingEdits = React.useCallback(
     async (trigger: 'switch' | 'leave'): Promise<'clean' | 'saved' | 'failed'> => {
+      const operation = captureNoteMutation()
       clearAutosaveTimeout()
       let saved = false
       for (let round = 0; round < 4; round += 1) {
+        if (!operation.isOwnerCurrent()) return 'failed'
         const inFlight = activeSavePromiseRef.current
         if (inFlight) {
           saved = (await inFlight.catch(() => false)) || saved
+          if (!operation.isOwnerCurrent()) return 'failed'
           continue
         }
         if (!isDirtyRef.current) return saved ? 'saved' : 'clean'
@@ -1018,13 +1121,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         if (!snapshot.title.trim() && !snapshot.content.trim()) return 'failed'
         if (!saveNoteRef.current || !canStartNoteSave(saveStateRef.current, trigger)) return 'failed'
         const ok = await saveNoteRef.current({ showSuccessMessage: false, trigger }).catch(() => false)
-        if (!ok) return 'failed'
+        if (!operation.isOwnerCurrent() || !ok) return 'failed'
         saved = true
         if (trigger === 'switch') return 'saved'
       }
       return isDirtyRef.current ? 'failed' : saved ? 'saved' : 'clean'
     },
-    [clearAutosaveTimeout]
+    [captureNoteMutation, clearAutosaveTimeout]
   )
 
   const markEditsDiscarded = React.useCallback(() => {
@@ -1036,6 +1139,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const askAboutUnsavedEdits = React.useCallback(
     (trigger: 'switch' | 'leave') =>
       new Promise<'saved' | 'continue' | 'discard' | 'stay'>((resolve) => {
+        const operation = captureNoteMutation()
         const state = saveStateRef.current
         const keptOnDevice = isDraftKeptOnDevice()
         const title = t('option:notesSearch.unsavedEditsTitle', {
@@ -1072,9 +1176,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           cancelText: stayText,
           okButtonProps: { type: 'primary' },
           onOk: async () => {
+            if (!operation.isOwnerCurrent()) { resolve('stay'); return }
             const saved = await (saveNoteRef.current?.({ showSuccessMessage: true, trigger }) ?? Promise.resolve(false))
               .catch(() => false)
-            resolve(saved ? 'saved' : 'stay')
+            resolve(operation.isOwnerCurrent() && saved ? 'saved' : 'stay')
           },
           onCancel: () => resolve('stay'),
           footer: (_, { OkBtn, CancelBtn }) => (
@@ -1094,7 +1199,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           ),
         })
       }),
-    [describeSaveFailure, isDraftKeptOnDevice, t]
+    [captureNoteMutation, describeSaveFailure, isDraftKeptOnDevice, t]
   )
 
   /**
@@ -1104,8 +1209,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const confirmDiscardIfDirty = React.useCallback(
     async (onSaved?: () => void, options?: { trigger?: 'switch' | 'leave' }) => {
       const trigger = options?.trigger ?? 'switch'
+      const operation = captureNoteMutation()
       if (!isDirtyRef.current && !activeSavePromiseRef.current) return true
       const outcome = await settlePendingEdits(trigger)
+      if (!operation.isOwnerCurrent()) return false
       if (outcome === 'clean') return true
       if (outcome === 'saved') {
         onSaved?.()
@@ -1121,10 +1228,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           okText: t('option:notesSearch.discardChanges', { defaultValue: 'Discard changes' }),
           cancelText: t('common:cancel', { defaultValue: 'Cancel' })
         })
+        if (!operation.isOwnerCurrent()) return false
         if (ok) markEditsDiscarded()
         return ok
       }
       const choice = await askAboutUnsavedEdits(trigger)
+      if (!operation.isOwnerCurrent()) return false
       if (choice === 'saved') {
         onSaved?.()
         return true
@@ -1132,7 +1241,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (choice === 'discard') markEditsDiscarded()
       return choice !== 'stay'
     },
-    [askAboutUnsavedEdits, confirmDanger, markEditsDiscarded, settlePendingEdits, t]
+    [askAboutUnsavedEdits, captureNoteMutation, confirmDanger, markEditsDiscarded, settlePendingEdits, t]
   )
   const confirmDiscardIfDirtyRef = React.useRef(confirmDiscardIfDirty)
   confirmDiscardIfDirtyRef.current = confirmDiscardIfDirty
@@ -1243,82 +1352,116 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     )
   }, [])
 
-  const reloadSelectedNoteAfterConflict = React.useCallback(async () => {
-    if (selectedId == null) return
-    const ok = await confirmDanger({
-      title: t('option:notesSearch.reloadConflictTitle', {
-        defaultValue: 'Reload server version?'
-      }),
-      content: t('option:notesSearch.reloadConflictContent', {
-        defaultValue:
-          'Reloading replaces the current editor contents with the server version. Your unsaved local edits will be discarded.'
-      }),
-      okText: t('option:notesSearch.reloadConflictAction', {
-        defaultValue: 'Reload server version'
-      }),
-      cancelText: t('option:notesSearch.keepEditingAction', {
-        defaultValue: 'Keep editing'
-      })
-    })
-    if (!ok) return
-    dropOfflineDraftNow(offlineDraftKeyFor(selectedId))
-    await loadDetail(selectedId)
-  }, [confirmDanger, dropOfflineDraftNow, loadDetail, selectedId, t])
+  /** Load the server copy; the local text goes to the clipboard first. */
+  const takeTheirVersion = React.useCallback(async ({ copyCleanDraft = true }: { copyCleanDraft?: boolean } = {}): Promise<boolean> => {
+    const noteId = selectedIdRef.current
+    if (noteId == null) return false
+    clearAutosaveTimeout()
+    const hasLocalDraft = isDirtyRef.current || saveStateRef.current.status === 'conflict'
+    const shouldCopy = copyCleanDraft || hasLocalDraft
+    const local = editRevisionRef.current
+    const requestEpoch = authorityEpochRef.current
+    const requestAuthorityScope = authorityScope
+    const capturedConfig = connectionConfig ? { ...connectionConfig } : null
+    let selectionEpoch = noteSelectionEpochRef.current
+    const controller = new AbortController()
+    authorityRequestsRef.current.add(controller)
+    const isCurrent = () => !controller.signal.aborted && authorityEpochRef.current === requestEpoch &&
+      authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === selectionEpoch &&
+      String(selectedIdRef.current) === String(noteId)
+    const hasOriginalDraft = () => isCurrent() && editRevisionRef.current.revision === local.revision
+    try {
+      let copied = false
+      if (shouldCopy) {
+        // Must run before any other await (see writeClipboardText).
+        copied = await writeClipboardText(
+          buildSingleNoteCopyText(
+            { id: noteId, title: local.title, content: local.content, keywords: local.editorKeywords },
+            'markdown'
+          )
+        )
+        if (!hasOriginalDraft()) return false
+        if (!copied) {
+          const ok = await confirmDanger({
+            title: t('option:notesSearch.useTheirVersionTitle', { defaultValue: 'Use their version?' }),
+            content: t('option:notesSearch.useTheirVersionNoCopy', {
+              defaultValue: 'Your text could not be copied to the clipboard. Using their version discards your edits.'
+            }),
+            okText: t('option:notesSearch.useTheirVersion', { defaultValue: 'Use their version' }),
+            cancelText: t('option:notesSearch.keepEditingAction', { defaultValue: 'Keep editing' })
+          })
+          if (!ok || !hasOriginalDraft()) return false
+        }
+      }
+      if (!requestAuthorityScope || !capturedConfig) return false
+      const user = await tldwAuth.getCurrentUser()
+      if (!hasOriginalDraft() || !user?.is_active || user.id == null ||
+          createNotesGraphAuthorityScope(capturedConfig.serverUrl, user.id) !== requestAuthorityScope) return false
+      const ownedRequest: NotesOwnedRequestOptions = {
+        servicePromptConfig: {
+          serverUrl: capturedConfig.serverUrl,
+          authMode: capturedConfig.authMode,
+          authSource: capturedConfig.authSource,
+          orgId: capturedConfig.orgId,
+          expectedUserId: user.id,
+          expectedSingleUserApiKeyScope: capturedConfig.authMode === 'single-user'
+            ? deriveSingleUserApiKeyCredentialScope('single-user', capturedConfig.apiKey) : undefined
+        },
+        headers: { 'X-TLDW-Expected-User-ID': String(user.id) },
+        abortSignal: controller.signal
+      }
+      dropOfflineDraftNow(offlineDraftKeyFor(noteId))
+      selectionEpoch += 1
+      const loaded = await loadDetail(noteId, ownedRequest, local.revision)
+      if (!loaded || !isCurrent()) return false
+      void refetch()
+      if (shouldCopy) {
+        message.info({
+          content: copied
+            ? t('option:notesSearch.reloadConflictCopied', {
+                defaultValue: 'Loaded the latest version from the server. Your unsaved edits were copied to the clipboard.'
+              })
+            : t('option:notesSearch.loadedTheirVersion', { defaultValue: 'Loaded the latest version from the server.' }),
+          duration: 8
+        })
+      }
+      return true
+    } catch {
+      return false
+    } finally {
+      if (authorityEpochRef.current === requestEpoch && authorityScopeRef.current === requestAuthorityScope && noteSelectionEpochRef.current === selectionEpoch) setLoadingDetail(false)
+      authorityRequestsRef.current.delete(controller)
+    }
+  }, [authorityScope, clearAutosaveTimeout, confirmDanger, connectionConfig, dropOfflineDraftNow, loadDetail, message, refetch, setLoadingDetail, t])
 
-  // "Reload notes" from the conflict toast. The editor's base version must
-  // never move without the content it belongs to: if it did, the next autosave
-  // would send the stale text with the new version and overwrite the other
-  // tab's change (NS-N1). The toast keeps an old copy of this callback, so the
-  // live editor state is read from refs.
+  const reloadSelectedNoteAfterConflict = takeTheirVersion
+
+  // Compatibility entry point for conflict toasts and callers reloading another note.
   const reloadNotes = React.useCallback(async (noteId?: string | number | null) => {
     const currentId = selectedIdRef.current
     const target = noteId ?? currentId
-    if (target == null || currentId == null || String(target) !== String(currentId)) {
-      // The conflict was on another note: refresh the list, leave the editor alone.
-      await refetch()
+    if (target != null && currentId != null && String(target) === String(currentId)) {
+      await takeTheirVersion({ copyCleanDraft: false })
       return
     }
-    clearAutosaveTimeout()
-    // A conflicting draft restored from this device is local text too.
-    const hadLocalEdits = isDirtyRef.current || saveStateRef.current.status === 'conflict'
-    if (hadLocalEdits) {
-      // Keep the unsaved text recoverable before the server copy replaces it.
-      // This must run before any other await (see writeClipboardText).
-      const local = editRevisionRef.current
-      const copied = await writeClipboardText(
-        buildSingleNoteCopyText(
-          { id: currentId, title: local.title, content: local.content, keywords: local.editorKeywords },
-          'markdown'
-        )
-      )
-      if (!copied) {
-        message.warning(
-          t('option:notesSearch.reloadConflictCopyFailed', {
-            defaultValue: 'Could not copy your unsaved edits to the clipboard.'
-          })
-        )
-        // Fall back to the explicit "your edits will be discarded" confirm.
-        await reloadSelectedNoteAfterConflict()
-        await refetch()
-        return
-      }
-    }
-    // The local text is on the clipboard; a queued copy must not come back over the server's.
-    dropOfflineDraftNow(offlineDraftKeyFor(target))
-    const loaded = await loadDetail(target)
-    await refetch()
-    if (loaded && hadLocalEdits) {
-      message.info({
-        content: t('option:notesSearch.reloadConflictCopied', {
-          defaultValue:
-            'Loaded the latest version from the server. Your unsaved edits were copied to the clipboard.'
-        }),
-        duration: 8
-      })
-    }
-  }, [clearAutosaveTimeout, dropOfflineDraftNow, loadDetail, message, refetch, reloadSelectedNoteAfterConflict, t])
+    const epoch = authorityEpochRef.current
+    const scope = authorityScope
+    const capturedRefetch = refetch
+    if (!scope || authorityEpochRef.current !== epoch || authorityScopeRef.current !== scope) return
+    // This captured list refresh already fences its owner's generation.
+    await capturedRefetch()
+  }, [authorityScope, refetch, takeTheirVersion])
 
   const handleVersionConflict = React.useCallback((noteId?: string | number | null) => {
+    const epoch = authorityEpochRef.current
+    const scope = authorityScopeRef.current
+    const selection = noteSelectionEpochRef.current
+    const selectedNoteId = selectedIdRef.current
+    const reload = () => {
+      if (authorityEpochRef.current !== epoch || authorityScopeRef.current !== scope ||
+          noteSelectionEpochRef.current !== selection || String(selectedIdRef.current) !== String(selectedNoteId)) return
+      void reloadNotes(noteId)
+    }
     message.error({
       content: (
         <span
@@ -1330,7 +1473,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           onKeyDown={(event) => {
             if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault()
-              void reloadNotes(noteId)
+              reload()
             }
           }}
         >
@@ -1338,7 +1481,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           <Button
             type="link"
             size="small"
-            onClick={() => void reloadNotes(noteId)}
+            onClick={reload}
             aria-label="Reload notes"
           >
             Reload notes
@@ -1366,7 +1509,27 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         return
       }
 
+      const operation = captureNoteMutation()
+      const controller = new AbortController()
+      const unregister = operation.register(controller)
+      const isCurrent = () => !controller.signal.aborted && operation.isEditorCurrent()
       try {
+        if (!operation.scope || !operation.config) return
+        const user = await tldwAuth.getCurrentUser()
+        if (!isCurrent()) return
+        if (!user?.is_active || user.id == null ||
+            createNotesGraphAuthorityScope(operation.config.serverUrl, user.id) !== operation.scope) return
+        const ownedRequest: NotesOwnedRequestOptions = {
+          servicePromptConfig: {
+            serverUrl: operation.config.serverUrl, authMode: operation.config.authMode,
+            authSource: operation.config.authSource, orgId: operation.config.orgId,
+            expectedUserId: user.id,
+            expectedSingleUserApiKeyScope: operation.config.authMode === 'single-user'
+              ? deriveSingleUserApiKeyCredentialScope('single-user', operation.config.apiKey) : undefined
+          },
+          abortSignal: controller.signal,
+          headers: { 'X-TLDW-Expected-User-ID': String(user.id) }
+        }
         await setNoteTaskStatus([
           {
             task_id: task.id,
@@ -1374,10 +1537,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
             expected_task_version: task.version,
             expected_note_version: expectedNoteVersion
           }
-        ])
+        ], ownedRequest)
+        if (!isCurrent()) return
         setTaskConflictNotice(null)
-        await loadDetail(selectedId)
+        await loadDetail(selectedId, ownedRequest, operation.editRevision)
       } catch (error: any) {
+        if (!isCurrent()) return
         setTaskConflictNotice(
           t('option:notesSearch_taskConflictNotice', {
             defaultValue: 'Task changed on the server. Reload the note and try again.'
@@ -1388,9 +1553,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         } else {
           message.error(String(error?.message || '') || 'Task update failed')
         }
+      } finally {
+        controller.abort()
+        unregister()
       }
     },
     [
+      captureNoteMutation,
       handleVersionConflict,
       isVersionConflictError,
       loadDetail,
@@ -1803,8 +1972,11 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           }
           return true
         } else {
+          const pendingUpdate = pendingWriteRef.current
+          const replayingUpdate = pendingUpdate?.authority === requestEpoch && pendingUpdate.selection === requestNoteEpoch &&
+            pendingUpdate.request.path === noteResourcePath(noteId) && pendingUpdate.request.method === 'PUT'
           let expectedVersion = baseVersion
-          if (expectedVersion == null) {
+          if (expectedVersion == null || (trigger === 'keep-mine' && !replayingUpdate)) {
             const latest = await request({
               path: noteResourcePath(noteId),
               method: 'GET'
@@ -1814,7 +1986,9 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           if (expectedVersion == null) {
             throw Object.assign(new Error('Missing version; reload and try again'), { status: 428 })
           }
-          const pendingUpdate = pendingWriteRef.current
+          if (trigger === 'keep-mine' && !replayingUpdate && hasNewerEdits()) {
+            throw new DOMException('Note edits changed', 'AbortError')
+          }
           const previousSavedTitle = pendingUpdate?.authority === requestEpoch && pendingUpdate.selection === requestNoteEpoch &&
             pendingUpdate.request.path === noteResourcePath(noteId) ? pendingUpdate.previousTitle : (
             savedTitleRef.current?.noteId === String(noteId) ? savedTitleRef.current.title : null)
@@ -1910,6 +2084,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
               const current = await bgRequest<NotesWriteResponse & KnowledgeNoteHead>({ ...ownedSaveRequest, path: noteResourcePath(noteId), method: 'GET' })
               if (!isCurrent() || controller.signal.aborted) return (result = false)
               setOriginalMetadata(previous => ({ ...previous, ...knowledgeNoteHead(current) }))
+              const remoteVersion = toNoteVersion(current)
+              if (remoteVersion != null && baseVersion != null && remoteVersion > baseVersion) {
+                setRemoteVersionInfo({ version: remoteVersion, lastModified: toNoteLastModified(current) })
+              }
             } catch (error) {
               console.debug('[NotesManagerPage] History refresh after conflict failed:', error)
             }
@@ -2607,9 +2785,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   // not a modal at the next autosave (NS-N2, NS-03).
   React.useEffect(() => {
     if (!isDirty || remoteVersionInfo == null || selectedVersion == null) return
+    if (saveState.status === 'saving' || saveState.status === 'conflict') return
     if (remoteVersionInfo.version <= selectedVersion) return
     dispatchSave({ type: 'remote-changed' })
-  }, [dispatchSave, isDirty, remoteVersionInfo, selectedVersion])
+  }, [dispatchSave, isDirty, remoteVersionInfo, saveState.status, selectedVersion])
 
   // beforeunload: a full reload or tab close while edits are unsaved or saving.
   React.useEffect(() => {
@@ -2680,11 +2859,30 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     if (!isOnline || listMode !== 'active') return
     if (selectedId == null || selectedVersion == null) return
     if (saving) return
+    const operation = captureNoteMutation()
+    const controller = new AbortController()
+    const unregister = operation.register(controller)
+    const isCurrent = () => !controller.signal.aborted && operation.isEditorCurrent()
     try {
+      if (!operation.scope || !operation.config || !isCurrent()) return
+      const user = await tldwAuth.getCurrentUser()
+      if (!isCurrent()) return
+      if (!user?.is_active || user.id == null ||
+          createNotesGraphAuthorityScope(operation.config.serverUrl, user.id) !== operation.scope) return
       const detail = await bgRequest<any>({
         path: noteResourcePath(selectedId) as any,
-        method: 'GET' as any
+        method: 'GET' as any,
+        servicePromptConfig: {
+          serverUrl: operation.config.serverUrl, authMode: operation.config.authMode,
+          authSource: operation.config.authSource, orgId: operation.config.orgId,
+          expectedUserId: user.id,
+          expectedSingleUserApiKeyScope: operation.config.authMode === 'single-user'
+            ? deriveSingleUserApiKeyCredentialScope('single-user', operation.config.apiKey) : undefined
+        },
+        abortSignal: controller.signal,
+        headers: { 'X-TLDW-Expected-User-ID': String(user.id) }
       })
+      if (!isCurrent()) return
       const remoteVersion = toNoteVersion(detail)
       if (remoteVersion != null && remoteVersion > selectedVersion) {
         setRemoteVersionInfo({
@@ -2696,8 +2894,11 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       }
     } catch {
       // Ignore transient freshness-check failures.
+    } finally {
+      controller.abort()
+      unregister()
     }
-  }, [isOnline, listMode, saving, selectedId, selectedVersion])
+  }, [captureNoteMutation, isOnline, listMode, saving, selectedId, selectedVersion])
 
   React.useEffect(() => {
     if (listMode !== 'active') {
@@ -2710,7 +2911,6 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (cancelled) return
       await checkSelectedNoteFreshness()
     }
-    void runCheck()
     const intervalId = window.setInterval(() => {
       void runCheck()
     }, 30_000)
@@ -3008,75 +3208,18 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
 
   /** Explicit overwrite: save over the server's latest version, never a stale one. */
   const keepMyVersion = React.useCallback(async (): Promise<boolean> => {
-    const noteId = selectedIdRef.current
-    if (noteId == null || !saveNoteRef.current) return false
+    if (selectedIdRef.current == null || !saveNoteRef.current) return false
     clearAutosaveTimeout()
-    let serverVersion: number | null = null
-    try {
-      serverVersion = toNoteVersion(
-        await bgRequest<NotesWriteResponse>({ path: noteResourcePath(noteId), method: 'GET' })
-      )
-    } catch {
-      serverVersion = null
-    }
-    if (serverVersion == null) {
-      message.error(
-        t('option:notesSearch.keepMineLoadFailed', {
-          defaultValue: 'Could not read the latest server version. Check the connection and try again.'
-        })
-      )
-      return false
-    }
-    return saveNoteRef.current({ showSuccessMessage: true, trigger: 'keep-mine', expectedVersion: serverVersion })
-  }, [clearAutosaveTimeout, message, t])
+    return saveNoteRef.current({ showSuccessMessage: true, trigger: 'keep-mine' })
+  }, [clearAutosaveTimeout])
 
-  /** Load the server copy; the local text goes to the clipboard first. */
-  const takeTheirVersion = React.useCallback(async (): Promise<boolean> => {
-    const noteId = selectedIdRef.current
-    if (noteId == null) return false
-    clearAutosaveTimeout()
-    const local = editRevisionRef.current
-    // Must run before any other await (see writeClipboardText).
-    const copied = await writeClipboardText(
-      buildSingleNoteCopyText(
-        { id: noteId, title: local.title, content: local.content, keywords: local.editorKeywords },
-        'markdown'
-      )
-    )
-    if (!copied) {
-      const ok = await confirmDanger({
-        title: t('option:notesSearch.useTheirVersionTitle', { defaultValue: 'Use their version?' }),
-        content: t('option:notesSearch.useTheirVersionNoCopy', {
-          defaultValue: 'Your text could not be copied to the clipboard. Using their version discards your edits.'
-        }),
-        okText: t('option:notesSearch.useTheirVersion', { defaultValue: 'Use their version' }),
-        cancelText: t('option:notesSearch.keepEditingAction', { defaultValue: 'Keep editing' })
-      })
-      if (!ok) return false
-    }
-    dropOfflineDraftNow(offlineDraftKeyFor(noteId))
-    const loaded = await loadDetail(noteId)
-    if (loaded) {
-      void refetch()
-      message.info({
-        content: copied
-          ? t('option:notesSearch.reloadConflictCopied', {
-              defaultValue: 'Loaded the latest version from the server. Your unsaved edits were copied to the clipboard.'
-            })
-          : t('option:notesSearch.loadedTheirVersion', { defaultValue: 'Loaded the latest version from the server.' }),
-        duration: 8
-      })
-    }
-    return loaded
-  }, [clearAutosaveTimeout, confirmDanger, dropOfflineDraftNow, loadDetail, message, refetch, t])
+
+
 
   /** "Reload" for a newer server copy when there is nothing local to lose. */
   const loadLatestVersion = React.useCallback(async (): Promise<boolean> => {
-    const noteId = selectedIdRef.current
-    if (noteId == null) return false
-    if (isDirtyRef.current) return takeTheirVersion()
-    return loadDetail(noteId)
-  }, [loadDetail, takeTheirVersion])
+    return takeTheirVersion({ copyCleanDraft: false })
+  }, [takeTheirVersion])
 
   const retrySave = React.useCallback(
     () => saveNoteRef.current?.({ showSuccessMessage: true, trigger: 'retry' }) ?? Promise.resolve(false),
@@ -3282,28 +3425,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     toggleNotePinned,
     isVersionConflictError,
     handleVersionConflict,
-    getExpectedVersionForNoteId: React.useCallback(
-      async (noteId: string): Promise<number | null> => {
-        if (selectedId != null && String(selectedId) === noteId && selectedVersion != null) {
-          return selectedVersion
-        }
-        if (Array.isArray(data)) {
-          const match = data.find((note) => String(note.id) === noteId)
-          if (typeof match?.version === 'number' && Number.isFinite(match.version)) {
-            return match.version
-          }
-        }
-        try {
-          const detail = await bgRequest<any>({
-            path: noteResourcePath(noteId),
-            method: 'GET' as any
-          })
-          return toNoteVersion(detail)
-        } catch {
-          return null
-        }
-      },
-      [data, selectedId, selectedVersion]
-    ),
+    captureNoteMutation,
+
   }
 }

@@ -267,7 +267,9 @@ export const hasCurrentServerChatSelection = (serverChatId: string | null): bool
 }
 
 const stopWatchingAccount = watchChatAccountChanges((invalidated) => {
-  if (invalidated) usePlaygroundSessionStore.getState().clearSession()
+  if (!invalidated) return
+  bestEffortStorage(() => sessionStorage).removeItem("tldw-h1-playground-reference")
+  usePlaygroundSessionStore.getState().clearSession()
 })
 const hot = (import.meta as { hot?: { dispose: (callback: () => void) => void } }).hot
 hot?.dispose(stopWatchingAccount)

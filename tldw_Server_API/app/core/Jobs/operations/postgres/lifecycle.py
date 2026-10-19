@@ -387,6 +387,9 @@ def _candidate_sql(command: AcquireJobCommand) -> tuple[str, list[Any]]:
     if command.job_type:
         sql += " AND job_type = %s"
         params.append(command.job_type)
+    elif command.job_types is not None:
+        sql += " AND job_type = ANY(%s)"
+        params.append(list(command.job_types))
     sql += _order_clause(command)
     return sql, params
 

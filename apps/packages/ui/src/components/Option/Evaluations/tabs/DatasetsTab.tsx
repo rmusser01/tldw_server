@@ -271,7 +271,7 @@ export const DatasetsTab: React.FC = () => {
         okText={t("common:create", { defaultValue: "Create" }) as string}
         width={600}
       >
-        <Form form={form} layout="vertical">
+        <Form name="evaluation-dataset" form={form} layout="vertical">
           <Form.Item
             label={t("evaluations:datasetNameLabel", {
               defaultValue: "Name"

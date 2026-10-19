@@ -1,3 +1,5 @@
+vi.mock("@/hooks/usePrivateWorkspaceScope", () => ({ usePrivateWorkspaceScope: () => ({ scope: null, retry: vi.fn() }) }))
+import { createAdminTestSession } from "./admin-query-fixture"
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -15,7 +17,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 }))
 
 import { loadAdminModuleSignals } from "../admin-module-signals"
-import { getAdminQueryClient } from "../AdminQueryProvider"
+
 
 const resolveAllHealthy = () => {
   apiMock.getSystemStats.mockResolvedValue({ users: { total: 3 } })
@@ -26,12 +28,15 @@ const resolveAllHealthy = () => {
   apiMock.getGovernorCoverage.mockResolvedValue({ coverage_pct: 90 })
 }
 
+let session = createAdminTestSession()
+
 describe("loadAdminModuleSignals", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    session.client.clear()
+    session = createAdminTestSession()
     // The probes share the admin query cache (B-S4); drop leftovers so each
     // test exercises its own mocks instead of the previous test's cache.
-    getAdminQueryClient().clear()
     resolveAllHealthy()
   })
 
@@ -40,7 +45,7 @@ describe("loadAdminModuleSignals", () => {
   })
 
   it("maps healthy responses onto per-route signals", async () => {
-    const signals = await loadAdminModuleSignals()
+    const signals = await loadAdminModuleSignals(session)
 
     expect(signals["/admin/server"]).toEqual({
       state: "healthy",
@@ -75,7 +80,7 @@ describe("loadAdminModuleSignals", () => {
     apiMock.getMlxStatus.mockResolvedValue({ active: false })
     apiMock.getGovernorCoverage.mockResolvedValue({ coverage_pct: 12 })
 
-    const signals = await loadAdminModuleSignals()
+    const signals = await loadAdminModuleSignals(session)
 
     expect(signals["/admin/monitoring"]).toEqual({
       state: "attention",
@@ -107,7 +112,7 @@ describe("loadAdminModuleSignals", () => {
     // An unknown alerting health value must not claim degradation.
     apiMock.getSecurityAlertStatus.mockResolvedValue({})
 
-    const signals = await loadAdminModuleSignals()
+    const signals = await loadAdminModuleSignals(session)
 
     expect(signals["/admin/data-ops"]).toEqual({
       state: "healthy",
@@ -127,7 +132,7 @@ describe("loadAdminModuleSignals", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
     apiMock.getLlamacppStatus.mockRejectedValue(new Error("Request failed: 503"))
 
-    const signals = await loadAdminModuleSignals()
+    const signals = await loadAdminModuleSignals(session)
 
     expect(signals["/admin/llamacpp"]).toEqual({
       state: "unavailable",
@@ -150,7 +155,7 @@ describe("loadAdminModuleSignals", () => {
       )
     )
 
-    const signals = await loadAdminModuleSignals()
+    const signals = await loadAdminModuleSignals(session)
 
     expect(signals["/admin/llamacpp"]).toEqual({
       state: "off",
@@ -165,8 +170,8 @@ describe("loadAdminModuleSignals", () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
     apiMock.getGovernorCoverage.mockRejectedValue(new Error("boom"))
 
-    await loadAdminModuleSignals()
-    await loadAdminModuleSignals()
+    await loadAdminModuleSignals(session)
+    await loadAdminModuleSignals(session)
 
     const governorWarns = warnSpy.mock.calls.filter(([first]) =>
       String(first).includes("/admin/rate-limiting")
@@ -179,7 +184,7 @@ describe("loadAdminModuleSignals", () => {
     vi.useFakeTimers()
     apiMock.getMlxStatus.mockImplementation(() => new Promise(() => {}))
 
-    const pending = loadAdminModuleSignals()
+    const pending = loadAdminModuleSignals(session)
     await vi.advanceTimersByTimeAsync(4100)
     const signals = await pending
 
@@ -190,29 +195,12 @@ describe("loadAdminModuleSignals", () => {
     expect(signals["/admin/server"].state).toBe("healthy")
   })
 
-  it("drops a pre-existing admin cache on the session's first signals load (B-S4 fix1)", async () => {
-    // Fresh module instances so the target bookkeeping is back to its
-    // session-start sentinel and the admin query client is pristine.
-    vi.resetModules()
-    const { getAdminQueryClient: getFreshAdminQueryClient } = await import(
-      "../AdminQueryProvider"
-    )
-    const { loadAdminModuleSignals: freshLoadAdminModuleSignals } = await import(
-      "../admin-module-signals"
-    )
-
-    // Prime the shared cache the way the admin pages would against server A
-    // (setQueryData marks the entry fresh), before the overview has ever
-    // loaded signals.
-    const primedClient = getFreshAdminQueryClient()
-    primedClient.setQueryData(["admin", "system-stats"], {
-      users: { total: 99 }
-    })
-
-    // First signals load of the session — e.g. after the user switched to
-    // server B without ever visiting the overview on A — must drop the
-    // primed entry instead of serving it.
-    const signals = await freshLoadAdminModuleSignals()
+  it("does not read another workspace cache on the first signals load", async () => {
+    const previousSession = createAdminTestSession()
+    previousSession.client.setQueryData(["admin", "system-stats"], { users: { total: 99 } })
+    const signals = await loadAdminModuleSignals(session)
+    const primedClient = session.client
+    expect(previousSession.client.getQueryData(["admin", "system-stats"])).toEqual({ users: { total: 99 } })
 
     // Detail comes from the refetched mock (3 users), not the primed 99,
     // and the probe actually hit the endpoint.

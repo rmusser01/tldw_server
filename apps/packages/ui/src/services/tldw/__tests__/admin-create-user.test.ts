@@ -16,3 +16,26 @@ describe("admin user creation", () => {
     })
   })
 })
+
+describe("admin workspace captured requests", () => {
+  const scope = {
+    configSnapshot: { serverUrl: "https://captured.test", authMode: "multi-user" as const },
+    abortSignal: new AbortController().signal,
+    headers: { "X-TLDW-Expected-User-ID": "42" }
+  }
+  it.each([
+    ["create user", () => adminMethods.createAdminUser({ username: "alice", email: "alice@example.test", password: "test-only-password", role: "user" }, scope)],
+    ["list users", () => adminMethods.listAdminUsers({ page: 1 }, scope)],
+    ["update user", () => adminMethods.updateAdminUser(2, { is_active: false, reason: "Test captured account" }, scope)],
+    ["reset password", () => adminMethods.resetAdminUserPassword(2, { temporary_password: "test-only-password", reason: "Test captured account" }, scope)],
+    ["list roles", () => adminMethods.listAdminRoles(scope)],
+    ["create role", () => adminMethods.createAdminRole("reader", "Read only", scope)],
+    ["delete role", () => adminMethods.deleteAdminRole(2, scope)]
+  ])("binds %s to its captured account and cancellation", async (_name, request) => {
+    vi.mocked(bgRequest).mockClear()
+    await request()
+    expect(bgRequest).toHaveBeenCalledWith(expect.objectContaining({ ...scope, headers: expect.objectContaining(scope.headers) }))
+    const sent = vi.mocked(bgRequest).mock.calls[0][0]
+    if (sent.body !== undefined) expect(sent.headers).toHaveProperty("Content-Type", "application/json")
+  })
+})

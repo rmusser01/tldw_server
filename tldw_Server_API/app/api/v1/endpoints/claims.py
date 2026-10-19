@@ -10,6 +10,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     check_rate_limit,
     get_auth_principal,
     get_request_user,
+    require_expected_user_if_present,
 )
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.api.v1.schemas.claims_schemas import (
@@ -46,7 +47,10 @@ from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Claims_Extraction import claims_service
 from tldw_Server_API.app.core.Claims_Extraction.claims_rebuild_service import get_claims_rebuild_service
 
-router = APIRouter(prefix="/claims", tags=["claims"])
+router = APIRouter(
+    prefix="/claims", tags=["claims"],
+    dependencies=[Depends(require_expected_user_if_present)],
+)
 
 
 async def _enforce_claims_export_rate_limit(request: Request) -> None:

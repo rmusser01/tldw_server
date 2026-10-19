@@ -1,3 +1,4 @@
+import { tldwModels } from "@/services/tldw"
 import { getStructuredApiErrorDetail } from "@/services/tldw/api-error";
 import type { ChatModelSettings } from '@/store/model';
 import type { ToolChoice } from '@/store/option';
@@ -81,6 +82,30 @@ export const validateNativeCharacterConfiguration = (params: NativeCharacterConf
     throw new Error('native_history_explicit_model_provider_required');
   return { model, provider, settings };
 };
+
+/** Resolve an exact current catalog binding without guessing a provider. */
+export const resolveNativeCharacterConfiguration = async (
+  params: NativeCharacterConfiguration,
+  isCurrent: () => boolean
+) => {
+  if (!isCurrent()) throw new Error("stale_selection")
+  try {
+    return validateNativeCharacterConfiguration(params)
+  } catch (error) {
+    const model = parseProviderQualifiedModelSelection(params.model).modelId.replace(/^tldw:/, "").trim()
+    if (!(error instanceof Error) || error.message !== "native_history_explicit_model_provider_required" ||
+        !model || isAutoModelId(model)) throw error
+    const catalog = await tldwModels.getModels(true, { requireFresh: true })
+    if (!isCurrent()) throw new Error("stale_selection")
+    const providers = new Set(catalog.filter(entry => entry.id === model).map(entry => {
+      const binding = parseProviderQualifiedModelSelection(`${entry.provider}:${model}`)
+      return binding.modelId === model ? binding.provider : undefined
+    }))
+    const provider = providers.size === 1 ? providers.values().next().value : undefined
+    if (!provider) throw error
+    return validateNativeCharacterConfiguration({ ...params, settings: { ...params.settings, apiProvider: provider } })
+  }
+}
 
 /** A confirmed original-turn refusal retains transport evidence and its accepted view guard. */
 export class NativeHistoryContextRefusal extends Error {

@@ -260,9 +260,36 @@ class HistoryCaptureViewV1(HistoryViewSelectionV1):
     owner_key: str | None = Field(None, min_length=1)
 
 
+class HistoryAdmissionReferenceV1(HistoryWireModel):
+    version: Literal[1]
+    owner_key: str = Field(min_length=1)
+    conversation_id: str
+    input_message_id: str
+    input_message_revision: str
+    selection_digest: str
+
+
+class ValidatedHistoryAdmissionV1(HistoryWireModel):
+    admission: HistoryAdmissionReferenceV1
+    input_revision: str = Field(min_length=1)
+
+
 class HistoryCaptureRequestV1(HistoryWireModel):
     view: HistoryCaptureViewV1
     purpose: Literal["send", "fork"]
+    required_capability: Literal["tldw_history_existing_input_v1", "tldw_history_server_existing_input_v1"] | None = None
+    accepted_input_admission: HistoryAdmissionReferenceV1 | None = None
+
+    @model_validator(mode="after")
+    def validate_admission_cursor(self) -> HistoryCaptureRequestV1:
+        if self.accepted_input_admission is not None and (
+            self.purpose != "send"
+            or self.required_capability is not None
+            or self.view.cursor.kind != "after_message"
+            or self.view.cursor.message_id != self.accepted_input_admission.input_message_id
+        ):
+            raise ValueError("invalid_history_retry")
+        return self
 
 
 class NativeCompletionCapabilityV1(HistoryWireModel):
@@ -275,6 +302,10 @@ class NativeCompletionCapabilityV1(HistoryWireModel):
 
 class CapturedHistoryV1(HistoryWireModel):
     status: Literal["captured"]
+    acknowledged_capability: Literal["tldw_history_existing_input_v1", "tldw_history_server_existing_input_v1"] | None = Field(
+        None, exclude_if=lambda value: value is None
+    )
+    validated_admission: ValidatedHistoryAdmissionV1 | None = Field(None, exclude_if=lambda value: value is None)
     snapshot: HistorySelectionSnapshotV1
     rows: tuple[HistoryNodeV1, ...]
     selected_content: tuple[HistorySelectedContentV1, ...]
@@ -312,6 +343,16 @@ class CapturedHistoryV1(HistoryWireModel):
         for row, content in zip(self.rows, self.selected_content):
             if members.get(row.id) != row.revision or row.id != content.id or row.revision != content.revision:
                 raise ValueError("selected_content_mismatch")
+        if self.validated_admission is not None:
+            proof = self.validated_admission
+            if (
+                self.purpose != "send" or not self.rows or self.rows[-1].role != "user"
+                or proof.admission.owner_key != self.view.owner_key
+                or proof.admission.conversation_id != self.view.conversation_id
+                or proof.admission.input_message_id != self.rows[-1].id
+                or proof.input_revision != self.rows[-1].revision
+            ):
+                raise ValueError("invalid_admission_capture")
         return self
 
 
@@ -335,6 +376,9 @@ class HistoryFailureV1(HistoryWireModel):
 class HistoryCaptureFailureV1(HistoryFailureV1):
     """Read failures retain the authenticated complete source for explicit review."""
 
+    acknowledged_capability: Literal["tldw_history_existing_input_v1", "tldw_history_server_existing_input_v1"] | None = Field(
+        None, exclude_if=lambda value: value is None
+    )
     snapshot: HistorySelectionSnapshotV1
     view: HistoryViewSelectionV1
 
@@ -364,15 +408,6 @@ class LegacyProjectionConfirmEnvelopeV1(HistoryWireModel):
 class LegacyHistoryProjectionV1(LegacyHistoryProjectionConfirmV1):
     projection_digest: str
     created_at: str
-
-
-class HistoryAdmissionReferenceV1(HistoryWireModel):
-    version: Literal[1]
-    owner_key: str = Field(min_length=1)
-    conversation_id: str
-    input_message_id: str
-    input_message_revision: str
-    selection_digest: str
 
 
 class HistoryAdmissionV1(HistoryAdmissionReferenceV1):

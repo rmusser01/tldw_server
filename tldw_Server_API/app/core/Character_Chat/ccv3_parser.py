@@ -58,6 +58,9 @@ def validate_v3_card(card_data: dict[str, Any]) -> tuple[bool, list[str]]:
             "extensions": dict,
         }
         for field, expected_type in optional_fields.items():
+            # Older V3 exports wrote absent optional DB text as null.
+            if expected_type is str and data.get(field) is None:
+                continue
             if field in data and not isinstance(data[field], expected_type):
                 errors.append(f"Field '{field}' must be of type '{expected_type.__name__}'.")
 
@@ -119,17 +122,17 @@ def parse_v3_card(card_data: dict[str, Any]) -> Optional[dict[str, Any]]:
         parsed = {
             "name": data.get("name"),
             "description": data.get("description", ""),
-            "personality": data.get("personality", ""),
-            "scenario": data.get("scenario", ""),
+            "personality": data.get("personality") or "",
+            "scenario": data.get("scenario") or "",
             "first_message": data.get("first_mes", ""),
-            "message_example": data.get("mes_example", ""),
-            "creator_notes": data.get("creator_notes", ""),
-            "system_prompt": data.get("system_prompt", ""),
-            "post_history_instructions": data.get("post_history_instructions", ""),
+            "message_example": data.get("mes_example") or "",
+            "creator_notes": data.get("creator_notes") or "",
+            "system_prompt": data.get("system_prompt") or "",
+            "post_history_instructions": data.get("post_history_instructions") or "",
             "alternate_greetings": data.get("alternate_greetings", []),
             "tags": data.get("tags", []),
-            "creator": data.get("creator", ""),
-            "character_version": data.get("character_version", ""),
+            "creator": data.get("creator") or "",
+            "character_version": data.get("character_version") or "",
             "extensions": data.get("extensions", {}) or {},
         }
         image_value = data.get("char_image") or data.get("image")

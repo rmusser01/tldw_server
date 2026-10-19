@@ -1,5 +1,5 @@
 import type { HistorySendTurn } from "@/types/chat-modes"
-import { settleAcceptedAssistant } from "@/services/chat-history-selection"
+import { settleAcceptedAssistant, settleSelectedExistingInput } from "@/services/chat-history-selection"
 import {
   getLastChatHistory,
   saveHistory,
@@ -578,12 +578,16 @@ export const saveMessageOnSuccess = async ({
   sessionFilesToAdd?: UploadedFile[]
 }) => {
   if (historyTurn) {
-    if (!historyTurn.admission) throw new Error('missing_history_admission');
-    if (historyTurn.persistence === 'server') {
-      if (!historyTurn.resultId) throw new Error('missing_native_completion_receipt');
-      await historyTurn.complete?.(fullText);
-      return historyId ?? historyTurn.admission.conversation_id;
+    if (!historyTurn.admission && !historyTurn.existingSelection)
+      throw new Error("missing_history_admission")
+    if (historyTurn.existingSelection && !historyTurn.selection)
+      throw new Error("missing_history_selection")
+    if (historyTurn.persistence === "server") {
+      if (!historyTurn.resultId) throw new Error("missing_native_completion_receipt")
+      await historyTurn.complete?.(fullText)
+      return historyId ?? historyTurn.admission?.conversation_id ?? historyTurn.selection!.conversation_id
     }
+
     const native = historyTurn.owner.kind === "native"
     // ponytail: native history retains full reasoning text, not client elapsed-time telemetry.
     // Add a negotiated metadata field if cross-client timing becomes required.
@@ -606,7 +610,9 @@ export const saveMessageOnSuccess = async ({
       content: fullText,
       createdAt: historyTurn.createdAt!,
       images: assistantImages ?? [],
-      parent_message_id: historyTurn.admission.input_message_id,
+      parent_message_id: historyTurn.existingSelection
+        ? historyTurn.selection!.messages.at(-1)!.id
+        : historyTurn.admission!.input_message_id,
       ...(!native
         ? {
             sources: source,
@@ -623,13 +629,14 @@ export const saveMessageOnSuccess = async ({
           }
         : {})
     }
-    await settleAcceptedAssistant(
-      historyTurn.owner,
-      historyTurn.admission,
-      assistant,
-      undefined,
-      sessionFilesToAdd
-    )
+    if (historyTurn.existingSelection) {
+      if (!historyTurn.stageSettlementPayload)
+        throw new Error("missing_history_recovery")
+      await historyTurn.stageSettlementPayload(assistant)
+      await settleSelectedExistingInput(historyTurn.owner, historyTurn.selection!, assistant)
+    } else
+      await settleAcceptedAssistant(historyTurn.owner, historyTurn.admission!, assistant, undefined, sessionFilesToAdd)
+
     historyTurn.resultId = assistant.id
     await historyTurn.complete?.(assistant.content)
     return historyId ?? assistant.history_id

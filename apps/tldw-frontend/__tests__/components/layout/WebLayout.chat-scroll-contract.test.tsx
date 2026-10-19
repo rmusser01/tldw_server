@@ -1169,6 +1169,70 @@ describe('WebLayout /chat scroll contract', () => {
     expect(chatSidebarMockState.props).toHaveLength(0);
   });
 
+  it.each([false, true])(
+    'keeps the root shell when the first-run gate wrapper changes (initially gated: %s)',
+    (initiallyGated) => {
+      featureFlagState.showChatSidebar = true;
+      mediaQueryState.isMobile = false;
+      function FirstRunGate({ children }: { children: React.ReactNode }) {
+        return <>{children}</>;
+      }
+      const tree = (gated: boolean) => {
+        routerState.location.pathname = gated ? '/' : '/setup';
+        const layout = (
+          <OptionLayout hideHeader={!gated} hideSidebar={!gated}>
+            <div>{gated ? 'Companion Home' : 'Setup complete'}</div>
+          </OptionLayout>
+        );
+        return gated ? <FirstRunGate>{layout}</FirstRunGate> : layout;
+      };
+      const view = render(tree(initiallyGated));
+      expect(screen.getByRole('main')).toBeInTheDocument();
+
+      view.rerender(tree(!initiallyGated));
+
+      expect(screen.getByRole('main')).toContainElement(
+        screen.getByText(initiallyGated ? 'Setup complete' : 'Companion Home'),
+      );
+      if (initiallyGated) {
+        expect(screen.queryByTestId('header')).toBeNull();
+        expect(screen.queryByTestId('chat-sidebar')).toBeNull();
+      } else {
+        expect(screen.getByTestId('header')).toBeInTheDocument();
+        expect(screen.getByTestId('chat-sidebar')).toBeInTheDocument();
+      }
+    },
+  );
+
+  it('keeps one shell for a genuinely nested WebLayout and releases its hiding request', () => {
+    routerState.location.pathname = '/';
+    featureFlagState.showChatSidebar = true;
+    mediaQueryState.isMobile = false;
+    const tree = (hideShell: boolean) => (
+      <OptionLayout>
+        <OptionLayout hideHeader={hideShell} hideSidebar={hideShell}>
+          <div>Nested route content</div>
+        </OptionLayout>
+      </OptionLayout>
+    );
+    const view = render(tree(false));
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(screen.getAllByTestId('header')).toHaveLength(1);
+    expect(screen.getAllByTestId('chat-sidebar')).toHaveLength(1);
+
+    view.rerender(tree(true));
+    expect(screen.getByRole('main')).toContainElement(
+      screen.getByText('Nested route content'),
+    );
+    expect(screen.queryByTestId('header')).toBeNull();
+    expect(screen.queryByTestId('chat-sidebar')).toBeNull();
+
+    view.rerender(tree(false));
+    expect(screen.getAllByRole('main')).toHaveLength(1);
+    expect(screen.getAllByTestId('header')).toHaveLength(1);
+    expect(screen.getAllByTestId('chat-sidebar')).toHaveLength(1);
+  });
+
   it('mounts the shared tutorial runner in the web shell so page tour controls can render overlays', async () => {
     render(
       <OptionLayout>

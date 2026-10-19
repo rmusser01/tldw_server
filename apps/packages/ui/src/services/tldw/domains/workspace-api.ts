@@ -1,3 +1,4 @@
+import type { AdminRequestOptions } from "./admin"
 import type { ScopedRequestOptions } from "../TldwApiClient"
 import { requestScopeFields } from "./service-prompts"
 import { bgRequest } from "@/services/background-proxy"
@@ -2059,7 +2060,7 @@ export const workspaceApiMethods = {
     return await bgRequest<any>({ path: "/api/v1/resource-governor/policy", method: "GET" })
   },
 
-  async getGovernorCoverage(params?: { limit?: number }): Promise<any> {
+  async getGovernorCoverage(params?: { limit?: number }, options?: AdminRequestOptions): Promise<any> {
     const limit = params?.limit
     const query =
       typeof limit === "number" && Number.isFinite(limit)
@@ -2067,7 +2068,8 @@ export const workspaceApiMethods = {
         : ""
     return await bgRequest<any>({
       path: `/api/v1/diag/coverage${query}`,
-      method: "GET"
+      method: "GET",
+      ...options
     })
   },
 

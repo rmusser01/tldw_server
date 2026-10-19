@@ -757,7 +757,7 @@ def _marker(gh: GhApi, number: int, kind: str, sha: str) -> dict | None:
         GhError: The read failed.
     """
     marker = f"<!-- merge-queue:{kind}:{sha} -->"
-    return next((n for n in _queue_comments(gh, number) if marker in (n.get("body") or "")), None)
+    return next((n for n in _queue_comments(gh, number) if (n.get("body") or "").startswith(f"{marker}\n")), None)
 
 
 def marker_age(gh: GhApi, number: int, kind: str, sha: str, now: datetime) -> timedelta | None:
@@ -814,7 +814,7 @@ def comment_once(gh: GhApi, number: int, kind: str, sha: str, body: str,
         GhError: A call failed.
     """
     marker = f"<!-- merge-queue:{kind}:{sha} -->"
-    if any(marker in (n.get("body") or "") for n in _queue_comments(gh, number)):
+    if any((n.get("body") or "").startswith(f"{marker}\n") for n in _queue_comments(gh, number)):
         return False
     try:
         posted = gh.rest("POST", f"repos/{REPO}/issues/{number}/comments", {"body": f"{marker}\n{body}"})
@@ -829,7 +829,7 @@ def comment_once(gh: GhApi, number: int, kind: str, sha: str, body: str,
         return True
     try:
         ids = [n["databaseId"] for n in _queue_comments(gh, number)
-               if marker in (n.get("body") or "") and n.get("databaseId") is not None]
+               if (n.get("body") or "").startswith(f"{marker}\n") and n.get("databaseId") is not None]
         if ids and min(ids) < own_id:
             gh.rest("DELETE", f"repos/{REPO}/issues/comments/{own_id}")
             return False

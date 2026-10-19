@@ -30,6 +30,19 @@ import {
 import { characterMethods } from "@/services/tldw/domains/characters"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 
+it.each(["stats", "media-budget"])("binds admin %s reads to the verified workspace", async (operation) => {
+  const client = new TldwApiClient()
+  const options = {
+    configSnapshot: { serverUrl: "https://captured.test", authMode: "multi-user" as const },
+    abortSignal: new AbortController().signal,
+    headers: { "X-TLDW-Expected-User-ID": "42" }
+  }
+  mocks.bgRequest.mockClear()
+  if (operation === "stats") await client.getSystemStats({ ...options, timeoutMs: 10_000 })
+  else await client.getMediaIngestionBudgetDiagnostics({ userId: 2 }, options)
+  expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining(options))
+})
+
 const requestScope = {
   config: {
     serverUrl: "https://research-one.test",
@@ -142,7 +155,10 @@ describe("TldwApiClient captured request scope", () => {
     mocks.bgRequest.mockResolvedValue([])
 
     const baseClient = new TldwApiClientBase()
-    vi.spyOn(baseClient, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
+    vi.spyOn(baseClient, "resolveApiPath").mockImplementation(async (_key, paths) => {
+      if (!paths[0]?.startsWith("/")) throw new Error("Expected a relative API path fixture")
+      return `/${paths[0].slice(1)}` as const
+    })
     await TldwApiClientBase.prototype.listCharacters.call(baseClient, { limit: 5 })
 
     expect(mocks.bgRequest.mock.calls[0]?.[0]).toMatchObject({
@@ -151,7 +167,10 @@ describe("TldwApiClient captured request scope", () => {
     })
 
     const domainClient = new TldwApiClientBase()
-    vi.spyOn(domainClient, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
+    vi.spyOn(domainClient, "resolveApiPath").mockImplementation(async (_key, paths) => {
+      if (!paths[0]?.startsWith("/")) throw new Error("Expected a relative API path fixture")
+      return `/${paths[0].slice(1)}` as const
+    })
     await characterMethods.listCharacters.call(domainClient, { limit: 5 })
 
     expect(mocks.bgRequest.mock.calls[1]?.[0]).toMatchObject({
@@ -228,7 +247,10 @@ describe("TldwApiClient captured request scope", () => {
   ])("binds the QA %s request without changing its body", async (method, args, requestMethod) => {
     const client = new TldwApiClient()
     vi.spyOn(client, "ensureConfigForRequest").mockResolvedValue({ ...requestScope.config, accessToken: "token" })
-    vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
+    vi.spyOn(client, "resolveApiPath").mockImplementation(async (_key, paths) => {
+      if (!paths[0]?.startsWith("/")) throw new Error("Expected a relative API path fixture")
+      return `/${paths[0].slice(1)}` as const
+    })
     if (method === "updateChat") {
       mocks.bgRequest.mockImplementation(async request => ({
         id: "owned", version: request.method === "GET" ? 4 : 5,
@@ -619,6 +641,18 @@ it("preserves default version URLs and forwards native page parameters and rows"
   })
 })
 
+
+it.each([[true, false], [false, false], [true, true], [false, true]])("preserves native greeting seed query and captured scope (enabled=%s, base=%s)", async (enabled, base) => {
+  const client = base ? new TldwApiClientBase() : new TldwApiClient()
+  const signal = new AbortController().signal
+  mocks.bgRequest.mockReset()
+  mocks.bgRequest.mockResolvedValueOnce({ id: "seeded-chat" })
+  await client.createChat({ character_id: 12 }, { requestScope, signal, seedFirstMessage: enabled, greetingStrategy: "alternate_index", alternateIndex: 2 } as Parameters<typeof client.createChat>[1])
+  expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+    path: `/api/v1/chats/?seed_first_message=${enabled}&greeting_strategy=alternate_index&alternate_index=2`,
+    method: "POST", body: { character_id: 12, scope_type: "global" }, abortSignal: signal, ...expectedScopeFields
+  }))
+})
 
 it.each([TldwApiClientBase, TldwApiClient])(
   "native message reads and edits preserve captured workspace, principal and cancellation through %s",

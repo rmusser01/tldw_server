@@ -1,3 +1,4 @@
+import { AdminQueryProvider } from "@/components/Option/Admin/AdminQueryProvider"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import "../styles/globals.css"
 // react-pdf layer CSS must stay app-wide: the Next.js pages router forbids
@@ -560,9 +561,11 @@ export default function App({ Component, pageProps }: AppProps) {
   }
 
   const layoutContent = (
-    <OptionLayout {...layoutProps}>
-      <Component {...pageProps} />
-    </OptionLayout>
+    <AdminQueryProvider active={isAdminRoute(routePath)}>
+      <OptionLayout {...layoutProps}>
+        <Component {...pageProps} />
+      </OptionLayout>
+    </AdminQueryProvider>
   )
 
   const gatedContent = isPublicAuthRoute ? (

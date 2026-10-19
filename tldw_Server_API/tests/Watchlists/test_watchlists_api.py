@@ -305,6 +305,28 @@ def test_sources_check_now_reports_run_errors_and_missing_sources(client_with_us
     assert by_source[999999]["status"] == "not_found"
 
 
+@pytest.mark.parametrize("source_status", ["error:403", "error:extraction", "partial:extraction", "error"])
+def test_sources_check_now_preserves_source_failure_status(client_with_user, monkeypatch, source_status):
+    from tldw_Server_API.app.api.v1.endpoints import watchlists as endpoints
+
+    async def failed_run(user_id, _job_id, **kwargs):
+        db = WatchlistsDatabase.for_user(user_id)
+        for source_id in kwargs["source_ids_override"]:
+            db.update_source_scrape_meta(source_id, status=source_status)
+        return {"run_id": None, "status": "failed"}
+
+    monkeypatch.setattr(endpoints, "run_watchlist_job", failed_run)
+    response = client_with_user.post("/api/v1/watchlists/sources", json={
+        "name": "Failed source", "url": "https://example.com/failure.xml", "source_type": "rss",
+    })
+    assert response.status_code == 200  # nosec B101 - Pytest source-failure regression assertion.
+    checked = client_with_user.post("/api/v1/watchlists/sources/check-now", json={"source_ids": [response.json()["id"]]})
+    assert checked.status_code == 200  # nosec B101 - Pytest source-failure regression assertion.
+    payload = checked.json()
+    assert payload["success"] == 0 and payload["failed"] == 1  # nosec B101 - Pytest source-failure regression assertion.
+    assert payload["items"][0]["status"] == "error"  # nosec B101 - Pytest source-failure regression assertion.
+
+
 def test_source_group_validation_and_idempotent_create(client_with_user):
 
     c = client_with_user

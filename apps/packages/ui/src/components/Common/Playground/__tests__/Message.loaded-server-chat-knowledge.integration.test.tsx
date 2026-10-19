@@ -371,6 +371,17 @@ describe.each(surfaces)("$surface on a loaded server chat (XP-02, #3109)", { tim
     messageApiMock.error.mockClear()
   })
 
+  it.each(["stopped", "interrupted"])("B02 shows %s canonical partial status on a reloaded selected reply", (status) => {
+    const capture = loadedServerChatCapture()
+    capture.selected_content.find(row => row.id === ASSISTANT_ID)!.extra_metadata = { generation_status: status }
+    chatState.messages = formatSelectedHistory(capture).messages
+    renderChat()
+
+    const assistant = messageCard("assistant")
+    expect(assistant.querySelector("[data-interruption-label]")).toHaveTextContent(status === "stopped" ? "Stopped" : "Interrupted")
+    expect(assistant).toHaveAttribute("data-server-message-id", ASSISTANT_ID)
+  })
+
   it("offers Save to Notes on the assistant reply and saves it against its server message", async () => {
     renderChat()
     const assistant = messageCard("assistant")

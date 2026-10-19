@@ -279,14 +279,14 @@ index 59e340cbb1..5e280711af 100644
 --- a/tldw_Server_API/tests/Services/test_outputs_service.py
 +++ b/tldw_Server_API/tests/Services/test_outputs_service.py
 @@ -5,6 +5,8 @@ from types import SimpleNamespace
- 
+
  import pytest
- 
+
 +from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 +from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summarization
  from tldw_Server_API.app.services import outputs_service
- 
- 
+
+
 @@ -154,3 +156,128 @@ async def test_resolve_tts_generation_defaults_omnivoice_blank_voice_falls_back_
      assert resolved_model == "omnivoice"
      assert resolved_voice == outputs_service.DEFAULT_OMNIVOICE_TTS_VOICE
@@ -422,19 +422,19 @@ index 016657a684..f9b817dd55 100644
 +++ b/tldw_Server_API/tests/Watchlists/test_output_enrichment_scheduler.py
 @@ -1,10 +1,14 @@
  from __future__ import annotations
- 
+
 +import json
  from types import SimpleNamespace
  from typing import Any
- 
+
  import pytest
- 
+
 +from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
 +from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 +from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib as summarization
  from tldw_Server_API.app.core.Watchlists import output_enrichment_handler
- 
- 
+
+
 @@ -87,3 +91,81 @@ async def test_schedule_output_enrichment_uses_fallback_when_scheduler_submit_fa
              },
          )
@@ -587,7 +587,7 @@ index 6813063e86..25dc19a105 100644
 +            raise  # a 402, not a non-critical summarization failure
          except _WATCHLISTS_NONCRITICAL_EXCEPTIONS as exc:
              logger.warning(f"Watchlists output summarization failed (non-critical): {exc}")
- 
+
 diff --git a/tldw_Server_API/app/services/outputs_service.py b/tldw_Server_API/app/services/outputs_service.py
 index a7a3f2729f..da01f72f20 100644
 --- a/tldw_Server_API/app/services/outputs_service.py
@@ -600,22 +600,22 @@ index a7a3f2729f..da01f72f20 100644
 +from tldw_Server_API.app.core.exceptions import InvalidStoragePathError, LLMQuotaExceededError
  from tldw_Server_API.app.core.Utils.path_utils import safe_join
  from tldw_Server_API.app.core.TTS.tts_service_v2 import get_tts_service_v2
- 
+
 @@ -636,6 +636,10 @@ def delete_outputs_by_ids(cdb, user_id: int, ids: list[int]) -> int:
- 
+
  _SUMMARIZE_MAX_CHARS = 12_000
  _SUMMARIZE_DEFAULT_PROMPT = "Summarize the following article in 2-3 concise sentences:\n\n{text}"
 +# analyze's own default system prompt asks for bulleted notes; these prompts say what they want.
 +_OUTPUTS_SYSTEM_PROMPT = (
 +    "You are a concise assistant. Follow the instructions in the message exactly and return only what they ask for."
 +)
- 
- 
+
+
  def _content_cache_key(content: str) -> str:
 @@ -663,6 +667,13 @@ def _get_cached_summary(metadata_json: str | None, content_hash: str) -> str | N
      return None
- 
- 
+
+
 +def _fill_prompt(template: str, text: str) -> str:
 +    """Put ``text`` at the template's ``{text}``, or after the template when it has none."""
 +    if "{text}" in template:
@@ -633,7 +633,7 @@ index a7a3f2729f..da01f72f20 100644
 -    """Synchronously call LLM to summarize a single article."""
 +    """Synchronously call LLM to summarize a single article. A quota refusal propagates."""
      from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
- 
+
      truncated = text[:_SUMMARIZE_MAX_CHARS]
 -    prompt = (custom_prompt or _SUMMARIZE_DEFAULT_PROMPT).format(text=truncated)
 +    prompt = _fill_prompt(custom_prompt or _SUMMARIZE_DEFAULT_PROMPT, truncated)
@@ -668,7 +668,7 @@ index a7a3f2729f..da01f72f20 100644
 -    """Shared helper to summarize a block of text via LLM. Synchronous."""
 +    """Shared helper to summarize a block of text via LLM. Synchronous. A quota refusal propagates."""
      from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
- 
+
      truncated = text[:max_chars]
 -    prompt = (custom_prompt or _BRIEFING_SUMMARY_DEFAULT_PROMPT).format(text=truncated)
 +    prompt = _fill_prompt(custom_prompt or _BRIEFING_SUMMARY_DEFAULT_PROMPT, truncated)
@@ -725,7 +725,7 @@ index a7a3f2729f..da01f72f20 100644
      combined = "\n".join(texts)
 -    prompt = _TOPIC_CLASSIFY_PROMPT.format(max_groups=max_groups, text=combined)
 +    prompt = _TOPIC_CLASSIFY_PROMPT.replace("{max_groups}", str(max_groups))
- 
+
      try:
          result = await loop.run_in_executor(
 @@ -1072,6 +1095,8 @@ async def classify_items_by_topic(
@@ -888,9 +888,9 @@ index 6df2c70073..01a626c2b9 100644
 --- a/tldw_Server_API/tests/Usage/test_llm_roots_non_sdk.py
 +++ b/tldw_Server_API/tests/Usage/test_llm_roots_non_sdk.py
 @@ -84,7 +84,7 @@ async def test_the_audio_jobs_worker_runs_analysis_for_the_job_owner(monkeypatch
- 
+
      seen: list[int | None] = []
- 
+
 -    def _analyze(text: str, api_name: str, *args: object, **kwargs: object) -> str:
 +    def _analyze(api_name: str, input_data: str, *args: object, **kwargs: object) -> str:
          """Record the user the analysis runs as."""
@@ -936,7 +936,7 @@ index f621c7e18a..e23d2f19b3 100644
                  ok = False
                  msg_err = str(e)
 +                failure = e
- 
+
              if ok:
                  if next_type:
 @@ -381,7 +392,16 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
@@ -954,7 +954,7 @@ index f621c7e18a..e23d2f19b3 100644
 +                    lease_id=str(job.get("lease_id")),
 +                    completion_token=str(job.get("lease_id")),
 +                )
- 
+
          except asyncio.CancelledError:
              raise
 ```

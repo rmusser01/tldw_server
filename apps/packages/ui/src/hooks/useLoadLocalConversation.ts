@@ -62,7 +62,7 @@ export function useLoadLocalConversation(
   }
 
   return React.useCallback(
-    async (conversationId: string, readerScope?: OnDeviceHistoryScope): Promise<boolean> => {
+    async function loadLocalConversation(conversationId: string, readerScope?: OnDeviceHistoryScope): Promise<boolean> {
       if (!mountedRef.current || (readerScope && !readerScope.isCurrent())) return false
       const source = captureChatDraftSource()
       if (!confirmTemporaryChatDiscard() || !source.isCurrent()) return false
@@ -109,9 +109,16 @@ export function useLoadLocalConversation(
         const profileOwned = loadConversation && historyDetails.local_owner_key &&
           !historyDetails.server_scope_key && !historyDetails.server_chat_id &&
           historyDetails.message_source !== "server"
-        if (!profileOwned) {
+        const unboundLocal = loadConversation && !historyDetails.local_owner_key && !historyDetails.server_scope_key && !historyDetails.server_chat_id && historyDetails.message_source !== "server"
+        if (!profileOwned && !unboundLocal) {
           snapshot = await loadServicePromptSnapshot([])
           if (!isCurrent() || historyDetails.server_scope_key !== serverChatMirrorOwnerKey(snapshot)) return false
+        }
+        if (unboundLocal) {
+          const offered = await loadConversation!({ historyId: conversationId, isCurrent: isCurrentLoad, resumeAfterBind: () => isCurrentLoad() ? loadLocalConversation(conversationId, readerScope) : Promise.resolve(false) })
+          if (offered && isCurrentLoad() && getCurrent?.().owner?.kind === "local")
+            return loadLocalConversation(conversationId, readerScope)
+          return false
         }
         const history = preview?.messages ?? await db.getChatHistory(conversationId)
         if (!isCurrent()) return false
@@ -127,7 +134,7 @@ export function useLoadLocalConversation(
         if (!isCurrent()) return false
         if (loadConversation && fence) {
           let accepted = false
-          if (!await loadConversation({ historyId: conversationId, isCurrent: isCurrentLoad, onDeviceScope: readerScope }, null, receipt => { if (!readerScope || receipt.owner.kind === "local") accepted = acceptDraft(receipt) })) return false
+          if (!await loadConversation({ historyId: conversationId, isCurrent: isCurrentLoad, onDeviceScope: readerScope, resumeAfterBind: () => isCurrentLoad() ? loadLocalConversation(conversationId, readerScope) : Promise.resolve(false) }, null, receipt => { if (!readerScope || receipt.owner.kind === "local") accepted = acceptDraft(receipt) })) return false
           if (generation !== loadGenerationRef.current) return false
           selectionCurrent = fence()
           const selected = getCurrent?.()

@@ -155,7 +155,7 @@ Next in line: XP-02 (Save to Notes missing on most server chats, S), NL-03 (bulk
 ### 2.5 Verification
 
 - Every candidate issue was **re-checked adversarially**, live in the running stack, in code, or both. Claims that didn't hold were narrowed or dropped. Where verification changed a severity or a claim, the section entry says so.
-- Every issue at **severity 3 or higher** was re-checked by an **independent skeptic** who tried to refute it. Disagreements were settled by a tiebreak review.
+- Most issues at **severity 3 or higher** were re-checked by an **independent skeptic** who tried to refute them. CM-N1, CS-N2, NS-N1, CC-N1 and CS-N1 remain severity-3, single-verifier findings in this report and its JSON. Disagreements in independently reviewed findings were settled by a tiebreak review.
 - No finding was rejected outright (Appendix A). Several were narrowed. For example, the "unnamed in-bubble Stop" claim (CM-02, AX-13) and the "failures announced as status" claim (AX-13) were refuted and dropped from the write-ups, and seven Notes severities were adjusted (shown, for example, as "2 (from 3)" in §5).
 
 ### 2.6 Severity, priority and effort
@@ -2033,7 +2033,7 @@ Five shared rules hold the loop together:
 - **Sketch:**
   - ⌘K / Ctrl+K with an empty query shows Recent: the last 8 notes and chats mixed, with type icons and relative dates.
   - Typing searches, in parallel, note titles and bodies, chat titles and messages, prompts (server and local), characters and models. Results appear in grouped sections and are fully keyboard-operable.
-  - Enter opens the item's URL (N4) and ⌘Enter opens it in a new tab. Tab cycles a type filter.
+  - Enter opens the item's URL (N4). Cmd/Ctrl+Enter opens it beside the current page (Notes Dock now; chat split view after S4); Shift+Enter opens a new browser tab (D11). Tab cycles a type filter.
   - A `>` prefix shows today's commands and `@` shows entities. The last row offers 'Create note "&lt;query&gt;"' and 'New chat about "&lt;query&gt;"'.
   - ⌘P is an alias that opens pre-filtered to notes and chats.
   - The shortcut sheet describes ⌘K as "Search everything".
@@ -2087,7 +2087,7 @@ Five shared rules hold the loop together:
 - **Sketch:**
   - Row 1: [textarea] [**Send** (filled primary)].
   - Row 2: [+ Attach ▾ (Image, Document, From knowledge)] [Knowledge] [Web] [Model: mock-gpt-4o ▾] … [⋯ More: Compare models, Character, Tools, Response style, System prompt, Voice, Interactive answer]. Hovering the model chip shows the token estimate.
-  - Casual is this layout. Pro adds the full toolbar, the right panel and a token chip. The choice is remembered per user.
+  - Casual is this layout. Pro adds a persistent right panel that absorbs the cockpit rails, without adding toolbar buttons (D9). The choice is remembered per user.
   - The side panel uses the same composer and the same placeholder.
 
 **N13 · Mobile composer as a bottom sheet** (IDEA-12)

@@ -14,7 +14,7 @@ describe("FirstChatStep", () => {
   it.each(["ready", "failed"])("credits only the request owner after verification is %s", async (status) => {
     let resolve!: (value: unknown) => void;
     const verifyFirstChat = vi.fn().mockImplementation(() => new Promise((done) => { resolve = done; }));
-    const props = { provider: "llamacpp", model: "local", verifyFirstChat, complete: vi.fn().mockResolvedValue({ success: true }), onComplete: vi.fn(), onBack: vi.fn() };
+    const props = { provider: "llamacpp", model: "local", verifyFirstChat, complete: vi.fn().mockResolvedValue({ success: true }), onComplete: vi.fn(), onBack: vi.fn(), onEditProvider: vi.fn(), onSwitchProvider: vi.fn(), onSkip: vi.fn() };
     const view = render(<FirstChatStep {...props} />);
     fireEvent.click(screen.getByRole("button", { name: /send test chat/i }));
     scope.current = "server-a:bob";
@@ -27,7 +27,7 @@ describe("FirstChatStep", () => {
 
   it("does not credit a successful chat with an unknown request owner", async () => {
     scope.current = null;
-    render(<FirstChatStep provider="llamacpp" model="local" verifyFirstChat={vi.fn().mockResolvedValue({ status: "ready", response_text: "Verified response" })} complete={vi.fn().mockResolvedValue({ success: true })} onComplete={vi.fn()} onBack={vi.fn()} />);
+    render(<FirstChatStep provider="llamacpp" model="local" verifyFirstChat={vi.fn().mockResolvedValue({ status: "ready", response_text: "Verified response" })} complete={vi.fn().mockResolvedValue({ success: true })} onComplete={vi.fn()} onBack={vi.fn()} onEditProvider={vi.fn()} onSwitchProvider={vi.fn()} onSkip={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: /send test chat/i }));
     await screen.findByText("Verified response");
     expect(useMilestoneStore.getState().scopedMilestones).toEqual({});

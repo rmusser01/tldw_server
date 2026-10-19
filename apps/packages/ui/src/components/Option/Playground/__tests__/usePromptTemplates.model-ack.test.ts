@@ -16,6 +16,9 @@ import type { Prompt } from "@/db/dexie/types"
 const createDeps = (
   overrides: Partial<UsePromptTemplatesDeps> = {}
 ): UsePromptTemplatesDeps => ({
+  promptOwnerId: "model-ack-owner",
+  promptOwnerReady: true,
+  promptOwnerBoundaryKey: "model-ack-owner",
   startupTemplatesRaw: "[]",
   setStartupTemplatesRaw: vi.fn(),
   promptLibrary: [],
@@ -266,6 +269,7 @@ describe("exact startup application Retry with the actual model device boundary"
     const view = mountApplication()
     await ready(view)
     const record = {
+      ownerId: "model-ack-owner",
       id: "library-original",
       title: "Original",
       content: "Frozen reviewed behavior"
@@ -273,6 +277,7 @@ describe("exact startup application Retry with the actual model device boundary"
     view.deps.promptLibrary = [record]
     view.rerender()
     const proposal = createStartupTemplateBundle({
+      ownerId: "model-ack-owner",
       name: "Exact Retry",
       selectedModel: "openai:next",
       selectedSystemPromptId: record.id,

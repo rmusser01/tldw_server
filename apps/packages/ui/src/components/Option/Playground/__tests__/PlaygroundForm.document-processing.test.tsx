@@ -106,9 +106,17 @@ const baseDeps = (overrides: Partial<UsePlaygroundSubmitDeps> = {}) => ({
   restorePromptAssistAttempt: vi.fn(),
   beginPromptAssistReset: vi.fn(() => 1),
   markPromptAssistAttemptSaved: vi.fn(),
+  // Payload fixture only; draft ownership is covered with the real composer hook.
+  captureDraftOwnership: () => ({
+    isCurrent: () => true,
+    isOwnerCurrent: () => true,
+    normalizeMessage: () => true
+  }),
+  captureHistorySelection: () => () => true,
   isSending: false,
   isConnectionReady: true,
   webSearch: false,
+  chatMode: "normal",
   compareModeActive: false,
   compareSelectedModels: [],
   selectedModel: "openai:gpt-4o-mini",

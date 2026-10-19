@@ -78,8 +78,20 @@ export async function getDraftsByBatch(batchId: string, operation = quickIngestA
 export async function getDraftById(id: string, operation = quickIngestAuthority.capture()) {
   return readOwned(db.contentDrafts, id, operation)
 }
-export async function upsertContentDraft(draft: ContentDraft, operation = quickIngestAuthority.capture()): Promise<void> {
-  await putOwned(db.contentDrafts, draft, operation)
+export async function upsertContentDraft(draft: ContentDraft, operation = quickIngestAuthority.capture(), expectedUpdatedAt?: number): Promise<void> {
+  if (expectedUpdatedAt === undefined) return putOwned(db.contentDrafts, draft, operation)
+  await transact(operation, "rw", async () => {
+    const previous = await db.contentDrafts.get(draft.id)
+    if (!previous || !owned(previous, operation) || (draft.ownerScope && !owned(draft, operation))) {
+      throw new Error("This draft is no longer available for this account.")
+    }
+    if (previous.updatedAt !== expectedUpdatedAt) {
+      const error = new Error("Draft changed elsewhere. Your edits remain in the editor; copy them before reloading the saved draft.")
+      error.name = "DraftConflictError"
+      throw error
+    }
+    await db.contentDrafts.put({ ...draft, ...(previous.pendingMediaId ? { pendingMediaId: previous.pendingMediaId } : {}), ownerScope: operation.authorityKey })
+  })
 }
 export async function updateContentDraft(id: string, updates: Partial<ContentDraft>, operation = quickIngestAuthority.capture()): Promise<void> {
   await transact(operation, "rw", async () => {

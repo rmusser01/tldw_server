@@ -6,7 +6,9 @@ on:
     paths:
       - 'apps/packages/ui/src/**'
       - 'apps/tldw-frontend/**'
+      - 'apps/extension/**'
       - 'tldw_Server_API/**'
+      - '.github/workflows/frontend-e2e-tiers.yml'
   workflow_dispatch:
     inputs:
       tier:

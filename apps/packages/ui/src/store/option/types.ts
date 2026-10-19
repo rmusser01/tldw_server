@@ -162,6 +162,7 @@ export type State = {
   isProcessing: boolean
   setIsProcessing: (isProcessing: boolean) => void
   selectedModel: string | null
+  selectedModelInitialized: boolean
   selectedModelStorageHandled: boolean
   selectedModelRevision: number
   setSelectedModel: (

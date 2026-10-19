@@ -970,6 +970,14 @@ export const WritingPlayground = () => {
   // =====================================================================
   // Generation logic (unique - not in hooks)
   // =====================================================================
+  const resolveGenerationTarget = React.useCallback(async () => ({
+    model: selectedModel?.trim().replace(/^tldw:/i, "") || selectedModel || "",
+    apiProvider: (await resolveApiProviderForModel({
+      modelId: selectedModel,
+      explicitProvider: apiProviderOverride
+    })) ?? undefined
+  }), [apiProviderOverride, selectedModel])
+
   const handleGenerate = React.useCallback(
     async (overrideText?: string) => {
     if (generationOperationRef.current || isGenerating || isRevisionGenerating) return
@@ -1158,7 +1166,9 @@ export const WritingPlayground = () => {
       } else {
         generationRequestOptions.signal = controller.signal
       }
+      const target = await resolveGenerationTarget()
       if (!canAccept()) return
+      Object.assign(generationRequestOptions, target)
       dispatched = true
       if (plan.placeholder) emitText(plan.prefix + plan.suffix)
       if (settings.token_streaming) {
@@ -1230,6 +1240,7 @@ export const WritingPlayground = () => {
       isSceneBound,
       isOnline,
       pushGenerationHistory,
+      resolveGenerationTarget,
       selectedModel,
       settings,
       requestedLogprobsExplicitlyUnsupported,
@@ -1725,10 +1736,15 @@ export const WritingPlayground = () => {
           content: userPrompt
         }
       ]
+      const binding = generationBindingRef.current
+      const ownsBinding = () => generationMountedRef.current && generationBindingRef.current === binding
+      const target = await resolveGenerationTarget()
+      if (!ownsBinding()) return null
       const responseText = await generationServiceRef.current.sendMessage(
         messages,
-        buildRevisionRequestOptions()
+        { ...buildRevisionRequestOptions(), ...target }
       )
+      if (!ownsBinding()) return null
       return parseRevisionModelResponse({
         responseText,
         sessionId: activeSessionDetail.id,
@@ -1748,6 +1764,7 @@ export const WritingPlayground = () => {
       hasChat,
       isSceneEditorPending,
       isOnline,
+      resolveGenerationTarget,
       selectedModel,
       t
     ]

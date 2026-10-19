@@ -492,7 +492,7 @@ export const chatRagMethods = {
         const parsed = JSON.parse(line)
         yield parsed
       } catch (e) {
-        if (request.tldw_history_selection_v1 && line.trim() && line.trim() !== "[DONE]" && !line.trim().startsWith(":"))
+        if ((request.tldw_history_selection_v1 || request.tldw_history_server_existing_input_v1) && line.trim() && line.trim() !== "[DONE]" && !line.trim().startsWith(":"))
           throw new Error("unparseable_native_completion_stream")
         // Ignore empty/whitespace-only lines and SSE comments (": ...")
         const trimmed = line.trim()

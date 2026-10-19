@@ -136,6 +136,26 @@ describe("fetchChatModels", () => {
     expect(mocks.getChatModels).toHaveBeenCalledTimes(2)
   })
 
+  it("settles fresh models when account invalidation happens during config loading", async () => {
+    const config = deferred<Record<string, unknown>>()
+    const current = { serverUrl: "http://127.0.0.1:3000", authMode: "single-user", apiKey: "test-key" }
+    mocks.getConfig.mockReturnValueOnce(config.promise).mockResolvedValue(current)
+    mocks.getChatModels.mockResolvedValue([
+      { id: "fresh-model", name: "Fresh Model", provider: "llama", type: "chat" }
+    ])
+    const { fetchChatModels, clearChatModelsCache } = await importService()
+    const pending = fetchChatModels({ returnEmpty: true })
+    await vi.waitFor(() => expect(mocks.getConfig).toHaveBeenCalledOnce())
+    clearChatModelsCache()
+    config.resolve(current)
+    let result: unknown
+    void pending.then(models => { result = models })
+    await vi.waitFor(() => expect(result).toEqual([
+      expect.objectContaining({ model: "tldw:fresh-model" })
+    ]))
+
+})
+
   it.each([
     { requireFresh: false, invalidate: true, forceRefresh: false },
     { requireFresh: true, invalidate: true, forceRefresh: false },

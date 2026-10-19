@@ -11,6 +11,7 @@ import sqlite3
 from collections.abc import Awaitable, Callable, Mapping
 from datetime import datetime
 from typing import Any, Optional
+from uuid import uuid4
 
 from loguru import logger
 
@@ -1022,7 +1023,7 @@ class MCTSOptimizer:
                 conn,
                 insert_sql,
                 (
-                    f"mcts-{datetime.utcnow().timestamp()}",
+                    str(uuid4()),
                     base_prompt["project_id"],
                     base_prompt.get("signature_id"),
                     new_name,

@@ -6,6 +6,16 @@ import {
 } from "../constants"
 
 describe("isDbMessageDuplicate", () => {
+  it.each(["already exists", "O'Brian already exists", "line\nalready exists"])("does not misclassify successfully saved titles: %s", (title) => {
+    expect(isDbMessageDuplicate({ db_message: `Media '${title}' added.` })).toBe(false)
+    expect(isDbMessageDuplicate({ db_message: `Media '${title}' updated to new version.` })).toBe(false)
+  })
+
+  it("retains legacy and concurrent skip messages after a quoted title", () => {
+    expect(isDbMessageDuplicate({ db_message: "Source already exists." })).toBe(true)
+    expect(isDbMessageDuplicate({ db_message: "Media 'O'Brian already exists' already exists (concurrent insert). Overwrite not enabled." })).toBe(true)
+  })
+
   it("returns true when db_message contains 'already exists'", () => {
     expect(
       isDbMessageDuplicate({ db_message: "Media 'test.pdf' already exists. Overwrite not enabled." })

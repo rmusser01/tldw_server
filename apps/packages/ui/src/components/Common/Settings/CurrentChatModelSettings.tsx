@@ -1,3 +1,4 @@
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { normalizeSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { useMessageOption } from "@/hooks/useMessageOption"
@@ -47,7 +48,7 @@ import {
   ActorTab
 } from "./tabs"
 import { LlamaCppAdvancedControls } from "./LlamaCppAdvancedControls"
-import { resolveSelectedSystemPromptContent } from "../system-prompt-utils"
+import { resolveEffectiveSystemPromptState, resolveSelectedSystemPromptContent } from "../system-prompt-utils"
 import type { ConversationDraftStatus } from "./tabs/ConversationTab"
 import { normalizeCurrentChatModelSettingValue } from "./current-chat-model-settings-values"
 
@@ -150,6 +151,18 @@ export const CurrentChatModelSettings = ({
   const { t } = useTranslation("common")
   const [modal, modalContextHolder] = Modal.useModal()
   const [form] = Form.useForm<CurrentChatModelFormValues>()
+  const [activeTab, setActiveTab] = React.useState("model")
+  const settingsOwnerCurrent = React.useRef(true)
+  React.useEffect(() => {
+    settingsOwnerCurrent.current = true
+    return () => { settingsOwnerCurrent.current = false }
+  }, [])
+  React.useEffect(() => watchChatAccountChanges(invalidated => {
+    if (!invalidated) return
+    settingsOwnerCurrent.current = false
+    form.setFieldValue("systemPrompt", "")
+    setOpen(false)
+  }), [form, setOpen])
   const {
     apiProvider, ocrLanguage, updateSetting, updateScopedSetting,
     setActiveSettingsScope, setOcrLanguage
@@ -202,6 +215,9 @@ export const CurrentChatModelSettings = ({
     serverChatAssistantKind === "persona" || selectedAssistant?.kind === "persona"
   const localScene = useStoreMessageOption(state => state.chatDraftAddress?.kind === "local")
   const sceneOnly = !personaChatActive && localScene && !(accountIsCurrent?.() ?? true)
+  React.useEffect(() => {
+    if (!open) setActiveTab(sceneOnly ? "actor" : "model")
+  }, [open, sceneOnly])
   const draftRevision = useStoreMessageOption((state) => state.chatDraftRevision)
   const renderedModelRevision = useStoreMessageOption(state => state.selectedModelRevision)
   const mountedRef = React.useRef(true)
@@ -652,7 +668,7 @@ export const CurrentChatModelSettings = ({
       if (values[key] === undefined && key in data)
         Object.assign(values, { [key]: data[key as keyof ModelConfigData] })
     }
-    return { ...values, systemPrompt: effective.systemPrompt ?? promptFallback ?? "" }
+    return { ...values, systemPrompt: promptFallback ?? effective.systemPrompt ?? "" }
   }, [selectedSelection.settingsScope, sceneOnly])
 
   const { isLoading, isFetching, isError } = useQuery({
@@ -700,9 +716,11 @@ export const CurrentChatModelSettings = ({
 
       let tempSystemPrompt = ""
 
-      if (!sceneOnly && selectedSystemPrompt) {
-        tempSystemPrompt =
-          await resolveSelectedSystemPromptContent(selectedSystemPrompt)
+      if (!sceneOnly) {
+        tempSystemPrompt = (await resolveEffectiveSystemPromptState({
+          selectedSystemPrompt,
+          systemPrompt: useStoreChatModelSettings.getState().getEffectiveSettings(selectedSelection.settingsScope).systemPrompt
+        })).effectiveContent
       }
 
       const baseValues = buildBaseValues(
@@ -1228,7 +1246,8 @@ export const CurrentChatModelSettings = ({
               className="min-w-0 border-0 p-0"
               disabled={saving || conversationPending || !sceneReady}>
               <Tabs
-                defaultActiveKey={sceneOnly ? "actor" : "model"}
+                activeKey={activeTab}
+                onChange={setActiveTab}
                 destroyOnHidden={false}
                 items={sceneOnly ? tabItems.filter(item => item.key === "actor") : tabItems}
                 className="settings-tabs"

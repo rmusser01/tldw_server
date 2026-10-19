@@ -1,4 +1,4 @@
-import { bgRequest } from "@/services/background-proxy"
+import { bgRequest, type BgRequestInit } from "@/services/background-proxy"
 import { buildQuery } from "../client-utils"
 import type {
   AdminUserListResponse,
@@ -8,14 +8,17 @@ import type {
   AdminRole,
 } from "../TldwApiClient"
 
+export type AdminRequestOptions = Pick<BgRequestInit, "configSnapshot" | "abortSignal" | "headers">
+
 export const adminMethods = {
   // ── Admin Users & Roles ──
 
-  async createAdminUser(payload: AdminUserCreateRequest): Promise<AdminUserSummary> {
+  async createAdminUser(payload: AdminUserCreateRequest, options?: AdminRequestOptions): Promise<AdminUserSummary> {
     return await bgRequest<AdminUserSummary>({
       path: "/api/v1/admin/users",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      ...options,
+      headers: { "Content-Type": "application/json", ...options?.headers },
       body: payload
     })
   },
@@ -26,23 +29,26 @@ export const adminMethods = {
     role?: string
     is_active?: boolean
     search?: string
-  }): Promise<AdminUserListResponse> {
+  }, options?: AdminRequestOptions): Promise<AdminUserListResponse> {
     const query = buildQuery(params as Record<string, any>)
     return await bgRequest<AdminUserListResponse>({
       path: `/api/v1/admin/users${query}`,
-      method: "GET"
+      method: "GET",
+      ...options
     })
   },
 
   async updateAdminUser(
     userId: number,
-    payload: AdminUserUpdateRequest
+    payload: AdminUserUpdateRequest,
+    options?: AdminRequestOptions
   ): Promise<{ message: string }> {
     return await bgRequest<{ message: string }>({
       path: `/api/v1/admin/users/${userId}`,
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: payload
+      body: payload,
+      ...options,
+      headers: { "Content-Type": "application/json", ...options?.headers }
     })
   },
 
@@ -52,7 +58,8 @@ export const adminMethods = {
       temporary_password: string
       reason: string
       force_password_change?: boolean
-    }
+    },
+    options?: AdminRequestOptions
   ): Promise<{ user_id: number; force_password_change: boolean; message: string }> {
     return await bgRequest<{
       user_id: number
@@ -61,7 +68,8 @@ export const adminMethods = {
     }>({
       path: `/api/v1/admin/users/${userId}/reset-password`,
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      ...options,
+      headers: { "Content-Type": "application/json", ...options?.headers },
       body: {
         force_password_change: true,
         ...payload
@@ -69,29 +77,33 @@ export const adminMethods = {
     })
   },
 
-  async listAdminRoles(): Promise<AdminRole[]> {
+  async listAdminRoles(options?: AdminRequestOptions): Promise<AdminRole[]> {
     return await bgRequest<AdminRole[]>({
       path: "/api/v1/admin/roles",
-      method: "GET"
+      method: "GET",
+      ...options
     })
   },
 
   async createAdminRole(
     name: string,
-    description?: string
+    description?: string,
+    options?: AdminRequestOptions
   ): Promise<AdminRole> {
     return await bgRequest<AdminRole>({
       path: "/api/v1/admin/roles",
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      ...options,
+      headers: { "Content-Type": "application/json", ...options?.headers },
       body: { name, description }
     })
   },
 
-  async deleteAdminRole(roleId: number): Promise<{ message: string }> {
+  async deleteAdminRole(roleId: number, options?: AdminRequestOptions): Promise<{ message: string }> {
     return await bgRequest<{ message: string }>({
       path: `/api/v1/admin/roles/${roleId}`,
-      method: "DELETE"
+      method: "DELETE",
+      ...options
     })
   },
 
@@ -231,8 +243,8 @@ export const adminMethods = {
 
   // ── Admin Monitoring & Alerting ──
 
-  async listAlertRules(): Promise<any[]> {
-    return await bgRequest<any[]>({ path: "/api/v1/admin/monitoring/alert-rules", method: "GET" })
+  async listAlertRules(options?: AdminRequestOptions): Promise<any[]> {
+    return await bgRequest<any[]>({ path: "/api/v1/admin/monitoring/alert-rules", method: "GET", ...options })
   },
 
   async createAlertRule(payload: {
@@ -286,8 +298,8 @@ export const adminMethods = {
     return await bgRequest<any[]>({ path: `/api/v1/admin/monitoring/alerts/history${query}`, method: "GET" })
   },
 
-  async getSecurityAlertStatus(): Promise<any> {
-    return await bgRequest<any>({ path: "/api/v1/admin/security/alert-status", method: "GET" })
+  async getSecurityAlertStatus(options?: AdminRequestOptions): Promise<any> {
+    return await bgRequest<any>({ path: "/api/v1/admin/security/alert-status", method: "GET", ...options })
   },
 
   async getDashboardActivity(params?: { days?: number; granularity?: string }): Promise<any> {
@@ -468,9 +480,9 @@ export const adminMethods = {
 
   // ── Admin Data Operations ──
 
-  async listBackups(params?: { dataset?: string; user_id?: number }): Promise<any> {
+  async listBackups(params?: { dataset?: string; user_id?: number }, options?: AdminRequestOptions): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
-    return await bgRequest<any>({ path: `/api/v1/admin/backups${query}`, method: "GET" })
+    return await bgRequest<any>({ path: `/api/v1/admin/backups${query}`, method: "GET", ...options })
   },
 
   async createBackup(payload: { dataset: string; user_id?: number }): Promise<any> {
@@ -482,17 +494,17 @@ export const adminMethods = {
     })
   },
 
-  async restoreBackup(backupId: string): Promise<any> {
+  async restoreBackup(backupId: string, payload: { dataset: string; user_id?: number; confirm: true }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/backups/${encodeURIComponent(backupId)}/restore`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: {}
+      body: payload
     })
   },
 
-  async listBackupSchedules(): Promise<any> {
-    return await bgRequest<any>({ path: "/api/v1/admin/backup-schedules", method: "GET" })
+  async listBackupSchedules(options?: AdminRequestOptions): Promise<any> {
+    return await bgRequest<any>({ path: "/api/v1/admin/backup-schedules", method: "GET", ...options })
   },
 
   async createBackupSchedule(payload: {
@@ -588,8 +600,8 @@ export const adminMethods = {
 
   // ── Admin RBAC & Permissions ──
 
-  async listPermissions(): Promise<any[]> {
-    return await bgRequest<any[]>({ path: "/api/v1/admin/permissions", method: "GET" })
+  async listPermissions(options?: AdminRequestOptions): Promise<any[]> {
+    return await bgRequest<any[]>({ path: "/api/v1/admin/permissions", method: "GET", ...options })
   },
 
   async listPermissionCategories(): Promise<any[]> {

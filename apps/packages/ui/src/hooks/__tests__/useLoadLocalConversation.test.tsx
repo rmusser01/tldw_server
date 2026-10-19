@@ -1,4 +1,8 @@
-import { act, renderHook, waitFor } from "@testing-library/react"
+import React from "react"
+import { MemoryRouter } from "react-router-dom"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { LocalChatList } from "@/components/Common/ChatSidebar/LocalChatList"
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
@@ -37,7 +41,9 @@ vi.mock("@/services/model-settings", () => ({
   lastUsedChatModelEnabled: () => io.readModelPreference()
 }))
 vi.mock("antd", async importOriginal => ({ ...await importOriginal<typeof import("antd")>(), message: { error: (value: unknown) => io.notifyError(value) } }))
-vi.mock("@/hooks/useMessageOption", () => ({ useMessageOption: () => ({ ...io.deps, historyId: null, clearChat: vi.fn() }) }))
+vi.mock("@/store/option", () => ({ useStoreMessageOption: (select: (state: unknown) => unknown) => select({ ...io.deps, historyId: null }) }))
+vi.mock("@/hooks/chat/useSelectedModel", () => ({ useSelectedModel: () => ({ setSelectedModel: io.deps?.setSelectedModel }) }))
+vi.mock("@/hooks/chat/useClearChat", () => ({ useClearChat: () => vi.fn() }))
 vi.mock("@/store/model", () => ({ useStoreChatModelSettings: () => ({ setSystemPrompt: io.deps?.setSystemPrompt }) }))
 vi.mock("@/hooks/useConnectionState", () => ({ useIsConnected: () => false }))
 vi.mock("@/hooks/useUndoNotification", () => ({ useUndoNotification: () => ({ showUndoNotification: vi.fn() }) }))
@@ -183,6 +189,37 @@ describe("local conversation load ownership", () => {
     expect(state.prompt).toBe("Saved prompt")
     unmount()
   })
+
+  it.each(["current", "unmounted", "failed"] as const)("reports only an accepted LocalChatList selection: %s", async outcome => {
+    const pending = deferred<unknown[]>()
+    io.readMessages.mockReturnValueOnce(pending.promise)
+    const { state, unmount: unmountUnusedHook } = setup()
+    unmountUnusedHook()
+    const onSelectChat = vi.fn()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = render(<MemoryRouter><QueryClientProvider client={queryClient}><LocalChatList searchQuery="" selectedChatId={null} onSelectChat={onSelectChat} /></QueryClientProvider></MemoryRouter>)
+    fireEvent.click(await screen.findByRole("button", { name: "Owned local chat" }))
+    await waitFor(() => expect(io.readMessages).toHaveBeenCalledWith("owned"))
+    if (outcome === "unmounted") view.unmount()
+    if (outcome === "failed") vi.spyOn(console, "error").mockImplementation(() => undefined)
+    await act(async () => {
+      if (outcome === "failed") pending.reject(new Error("Synthetic read failure"))
+      else pending.resolve([{ content: "Current local chat" }])
+      await pending.promise.catch(() => undefined)
+    })
+    if (outcome === "current") {
+      await waitFor(() => expect(onSelectChat).toHaveBeenCalledWith("owned"))
+      expect(state.historyId).toBe("owned")
+      expect(state.prompt).toBe("Saved prompt")
+    } else {
+      expect(onSelectChat).not.toHaveBeenCalled()
+      expect(state.historyId).toBe("before")
+      if (outcome === "failed") expect(io.notifyError).toHaveBeenCalled()
+    }
+    view.unmount()
+    queryClient.clear()
+
+})
 
 
 })

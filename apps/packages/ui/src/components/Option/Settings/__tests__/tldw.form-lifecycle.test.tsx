@@ -7,6 +7,7 @@ import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { createMemoryRouter, RouterProvider } from "react-router-dom"
 import { requestSettingsNavigation } from '@/utils/settings-return'
+import { apiSend } from "@/services/api-send"
 
 // Match the WebUI storage boundary, including same-tab and cross-tab watches.
 vi.mock("@plasmohq/storage", async () =>
@@ -43,6 +44,7 @@ beforeEach(async () => {
   storage = new Storage({ area: "local" })
   await storage.set("tldwConfig", signedIn)
   mocks.getConfig.mockReset().mockResolvedValue(signedIn)
+  vi.mocked(apiSend).mockReset()
   mocks.bgRequest.mockReset().mockResolvedValue({ paths: {} })
   mocks.testApiKey.mockReset().mockResolvedValue(true)
   mocks.saveManualSingleUserCredential.mockReset().mockResolvedValue("device")
@@ -84,7 +86,7 @@ it("ignores a delayed billing advertisement after disconnecting the server", asy
   mount()
   await screen.findByText("Logged In", { exact: true })
   await waitFor(() => expect(mocks.bgRequest).toHaveBeenCalled())
-  fireEvent.click(await screen.findByRole("button", { name: "Logout", exact: true }))
+  fireEvent.click(await screen.findByRole("button", { name: "Logout" }))
   await screen.findByText("Login Required", { exact: true })
   await act(async () => release({ paths: Object.fromEntries(
     ["plans", "subscription", "usage", "invoices"].map(route => [`/api/v1/billing/${route}`, { get: {} }])
@@ -123,7 +125,7 @@ it("normal logout reaches the actual login form without a disconnected-form warn
   mount()
   await screen.findByText("Logged In", { exact: true })
   errors.mockClear()
-  fireEvent.click(screen.getByRole("button", { name: "Logout", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Logout" }))
   await screen.findByText("Login Required", { exact: true })
   await waitFor(() => expect(screen.getByRole("textbox", { name: "Server URL" })).toHaveValue(target.serverUrl))
   expect(formErrors(errors)).toEqual([])
@@ -145,12 +147,12 @@ it.each([
     window.dispatchEvent(new CustomEvent("tldw:config-updated"))
   })
   mount()
-  fireEvent.click(await screen.findByRole("button", { name: action, exact: true }))
+  fireEvent.click(await screen.findByRole("button", { name: action }))
   expect(screen.getByRole("textbox", { name: "Server URL" })).toHaveValue(config.serverUrl)
   await act(async () => { release() })
   await waitFor(() => expect(screen.getByRole("textbox", { name: "Server URL" })).toHaveValue(""))
   expect(screen.getByLabelText("API Key")).toHaveValue("")
-  expect(screen.queryByRole("button", { name: action, exact: true })).not.toBeInTheDocument()
+  expect(screen.queryByRole("button", { name: action })).not.toBeInTheDocument()
   expect(formErrors(errors)).toEqual([])
 })
 
@@ -212,7 +214,7 @@ it('clears the unsaved navigation guard after connection settings save succeeds'
   await screen.findByText('Logged In', { exact: true })
   fireEvent.change(screen.getByRole('textbox', { name: 'Server URL' }), { target: { value: 'https://saved.example.test' } })
   await screen.findByText('Login Required', { exact: true })
-  fireEvent.click(screen.getByRole('button', { name: 'common:save', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: 'common:save' }))
   await waitFor(() => expect(screen.queryByText(/unsaved connection settings/i)).not.toBeInTheDocument())
   expect(requestSettingsNavigation('/settings/preferences')).toBe(true)
 })
@@ -224,7 +226,7 @@ it('retains the draft and its navigation guard after connection save fails', asy
   mount()
   await screen.findByText('Logged In', { exact: true })
   fireEvent.change(screen.getByRole('textbox', { name: 'Server URL' }), { target: { value: 'https://unsaved.example.test' } })
-  fireEvent.click(screen.getByRole('button', { name: 'common:save', exact: true }))
+  fireEvent.click(screen.getByRole('button', { name: 'common:save' }))
   await screen.findByText('settings:saveFailed')
   expect(screen.getByText(/unsaved connection settings/i)).toBeInTheDocument()
   await navigateSettings('/settings/preferences')
@@ -259,7 +261,7 @@ it("keeps the current form available when logout fails before credentials are cl
   mocks.logout.mockRejectedValue(new Error("Local credential storage unavailable"))
   mount()
   await screen.findByText("Logged In", { exact: true })
-  fireEvent.click(screen.getByRole("button", { name: "Logout", exact: true }))
+  fireEvent.click(screen.getByRole("button", { name: "Logout" }))
   await screen.findByText("Logout failed", { exact: true })
   expect(screen.getByText("Logged In", { exact: true })).toBeInTheDocument()
   expect(screen.getByRole("textbox", { name: "Server URL" })).toHaveValue(target.serverUrl)
@@ -278,6 +280,28 @@ it.each([-1, '/settings/health'])('preserves an unsaved connection draft when na
   expect(router.state.location.pathname).toBe('/')
   expect(screen.getByRole('textbox', { name: 'Server URL' })).toHaveValue('https://unsaved.example.test')
 })
+
+
+it.each([
+  ["", "Please enter the server URL"],
+  ["not a URL", "Please enter a valid URL"]
+])("does not leave connection progress active for invalid URL %s", async (url, validation) => {
+  mount()
+  await screen.findByText("Logged In", { exact: true })
+  vi.mocked(apiSend).mockResolvedValue({ ok: true, status: 200 })
+  fireEvent.click(screen.getByRole("button", { name: "Test Connection", exact: true }))
+  await screen.findByText("Core: reachable", { exact: true })
+  vi.mocked(apiSend).mockClear()
+  vi.mocked(tldwClient.updateConfig).mockClear()
+  fireEvent.change(screen.getByLabelText("Server URL", { exact: true }), { target: { value: url } })
+  fireEvent.click(screen.getByRole("button", { name: "Test Connection", exact: true }))
+  await screen.findByText(validation, { exact: true })
+  await waitFor(() => expect(screen.queryByText("Checking connection and RAG health…")).not.toBeInTheDocument())
+  expect(screen.queryByText("Core: checking…")).not.toBeInTheDocument()
+  expect(screen.getByText("Core: not checked yet")).toBeInTheDocument()
+  expect(apiSend).not.toHaveBeenCalled()
+  expect(tldwClient.updateConfig).not.toHaveBeenCalled()
+  })
 
 it("keeps both diagnostics actions within an embedded settings destination", async () => {
   const diagnostics = vi.fn()

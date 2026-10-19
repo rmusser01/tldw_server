@@ -251,3 +251,20 @@ def test_saved_dictionary_settings_have_no_native_projector(character, settings)
     captured["settings"] = settings
     with pytest.raises(HistorySelectionError, match="unsupported_history_context_saved_settings"):
         project_history_context(captured)
+
+
+@pytest.mark.parametrize("invalid", [None, "asset", "answered", "assistant", "cursor"])
+def test_b02_saved_question_requires_unanswered_text(invalid):
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.Chat.history_context import selected_unanswered_text_question
+    content = ({"id": "question", "message": "saved text", "images": ["image"] if invalid == "asset" else []},)
+    nodes = [{"id": "question", "role": "assistant" if invalid == "assistant" else "user"}]
+    if invalid == "answered":
+        nodes.append({"id": "answer", "role": "assistant", "parent_id": "question"})
+    selection = {"purpose": "send", "cursor": {"kind": "after_message", "message_id": "other" if invalid == "cursor" else "question"}}
+    if invalid:
+        with pytest.raises(HistorySelectionError):
+            selected_unanswered_text_question(SimpleNamespace(nodes=nodes), content, selection)
+    else:
+        assert selected_unanswered_text_question(SimpleNamespace(nodes=nodes), content, selection) == content[0]  # nosec B101 - Preserve exact saved text for one new answer intent.

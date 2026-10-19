@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import RequireRole, require_expected_user_if_present
 from tldw_Server_API.app.core.Admin_Webhooks.config import (
     AdminWebhookMode,
     AdminWebhookSettings,
@@ -137,7 +137,7 @@ def _mount_admin_webhook_routes(
 router = APIRouter(
     prefix="/admin",
     tags=["admin"],
-    dependencies=[Depends(RequireRole("admin"))],  # All endpoints require admin role
+    dependencies=[Depends(require_expected_user_if_present), Depends(RequireRole("admin"))],
     responses={403: {"description": "Not authorized"}},
 )
 

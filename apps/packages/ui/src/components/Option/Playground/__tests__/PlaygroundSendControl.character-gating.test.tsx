@@ -25,6 +25,19 @@ const baseProps = {
 }
 
 describe("PlaygroundSendControl character chat gating", () => {
+  it("B02 disables character Send while the selected card is loading", async () => {
+    const onAction = vi.fn()
+    const onSubmitForm = vi.fn()
+    const blocker = { active: true, title: "Loading character. Your draft is retained.", actionLabel: "Loading character", disabled: true, onAction }
+    render(<PlaygroundSendControl {...baseProps} onSubmitForm={onSubmitForm} characterChatSendBlocker={blocker} />)
+    const button = screen.getByRole("button", { name: "Loading character" })
+    expect(button).toBeDisabled()
+    await userEvent.setup().click(button)
+    expect(onAction).not.toHaveBeenCalled()
+    expect(onSubmitForm).not.toHaveBeenCalled()
+
+})
+
   it.each([false, true])("keeps unsupported history Send and Queue unavailable (busy=%s)", async isSending => {
     const submit = vi.fn()
     const user = userEvent.setup()

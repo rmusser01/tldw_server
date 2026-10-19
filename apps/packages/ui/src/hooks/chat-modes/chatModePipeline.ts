@@ -3,6 +3,7 @@ import type { BaseMessage } from "@/types/messages"
 import {
   appendSelectedUser,
   finalizeHistorySelection,
+  isDefinitiveHistoryAdmissionRejection,
   prepareHistoryContext,
   nativeHistoryMessagePayload,
   parseNativeHistoryAdmission
@@ -539,6 +540,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     return true
   }
 
+  let projectSelectedMessages: (() => void) | undefined
   if (mode.setupMessages) {
     const setup = mode.setupMessages(context)
     generateMessageId = setup.targetMessageId
@@ -552,10 +554,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     if (!mode.buildAssistantMessage || !mode.buildUserMessage) {
       throw new Error(`Chat mode "${mode.id}" is missing message builders.`)
     }
-    setMessagesWithTransition((previous) => {
+    projectSelectedMessages = () => setMessagesWithTransition((previous) => {
       const prev = historyTurn ? messages : previous
       const assistantStub = mode.buildAssistantMessage!(context)
-      if (!isRegenerate) {
+      if (!isRegenerate && !historyTurn?.existingSelection) {
         const userMessageEntry = applyMetadataExtra(
           mode.buildUserMessage!(context),
           params.userMetadataExtra
@@ -586,6 +588,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       }
       return [...prev, assistantStub]
     })
+    if (!historyTurn?.deferProjectionUntilAdmission) projectSelectedMessages()
 
     if (regenerateVariants.length > 0) {
       setMessagesWithTransition((prev) => {
@@ -609,7 +612,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
 
   const admitHistoryInput = async (wire: unknown, diagnosticInfo?: unknown): Promise<ChatCompletionRequest | undefined> => {
     if (!historyTurn) return undefined
-      if (isRegenerate || mode.isContinue)
+      if ((isRegenerate && !historyTurn.existingSelection) || mode.isContinue)
         throw new Error("unsupported_history_action")
       const input = {
         id: resolvedUserMessageId!,
@@ -666,7 +669,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           ...(historyTurn.historyEdit ? { tldw_history_edit_v1: historyTurn.historyEdit } : {}) })
       }
       historyTurn.dispatched = true
-      if (historyTurn.retryAdmission) {
+      if (historyTurn.existingSelection) {
+        if (selection.messages.at(-1)?.id !== input.id) throw new Error("invalid_selection")
+      } else if (historyTurn.retryAdmission) {
         // Retry (CS-04): the owner already holds this question. The new reply
         // settles against its admission; admitting it again would save a
         // second copy of the question.
@@ -675,7 +680,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         historyTurn.admission = historyTurn.retryAdmission
       } else {
         // A response received after display navigation is still the original operation's result.
-        historyTurn.admission = await appendSelectedUser(
+        try {
+          historyTurn.admission = await appendSelectedUser(
           historyTurn.owner,
           selection,
           input,
@@ -689,11 +695,19 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
               : {}),
             ...(historyTurn.historyEdit ? { historyEdit: historyTurn.historyEdit } : {})
           }
-        )
+          )
+        } catch (error) {
+          if (historyTurn.deferProjectionUntilAdmission && isDefinitiveHistoryAdmissionRejection(error))
+            historyTurn.dispatched = false
+          throw error
+        }
       }
       await historyTurn.afterAdmission?.()
       if (!historyTurn.validateLease() || signal.aborted)
         throw new Error("request_config_scope_changed")
+      if ((historyTurn.deferProjectionUntilAdmission || historyTurn.existingSelection) && !historyTurn.canUpdateView())
+        throw new Error("stale_selection")
+      if (historyTurn.deferProjectionUntilAdmission) projectSelectedMessages?.()
       return prepared.payload as ChatCompletionRequest
   }
 
@@ -868,7 +882,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
 
     const nativeCompletion = Boolean(historyTurn?.owner.kind === "native" &&
       historyTurn.capture.status === "captured" && historyTurn.capture.native_completion_v1?.supported === true &&
-      !historyTurn.retryAdmission && !historyTurn.historyEdit && promptData.nativeCurrentInput !== undefined && humanMessage && mode.id === "normal")
+      !historyTurn.retryAdmission && !historyTurn.existingSelection && !historyTurn.historyEdit && promptData.nativeCurrentInput !== undefined && humanMessage && mode.id === "normal")
     if (nativeCompletion) historyTurn!.persistence = "server"
     modelClient = await pageAssistModel({
       model: rawSelectedModel,
@@ -1285,10 +1299,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
         )
         const outcome: HistoryTurnOutcome | undefined =
           historyTurn.persistence === "server" && historyTurn.resultId ? historyTurn.outcome ?? "interrupted" :
-          !historyTurn.admission || scopeInvalidated
+          (!historyTurn.admission && !historyTurn.existingSelection) || scopeInvalidated
             ? undefined
             : replyCompleted
-              ? historyTurn.resultId ? "complete" : undefined
+              ? historyTurn.resultId || historyTurn.retryAdmission ? "complete" : undefined
               : signal.aborted && params.wasStoppedByUser?.() === true
                 ? "stopped"
                 : signal.aborted || fullText.trim().length > 0
@@ -1354,6 +1368,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                 )
               : prev.filter((row) => row.id !== resolvedAssistantMessageId)
           )
+          if (outcome === "complete" && !historyTurn.resultId)
+            return chatSubmitFailed(e instanceof Error ? e.message : "Reply save unconfirmed")
           return outcome === "complete" || (historyTurn.persistence === "server" && historyTurn.resultId)
             ? chatSubmitSubmitted()
             : outcome === "stopped"
@@ -1365,12 +1381,13 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           prev.filter(
             (row) =>
               row.id !== resolvedAssistantMessageId &&
-              (historyTurn.admission || row.id !== resolvedUserMessageId)
+              (historyTurn.admission || historyTurn.existingSelection || row.id !== resolvedUserMessageId)
           )
         )
       } else {
         await historyTurn.cancelPreparation?.()
-        setMessagesWithTransition(messages)
+        if (!historyTurn.deferProjectionUntilAdmission)
+          setMessagesWithTransition(messages)
       }
       return chatSubmitFailed(
         e instanceof Error ? e.message : "History send failed"

@@ -11,6 +11,23 @@ import type {
   Message as StoredMessage
 } from "@/db/dexie/types"
 
+/** An owner-bound edit target, captured before the editor starts asynchronous work. */
+export type HistoryEditAndSendBoundary = {
+  targetId: string
+  owner: HistoryOwnerV1
+  originView: HistoryViewSelectionV1
+  originIsCurrent: () => boolean
+}
+
+export type HistoryRegenerateBoundary = {
+  answerId: string
+  questionId: string
+  questionRevision: string
+  owner: HistoryOwnerV1
+  originView: HistoryViewSelectionV1
+  originIsCurrent: () => boolean
+}
+
 /** Private explicit branch intent; its editor lease never enters a wire payload. */
 export type NativeHistoryEditResend = {
   owner_key: string
@@ -34,6 +51,8 @@ export interface HistorySendTurn {
   currentView: () => HistoryViewSelectionV1 | null
   validateLease: () => boolean
   canUpdateView: () => boolean
+  /** An edited selected input does not replace the mounted view before admission. */
+  deferProjectionUntilAdmission?: boolean
   /** Original command or its accepted bind, required until user admission. */
   preparationIsCurrent?: () => boolean;
   persistence?: 'server';
@@ -45,6 +64,8 @@ export interface HistorySendTurn {
    * instead of admitting the question a second time.
    */
   retryAdmission?: HistoryAdmissionReferenceV1
+  existingSelection?: boolean
+  stageSettlementPayload?: (message: StoredMessage) => Promise<void>
   historyBranch?: boolean
   historyEdit?: HistoryEditTargetV1
   selection?: HistorySelectionV1

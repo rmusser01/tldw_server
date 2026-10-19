@@ -1,4 +1,5 @@
 import React from "react"
+import type { Prompt } from "@/db/dexie/types"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -12,6 +13,7 @@ import {
 } from "../index"
 
 const state = vi.hoisted(() => ({
+  realStudio: false,
   isOnline: true,
   privateMode: false,
   prompts: [] as any[],
@@ -31,6 +33,17 @@ const recipeOwner = {
   ownerId: `recipe-owner:sha256:${"a".repeat(64)}`,
   authorizationRevision: `recipe-authorization:sha256:${"a".repeat(64)}`
 }
+// These tests arrange an authenticated inventory and exercise the separate
+// recipe-authority resolver. Account-switch integration uses the real hook.
+vi.mock("@/hooks/usePromptLocalAuthority", () => ({
+  usePromptLocalAuthority: () => ({ ownerId: recipeOwner.ownerId, ready: true, boundaryKey: "authenticated-inventory-fixture" })
+}))
+
+const inventoryFixture = (prompts: Prompt[]) => prompts.map(prompt =>
+  prompt.serverId != null || prompt.studioPromptId != null || prompt.studioProjectId != null || prompt.serverLibraryId != null || prompt.serverLibraryUuid != null
+    ? { ...prompt, ownerId: prompt.ownerId ?? recipeOwner.ownerId }
+    : prompt
+)
 
 type PromptSyncMockResult = {
   success: boolean
@@ -72,6 +85,7 @@ const mocks = vi.hoisted(() => ({
         success: boolean
         syncStatus: string
         error?: string
+        failureKind?: string
       }
   ),
   pushToStudio: vi.fn(async (): Promise<PromptSyncMockResult> => ({ success: true })),
@@ -309,6 +323,9 @@ vi.mock("@/services/prompts-api", () => ({
 }))
 
 vi.mock("@/services/prompt-studio", () => ({
+  getPromptStudioStatus: async () => ({ data: { data: {} } }),
+  listProjects: async () => ({ data: { data: [{ id: 77, name: "Owned Studio project" }] } }),
+  listPrompts: async () => ({ data: { data: [{ id: 501, project_id: 77, name: "Owned Studio prompt", version_number: 1 }] } }),
   hasPromptStudio: (...args: unknown[]) =>
     (mocks.hasPromptStudio as (...args: unknown[]) => unknown)(...args),
   getPrompt: (...args: unknown[]) =>
@@ -319,6 +336,7 @@ vi.mock("@/services/prompt-studio", () => ({
 
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
+    getConfig: async () => null,
     initialize: (...args: unknown[]) =>
       (mocks.tldwInitialize as (...args: unknown[]) => unknown)(...args),
     createChatCompletion: (...args: unknown[]) =>
@@ -326,10 +344,14 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-vi.mock("@/store/prompt-studio", () => ({
-  usePromptStudioStore: (selector: (state: typeof promptStudioStore) => unknown) =>
-    selector(promptStudioStore)
-}))
+vi.mock("@/store/prompt-studio", async importOriginal => {
+  const actual = await importOriginal<typeof import("@/store/prompt-studio")>()
+  return {
+    ...actual,
+    usePromptStudioStore: (selector: (store: ReturnType<typeof actual.usePromptStudioStore.getState> | typeof promptStudioStore) => unknown) =>
+      state.realStudio ? actual.usePromptStudioStore(selector) : selector(promptStudioStore)
+  }
+})
 
 vi.mock("@/services/prompt-sync", () => ({
   autoSyncPrompt: (...args: unknown[]) =>
@@ -351,8 +373,9 @@ vi.mock("@/services/prompt-sync", () => ({
 vi.mock("@/db/dexie/helpers", () => ({
   deletePromptById: (...args: unknown[]) =>
     (mocks.deletePromptById as (...args: unknown[]) => unknown)(...args),
-  getAllPrompts: (...args: unknown[]) =>
-    (mocks.getAllPrompts as (...args: unknown[]) => unknown)(...args),
+  getAllPrompts: async (...args: unknown[]) =>
+    inventoryFixture(await (mocks.getAllPrompts as (...args: unknown[]) => Promise<Prompt[]>)(...args)),
+  getSharedLocalPrompts: async () => (await mocks.getAllPrompts()).filter((prompt: Prompt) => prompt.ownerId == null && !prompt.serverId && !prompt.studioProjectId && !prompt.studioPromptId && !prompt.serverLibraryId && !prompt.serverLibraryUuid),
   savePrompt: (...args: unknown[]) =>
     (mocks.savePrompt as (...args: unknown[]) => unknown)(...args),
   updatePrompt: (...args: unknown[]) =>
@@ -459,8 +482,14 @@ vi.mock("../ProjectSelector", () => ({
   ProjectSelector: () => null
 }))
 
-vi.mock("../Studio/StudioTabContainer", () => ({
-  StudioTabContainer: () => <div data-testid="mock-studio-tab-container" />
+vi.mock("../Studio/StudioTabContainer", async importOriginal => {
+  const actual = await importOriginal<typeof import("../Studio/StudioTabContainer")>()
+  return { StudioTabContainer: () => state.realStudio ? <actual.StudioTabContainer /> : <div data-testid="mock-studio-tab-container" /> }
+})
+vi.mock("../Studio/Prompts/PromptEditorDrawer", () => ({ PromptEditorDrawer: () => null }))
+vi.mock("@/services/prompt-studio-settings", () => ({
+  getPromptStudioDefaultsForOwner: async () => ({ defaultProjectId: null, autoSyncWorkspacePrompts: false }),
+  setPromptStudioDefaults: vi.fn()
 }))
 
 vi.mock("../Studio/Prompts/VersionHistoryDrawer", () => ({
@@ -507,7 +536,7 @@ const renderPromptBody = (
   }
 }
 
-const savedRecipeRecord = (overrides: Record<string, unknown> = {}) => ({
+const savedRecipeRecord = (overrides: Partial<Prompt> = {}): Prompt => ({
   id: "recipe-system",
   name: "Clear task recipe",
   title: "Clear task recipe",
@@ -523,7 +552,7 @@ const savedRecipeRecord = (overrides: Record<string, unknown> = {}) => ({
   ...overrides
 })
 
-describe("PromptBody server search and pagination", () => {
+describe("PromptBody inventory search and pagination", () => {
   const setViewportWidth = (width: number) => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
@@ -578,6 +607,7 @@ describe("PromptBody server search and pagination", () => {
     mocks.setSelectedQuickPrompt.mockReset()
     mocks.setSelectedSystemPrompt.mockReset()
     mocks.setSystemPrompt.mockReset()
+    state.realStudio = false
     state.privateMode = false
     state.isOnline = true
     state.canonicalConnectionConfig = {
@@ -789,7 +819,70 @@ describe("PromptBody server search and pagination", () => {
     expect(bulkExportButton.className).toContain("min-h-[44px]")
   })
 
-  it("debounces online server search and requests next page", async () => {
+  it.each(["Pirate", "ARRR", "water wet"])(
+    "searches hydrated synced Studio inventory for %s while the unrelated library is empty",
+    async (query) => {
+      state.prompts = [{
+        id: "123e4567-e89b-12d3-a456-426614174001",
+        title: "uat-C01-Pirate",
+        name: "uat-C01-Pirate",
+        content: "You are a pirate. Say ARRR.",
+        system_prompt: "You are a pirate. Say ARRR.",
+        user_prompt: "Explain why water wet in one sentence.",
+        is_system: true,
+        createdAt: 100,
+        serverId: 1,
+        studioPromptId: 1,
+        studioProjectId: 1,
+        syncStatus: "synced"
+      }]
+      mocks.getAllPrompts.mockResolvedValue(state.prompts)
+      mocks.searchPromptsServer.mockResolvedValue({
+        items: [], total_matches: 0, page: 1, per_page: 20
+      })
+      renderPromptBody()
+      fireEvent.change(await screen.findByRole("textbox", { name: "Search prompts..." }), {
+        target: { value: query }
+      })
+      await new Promise((resolve) => setTimeout(resolve, 350))
+      await waitFor(() => expect(getVisibleRowNames()).toEqual(["uat-C01-Pirate"]))
+      expect(screen.getByTestId("table-total")).toHaveTextContent("1")
+      expect(mocks.searchPromptsServer).not.toHaveBeenCalled()
+    }
+  )
+
+  it("does not match a Studio row through a colliding unrelated library numeric ID", async () => {
+    state.prompts = [{
+      id: "123e4567-e89b-12d3-a456-426614174001",
+      title: "Pirate", name: "Pirate", content: "ARRR", is_system: true,
+      createdAt: 100, serverId: 1, studioPromptId: 1, syncStatus: "synced"
+    }]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    mocks.searchPromptsServer.mockResolvedValue({
+      items: [{ id: 1, uuid: "unrelated-library-uuid", name: "NOT_PRESENT_714" }],
+      total_matches: 1, page: 1, per_page: 20
+    })
+    renderPromptBody()
+    const search = await screen.findByRole("textbox", { name: "Search prompts..." })
+    fireEvent.change(search, { target: { value: "NOT_PRESENT_714" } })
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    await waitFor(() => expect(screen.getByTestId("table-row-count")).toHaveTextContent("0"))
+    expect(screen.getByTestId("table-total")).toHaveTextContent("0")
+    fireEvent.change(search, { target: { value: "" } })
+    await new Promise((resolve) => setTimeout(resolve, 350))
+    await waitFor(() => expect(getVisibleRowNames()).toEqual(["Pirate"]))
+  })
+
+  it("debounces online inventory search and paginates every matching local row", async () => {
+    state.prompts = Array.from({ length: 23 }, (_, index) => ({
+      id: `alpha-uuid-${index + 1}`,
+      name: `Alpha ${index + 1}`, title: `Alpha ${index + 1}`,
+      content: "alpha content", is_system: false, createdAt: 100 - index,
+      serverId: index + 1, syncStatus: "synced",
+      ...(index === 0 ? { serverLibraryId: 1, serverLibraryUuid: "imported-library-uuid" } : {})
+    }))
+    state.prompts.push({ id: "beta-uuid", title: "Beta", name: "Beta", content: "beta", is_system: false, createdAt: 1 })
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
     renderPromptBody()
 
     const search = await screen.findByRole("textbox", {
@@ -800,37 +893,24 @@ describe("PromptBody server search and pagination", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 150))
     expect(mocks.searchPromptsServer).not.toHaveBeenCalled()
+    expect(screen.getByTestId("table-total")).toHaveTextContent("24")
 
     await new Promise((resolve) => setTimeout(resolve, 220))
 
-    await waitFor(() => expect(mocks.searchPromptsServer).toHaveBeenCalledTimes(1))
-    expect(mocks.searchPromptsServer.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({
-        searchQuery: "alpha",
-        page: 1,
-        resultsPerPage: 20
-      })
-    )
-    expect(screen.getByTestId("table-row-count")).toHaveTextContent("2")
-    expect(screen.getByTestId("table-total")).toHaveTextContent("3")
+    await waitFor(() => expect(screen.getByTestId("table-total")).toHaveTextContent("23"))
+    expect(screen.getByTestId("table-row-count")).toHaveTextContent("20")
+    const firstPage = getVisibleRowNames()
 
     fireEvent.click(screen.getByTestId("table-next-page"))
 
     await waitFor(() => {
-      expect(mocks.searchPromptsServer).toHaveBeenCalledTimes(2)
+      expect(screen.getByTestId("table-row-count")).toHaveTextContent("3")
     })
-    expect(mocks.searchPromptsServer.mock.calls[1]?.[0]).toEqual(
-      expect.objectContaining({
-        searchQuery: "alpha",
-        page: 2
-      })
-    )
-    await waitFor(() => {
-      expect(screen.getByTestId("table-row-count")).toHaveTextContent("1")
-    })
+    expect(new Set([...firstPage, ...getVisibleRowNames()]).size).toBe(23)
+    expect(mocks.searchPromptsServer).not.toHaveBeenCalled()
   })
 
-  it("merges matching local-only and pending recipes into online search without duplicating synced recipes", async () => {
+  it("searches ordinary and local-only, pending, and synced recipe inventory without duplicates", async () => {
     state.prompts = [
       savedRecipeRecord({
         id: "recipe-synced",
@@ -897,7 +977,7 @@ describe("PromptBody server search and pagination", () => {
     )
   })
 
-  it("paginates the complete mixed local result set when a recipe overlay is present", async () => {
+  it("paginates the complete mixed ordinary and recipe inventory", async () => {
     const ordinarySynced = Array.from({ length: 20 }, (_, index) => ({
       id: `ordinary-synced-${index + 1}`,
       name: `Mixed overlay match ${String(index + 1).padStart(2, "0")}`,
@@ -968,11 +1048,6 @@ describe("PromptBody server search and pagination", () => {
     expect(new Set(firstPage).size).toBe(20)
 
     fireEvent.click(screen.getByTestId("table-next-page"))
-    await waitFor(() =>
-      expect(mocks.searchPromptsServer).toHaveBeenLastCalledWith(
-        expect.objectContaining({ page: 2 })
-      )
-    )
     await new Promise((resolve) => setTimeout(resolve, 50))
     await waitFor(() =>
       expect(screen.getByTestId("table-row-count")).toHaveTextContent("3")
@@ -984,6 +1059,7 @@ describe("PromptBody server search and pagination", () => {
       "Mixed overlay match pending edit"
     ])
     expect(new Set([...firstPage, ...secondPage]).size).toBe(23)
+    expect(mocks.searchPromptsServer).not.toHaveBeenCalled()
   })
 
   it("falls back to local filtering when offline", async () => {
@@ -1289,7 +1365,7 @@ describe("PromptBody server search and pagination", () => {
       role: "user"
     }))
     rendered.queryClient.setQueryData(
-      ["fetchAllPrompts"],
+      ["fetchAllPrompts", recipeOwner.ownerId, "resolved"],
       [
         savedSystemRecipe,
         savedRecipeRecord({
@@ -2155,6 +2231,20 @@ describe("PromptBody server search and pagination", () => {
         "Quick test output"
       )
     })
+  })
+
+  it("carries the real Prompt Quick Test handoff into the mounted Studio execute drawer", async () => {
+    state.realStudio = true
+    state.prompts = [{ id: "synced-live-studio", name: "Owned linked prompt", title: "Owned linked prompt", content: "Synthetic instructions", is_system: false, createdAt: 100, serverId: 501, studioProjectId: 77, keywords: [] }]
+    mocks.getAllPrompts.mockResolvedValue(state.prompts)
+    mocks.hasPromptStudio.mockResolvedValue(true)
+    mocks.getStudioPromptById.mockResolvedValue({ data: { data: { id: 501, project_id: 77, name: "Owned Studio prompt", system_prompt: "Owned system", user_prompt: "{{input}}", version_number: 1 } } })
+    renderPromptBody()
+    fireEvent.click(await screen.findByTestId("mock-quick-test-synced-live-studio"))
+    const drawer = await screen.findByRole("dialog")
+    expect(within(drawer).getByText(/Owned Studio prompt/)).toBeVisible()
+    expect(mocks.getStudioPromptById).toHaveBeenCalledWith(501)
+    expect(screen.getByTestId("prompt-location-search")).toHaveTextContent("subtab=prompts")
   })
 
   it("opens studio execute context for synced prompts when quick test is clicked", async () => {

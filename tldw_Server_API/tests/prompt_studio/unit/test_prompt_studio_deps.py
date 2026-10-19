@@ -603,3 +603,66 @@ async def test_check_rate_limit_sanitizes_shared_limiter_unavailable_warning_log
     assert sensitive_text not in logged_text
     assert "Prompt Studio shared rate limiter unavailable" in logged_text
     assert "RuntimeError" in logged_text
+
+
+def test_postgres_request_release_waits_for_nested_scope(monkeypatch, tmp_path):
+    cache, _created = _install_close_recording_cache(monkeypatch, tmp_path, maxsize=2)
+    db = deps._get_or_create_prompt_studio_db("tenant-42", "web")
+    db.backend_type = BackendType.POSTGRESQL
+    context = {"user_id": "tenant-42", "client_id": "web"}
+    with deps.managed_prompt_studio_db(context) as outer:
+        with deps.managed_prompt_studio_db(context) as inner:
+            assert outer is inner is db  # nosec B101 - Causal request-scope ownership assertion.
+        assert db.close_count == 0  # nosec B101 - Causal request-scope ownership assertion.
+    assert db.close_count == 1  # nosec B101 - Causal request-scope ownership assertion.
+    assert list(cache.values()) == [db]  # nosec B101 - Causal request-scope ownership assertion.
+
+
+def test_postgres_request_release_is_per_thread(monkeypatch, tmp_path):
+    _cache, _created = _install_close_recording_cache(monkeypatch, tmp_path, maxsize=2)
+    db = deps._get_or_create_prompt_studio_db("tenant-42", "web")
+    db.backend_type = BackendType.POSTGRESQL
+    context = {"user_id": "tenant-42", "client_id": "web"}
+    ready = threading.Barrier(3)
+    release_first = threading.Event()
+    release_second = threading.Event()
+    released = []
+    monkeypatch.setattr(db, "close_connection", lambda: released.append(threading.get_ident()))
+
+    def hold(release):
+        with deps.managed_prompt_studio_db(context):
+            ready.wait(timeout=5)
+            assert release.wait(timeout=5)  # nosec B101 - Causal request-scope ownership assertion.
+        return threading.get_ident()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(hold, release_first)
+        second = executor.submit(hold, release_second)
+        try:
+            ready.wait(timeout=5)
+            release_first.set()
+            first_thread = first.result(timeout=5)
+            assert released == [first_thread]  # nosec B101 - Causal request-scope ownership assertion.
+            assert not second.done()  # nosec B101 - Causal request-scope ownership assertion.
+            release_second.set()
+            second_thread = second.result(timeout=5)
+            assert sorted(released) == sorted([first_thread, second_thread])  # nosec B101 - Causal request-scope ownership assertion.
+        finally:
+            release_first.set()
+            release_second.set()
+
+
+def test_postgres_request_release_distinguishes_recreated_cache_instance(monkeypatch, tmp_path):
+    _cache, created = _install_close_recording_cache(monkeypatch, tmp_path, maxsize=1)
+    old = deps._get_or_create_prompt_studio_db("tenant-42", "web")
+    old.backend_type = BackendType.POSTGRESQL
+    context = {"user_id": "tenant-42", "client_id": "web"}
+    with deps.managed_prompt_studio_db(context):
+        deps._get_or_create_prompt_studio_db("other-tenant", "other-client")
+        replacement = deps._get_or_create_prompt_studio_db("tenant-42", "web")
+        replacement.backend_type = BackendType.POSTGRESQL
+        with deps.managed_prompt_studio_db(context):
+            assert replacement.close_count == 0  # nosec B101 - Causal request-scope ownership assertion.
+        assert replacement.close_count == 1  # nosec B101 - Causal request-scope ownership assertion.
+        assert old.close_count == 0  # nosec B101 - Causal request-scope ownership assertion.
+    assert created[0] is old and created[2] is replacement  # nosec B101 - Causal request-scope ownership assertion.

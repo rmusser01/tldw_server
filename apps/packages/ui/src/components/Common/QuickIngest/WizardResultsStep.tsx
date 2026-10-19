@@ -25,6 +25,7 @@ import { useQuickIngestSessionStore } from "@/store/quick-ingest-session"
 import { useIngestWizard } from "./IngestWizardContext"
 import { classifyError, extractionFailureSources } from "./ErrorClassification"
 import type { ErrorCategory } from "./ErrorClassification"
+import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import {
   canOpenMedia,
   canRetryWizardResult,
@@ -291,6 +292,12 @@ const ErrorRow: React.FC<ErrorRowProps> = React.memo(
             <p className="mt-1 text-xs text-text-subtle">
               {category.userMessage} {category.suggestion}
             </p>
+            {item.error && (
+              <details className="mt-1 text-xs text-text-subtle">
+                <summary className="cursor-pointer">{qi("wizard.results.errorDetails", "Error details")}</summary>
+                <p className="mt-1 break-words">{sanitizeServerErrorMessage(item.error, category.userMessage)}</p>
+              </details>
+            )}
             {failedSources.length > 0 && (
               <p className="mt-1 break-all text-xs text-text-subtle">
                 {qi("wizard.results.failedSources", "Failed: {{sources}}", {

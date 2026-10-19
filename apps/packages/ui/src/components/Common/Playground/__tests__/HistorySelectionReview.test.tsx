@@ -323,6 +323,63 @@ const recoveryController = (
   } as unknown as HistorySelectionController
 }
 
+it("accepted unanswered user recovery reviews reapplied prompt before retrying its saved question", async () => {
+  const selection = recoveryController("client", "accepted_unsent")
+  const entry = selection.recoveries[0]
+  const question = {
+    id: entry.turn.input_id, revision: "r1", role: "user",
+    parent_id: null, settled: true
+  }
+  Object.assign(selection, {
+    owner: { kind: "local", owner_key: entry.turn.owner_key, conversation_id: entry.turn.conversation_id },
+    view: { ...entry.turn.origin_view, cursor: { kind: "after_message", message_id: question.id } },
+    bookmarkScope: { profile_id: "original-profile", client_session_id: "reopened-client" },
+    fence: () => () => true,
+    capture: { status: "captured", rows: [question], snapshot: { nodes: [question] } }
+  })
+  const retry = vi.fn(async () => ({ status: "submitted" as const }))
+  const context = { model: "qwen", systemPrompts: ["Answer like a pirate."], isCurrent: () => true }
+  // The extra props model the missing mounted consumer contract without replacing the component.
+  render(<HistorySelectionReview selection={selection} {...{
+    onRetryRecovery: retry,
+    getRetryContext: async () => context
+  }} />)
+  expect(screen.queryByRole("button", { name: "Retry saved question" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
+  expect(await screen.findByText(/Review or reapply the original System\/Prompt settings/)).toBeVisible()
+  expect(screen.getByText("qwen")).toBeVisible()
+  expect(screen.getByText("Answer like a pirate.")).toBeVisible()
+  expect(retry).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: "Retry saved question" }))
+  expect(retry).toHaveBeenCalledWith(entry, { contextReviewed: true, context })
+  expect(selection.dismissRecovery).not.toHaveBeenCalled()
+})
+
+it("an old no-prompt recovery requires explicit current-context confirmation and stays inspectable on refusal", async () => {
+  const selection = recoveryController("client", "accepted_unsent")
+  Object.assign(selection, { fence: () => () => true })
+  const context = { model: "qwen", systemPrompts: [], isCurrent: () => true }
+  const retry = vi.fn(async () => ({ status: "failed" as const, errorMessage: "retry_context_changed" }))
+  render(<HistorySelectionReview selection={selection} getRetryContext={async () => context} onRetryRecovery={retry} />)
+  fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
+  expect(await screen.findByText("No System/Prompt instruction is currently applied.")).toBeVisible()
+  expect(retry).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole("button", { name: "Retry saved question" }))
+  expect(await screen.findByRole("alert")).toHaveTextContent("the original recovery is retained for inspection")
+  expect(selection.dismissRecovery).not.toHaveBeenCalled()
+  expect(screen.getByRole("button", { name: "Copy recovered text" })).toBeVisible()
+})
+
+it.each(["server", "partial", "missing-admission"])("does not offer manual Retry for %s even with a connected callback", refusal => {
+  const selection = recoveryController("client", "accepted_unsent")
+  if (refusal === "server") Object.assign(selection.recoveries[0].turn, { persistence: "server" })
+  else if (refusal === "partial") selection.recoveries[0].turn.result_text = "retained output"
+  else selection.recoveries[0].turn.admission = undefined
+  render(<HistorySelectionReview selection={selection} getRetryContext={async () => ({ model: "qwen", systemPrompts: [], isCurrent: () => true })} onRetryRecovery={vi.fn()} />)
+  expect(screen.queryByRole("button", { name: "Review retry" })).toBeNull()
+  expect(screen.getByRole("button", { name: "Copy recovered text" })).toBeVisible()
+})
+
 it.each(["accepted_unsent", "generated_unsaved"] as const)(
   "native %s recovery keeps known admission and uncertain response visible",
   (state) => {
@@ -410,6 +467,74 @@ it.each(['dispatching', 'unknown', 'partial'] as const)('scopes %s copy guarante
   expect(screen.queryByText(/No copy will be retried automatically/)).toBeNull()
 })
 
+
+it.each(["history_retry_input_changed", "request_config_scope_changed", "provider detail with dummy-private-marker"])("Retry failure details expose only a known refusal (%s)", async reason => {
+  const selection = recoveryController("client", "accepted_unsent")
+  Object.assign(selection, { fence: () => () => true })
+  const context = { model: "qwen", systemPrompts: [], isCurrent: () => true }
+  const retry = vi.fn(async () => ({ status: "failed" as const, errorMessage: reason }))
+  render(<HistorySelectionReview selection={selection} getRetryContext={async () => context} onRetryRecovery={retry} />)
+  fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
+  await screen.findByText("No System/Prompt instruction is currently applied.")
+  fireEvent.click(screen.getByRole("button", { name: "Retry saved question" }))
+  await screen.findByRole("alert")
+  expect(selection.dismissRecovery).not.toHaveBeenCalled()
+  if (reason.startsWith("provider")) {
+    expect(screen.queryByText(reason)).toBeNull()
+    expect(screen.queryByText("Retry details")).toBeNull()
+    return
+  }
+  fireEvent.click(screen.getByText("Retry details"))
+  expect(screen.getByText(reason)).toBeVisible()
+  fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
+  await screen.findByText("No System/Prompt instruction is currently applied.")
+  expect(screen.queryByText(reason)).toBeNull()
+})
+
+
+it.each([true, false])("offers local import consent only for a live resumable candidate: %s", canBindUnavailable => {
+  const onBind = vi.fn()
+  const selection = { ...controller(), owner: { kind: "unavailable", code: "unbound_local_history" }, status: "unsupported_history_capability", error: "unbound_local_history", capture: null, view: null, canBindUnavailable } as unknown as HistorySelectionController
+  render(<HistorySelectionReview selection={selection} onBind={onBind} />)
+  if (canBindUnavailable) {
+    expect(onBind).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole("button", { name: "Use this local conversation" }))
+    expect(onBind).toHaveBeenCalledTimes(1)
+  } else {
+    expect(screen.queryByRole("button", { name: "Use this local conversation" })).toBeNull()
+    expect(onBind).not.toHaveBeenCalled()
+  }
+})
+
+it("hides Connect for a retired native binding candidate", () => {
+  const onBind = vi.fn()
+  const selection = { ...controller(), owner: { kind: "unavailable", code: "unbound_server_mirror" }, status: "unsupported_history_capability", error: "unbound_server_mirror", capture: null, view: null, canBindUnavailable: false } as unknown as HistorySelectionController
+  render(<HistorySelectionReview selection={selection} onBind={onBind} />)
+  expect(screen.queryByRole("button", { name: "Connect this conversation" })).toBeNull()
+  expect(onBind).not.toHaveBeenCalled()
+})
+
+
+it.each([false, true])("B02 reviews a saved question before explicit retry (stale=%s)", async stale => {
+  let current = true
+  const review = {id: "saved-user", revision: "r1", text: "My unanswered question", model: "llamacpp:qwen", isCurrent: () => current}
+  const selected = {...controller(), status: "ready", owner: {kind: "native"}, settingsQualified: true,
+    capture: {rows: [{id: "saved-user", revision: "r1", role: "user"}], snapshot: {nodes: [{id: "saved-user", revision: "r1", role: "user"}]}},
+    view: {cursor: {kind: "after_message", message_id: "saved-user"}}} as unknown as HistorySelectionController
+  const retry = vi.fn(async () => ({status: "submitted" as const}))
+  const getReview = vi.fn(async () => review)
+  render(<HistorySelectionReview selection={selected} getSavedQuestionReview={getReview} onRetrySavedQuestion={retry} />)
+  fireEvent.click(screen.getByRole("button", {name: "Review saved question"}))
+  expect(await screen.findByText("My unanswered question")).toBeVisible()
+  expect(screen.getByText("llamacpp:qwen")).toBeVisible()
+  expect(retry).not.toHaveBeenCalled()
+  current = !stale
+  fireEvent.click(screen.getByRole("button", {name: "Retry saved question"}))
+  if (stale) expect(await screen.findByRole("alert")).toHaveTextContent("Review the saved question again")
+  else { await vi.waitFor(() => expect(retry).toHaveBeenCalledWith(review)) }
+  expect(retry).toHaveBeenCalledTimes(stale ? 0 : 1)
+
+})
 
 describe("available history-path actions (TASK-13550)", () => {
   it("hides both history choices for a ready empty source", () => {

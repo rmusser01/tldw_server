@@ -18,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 
 from tldw_Server_API.app.api.v1.schemas.pagination import OffsetPaginationMeta
 from tldw_Server_API.app.core.Character_Chat.constants import MAX_CHAT_DICTIONARY_TEXT_LENGTH
+from tldw_Server_API.app.core.Utils.iso_datetime import parse_iso_utc
 
 # Maximum length for regex patterns to prevent complexity attacks
 MAX_REGEX_PATTERN_LENGTH = 500
@@ -499,6 +500,12 @@ class ChatDictionaryResponse(ChatDictionaryBase):
         default_factory=list,
         description="Small preview of linked chat sessions",
     )
+
+    @field_validator("created_at", "updated_at")
+    @classmethod
+    def normalize_timestamps(cls, value: datetime) -> datetime:
+        """Expose validated SQLite/ISO dictionary timestamps as aware UTC."""
+        return parse_iso_utc(value) or value
 
     model_config = ConfigDict(from_attributes=True)
 

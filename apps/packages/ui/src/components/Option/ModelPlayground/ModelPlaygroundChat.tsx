@@ -155,11 +155,12 @@ export const ModelPlaygroundChat: React.FC = () => {
       return
     }
 
+    const submittedMessage = message.trim()
+    setMessage("")
     await onSubmit({
-      message: message.trim(),
+      message: submittedMessage,
       image: ""
     })
-    setMessage("")
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

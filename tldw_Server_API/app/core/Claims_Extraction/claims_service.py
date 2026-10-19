@@ -2842,6 +2842,7 @@ async def review_claim(
             expected_version=int(payload.get("review_version")),
             action_ip=action_ip,
             action_user_agent=action_user_agent,
+            actor_user_id=principal.user_id if principal.user_id is not None else int(current_user.id),
         )
         if updated is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Claim not found")
@@ -2991,6 +2992,7 @@ def bulk_review_claims(
                 expected_version=int(claim_row.get("review_version") or 1),
                 action_ip=action_ip,
                 action_user_agent=action_user_agent,
+                actor_user_id=principal.user_id if principal.user_id is not None else int(current_user.id),
             )
             if isinstance(updated, dict) and updated.get("conflict"):
                 conflicts.append(int(cid))

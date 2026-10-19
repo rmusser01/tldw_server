@@ -292,3 +292,20 @@ def test_test_case_update_delete_and_limit(prompt_studio_dual_backend_client):
     # If limiter active, expect to hit error 400 at some point
     if errors == 0:
         pytest.skip("Test case limit not enforced in this environment")
+
+
+def test_project_detail_legacy_and_standard_shapes(prompt_studio_dual_backend_client):
+    """The legacy bare project and canonical envelope remain distinct public contracts."""
+    backend_label, client, _db = prompt_studio_dual_backend_client
+    created = client.post(
+        "/api/v1/prompt-studio/projects/",
+        json={"name": "C02 project details", "description": "Preserve both response shapes"},
+    )
+    assert created.status_code == 201, f"{backend_label}: {created.text}"  # nosec B101 - Pytest verifies the real create contract.
+    expected = created.json()["data"]
+    canonical = client.get(f"/api/v1/prompt-studio/projects/get/{expected['id']}")
+    assert canonical.status_code == 200, f"{backend_label}: {canonical.text}"  # nosec B101 - Pytest verifies the canonical route.
+    assert canonical.json()["data"] == expected  # nosec B101 - Pytest preserves all public project fields.
+    legacy = client.get(f"/api/v1/prompt-studio/projects/{expected['id']}")
+    assert legacy.status_code == 200, f"{backend_label}: {legacy.text}"  # nosec B101 - Pytest catches response serialization failures.
+    assert legacy.json() == expected  # nosec B101 - Pytest preserves the legacy bare-project shape.

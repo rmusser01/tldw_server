@@ -220,6 +220,28 @@ def legacy_view(db, cid, after):
     }, "send", "legacy")["selection"]
 
 
+def test_empty_accepted_legacy_projection_admits_first_input(history_db):
+    db, cid = history_db
+    source = db.get_conversation_history_snapshot(cid, **OWNER)
+    wire = snapshot_to_wire(source)
+    db.confirm_legacy_history_projection({
+        "version": 1, "projection_id": "reviewed", "owner_key": OWNER_KEY, "conversation_id": cid,
+        "source_digest": source.source_digest, "fences": wire["fences"],
+        "source_members": [], "ordered_path_ids": [], "cursor": {"kind": "empty"}, "selection_revision": 1,
+    }, **OWNER)
+    snapshot = snapshot_to_wire(db.get_conversation_history_snapshot(cid, projection_id="reviewed", **OWNER))
+    result = resolve_history_selection(snapshot, {
+        "owner_key": OWNER_KEY, "conversation_id": cid,
+        "interpretation": {"kind": "legacy_linear_v1", "projection_id": "reviewed"},
+        "cursor": {"kind": "empty"}, "selection_revision": 1,
+    }, "send", "legacy")
+    assert result["status"] == "ready", result  # nosec B101 - pytest behavior assertion
+    admission = admit(db, cid, result["selection"], "first-input", history_branch=False)
+    assert admission["input_message_id"] == "first-input"  # nosec B101 - pytest behavior assertion
+    assert db.get_message_by_id("first-input")["parent_message_id"] is None  # nosec B101 - pytest behavior assertion
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101 - pytest behavior assertion
+
+
 def test_legacy_projection_successor_counts_as_live_child(history_db):
     db, cid = history_db
     for mid in ("legacy-a", "legacy-b"):

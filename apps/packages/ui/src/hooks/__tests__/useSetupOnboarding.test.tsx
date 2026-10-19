@@ -26,6 +26,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
       setup_paths: [],
       multi_user_exit: { guide_path: "/docs/multi-user" }
     }),
+    saveSetupProvider: vi.fn(),
+    updateFirstRunState: vi.fn(),
     getMcpToolsCatalog: vi.fn(),
     applyMcpTools: vi.fn(),
     validateMcpTools: vi.fn()
@@ -59,6 +61,8 @@ describe("useSetupOnboarding", () => {
         setup_paths: [],
         multi_user_exit: { guide_path: "/docs/multi-user" }
       })
+    vi.mocked(tldwClient.saveSetupProvider).mockReset()
+    vi.mocked(tldwClient.updateFirstRunState).mockReset()
     vi.mocked(tldwClient.getMcpToolsCatalog).mockReset()
     vi.mocked(tldwClient.applyMcpTools).mockReset()
     vi.mocked(tldwClient.validateMcpTools).mockReset()
@@ -67,6 +71,195 @@ describe("useSetupOnboarding", () => {
   afterEach(() => {
     cleanup()
   })
+
+
+  it("persists a saved default provider draft without acknowledging or copying secrets", async () => {
+    const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+    const { useSetupOnboarding } = await import("../useSetupOnboarding")
+    const state: FirstRunState = {
+      status: "in_progress",
+      completed_steps: [],
+      skipped_steps: [],
+      step_data: {},
+      acknowledged_steps: [],
+      first_chat: { completed: false }
+    }
+    const data = {
+      acknowledged: false,
+      default_provider: "llamacpp",
+      default_model: "real-model",
+      default_base_url: "http://127.0.0.1:8010/v1",
+      default_provider_credential_configured: true
+    }
+    vi.mocked(tldwClient.saveSetupProvider).mockResolvedValue({
+      provider_key: "llamacpp",
+      status: "saved",
+      model: "real-model",
+      base_url: data.default_base_url,
+      make_default: true,
+      credential_configured: true
+    })
+    vi.mocked(tldwClient.updateFirstRunState).mockResolvedValue({
+      ...state,
+      step_data: { providers: data }
+    })
+    const { result } = renderHook(() =>
+      useSetupOnboarding({ initialState: state, autoLoad: false })
+    )
+    await act(async () => {
+      await result.current.saveProvider({
+        provider_key: "llamacpp",
+        model: "real-model",
+        base_url: data.default_base_url,
+        make_default: true,
+        api_key: "synthetic-private-key"
+      })
+    })
+    expect(tldwClient.updateFirstRunState).toHaveBeenCalledWith({
+      step: "providers",
+      data
+    })
+    expect(result.current.state?.step_data.providers).toEqual(data)
+    expect(result.current.state?.completed_steps).not.toContain("providers")
+  })
+
+  it("surfaces a provider draft write failure instead of claiming saved progress", async () => {
+    const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+    const { useSetupOnboarding } = await import("../useSetupOnboarding")
+    const state: FirstRunState = {
+      status: "in_progress",
+      completed_steps: [],
+      skipped_steps: [],
+      step_data: {},
+      acknowledged_steps: [],
+      first_chat: { completed: false }
+    }
+    vi.mocked(tldwClient.saveSetupProvider).mockResolvedValue({
+      provider_key: "openai",
+      status: "saved",
+      model: "working",
+      make_default: true,
+      credential_configured: true
+    })
+    vi.mocked(tldwClient.updateFirstRunState).mockRejectedValue(
+      new Error("progress unavailable")
+    )
+    const { result } = renderHook(() =>
+      useSetupOnboarding({ initialState: state, autoLoad: false })
+    )
+    await act(async () => {
+      await expect(
+        result.current.saveProvider({
+          provider_key: "openai",
+          model: "working",
+          make_default: true
+        })
+      ).rejects.toThrow("progress unavailable")
+    })
+  })
+
+  it.each([
+    {
+      status: "failed" as const,
+      makeDefault: true,
+      stateStatus: "in_progress" as const
+    },
+    {
+      status: "saved" as const,
+      makeDefault: false,
+      stateStatus: "in_progress" as const
+    },
+    {
+      status: "saved" as const,
+      makeDefault: true,
+      stateStatus: "blocked" as const
+    },
+    {
+      status: "saved" as const,
+      makeDefault: true,
+      stateStatus: "skipped" as const
+    },
+    {
+      status: "saved" as const,
+      makeDefault: true,
+      stateStatus: "first_chat_complete" as const
+    },
+    {
+      status: "saved" as const,
+      makeDefault: true,
+      stateStatus: "completed" as const
+    }
+  ])(
+    "does not rewrite provider progress for %j",
+    async ({ status, makeDefault, stateStatus }) => {
+      const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+      const { useSetupOnboarding } = await import("../useSetupOnboarding")
+      const state: FirstRunState = {
+        status: stateStatus,
+        completed_steps: [],
+        skipped_steps: [],
+        step_data: {},
+        acknowledged_steps: [],
+        first_chat: { completed: false }
+      }
+      vi.mocked(tldwClient.saveSetupProvider).mockResolvedValue({
+        provider_key: "openai",
+        status
+      })
+      const { result } = renderHook(() =>
+        useSetupOnboarding({ initialState: state, autoLoad: false })
+      )
+      await act(async () => {
+        await result.current.saveProvider({
+          provider_key: "openai",
+          model: "working",
+          make_default: makeDefault
+        })
+      })
+      expect(tldwClient.updateFirstRunState).not.toHaveBeenCalled()
+    }
+  )
+
+  it.each([
+    "http://user:synthetic-secret@127.0.0.1:8010/v1",
+    "http://127.0.0.1:8010/v1?api_key=synthetic-secret",
+    "http://127.0.0.1:8010/v1#synthetic-secret",
+    "not-a-url"
+  ])(
+    "keeps unsafe endpoint URLs out of public provider progress (%s)",
+    async (baseUrl) => {
+      const { tldwClient } = await import("@/services/tldw/TldwApiClient")
+      const { useSetupOnboarding } = await import("../useSetupOnboarding")
+      const state: FirstRunState = {
+        status: "in_progress",
+        completed_steps: [],
+        skipped_steps: [],
+        step_data: {},
+        acknowledged_steps: [],
+        first_chat: { completed: false }
+      }
+      vi.mocked(tldwClient.saveSetupProvider).mockResolvedValue({
+        provider_key: "llamacpp",
+        status: "saved",
+        model: "working",
+        base_url: baseUrl,
+        make_default: true
+      })
+      const { result } = renderHook(() =>
+        useSetupOnboarding({ initialState: state, autoLoad: false })
+      )
+      await act(async () => {
+        await expect(
+          result.current.saveProvider({
+            provider_key: "llamacpp",
+            model: "working",
+            base_url: baseUrl
+          })
+        ).rejects.toThrow(/saved.*plain.*URL/i)
+      })
+      expect(tldwClient.updateFirstRunState).not.toHaveBeenCalled()
+    }
+  )
 
   it("loads backend first-run state", async () => {
     const { useSetupOnboarding } = await import("../useSetupOnboarding")
@@ -187,7 +380,7 @@ describe("useSetupOnboarding", () => {
 
   it("loads first-run MCP tools catalog into state", async () => {
     const { tldwClient } = await import("@/services/tldw/TldwApiClient")
-    const catalog = {
+    const catalog: Awaited<ReturnType<typeof tldwClient.getMcpToolsCatalog>> = {
       catalog_version: "2026-07-04",
       confirmation_version: "v1",
       packs: [
@@ -226,7 +419,7 @@ describe("useSetupOnboarding", () => {
 
   it("refreshes first-run state after applying MCP tools", async () => {
     const { tldwClient } = await import("@/services/tldw/TldwApiClient")
-    const response = {
+    const response: Awaited<ReturnType<typeof tldwClient.applyMcpTools>> = {
       status: "applied",
       profile_id: 7,
       assignment_id: 9,
@@ -259,7 +452,7 @@ describe("useSetupOnboarding", () => {
 
   it("refreshes first-run state after validating MCP tools", async () => {
     const { tldwClient } = await import("@/services/tldw/TldwApiClient")
-    const response = {
+    const response: Awaited<ReturnType<typeof tldwClient.validateMcpTools>> = {
       status: "validated",
       validation_state: "built_in_passed",
       profile_id: 7,

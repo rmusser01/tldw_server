@@ -1,4 +1,6 @@
 export type AudioErrorCategory =
+  | "invalid_audio"
+  | "input_too_large"
   | "missing_credentials"
   | "missing_model"
   | "engine_unavailable"
@@ -55,6 +57,25 @@ export function classifyAudioError(error: unknown): AudioErrorClassification {
   const debugMessage = sanitizeDebugMessage(rawMessage || "Unknown audio error")
   const lower = rawMessage.toLowerCase()
 
+  const uploadError = error as { status?: unknown; details?: { detail?: { status?: unknown } } } | null
+  if (uploadError?.status === 413) {
+    return {
+      category: "input_too_large",
+      title: "Audio input is too large",
+      recovery: "Use a smaller audio file or shorter text, then try again.",
+      debugMessage
+    }
+  }
+
+  if (uploadError?.status === 400 && uploadError.details?.detail?.status === "invalid_audio") {
+    return {
+      category: "invalid_audio",
+      title: "Audio file cannot be read",
+      recovery: "Choose a valid audio recording, then transcribe again.",
+      debugMessage
+    }
+  }
+
   if (
     includesAny(lower, [
       "notallowederror",
@@ -101,6 +122,7 @@ export function classifyAudioError(error: unknown): AudioErrorClassification {
   }
 
   if (
+    (uploadError?.status === 503 && uploadError.details?.detail?.status === "model_unavailable") ||
     includesAny(lower, [
       "model not found",
       "no such model",

@@ -18,6 +18,37 @@ describe("useComposerText", () => {
     window.localStorage.clear()
   })
 
+  it.each(["", "data:image/png;base64,replacement"])(
+    "clears the image filename when the selected image becomes %s",
+    (nextImage) => {
+      const { result } = renderHook(() => useComposerText({
+        draftKey: "tldw:test:image-filename",
+        textareaRef: createRef()
+      }))
+      act(() => {
+        result.current.form.setFieldValue("image", "data:image/png;base64,original")
+        result.current.form.setFieldValue("imageFilename", "private-diagram.png")
+      })
+      act(() => result.current.form.setFieldValue("image", nextImage))
+      expect(result.current.form.values.imageFilename).toBe("")
+      expect(result.current.form.values.image).toBe(nextImage)
+    }
+  )
+
+  it("clears filename metadata through the existing composer reset", () => {
+    const { result } = renderHook(() => useComposerText({
+      draftKey: "tldw:test:image-reset",
+      textareaRef: createRef()
+    }))
+    act(() => {
+      result.current.form.setFieldValue("image", "data:image/png;base64,original")
+      result.current.form.setFieldValue("imageFilename", "private-diagram.png")
+    })
+    act(() => result.current.form.reset())
+    expect(result.current.form.values.imageFilename).toBe("")
+    expect(result.current.form.values.image).toBe("")
+  })
+
   it("initializes with an empty message", () => {
     const { result } = renderHook(() =>
       useComposerText({

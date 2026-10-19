@@ -397,6 +397,7 @@ export function useCreateQuestionMutation() {
     mutationFn: (params: { quizId: number; question: QuestionCreate }) =>
       createQuestion(params.quizId, params.question),
     onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: ["quizzes:list"] })
       qc.invalidateQueries({ queryKey: ["quizzes:questions", variables.quizId] })
       qc.invalidateQueries({ queryKey: ["quizzes:detail", variables.quizId] })
     }
@@ -430,6 +431,7 @@ export function useDeleteQuestionMutation() {
     mutationFn: (params: { quizId: number; questionId: number; version: number }) =>
       deleteQuestion(params.quizId, params.questionId, params.version),
     onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: ["quizzes:list"] })
       qc.invalidateQueries({ queryKey: ["quizzes:questions", variables.quizId] })
       qc.invalidateQueries({ queryKey: ["quizzes:detail", variables.quizId] })
     }

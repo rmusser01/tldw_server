@@ -108,7 +108,7 @@ it.each(["save", "cancel"])(
     windowRange.start = 0
     windowRange.end = 3
     view.rerender(timeline())
-    fireEvent.click(screen.getByRole("button", { name: action, exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: action }))
     expect(save.mock.calls).toEqual(
       action === "save" ? [["message-1", "Unsaved draft"]] : []
     )

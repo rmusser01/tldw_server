@@ -1,12 +1,17 @@
 import { afterEach, expect, it, vi } from "vitest"
 import { createSafeStorage } from "../safe-storage"
 import { requirePersistentStorage } from "../persistent-storage"
+import { Storage as NativeStorage } from "../../../node_modules/@plasmohq/storage/dist/index.js"
+
+// Bind the real safe-storage factory to its owner's installed native dependency.
+vi.mock("@plasmohq/storage", () => import("../../../node_modules/@plasmohq/storage/dist/index.js"))
 
 afterEach(() => vi.unstubAllGlobals())
 it("rejects installed Plasmo's silent no-client get/set path while preserving ordinary use", async () => {
   vi.stubGlobal("browser", undefined)
   vi.stubGlobal("chrome", undefined)
   const storage = createSafeStorage({ area: "local" })
+  expect(storage).toBeInstanceOf(NativeStorage)
   await storage.set("required", "persona")
   expect(await storage.get("required")).toBeUndefined()
   expect(() => requirePersistentStorage(storage)).toThrow(

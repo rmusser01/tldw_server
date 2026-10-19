@@ -103,6 +103,7 @@ def test_collect_startup_worker_specs_accepts_real_provider_graph() -> None:
         "admin_webhook_delivery_runtime_task",
         "audio_jobs_task",
         "audiobook_jobs_task",
+        "audio_studio_jobs_task",
         "authnz_scheduler",
         "automation_definitions_sched_task",
         "chatbooks_cleanup",
