@@ -99,6 +99,10 @@ import { ModelSelect } from "@/components/Common/ModelSelect"
 import { ConnectionStatusIndicator } from "@/components/Sidepanel/Chat/ConnectionStatusIndicator"
 import { ControlRow } from "@/components/Sidepanel/Chat/ControlRow"
 import { SidepanelComposerControlArea } from "@/components/Sidepanel/Chat/SidepanelComposerControlArea"
+import {
+  SidepanelResponseStatus,
+  resolveSidepanelPrimaryAction
+} from "@/components/Sidepanel/Chat/sidepanel-response-status"
 import { PromptAssistComposerAction } from "@/components/Chat/composer/PromptAssistComposerAction"
 import { ContextChips } from "@/components/Sidepanel/Chat/ContextChips"
 import { SlashCommandMenu } from "@/components/Sidepanel/Chat/SlashCommandMenu"
@@ -3412,18 +3416,17 @@ export const SidepanelForm = ({
     [form, submitCurrentRequest]
   )
 
-  const shouldQueuePrimaryAction = isSending && isConnectionReady
-  const primaryActionLabel = shouldQueuePrimaryAction
-    ? t("common:queue", "Queue")
-    : t("common:send", "Send")
-  const primaryActionTitle = personaSubmitDisabledReason ?? (!isConnectionReady
-    ? t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") as string
-    : shouldQueuePrimaryAction
-      ? t("playground:composer.queue.primaryWhileBusy", "Queue this request to run after the current response.") as string
-      : sendButtonTitle)
-  const primaryActionAriaLabel = shouldQueuePrimaryAction
-    ? (t("playground:composer.queue.primaryAria", "Queue request") as string)
-    : (t("playground:composer.submitAria", "Send message") as string)
+  const primaryAction = resolveSidepanelPrimaryAction({
+    isSending,
+    isConnectionReady,
+    sendTitle: sendButtonTitle,
+    disabledReason: personaSubmitDisabledReason,
+    t: (key, fallback, options) => String(t(key, fallback, options))
+  })
+  const shouldQueuePrimaryAction = primaryAction.queuesAfterReply
+  const primaryActionLabel = primaryAction.label
+  const primaryActionTitle = primaryAction.title
+  const primaryActionAriaLabel = primaryAction.ariaLabel
   const v5DocumentProcessingFacet = React.useMemo(() => {
     if (contextFiles.length === 0) return null
 
@@ -3824,6 +3827,16 @@ export const SidepanelForm = ({
                         </div>
                       )
 
+                      const composerResponseStatusNode = (
+                        <SidepanelResponseStatus
+                          isSending={isSending}
+                          messages={messages}
+                          selectedModel={selectedModel}
+                          models={chatModels}
+                          className="px-2 py-1"
+                        />
+                      )
+
                       const composerInlineMessagesNode = (
                         <>
                           {personaSubmitDisabledReason && <p role="status" className="px-2 py-1 text-sm text-text-muted">{personaSubmitDisabledReason}</p>}
@@ -3998,7 +4011,7 @@ export const SidepanelForm = ({
                               className="flex min-w-0 flex-wrap items-center gap-2">
                               {/* L15: gap-2 provides visual separation */}
                               <>
-                                {!streaming ? (
+                                {!primaryAction.showStop ? (
                                   <>
                                     <Tooltip
                                       title={t("playground:actions.upload", "Attach image")}
@@ -4490,7 +4503,7 @@ export const SidepanelForm = ({
                             )}
                           </div>
                           <div className="flex items-end gap-2">
-                            {streaming && (
+                            {primaryAction.showStop && (
                               <div className="flex flex-col items-center gap-1">
                                 <Tooltip title={t("tooltip.stopStreaming")}>
                                   <button
@@ -4544,7 +4557,12 @@ export const SidepanelForm = ({
                       )
 
                       if (nextgenComposerEnabled) {
-                        const sharedNoticesSlot = composerInlineMessagesNode
+                        const sharedNoticesSlot = (
+                          <>
+                            {composerInlineMessagesNode}
+                            {composerResponseStatusNode}
+                          </>
+                        )
 
                         // Compact brief for V3 in the sidepanel — same idea
                         // as Playground's, trimmed to the data Sidepanel
@@ -4657,7 +4675,7 @@ export const SidepanelForm = ({
                           "inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-surface text-text-muted transition-colors hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus disabled:cursor-not-allowed disabled:opacity-50"
                         const v5InlineSlot = (
                           <>
-                            {!streaming ? (
+                            {!primaryAction.showStop ? (
                               <>
                                 <Tooltip
                                   title={t(
@@ -4919,6 +4937,7 @@ export const SidepanelForm = ({
                         <>
                           {composerTextareaShellNode}
                           {composerInlineMessagesNode}
+                          {composerResponseStatusNode}
                           {composerControlAreaNode}
                         </>
                       )
