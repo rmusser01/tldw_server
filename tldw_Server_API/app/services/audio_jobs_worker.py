@@ -106,12 +106,13 @@ async def hand_off(
     The next stage is queued first, so a failed hand-off fails this stage instead of completing it with nothing
     after it. The key makes a re-run stage reuse the next stage it already queued, which also makes a repeated
     enqueue safe. The next stage continues this job, so it is exempt from the per-user fair-share limit and the
-    submit quotas.
+    submit quotas. If this stage was cancelled while it ran, the stage just queued is cancelled too, so the
+    pipeline stops here.
     """
     next_queue = _next_stage_queue(next_type)
     for delay in (*_ENQUEUE_RETRY_DELAYS, None):
         try:
-            jm.create_job(
+            next_job = jm.create_job(
                 domain=DOMAIN,
                 queue=next_queue,
                 job_type=next_type,
@@ -139,7 +140,9 @@ async def hand_off(
                 )
             await asyncio.sleep(delay)
     lease_id = str(job.get("lease_id"))
-    jm.complete_job(int(job["id"]), result=result, worker_id=worker_id, lease_id=lease_id, completion_token=lease_id)
+    if not jm.complete_job(int(job["id"]), result=result, worker_id=worker_id, lease_id=lease_id, completion_token=lease_id):
+        if (jm.get_job(int(job["id"])) or {}).get("status") == "cancelled":
+            jm.cancel_job(int(next_job["id"]), reason="pipeline_cancelled")
     return None
 
 

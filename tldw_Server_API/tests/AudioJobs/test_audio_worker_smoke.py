@@ -500,7 +500,7 @@ async def test_audio_gpu_worker_sanitizes_owner_slot_release_log(monkeypatch):
             }
 
         def complete_job(self, *args, **kwargs):
-            return None
+            return True
 
         def create_job(self, *args, **kwargs):
             return {"id": 104}
@@ -1632,3 +1632,26 @@ async def test_audio_store_with_a_result_over_the_cap_fails_instead_of_staying_p
     await _run_worker_until(worker, lambda: (jm.get_job(job_id) or {}).get("status") in {"completed", "failed"}, seconds=2)
     job = jm.get_job(job_id) or {}
     assert (job.get("status"), job.get("retry_count"), job.get("error_code")) == ("failed", 0, "result_too_large")
+
+
+# --- cancelling a pipeline (TASK-13852) ---
+
+
+@pytest.mark.unit
+async def test_cancelling_a_running_stage_stops_the_stages_after_it(pipeline_worker, monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    worker, jm, stt_calls = pipeline_worker
+
+    def _stt_cancelled_while_running(wav_path, model, *args, **kwargs):
+        stt_calls.append(wav_path)
+        assert jm.cancel_job(int(_jobs_of(jm, "audio_transcribe")[0]["id"]), reason="user")
+        return {"text": "hello pipeline", "segments": [{"Text": "hello pipeline"}]}
+
+    monkeypatch.setattr(atlib, "run_stt_job_via_registry", _stt_cancelled_while_running)
+    _convert_job(jm)
+    await _run_worker_until(
+        worker, lambda: any(j["status"] not in {"queued", "processing"} for j in _jobs_of(jm, "audio_store"))
+    )
+    assert [j["status"] for j in _jobs_of(jm, "audio_transcribe")] == ["cancelled"]
+    assert [j["status"] for j in _jobs_of(jm, "audio_store")] == ["cancelled"]
