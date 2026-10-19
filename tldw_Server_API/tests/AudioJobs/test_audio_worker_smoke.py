@@ -3,6 +3,7 @@ import os
 import shutil
 import sqlite3
 import tempfile
+import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -798,19 +799,21 @@ def analyze_worker(monkeypatch, tmp_path):
     return worker, JobManager(), adapter
 
 
-async def _run_worker_until(worker, done) -> None:
+async def _run_worker_until(worker, done, *, workers: int = 1, seconds: float = 5.0) -> None:
+    """Run ``workers`` audio worker loops (as separate server processes would) until ``done()`` or ``seconds``."""
     stop = asyncio.Event()
-    task = asyncio.create_task(worker.run_audio_jobs_worker(stop))
+    tasks = [asyncio.create_task(worker.run_audio_jobs_worker(stop)) for _ in range(workers)]
     try:
-        for _ in range(100):
+        for _ in range(int(seconds / 0.05)):
             await asyncio.sleep(0.05)
-            if task.done():
-                pytest.fail(f"audio worker crashed: {task.exception()!r}")
+            for task in tasks:
+                if task.done():
+                    pytest.fail(f"audio worker crashed: {task.exception()!r}")
             if done():
                 break
     finally:
         stop.set()
-        await asyncio.wait_for(task, timeout=2.0)
+        await asyncio.wait_for(asyncio.gather(*tasks), timeout=10.0)
 
 
 def _analyze_job(jm, text: str, api_name: str | None = "openai") -> int:
@@ -1281,3 +1284,97 @@ async def test_audio_analyze_skip_is_logged(analyze_worker, monkeypatch):
     await _run_worker_until(worker, lambda: bool(jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7")))
     info_lines = [message.format(*args) if args else message for level, message, args, _ in capture.records if level == "info"]
     assert f"Audio job {job_id}: analysis skipped, no api_name" in info_lines
+
+
+# --- the stage lease (TASK-13850) ---
+
+
+def _store_completed(jm) -> bool:
+    return any(j.get("status") == "completed" for j in _jobs_of(jm, "audio_store"))
+
+
+@pytest.mark.unit
+async def test_a_stage_longer_than_its_lease_runs_once(pipeline_worker, monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    worker, jm, stt_calls = pipeline_worker
+    monkeypatch.setenv("JOBS_LEASE_SECONDS", "2")
+
+    def _slow_stt(wav_path, model, *args, **kwargs):
+        stt_calls.append(wav_path)
+        time.sleep(3)  # longer than the lease
+        return {"text": "hello pipeline", "segments": [{"Text": "hello pipeline"}]}
+
+    monkeypatch.setattr(atlib, "run_stt_job_via_registry", _slow_stt)
+    _convert_job(jm)
+    # Two worker loops, as two server processes would run them: the second must not recover the lease.
+    await _run_worker_until(worker, lambda: _store_completed(jm), workers=2, seconds=15)
+    assert len(stt_calls) == 1
+    assert [(j["status"], j["retry_count"]) for j in _jobs_of(jm, "audio_transcribe")] == [("completed", 0)]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("stage_fails", [False, True], ids=["completes", "fails"])
+async def test_lease_renewal_stops_when_the_stage_ends(pipeline_worker, monkeypatch, stage_fails):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    worker, jm, stt_calls = pipeline_worker
+    monkeypatch.setenv("JOBS_LEASE_SECONDS", "4")  # a renewal every 2 s
+    renewed = []
+    original_renew = JobManager.renew_job_lease
+
+    def _recording_renew(self, job_id, **kwargs):
+        renewed.append(int(job_id))
+        return original_renew(self, job_id, **kwargs)
+
+    monkeypatch.setattr(JobManager, "renew_job_lease", _recording_renew)
+
+    def _stt(wav_path, model, *args, **kwargs):
+        time.sleep(3)  # one renewal, at 2 s
+        if stage_fails:
+            raise RuntimeError("stt failed")
+        return {"text": "hello pipeline", "segments": [{"Text": "hello pipeline"}]}
+
+    monkeypatch.setattr(atlib, "run_stt_job_via_registry", _stt)
+    job_id = int(jm.create_job(
+        domain="audio", queue="default", job_type="audio_transcribe",
+        payload={"wav_path": "/tmp/p.wav", "model": "whisper-1", "perform_chunking": False, "perform_analysis": False},
+        owner_user_id="7", max_retries=0,
+    )["id"])
+    await _run_worker_until(worker, lambda: (jm.get_job(job_id) or {}).get("status") in {"completed", "failed"})
+    await asyncio.sleep(2)  # a renewal still running would fire again at 4 s
+    assert (jm.get_job(job_id) or {}).get("status") == ("failed" if stage_fails else "completed")
+    assert renewed.count(job_id) == 1
+
+
+@pytest.mark.unit
+async def test_a_renewal_error_does_not_end_the_renewals(pipeline_worker, monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    worker, jm, stt_calls = pipeline_worker
+    # A 3 s lease is renewed every second (3 // 2): the renewal after the failed one still comes a second
+    # before the lease runs out.
+    monkeypatch.setenv("JOBS_LEASE_SECONDS", "3")
+    renewals = []
+    original_renew = JobManager.renew_job_lease
+
+    def _first_renewal_fails(self, job_id, **kwargs):
+        renewals.append(int(job_id))
+        if len(renewals) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return original_renew(self, job_id, **kwargs)
+
+    monkeypatch.setattr(JobManager, "renew_job_lease", _first_renewal_fails)
+
+    def _slow_stt(wav_path, model, *args, **kwargs):
+        stt_calls.append(wav_path)
+        time.sleep(4)  # longer than the lease
+        return {"text": "hello pipeline", "segments": [{"Text": "hello pipeline"}]}
+
+    monkeypatch.setattr(atlib, "run_stt_job_via_registry", _slow_stt)
+    _convert_job(jm)
+    await _run_worker_until(worker, lambda: _store_completed(jm), workers=2, seconds=20)
+    assert len(stt_calls) == 1
+    assert [(j["status"], j["retry_count"]) for j in _jobs_of(jm, "audio_transcribe")] == [("completed", 0)]
