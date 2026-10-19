@@ -489,6 +489,8 @@
     "goToSettings": "Go to Settings",
     "goToHealth": "Go to Health & Diagnostics",
     "newChat": "New Chat",
+    "toggleKnowledgeSearch": "Toggle Search & Context",
+    "toggleKnowledgeSearchDesc": "Search your knowledge base and context",
     "toggleChatWithPage": "Toggle chat with current page",
     "toggleChatWithPageDesc": "Answer using the page open in this browser tab",
     "toggleWebSearch": "Toggle Web Search",

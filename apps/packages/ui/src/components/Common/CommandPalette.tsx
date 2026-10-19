@@ -432,23 +432,40 @@ export function CommandPalette({
         ? ([
             {
               id: "action-toggle-rag",
-              // Same term as the help sheet and the Send menu checkbox (XS-08).
-              label: t(
-                "common:commandPalette.toggleChatWithPage",
-                "Toggle chat with current page"
+              // In the side panel this mode chats with the current page; use the
+              // help sheet's and Send menu's term there (XS-08).
+              label: isSidepanel
+                ? t(
+                    "common:commandPalette.toggleChatWithPage",
+                    "Toggle chat with current page"
+                  )
+                : t(
+                    "common:commandPalette.toggleKnowledgeSearch",
+                    "Toggle Search & Context"
+                  ),
+              description: isSidepanel
+                ? t(
+                    "common:commandPalette.toggleChatWithPageDesc",
+                    "Answer using the page open in this browser tab"
+                  )
+                : t(
+                    "common:commandPalette.toggleKnowledgeSearchDesc",
+                    "Search your knowledge base and context"
+                  ),
+              icon: isSidepanel ? (
+                <Globe className="size-4" />
+              ) : (
+                <Search className="size-4" />
               ),
-              description: t(
-                "common:commandPalette.toggleChatWithPageDesc",
-                "Answer using the page open in this browser tab"
-              ),
-              icon: <Globe className="size-4" />,
               shortcut: toCommandShortcut(configuredShortcuts.toggleChatMode),
               action: () => {
                 onToggleRag()
                 setOpen(false)
               },
               category: "action",
-              keywords: ["page", "website", "tab", "context", "rag"],
+              keywords: isSidepanel
+                ? ["page", "website", "tab", "context", "rag"]
+                : ["search", "knowledge", "retrieve", "rag"],
             }
           ] as CommandItem[])
         : []),
