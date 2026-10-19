@@ -1,7 +1,7 @@
 ---
 id: TASK-13635
 title: RAG custom completeness metric never calls a provider
-status: To Do
+status: In Progress
 labels:
 - rag
 - evaluations
@@ -16,13 +16,14 @@ RAGCustomMetrics.evaluate_response_completeness (core/RAG/rag_custom_metrics.py,
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The completeness metric calls a configured provider through analyze with the right arguments, off the event loop
-- [ ] #2 With no provider configured it keeps the heuristic, and says so in the result
+- [ ] #1 evaluate_response_completeness and evaluate_all_metrics, which nothing in the app or the WebUI calls, are deleted, so rag_custom_metrics makes no LLM call
+- [ ] #2 The docs that name the metric (the service prompt inventory, the RAG pipeline evaluation design and the LLM usage accounting design section 4b) say it was deleted
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: plan_quota_callers_rag_metric.md (PR B, tasks 10-11). Owner decision 4: delete the metric. The original ACs assumed a caller: git grep on origin/dev finds none in tldw_Server_API/app, apps/ or the tests other than test_rag_custom_metrics_sanitizers.py, and eval_runner uses only the coverage and diversity metrics. ACs amended to match.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

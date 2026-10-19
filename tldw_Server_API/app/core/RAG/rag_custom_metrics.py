@@ -14,10 +14,7 @@ from enum import Enum
 from typing import Any, Optional
 
 import numpy as np
-from loguru import logger
 from sklearn.metrics.pairwise import cosine_similarity
-
-from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 
 # Safe import of embeddings helpers to avoid heavy deps during app import
 try:
@@ -197,86 +194,6 @@ class RAGCustomMetrics:
             suggestions=suggestions
         )
 
-    async def evaluate_response_completeness(
-        self,
-        query: str,
-        response: str,
-        expected_elements: Optional[list[str]] = None
-    ) -> CustomMetricResult:
-        """
-        Evaluate completeness of the generated response.
-
-        Checks if the response addresses all aspects of the query.
-        """
-        # Use LLM to evaluate completeness
-        prompt = f"""
-        Evaluate the completeness of this response to the given query.
-
-        Query: {query}
-
-        Response: {response}
-
-        Rate the completeness on a scale of 0-10 where:
-        - 0-3: Response is incomplete, missing major elements
-        - 4-6: Response covers basics but lacks depth
-        - 7-8: Response is mostly complete with minor gaps
-        - 9-10: Response is comprehensive and complete
-
-        Also identify any missing elements.
-
-        Format your response as:
-        Score: [0-10]
-        Missing: [list any missing elements or "None"]
-        """
-
-        try:
-            llm_response = await analyze(prompt, "You are an expert at evaluating response completeness")
-
-            # Parse score
-            score_line = [l for l in llm_response.split('\n') if 'Score:' in l]
-            score = float(score_line[0].split(':')[1].strip()) / 10 if score_line else 0.5
-
-            # Parse missing elements
-            missing_line = [l for l in llm_response.split('\n') if 'Missing:' in l]
-            missing = missing_line[0].split(':')[1].strip() if missing_line else ""
-
-            # Check expected elements if provided
-            if expected_elements:
-                found_elements = [e for e in expected_elements if e.lower() in response.lower()]
-                element_score = len(found_elements) / len(expected_elements)
-                score = (score + element_score) / 2
-
-            suggestions = []
-            if score < 0.7:
-                suggestions.append("Response lacks completeness")
-                if missing and missing != "None":
-                    suggestions.append(f"Consider adding: {missing}")
-
-            return CustomMetricResult(
-                metric_type=MetricType.RESPONSE_COMPLETENESS,
-                score=score,
-                confidence=0.75,
-                details={
-                    "missing_elements": missing,
-                    "expected_elements_found": found_elements if expected_elements else None
-                },
-                suggestions=suggestions
-            )
-
-        except Exception:
-            logger.error("Failed to evaluate completeness; using heuristic fallback")
-            # Fallback to simple heuristic
-            word_count = len(response.split())
-            score = min(1.0, word_count / 200)  # Assume 200 words is complete
-
-            return CustomMetricResult(
-                metric_type=MetricType.RESPONSE_COMPLETENESS,
-                score=score,
-                confidence=0.5,
-                details={"word_count": word_count, "method": "heuristic"},
-                suggestions=["Could not perform deep evaluation"]
-            )
-
     async def evaluate_source_attribution(
         self,
         response: str,
@@ -428,75 +345,6 @@ class RAGCustomMetrics:
             },
             suggestions=suggestions
         )
-
-    async def evaluate_all_metrics(
-        self,
-        query: str,
-        retrieved_contexts: list[str],
-        response: str,
-        sources: Optional[list[dict[str, Any]]] = None,
-        tokens_used: Optional[int] = None,
-        estimated_cost: Optional[float] = None,
-        response_time_ms: Optional[float] = None
-    ) -> dict[str, CustomMetricResult]:
-        """
-        Evaluate all applicable custom metrics.
-        """
-        results = {}
-
-        # Retrieval metrics
-        coverage_task = self.evaluate_retrieval_coverage(query, retrieved_contexts)
-        diversity_task = self.evaluate_retrieval_diversity(retrieved_contexts,
-                                                          [s.get('source') for s in sources] if sources else None)
-
-        # Response metrics
-        completeness_task = self.evaluate_response_completeness(query, response)
-        coherence_task = self.evaluate_response_coherence(response)
-
-        # Attribution metric
-        attribution_task = None
-        if sources:
-            attribution_task = self.evaluate_source_attribution(response, sources)
-
-        # Cost metric
-        cost_task = None
-        if tokens_used and estimated_cost:
-            # Estimate quality from other metrics (simplified)
-            cost_task = self.evaluate_cost_efficiency(tokens_used, 0.75, estimated_cost)
-
-        # Gather all results
-        tasks = [
-            ("coverage", coverage_task),
-            ("diversity", diversity_task),
-            ("completeness", completeness_task),
-            ("coherence", coherence_task)
-        ]
-
-        if attribution_task:
-            tasks.append(("attribution", attribution_task))
-        if cost_task:
-            tasks.append(("cost", cost_task))
-
-        # Execute all evaluations in parallel
-        for name, task in tasks:
-            try:
-                result = await task
-                results[name] = result
-            except Exception:
-                logger.error(f"Failed to evaluate {name}; skipping metric")
-
-        # Add response time metric if provided
-        if response_time_ms:
-            time_score = 1.0 if response_time_ms < 1000 else 0.5 if response_time_ms < 5000 else 0.2
-            results["response_time"] = CustomMetricResult(
-                metric_type=MetricType.RESPONSE_TIME,
-                score=time_score,
-                confidence=1.0,
-                details={"response_time_ms": response_time_ms},
-                suggestions=["Optimize query processing"] if time_score < 0.5 else []
-            )
-
-        return results
 
     async def _extract_concepts(self, text: str) -> list[str]:
         """Extract key concepts from text."""
