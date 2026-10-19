@@ -637,7 +637,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
     initialize: vi.fn(async () => undefined),
     getConfig: async () => sourceFlow.config,
     getChat: async (id: string) => ({ id, title: "Cedar saved chat", character_id: null, assistant_id: null, assistant_kind: null, version: 1 }),
-    captureHistorySelection: async (id: string, request: any) => {
+    captureHistorySelection: async (id: string, request: Parameters<typeof tldwClient.captureHistorySelection>[1]) => {
       const ownerKey = `native-history-v1:sha256:${chatDraftOwnerKey(sourceFlow.snapshot!.requestScope)}`
       const data = await sourceFlow.getFullChatData(id)
       const nodes = data.messages.map((row: typeof cedarRows[number], index: number) => ({ id: row.id, revision: "1", role: row.role,
@@ -1223,18 +1223,19 @@ function useStaticMessageOptions() {
 function SourceFlowInner({ sourceActions }: { sourceActions: ReturnType<typeof useSourceFlowActions> }) {
   const session = usePlaygroundSessionPersistence()
   const selection = useHistorySelectionContext()!
+  const selectionFence = selection.fence
   const chatId = useStoreMessageOption(state => state.serverChatId)
   const owner = selection.getCurrent().owner
   React.useEffect(() => {
     if (!chatId || owner?.kind !== "native" || owner.conversation_id !== chatId) return
     let mounted = true
-    const current = selection.fence()
+    const current = selectionFence()
     void tldwClient.getChat(chatId).then(detail => {
       if (mounted && current() && useStoreMessageOption.getState().serverChatId === detail.id)
         useStoreMessageOption.getState().setServerChatMetaLoaded(true)
     })
     return () => { mounted = false }
-  }, [chatId, owner, selection.fence])
+  }, [chatId, owner, selectionFence])
   sourceFlow.restore = session.restoreSession
   sourceFlow.sessionReady = session.sessionScopeReady
   return (

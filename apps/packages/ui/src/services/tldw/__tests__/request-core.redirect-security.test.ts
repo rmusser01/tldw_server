@@ -24,6 +24,25 @@ afterEach(async () => {
 })
 
 describe("configured server redirect boundary", () => {
+  it.each(["//attacker.example/collect", "/\\attacker.example/collect"])(
+    "rejects raw-only URL flags on ordinary parsed requests: %s",
+    async path => {
+      vi.stubEnv("NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE", "quickstart")
+      const fetchFn = vi.fn(async () => new Response("{}"))
+      const result = await tldwRequest({ path: path as PathOrUrl, preResolvedUrl: true }, {
+        getConfig: async () => ({
+          serverUrl: "https://configured.example.test",
+          authMode: "single-user",
+          apiKey: "redirect-regression-key"
+        }),
+        fetchFn,
+        useRuntimeAuthOverride: false
+      })
+      expect(result.status).toBe(400)
+      expect(fetchFn).not.toHaveBeenCalled()
+    }
+  )
+
   it.each([
     { serverUrl: "https://new.example.test" },
     { authMode: "single-user" },

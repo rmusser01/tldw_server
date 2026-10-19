@@ -786,7 +786,8 @@ const performTldwRequest = async (
     receipt?: RecipeDeliveryReceipt;
   },
 ): Promise<ApiSendResponse> => {
-  const resolvedPlan = await resolveTldwRequestPlan(payload, runtime);
+  // Raw-only URL handling must not relax ordinary IPC request guards.
+  const resolvedPlan = await resolveTldwRequestPlan({ ...payload, preResolvedUrl: false }, runtime);
   if (resolvedPlan.ok !== true) {
     return {
       ok: false,
