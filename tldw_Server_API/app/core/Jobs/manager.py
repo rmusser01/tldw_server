@@ -8187,10 +8187,16 @@ class JobManager:
         error_class: str | None = None,
         error_stack: dict[str, Any] | None = None,
         completion_token: str | None = None,
+        quarantine: bool = True,
     ) -> bool:
         """Mark a job as failed; optionally reschedule with backoff if retryable.
 
         See `renew_job_lease` for enforcement semantics.
+
+        ``quarantine=False`` exempts this failure from the poison-message quarantine
+        (JOBS_QUARANTINE_THRESHOLD identical failures in a row), for failures that are
+        expected to repeat, such as a provider rate limit. Retries still stop at
+        ``max_retries``, and the job then fails.
         """
         # Strong exactly-once finalize (optional): require a completion_token when enabled
         if (
@@ -8273,6 +8279,8 @@ class JobManager:
                                 thresh = max(base_thresh, 10**9)
                             else:
                                 thresh = base_thresh
+                            if not quarantine:
+                                thresh = 10**9
                             # Update retry path with failure streak bookkeeping
                             if enforce:
                                 cur.execute(
@@ -8866,6 +8874,8 @@ class JobManager:
                                     thresh = max(base_thresh, 10**9)
                                 else:
                                     thresh = base_thresh
+                        if not quarantine:
+                            thresh = 10**9
                         # SQLite retry path with failure streak bookkeeping
                         if enforce:
                             retry_cursor = conn.execute(

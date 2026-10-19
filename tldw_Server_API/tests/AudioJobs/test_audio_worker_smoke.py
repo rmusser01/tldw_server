@@ -1,6 +1,7 @@
 import os
 import shutil
 import asyncio
+import sqlite3
 import tempfile
 from types import SimpleNamespace
 import numpy as np
@@ -825,6 +826,38 @@ def _failed_or_retried(jm, job_id: int) -> bool:
     return job.get("status") in {"failed", "quarantined"} or int(job.get("retry_count") or 0) >= 1
 
 
+def _stored(jm) -> list:
+    return jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7")
+
+
+def _settled(jm, job_id: int, retries: int = 1) -> bool:
+    """The analyze job handed over to audio_store, ended, or was retried `retries` times."""
+    job = jm.get_job(job_id) or {}
+    ended = job.get("status") in {"failed", "quarantined"}
+    return bool(_stored(jm)) or ended or int(job.get("retry_count") or 0) >= retries
+
+
+def _seconds_until_due(jm, job_id: int) -> float:
+    """How far in the future the job's available_at is; 0.0 when it is NULL."""
+    connection = sqlite3.connect(jm.db_path)
+    try:
+        row = connection.execute(
+            "SELECT (julianday(available_at) - julianday('now')) * 86400 FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+    finally:
+        connection.close()
+    return float(row[0] or 0.0)
+
+
+def _make_due(jm, job_id: int) -> None:
+    connection = sqlite3.connect(jm.db_path)
+    try:
+        connection.execute("UPDATE jobs SET available_at = DATETIME('now') WHERE id = ?", (job_id,))
+        connection.commit()
+    finally:
+        connection.close()
+
+
 @pytest.mark.unit
 async def test_audio_analyze_stores_the_model_analysis(analyze_worker):
     worker, jm, adapter = analyze_worker
@@ -914,6 +947,25 @@ async def test_audio_analyze_rate_limit_still_retries(analyze_worker):
     assert int(job.get("retry_count") or 0) >= 1
     assert job.get("status") != "failed"
     assert job.get("error_code") == "rate_limit"
+
+
+@pytest.mark.unit
+async def test_audio_analyze_rate_limit_waits_and_is_not_quarantined(analyze_worker):
+    from tldw_Server_API.app.core.exceptions import ChatRateLimitError
+
+    worker, jm, adapter = analyze_worker
+    adapter.error = ChatRateLimitError(provider="openai")
+    job_id = _analyze_job(jm, "hello transcript")
+
+    await _run_worker_until(worker, lambda: _settled(jm, job_id, retries=1))
+    assert _seconds_until_due(jm, job_id) >= 25, "a rate limit must wait about 30 s, not retry at once"
+
+    _make_due(jm, job_id)
+    await _run_worker_until(worker, lambda: _settled(jm, job_id, retries=2))
+    job = jm.get_job(job_id) or {}
+    assert (job.get("status"), job.get("retry_count"), job.get("error_code")) == ("queued", 2, "rate_limit")
+    assert _seconds_until_due(jm, job_id) >= 55, "the second wait doubles"
+    assert len(adapter.requests) == 2
 
 
 @pytest.mark.unit

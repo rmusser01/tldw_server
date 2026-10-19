@@ -26,12 +26,23 @@ _RETRYABLE_ANALYSIS_CODES = frozenset({"rate_limit", "provider_failure"})
 
 
 class _StageFailure(RuntimeError):
-    """A stage failure carrying its job error code and whether a retry can fix it."""
+    """A stage failure carrying its job error code, whether a retry can fix it, its retry
+    backoff (doubled by fail_job on each retry) and whether repeats may quarantine the job."""
 
-    def __init__(self, message: str, *, failure_code: str, retryable: bool) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        failure_code: str,
+        retryable: bool,
+        backoff_seconds: int = 1,
+        quarantine: bool = True,
+    ) -> None:
         super().__init__(message)
         self.failure_code = failure_code
         self.retryable = retryable
+        self.backoff_seconds = backoff_seconds
+        self.quarantine = quarantine
 
 
 def _next_stage_queue(next_type: str) -> str:
@@ -400,9 +411,16 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                                     raise_on_error=True,
                                 )
                         except SummaryProviderError as exc:
-                            raise _StageFailure(
-                                str(exc), failure_code=exc.code, retryable=exc.code in _RETRYABLE_ANALYSIS_CODES
-                            ) from exc
+                            if exc.code in _RETRYABLE_ANALYSIS_CODES:
+                                # Wait long enough for a rate limit to lift; a retry, not a poison message.
+                                raise _StageFailure(
+                                    str(exc),
+                                    failure_code=exc.code,
+                                    retryable=True,
+                                    backoff_seconds=30 if exc.code == "rate_limit" else 5,
+                                    quarantine=False,
+                                ) from exc
+                            raise _StageFailure(str(exc), failure_code=exc.code, retryable=False) from exc
                         if isinstance(analysis, str) and analysis.startswith("Error:"):
                             raise RuntimeError(analysis)
                         updated_payload["analysis"] = analysis
@@ -457,6 +475,8 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                     int(job["id"]),
                     error=msg_err,
                     retryable=bool(getattr(failure, "retryable", True)),
+                    backoff_seconds=getattr(failure, "backoff_seconds", 1),
+                    quarantine=getattr(failure, "quarantine", True),
                     error_code=getattr(failure, "failure_code", None),
                     worker_id=worker_id,
                     lease_id=str(job.get("lease_id")),
