@@ -1531,7 +1531,8 @@
       "notes_graph_suggestions_worker_unavailable": "The suggestion worker is unavailable.",
       "notes_graph_sync_not_ready": "Suggestion decisions are unavailable for this Notes dataset."
     },
-    "closeMobileSidebar": "Close notes list"
+    "closeMobileSidebar": "Close notes list",
+    "listRowKeyboardHint": "Press Enter to open. Use the arrow keys to move between notes, X to select, and P to pin."
   },
   "tts": {
     "playground": "TTS Playground"

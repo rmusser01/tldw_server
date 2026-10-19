@@ -30,6 +30,7 @@ import {
   NOTES_SEARCH_INPUT_ATTR,
   useNotesOffCanvasList,
 } from './hooks/useNotesOffCanvasList'
+import { focusActiveNotesListRow } from './notes-list-keyboard'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -140,6 +141,8 @@ export interface NotesSidebarProps {
   handleNewNote: () => Promise<void>
   switchListMode: (mode: 'active' | 'trash') => void
   handleSelectNote: (id: string | number) => Promise<void>
+  /** Enter on a list row: open the note and focus the editor (AX-03). */
+  handleOpenNoteFromKeyboard?: (id: string | number) => Promise<void>
   handleClearFilters: () => void
   handleKeywordFilterSearch: (text: string) => void
   handleKeywordFilterChange: (vals: string[] | string) => void
@@ -274,6 +277,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   handleNewNote,
   switchListMode,
   handleSelectNote,
+  handleOpenNoteFromKeyboard,
   handleClearFilters,
   handleKeywordFilterSearch,
   handleKeywordFilterChange,
@@ -792,6 +796,23 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                           setQuery(queryInput)
                           setPage(1)
                         }}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey) return
+                          // First Escape clears the search; the next one moves to the results (AX-03).
+                          if (queryInput.length > 0) {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            clearSearchQueryTimeout()
+                            setQueryInput('')
+                            setQuery('')
+                            setPage(1)
+                            return
+                          }
+                          // In the mobile dialog an empty-search Escape closes the list instead.
+                          if (offCanvas.isModal) return
+                          const aside = offCanvas.asideRef.current
+                          if (focusActiveNotesListRow(aside)) event.preventDefault()
+                        }}
                         ref={searchInputRef}
                         {...{ [NOTES_SEARCH_INPUT_ATTR]: '' }}
                       />
@@ -1308,6 +1329,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 pinnedNoteIds={pinnedNoteIds}
                 onSelectNote={(id) => {
                   void handleSelectNote(id)
+                }}
+                onOpenNoteFromKeyboard={(id) => {
+                  void (handleOpenNoteFromKeyboard ?? handleSelectNote)(id)
                 }}
                 onToggleBulkSelection={handleToggleBulkSelection}
                 onTogglePinned={(id) => {

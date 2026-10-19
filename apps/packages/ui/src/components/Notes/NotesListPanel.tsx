@@ -5,6 +5,7 @@ import { Clock3 as ClockIcon, Link2 as LinkIcon, Star as StarIcon, Tag as TagIco
 import { useTranslation } from 'react-i18next'
 import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NoteListItem } from '@/components/Notes/types'
+import { moveNotesListRowFocus } from './notes-list-keyboard'
 
 const LazyNotesListPanelEmptyStates = React.lazy(() => import('./NotesListPanelEmptyStates'))
 
@@ -107,6 +108,8 @@ type NotesListPanelProps = {
   isStaleResults?: boolean
   selectedId: string | number | null
   onSelectNote: (id: string | number) => void
+  /** Enter on a row: open the note and move focus into the editor (AX-03). */
+  onOpenNoteFromKeyboard?: (id: string | number) => void
   onToggleBulkSelection?: (id: string | number, checked: boolean, shiftKey: boolean) => void
   onTogglePinned?: (id: string | number) => void
   onChangePage: (page: number, pageSize: number) => void
@@ -155,6 +158,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   isStaleResults = false,
   selectedId,
   onSelectNote,
+  onOpenNoteFromKeyboard,
   onToggleBulkSelection,
   onTogglePinned,
   onChangePage,
@@ -188,6 +192,21 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
     [pinnedNoteIds]
   )
   const searchTerms = React.useMemo(() => extractSearchTerms(searchQuery), [searchQuery])
+  const listDomId = React.useId()
+  const rowHintId = `${listDomId}-row-hint`
+  // Roving tabindex (AX-03): the list is one Tab stop. It is the row the user
+  // last focused, else the open note, else the first row.
+  const [focusedRowId, setFocusedRowId] = React.useState<string | null>(null)
+  React.useEffect(() => {
+    setFocusedRowId(null)
+  }, [selectedId])
+  const tabStopRowId = React.useMemo(() => {
+    if (!Array.isArray(notes) || notes.length === 0) return null
+    const ids = notes.map((note) => String(note.id))
+    if (focusedRowId != null && ids.includes(focusedRowId)) return focusedRowId
+    if (selectedId != null && ids.includes(String(selectedId))) return String(selectedId)
+    return ids[0]
+  }, [focusedRowId, notes, selectedId])
   const startItem = hasNotes ? (page - 1) * pageSize + 1 : 0
   const endItem = hasNotes ? Math.min(page * pageSize, total) : 0
   const isExporting = exportProgress != null
@@ -485,6 +504,14 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
         renderEmptyStateSurface('error')
       ) : Array.isArray(notes) && notes.length > 0 ? (
         <>
+          {!isTrashView && (
+            <p id={rowHintId} className="sr-only">
+              {t('option:notesSearch.listRowKeyboardHint', {
+                defaultValue:
+                  'Press Enter to open. Use the arrow keys to move between notes, X to select, and P to pin.'
+              })}
+            </p>
+          )}
           <div
             className="divide-y divide-border"
             role="list"
@@ -501,6 +528,17 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                 const isSelectedNote =
                   selectedId != null && String(selectedId) === itemIdText
                 const isPinned = pinnedNoteIdSet.has(itemIdText)
+                const rowDomId = `${listDomId}-row-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`
+                const previewText = item.content ? derivePreviewText(item.content, item.title) : ''
+                const hasRowKeywords = Array.isArray(item.keywords) && item.keywords.length > 0
+                const rowDescribedBy = [
+                  previewText ? `${rowDomId}-preview` : null,
+                  hasRowKeywords ? `${rowDomId}-tags` : null,
+                  item.updated_at ? `${rowDomId}-date` : null,
+                  rowHintId
+                ]
+                  .filter(Boolean)
+                  .join(' ')
                 return (
                   <div
                     key={itemIdText}
@@ -526,6 +564,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                         title: item.title || `Note ${item.id}`
                       })}
                       data-testid={`notes-select-checkbox-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`}
+                      tabIndex={-1}
                       onChange={() => {}}
                       onClick={(event) => {
                         event.stopPropagation()
@@ -547,6 +586,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                       }
                       className="mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded text-text-muted hover:bg-surface2 hover:text-text"
                       data-testid={`notes-pin-toggle-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`}
+                      tabIndex={-1}
                       onClick={(event) => {
                         event.stopPropagation()
                         onTogglePinned?.(item.id)
@@ -568,19 +608,30 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                       }}
                       className="w-full text-left"
                       aria-current={isSelectedNote ? "true" : undefined}
+                      aria-describedby={rowDescribedBy}
+                      tabIndex={tabStopRowId === itemIdText ? 0 : -1}
                       data-testid={`notes-open-button-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`}
                       data-notes-list-item
+                      data-note-row-id={itemIdText}
+                      onFocus={() => setFocusedRowId(itemIdText)}
                       onKeyDown={(e) => {
-                        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                        // Alt/Ctrl/Meta combinations belong to page shortcuts.
+                        if (e.altKey || e.ctrlKey || e.metaKey) return
+                        if (moveNotesListRowFocus(e)) return
+                        if (e.key === 'Enter') {
                           e.preventDefault()
-                          const buttons = Array.from(
-                            e.currentTarget.closest('[data-notes-list]')
-                              ?.querySelectorAll<HTMLButtonElement>('[data-notes-list-item]') ?? []
-                          )
-                          const idx = buttons.indexOf(e.currentTarget as HTMLButtonElement)
-                          if (idx < 0) return
-                          const next = e.key === 'ArrowDown' ? buttons[idx + 1] : buttons[idx - 1]
-                          next?.focus()
+                          if (onOpenNoteFromKeyboard) onOpenNoteFromKeyboard(item.id)
+                          else onSelectNote(item.id)
+                          return
+                        }
+                        if ((e.key === ' ' || e.key === 'x' || e.key === 'X') && onToggleBulkSelection) {
+                          e.preventDefault()
+                          onToggleBulkSelection(item.id, !isBulkSelected, e.shiftKey)
+                          return
+                        }
+                        if ((e.key === 'p' || e.key === 'P') && onTogglePinned) {
+                          e.preventDefault()
+                          onTogglePinned(item.id)
                         }
                       }}
                     >
@@ -645,15 +696,15 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                           )
                         })()}
                         {item.content && (
-                          <div className="text-xs text-text-muted truncate mt-1">
+                          <div id={`${rowDomId}-preview`} className="text-xs text-text-muted truncate mt-1">
                             {renderHighlightedText(
-                              derivePreviewText(item.content, item.title),
+                              previewText,
                               searchTerms
                             )}
                           </div>
                         )}
                         {Array.isArray(item.keywords) && item.keywords.length > 0 && (
-                          <div className="mt-2 flex flex-wrap gap-1">
+                          <div id={`${rowDomId}-tags`} className="mt-2 flex flex-wrap gap-1">
                             {item.keywords.slice(0, 5).map((keyword, idx) => (
                               <span
                                 key={`${keyword}-${idx}`}
@@ -697,7 +748,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                               </div>
                             )
                           })()}
-                        <div className="text-xs text-text-subtle mt-1">
+                        <div id={`${rowDomId}-date`} className="text-xs text-text-subtle mt-1">
                           {item.updated_at
                             ? (() => {
                                 const d = new Date(item.updated_at)

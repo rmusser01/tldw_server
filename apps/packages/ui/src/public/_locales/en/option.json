@@ -6362,6 +6362,9 @@
   "notesSearch_closeMobileSidebar": {
     "message": "Close notes list"
   },
+  "notesSearch_listRowKeyboardHint": {
+    "message": "Press Enter to open. Use the arrow keys to move between notes, X to select, and P to pin."
+  },
   "quickIngest_wizard_results_batchAccounting": {
     "message": "{{added}} added · {{excluded}} excluded/skipped · {{succeeded}} succeeded ({{saved}} saved) · {{failed}} failed · {{cancelled}} cancelled"
   },

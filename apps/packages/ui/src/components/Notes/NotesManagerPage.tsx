@@ -120,6 +120,8 @@ import {
   resolveNotesGraphFocusNoteId,
 } from './notes-manager-utils'
 import { isEditableTarget } from "@/utils/editable-target"
+import { useNotesKeyboardNavigation } from "@/components/Notes/hooks/useNotesKeyboardNavigation"
+import { focusActiveNotesListRow } from "@/components/Notes/notes-list-keyboard"
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
 
@@ -455,6 +457,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [list.data, list.listMode, list.listViewMode, ed.pinnedNoteIdSet])
 
   const filteredCount = visibleNotes.length
+  const listKeyboard = useNotesKeyboardNavigation({ visibleNotes, selectedId: ed.selectedId, selectNote: ed.handleSelectNote, richEditorRef: ed.richEditorRef, contentTextareaRef: ed.contentTextareaRef, editorRegionId: NOTES_EDITOR_REGION_ID })
   const graphInitialFocusNoteId = React.useMemo(
     () =>
       resolveNotesGraphFocusNoteId(
@@ -2643,7 +2646,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       window.requestAnimationFrame(() => {
         const target = document.getElementById(targetId) as HTMLElement | null
         if (!target) return
-        target.focus()
+        if (targetId !== NOTES_LIST_REGION_ID || !focusActiveNotesListRow(target)) target.focus()
         if (typeof window !== 'undefined') window.location.hash = targetId
       })
     },
@@ -2736,6 +2739,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         handleSelectNote={async (id) => {
           await ed.handleSelectNote(id)
         }}
+        handleOpenNoteFromKeyboard={listKeyboard.openNoteAndFocusEditor}
         handleClearFilters={list.handleClearFilters}
         handleKeywordFilterSearch={kw.handleKeywordFilterSearch}
         handleKeywordFilterChange={kw.handleKeywordFilterChange}
