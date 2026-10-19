@@ -147,7 +147,7 @@ If your goal is a custom quality test today without backend benchmark registrati
 ### 402 LLM quota
 
 - The user is over an LLM limit: `detail.error` is `limit_exceeded`, and `Retry-After` says when to try again. The run is refused before its dataset loads, so nothing is evaluated.
-- A user who reaches the limit during a run has the remaining items refused; they count under `failed` in the summary.
+- An admitted run runs to completion, even if it takes the user past the limit; no item is refused mid-run. The next run is refused.
 
 ### 404 benchmark not found
 

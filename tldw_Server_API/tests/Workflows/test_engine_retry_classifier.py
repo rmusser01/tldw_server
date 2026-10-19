@@ -169,5 +169,7 @@ async def test_llm_quota_refusal_does_not_consume_retries(tmp_path, monkeypatch)
     run = db.get_run(run_id)
     assert run is not None
     assert run.status == "failed"
-    assert len(db.list_step_attempts(run_id=run_id, step_id="s1")) == 1
+    attempts = db.list_step_attempts(run_id=run_id, step_id="s1")
+    assert len(attempts) == 1
+    assert not attempts[0]["retryable"]
     assert any(event.get("event_type") == "step_retry_suppressed" for event in db.get_events(run_id))

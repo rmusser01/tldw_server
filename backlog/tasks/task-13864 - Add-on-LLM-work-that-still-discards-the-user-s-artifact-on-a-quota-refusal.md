@@ -23,6 +23,7 @@ TASK-13638 Decision 3 keeps the artifact the user asked for and records the refu
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+From the #3277 clean-session review (M2): a Prompt Studio evaluation refused part-way drops the links to the cases that already ran. EvaluationManager.run_evaluation_with_existing_record (prompt_studio/evaluation_manager.py near lines 258-268) writes status, completed_at and error_message on the failed update, but not the test_run_ids collected so far; those test runs stay stored, but the evaluation record no longer points to them. Fix: add "test_run_ids": test_run_ids to that update, with a test that refuses the second of two cases and reads the record's test_run_ids back.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

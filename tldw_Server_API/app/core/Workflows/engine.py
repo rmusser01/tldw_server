@@ -20,7 +20,7 @@ from tldw_Server_API.app.core.testing import is_truthy
 from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 from tldw_Server_API.app.core.Workflows.adapters import get_adapter
 from tldw_Server_API.app.core.Workflows.capabilities import get_step_capability
-from tldw_Server_API.app.core.Workflows.failures import build_failure_envelope
+from tldw_Server_API.app.core.Workflows.failures import build_failure_envelope, is_retriable_reason
 
 _WF_NONCRITICAL_EXCEPTIONS: tuple[type[Exception], ...] = (
     AttributeError,
@@ -82,16 +82,6 @@ _ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "waiting_approval": {"running", "failed", "cancelled"},
 }
 
-_NON_RETRIABLE_REASONS: set[str] = {
-    "validation_error",
-    "authz_error",
-    "acp_governance_blocked",
-    "session_access_denied",
-    "invariant_violation",
-    "402",  # an LLM quota refusal (LLMQuotaExceededError): the limit does not reset between attempts
-}
-
-
 def _is_allowed_transition(current: str, target: str) -> bool:
     """Return True when a run status transition is allowed by the state contract."""
     return target in _ALLOWED_TRANSITIONS.get(current, set())
@@ -112,11 +102,12 @@ def _reason_code_from_error(error: BaseException | str | None) -> str:
 
 
 def _is_retriable_error(reason_code: str | None) -> bool:
-    """Return True when a reason code should consume retry attempts."""
-    normalized = _reason_code_from_error(reason_code)
-    if not normalized:
-        return True
-    return normalized not in _NON_RETRIABLE_REASONS
+    """Return True when a reason code should consume retry attempts.
+
+    Delegates to ``failures.is_retriable_reason`` so the retry decision and the
+    attempt's ``retryable`` flag come from one reason set.
+    """
+    return is_retriable_reason(reason_code)
 
 
 def _resolve_config_templates(cfg: Any, context: dict[str, Any]) -> Any:
