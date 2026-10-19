@@ -7,7 +7,7 @@ import pytest
 import pytest_asyncio
 from fastapi import Depends
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import TokenScopeGuard, _principal_has_admin_bypass_claims
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
 from tldw_Server_API.app.api.v1.endpoints import chat
 from tldw_Server_API.app.core.AuthNZ import User_DB_Handling
@@ -122,6 +122,8 @@ def test_cookie_dictionary_validation_requires_csrf(chat_cookie_client):
 
     assert response.status_code == 403, response.text  # nosec B101
 
+    assert response.json() == {"detail": "CSRF token validation failed"}  # nosec B101 - Require the recoverable CSRF denial body.
+
 
 @pytest.mark.parametrize("session_state", ["absent", "invalid", "expired", "revoked", "wrong_type"])
 def test_share_guard_rejects_unusable_cookie_sessions(chat_cookie_client, monkeypatch, session_state):
@@ -164,6 +166,9 @@ def test_share_guard_never_falls_back_from_explicit_headers(chat_cookie_client, 
 
     assert response.status_code == 401, response.text  # nosec B101
 
+    assert set(response.json()) == {"detail"}  # nosec B101 - Authentication denials expose no shared-conversation data.
+    assert response.json()["detail"]  # nosec B101 - Authentication errors must explain the refusal.
+
 
 @pytest.mark.parametrize("header", ["X-API-KEY", "Authorization"])
 def test_share_route_retains_explicit_primary_key_authentication(chat_cookie_client, header):
@@ -174,6 +179,8 @@ def test_share_route_retains_explicit_primary_key_authentication(chat_cookie_cli
     response = client.get(_share_path(conversation), headers={header: value})
 
     assert response.status_code == 200, response.text  # nosec B101
+
+    assert response.json() == {"conversation_id": conversation, "links": []}  # nosec B101 - Check the authenticated owner result.
 
 
 @pytest.mark.parametrize("claim", ["admin-role", "wildcard-permission", "boolean-only"])
@@ -189,8 +196,10 @@ def test_cookie_guard_requires_verified_bypass_claims(chat_cookie_client, monkey
 
     response = client.get(_share_path(conversation))
 
-    expected = 401 if claim == "boolean-only" else 200
-    assert response.status_code == expected, response.text  # nosec B101
+    assert _principal_has_admin_bypass_claims(user) is (claim != "boolean-only")  # nosec B101 - A boolean flag alone never grants token-scope bypass.
+    # A validated headerless owner session has no virtual-key scope to bypass.
+    assert response.status_code == 200, response.text  # nosec B101 - Canonical cookie authentication remains independent of token admin bypass.
+    assert response.json() == {"conversation_id": conversation, "links": []}  # nosec B101 - Return only the actual owned catalog.
 
 
 def test_cookie_guard_respects_disabled_admin_bypass(chat_cookie_client):
@@ -205,7 +214,17 @@ def test_cookie_guard_respects_disabled_admin_bypass(chat_cookie_client):
     _authenticate(client, api_key)
     response = client.get("/api/test/no-bypass")
 
-    assert response.status_code == 401, response.text  # nosec B101
+    assert response.status_code == 200, response.text  # nosec B101 - A canonical headerless owner needs no virtual-key bypass.
+    assert response.json() == {"ok": True}  # nosec B101 - The actual guarded handler is admitted.
+
+    async def write_only_key():
+        manager = await get_api_key_manager()
+        return await manager.create_virtual_key(user_id=int(_owner), name="Read-denied writer", scope="write")
+
+    key = client.portal.call(write_only_key)
+    denied = client.get("/api/test/no-bypass", headers={"X-API-KEY": key["key"]})
+    assert denied.status_code == 403, denied.text  # nosec B101 - Disabling bypass preserves the persisted key's read restriction.
+    assert denied.json() == {"detail": "Forbidden: API key lacks required scope"}  # nosec B101 - Require the actual scope refusal, not an unrelated failure.
 
 
 @pytest.mark.parametrize("boundary", ["foreign-owner", "global-as-workspace", "workspace-as-global",
@@ -233,6 +252,12 @@ def test_cookie_share_routes_retain_owner_and_scope_fences(chat_cookie_client, b
     response = client.get(_share_path(conversation), params=params)
 
     assert response.status_code == expected, response.text  # nosec B101
+
+    if expected == 200:
+        assert response.json() == {"conversation_id": conversation, "links": []}  # nosec B101 - Only the exact owner/workspace is visible.
+    else:
+        detail = "Forbidden for this conversation" if expected == 403 else "Conversation not found"
+        assert response.json() == {"detail": detail}  # nosec B101 - Preserve foreign-owner and concealed scope errors.
 
 
 def test_cookie_share_revocation_requires_csrf_and_preserves_settings(chat_cookie_client):
@@ -268,6 +293,8 @@ def test_share_guard_uses_configured_cookie_name(chat_cookie_client, monkeypatch
     response = client.get(_share_path(conversation))
 
     assert response.status_code == 200, response.text  # nosec B101
+
+    assert response.json() == {"conversation_id": conversation, "links": []}  # nosec B101 - The configured cookie authenticates the actual owned result.
 
 
 @pytest.mark.parametrize("constraint", ["allowed", "scope", "endpoint", "method", "path", "revoked"])

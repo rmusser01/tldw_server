@@ -40,13 +40,9 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGD
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import ChatProviderRegistry
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_saved_testbot_instruction_reaches_first_ollama_system_message(
-    chacha_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Observe prompt delivery independently of any model's generated answer."""
-    instruction = "You are E2E-TestBot. Always respond with exactly: BEEP BOOP."
+@pytest.fixture
+def native_provider_configuration(monkeypatch):
+    """Supply external provider configuration/inventory; keep binding and transport construction real."""
     model = "qwen2.5:0.5b"
     endpoint = "http://127.0.0.1:11434"
     app_config = {"ollama_api": {"api_url": endpoint, "model": model}}
@@ -54,9 +50,24 @@ async def test_saved_testbot_instruction_reaches_first_ollama_system_message(
     monkeypatch.setattr(character_conversation_factory, "ensure_app_config", lambda: deepcopy(app_config))
     monkeypatch.setattr(chat_service, "load_comprehensive_config", lambda: deepcopy(app_config))
     monkeypatch.setattr(chat_service, "list_provider_models", lambda _provider: [model])
+    return app_config
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("preset,separator", [("default", "\n"), ("st_default", "\n\n")])
+async def test_saved_testbot_instruction_reaches_first_ollama_system_message(
+    chacha_db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, native_provider_configuration, preset, separator,
+) -> None:
+    """Observe prompt delivery independently of any model's generated answer."""
+    instruction = "You are E2E-TestBot. Always respond with exactly: BEEP BOOP."
+    app_config = native_provider_configuration
+    model = app_config["ollama_api"]["model"]
+    endpoint = app_config["ollama_api"]["api_url"]
 
     character_id = chacha_db.add_character_card({
         "name": "E2E-TestBot",
+        "extensions": {"tldw": {"prompt_preset": preset}},
         "system_prompt": instruction,
         "first_message": "BEEP BOOP.",
     })
@@ -162,7 +173,7 @@ async def test_saved_testbot_instruction_reaches_first_ollama_system_message(
     assert captured[0]["payload"]["model"] == model  # nosec B101
     assert captured[0]["payload"]["stream"] is True  # nosec B101
     assert captured[0]["payload"]["messages"] == [  # nosec B101
-        {"role": "system", "content": "You are E2E-TestBot.\n\n" + instruction},
+        {"role": "system", "content": "You are E2E-TestBot." + separator + instruction},
         {"role": "assistant", "content": [{"type": "text", "text": "BEEP BOOP."}]},
         {"role": "user", "content": [{"type": "text", "text": "Hello"}]},
     ]

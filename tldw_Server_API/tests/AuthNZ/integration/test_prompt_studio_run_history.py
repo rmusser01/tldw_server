@@ -149,6 +149,8 @@ def test_history_rejects_out_of_bounds_page_sizes(history_accounts, per_page):
         params={"project_id": context.project["id"], "per_page": per_page})
     assert response.status_code == 422, response.text  # nosec B101 - pytest contract
 
+    assert any(error["loc"] == ["query", "per_page"] for error in response.json()["detail"])  # nosec B101 - The rejection must identify the actual invalid pagination input.
+
 
 @pytest.mark.parametrize("operation", ["list", "detail", "evaluation"])
 def test_history_authorizes_stored_project_not_caller_supplied_identity(history_accounts, operation):
@@ -229,6 +231,9 @@ def test_saved_history_read_compatible_with_optional_matching_owner_header(histo
 def test_history_requires_real_authentication(history_accounts, path):
     response = history_accounts.client.get(ROOT + path)
     assert response.status_code == 401, response.text  # nosec B101 - pytest contract
+
+    assert set(response.json()) == {"detail"}  # nosec B101 - No run-history rows may escape an authentication denial.
+    assert response.json()["detail"]  # nosec B101 - Retain a meaningful authentication failure.
 
 
 @pytest.mark.parametrize("configs", ["malformed-json", ["not-a-model"], 12])

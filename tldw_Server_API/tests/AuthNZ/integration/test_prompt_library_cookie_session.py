@@ -86,6 +86,9 @@ def test_prompt_library_rejects_missing_invalid_and_explicit_bad_credentials(pro
 
     assert response.status_code == 401, response.text  # nosec B101
 
+    assert set(response.json()) == {"detail"}  # nosec B101 - Denials expose no private Prompt catalog.
+    assert response.json()["detail"]  # nosec B101 - Require an actionable authentication denial.
+
 
 def test_prompt_library_rejects_revoked_cookie(prompt_library_client):
     client, api_key = prompt_library_client

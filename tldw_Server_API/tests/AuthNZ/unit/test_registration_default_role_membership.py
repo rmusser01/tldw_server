@@ -274,7 +274,7 @@ async def test_registration_hash_keeps_event_loop_responsive(tmp_path, monkeypat
 
     monkeypatch.setattr(service.password_service, "hash_password", controlled_hash)
     try:
-        await service.register_user(
+        payload = await service.register_user(
             username="responsive-registration",
             email="responsive-registration@example.com",
             password="Strong!Pass9",  # nosec B106 - Synthetic existing unit-fixture input.
@@ -283,3 +283,5 @@ async def test_registration_hash_keeps_event_loop_responsive(tmp_path, monkeypat
         released.set()
     # The controlled hash can observe loop progress only when it runs off-loop.
     assert release_observed == [True]  # nosec B101
+    assert payload["role"] == "user"  # nosec B101 - The off-loop registration still grants the configured role.
+    assert _role_memberships(_db_path, "responsive-registration") == ["user"]  # nosec B101 - Verify the real committed membership, not only the timing probe.

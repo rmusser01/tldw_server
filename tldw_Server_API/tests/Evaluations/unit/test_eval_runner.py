@@ -486,21 +486,20 @@ async def test_two_row_exact_match_run_retains_scores_and_dataset(
     (None, None, "provider_default"),
 ], ids=["override", "provider-default"])
 async def test_model_run_persists_allowlisted_grader_rationale_and_rubric(
-    tmp_path, model, expected_model, model_source,
+    tmp_path, model, expected_model, model_source, monkeypatch,
 ):
     """The saved run must explain its scores without persisting provider secrets."""
     runner = EvaluationRunner(str(tmp_path / "grader-provenance.db"))
 
-    class Judge:
-        async def evaluate(self, **kwargs):
-            assert kwargs["api_name"] == "openai"  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
-            assert kwargs["model"] == expected_model  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
-            return {"metrics": {"accuracy": {"score": 1.0, "raw_score": 5,
-                    "rationale": "The answer matches Mira Vale in the source.",
-                    "rubric": "Rate factual accuracy against the supplied source, 1-5.",
-                    "api_key": "must-not-persist"}}, "overall_quality": 1.0}
+    from unittest.mock import create_autospec
 
-    runner._quality_evaluator = Judge()
+    evaluate = create_autospec(runner.quality_evaluator.evaluate, return_value={
+        "metrics": {"accuracy": {"score": 1.0, "raw_score": 5,
+            "rationale": "The answer matches Mira Vale in the source.",
+            "rubric": "Rate factual accuracy against the supplied source, 1-5.",
+            "api_key": "must-not-persist"}}, "overall_quality": 1.0,
+    })
+    monkeypatch.setattr(runner.quality_evaluator, "evaluate", evaluate)
     dataset_id = runner.db.create_dataset(name="grounded", samples=[{
         "input": {"prompt": "Who leads Rowan? Source: Dr Mira Vale.", "response": "Dr Mira Vale"},
         "expected": "Dr Mira Vale",
@@ -511,6 +510,9 @@ async def test_model_run_persists_allowlisted_grader_rationale_and_rubric(
     )
     run_id = runner.db.create_run(evaluation_id, target_model="display-label-only")
     await runner.run_evaluation(run_id, evaluation_id, {"created_by": "owner"}, background=False)
+    assert evaluate.await_count == 1  # nosec B101 - One real runner invocation reaches the typed evaluator seam.
+    assert evaluate.await_args.kwargs["api_name"] == "openai"  # nosec B101 - Preserve the original provider argument contract.
+    assert evaluate.await_args.kwargs["model"] == expected_model  # nosec B101 - Preserve the original model argument contract.
     saved = runner.db.get_run(run_id, created_by="owner")
     row = saved["results"]["sample_results"][0]
     assert row["grader"] == {"provider": "openai", "model": expected_model, "model_source": model_source, "temperature": 0.1}  # nosec B101 - Pytest C03 causal behavior/ownership assertion.

@@ -685,7 +685,7 @@ async def test_saved_lore_preview_preserves_storage_read_failure(frozen_chat, mo
 @pytest.mark.asyncio
 @pytest.mark.parametrize("frozen_chat", ["sqlite", "postgres"], indirect=True)
 @pytest.mark.parametrize("mode", ["saved", "foreign", "string", "integer", "null"])
-async def test_saved_lore_preview_http_boundary(frozen_chat, mode):
+async def test_saved_lore_preview_http_boundary(frozen_chat, mode, monkeypatch):
     import httpx
     from fastapi import FastAPI
 
@@ -695,8 +695,8 @@ async def test_saved_lore_preview_http_boundary(frozen_chat, mode):
 
     app = FastAPI()
     app.include_router(router, prefix="/api/v1/chats")
-    app.dependency_overrides[get_chacha_db_for_user] = lambda: frozen_chat.db
-    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=2 if mode == "foreign" else 1)
+    monkeypatch.setitem(app.dependency_overrides, get_chacha_db_for_user, lambda: frozen_chat.db)
+    monkeypatch.setitem(app.dependency_overrides, get_request_user, lambda: SimpleNamespace(id=2 if mode == "foreign" else 1))
     value = {"string": "true", "integer": 1, "null": None}.get(mode, True)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         response = await client.post(
@@ -725,8 +725,8 @@ async def test_world_book_catalog_db_read_failure_never_becomes_empty(frozen_cha
 
     app = FastAPI()
     app.include_router(router, prefix="/api/v1/characters")
-    app.dependency_overrides[get_chacha_db_for_user] = lambda: frozen_chat.db
-    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    monkeypatch.setitem(app.dependency_overrides, get_chacha_db_for_user, lambda: frozen_chat.db)
+    monkeypatch.setitem(app.dependency_overrides, get_request_user, lambda: SimpleNamespace(id=1))
     original = frozen_chat.db.execute_query
     failures = []
 

@@ -445,22 +445,31 @@ async def test_rag_pipeline_keeps_its_existing_whole_run_deadline(tmp_path, monk
         await service.shutdown()
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_service_cancel_cleanup_keeps_first_terminal_record(real_owned_run, monkeypatch):
-    """Once API cancellation is persisted, worker retirement must not write it again."""
-    import asyncio
+@pytest.fixture
+def owned_run_webhook(real_owned_run, monkeypatch):
+    """Isolate the external webhook sink while cancellation and persistence stay real."""
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
+
+    service = real_owned_run[0]
+    webhook = AsyncMock()
+    monkeypatch.setattr(service, "enable_webhooks", True)
+    monkeypatch.setattr(service, "webhook_manager", SimpleNamespace(send_webhook=webhook))
+    return webhook
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_service_cancel_cleanup_keeps_first_terminal_record(real_owned_run, monkeypatch, owned_run_webhook):
+    """Once API cancellation is persisted, worker retirement must not write it again."""
+    import asyncio
 
     service, owner, _foreign, evaluation, _completed_run = real_owned_run
     entered = asyncio.Event()
     release = asyncio.Event()
     original_update = type(service.db).update_run_status
     cancelled_records = []
-    webhook = AsyncMock()
-    monkeypatch.setattr(service, "enable_webhooks", True)
-    monkeypatch.setattr(service, "webhook_manager", SimpleNamespace(send_webhook=webhook))
+    webhook = owned_run_webhook
 
     async def pending_example(**_kwargs):
         entered.set()

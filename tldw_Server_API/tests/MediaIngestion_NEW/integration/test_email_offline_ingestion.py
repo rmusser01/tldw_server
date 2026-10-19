@@ -275,8 +275,9 @@ def test_offline_guard_reports_boundary_and_caller_without_arguments(offline_cli
     assert private_input not in diagnostic  # nosec B101 - pytest verifies input privacy.
 
 
-def test_offline_upload_does_not_initialize_authnz_accounting(offline_client, monkeypatch):
-    """A cold upload keeps AuthNZ quota and ledger bootstrap outside this harness."""
+@pytest.fixture
+def offline_accounting_probes(offline_client, monkeypatch):
+    """Observe excluded AuthNZ accounting while retaining the real offline upload path."""
     from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import ResourceDailyLedger
 
     quota_lookup = AsyncMock(return_value=None)
@@ -284,6 +285,29 @@ def test_offline_upload_does_not_initialize_authnz_accounting(offline_client, mo
     monkeypatch.setattr(persistence, "_media_ingestion_daily_ledger", None)
     monkeypatch.setattr(persistence.quota_checks, "user_quota", quota_lookup)
     monkeypatch.setattr(ResourceDailyLedger, "initialize", ledger_initialize)
+    return quota_lookup, ledger_initialize
+
+
+@pytest.fixture
+def offline_pool_probe(offline_client, monkeypatch):
+    """Reject excluded AuthNZ pool access and restore its quota resolver state."""
+    from tldw_Server_API.app.core.AuthNZ import database
+    from tldw_Server_API.app.core.DB_Management import Resource_Daily_Ledger
+    from tldw_Server_API.app.core.Usage import quota_resolver
+
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
+    quota_resolver.invalidate_all()
+    monkeypatch.setattr(persistence, "_media_ingestion_daily_ledger", None)
+    pool_entry = AsyncMock(side_effect=RuntimeError("AuthNZ is outside the offline email harness"))
+    monkeypatch.setattr(database, "get_db_pool", pool_entry)
+    monkeypatch.setattr(Resource_Daily_Ledger, "get_db_pool", pool_entry)
+    yield pool_entry
+    quota_resolver.invalidate_all()
+
+
+def test_offline_upload_does_not_initialize_authnz_accounting(offline_client, offline_accounting_probes):
+    """A cold upload keeps AuthNZ quota and ledger bootstrap outside this harness."""
+    quota_lookup, ledger_initialize = offline_accounting_probes
 
     upload(offline_client, "synthetic.eml", synthetic_message(701).as_bytes())
 
@@ -339,19 +363,10 @@ def search(client, query: str):
 
 
 def test_offline_upload_does_not_enter_authnz_pool(
-    offline_client: TestClient, monkeypatch: pytest.MonkeyPatch,
+    offline_client: TestClient, offline_pool_probe,
 ) -> None:
     """Daily accounting cannot bootstrap AuthNZ in the native email harness."""
-    from tldw_Server_API.app.core.AuthNZ import database
-    from tldw_Server_API.app.core.DB_Management import Resource_Daily_Ledger
-    from tldw_Server_API.app.core.Usage import quota_resolver
-
-    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
-    quota_resolver.invalidate_all()
-    monkeypatch.setattr(persistence, "_media_ingestion_daily_ledger", None)
-    pool_entry = AsyncMock(side_effect=RuntimeError("AuthNZ is outside the offline email harness"))
-    monkeypatch.setattr(database, "get_db_pool", pool_entry)
-    monkeypatch.setattr(Resource_Daily_Ledger, "get_db_pool", pool_entry)
+    pool_entry = offline_pool_probe
 
     result = upload(offline_client, "synthetic-quota.eml", synthetic_message(77).as_bytes())
     rows = search(offline_client, "uniquequartz")

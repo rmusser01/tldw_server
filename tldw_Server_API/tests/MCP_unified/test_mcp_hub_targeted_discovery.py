@@ -182,6 +182,9 @@ async def test_mutation_and_visibility_denials_do_not_start_discovery(runtime, m
     response = await runtime.client.post(f"{BASE}/{server_id}/{action}")
     assert response.status_code == status  # nosec B101 - pytest behavioral oracle, not a runtime guard.
 
+    detail = "system.configure permission required" if status == 403 else "External server not found"
+    assert response.json() == {"detail": detail}  # nosec B101 - Distinguish permission denial from concealed foreign/missing rows.
+
 
 @pytest.mark.parametrize(("enabled", "source", "superseded"), [
     (False, "managed", None), (True, "legacy", None), (True, "managed", "replacement"),
@@ -193,6 +196,8 @@ async def test_unavailable_rows_refuse_before_transport(runtime, monkeypatch, en
     await _save(runtime, enabled=enabled, source=source, superseded=superseded)
     response = await runtime.client.post(f"{BASE}/uat-smoke/refresh-discovery")
     assert response.status_code == 409  # nosec B101 - pytest behavioral oracle, not a runtime guard.
+
+    assert response.json() == {"detail": "External server is not available for discovery refresh"}  # nosec B101 - Require the actual unavailable-row recovery contract.
 
 
 async def test_same_server_requests_reconcile_serially(runtime, monkeypatch):

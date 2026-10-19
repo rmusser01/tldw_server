@@ -217,6 +217,7 @@ def test_runtime_timeout_retains_fixture_until_owned_child_exits(tmp_path, monke
             pg_user="fixture", pg_password="private", pg_host="127.0.0.1", pg_port=15492, pg_database="fixture"
         )
     )
-    with pytest.raises(AssertionError, match="Owned runtime exceeded150s; graceful cleanup completed"):
+    with pytest.raises(AssertionError, match="Owned runtime exceeded150s; graceful cleanup completed") as failure:
         test_ordinary_postgres_user_can_transcribe_after_normal_startup(fixture, tmp_path)
+    assert failure.value.__cause__ is None and failure.value.__suppress_context__ is True  # nosec B101 - The real timeout driver suppresses private child-error context.
     assert calls == [("communicate", 150), "terminate", ("communicate", 15), ("communicate", None)]  # nosec B101 - Require graceful ownership cleanup, never force.

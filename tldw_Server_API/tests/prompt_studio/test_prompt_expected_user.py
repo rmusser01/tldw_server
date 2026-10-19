@@ -94,3 +94,6 @@ def test_matching_and_absent_scope_headers_keep_existing_reads(scoped_routes, ex
     headers = {} if expected is None else {"X-TLDW-Expected-User-ID": expected}
     response = scoped_routes[0].get(path, headers=headers)
     assert response.status_code == 200, response.text  # nosec B101 # pytest verifies account scope admission and preservation.
+
+    expected_name = "Bob project" if path.endswith("/projects") else "Bob private"
+    assert expected_name in response.text  # nosec B101 - The admitted request must return the seeded owner record, not just HTTP200.

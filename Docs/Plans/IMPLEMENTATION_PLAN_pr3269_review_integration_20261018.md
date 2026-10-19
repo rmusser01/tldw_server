@@ -4,7 +4,11 @@ Task: TASK-13260.278.18.83.45. User approved the review/fix/validation cycle, us
 
 ADR required: no new durable rule for integration. Existing ADR007/012/013/020/059 govern their respective changes; Proposed ADR077 documents the selected-input contract. Its number replaces the branch's colliding Proposed ADR067 without changing the decision or the Accepted upstream ADR067. Reassess any substantive architecture correction.
 
-## Current integration candidate — 2026-10-18
+## Current candidate — 2026-10-19
+
+Rebased local integration `3befa530f18a0863b7b0269dfa856ca77edb562b` contains all published1003 repairs on exact current dev `29fda0d860c7a0d76dd3d9ea0561a32ac8e48148`. Both ADR indexes preserve Accepted075 and Proposed077; the final pre-quality tree differs from published1003 in exactly the28 incoming paths. No conflicts remain. The test-quality corrections below are the only subsequent source delta and await normal hooks/commit/exact-lease publication. Earlier current-head/base statements are historical. Main UAT/C05 and its runtime are untouched.
+
+## Historical integration candidate — 2026-10-18
 
 Latest integrated dev is `3f45238a0f29e63f417da26466f90f4df5c1da20`. The conflict-free rebase is published as `b76b67d0693dfb6a5b8027afe69f5ed4110bf7eb`, directly on that dev commit, with normal hooks and an exact lease against prior published `ee08fe312dda905e7fa68280edb22dc410834f87`. PR3269 is ready, its authored description and preserved external suffix were read back exactly, and final-head hosted qualification remains in progress. Historical source/base and review-running paragraphs below are retained as history and superseded by this section.
 
@@ -36,7 +40,7 @@ The service recovered in the renewed-authorization continuation. Fresh GitHub AP
 **Goal:** Preserve current-dev behavior and accumulated UAT fixes while resolving demonstrated defects/conflicts.
 **Success Criteria:** No removed ownership/security/version/cancellation contracts or weakened tests; each new repair has a causal regression and affected checks.
 **Tests:** Relevant configured suites, compile/lint, scoped baseline/current Bandit, canonical API generation when affected.
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage3: Final review and publication
 **Goal:** Fresh actual/staged review, normal hooks and guarded publication to PR3269.
@@ -89,3 +93,27 @@ The requester answered “Waived” to the human Change summary requirement for 
 - Extension: hosted Research job exhausted the default~4GB Node heap. Exact unchanged frozen local Chrome production build passes in63.648s/50.34MB with that same default, and a separate same-head hosted extension job passed. One failed-job-only hosted retry requested; no speculative source/heap cap change. No browser/runtime launch or model changes.
 
 These fixes are local WIP until final review/hooks and exact-head publication. New-head required CI and affected browser outcomes remain mandatory; no new43-workflow acceptance is claimed.
+
+### Corrective publication and both frontend profiles
+
+Corrective commit `1003cceae3b52fa2f357ca10656d93b5bfce4ce3` is published on unchanged dev3f452 with exact remote lease and normal hooks. All17-path manual actual/staged review is complete; scoped qualification and limits above remain. Additional production-profile build first reported a concrete sandbox PostCSS os1, then the unchanged command through normal host access passed23.261s/compile20.7s, shared595.7KB/heaviest876.4KB under unchanged600/900 budgets. Production-root TS0; no new lint/security findings. The current-head license/hosted CI remains queued, so Stage4 is open. Local task/plan progress updates are intentionally unpublished while this head qualifies; main UAT/runtime remains untouched.
+
+### New live dev29fd — integration reopened
+
+PR3270 advanced dev8commits/28paths: native Messages accounting, MCP tool caller attribution/refusal handling and Claims rebuild owners. Covered source/test/doc review is recorded in the task; the long foreign plan narrative is explicitly partial. Only overlaps are both ADR indexes and three owner-propagation calls in claims_service.py. Preserve Accepted ADR075, Proposed077, all1003 repairs and local task/plan updates; rebase onto exact29fda0d860c7a0d76dd3d9ea0561a32ac8e48148 and qualify genuinely affected backend/doc controls. The1003 license audit passed; other1003 checks are not qualification for the later rebased head. Stages2/3 reopened; Stage4 remains open.
+
+### Test-quality gate corrections
+
+The unchanged ratchet exposed25 new/increased flags in the accumulated tests. Keep its detector and baseline unchanged. Repairs are limited to the flagged tests and one reusable cold-ledger fixture: check response bodies and persisted results in addition to status/timing, assert actual pagination failures, verify typed evaluator calls, keep transport assertions outside the inference substitute, and use scoped pytest restoration for real DB/auth dependency wiring. Configuration/cache isolation and external fault-observation inputs become explicit fixtures while real SQL, owner fences, worker admission, refund/metrics, no-network/offline guards and original causal assertions remain. Each workspace endpoint now has its own authenticated boundary case. The two old cookie401 assumptions were superseded by canonical headerless-owner validation; retain the verified-claims classifier guard and use a real persisted write-only virtual key to prove disabled bypass still rejects reads403. Firstcookie run69passed2failed; corrected two cases plus three isolated JWT boundaries7pass. Independent unit/SQLite group73pass2officialPGskips34PGdeselected; fixture-unavailable PG cells are not passes. Changed-module triage currently0newoffenses; remaining full-module/targeted execution, whole ratchet, scoped security, final source/staged review and hooks are pending. No source authentication or ratchet weakening.
+
+### Final local test-quality qualification
+
+Whole unchanged test-quality ratchet passes naturally0/24.654s with no offenses beyond baseline. All25 existing test-function name sets survive; new helper compiles. Scoped baseline/current Ruff5identical diagnostics and Bandit277identical signatures,0errors/0new across26Python paths. Manual review covers every changed fixture/assertion hunk and affected cookie-scope/preset consumers; no new Critical/Important finding. No fresh independent agent or exhaustive review of unrelated large bodies is claimed.
+
+Flashcard complete transport module21passed2377warnings/72.80pytest79.719outer. Email complete offline module42passed1sandbox socketpair PermissionError/11.02pytest12.940outer; only the unchanged socket guard rerun with normal host access passed1/36warnings1.72pytest. These compose the module coverage; no whole43-case host rerun claimed. Verification output from earlier sessions was lost during context transfer, so those two modules and the ratchet were rerun once with retained bounded summaries.
+
+Other current quality checks retain their recorded scopes: unit/SQLite73passed2officialPGskips34deselected; integration36passed9officialPGskips plus the native preset assertion failure; both explicit default/st_default presets then2passed on correction. Auth recovery17passed and corrected cookie/real JWT boundary7passed. The two stale401 cookie expectations are reconciled to current canonical owner-cookie authentication while a real persisted write-only key still proves disabled-bypass403. No production auth change. Fixture-unavailable PostgreSQL cells remain dependent on hosted qualification.
+
+Incoming29fd controls: eight changed modules natural0/17.379outer (counts not retained); nine surrounding modules348passed355warnings/28.58pytest33.129outer;15Python compile, Ruff1identical inherited diagnostic, Bandit225identical signatures0errors/new. Ordinary changed docs/mirrors/indexes reviewed; long foreign plan narrative remains partial. No unchanged frontend/build/API export replay is required by this backend/test-only delta. Final-head hosted requirements remain open.
+
+Normal explicit pre-commit checks pass all applicable28paths; wizard-only Ruff/Black hooks skip as configured, with explicit scoped Ruff/security results above. Fresh queue variable is unset. Final actual/staged review finds no new Critical/Important issue in the quality delta; hosted final-head qualification remains mandatory.

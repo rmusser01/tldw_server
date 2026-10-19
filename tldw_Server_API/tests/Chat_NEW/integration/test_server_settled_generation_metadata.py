@@ -604,15 +604,15 @@ def test_b02_legacy_pre_stream_failure_keeps_http_error(settled_api, monkeypatch
     assert "private-upstream-b02-legacy-marker" not in response.text  # nosec B101 - Provider internals stay private.
 
 
-def test_b02_admitted_preparation_failure_refunds_and_records_failure(settled_api, monkeypatch):
-    """Receipt delivery cannot turn a failed reserved request into accounting success."""
+@pytest.fixture
+def reserved_admission_metrics(settled_api, monkeypatch):
+    """Observe reservation/refund and actual request metrics independently of provider preparation."""
     from types import SimpleNamespace
-    from unittest.mock import AsyncMock, Mock
+    from unittest.mock import AsyncMock
 
     from tldw_Server_API.app.api.v1.endpoints import chat
-    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 
-    client, db, cid, headers = settled_api
+    client = settled_api[0]
     governor = SimpleNamespace(
         reserve=AsyncMock(return_value=(SimpleNamespace(allowed=True, retry_after=None, details={}), "b02-reserved")),
         commit=AsyncMock(),
@@ -637,6 +637,19 @@ def test_b02_admitted_preparation_failure_refunds_and_records_failure(settled_ap
             return await self.original.__aexit__(exc_type, exc_value, exc_tb)
 
     monkeypatch.setattr(metrics, "track_request", ObserveRequestExit)
+
+    return governor, exits
+
+
+def test_b02_admitted_preparation_failure_refunds_and_records_failure(settled_api, monkeypatch, reserved_admission_metrics):
+    """Receipt delivery cannot turn a failed reserved request into accounting success."""
+    from unittest.mock import Mock
+
+    from tldw_Server_API.app.api.v1.endpoints import chat
+    from tldw_Server_API.app.core.exceptions import ChatConfigurationError
+
+    client, db, cid, headers = settled_api
+    governor, exits = reserved_admission_metrics
 
     def fail_preparation(*_args, **_kwargs):
         raise ChatConfigurationError("private-b02-configuration-marker", provider="openai")

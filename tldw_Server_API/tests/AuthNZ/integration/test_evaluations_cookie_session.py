@@ -11,7 +11,7 @@ from fastapi import HTTPException, Request
 from tldw_Server_API.app.api.v1.endpoints.evaluations import evaluations_auth, evaluations_datasets, evaluations_recipes
 from tldw_Server_API.app.core.AuthNZ import User_DB_Handling
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import reset_api_key_manager
-from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_READ
+from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.AuthNZ.session_manager import SessionManager
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings, reset_settings
 from tldw_Server_API.app.core.Evaluations import unified_evaluation_service
@@ -123,6 +123,9 @@ def test_evaluation_cookie_never_overrides_explicit_headers(evaluation_cookie_cl
 
     assert response.status_code == 401, response.text  # nosec B101 - pytest header precedence assertion.
 
+    assert set(response.json()) == {"detail"}  # nosec B101 - Explicit bad credentials expose no private catalog.
+    assert response.json()["detail"]  # nosec B101 - Require a recoverable authentication error.
+
 
 @pytest.mark.parametrize("path", [RECIPES, DATASETS])
 def test_evaluation_cookie_retains_ip_allowlist(evaluation_cookie_client, monkeypatch, path):
@@ -145,6 +148,11 @@ def test_evaluation_retains_primary_key_and_bearer_without_cookie(evaluation_coo
     for path in (RECIPES, DATASETS):
         response = client.get(path, headers={header: value})
         assert response.status_code == 200, response.text  # nosec B101 - pytest explicit authentication assertion.
+
+        if path == RECIPES:
+            assert "summarization_quality" in {item["recipe_id"] for item in response.json()}  # nosec B101 - The real recipe catalog is returned.
+        else:
+            assert response.json()["data"] == []  # nosec B101 - Only the isolated owner dataset catalog is visible.
 
 
 def test_evaluation_cookie_dataset_write_retains_csrf_and_owner(evaluation_cookie_client):
@@ -180,6 +188,14 @@ def test_evaluation_cookie_retains_read_permission_gate(evaluation_cookie_client
 
     assert response.status_code == (200 if can_read else 403), response.text  # nosec B101 - pytest claim-based permission assertion.
 
+    if can_read:
+        if path == RECIPES:
+            assert "summarization_quality" in {item["recipe_id"] for item in response.json()}  # nosec B101 - Read claims grant the real catalog.
+        else:
+            assert response.json()["data"] == []  # nosec B101 - Read claims expose only this owner dataset catalog.
+    else:
+        assert response.json() == {"detail": f"Permission denied: missing {EVALS_READ}"}  # nosec B101 - Preserve the distinct missing-read failure.
+
 
 def test_evaluation_cookie_read_permission_does_not_allow_manage(evaluation_cookie_client, monkeypatch):
     client, api_key = evaluation_cookie_client
@@ -191,6 +207,8 @@ def test_evaluation_cookie_read_permission_does_not_allow_manage(evaluation_cook
     response = client.post(DATASETS, json=DATASET_BODY, headers=headers)
 
     assert response.status_code == 403, response.text  # nosec B101 - pytest distinct manage permission assertion.
+
+    assert response.json() == {"detail": f"Permission denied: missing {EVALS_MANAGE}"}  # nosec B101 - Read permission must not become management permission.
 
 
 def test_evaluation_other_cookie_name_is_not_a_candidate(evaluation_cookie_client):

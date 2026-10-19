@@ -58,10 +58,11 @@ class InferenceTransport:
     judge: str = '{"label":"supported","confidence":0.95,"rationale":"Fixed external inference."}'
     requests: list[dict] = field(default_factory=list)
     responses_closed: int = 0
+    targets: list[tuple] = field(default_factory=list)
 
     def fetch(self, **kwargs):
         payload = kwargs["json"]
-        assert kwargs["configured_endpoint"].matches(kwargs["url"])  # nosec B101 - real boundary contract
+        self.targets.append((kwargs["configured_endpoint"], kwargs["url"]))
         self.requests.append(payload)
         is_judge = "fact-checking judge" in payload["messages"][0]["content"]
         content = self.judge if is_judge else json.dumps(self.cards)
@@ -96,7 +97,9 @@ def inference_transport(private_pair_paths, monkeypatch):
     transport = InferenceTransport()
     adapter = adapter_registry.get_registry().get_adapter("ollama")
     monkeypatch.setattr(adapter, "http_fetcher", transport.fetch)
-    return transport
+    yield transport
+    for endpoint, url in transport.targets:
+        assert endpoint.matches(url), url  # nosec B101 - Audit every real configured endpoint at the fixture boundary.
 
 
 @pytest.fixture

@@ -58,6 +58,9 @@ def test_prompt_projects_reject_missing_or_invalid_credentials(prompt_cookie_cli
 
     assert response.status_code == 401, response.text  # nosec B101
 
+    assert set(response.json()) == {"detail"}  # nosec B101 - Denials expose no private Prompt projects.
+    assert response.json()["detail"]  # nosec B101 - Require an actionable authentication denial.
+
 
 def test_cookie_project_write_requires_csrf_and_retains_owner(prompt_cookie_client):
     client, api_key = prompt_cookie_client

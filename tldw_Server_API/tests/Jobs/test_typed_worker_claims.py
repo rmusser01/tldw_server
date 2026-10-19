@@ -42,6 +42,13 @@ def jobs(request, tmp_path, monkeypatch):
     return JobManager(tmp_path / "typed-worker.db")
 
 
+@pytest.fixture
+def default_evaluation_queues(monkeypatch):
+    """Worker entrypoint cases use their declared shared default queue."""
+    for key in ("EVALUATIONS_JOBS_QUEUE", "EVALS_JOBS_QUEUE", "EVALUATIONS_RECIPE_RUN_JOBS_QUEUE"):
+        monkeypatch.delenv(key, raising=False)
+
+
 def create(jobs, kind, *, priority=5, owner="owner", queue="default", domain="evaluations", **kwargs):
     return jobs.create_job(
         domain=domain, queue=queue, job_type=kind, payload={}, owner_user_id=owner, priority=priority, **kwargs
@@ -68,7 +75,7 @@ def execute(jobs, sqlite_sql, pg_sql, params):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("owner_worker", ["recipe", "ab"])
-async def test_actual_entrypoint_never_leases_foreign_jobs(jobs, monkeypatch, owner_worker):
+async def test_actual_entrypoint_never_leases_foreign_jobs(jobs, monkeypatch, owner_worker, default_evaluation_queues):
     """Removing either caller filter delivers another worker's valid job."""
     stop = asyncio.Event()
     if owner_worker == "recipe":
@@ -99,9 +106,6 @@ async def test_actual_entrypoint_never_leases_foreign_jobs(jobs, monkeypatch, ow
 
     monkeypatch.setattr(module, manager_name, lambda: jobs)
     monkeypatch.setattr(module, handler_name, business_operation)
-    monkeypatch.delenv("EVALUATIONS_JOBS_QUEUE", raising=False)
-    monkeypatch.delenv("EVALS_JOBS_QUEUE", raising=False)
-    monkeypatch.delenv("EVALUATIONS_RECIPE_RUN_JOBS_QUEUE", raising=False)
     await asyncio.wait_for(entrypoint(stop), timeout=5)
     assert observed == expected  # nosec B101 - pytest real worker routing assertion.
     assert processing == [1] * len(wanted)  # nosec B101 - pytest one serial lease assertion.

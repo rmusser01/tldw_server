@@ -118,6 +118,9 @@ def test_list_requires_real_authentication(history_accounts):
     response = history_accounts.client.get(ROOT + "/evaluations", params={"project_id": history_accounts.project["id"]})
     assert response.status_code == 401, response.text  # nosec B101 - pytest contract
 
+    assert set(response.json()) == {"detail"}  # nosec B101 - Unauthenticated requests expose no evaluation provenance.
+    assert response.json()["detail"]  # nosec B101 - Preserve recovery information without private data.
+
 
 def test_projection_preserves_existing_exact_offset_pagination(history_accounts):
     context = history_accounts

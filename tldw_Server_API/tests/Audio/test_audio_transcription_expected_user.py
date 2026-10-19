@@ -31,8 +31,8 @@ def test_b05_transcription_owner_admission(expected: str | None, status: int, mo
     # Retain the actual owner guard; isolate unrelated quotas/DB/provider work.
     for dependency in route.dependant.dependencies:
         if dependency.call is not auth_deps.require_expected_user:
-            app.dependency_overrides[dependency.call] = no_side_effect
-    app.dependency_overrides[auth_deps.get_auth_principal] = lambda: SimpleNamespace(user_id=84)
+            monkeypatch.setitem(app.dependency_overrides, dependency.call, no_side_effect)
+    monkeypatch.setitem(app.dependency_overrides, auth_deps.get_auth_principal, lambda: SimpleNamespace(user_id=84))
     headers = {} if expected is None else {"X-TLDW-Expected-User-ID": expected}
     with TestClient(app) as client:
         response = client.post(route.path, headers=headers, files={"file": ("unit.wav", b"unit bytes", "audio/wav")})
@@ -40,3 +40,5 @@ def test_b05_transcription_owner_admission(expected: str | None, status: int, mo
     assert bool(calls) is (status == 200)  # nosec B101 - Rejected requests must not process audio.
     if status == 412:
         assert response.json()["detail"]["code"] == "request_config_scope_changed"  # nosec B101 - Verify structured recovery contract.
+    if status == 200:
+        assert response.json() == {"text": "admitted unit probe"}  # nosec B101 - The accepted owner reaches and returns the actual route probe.
