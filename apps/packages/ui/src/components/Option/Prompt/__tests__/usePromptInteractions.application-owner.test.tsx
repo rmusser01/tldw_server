@@ -5,11 +5,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 const state = vi.hoisted(() => ({ system: undefined as string | undefined, quick: undefined as string | undefined }))
+const ownerIo = vi.hoisted(() => ({ resolve: vi.fn<() => Promise<{ ownerId: string; authorizationRevision: string }>>() }))
 const owner = "recipe-owner:sha256:" + "a".repeat(64)
 vi.mock("@/hooks/useMessageOption", () => ({ useMessageOption: () => ({ setSelectedSystemPrompt: (id: string | undefined) => { state.system = id }, setSelectedQuickPrompt: (value: string | undefined) => { state.quick = value } }) }))
 vi.mock("@/services/application", () => ({ getAllCopilotPrompts: async () => [], upsertCopilotPrompts: vi.fn() }))
 vi.mock("@/services/prompt-studio", () => ({ hasPromptStudio: async () => false, getPrompt: vi.fn(), getLlmProviders: async () => ({ providers: [] }) }))
-vi.mock("@/services/recipe-persistence-uncertainty", async original => ({ ...await original(), resolveRecipePersistenceOwnerView: async () => ({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), authorizationRevision: "current" }) }))
+vi.mock("@/services/recipe-persistence-uncertainty", async original => ({ ...await original(), resolveRecipePersistenceOwnerView: () => ownerIo.resolve() }))
 import { usePromptInteractions } from "../hooks/usePromptInteractions"
 import { useStoreChatModelSettings } from "@/store/model"
 const record = { id: "alice-prompt", name: "Pirate", system_prompt: "Always say ARRR.", user_prompt: "Alice private template" }
@@ -19,7 +20,7 @@ const mount = (mark: () => Promise<void> = async () => undefined) => {
   const hook = renderHook(() => usePromptInteractions({ queryClient: client, isOnline: false, ...{ expectedOwnerId: owner }, t: key => key, getPromptTexts: row => ({ systemText: row.system_prompt, userText: row.user_prompt }), getPromptKeywords: () => [], getPromptRecordById: () => record, getPromptModifiedAt: () => 0, getPromptUsageCount: () => 0, getPromptLastUsedAt: () => null, editorMarkPromptAsUsed: mark }), { wrapper })
   return { ...hook, client }
 }
-beforeEach(() => { state.system = undefined; state.quick = undefined; useStoreChatModelSettings.getState().reset() })
+beforeEach(() => { state.system = undefined; state.quick = undefined; useStoreChatModelSettings.getState().reset(); ownerIo.resolve.mockReset().mockResolvedValue({ ownerId: owner, authorizationRevision: "current" }) })
 afterEach(() => { vi.restoreAllMocks() })
 
 it("C01 applying a saved system prompt clears the previous temporary override", async () => {
@@ -35,32 +36,40 @@ it("C01 applying a saved system prompt clears the previous temporary override", 
 
 it.each(["system", "both", "quick"] as const)("C01 retired %s application cannot repopulate another account's Chat", async choice => {
   let finish!: () => void
-  const mark = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))
+  ownerIo.resolve.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({ ownerId: owner, authorizationRevision: "current" }) }))
+  const mark = vi.fn(async () => undefined)
   const view = mount(mark)
   let applying!: Promise<unknown>
   if (choice !== "quick") await act(async () => { await view.result.current.handleUsePromptInChat(record) })
   await act(async () => { applying = choice === "quick" ? view.result.current.handleUsePromptInChat({ ...record, system_prompt: "" }) : view.result.current.handleInsertChoice(choice) })
-  await waitFor(() => expect(mark).toHaveBeenCalledOnce())
+  await waitFor(() => expect(ownerIo.resolve).toHaveBeenCalledOnce())
+  expect(state.system).toBeUndefined()
+  expect(state.quick).toBeUndefined()
   view.unmount()
   window.dispatchEvent(new Event("tldw:auth-principal-changed"))
   await act(async () => { finish(); await applying })
   expect(state.system).toBeUndefined()
   expect(state.quick).toBeUndefined()
+  expect(mark).not.toHaveBeenCalled()
   view.client.clear()
 })
 
 it("C01 account retirement blocks a pending application even before its editor unmounts", async () => {
   let finish!: () => void
-  const mark = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))
+  ownerIo.resolve.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve({ ownerId: owner, authorizationRevision: "current" }) }))
+  const mark = vi.fn(async () => undefined)
   const view = mount(mark)
   await act(async () => { await view.result.current.handleUsePromptInChat(record) })
   let applying!: Promise<unknown>
   await act(async () => { applying = view.result.current.handleInsertChoice("both") })
-  await waitFor(() => expect(mark).toHaveBeenCalledOnce())
+  await waitFor(() => expect(ownerIo.resolve).toHaveBeenCalledOnce())
+  expect(state.system).toBeUndefined()
+  expect(state.quick).toBeUndefined()
   window.dispatchEvent(new Event("tldw:auth-principal-changed"))
   await act(async () => { finish(); await applying })
   expect(state.system).toBeUndefined()
   expect(state.quick).toBeUndefined()
+  expect(mark).not.toHaveBeenCalled()
   view.unmount(); view.client.clear()
 })
 

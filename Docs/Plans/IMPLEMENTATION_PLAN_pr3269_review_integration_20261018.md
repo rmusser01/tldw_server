@@ -12,6 +12,16 @@ Both primary CI Turbopack profiles passed after the guard repair under unchanged
 
 Stage2 locally complete; Stage3 requires reviewed publication and Stage4 final-head hosted qualification/merge. GitHub resolved its incident and the single trusted license recovery audit passed; this does not qualify the later rebased head. The requester waived the human-written Change summary for PR3269 only. Review covers new patches and affected callers, with earlier large-PR coverage limits retained. Main UAT/C05 and runtimes untouched; no additional UAT acceptance.
 
+## Current a9 hosted-failure repair — 2026-10-19
+
+Published head a9a720f92fd36fd88b6829be7fca435444555cfa remains under hosted qualification on live dev530e483b. Two completed frontend groups failed; each exact job/run/head/event/attempt/workflow binding was verified before its single in-memory log read. No passed or consumed log was reread.
+
+- Group4: five failures reproduced locally. The OpenUI success cleanup ran after its own imported-page removal changed context revision; clear the still-current one-shot mode inside successful afterSend, before that removal. Keep owner/completion/exact-context and failed/replaced-request guards. Four retirement fixtures now defer actual owner qualification, rather than the intentionally nonblocking usage counter. Existing private-state assertions remain, with additional no-counter-after-retirement assertions. One negative control temporarily disabled real retirement and failed with leaked alice-prompt as expected; exact production service was restored finally.
+- Group6: unauthenticated v1 pull correctly returns the existing validation/not_dispatched result before any foreign-row reread. Update its stale null oracle and add no-Prompt-request/unchanged-row checks for every unauthenticated v1 operation. The backup-confirmation visibility failure has not reproduced locally: all confirmation, metadata, cancellation/no-POST and exact-request assertions pass unchanged. No production cause or speculative backup repair claimed.
+- Qualification: complete five-file185 UI/185 WebUI runs, then distinct three-file90 UI/90 WebUI runs; these overlap and are not a project-suite aggregate. Production-root TypeScript0. Actual three-file ESLint0errors/16identicalwarnings/noignored/no new. Both primary Turbopack builds pass token sync and unchanged600/900KB budgets: production596.2/877.3KB, development593.1/874.3KB. Optional webpack STOP remains. Python/schema are unchanged; prior scoped security and canonical qualification retain their limits, Bandit N/A for this TypeScript/prose delta.
+
+Current actual-source/caller/assertion review is complete for this three-file repair; no fresh independent agent or exhaustive whole-PR review is claimed. Final staged review, normal hooks, exact-lease publication and new-head hosted qualification remain required. No additional UAT acceptance, runtime/model/browser changes or main-thread edits.
+
 ## Historical integration candidate — 2026-10-18
 
 Latest integrated dev is `3f45238a0f29e63f417da26466f90f4df5c1da20`. The conflict-free rebase is published as `b76b67d0693dfb6a5b8027afe69f5ed4110bf7eb`, directly on that dev commit, with normal hooks and an exact lease against prior published `ee08fe312dda905e7fa68280edb22dc410834f87`. PR3269 is ready, its authored description and preserved external suffix were read back exactly, and final-head hosted qualification remains in progress. Historical source/base and review-running paragraphs below are retained as history and superseded by this section.
@@ -44,13 +54,13 @@ The service recovered in the renewed-authorization continuation. Fresh GitHub AP
 **Goal:** Preserve current-dev behavior and accumulated UAT fixes while resolving demonstrated defects/conflicts.
 **Success Criteria:** No removed ownership/security/version/cancellation contracts or weakened tests; each new repair has a causal regression and affected checks.
 **Tests:** Relevant configured suites, compile/lint, scoped baseline/current Bandit, canonical API generation when affected.
-**Status:** Complete
+**Status:** In Progress
 
 ## Stage3: Final review and publication
 **Goal:** Fresh actual/staged review, normal hooks and guarded publication to PR3269.
 **Success Criteria:** All Critical/Important findings fixed; exact remote-head checks prevent overwriting foreign work; PR description accurately states final scope and evidence.
 **Tests:** Manual current/staged review, normal hooks, current-source/base/remote guards and PR readback. No further reviewer agent is permitted in this side conversation.
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage4: Hosted qualification and landing gates
 **Goal:** Verify required CI on the final current-dev head and satisfy human ownership gates.
@@ -187,3 +197,7 @@ Normal hooks and exact remote lease published45b7d4f88b11da2ff3b0ea9b87f505feaaf
 ### Current530 transport qualification
 
 Manual changed-hunk/caller/test review is clear after the causal raw-flag boundary repair. ADR required:no new decision; existing origin guards are restored for ordinary parsed requests. The real two-case red/green regression and full121UI/73Web transport groups pass; touched fixture/cookie-helper groups73UI/99Web pass. Production-root TypeScript0. Corrected actual74-file lint covers every file with zero ignored/zero errors/392inherited warnings/no new findings; earlier ignored warnings are explicitly not qualification. Final primary Turbopack production and development builds pass in24.462/24.107seconds with token sync and596.2/877.3KB versus593.1/874.3KB under unchanged600/900budgets. The initial advanced-mode preflight used no API URL; corrected invocations use the exact CI declaration. Optional webpack is unqualified after three bounded diagnostics, including the same4GB OOM on45b baseline; no fourth replay or heap/cache workaround. No new schema/Python/dependency delta requires unchanged canonical/security replay. All broader review/UAT coverage limits remain; final-head hosted gates/merge open.
+
+### Publisheda9 — final-head qualification open
+
+Normal exact-lease publication confirmeda9a720f92fd36fd88b6829be7fca435444555cfa on live530. Guard repair commit exactly matches reviewed patch8257d9c778252e506a879e01645a8545df4ec65e82f7427124cdfc576dc84411. PR description is rewritten around final implementation and scoped validation,8306characters; authored body, fresh external suffix and PR-specific human waiver read back exactly. Stage3complete; Stage4 waits for this head's hosted gates and merge. Routine tracking notes stay local without resetting CI. All main UAT/runtime and coverage restrictions retained.

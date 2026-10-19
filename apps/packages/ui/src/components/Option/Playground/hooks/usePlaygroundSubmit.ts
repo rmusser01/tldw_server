@@ -780,7 +780,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         activeDocumentPreparationRef.current = null
         setIsPreparingDocuments(false)
       }
-      const result = await dispatch(payload, {
+      await dispatch(payload, {
         beforeSend: () => {
           promptAssistAttemptId = beginPromptAssistReset()
           if (activeSubmissionRef.current === submission) activeSubmissionRef.current = null
@@ -814,6 +814,9 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         afterSend: (result) => {
           if (draftOwnership.isOwnerCurrent() && isChatSubmitSuccess(normalizeChatSubmitResult(result as ChatSubmitResult | undefined))) {
             markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
+            if (openUIRequestMode && contextRevisionRef.current.revision === contextRevision && completionIsCurrent()) {
+              clearOpenUIRequestMode()
+            }
             if (messageForModel && pageContextRevisionRef.current.revision === pageContextRevision) {
               clearImportedSidepanelContext?.()
             }
@@ -823,9 +826,6 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         },
         onSendError: () => restorePromptAssistAttempt(promptAssistAttemptId)
       })
-      if (openUIRequestMode && contextRevisionRef.current.revision === contextRevision && completionIsCurrent() && isChatSubmitSuccess(normalizeChatSubmitResult(result))) {
-        clearOpenUIRequestMode()
-      }
       } finally {
         if (activeSubmissionRef.current === submission) {
           activeSubmissionRef.current = null

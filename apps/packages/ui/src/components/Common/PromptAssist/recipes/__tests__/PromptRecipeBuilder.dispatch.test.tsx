@@ -1344,13 +1344,14 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
               },
             }),
       );
+      const original = structuredClone(mocks.rows.get("dispatch-id"));
       const result =
         operation === "pull"
           ? await pullFromStudio(101, "dispatch-id")
           : await autoSyncPrompt("dispatch-id", 42);
       expect(result).toMatchObject({
         success: authenticated,
-        recipeOwnership: !authenticated && operation === "pull" ? null : {
+        recipeOwnership: {
           dispatch: authenticated ? { state: "dispatched", actualOwnerId: ownerScope } : { state: "not_dispatched", actualOwnerId: null },
         },
       });
@@ -1358,6 +1359,10 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
         await readRecipePersistenceUncertainty("dispatch-id", ownerScope),
       ).toBe(authenticated ? "clear" : "scoped");
       expect(promptMutations()).toHaveLength(authenticated && operation !== "pull" ? 1 : 0);
+      if (!authenticated) {
+        expect(nonAuthRequests()).toHaveLength(0);
+        expect(mocks.rows.get("dispatch-id")).toEqual(original);
+      }
     },
   );
 });
