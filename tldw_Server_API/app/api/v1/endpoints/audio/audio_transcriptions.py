@@ -58,6 +58,7 @@ from tldw_Server_API.app.core.Metrics.stt_metrics import (
     observe_stt_latency_seconds,
 )
 from tldw_Server_API.app.core.testing import is_test_mode
+from tldw_Server_API.app.core.Usage import concurrency_quota, quota_checks
 from tldw_Server_API.app.core.Usage.audio_quota import (
     add_daily_minutes,
     can_start_job,
@@ -71,6 +72,8 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     increment_jobs_started,
     monthly_minutes_exhausted,
 )
+
+TRANSCRIPTIONS_KEY = "limits.audio_concurrent_transcriptions"
 
 router = APIRouter(
     tags=["Audio"],
@@ -687,6 +690,20 @@ async def create_transcription(
     except Exception:
         _emit_error_metrics(status_label="internal_error", reason="policy_resolution_failed")
         raise
+    # One of the user's direct-transcription slots, held until the finally below (TASK-13435).
+    try:
+        transcription_slot = await concurrency_quota.acquire_slot(
+            current_user.id, TRANSCRIPTIONS_KEY, "jobs"
+        )
+    except concurrency_quota.ConcurrencyQuotaExceeded as exc:
+        if job_heartbeat_task:
+            job_heartbeat_task.cancel()
+        _emit_error_metrics(status_label="quota_exceeded", reason="quota")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Concurrent transcription limit reached ({exc.limit})",
+            headers=quota_checks.rate_limit_headers(exc.limit, 0, exc.retry_after) if exc.retry_after else None,
+        ) from exc
     try:
         first_chunk = await file.read(upload_chunk_size)
         file_extension = _resolve_audio_upload_suffix(
@@ -1407,6 +1424,10 @@ async def create_transcription(
                     )
                 except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
                     logger.debug("metrics increment failed (audio tempfile_remove_failed)")
+        if job_heartbeat_task:
+            job_heartbeat_task.cancel()
+        # Last, so every cleanup above has run whatever the release does (TASK-13435).
+        await transcription_slot.release()
 
 
 @router.post(
