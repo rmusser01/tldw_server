@@ -207,3 +207,70 @@ async def test_upload_admitted_past_stale_column_when_quotas_off(
     monkeypatch.setattr(input_sourcing, "save_uploaded_files", sparse_upload)
     await _orchestrate()
     assert processed, "the upload was rejected although quotas are off"
+
+
+@pytest.fixture()
+def one_ingest_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    """limits.media_concurrent_jobs = 1 for every user, with a fresh in-memory lease store (TASK-13435)."""
+    from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor
+    from tldw_Server_API.app.core.Usage import concurrency_quota
+
+    async def _one(_user_id: int, key: str) -> object:
+        """A limit of 1 for concurrent media ingests; every other key unset."""
+        return 1 if key == "limits.media_concurrent_jobs" else None
+
+    monkeypatch.setattr(concurrency_quota, "user_quota", _one)
+    monkeypatch.setattr(concurrency_quota, "_governor", MemoryResourceGovernor(policy_loader=concurrency_quota._QuotaPolicies()))
+
+
+@pytest.mark.asyncio
+async def test_second_ingest_is_refused_while_the_first_runs_and_admitted_once_it_is_cancelled(
+    monkeypatch: pytest.MonkeyPatch, one_ingest_at_a_time: None
+) -> None:
+    """At limit 1 a second /media/add gets 429 before any work; cancelling the first frees the slot."""
+    quota_service = _BlockingQuotaService()
+    _patch_upload(monkeypatch, quota_service)
+    first = asyncio.create_task(_orchestrate())
+    await asyncio.wait_for(quota_service.entered.wait(), timeout=10)
+    processed = _patch_upload(monkeypatch, _RejectingQuotaService())
+
+    with pytest.raises(HTTPException) as refused:
+        await _orchestrate()
+    assert refused.value.status_code == 429
+    assert refused.value.detail == "Media ingestion concurrency limit reached."
+    assert int(refused.value.headers["Retry-After"]) >= 1
+
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(first, timeout=10)
+    with pytest.raises(HTTPException) as after_cancel:
+        await _orchestrate()
+    assert after_cancel.value.status_code == 413
+    assert processed == []
+
+
+@pytest.mark.asyncio
+async def test_a_finished_ingest_gives_its_slot_back(monkeypatch: pytest.MonkeyPatch, one_ingest_at_a_time: None) -> None:
+    """At limit 1, two ingests one after the other both run: a successful request releases its slot."""
+
+    class _AdmittingQuotaService:
+        """A storage quota with room for everything."""
+
+        async def check_quota(self, user_id: int, new_bytes: int, raise_on_exceed: bool = False):
+            """Admit the upload."""
+            return True, {"current_usage_mb": 0, "new_size_mb": 1, "quota_mb": None, "available_mb": None}
+
+    processed = _patch_upload(monkeypatch, _AdmittingQuotaService())
+    await _orchestrate()
+    await _orchestrate()
+    assert len(processed) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_ingest_gives_its_slot_back(monkeypatch: pytest.MonkeyPatch, one_ingest_at_a_time: None) -> None:
+    """An ingest that fails after admission (413) releases its slot: the next one fails on its own merits, not 429."""
+    _patch_upload(monkeypatch, _RejectingQuotaService())
+    for _ in range(2):
+        with pytest.raises(HTTPException) as exc_info:
+            await _orchestrate()
+        assert exc_info.value.status_code == 413
