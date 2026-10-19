@@ -875,64 +875,103 @@ async def test_audio_analyze_stores_the_model_analysis(analyze_worker):
 
 @pytest.mark.unit
 @pytest.mark.parametrize("text", ["", " \n "], ids=["empty", "whitespace"])
-async def test_audio_analyze_empty_transcript_fails_without_retry(analyze_worker, text):
+async def test_audio_analyze_empty_transcript_keeps_it(analyze_worker, text):
     worker, jm, adapter = analyze_worker
     job_id = _analyze_job(jm, text)
-    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
-    job = jm.get_job(job_id) or {}
-    assert job.get("status") == "failed"
-    assert int(job.get("retry_count") or 0) == 0
-    assert job.get("error_code") == "empty_transcript"
+    await _run_worker_until(worker, lambda: _settled(jm, job_id))
+    assert _stored(jm), "audio_analyze did not hand over to audio_store"
+    payload = _stored(jm)[0]["payload"]
+    assert payload["text"] == text
+    assert payload["analysis_error"]["code"] == "empty_transcript"
+    assert "analysis" not in payload
     assert adapter.requests == []
-    assert jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7") == []
 
 
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    ("error_name", "code"),
-    [("ChatAuthenticationError", "authentication"), ("ChatConfigurationError", "configuration")],
-)
-async def test_audio_analyze_provider_setup_failure_fails_without_retry(analyze_worker, error_name, code):
+def _break_provider(code: str, adapter, monkeypatch) -> None:
+    """Make analysis fail the way a misconfigured provider does, for the given error code."""
+    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as summarization
     from tldw_Server_API.app.core import exceptions
 
-    worker, jm, adapter = analyze_worker
-    adapter.error = getattr(exceptions, error_name)(provider="openai")
-    job_id = _analyze_job(jm, "hello transcript")
-    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
-    job = jm.get_job(job_id) or {}
-    assert job.get("status") == "failed"
-    assert int(job.get("retry_count") or 0) == 0
-    assert job.get("error_code") == code
+    if code == "authentication":
+        adapter.error = exceptions.ChatAuthenticationError(provider="openai")
+    elif code == "configuration":
+        adapter.error = exceptions.ChatConfigurationError(provider="openai")
+    elif code == "missing_model":
+        monkeypatch.setattr(summarization, "load_and_log_configs", lambda: {"openai_api": {}})
+        monkeypatch.delenv("DEFAULT_MODEL_OPENAI", raising=False)
+    else:  # adapter_unavailable
+        monkeypatch.setattr(summarization, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: None))
+
+
+def _exhaust_retries(jm, job_id: int) -> int:
+    """Put the job on its last attempt (retry_count == max_retries); returns max_retries."""
+    connection = sqlite3.connect(jm.db_path)
+    try:
+        connection.execute("UPDATE jobs SET retry_count = max_retries WHERE id = ?", (job_id,))
+        connection.commit()
+        return int(connection.execute("SELECT max_retries FROM jobs WHERE id = ?", (job_id,)).fetchone()[0])
+    finally:
+        connection.close()
 
 
 @pytest.mark.unit
-async def test_audio_analyze_missing_model_fails_without_retry(analyze_worker, monkeypatch):
-    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as summarization
-
+@pytest.mark.parametrize("code", ["authentication", "configuration", "missing_model", "adapter_unavailable"])
+async def test_audio_analyze_provider_setup_failure_keeps_the_transcript(analyze_worker, monkeypatch, code):
     worker, jm, adapter = analyze_worker
-    monkeypatch.setattr(summarization, "load_and_log_configs", lambda: {"openai_api": {}})
-    monkeypatch.delenv("DEFAULT_MODEL_OPENAI", raising=False)
+    _break_provider(code, adapter, monkeypatch)
     job_id = _analyze_job(jm, "hello transcript")
-    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
+    await _run_worker_until(worker, lambda: _settled(jm, job_id))
+    assert _stored(jm), "audio_analyze did not hand over to audio_store"
+    payload = _stored(jm)[0]["payload"]
+    assert payload["text"] == "hello transcript"
+    assert payload["analysis_error"]["code"] == code
+    assert payload["analysis_error"]["message"]
+    assert "analysis" not in payload
     job = jm.get_job(job_id) or {}
-    assert job.get("status") == "failed"
-    assert int(job.get("retry_count") or 0) == 0
-    assert job.get("error_code") == "missing_model"
-    assert adapter.requests == []
+    assert (job.get("status"), job.get("retry_count")) == ("completed", 0)
+    assert job["result"]["analysis_error"]["code"] == code
 
 
 @pytest.mark.unit
-async def test_audio_analyze_unavailable_adapter_fails_without_retry(analyze_worker, monkeypatch):
-    import tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib as summarization
+async def test_audio_analyze_rate_limited_on_the_last_attempt_keeps_the_transcript(analyze_worker):
+    from tldw_Server_API.app.core.exceptions import ChatRateLimitError
 
     worker, jm, adapter = analyze_worker
-    monkeypatch.setattr(summarization, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: None))
+    adapter.error = ChatRateLimitError(provider="openai")
     job_id = _analyze_job(jm, "hello transcript")
-    await _run_worker_until(worker, lambda: _failed_or_retried(jm, job_id))
+    max_retries = _exhaust_retries(jm, job_id)
+    await _run_worker_until(worker, lambda: _settled(jm, job_id, retries=max_retries + 1))
+    assert _stored(jm), "audio_analyze did not hand over to audio_store"
+    payload = _stored(jm)[0]["payload"]
+    assert payload["text"] == "hello transcript"
+    assert payload["analysis_error"]["code"] == "rate_limit"
+    assert "analysis" not in payload
+    assert (jm.get_job(job_id) or {}).get("status") == "completed"
+
+
+@pytest.mark.unit
+async def test_audio_analyze_error_reply_on_the_last_attempt_keeps_the_transcript(analyze_worker):
+    worker, jm, adapter = analyze_worker
+    adapter.reply = "Error: the provider said no"
+    job_id = _analyze_job(jm, "hello transcript")
+    max_retries = _exhaust_retries(jm, job_id)
+    await _run_worker_until(worker, lambda: _settled(jm, job_id, retries=max_retries + 1))
+    assert _stored(jm), "audio_analyze did not hand over to audio_store"
+    payload = _stored(jm)[0]["payload"]
+    assert payload["analysis_error"] == {"code": "provider_failure", "message": "Error: the provider said no"}
+    assert "analysis" not in payload
+
+
+@pytest.mark.unit
+async def test_audio_analyze_error_reply_is_retried_as_a_provider_failure(analyze_worker):
+    worker, jm, adapter = analyze_worker
+    adapter.reply = "Error: the provider said no"
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: _settled(jm, job_id))
     job = jm.get_job(job_id) or {}
-    assert job.get("status") == "failed"
-    assert int(job.get("retry_count") or 0) == 0
-    assert job.get("error_code") == "adapter_unavailable"
+    assert (job.get("status"), job.get("retry_count"), job.get("error_code")) == ("queued", 1, "provider_failure")
+    assert _seconds_until_due(jm, job_id) >= 4, "a provider failure waits about 5 s"
+    assert _stored(jm) == []
 
 
 @pytest.mark.unit
@@ -986,7 +1025,7 @@ async def test_audio_analyze_without_api_name_skips_analysis(analyze_worker, api
 
 
 @pytest.mark.unit
-async def test_audio_analyze_quota_refusal_fails_the_job_without_retry(analyze_worker):
+async def test_audio_analyze_quota_refusal_keeps_the_transcript(analyze_worker):
     from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 
     worker, jm, adapter = analyze_worker
@@ -994,11 +1033,17 @@ async def test_audio_analyze_quota_refusal_fails_the_job_without_retry(analyze_w
         category="llm_tokens_month", current=12, limit=10, message="over", retry_after=60
     )
     job_id = _analyze_job(jm, "hello transcript")
-    await _run_worker_until(worker, lambda: (jm.get_job(job_id) or {}).get("status") == "failed")
+    await _run_worker_until(worker, lambda: _settled(jm, job_id))
+    assert _stored(jm), "audio_analyze did not hand over to audio_store"
+    payload = _stored(jm)[0]["payload"]
+    assert payload["text"] == "hello transcript"
+    assert payload["analysis_error"] == {
+        "code": "llm_quota_exceeded",
+        "message": "LLM quota exceeded (llm_tokens_month)",
+    }
     job = jm.get_job(job_id) or {}
-    assert job.get("status") == "failed"
-    assert int(job.get("retry_count") or 0) == 0
-    assert job.get("error_code") == "llm_quota_exceeded"
+    assert (job.get("status"), job.get("retry_count")) == ("completed", 0)
+    assert job["result"]["analysis_error"]["code"] == "llm_quota_exceeded"
 
 
 @pytest.mark.unit

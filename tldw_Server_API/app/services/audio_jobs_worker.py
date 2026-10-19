@@ -21,7 +21,8 @@ from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 
 DOMAIN = "audio"
 # Analysis failures a retry can fix. The other SummaryProviderError codes (missing model or
-# credentials, bad configuration or authentication, an unknown provider) fail the same way every time.
+# credentials, bad configuration or authentication, an unknown provider) fail the same way every time,
+# so the transcript is stored at once with the failure in analysis_error.
 _RETRYABLE_ANALYSIS_CODES = frozenset({"rate_limit", "provider_failure"})
 
 
@@ -381,6 +382,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                     updated_payload["chunks"] = chunks
                     next_type = payload.get("perform_analysis") and "audio_analyze" or "audio_store"
                 elif jtype == "audio_analyze":
+                    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
                     from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import (
                         SummaryProviderError,
                         analyze,
@@ -391,14 +393,14 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                         segs = updated_payload.get("segments") or []
                         text = " ".join((s.get("Text", "").strip() if isinstance(s, dict) else "") for s in segs).strip()
                     api_name = str(payload.get("api_name") or "").strip()
+                    code: str | None = None
+                    message = ""
                     if not api_name or api_name.lower() == "none":
                         # No provider named: skip analysis, as /media/process-audios does.
                         updated_payload["analysis_skipped"] = "no api_name"
                         logger.info("Audio job {}: analysis skipped, no api_name", job["id"])
                     elif not text.strip():
-                        raise _StageFailure(
-                            "empty transcript: nothing to analyze", failure_code="empty_transcript", retryable=False
-                        )
+                        code, message = "empty_transcript", "empty transcript: nothing to analyze"
                     else:
                         try:
                             with llm_call_root(owner):
@@ -411,19 +413,32 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                                     raise_on_error=True,
                                 )
                         except SummaryProviderError as exc:
-                            if exc.code in _RETRYABLE_ANALYSIS_CODES:
-                                # Wait long enough for a rate limit to lift; a retry, not a poison message.
-                                raise _StageFailure(
-                                    str(exc),
-                                    failure_code=exc.code,
-                                    retryable=True,
-                                    backoff_seconds=30 if exc.code == "rate_limit" else 5,
-                                    quarantine=False,
-                                ) from exc
-                            raise _StageFailure(str(exc), failure_code=exc.code, retryable=False) from exc
-                        if isinstance(analysis, str) and analysis.startswith("Error:"):
-                            raise RuntimeError(analysis)
-                        updated_payload["analysis"] = analysis
+                            code, message = exc.code, str(exc)
+                        except LLMQuotaExceededError as exc:
+                            # A quota window does not reset in seconds: no retry, and no LLM call was made.
+                            code, message = exc.failure_code, f"LLM quota exceeded ({exc.category})"
+                        else:
+                            if isinstance(analysis, str) and analysis.startswith("Error:"):
+                                code, message = "provider_failure", analysis
+                            else:
+                                updated_payload["analysis"] = analysis
+                    if code is not None:
+                        # Jobs requeues while retry_count < max_retries, checked before the increment.
+                        attempts_left = int(job.get("retry_count") or 0) < int(job.get("max_retries") or 0)
+                        if code in _RETRYABLE_ANALYSIS_CODES and attempts_left:
+                            # Wait long enough for a rate limit to lift; a retry, not a poison message.
+                            raise _StageFailure(
+                                message,
+                                failure_code=code,
+                                retryable=True,
+                                backoff_seconds=30 if code == "rate_limit" else 5,
+                                quarantine=False,
+                            )
+                        # For good: keep the transcript and record why there is no analysis.
+                        updated_payload["analysis_error"] = {"code": code, "message": message}
+                        logger.warning(
+                            "Audio job {}: analysis failed ({}); storing the transcript without it", job["id"], code
+                        )
                     next_type = "audio_store"
                 elif jtype == "audio_store":
                     # Placeholder: integration to store into DB or export artifacts
@@ -466,11 +481,19 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                         retryable=next_queue in jm._get_allowed_queues(DOMAIN),
                     )
                 else:
-                    jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
+                    # A failed analysis completes its stage; the result keeps the reason visible on this job.
+                    analysis_error = updated_payload.get("analysis_error")
+                    jm.complete_job(
+                        int(job["id"]),
+                        result={"analysis_error": analysis_error} if analysis_error else None,
+                        worker_id=worker_id,
+                        lease_id=str(job.get("lease_id")),
+                        completion_token=str(job.get("lease_id")),
+                    )
             elif ok:
                 jm.complete_job(int(job["id"]), result={"payload": updated_payload}, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
             if not ok:
-                # An error that says it is not retryable (an LLM quota refusal, a _StageFailure) fails the job now.
+                # An error that says it is not retryable (a _StageFailure, for one) fails the job now.
                 jm.fail_job(
                     int(job["id"]),
                     error=msg_err,
