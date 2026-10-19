@@ -86,3 +86,17 @@ def test_a_failed_request_gives_its_slot_back(client: TestClient, monkeypatch: p
     assert second.json()["detail"] == "File size exceeds maximum of 0MB"
     assert "Concurrent transcription limit" not in second.text
     assert client.portal.call(_heartbeat_loops) == []
+
+
+def test_a_policy_resolution_failure_leaves_no_heartbeat_task(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A request that fails before its slot is taken starts no job-heartbeat task, so none is left running."""
+    import tldw_Server_API.app.api.v1.endpoints.audio.audio_transcriptions as audio_tx
+
+    async def _broken(**_kwargs: Any) -> None:
+        """Fail STT policy resolution."""
+        raise RuntimeError("policy failed")
+
+    monkeypatch.setattr(audio_tx, "resolve_effective_stt_policy", _broken)
+    with pytest.raises(RuntimeError, match="policy failed"):
+        _post(client)
+    assert client.portal.call(_heartbeat_loops) == []

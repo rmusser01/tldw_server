@@ -17,6 +17,7 @@ def test_setup_failure_after_admission_leaves_no_slot_held(monkeypatch: pytest.M
 
     started: list[int] = []
     finished: list[int] = []
+    setup_calls: list[bool] = []
 
     async def _start(user_id: int) -> tuple[bool, str]:
         """Admit and record the start."""
@@ -29,6 +30,7 @@ def test_setup_failure_after_admission_leaves_no_slot_held(monkeypatch: pytest.M
 
     def _broken_setup() -> float:
         """Fail during session setup, after admission on the old code path."""
+        setup_calls.append(True)
         raise RuntimeError("setup failed")
 
     monkeypatch.setattr(audio_ep, "can_start_stream", _start)
@@ -43,4 +45,5 @@ def test_setup_failure_after_admission_leaves_no_slot_held(monkeypatch: pytest.M
         except (WebSocketDisconnect, RuntimeError):
             pass
 
+    assert setup_calls, "the handler never reached session setup, so the test proved nothing"
     assert len(started) == len(finished)

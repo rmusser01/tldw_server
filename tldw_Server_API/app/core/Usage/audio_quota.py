@@ -854,7 +854,7 @@ def bytes_to_seconds(byte_count: int, sample_rate: int) -> float:
 
 
 async def heartbeat_stream(user_id: int) -> None:
-    """No-op hook: per-user stream concurrency isn't tracked (see TASK-13435)."""
+    """No-op hook: a held stream slot renews its own lease (ConcurrencySlot)."""
     return None
 
 
@@ -893,7 +893,7 @@ def get_job_heartbeat_interval_seconds() -> int:
 
 
 async def heartbeat_jobs(user_id: int) -> None:
-    """No-op hook: per-user job concurrency isn't tracked (see TASK-13435)."""
+    """No-op hook: a held job slot renews its own lease (ConcurrencySlot)."""
     return None
 
 

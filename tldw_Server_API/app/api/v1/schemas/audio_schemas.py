@@ -343,8 +343,8 @@ class StreamingLimitsResponse(BaseModel):
     can_start_stream: bool = Field(
         ...,
         description=(
-            "Always true. Not a live check: open streams are not counted, so a stream over the "
-            "user's limit is refused when it starts."
+            "Always true. Not a live check: this endpoint does not report open streams, so a stream "
+            "over the user's limit is refused when it starts."
         ),
     )
     legacy_can_start_stream: bool = Field(

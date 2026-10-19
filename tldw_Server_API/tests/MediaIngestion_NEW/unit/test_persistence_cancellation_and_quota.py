@@ -233,9 +233,14 @@ async def test_second_ingest_is_refused_while_the_first_runs_and_admitted_once_i
     first = asyncio.create_task(_orchestrate())
     await asyncio.wait_for(quota_service.entered.wait(), timeout=10)
     processed = _patch_upload(monkeypatch, _RejectingQuotaService())
+    metrics: list[tuple[Any, str]] = []
+    monkeypatch.setattr(
+        persistence, "_emit_ingestion_request_metric", lambda *, media_type, outcome: metrics.append((media_type, outcome))
+    )
 
     with pytest.raises(HTTPException) as refused:
         await _orchestrate()
+    assert metrics == [("document", "error")]
     assert refused.value.status_code == 429
     assert refused.value.detail == "Media ingestion concurrency limit reached."
     assert int(refused.value.headers["Retry-After"]) >= 1

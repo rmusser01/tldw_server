@@ -2849,6 +2849,7 @@ async def add_media_orchestrate(
             getattr(current_user, "id", None), MEDIA_CONCURRENT_KEY, "jobs"
         )
     except concurrency_quota.ConcurrencyQuotaExceeded as exc:
+        _emit_ingestion_request_metric(media_type=getattr(form_data, "media_type", None), outcome="error")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Media ingestion concurrency limit reached.",

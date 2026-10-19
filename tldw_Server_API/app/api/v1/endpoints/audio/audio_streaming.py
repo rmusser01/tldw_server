@@ -4533,8 +4533,8 @@ async def streaming_limits(
             - remaining_minutes (float|None): Minutes remaining today (0.0 if none left, `None` when there is no daily limit).
             - used_month_minutes / remaining_month_minutes (float|None): Monthly usage and remainder (`None` remainder when no monthly limit).
             - active_streams (None): The count of the user's open streams is not reported.
-            - _can_start_stream (bool): Always True. It is not a live check: open streams are not
-              counted, so a stream over `limits.audio_concurrent_streams` is refused when it starts.
+            - _can_start_stream (bool): Always True. It is not a live check: this endpoint does not
+              report open streams, so a stream over `limits.audio_concurrent_streams` is refused when it starts.
     """
     # Correlate logs with request_id if available
     rid = ensure_request_id(request) if request is not None else None
@@ -4595,7 +4595,7 @@ async def streaming_limits(
             "Failed to get tier for user %s, falling back to 'free': %s", current_user.id, e
         )
         tier = "free"
-    # Not a live check: open streams aren't counted; a stream over the limit is refused when it starts.
+    # Not a live check: this endpoint does not report open streams; a stream over the limit is refused when it starts.
     can_start = True
     return {
         "user_id": current_user.id,

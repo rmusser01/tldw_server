@@ -660,11 +660,6 @@ async def create_transcription(
     ok_job, msg_job = await _audio_shim_attr("can_start_job")(current_user.id)
     if not ok_job:
         raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=msg_job)
-    try:
-        job_heartbeat_task = await _maybe_start_job_heartbeat(current_user.id)
-    except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
-        job_heartbeat_task = None
-
     # Record job start (best-effort)
     acquired_job_slot = False
     try:
@@ -696,14 +691,17 @@ async def create_transcription(
             current_user.id, TRANSCRIPTIONS_KEY, "jobs"
         )
     except concurrency_quota.ConcurrencyQuotaExceeded as exc:
-        if job_heartbeat_task:
-            job_heartbeat_task.cancel()
         _emit_error_metrics(status_label="quota_exceeded", reason="quota")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=f"Concurrent transcription limit reached ({exc.limit})",
             headers=quota_checks.rate_limit_headers(exc.limit, 0, exc.retry_after) if exc.retry_after else None,
         ) from exc
+    # Started after the last await that can fail or be cancelled, so no exit leaks it.
+    try:
+        job_heartbeat_task = await _maybe_start_job_heartbeat(current_user.id)
+    except _AUDIO_TRANSCRIPTIONS_NONCRITICAL_EXCEPTIONS:
+        job_heartbeat_task = None
     try:
         first_chunk = await file.read(upload_chunk_size)
         file_extension = _resolve_audio_upload_suffix(

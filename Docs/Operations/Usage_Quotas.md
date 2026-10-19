@@ -159,7 +159,7 @@ These are unchanged by the switch and have no `limits.*` key:
 | Where | What it reports |
 |---|---|
 | `GET /api/v1/users/storage` | `storage_quota_mb`, used MB, available and percentage |
-| `GET /api/v1/audio/stream/limits` | Daily and monthly minute limits, `used_today_minutes`, `used_month_minutes`, `remaining_minutes` and `remaining_month_minutes` (used figures come from the ledger). `limits.concurrent_streams` is the `limits.audio_concurrent_streams` value. `active_streams` stays `null` and `can_start_stream` stays `true`: open streams are not counted, and a stream over the limit is refused when it starts |
+| `GET /api/v1/audio/stream/limits` | Daily and monthly minute limits, `used_today_minutes`, `used_month_minutes`, `remaining_minutes` and `remaining_month_minutes` (used figures come from the ledger). `limits.concurrent_streams` is the `limits.audio_concurrent_streams` value. `active_streams` stays `null` and `can_start_stream` stays `true`: this endpoint does not report open streams, and a stream over the limit is refused when it starts |
 | `GET /api/v1/evaluations/rate-limits` | The resolved `limits.evaluations_per_day` and `limits.evaluation_tokens_per_day`, with usage and remaining. The daily `X-RateLimit-Daily-*` headers on evaluation responses are omitted when the cap is unlimited |
 | `GET /api/v1/audio/jobs/admin/owner/{id}/processing` | An owner's processing count and concurrent-jobs limit (admin) |
 | Profile `quotas` section and `limits.*` config | Storage, audio (daily and monthly), evaluations and Prompt Studio quotas, and, when set, the `limits.*` values (unset keys are omitted from `effective_config`) |
