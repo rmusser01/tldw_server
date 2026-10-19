@@ -293,7 +293,11 @@ def _vibevoice_adapter(monkeypatch, gate: _Gate):
 @pytest.mark.asyncio
 @CANCEL_MODES
 async def test_vibevoice_keeps_the_model_until_its_call_returns(monkeypatch, via_anyio_scope):
-    """A cancelled generate must also keep a variant reload from freeing the model under the running thread."""
+    """A cancelled generate must keep a second generate from running on the model until the first thread returns.
+
+    The variant reload path (`_ensure_model_variant`) is not exercised here; it is covered only
+    because it shares `_model_state_lock` with generate.
+    """
     gate = _Gate()
     adapter = _vibevoice_adapter(monkeypatch, gate)
 

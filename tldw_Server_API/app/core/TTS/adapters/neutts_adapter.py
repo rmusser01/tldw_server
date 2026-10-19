@@ -31,7 +31,7 @@ from ..tts_exceptions import (
     TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
-from ..utils import hold_tts_engine, parse_bool
+from ..utils import hold_tts_engine, parse_bool, run_tts_blocking_call
 from .base import (
     AudioFormat,
     ProviderStatus,
