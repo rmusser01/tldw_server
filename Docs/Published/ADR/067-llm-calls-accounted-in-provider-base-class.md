@@ -38,13 +38,11 @@ Only `/chat/completions`, the router, the claims engine and embeddings recorded 
 - **Tests that replace a provider method** on an instance or class replace the wrapped method, so that call is not accounted. Accounting tests use a fake `ChatProvider` subclass.
 - **Embeddings** are excluded from the LLM token counter. They are still recorded.
 - **Background roots.** Background work gets its user from `llm_call_root`. The loop's default executor carries the LLM call state, so `loop.run_in_executor(None, ...)` keeps the user. A thread pool created at a call site must carry the state itself. Three do: claims extraction, the article extractor and web search.
-- **Still unrecorded,** each with its reason:
-  - MCP tool calls: MCP authentication sets no content scope.
-  - The in-process claims rebuild threads: their tasks carry no owner.
-  - System jobs with no user, such as the scheduled quality evaluation.
+- **MCP tool calls** get their user from the tool call's context, which MCP authentication fills in, because it sets no content scope. A tool run by an admitted request keeps the admission (ADR-075).
+- **Still unrecorded:** system jobs with no user, such as the scheduled quality evaluation.
 
 ## Follow-up
 
 - PR 1b of the spec added the remaining roots: `WorkerSDK`, the job workers with their own loop, the workflow engine, the audio and realtime WebSockets, and a default executor that carries the LLM call state.
-- TASK-13585: record MCP tool calls and the in-process claims rebuild.
+- TASK-13585 recorded MCP tool calls and the in-process claims rebuild. TASK-13610 recorded the Messages API native path (ADR-075).
 - PR 2: the quota check and the cost keys. No call is refused by this ADR's change.
