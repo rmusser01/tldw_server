@@ -9,6 +9,7 @@ import { Highlight } from "prism-react-renderer"
 import "property-information"
 import React from "react"
 import { CodeBlock } from "./CodeBlock"
+import { CODE_BLOCK_GROUP_CLASS, CodeBlockToolbar } from "./CodeBlockToolbar"
 import { TableBlock } from "./TableBlock"
 import { ManagedMarkdownImage } from "./ManagedMarkdownImage"
 import { MermaidDiagramBlock } from "./MermaidDiagramBlock"
@@ -430,79 +431,85 @@ export function Markdown({
             if (codeBlockVariant === "compact") {
               const highlightLanguage = rawLanguage ? normalizedLanguage : "plaintext"
               return (
-                <div className="not-prose my-2 rounded-lg border border-border bg-surface2/70 px-3 py-2 overflow-x-auto">
-                  <Highlight code={value} language={safeLanguage(highlightLanguage)} theme={resolveTheme(codeTheme || "dracula")}>
-                    {({ className: highlightClassName, style, tokens, getLineProps, getTokenProps }) => (
-                      <pre
-                        className={`${highlightClassName} m-0 text-xs font-mono leading-relaxed`}
-                        style={{
-                          ...style,
-                          backgroundColor: "transparent",
-                          fontFamily: "var(--font-mono)",
-                        }}
-                      >
-                        {tokens.map((line, i) => {
-                          const { key: _lineKey, ...lineProps } = getLineProps({
-                            line,
-                            key: i
-                          })
-                          return (
-                            <div key={i} {...lineProps}>
-                              {line.map((token, key) => {
-                                const { key: _tokenKey, ...tokenProps } =
-                                  getTokenProps({ token, key })
-                                return <span key={key} {...tokenProps} />
-                              })}
-                            </div>
-                          )
-                        })}
-                      </pre>
-                    )}
-                  </Highlight>
+                <div data-code-block className={`not-prose my-2 rounded-lg border border-border bg-surface2/70 ${CODE_BLOCK_GROUP_CLASS}`}>
+                  <CodeBlockToolbar language={highlightLanguage} value={value} />
+                  <div className="overflow-x-auto px-3 py-2">
+                    <Highlight code={value} language={safeLanguage(highlightLanguage)} theme={resolveTheme(codeTheme || "dracula")}>
+                      {({ className: highlightClassName, style, tokens, getLineProps, getTokenProps }) => (
+                        <pre
+                          className={`${highlightClassName} m-0 text-xs font-mono leading-relaxed`}
+                          style={{
+                            ...style,
+                            backgroundColor: "transparent",
+                            fontFamily: "var(--font-mono)",
+                          }}
+                        >
+                          {tokens.map((line, i) => {
+                            const { key: _lineKey, ...lineProps } = getLineProps({
+                              line,
+                              key: i
+                            })
+                            return (
+                              <div key={i} {...lineProps}>
+                                {line.map((token, key) => {
+                                  const { key: _tokenKey, ...tokenProps } =
+                                    getTokenProps({ token, key })
+                                  return <span key={key} {...tokenProps} />
+                                })}
+                              </div>
+                            )
+                          })}
+                        </pre>
+                      )}
+                    </Highlight>
+                  </div>
                 </div>
               )
             }
             if (codeBlockVariant === "github") {
               return (
-                <div className="not-prose my-2 overflow-x-auto rounded-md border border-border/80 bg-surface2/70 px-4 py-3">
-                  <Highlight
-                    code={value}
-                    language={safeLanguage(normalizedLanguage)}
-                    theme={resolveTheme("auto")}
-                  >
-                    {({
-                      className: highlightClassName,
-                      style,
-                      tokens,
-                      getLineProps,
-                      getTokenProps
-                    }) => (
-                      <pre
-                        className={`${highlightClassName} m-0 text-xs font-mono leading-relaxed`}
-                        style={{
-                          ...style,
-                          backgroundColor: "transparent",
-                          fontFamily: "var(--font-mono)"
-                        }}
-                      >
-                        {tokens.map((line, i) => {
-                          const { key: _lineKey, ...lineProps } = getLineProps({
-                            line,
-                            key: i
-                          })
-                          return (
-                            <div key={i} {...lineProps}>
-                              {line.map((token, key) => {
-                                const { key: _tokenKey, ...tokenProps } =
-                                  getTokenProps({ token, key })
-                                return <span key={key} {...tokenProps} />
-                              })}
-                            </div>
-                          )
-                        })}
-                      </pre>
-                    )}
-                  </Highlight>
+                <div data-code-block className={`not-prose my-2 rounded-md border border-border/80 bg-surface2/70 ${CODE_BLOCK_GROUP_CLASS}`}>
+                  <CodeBlockToolbar language={normalizedLanguage} value={value} />
+                  <div className="overflow-x-auto px-4 py-3">
+                    <Highlight
+                      code={value}
+                      language={safeLanguage(normalizedLanguage)}
+                      theme={resolveTheme("auto")}
+                    >
+                      {({
+                        className: highlightClassName,
+                        style,
+                        tokens,
+                        getLineProps,
+                        getTokenProps
+                      }) => (
+                        <pre
+                          className={`${highlightClassName} m-0 text-xs font-mono leading-relaxed`}
+                          style={{
+                            ...style,
+                            backgroundColor: "transparent",
+                            fontFamily: "var(--font-mono)"
+                          }}
+                        >
+                          {tokens.map((line, i) => {
+                            const { key: _lineKey, ...lineProps } = getLineProps({
+                              line,
+                              key: i
+                            })
+                            return (
+                              <div key={i} {...lineProps}>
+                                {line.map((token, key) => {
+                                  const { key: _tokenKey, ...tokenProps } =
+                                    getTokenProps({ token, key })
+                                  return <span key={key} {...tokenProps} />
+                                })}
+                              </div>
+                            )
+                          })}
+                        </pre>
+                      )}
+                    </Highlight>
+                  </div>
                 </div>
               )
             }
