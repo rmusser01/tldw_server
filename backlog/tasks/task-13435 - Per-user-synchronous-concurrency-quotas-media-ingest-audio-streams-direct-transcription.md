@@ -2,7 +2,7 @@
 id: TASK-13435
 title: Per-user synchronous concurrency quotas (media ingest, audio streams, direct
   transcription)
-status: To Do
+status: In Progress
 ---
 
 ## Description
@@ -15,11 +15,14 @@ Deferred from spec 2 (Docs/Design/2026-10-02-usage-quota-posture-design.md, revi
 <!-- AC:BEGIN -->
 - [ ] #1 A per-user concurrency limit on media ingest and audio streams is enforced on both RG backends
 - [ ] #2 Unset means unlimited
+- [ ] #3 A per-user concurrency limit on direct transcription (POST /audio/transcriptions and /audio/translations) is enforced on both RG backends
+- [ ] #4 A held slot is released on success, error, client disconnect or cancellation, and graceful shutdown; a lease nobody releases lapses within 120 s
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-10-18-per-user-concurrency-quotas.md (one PR). ADR check: ADR required: yes, ADR path: Docs/ADR/076-per-user-concurrency-quotas.md. The change makes synchronous concurrency a usage quota, which ADR-064's consequences ruled out, and takes media/audio concurrency out from under RG_ENABLED (ADR-056); a partial amendment by the ADR-056 precedent. ADR-075 is claimed by open PR #3270, so this is ADR-076. Owner decisions (2026-10-18): D1 (RG_ENABLED does not turn them off) = yes, as recommended: the limits follow USAGE_QUOTAS_ENABLED only; D2 (direct transcription key limits.audio_concurrent_transcriptions) = yes, as recommended, added as AC #3; D3 (keep the name limits.media_concurrent_jobs) = yes, keep it. ADR-076 accepted by the owner with the plan.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
