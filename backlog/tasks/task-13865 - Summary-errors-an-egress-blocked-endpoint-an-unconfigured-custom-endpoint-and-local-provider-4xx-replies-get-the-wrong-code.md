@@ -1,7 +1,7 @@
 ---
 id: TASK-13865
-title: 'Summary errors: an egress-blocked or unconfigured custom endpoint is not typed
-  as a configuration error'
+title: 'Summary errors: an egress-blocked endpoint, an unconfigured custom endpoint
+  and local-provider 4xx replies get the wrong code'
 status: To Do
 labels:
 - llm

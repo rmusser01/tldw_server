@@ -50,6 +50,10 @@ class _Adapter:
         self.error = error
         self.requests = []
 
+    def _use_native_http(self) -> bool:
+        # The kill-switch is on, so a RuntimeError from this adapter is not a configuration error.
+        return True
+
     def chat(self, request, timeout=None):
         self.requests.append((request, timeout))
         if self.error:
@@ -430,11 +434,25 @@ def _openai_upstream_replies(status: int, body: dict[str, Any]):
         (400, {"type": "invalid_request_error", "code": "context_length_exceeded"}, "request_rejected"),
         (413, {"type": "invalid_request_error"}, "request_rejected"),
         (408, {"type": "timeout"}, "provider_failure"),
+        (498, {"type": "capacity_exceeded"}, "provider_failure"),
         (429, {"type": "requests", "code": "rate_limit_exceeded"}, "rate_limit"),
         (429, {"type": "insufficient_quota", "code": "insufficient_quota"}, "provider_quota_exhausted"),
+        (429, {"type": "insufficient_quota"}, "provider_quota_exhausted"),
+        (429, {"code": "insufficient_quota"}, "provider_quota_exhausted"),
         (500, {"type": "server_error"}, "provider_failure"),
     ],
-    ids=["unknown-model", "context-overflow", "too-large", "timed-out", "rate-limit", "spent-quota", "server-error"],
+    ids=[
+        "unknown-model",
+        "context-overflow",
+        "too-large",
+        "timed-out",
+        "flex-capacity",
+        "rate-limit",
+        "spent-quota",
+        "spent-quota-type-only",
+        "spent-quota-code-only",
+        "server-error",
+    ],
 )
 def test_upstream_reply_reaches_the_summary_code_through_the_openai_adapter(
     monkeypatch, status, error, expected_code
