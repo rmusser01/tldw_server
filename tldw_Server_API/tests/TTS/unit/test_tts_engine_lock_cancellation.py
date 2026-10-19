@@ -9,6 +9,7 @@ site is checked with a plain task cancel and with an anyio scope.
 from __future__ import annotations
 
 import asyncio
+import platform
 import sys
 import threading
 import types
@@ -299,5 +300,108 @@ async def test_vibevoice_keeps_the_model_until_its_call_returns(monkeypatch, via
     async def call():
         request = TTSRequest(text="Speaker 1: hello", format=AudioFormat.PCM, stream=True)
         return [chunk async for chunk in adapter._stream_audio_vibevoice(request, "speaker_1", 1)]
+
+    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+
+
+@pytest.mark.asyncio
+@CANCEL_MODES
+async def test_omnivoice_runtime_load_keeps_the_lock_until_the_load_returns(monkeypatch, tmp_path, via_anyio_scope):
+    gate = _Gate()
+    runtime = _omnivoice_runtime(monkeypatch, tmp_path, gate, gate_load=True)
+
+    await _assert_cancelled_call_keeps_the_engine(runtime.load, gate, via_anyio_scope=via_anyio_scope)
+
+
+@pytest.mark.asyncio
+@CANCEL_MODES
+async def test_qwen3_mlx_model_load_keeps_the_lock_until_the_load_returns(monkeypatch, via_anyio_scope):
+    from tldw_Server_API.app.core.TTS.adapters.qwen3_tts_adapter import Qwen3TTSAdapter
+
+    gate = _Gate()
+
+    def load_model(_model_id):
+        gate.enter("load_model")
+        return object()
+
+    utils_module = types.ModuleType("mlx_audio.tts.utils")
+    utils_module.load_model = load_model
+    monkeypatch.setitem(sys.modules, "mlx_audio", types.ModuleType("mlx_audio"))
+    monkeypatch.setitem(sys.modules, "mlx_audio.tts", types.ModuleType("mlx_audio.tts"))
+    monkeypatch.setitem(sys.modules, "mlx_audio.tts.utils", utils_module)
+    monkeypatch.setattr(platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(platform, "machine", lambda: "arm64")
+    adapter = Qwen3TTSAdapter({"runtime": "mlx", "device": "mps"})
+    await adapter.ensure_initialized()
+    runtime = adapter._get_runtime()
+
+    async def call():
+        return await runtime._get_model("auto")
+
+    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+
+
+@pytest.mark.asyncio
+@CANCEL_MODES
+async def test_qwen3_pipeline_load_keeps_the_lock_until_the_load_returns(via_anyio_scope):
+    from tldw_Server_API.app.core.TTS.adapters.qwen3_tts_adapter import Qwen3TTSAdapter
+
+    gate = _Gate()
+
+    def build_pipeline(_model_id):
+        gate.enter("build_pipeline")
+        return object()
+
+    adapter = Qwen3TTSAdapter({})
+    adapter._pipeline_builders = [("fake", build_pipeline)]
+
+    async def call():
+        return await adapter._get_pipeline("Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice")
+
+    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+
+
+@pytest.mark.asyncio
+@CANCEL_MODES
+async def test_echo_tts_model_load_keeps_the_lock_until_the_load_returns(via_anyio_scope):
+    from tldw_Server_API.app.core.TTS.adapters.echo_tts_adapter import EchoTTSAdapter
+
+    gate = _Gate()
+
+    def load_model_from_hf(**_kwargs):
+        gate.enter("load_model_from_hf")
+        return object()
+
+    adapter = EchoTTSAdapter({})
+    adapter.device = "cuda"  # initialize() resolves it; this test skips initialize()
+    adapter._echo_modules_loaded = True
+    adapter._echo_inference = types.SimpleNamespace(
+        load_model_from_hf=load_model_from_hf,
+        load_fish_ae_from_hf=lambda **_kwargs: object(),
+        load_pca_state_from_hf=lambda **_kwargs: object(),
+    )
+    adapter._import_torch = lambda: types.SimpleNamespace(bfloat16="bf16", float16="f16", float32="f32")
+
+    await _assert_cancelled_call_keeps_the_engine(adapter._ensure_models_loaded, gate, via_anyio_scope=via_anyio_scope)
+
+
+@pytest.mark.asyncio
+@CANCEL_MODES
+async def test_kitten_tts_runtime_load_keeps_the_lock_until_the_load_returns(monkeypatch, via_anyio_scope):
+    from tldw_Server_API.app.core.TTS.adapters import kitten_tts_adapter as kitten_mod
+
+    gate = _Gate()
+
+    def kitten_runtime(assets):
+        gate.enter("KittenRuntime")
+        return types.SimpleNamespace(sample_rate=24000)
+
+    monkeypatch.setattr(kitten_mod, "resolve_model_revision", lambda _model, revision: revision)
+    monkeypatch.setattr(kitten_mod, "download_model_assets", lambda model, **_kwargs: types.SimpleNamespace(repo_id=model))
+    monkeypatch.setattr(kitten_mod, "KittenRuntime", kitten_runtime)
+    adapter = kitten_mod.KittenTTSAdapter({})
+
+    async def call():
+        return await adapter._load_runtime_for_model("KittenML/kitten-tts-nano-0.8")
 
     await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)

@@ -57,7 +57,7 @@ class OmniVoiceRuntime:
         if self.model is not None:
             return self.model
 
-        async with self._load_lock:
+        async with hold_tts_engine(self._load_lock) as run:
             if self.model is not None:
                 return self.model
 
@@ -80,7 +80,7 @@ class OmniVoiceRuntime:
                 if key in self.config and self.config[key] is not None
             }
             try:
-                self.model = await asyncio.to_thread(
+                self.model = await run(
                     omnivoice_cls.from_pretrained,
                     str(model_path),
                     **load_kwargs,
