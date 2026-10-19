@@ -159,7 +159,8 @@ class _SlowLoadAdapter(_MockAdapterV1):
 
     async def initialize(self) -> bool:
         type(self).loads += 1
-        assert await asyncio.to_thread(type(self).release.wait, 5)
+        if not await asyncio.to_thread(type(self).release.wait, 5):
+            raise RuntimeError("the test never released the slow load")
         return True
 
 
