@@ -98,6 +98,8 @@ Integration rebase: PR #3256 was rebased onto dev `e1f7770953a78224e43f92976e526
 
 A subsequent integration rebase onto dev `7c94a2efb1edc938070abcaa868d59e319a95112` also retains every measured source hash and all PR patches. Upstream changes sandbox WebSocket teardown and adds a test-quality CI gate; neither changes the measured workflow path. A CI-only chat test fix scopes synthetic exception state to the endpoint instead of Python’s shared `sys` module. No benchmark runtime change or additional performance claim is introduced.
 
+Latest integration base: dev `29fda0d860c7a0d76dd3d9ea0561a32ac8e48148`. Independent review confirms all nine PR patches and the four measured source hashes remain unchanged. Upstream provider/tool usage, Claims, admin, watchlist and TTS changes do not execute in this lifespan-disabled workflow workload. The measurements remain historical evidence for the unchanged path; they are not a new timing run on this integration base.
+
 ## Limits and rollback
 
 This synthetic loopback workload does not measure WAN/TLS, PostgreSQL, same-run fanout, many tenants, lifespan/background services, non-compressible payloads or a production soak. Native performance evidence is macOS-only; hosted Linux real-network tests cover behavior, not equivalent capacity. The shared threadpool may queue reads. Setup and single-client costs above remain disclosed. Revert the runtime changes if deployment evidence requires rollback, retaining the harness and regression evidence.

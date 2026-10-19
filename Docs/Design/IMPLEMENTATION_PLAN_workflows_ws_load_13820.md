@@ -28,3 +28,5 @@ Integration rebase: all checks passed on ff733d7976, but dev advanced before mer
 CI follow-up: isolate the chat refund test exception-state injection to the endpoint module binding, preserving refund/cleanup assertions and Python/framework exception handling. Verify failing-first with current CI framework versions, then adjacent runtime lifecycle tests and the simplified endpoint suite. No production change or benchmark rerun.
 
 Latest integration: clean8-patch rebase onto dev7c94a2efb1 after upstream sandbox teardown/test-quality changes; exact independent review and four measured hashes unchanged. CI-version chat suite217 passed/1 skipped and9 lifecycle cases passed; new quality ratchet and fresh hosted checks remain integration gates.
+
+Final freshness refresh:7411 hosted CI266success/36expectedskip and all7requiredsuccess; dev advanced to29fda0d860. Rebase preserves9patches and4measuredhashes; independent review confirms upstream changes outside measured path. Refresh private source and verify310connected+9chatcleanup plus quality/shardguards, final exactheadreview and fresh hosted checks before merge.
