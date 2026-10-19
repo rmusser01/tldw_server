@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { historySelectionExpansionPath } from "@/hooks/chat/useHistorySelection";
 import type { HistoryBookmark } from "@/db/dexie/types";
+import { bindUnboundLocalHistory } from "@/db/dexie/history-selection";
 
 import { Playground } from "../Playground";
 import { PlaygroundCockpitShell } from "../PlaygroundCockpitShell";
@@ -119,6 +120,7 @@ vi.mock("@/db/dexie/chat", () => ({
 vi.mock("@/db/dexie/history-selection", () => ({
   ensureLocalProfileId: async () => "profile",
   getLocalHistoryOwner: async (id: string) => ({ kind: "local", profile_id: "profile", owner_key: "local-owner", conversation_id: id }),
+  bindUnboundLocalHistory: vi.fn(async () => { throw new Error("Unexpected unbound local history") }),
   loadHistoryTurnRecoveries: async () => [],
   dismissHistoryTurnRecovery: async () => {},
   loadHistoryBookmark: (...args: unknown[]) => recentChatState.bookmark(...args),
@@ -723,6 +725,7 @@ describe("Playground cockpit shell", () => {
     render(<Playground />);
     await waitFor(() => expect(useStoreMessageOption.getState()).toMatchObject({ historyId: "local-resume", serverChatId: null, chatDraftAddress: { kind: "local", id: "local-resume", profileId: "profile" } }));
     expect(recentChatState.capture).toHaveBeenCalledTimes(1);
+    expect(bindUnboundLocalHistory).not.toHaveBeenCalled();
     expect(useStoreMessageOption.getState().chatDraftTransition?.kind).toBe("switch");
   });
 
@@ -927,6 +930,7 @@ describe("Playground cockpit shell", () => {
       }),
     );
     expect(recentChatState.capture).toHaveBeenCalledOnce();
+    expect(bindUnboundLocalHistory).not.toHaveBeenCalled();
     expect(recentChatState.capture.mock.calls[0]?.[0]).toMatchObject({
       kind: "local",
       owner_key: "local-owner",

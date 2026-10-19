@@ -18,9 +18,10 @@ Published head a9a720f92fd36fd88b6829be7fca435444555cfa remains under hosted qua
 
 - Group4: five failures reproduced locally. The OpenUI success cleanup ran after its own imported-page removal changed context revision; clear the still-current one-shot mode inside successful afterSend, before that removal. Keep owner/completion/exact-context and failed/replaced-request guards. Four retirement fixtures now defer actual owner qualification, rather than the intentionally nonblocking usage counter. Existing private-state assertions remain, with additional no-counter-after-retirement assertions. One negative control temporarily disabled real retirement and failed with leaked alice-prompt as expected; exact production service was restored finally.
 - Group6: unauthenticated v1 pull correctly returns the existing validation/not_dispatched result before any foreign-row reread. Update its stale null oracle and add no-Prompt-request/unchanged-row checks for every unauthenticated v1 operation. The backup-confirmation visibility failure has not reproduced locally: all confirmation, metadata, cancellation/no-POST and exact-request assertions pass unchanged. No production cause or speculative backup repair claimed.
+- Group5: unchanged two-module run124passed5failed matched hosted. Targeted diagnostic found missing bindUnboundLocalHistory export in the local-history fixture, not the unrelated ensureConfigForRequest warning. Diagnostic source restored exactly. The added fail-fast export is asserted unused by both already-bound chat controls; all original canonical-address/history/owner assertions remain. Three blocked reconciliation tests now require the entire original row and zero DB updates before a granted lease; copied-content checks after actual final-write/release failures remain. Both complete modules129passed in each client. Shared-coverage8 reports the same five OpenUI/retirement failures already repaired, with1787passes; no distinct cause.
 - Qualification: complete five-file185 UI/185 WebUI runs, then distinct three-file90 UI/90 WebUI runs; these overlap and are not a project-suite aggregate. Production-root TypeScript0. Actual three-file ESLint0errors/16identicalwarnings/noignored/no new. Both primary Turbopack builds pass token sync and unchanged600/900KB budgets: production596.2/877.3KB, development593.1/874.3KB. Optional webpack STOP remains. Python/schema are unchanged; prior scoped security and canonical qualification retain their limits, Bandit N/A for this TypeScript/prose delta.
 
-Current actual-source/caller/assertion review is complete for this three-file repair; no fresh independent agent or exhaustive whole-PR review is claimed. Final staged review, normal hooks, exact-lease publication and new-head hosted qualification remain required. No additional UAT acceptance, runtime/model/browser changes or main-thread edits.
+Current actual-source/caller/assertion review is complete for these five source/test files; no fresh independent agent or exhaustive whole-PR review is claimed. Final staged review, normal hooks, exact-lease publication and new-head hosted qualification remain required. No additional UAT acceptance, runtime/model/browser changes or main-thread edits.
 
 ## Historical integration candidate — 2026-10-18
 
@@ -54,13 +55,13 @@ The service recovered in the renewed-authorization continuation. Fresh GitHub AP
 **Goal:** Preserve current-dev behavior and accumulated UAT fixes while resolving demonstrated defects/conflicts.
 **Success Criteria:** No removed ownership/security/version/cancellation contracts or weakened tests; each new repair has a causal regression and affected checks.
 **Tests:** Relevant configured suites, compile/lint, scoped baseline/current Bandit, canonical API generation when affected.
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage3: Final review and publication
 **Goal:** Fresh actual/staged review, normal hooks and guarded publication to PR3269.
 **Success Criteria:** All Critical/Important findings fixed; exact remote-head checks prevent overwriting foreign work; PR description accurately states final scope and evidence.
 **Tests:** Manual current/staged review, normal hooks, current-source/base/remote guards and PR readback. No further reviewer agent is permitted in this side conversation.
-**Status:** Complete
+**Status:** In Progress
 
 ## Stage4: Hosted qualification and landing gates
 **Goal:** Verify required CI on the final current-dev head and satisfy human ownership gates.

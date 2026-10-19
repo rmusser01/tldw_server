@@ -534,6 +534,7 @@ describe("owner-aware sync and exact reconciliation", () => {
   it("a different pull owner cannot erase another owner's durable lock", async () => {
     seed(true)
     mocks.rows.get("exact-id").syncStatus = "error"
+    const original = structuredClone(mocks.rows.get("exact-id"))
     await registry.markRecipePersistenceScoped("exact-id", ownerA)
 
     expect(await sync.pullFromStudio(101, "exact-id")).toMatchObject({
@@ -541,12 +542,8 @@ describe("owner-aware sync and exact reconciliation", () => {
       syncStatus: "error",
       recipeWriteBlocked: true
     })
-    expect(mocks.rows.get("exact-id")).toMatchObject({
-      name: "Reconciled",
-      syncStatus: "error",
-      serverId: 101,
-      studioProjectId: 42
-    })
+    expect(mocks.rows.get("exact-id")).toEqual(original)
+    expect(mocks.reconcile).not.toHaveBeenCalled()
     expect(
       await registry.readRecipePersistenceUncertainty("exact-id", ownerA)
     ).toBe("scoped")
@@ -573,6 +570,7 @@ describe("owner-aware sync and exact reconciliation", () => {
   it("keep-server preserves the durable lock when exact reconciliation is blocked", async () => {
     seed(true)
     mocks.rows.get("exact-id").syncStatus = "error"
+    const original = structuredClone(mocks.rows.get("exact-id"))
     await registry.markRecipePersistenceScoped("exact-id", ownerA)
 
     expect(
@@ -584,16 +582,15 @@ describe("owner-aware sync and exact reconciliation", () => {
       syncStatus: "error",
       recipeWriteBlocked: true
     })
-    expect(mocks.rows.get("exact-id")).toMatchObject({
-      name: "Reconciled",
-      syncStatus: "error",
-      serverId: 101
-    })
+    expect(mocks.rows.get("exact-id")).toEqual(original)
+    expect(mocks.reconcile).not.toHaveBeenCalled()
+    expect(await registry.readRecipePersistenceUncertainty("exact-id", ownerA)).toBe("scoped")
   })
 
-  it("pull preserves copied content and durable error when reconciliation authority fails", async () => {
+  it("pull preserves original content and durable error when reconciliation authority fails", async () => {
     seed(true)
     mocks.rows.get("exact-id").syncStatus = "error"
+    const original = structuredClone(mocks.rows.get("exact-id"))
     const reconcile = vi
       .spyOn(registry, "reconcileRecipePersistenceExact")
       .mockRejectedValueOnce(new Error("background unavailable"))
@@ -603,11 +600,8 @@ describe("owner-aware sync and exact reconciliation", () => {
         syncStatus: "error",
         recipeWriteBlocked: true
       })
-      expect(mocks.rows.get("exact-id")).toMatchObject({
-        name: "Reconciled",
-        syncStatus: "error",
-        serverId: 101
-      })
+      expect(mocks.rows.get("exact-id")).toEqual(original)
+      expect(mocks.reconcile).not.toHaveBeenCalled()
     } finally {
       reconcile.mockRestore()
     }
