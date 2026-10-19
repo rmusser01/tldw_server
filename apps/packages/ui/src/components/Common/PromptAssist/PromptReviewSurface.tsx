@@ -113,7 +113,7 @@ export function PromptReviewSurface({
             ? t("common:promptAssist.appliedChanges", "Applied changes")
             : t("common:promptAssist.reviewTitle", "Review improved prompt")}
         </h2>
-        <p className="text-sm text-muted-foreground">
+        <p className="text-sm text-text-muted">
           {t("common:promptAssist.usedModel", "Used {{model}} ({{provider}})", {
             model: resolvedModel.display_name,
             provider: resolvedModel.provider
@@ -138,7 +138,7 @@ export function PromptReviewSurface({
       ) : null}
       {warnings.length > 0 ? (
         <ul
-          className="space-y-1 text-sm text-muted-foreground"
+          className="space-y-1 text-sm text-text-muted"
           aria-label={t("common:promptAssist.safetyNotices", "Safety notices")}>
           {warnings.slice(0, 5).map((warning, index) => (
             <li key={`${warning}-${index}`}>
@@ -170,7 +170,7 @@ export function PromptReviewSurface({
                 key={`${finding.category}-${index}`}
                 className="rounded-md bg-muted/50 p-3 text-sm">
                 <span className="font-medium">{finding.issue}</span>
-                <span className="block text-muted-foreground">
+                <span className="block text-text-muted">
                   {finding.change}
                 </span>
               </li>

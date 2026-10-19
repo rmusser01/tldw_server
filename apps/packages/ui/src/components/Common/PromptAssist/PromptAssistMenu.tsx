@@ -295,8 +295,8 @@ export function PromptAssistMenu({
         title={t("common:promptAssist.trigger", "Improve prompt")}
         className={
           compact
-            ? "inline-flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border bg-background p-0 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
-            : "inline-flex min-h-11 items-center gap-2 rounded-md border border-border bg-background px-3 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            ? "inline-flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border bg-surface p-0 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            : "inline-flex min-h-11 items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
         }
         disabled={disabled}
         onClick={() => setOpen((value) => !value)}>
@@ -328,8 +328,8 @@ export function PromptAssistMenu({
                     transform: `translateX(${menuHorizontalOffset}px)`
                   }
             }
-            className={`${placement === "top" ? "fixed" : "absolute right-0 top-full mt-2"} z-50 max-h-[calc(100vh-1rem)] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border border-border bg-popover p-2 text-popover-foreground shadow-lg`}>
-            <p className="px-2 pb-2 text-xs text-muted-foreground">
+            className={`${placement === "top" ? "fixed" : "absolute right-0 top-full mt-2"} z-50 max-h-[calc(100vh-1rem)] w-72 max-w-[calc(100vw-1rem)] overflow-y-auto rounded-lg border border-border bg-elevated p-2 text-text shadow-lg`}>
+            <p className="px-2 pb-2 text-xs text-text-muted">
               {recovery ??
                 t(
                   "common:promptAssist.activeModel",
@@ -348,7 +348,7 @@ export function PromptAssistMenu({
               <span className="font-medium">
                 {t("common:promptAssist.improveNow", "Improve now")}
               </span>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-text-muted">
                 {t(
                   "common:promptAssist.improveNowHelp",
                   "Replace this draft when checks pass."
@@ -364,7 +364,7 @@ export function PromptAssistMenu({
               <span className="font-medium">
                 {t("common:promptAssist.reviewChanges", "Review changes")}
               </span>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-text-muted">
                 {t(
                   "common:promptAssist.reviewChangesHelp",
                   "Edit and compare before applying."
@@ -384,7 +384,7 @@ export function PromptAssistMenu({
                     "Build from recipe"
                   )}
                 </span>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-text-muted">
                   {t(
                     "common:promptAssist.buildFromRecipeHelp",
                     "Compile a structured recipe locally into this draft."
