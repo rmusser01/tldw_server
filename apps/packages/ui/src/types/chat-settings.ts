@@ -97,3 +97,10 @@ export const DEFAULT_CHAT_SETTINGS: ChatSettingsConfig = {
   stickyChatInput: false,
   allowExternalImages: false
 }
+
+/**
+ * The side panel is short, so its composer stays pinned below the messages
+ * unless the user has turned "sticky chat input" off (XS-09). The full-page
+ * chat keeps `DEFAULT_CHAT_SETTINGS.stickyChatInput`.
+ */
+export const SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT = true

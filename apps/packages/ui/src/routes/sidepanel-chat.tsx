@@ -79,7 +79,7 @@ import { useMessage } from '~/hooks/useMessage';
 import { useSelectedCharacter } from '@/hooks/useSelectedCharacter';
 import { useSelectedAssistant } from '@/hooks/useSelectedAssistant';
 import { useSidepanelChatTabsStore } from '@/store/sidepanel-chat-tabs';
-import { DEFAULT_CHAT_SETTINGS } from '@/types/chat-settings';
+import { SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT } from '@/types/chat-settings';
 import type { Character } from '@/types/character';
 import type {
   ChatModelSettingsSnapshot,
@@ -700,7 +700,7 @@ const SidepanelChatContent = ({
   sendGate.current = freshness.beforeSend
   captureListener.current = freshness.noteCapture
   const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
-    useSmartScroll(messages, streaming, 100)
+    useSmartScroll(messages, streaming, 100, { pinOnContentResize: true })
   const uiMode = useUiModeStore((state) => state.mode)
   const [isNarrow, setIsNarrow] = React.useState(
     () =>
@@ -853,7 +853,7 @@ const SidepanelChatContent = ({
     if (!sidebarOpen) returnSidebarFocus();
   }, [sidebarOpen, returnSidebarFocus]);
 
-  const [stickyChatInput] = useStorage('stickyChatInput', DEFAULT_CHAT_SETTINGS.stickyChatInput);
+  const [stickyChatInput] = useStorage('stickyChatInput', SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT);
   const [userDisplayName] = useStorage('chatUserDisplayName', '');
 
   const composerPadding = composerHeight
@@ -3313,7 +3313,7 @@ const SidepanelChatContent = ({
             )}
           </div>
 
-          {!isAutoScrollToBottom && (
+          {messages.length > 0 && !isAutoScrollToBottom && (
             <div
               className="fixed z-20 left-0 right-0 flex justify-center"
               style={{ bottom: scrollToLatestBottom }}

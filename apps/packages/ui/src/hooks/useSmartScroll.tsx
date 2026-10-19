@@ -2,6 +2,12 @@ import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 
 type SmartScrollOptions = {
   bottomOffsetPx?: number;
+  /**
+   * Keep following the bottom when the transcript grows without a new
+   * message, for example when the final markdown, table or code block of a
+   * reply renders after streaming ends.
+   */
+  pinOnContentResize?: boolean;
 };
 
 export const useSmartScroll = (
@@ -141,6 +147,26 @@ export const useSmartScroll = (
     }
     lastScrollTop.current = container.scrollTop;
   }, [bottomOffsetPx, isAtBottom]);
+
+  const pinOnContentResize = options.pinOnContentResize === true;
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!pinOnContentResize || !container) return;
+    if (typeof ResizeObserver === "undefined") return;
+
+    let lastScrollHeight = container.scrollHeight;
+    const observer = new ResizeObserver(() => {
+      const nextScrollHeight = container.scrollHeight;
+      if (nextScrollHeight === lastScrollHeight) return;
+      lastScrollHeight = nextScrollHeight;
+      if (autoScrollPermission.current) scrollToBottom(false);
+    });
+    observer.observe(container);
+    Array.from(container.children).forEach((child) => observer.observe(child));
+
+    return () => observer.disconnect();
+    // Re-observe when messages change so newly rendered content is watched.
+  }, [messages, pinOnContentResize, scrollToBottom]);
 
   const autoScrollToBottom = useCallback(() => {
     setIsAutoScrollEnabled(true);

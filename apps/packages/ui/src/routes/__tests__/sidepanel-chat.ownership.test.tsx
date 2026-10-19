@@ -1312,6 +1312,30 @@ describe.each([
     expect(toggle).toHaveAttribute("aria-expanded", "true")
   })
 
+  it("keeps the composer pinned below the messages by default (XS-09)", async () => {
+    io.useComposer = true
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    const composer = await screen.findByRole("textbox", { name: "Composer draft" })
+    // The composer must not scroll away with the transcript.
+    expect(screen.getByTestId("chat-messages")).not.toContainElement(composer)
+  })
+
+  it("hides 'Scroll to latest' while the chat is empty (XS-09)", async () => {
+    render(<Route />)
+    await waitFor(() => expect(screen.getByTestId("chat-messages")).toBeInTheDocument())
+    await act(async () => {})
+    expect(screen.queryByTestId("chat-scroll-latest")).not.toBeInTheDocument()
+  })
+
+  it("offers 'Scroll to latest' once the chat has messages (XS-09)", async () => {
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    expect(screen.getByTestId("chat-scroll-latest")).toBeInTheDocument()
+  })
+
   it("remembers a collapsed Pro chat list when the panel reopens (XS-04)", async () => {
     installSidebarViewportWidth(800)
     io.data.set(storedKey("alice"), tabsState())
