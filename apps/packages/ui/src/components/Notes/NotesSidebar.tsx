@@ -427,6 +427,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   aria-label={t('option:notesSearch.new', {
                     defaultValue: 'New note'
                   })}
+                  data-testid="notes-new-note-button"
                 />
               </Tooltip>
             </div>

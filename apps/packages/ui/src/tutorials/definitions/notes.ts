@@ -36,12 +36,12 @@ const notesBasics: TutorialDefinition = {
       placement: "bottom"
     },
     {
-      target: '[data-testid="notes-sort-select"], [data-testid="notes-notebook-select"]',
+      target: '[data-testid="notes-sort-select"]',
       titleKey: "tutorials:notes.basics.filtersTitle",
-      titleFallback: "Sort and Filter",
+      titleFallback: "Sort notes",
       contentKey: "tutorials:notes.basics.filtersContent",
       contentFallback:
-        "Sort by date/title and use saved filter or tag filters to narrow your working set.",
+        "Sort the list by date or title. Open Filters below it to narrow the list by tag.",
       placement: "bottom"
     },
     {
@@ -78,7 +78,9 @@ const notesBasics: TutorialDefinition = {
       contentKey: "tutorials:notes.basics.connectionsContent",
       contentFallback:
         "See how notes relate to each other. Type [[ in a note to create a link, or add manual connections here.",
-      placement: "left"
+      placement: "left",
+      // Connections only render once a note is open.
+      optional: true
     },
     {
       target: '[data-testid="notes-section-organize"]',
@@ -88,6 +90,15 @@ const notesBasics: TutorialDefinition = {
       contentFallback:
         "Group notes into collections, or save tag filters for quick access to related notes.",
       placement: "bottom"
+    },
+    {
+      target: '[data-testid="notes-new-note-button"]',
+      titleKey: "tutorials:notes.basics.createTitle",
+      titleFallback: "Create your first note",
+      contentKey: "tutorials:notes.basics.createContent",
+      contentFallback:
+        "Click + to start a note. To see this tour again, press ? and choose Restart tutorial.",
+      placement: "right"
     }
   ]
 }

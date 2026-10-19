@@ -411,10 +411,10 @@
     "message": "Switch between active notes and trash to recover or permanently remove entries."
   },
   "notes_basics_filtersTitle": {
-    "message": "Sort and Filter"
+    "message": "Sort notes"
   },
   "notes_basics_filtersContent": {
-    "message": "Sort by date/title and use notebook/keyword filters to narrow your working set."
+    "message": "Sort the list by date or title. Open Filters below it to narrow the list by tag."
   },
   "notes_basics_editorTitle": {
     "message": "Editor Workspace"
@@ -427,6 +427,30 @@
   },
   "notes_basics_saveContent": {
     "message": "Save updates, duplicate notes, export content, and run helper actions from the header."
+  },
+  "notes_basics_tagsTitle": {
+    "message": "Tags"
+  },
+  "notes_basics_tagsContent": {
+    "message": "Add tags to organize your notes. Use the filter in the sidebar to find notes by tag."
+  },
+  "notes_basics_connectionsTitle": {
+    "message": "Note Connections"
+  },
+  "notes_basics_connectionsContent": {
+    "message": "See how notes relate to each other. Type [[ in a note to create a link, or add manual connections here."
+  },
+  "notes_basics_organizeTitle": {
+    "message": "Collections and Filters"
+  },
+  "notes_basics_organizeContent": {
+    "message": "Group notes into collections, or save tag filters for quick access to related notes."
+  },
+  "notes_basics_createTitle": {
+    "message": "Create your first note"
+  },
+  "notes_basics_createContent": {
+    "message": "Click + to start a note. To see this tour again, press ? and choose Restart tutorial."
   },
   "flashcards_basics_label": {
     "message": "Flashcards Basics"
