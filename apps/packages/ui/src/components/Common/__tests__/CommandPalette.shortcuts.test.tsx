@@ -219,7 +219,7 @@ describe("CommandPalette shortcut hints", () => {
     ).toBeInTheDocument()
 
     const toggleContext = screen.getByRole("option", {
-      name: /Toggle Search & Context/i
+      name: /Toggle chat with current page/i
     })
     expect(
       within(toggleContext).getByText(

@@ -189,6 +189,7 @@ import { CharacterControlsSheet } from "@/components/Sidepanel/Chat/CharacterCon
 import { getSidepanelOverlayResumeMarkerKey } from "@/utils/sidepanel-overlay-resume"
 import type { SidepanelChatWebUiHandoffOverrides } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import { readVisiblePageContextForHandoff } from "./sidepanel-chat-handoff-context"
+import { isChatWithPageActive } from "./page-chat-mode"
 import {
   DEFAULT_DOCUMENT_PROCESSING_MODE,
   documentProcessingSelectionKey,
@@ -1302,7 +1303,7 @@ export const SidepanelForm = ({
           }
         ]
       : []),
-    ...(pageContextActive
+    ...(isChatWithPageActive(chatMode)
       ? [
           {
             id: "page-context",

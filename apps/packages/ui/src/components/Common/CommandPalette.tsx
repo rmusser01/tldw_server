@@ -432,22 +432,23 @@ export function CommandPalette({
         ? ([
             {
               id: "action-toggle-rag",
+              // Same term as the help sheet and the Send menu checkbox (XS-08).
               label: t(
-                "common:commandPalette.toggleKnowledgeSearch",
-                "Toggle Search & Context"
+                "common:commandPalette.toggleChatWithPage",
+                "Toggle chat with current page"
               ),
               description: t(
-                "common:commandPalette.toggleKnowledgeSearchDesc",
-                "Search your knowledge base and context"
+                "common:commandPalette.toggleChatWithPageDesc",
+                "Answer using the page open in this browser tab"
               ),
-              icon: <Search className="size-4" />,
+              icon: <Globe className="size-4" />,
               shortcut: toCommandShortcut(configuredShortcuts.toggleChatMode),
               action: () => {
                 onToggleRag()
                 setOpen(false)
               },
               category: "action",
-              keywords: ["search", "knowledge", "retrieve", "rag"],
+              keywords: ["page", "website", "tab", "context", "rag"],
             }
           ] as CommandItem[])
         : []),
