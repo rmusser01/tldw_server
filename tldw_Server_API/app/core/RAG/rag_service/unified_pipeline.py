@@ -4130,7 +4130,8 @@ async def unified_rag_pipeline(
                     pass
                 hyde_embedding_metadata: dict[str, Any] = {}
                 if credential_runtime is None:
-                    hypo = generate_hypothetical_answer(query, hyde_provider, hyde_model)
+                    # Off the loop: a sync LLM call on the loop's thread blocks it and cannot be quota-checked.
+                    hypo = await asyncio.to_thread(generate_hypothetical_answer, query, hyde_provider, hyde_model)
                     vec = await hyde_embed_text(hypo)
                 else:
                     hypo = await generate_hypothetical_answer_async(
