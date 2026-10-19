@@ -693,7 +693,10 @@ class TTSAdapterRegistry:
         if not task.cancelled():
             # Retrieve it: shield stops forwarding a late error once its caller has been cancelled,
             # and asyncio would log "Task exception was never retrieved".
-            task.exception()
+            error = task.exception()
+            if error is not None:
+                # Type only: provider error text can carry secrets or paths.
+                logger.warning("Initialization of {} adapter failed: {}", key[0], type(error).__name__)
 
     async def _get_adapter_if_ready(self, provider: Union[TTSProvider, str]) -> Optional[TTSAdapter]:
         """get_adapter for callers that only want a provider that is ready now (the listings, best-adapter selection).

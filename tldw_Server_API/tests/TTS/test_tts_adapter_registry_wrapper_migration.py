@@ -730,6 +730,33 @@ async def test_registry_retrieves_the_error_of_an_initialization_nobody_awaits(m
 
 
 @pytest.mark.asyncio
+async def test_registry_logs_a_warning_for_an_initialization_nobody_awaits(monkeypatch) -> None:
+    """The retrieved error is not dropped silently: the log names the provider and exception type, not its text."""
+    from loguru import logger
+
+    registry = TTSAdapterRegistry(config={"mock_enabled": True}, include_defaults=False)
+    _UncaughtFailureLoadAdapter.release = asyncio.Event()
+    registry.register_adapter(TTSProvider.MOCK, _UncaughtFailureLoadAdapter)
+
+    async def _get_resource_manager() -> _NonCriticalResourceManager:
+        return _NonCriticalResourceManager()
+
+    monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
+    messages: list[str] = []
+    sink_id = logger.add(lambda m: messages.append(m.record["message"]), level="WARNING")
+    try:
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(registry.get_adapter(TTSProvider.MOCK), 0.05)
+        _UncaughtFailureLoadAdapter.release.set()
+        for _ in range(5):
+            await asyncio.sleep(0)
+    finally:
+        logger.remove(sink_id)
+
+    assert any("mock" in m and "_UncaughtLoadError" in m for m in messages)
+
+
+@pytest.mark.asyncio
 async def test_service_fallback_skips_a_provider_that_is_still_loading(monkeypatch) -> None:
     """TTSServiceV2 failover walks the providers itself; a still-loading one is skipped, not waited on."""
     ready = _MockAdapterV1({})
