@@ -7,6 +7,7 @@ import codecs
 import contextlib
 import json
 import os
+import time
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -56,6 +57,7 @@ from tldw_Server_API.app.core.LLM_Calls.anthropic_messages import (
     openai_stream_to_anthropic,
 )
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
+from tldw_Server_API.app.core.LLM_Calls.usage_accounting import accounted_direct_stream, record_direct_response
 from tldw_Server_API.app.core.testing import is_test_mode, is_truthy
 
 router = APIRouter()
@@ -2050,6 +2052,7 @@ async def _handle_messages(
                 anthropic_beta=anthropic_beta,
             )
             stream = _extract_stream_flag(request_data.stream)
+            started = time.monotonic()
             if stream:
                 stream_iter = await _prepare_native_stream_iterator(
                     url,
@@ -2059,11 +2062,17 @@ async def _handle_messages(
                     provider=provider,
                     operation="messages.stream",
                 )
+                # This path never reaches a ChatProvider, so it records through the provider recorder (ADR-075).
                 response = StreamingResponse(
-                    _touch_on_first_stream_output(
-                        _sanitize_native_messages_stream(stream_iter),
-                        credential_runtime,
-                        credentials,
+                    accounted_direct_stream(
+                        provider,
+                        payload,
+                        _touch_on_first_stream_output(
+                            _sanitize_native_messages_stream(stream_iter),
+                            credential_runtime,
+                            credentials,
+                        ),
+                        started,
                     ),
                     media_type="text/event-stream",
                 )
@@ -2079,6 +2088,7 @@ async def _handle_messages(
             )
             if not _native_message_payload_is_semantic(data):
                 raise_detached_error(_messages_upstream_http_exception())
+            record_direct_response(provider, payload, data, started)
             response = JSONResponse(data)
             await await_owned_worker(
                 _mark_messages_credential_used(
