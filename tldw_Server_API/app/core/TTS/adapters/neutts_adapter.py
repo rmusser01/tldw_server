@@ -18,7 +18,7 @@ import asyncio
 import contextlib
 import os
 import tempfile
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable
 from typing import Any
 
 import numpy as np
@@ -31,7 +31,7 @@ from ..tts_exceptions import (
     TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
-from ..utils import parse_bool
+from ..utils import parse_bool, run_tts_blocking_call, run_tts_blocking_next
 from .base import (
     AudioFormat,
     ProviderStatus,
@@ -66,6 +66,8 @@ class NeuTTSAdapter(TTSAdapter):
 
         # Will be set after init
         self._engine = None
+        # Engine calls run on worker threads; one at a time, as a llama-cpp context is not thread-safe.
+        self._engine_lock = asyncio.Lock()
         self._is_quantized_model = False
         self._supports_streaming = False
         self.audio_normalizer = None
@@ -82,6 +84,8 @@ class NeuTTSAdapter(TTSAdapter):
             )
             # Respect auto_download toggle from provider config (default True)
             auto_download = parse_bool(self.config.get("auto_download", True), default=True)
+            # ponytail: loads on the loop, once per process. On a worker thread the registry's 5 s
+            # capability-listing timeout would cancel a slow load and mark NeuTTS failed (TASK-13857).
             self._engine = _NeuTTSAir(
                 backbone_repo=self.backbone_repo,
                 backbone_device=self.backbone_device,
@@ -247,7 +251,7 @@ class NeuTTSAdapter(TTSAdapter):
                     f.write(request.voice_reference)
                 # Encode reference
                 logger.info("NeuTTS: encoding reference audio")
-                ref_codes = self._engine.encode_reference(temp_path)  # type: ignore
+                ref_codes = await self._engine_call(self._engine.encode_reference, temp_path)  # type: ignore
 
             if not ref_text or not isinstance(ref_text, str) or not ref_text.strip():
                 raise TTSValidationError(
@@ -257,7 +261,7 @@ class NeuTTSAdapter(TTSAdapter):
 
             # Generate waveform
             logger.info("NeuTTS: generating waveform")
-            wav = self._engine.infer(request.text, ref_codes, ref_text)  # type: ignore
+            wav = await self._engine_call(self._engine.infer, request.text, ref_codes, ref_text)  # type: ignore
             # Normalize to int16
             from tldw_Server_API.app.core.TTS.streaming_audio_writer import AudioNormalizer
             normalizer = self.audio_normalizer or AudioNormalizer()
@@ -341,7 +345,7 @@ class NeuTTSAdapter(TTSAdapter):
                 os.close(temp_fd)
                 with open(temp_path, "wb") as f:
                     f.write(request.voice_reference)
-                ref_codes = self._engine.encode_reference(temp_path)  # type: ignore
+                ref_codes = await self._engine_call(self._engine.encode_reference, temp_path)  # type: ignore
 
             if not ref_text or not isinstance(ref_text, str) or not ref_text.strip():
                 raise TTSValidationError(
@@ -358,15 +362,27 @@ class NeuTTSAdapter(TTSAdapter):
             )
             chunk_idx = 0
             try:
-                for chunk in self._engine.infer_stream(request.text, ref_codes, ref_text):  # type: ignore
-                    if chunk is None or len(chunk) == 0:
-                        continue
-                    chunk_idx += 1
-                    # Normalize float32 -> int16, then encode
-                    normalized = self.audio_normalizer.normalize(chunk, target_dtype=np.int16)
-                    encoded = writer.write_chunk(normalized)
-                    if encoded:
-                        yield encoded
+                # The generator drives the engine between chunks, so the stream holds the lock until it ends.
+                await self._engine_lock.acquire()
+                call: asyncio.Future | None = None
+                try:
+                    chunks = self._engine.infer_stream(request.text, ref_codes, ref_text)  # type: ignore
+                    done = object()
+                    while True:
+                        call = asyncio.ensure_future(run_tts_blocking_next(chunks, done))
+                        chunk = await asyncio.shield(call)
+                        if chunk is done:
+                            break
+                        if chunk is None or len(chunk) == 0:
+                            continue
+                        chunk_idx += 1
+                        # Normalize float32 -> int16, then encode
+                        normalized = self.audio_normalizer.normalize(chunk, target_dtype=np.int16)
+                        encoded = writer.write_chunk(normalized)
+                        if encoded:
+                            yield encoded
+                finally:
+                    self._release_engine_when_done(call)
                 # Finalize
                 final_bytes = writer.write_chunk(finalize=True)
                 if final_bytes:
@@ -391,6 +407,32 @@ class NeuTTSAdapter(TTSAdapter):
             if temp_path and os.path.exists(temp_path):
                 with contextlib.suppress(Exception):
                     os.remove(temp_path)
+
+    async def _engine_call(self, func: Callable[..., Any], *args: Any) -> Any:
+        """Run one engine call on a worker thread, holding the engine lock until it returns."""
+        await self._engine_lock.acquire()
+        call = asyncio.ensure_future(run_tts_blocking_call(func, *args))
+        try:
+            return await asyncio.shield(call)
+        finally:
+            self._release_engine_when_done(call)
+
+    def _release_engine_when_done(self, call: asyncio.Future | None) -> None:
+        """Release the engine lock now, or when an engine call still running on its thread returns.
+
+        A cancelled caller (a client disconnect) cannot stop that thread, so handing the engine to
+        the next caller before it returns would run two calls on one llama-cpp context.
+        """
+        if call is None or call.done():
+            self._engine_lock.release()
+            return
+
+        def _release(finished: asyncio.Future) -> None:
+            self._engine_lock.release()
+            if not finished.cancelled():
+                finished.exception()  # its caller is gone; don't log the error as never retrieved
+
+        call.add_done_callback(_release)
 
     def _maybe_override_engine(self, extras: dict[str, Any]):
         """Allow per-request override of model repos/devices via extra_params."""
