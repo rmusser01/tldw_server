@@ -12,7 +12,7 @@ All paths under `tldw_Server_API/` unless noted.
 | Adapter base | `app/core/LLM_Calls/providers/base.py` | `ChatProvider` ABC — `__init_subclass__` auto-instruments every adapter with usage accounting |
 | Adapters | `providers/*.py`, `providers/local_adapters.py` | hosted: openai, anthropic, groq, openrouter, google, mistral, qwen, deepseek, huggingface, bedrock, cohere, moonshot, zai, novita, poe, together, custom-openai family; local: llama.cpp, kobold, ooba, tabbyapi, vllm, local-llm, ollama, aphrodite, mlx over a shared OpenAI-compatible engine |
 | SSE | `LLM_Calls/sse.py`, `streaming.py` | line normalization, delta chunks, done detection, sync/async SSE iterators, sync-stream wrapping |
-| Accounting | `LLM_Calls/usage_accounting.py` + `app/core/Usage/*` | quota gate before the call; stream usage parsing; estimation fallback (4 chars/token, data-URIs redacted); pricing catalog with a conservative unknown-model rate; async submit loop |
+| Accounting | `LLM_Calls/usage_accounting.py` + `app/core/Usage/*` | quota gate before the call; stream usage parsing; estimation fallback (the chat path's `estimate_segment_tokens`: 4 chars/token rounded up, data-URIs redacted); pricing catalog with a conservative unknown-model rate; async submit loop |
 | Capability policy | `LLM_Calls/capability_registry.py` | per-provider allowed/blocked fields and aliases; call-policy application |
 | Tokenizers | `LLM_Calls/tokenizer_resolver.py` | provider-native token counting (Anthropic/Google/Cohere/Bedrock HTTP), strict mode |
 | Routing | `LLM_Calls/routing/` | `model=auto` resolution, rules router, LLM-router prompt/choice |

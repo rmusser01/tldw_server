@@ -95,7 +95,13 @@ def fingerprint_text(text: str, *, version: str = FINGERPRINT_VERSION) -> str:
 
 
 def estimate_segment_tokens(text: str) -> int:
-    """Conservative deterministic estimate using the existing 4 chars/token heuristic."""
+    """The chat path's one prompt-size estimate: data:image payloads redacted, 4 chars/token rounded up.
+
+    Rate limits, quota and billing reservations, queue admission, the prompt-cost guardrail,
+    the post-call stream estimates and every recorded provider call's estimate row
+    (usage_accounting) all use it (TASK-13843). Rounded up because every one of them is
+    safer over than under.
+    """
     if not text:
         return 0
     sanitized = _sanitize_data_uris(text)
