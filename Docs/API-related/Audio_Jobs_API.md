@@ -45,7 +45,7 @@ Base path: `/api/v1/audio`
   - `AUDIO_JOBS_WORKER_ENABLED`: `true|false` (default false)
   - `AUDIO_JOBS_OWNER_STRICT`: enable owner-aware acquisition (default false)
   - `AUDIO_JOBS_GPU_TRANSCRIBE`: `true` queues `audio_transcribe` on the `transcribe` queue for the GPU worker instead of transcribing in this worker (default false). It is read by this worker, so set it where this worker runs, and only when a GPU worker reads the same Jobs database; otherwise transcription waits for a worker that never comes.
-  - `JOBS_LEASE_SECONDS`: lease duration (default 120)
+  - `JOBS_LEASE_SECONDS`: lease duration (default 120). The worker renews it every half lease while a stage runs, so another worker does not pick up a long transcription and run it again. The GPU worker does the same, with its own default of 180.
 
 ### GPU Worker (stub)
 
