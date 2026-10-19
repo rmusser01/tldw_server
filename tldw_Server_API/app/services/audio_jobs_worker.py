@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import os
 import tempfile
+from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -52,15 +53,28 @@ def start_lease_renewal(jm: JobManager, job: dict[str, Any], *, worker_id: str, 
     The caller stops it with ``stop_lease_renewal`` when the stage ends. It stops by itself once a renewal is
     refused: the lease was lost, or the job was cancelled. A backend error (a locked database, a dropped
     connection) is logged and the next renewal is tried, so one error does not let a long stage's lease expire.
+
+    It renews the lease acquisition granted: ``lease_seconds`` capped at JOBS_LEASE_MAX_SECONDS, as
+    ``acquire_next_job`` caps it, or, for 0 (an adaptive lease, whose length acquisition chose), the time left
+    on the job's ``leased_until``.
     """
     job_id = int(job["id"])
     lease_id = str(job.get("lease_id"))
+    if lease_seconds > 0:
+        lease = max(1, min(lease_seconds, int(os.getenv("JOBS_LEASE_MAX_SECONDS", "3600") or "3600")))
+    else:
+        leased_until = datetime.fromisoformat(str(job["leased_until"]))
+        if leased_until.tzinfo is None:  # SQLite stores UTC without an offset
+            leased_until = leased_until.replace(tzinfo=timezone.utc)
+        # ponytail: Postgres sets leased_until by its own clock; a skew near half the lease would need the
+        # granted length returned by acquire_next_job instead.
+        lease = max(1, int((leased_until - datetime.now(timezone.utc)).total_seconds()))
 
     async def _renew() -> None:
         while True:
-            await asyncio.sleep(max(1, lease_seconds // 2))
+            await asyncio.sleep(max(1, lease // 2))
             try:
-                if not jm.renew_job_lease(job_id, seconds=lease_seconds, worker_id=worker_id, lease_id=lease_id):
+                if not jm.renew_job_lease(job_id, seconds=lease, worker_id=worker_id, lease_id=lease_id):
                     return
             except Exception as e:  # noqa: BLE001 - a backend error must not end renewal; the next one may pass
                 logger.warning("Audio job {}: lease renewal failed ({}); trying again", job_id, type(e).__name__)
