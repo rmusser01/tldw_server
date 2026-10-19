@@ -2,7 +2,7 @@
 id: TASK-13844
 title: 'Summary provider errors: a provider rejecting the request reads as a transient
   failure'
-status: To Do
+status: In Progress
 labels:
 - llm
 - errors
@@ -24,6 +24,7 @@ _summary_error_code (core/LLM_Calls/Summarization_General_Lib.py) maps a ChatBad
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-10-18-summary-provider-error-codes.md (three tasks: request_rejected and the kill switch; provider_quota_exhausted; the reader audit, docs and close-out). ADR assessment: none needed (two codes added to an internal bounded set and one bool on ChatRateLimitError; ADR-025 followed, the quota signal is decided in the shared build_sanitized_chat_error).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

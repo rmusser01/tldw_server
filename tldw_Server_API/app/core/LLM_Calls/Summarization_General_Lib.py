@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
+    ChatBadRequestError,
     ChatConfigurationError,
     ChatRateLimitError,
 )
@@ -117,6 +118,7 @@ _SUMMARY_ERROR_CODES = frozenset(
         "authentication",
         "configuration",
         "rate_limit",
+        "request_rejected",
         "provider_failure",
     }
 )
@@ -132,7 +134,18 @@ class SummaryProviderError(Exception):
         super().__init__(f"Summary provider error: {self.code} ({self.provider})")
 
 
-def _summary_error_code(exc: BaseException) -> str:
+def _native_http_disabled(adapter: Any) -> bool:
+    """Whether the adapter's LLM_ADAPTERS_NATIVE_HTTP_<PROVIDER> switch is off.
+
+    An adapter with the switch off raises a bare RuntimeError on every call, before any request.
+    """
+    # ponytail: reads the adapter's own switch instead of retyping its 12 raise sites; a typed
+    # error there is the upgrade if other untyped adapter configuration errors need a code.
+    switch = getattr(adapter, "_use_native_http", None)
+    return callable(switch) and switch() is False
+
+
+def _summary_error_code(exc: BaseException, adapter: Any = None) -> str:
     """Map chat adapter failures to a bounded, detail-free summary taxonomy."""
     if isinstance(exc, ChatAuthenticationError):
         return "authentication"
@@ -140,11 +153,20 @@ def _summary_error_code(exc: BaseException) -> str:
         return "configuration"
     if isinstance(exc, ChatRateLimitError):
         return "rate_limit"
+    if isinstance(exc, ChatBadRequestError):
+        # 408 (OpenRouter timeout) and 498 (Groq flex capacity) are transient 4xx replies.
+        if getattr(exc, "upstream_status_code", None) in {408, 498}:
+            return "provider_failure"
+        # The provider refused this request (an unknown model, a prompt over its context);
+        # sending it again gets the same answer.
+        return "request_rejected"
     if isinstance(exc, ChatAPIError):
         if exc.status_code in {401, 403}:
             return "authentication"
         if exc.status_code == 429:
             return "rate_limit"
+    if isinstance(exc, RuntimeError) and _native_http_disabled(adapter):
+        return "configuration"
     return "provider_failure"
 
 
@@ -332,7 +354,7 @@ def _summarize_via_adapter(
             except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
                 if raise_on_error:
                     logging.error(f"Adapter streaming failed for {provider}")
-                    raise SummaryProviderError(code=_summary_error_code(exc), provider=provider) from None
+                    raise SummaryProviderError(code=_summary_error_code(exc, adapter), provider=provider) from None
                 logging.error(f"Adapter streaming failed for {provider}")
                 yield f"Error: Provider streaming failed for '{provider}'."
             finally:
@@ -383,7 +405,7 @@ def _summarize_via_adapter(
     except _SUMMARY_ADAPTER_EXCEPTIONS as exc:
         if raise_on_error:
             logging.error(f"Adapter summarization failed for {provider}")
-            raise SummaryProviderError(code=_summary_error_code(exc), provider=provider) from None
+            raise SummaryProviderError(code=_summary_error_code(exc, adapter), provider=provider) from None
         logging.error(f"Adapter summarization failed for {provider}")
         return f"Error: Provider request failed for '{provider}'."
 
