@@ -168,6 +168,8 @@ const localRows = async () =>
 
 /** Click Retry on the "Interrupted" notice and wait for the new reply to finish. */
 const retryInterruptedReply = async (view: PlaygroundView, server: ReturnType<typeof createFakeTldwServer>) => {
+  if (useStoreMessageOption.getState().serverChatId)
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(true), HARNESS_WAIT)
   const before = server.completionRequests().length
   const notice = await interruptionNotice("Interrupted")
   await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
@@ -279,6 +281,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
     const notice = await interruptionNotice("Interrupted")
     expect(screen.queryByText("Turn needs review")).not.toBeInTheDocument()
 
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(true), HARNESS_WAIT)
     await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
     await act(async () => { const retried = await retryCompletion.current; expect(retried, JSON.stringify(retried)).toEqual({ status: "submitted" }) })
     await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)

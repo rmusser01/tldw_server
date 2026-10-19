@@ -6859,7 +6859,7 @@ it.each(["unsupported", "changed", "uncertain"])(
           params
         ).catch((value) => value)
       })
-      expect(error).toMatchObject({
+      expect(error, JSON.stringify(error)).toMatchObject({
         status: "failed",
         errorMessage:
           outcome === "unsupported"

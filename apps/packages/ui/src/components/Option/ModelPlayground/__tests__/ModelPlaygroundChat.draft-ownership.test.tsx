@@ -38,7 +38,8 @@ vi.mock("@/hooks/useMessageOption", () => ({
   }),
 }));
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [] }),
+  useQuery: () => ({ data: [], isSuccess: true, isFetching: false }),
+  useQueryClient: () => ({ getQueryState: () => undefined }),
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -86,7 +87,7 @@ describe("Model Playground local draft ownership", () => {
     const input = screen.getByPlaceholderText("Type your message...");
     try {
       fireEvent.change(input, { target: { value: "first" } });
-      fireEvent.click(input.parentElement!.querySelector("button")!);
+      fireEvent.click(screen.getByRole("button", { name: "Send" }));
       await waitFor(() =>
         expect(turn.submit).toHaveBeenCalledWith({
           message: "first",

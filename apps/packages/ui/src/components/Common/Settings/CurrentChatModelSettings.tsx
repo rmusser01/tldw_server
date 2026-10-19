@@ -216,7 +216,7 @@ export const CurrentChatModelSettings = ({
   const localScene = useStoreMessageOption(state => state.chatDraftAddress?.kind === "local")
   const sceneOnly = !personaChatActive && localScene && !(accountIsCurrent?.() ?? true)
   React.useEffect(() => {
-    if (!open) setActiveTab(sceneOnly ? "actor" : "model")
+    if (!open || sceneOnly) setActiveTab(sceneOnly ? "actor" : "model")
   }, [open, sceneOnly])
   const draftRevision = useStoreMessageOption((state) => state.chatDraftRevision)
   const renderedModelRevision = useStoreMessageOption(state => state.selectedModelRevision)

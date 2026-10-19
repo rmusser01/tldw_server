@@ -763,10 +763,10 @@ export const useServerChatLoader = ({
     }
 
     serverChatDebounceRef.current.chatId = serverChatId
+    let ownedSelectionRevision = getSelectedAssistantOperationRevision()
     serverChatDebounceRef.current.timer = setTimeout(() => {
       const controller = new AbortController()
       let selectionCurrent = selectionRef.current?.fence() || (() => true)
-      let ownedSelectionRevision = getSelectedAssistantOperationRevision()
       const canCommitCurrentLoad = () =>
         selectionCurrent() &&
         useStoreMessageOption.getState().serverChatId === serverChatId &&

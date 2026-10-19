@@ -332,6 +332,7 @@ const createHookOptions = (
     ragAdvancedOptions: {},
     serverChatId: "server-chat-1",
     serverChatTitle: "Image Sync Chat",
+    serverChatMetaLoaded: true,
     serverChatCharacterId: null,
     serverChatAssistantKind: null,
     serverChatAssistantId: null,

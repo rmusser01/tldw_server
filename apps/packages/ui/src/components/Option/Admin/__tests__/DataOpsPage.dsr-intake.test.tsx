@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { ConfigProvider, message } from "antd"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import DataOpsPage from "../DataOpsPage"
+import { formatAdminDateTime } from "../admin-format"
 
 const mocks = vi.hoisted(() => ({ request: vi.fn() }))
 // Only the external transport is replaced: actual client domain methods and Antd UI remain mounted.
@@ -26,7 +27,7 @@ const ITEM = {
   id: 41, client_request_id: "existing-preview-id", requester_identifier: "admin@example.test",
   resolved_user_id: 1, request_type: "export", status: "recorded", selected_categories: CATEGORIES,
   preview_summary: [], coverage_metadata: {}, requested_by_user_id: 1,
-  requested_at: "2026-10-09T04:12:00Z", notes: "Intake review only"
+  requested_at: "2026-10-09T04:12:00Z", created_at: "2020-01-01T00:00:00Z", notes: "Intake review only"
 }
 type Request = { path: string, method: string, body?: Record<string, unknown>, headers?: Record<string, string> }
 const previewRequest = vi.fn<() => Promise<unknown>>()
@@ -160,7 +161,7 @@ describe("DSR intake contract", () => {
     await mountDsr()
     const cell = await screen.findByText("41", { selector: "td" })
     expect(cell.closest("tr")).toHaveTextContent("admin@example.test")
-    expect(cell.closest("tr")).toHaveTextContent(new Date(ITEM.requested_at).toLocaleString())
+    expect(cell.closest("tr")).toHaveTextContent(formatAdminDateTime(ITEM.requested_at))
     expect(within(cell.closest("tr")!).queryByRole("button", { name: /Execute$/ })).not.toBeInTheDocument()
   }, 30000)
 
@@ -169,7 +170,7 @@ describe("DSR intake contract", () => {
     history = envelope === "array" ? [legacy] : { [envelope]: [legacy] }
     await mountDsr()
     const cell = await screen.findByText("41", { selector: "td" })
-    expect(cell.closest("tr")).toHaveTextContent(new Date(ITEM.requested_at).toLocaleString())
+    expect(cell.closest("tr")).toHaveTextContent(formatAdminDateTime(ITEM.requested_at))
   }, 30000)
 
   it("keeps erasure execution behind explicit confirmation and excludes completed/export rows", async () => {

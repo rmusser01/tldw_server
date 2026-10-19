@@ -2,15 +2,16 @@ import React from 'react'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { createNotesGraphAuthorityScope } from '../hooks/useNotesGraphAuthorityScope'
 import { useNotesEditorState, type UseNotesEditorStateDeps } from '../hooks/useNotesEditorState'
 
-const mocks = vi.hoisted(() => ({ request: vi.fn(), tasks: vi.fn(), activity: vi.fn(), error: vi.fn() }))
+const mocks = vi.hoisted(() => ({ user: "alice", request: vi.fn(), tasks: vi.fn(), activity: vi.fn(), error: vi.fn() }))
 vi.mock('@/services/background-proxy', () => ({ bgRequest: mocks.request }))
 vi.mock('@/services/notes-tasks', () => ({
   listNoteTasks: mocks.tasks, listTaskActivity: mocks.activity,
   markTaskActivityRead: vi.fn(), setNoteTaskStatus: vi.fn()
 }))
-vi.mock('@/services/tldw/TldwAuth', () => ({ tldwAuth: { getCurrentUser: vi.fn(async () => null) } }))
+vi.mock('@/services/tldw/TldwAuth', () => ({ tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: mocks.user, is_active: true })) } }))
 vi.mock('@/services/settings/registry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/services/settings/registry')>(),
   getSetting: vi.fn(async () => null), setSetting: vi.fn(async () => undefined), clearSetting: vi.fn()
@@ -26,7 +27,8 @@ const deferred = <T,>() => {
 const renderEditor = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const deps: UseNotesEditorStateDeps = {
-    authorityScope: 'alice', isOnline: false, isMobileViewport: false,
+    connectionConfig: { serverUrl: 'https://notes-races.test', authMode: 'multi-user', accessToken: 'notes-race-fixture-token' },
+    authorityScope: createNotesGraphAuthorityScope('https://notes-races.test', 'alice'), isOnline: false, isMobileViewport: false,
     message: { error: mocks.error } as unknown as UseNotesEditorStateDeps['message'],
     confirmDanger: vi.fn(async () => true), queryClient, t: (key) => key,
     listMode: 'active', setListMode: vi.fn(), data: [], refetch: vi.fn(async () => undefined),
@@ -35,7 +37,11 @@ const renderEditor = () => {
     setEditorKeywords: vi.fn(), keywordSuggestionReturnFocusRef: { current: null },
     setKeywordSuggestionOptions: vi.fn(), setKeywordSuggestionSelection: vi.fn(), editorDisabled: false
   }
-  return renderHook(({ scope }) => useNotesEditorState({ ...deps, authorityScope: scope }), {
+  return renderHook(({ scope }) => {
+    mocks.user = scope
+    const [editorKeywords, setEditorKeywords] = React.useState<string[]>([])
+    return useNotesEditorState({ ...deps, editorKeywords, setEditorKeywords, authorityScope: scope == null ? null : createNotesGraphAuthorityScope('https://notes-races.test', scope) })
+  }, {
     initialProps: { scope: 'alice' },
     wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   })
@@ -203,12 +209,13 @@ describe('Notes editor authority races', () => {
     const view = renderEditor()
     let loading!: Promise<boolean>
     await act(async () => { loading = view.result.current.loadDetail('old') })
+    await waitFor(() => expect(mocks.tasks).toHaveBeenCalledWith('old', { limit: 500 }, expect.anything()))
     view.rerender({ scope: 'bob' })
     view.rerender({ scope: 'alice' })
     await act(async () => { await view.result.current.loadDetail('new') })
     await act(async () => { old.resolve({ tasks: [{ id: 'stale-task' }], reconciliation: null }); await loading })
     expect(view.result.current.noteTasks.map((task) => task.id)).toEqual(['current-task'])
-    expect(mocks.activity).not.toHaveBeenCalledWith({ note_id: 'old', limit: 50 })
+    expect(mocks.activity).not.toHaveBeenCalledWith({ note_id: 'old', limit: 50 }, expect.anything())
   })
 
   it.each(['resolve', 'reject'] as const)('ignores delayed activity %s after Alice → Bob → Alice', async (settle) => {
@@ -219,6 +226,7 @@ describe('Notes editor authority races', () => {
     const view = renderEditor()
     let loading!: Promise<boolean>
     await act(async () => { loading = view.result.current.loadDetail('old') })
+    await waitFor(() => expect(mocks.activity).toHaveBeenCalledWith({ note_id: 'old', limit: 50 }, expect.anything()))
     view.rerender({ scope: 'bob' })
     view.rerender({ scope: 'alice' })
     await act(async () => { await view.result.current.loadDetail('new') })

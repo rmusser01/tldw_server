@@ -378,7 +378,7 @@ describe.each(surfaces)("$surface on a loaded server chat (XP-02, #3109)", { tim
     renderChat()
 
     const assistant = messageCard("assistant")
-    expect(assistant.querySelector("[data-interruption-label]")).toHaveTextContent(status === "stopped" ? "Stopped" : "Interrupted")
+    expect(within(assistant).getByRole("status", { name: status === "stopped" ? "Stopped" : "Interrupted" })).toBeVisible()
     expect(assistant).toHaveAttribute("data-server-message-id", ASSISTANT_ID)
   })
 

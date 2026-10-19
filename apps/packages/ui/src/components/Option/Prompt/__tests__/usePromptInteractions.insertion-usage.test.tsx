@@ -97,9 +97,9 @@ describe("library insertion does not await best-effort usage", () => {
         "library-prompt",
       );
       let completion!: Promise<void>;
-      act(() => {
-        completion =
-          view.result.current.interactions.handleInsertChoice(choice);
+      await act(async () => {
+        completion = view.result.current.interactions.handleInsertChoice(choice);
+        await completion;
       });
       try {
         expect(markUsed).toHaveBeenCalledExactlyOnceWith("library-prompt");
@@ -124,11 +124,12 @@ describe("library insertion does not await best-effort usage", () => {
     const markUsed = vi.fn(() => usage.promise);
     const view = mount(markUsed);
     let completion!: Promise<void>;
-    act(() => {
+    await act(async () => {
       completion = view.result.current.interactions.handleUsePromptInChat({
         id: "quick-library-prompt",
         userText,
       });
+      await completion;
     });
     try {
       expect(markUsed).toHaveBeenCalledExactlyOnceWith("quick-library-prompt");

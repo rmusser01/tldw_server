@@ -1223,7 +1223,6 @@ export const PlaygroundChat = ({
   messagesRef.current = messages
   const latestRowHandlers = React.useRef({
     editMessage,
-    deleteMessage,
     toggleMessagePinned,
     createChatBranch,
     handleVariantSwipe,
@@ -1233,7 +1232,6 @@ export const PlaygroundChat = ({
   })
   latestRowHandlers.current = {
     editMessage,
-    deleteMessage,
     toggleMessagePinned,
     createChatBranch,
     handleVariantSwipe,
@@ -1266,21 +1264,6 @@ export const PlaygroundChat = ({
             editIsCurrent,
             editOriginIsCurrent
           )
-        }
-      ),
-    []
-  )
-  const getRowDeleteHandler = React.useCallback(
-    (messageId: string | undefined) =>
-      getStableRowHandler(
-        rowHandlerCache,
-        `delete:${messageId ?? ""}`,
-        () => () => {
-          const index = messagesRef.current.findIndex(
-            (row) => row.id === messageId
-          )
-          if (index < 0) return
-          return latestRowHandlers.current.deleteMessage(index)
         }
       ),
     []
@@ -1531,7 +1514,7 @@ export const PlaygroundChat = ({
                 isSearchingInternet={isSearchingInternet}
                 sources={message.sources}
                 onEditFormSubmit={getRowEditSubmitHandler(message.id)}
-                onDeleteMessage={getRowDeleteHandler(message.id)}
+                onDeleteMessage={() => deleteMessage(block.index)}
                 onTogglePinned={getRowTogglePinnedHandler(message.id)}
                 onNewBranch={getRowNewBranchHandler(message.id)}
                 isTTSEnabled={ttsEnabled}

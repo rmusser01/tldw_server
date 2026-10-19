@@ -301,6 +301,7 @@ describe("useVoiceChatStream interrupt handling", () => {
   })
 
   it("fails fast when the selected model cannot be resolved to a provider", async () => {
+    useStoreMessageOption.setState({ selectedModel: "bad-model" })
     storageValues.set("selectedModel", "bad-model")
     vi.mocked(resolveApiProviderForModel).mockRejectedValue(
       new Error('Unable to resolve provider for model "bad-model".')

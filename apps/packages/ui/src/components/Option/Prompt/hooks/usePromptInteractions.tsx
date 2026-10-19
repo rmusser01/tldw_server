@@ -279,7 +279,8 @@ export function usePromptInteractions(deps: UsePromptInteractionsDeps) {
         })
         return
       }
-      await editorMarkPromptAsUsed(promptId)
+      // Usage is best effort; a slow counter must not delay owned insertion.
+      void editorMarkPromptAsUsed(promptId).catch(() => undefined)
       scope.assertCurrent()
       if (applicationLifetime.current) apply()
     } catch (error) {

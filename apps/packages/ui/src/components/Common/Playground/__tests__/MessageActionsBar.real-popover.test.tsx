@@ -84,7 +84,7 @@ describe("real AntD message action triggers", () => {
     expect(props.onSaveKnowledge).not.toHaveBeenCalled()
     await user.click(trigger)
     const choice = await screen.findByRole("button", { name: label })
-    expect(choice).toBeVisible()
+    await waitFor(() => expect(choice).toBeVisible())
     expect(screen.getByRole("button", { name: "Save to Notes" })).toBeVisible()
     expect(screen.getByRole("button", { name: "Save to Flashcards" })).toBeVisible()
     await user.click(choice)

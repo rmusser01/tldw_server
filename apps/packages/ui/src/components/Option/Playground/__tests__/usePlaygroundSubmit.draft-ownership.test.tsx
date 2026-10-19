@@ -11,6 +11,7 @@ import {
 import type { UploadedFile } from "@/db/dexie/types";
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils";
 import { useSlashCommands } from "@/hooks/playground/useSlashCommands";
+import { useStoreMessageOption } from "@/store/option";
 import { useStoreChatModelSettings } from "@/store/model";
 import { createSidepanelChatHandoff } from "@/services/sidepanel-chat-handoff";
 import { useSidepanelChatHandoffImport } from "../hooks/useSidepanelChatHandoffImport";
@@ -121,7 +122,9 @@ describe("Playground send owns only its captured composer draft", () => {
           input.webSearch ?? false,
         );
         const [chatMode, setChatMode] = React.useState("normal");
+        const draftAddress = useStoreMessageOption(state => state.chatDraftAddress);
         const composer = useComposerText({
+          draftAddress: draftAddress ?? undefined,
           draftKey: "tldw:playgroundChatDraft:ownership-test",
           tabScopedDraft: true,
           draftEnabled: input.draftEnabled,
@@ -132,6 +135,10 @@ describe("Playground send owns only its captured composer draft", () => {
         );
         const navigate = useNavigate();
         const handoff = useSidepanelChatHandoffImport({
+          ready: composer.draftReady,
+          destinationKey: draftAddress ? JSON.stringify(draftAddress) : "unresolved",
+          captureGuard: composer.captureCompletionGuard,
+          getDraftRevision: composer.form.getRevision,
           draftValue: composer.form.values.message,
           setMessageValue: composer.setMessageValue,
           t,
@@ -166,6 +173,9 @@ describe("Playground send owns only its captured composer draft", () => {
           currentMessage: composer.form.values.message,
         });
         const submit = usePlaygroundSubmit({
+          historySelection,
+          draftReady: composer.draftReady || input.draftEnabled === false,
+          restorePromptAssistAttempt: composer.restorePromptAssistAttempt,
           form,
           beginPromptAssistReset: composer.beginPromptAssistReset,
           markPromptAssistAttemptSaved: composer.markPromptAssistAttemptSaved,
@@ -212,11 +222,12 @@ describe("Playground send owns only its captured composer draft", () => {
           queueSubmission,
           validateSelectedChatModelsAvailability: () => true,
           compareModelsSupportCapability: (models, capability) => compareModelsSupportCapability(models, capability, buildCompareModelMetaById([{ model: "ready-model", capabilities: input.visionSupported === false ? [] : ["vision"] }, { ...visionModel, capabilities: input.visionSupported === false ? [] : ["vision"] }])),
-          notificationApi: { error: vi.fn(), warning: warnNotReady },
+          notificationApi: { info: vi.fn(), error: vi.fn(), warning: warnNotReady },
           t,
         });
         return {
           composer,
+          handoff,
           historySelection,
           submit,
           submissions,
@@ -240,6 +251,7 @@ describe("Playground send owns only its captured composer draft", () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
+    useStoreMessageOption.getState().startNewChatDraft(false);
     useStoreChatModelSettings.getState().reset();
     services.account = "alice";
     services.scopeBarrier = null;
@@ -325,7 +337,7 @@ describe("Playground send owns only its captured composer draft", () => {
       }
     });
 
-  it.each([true, false])("B03 preflight immediate refusal restores text only with its no-admission flag (%s)", async restoreDraft => {
+  it.each([true, false])("retains an explicit failed input without automatically resending it (admission hint=%s)", async restoreDraft => {
     sendMessage.mockResolvedValueOnce({ status: "failed", errorMessage: "Refused", ...(restoreDraft ? { restoreDraft: true } : {}) });
     const view = mount();
     try {
@@ -333,8 +345,9 @@ describe("Playground send owns only its captured composer draft", () => {
       act(() => view.result.current.composer.setMessageValue("Immediate question"));
       act(() => view.result.current.submit.submitForm());
       await act(async () => { await Promise.all(view.result.current.submissions.current); });
-      await waitFor(() => expect(view.result.current.composer.form.values.message).toBe(restoreDraft ? "Immediate question" : ""));
+      await waitFor(() => expect(view.result.current.composer.form.values.message).toBe("Immediate question"));
       expect(sendMessage).toHaveBeenCalledOnce();
+      expect(queueSubmission).not.toHaveBeenCalled();
     } finally { view.unmount(); }
   });
 
@@ -536,6 +549,9 @@ describe("Playground send owns only its captured composer draft", () => {
       await waitFor(() =>
         expect(view.result.current.composer.draftReady).toBe(true),
       );
+      await waitFor(() => expect(view.result.current.handoff.conflict).not.toBeNull());
+      expect(view.result.current.composer.form.values.message).toBe("");
+      await act(async () => { await view.result.current.handoff.replaceWithHandoffDraft(); });
       await waitFor(() =>
         expect(view.result.current.composer.form.values.message).toBe(
           "first imported question",
@@ -548,6 +564,8 @@ describe("Playground send owns only its captured composer draft", () => {
       await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
       expect(view.result.current.composer.form.values.message).toBe("");
       act(() => view.result.current.navigate(`/chat?handoff=${second.id}`));
+      await waitFor(() => expect(view.result.current.handoff.conflict).not.toBeNull());
+      await act(async () => { await view.result.current.handoff.replaceWithHandoffDraft(); });
       await waitFor(() =>
         expect(view.result.current.composer.form.values.message).toBe(
           "second imported question",

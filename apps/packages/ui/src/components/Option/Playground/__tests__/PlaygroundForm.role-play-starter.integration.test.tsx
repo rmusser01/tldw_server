@@ -114,6 +114,7 @@ const nativeSetupFixture = vi.hoisted(() => ({
     { model: "gpt-4.1", provider: "openai", is_configured: true }
   ],
   controller: null as null | {
+    readonly status: string
     getCurrent: () => SettingsSelectionState
     getSignal: () => AbortSignal
     settingsMode: (chatId: string | null) => "ordinary" | "pending"
@@ -1128,7 +1129,7 @@ vi.mock("@/hooks/useDraftPersistence", async original => {
   const actual = await original<typeof import("@/hooks/useDraftPersistence")>()
   return { ...actual, useDraftPersistence: (...args: Parameters<typeof actual.useDraftPersistence>) => nativeSetupFixture.realDrafts
     ? actual.useDraftPersistence(...args)
-    : { draftSaved: false, draftReady: true, retainDraft: nativeSetupFixture.retain } }
+    : { draftSaved: false, draftReady: true, retainDraft: nativeSetupFixture.retain, flushDraft: vi.fn() } }
 })
 
 vi.mock("@/hooks/useSelectedCharacter", () => ({
@@ -2019,6 +2020,7 @@ const prepareNativeSource = () => {
     current = { status: "idle", owner: null, view: null }
   })
   nativeSetupFixture.controller = {
+    get status() { return current.status },
     getCurrent: () => current,
     getSignal: () => selectionController.signal,
     settingsMode: (chatId) => !chatId ? "ordinary" :
@@ -7465,6 +7467,7 @@ describe("PlaygroundForm role-play starter", () => {
   })
 
   it.each(["loading", "recovery"])("B02 retains the real composer draft through character %s", async (phase) => {
+    prepareNativeSource()
     const user = userEvent.setup()
     const onAction = vi.fn()
     onSubmitMock.mockResolvedValueOnce({ status: "submitted" } as never)
@@ -7481,13 +7484,16 @@ describe("PlaygroundForm role-play starter", () => {
     if (phase === "loading") expect(button).toBeDisabled()
     else {
       onAction.mockClear()
+      await waitFor(() => expect(button).toBeEnabled())
       await user.click(button)
       expect(onAction).toHaveBeenCalledTimes(1)
     }
     rerender(form(null))
     expect(onSubmitMock).not.toHaveBeenCalled()
     expect(composer).toHaveValue("Keep this B02 question.")
-    fireEvent.submit(composer.closest("form")!)
+    const send = within(screen.getByTestId("composer-inline-send-control")).getByRole("button", { name: /^send/i })
+    await waitFor(() => expect(send).toBeEnabled())
+    await user.click(send)
     await waitFor(() => expect(onSubmitMock).toHaveBeenCalledTimes(1))
   })
 

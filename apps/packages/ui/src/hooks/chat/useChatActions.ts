@@ -4119,7 +4119,8 @@ export const useChatActions = ({
           savedIdentity.serverChatMetaLoaded &&
           (savedIdentity.serverChatAssistantKind === "character" ||
             savedIdentity.serverChatAssistantKind == null && savedIdentity.serverChatCharacterId != null) &&
-          turnResolvedSendMode !== "tracked_character") {
+          turnResolvedSendMode !== "tracked_character" &&
+          turnResolvedSendMode !== "tracked_persona") {
         identityPreflightRefused = true
         throw new Error(t("common:serverChatIdentityChanged", { defaultValue: "Chat details changed while preparing this message. Review the conversation before sending again." }))
       }
@@ -4766,7 +4767,7 @@ export const useChatActions = ({
           let compareReceipt: HistoryLoadReceipt | undefined
           let compareAdoptionIsCurrent: (() => boolean) | undefined
           let temporaryCompareBound = false
-          let compareHistoryId = commandDraftSource.historyId
+          let compareHistoryId = acceptedSceneMirror ?? commandDraftSource.historyId
           let compareMetadataRetired = false
           const compareMetadataIsCurrent = () => {
             const current = useStoreMessageOption.getState()

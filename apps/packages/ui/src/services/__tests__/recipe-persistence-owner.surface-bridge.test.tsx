@@ -121,6 +121,7 @@ vi.mock("@/services/settings/local-bucket", () => ({
 }))
 
 vi.mock("@/services/prompt-studio-settings", () => ({
+  getPromptStudioDefaultsForOwner: async () => ({ defaultProjectId: 42, autoSyncWorkspacePrompts: true }),
   getPromptStudioDefaults: async () => ({
     defaultProjectId: 42,
     autoSyncWorkspacePrompts: true
@@ -165,12 +166,14 @@ vi.mock("@/db/dexie/schema", () => ({
 
 vi.mock("@/db/dexie/helpers", () => ({
   generateID: () => boundary.nextId,
-  getAllPrompts: async () => structuredClone([...boundary.rows.values()]),
+  getAllPrompts: async (ownerId: string) => structuredClone([...boundary.rows.values()].filter(row => row.ownerId === ownerId)),
+  getSharedLocalPrompts: async () => [],
   getPromptById: async (id: string) => structuredClone(boundary.rows.get(id)),
   savePrompt: async (fields: Record<string, unknown>) => {
     const now = Date.now()
     const row = {
       ...structuredClone(fields),
+      ownerId: fields.expectedOwnerId,
       id: boundary.nextId,
       createdAt: now,
       updatedAt: now,
@@ -199,6 +202,13 @@ vi.mock("@/db/dexie/helpers", () => ({
   }
 }))
 
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: boundary.values.get("tldwConfig"),
+    loading: false,
+    authorityLoading: false
+  })
+}))
 vi.mock("@/hooks/useServerOnline", () => ({ useServerOnline: () => true }))
 vi.mock("@/utils/is-private-mode", () => ({ isFireFoxPrivateMode: false }))
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -722,12 +732,9 @@ describe("actual recipe surface adapter bridges", () => {
     expect(ownerB!.ownerId).not.toBe(ownerA!.ownerId)
     const reopened = renderComposer()
     await openComposerRecipe(user)
-    await chooseSavedRecipe(user)
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "Update recipe" })
-      ).toBeDisabled()
-    )
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save as new recipe" })).toBeEnabled())
+    expect(screen.queryByRole("option", { name: /Surface recipe|Untitled recipe/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Update recipe" })).not.toBeInTheDocument()
     const preview = await fillTask(user, "still local under owner B")
     expect(
       screen.getByRole("button", { name: "Apply to user message" })
@@ -747,10 +754,9 @@ describe("actual recipe surface adapter bridges", () => {
     const ownerBPull = await pullFromStudio(101, boundary.nextId)
     expect(ownerBPull).toMatchObject({
       success: false,
-      syncStatus: "error",
-      recipeWriteBlocked: true,
+      failureKind: "validation",
       recipeOwnership: {
-        dispatch: { state: "dispatched", actualOwnerId: ownerB!.ownerId }
+        dispatch: { state: "not_dispatched" }
       }
     })
     expect(
@@ -850,7 +856,7 @@ describe("actual recipe surface adapter bridges", () => {
     )
     await fillTask(user, "unknown extension task")
     await user.click(screen.getByRole("button", { name: "Save as new recipe" }))
-    await screen.findByText(/server outcome could not be verified/i)
+    await screen.findByText(/server outcome and responsible connection are unknown/i)
     expect(boundary.mutationCount).toBe(1)
     expect(
       await readRecipePersistenceUncertainty(boundary.nextId, ownerA!.ownerId)
@@ -861,12 +867,9 @@ describe("actual recipe surface adapter bridges", () => {
     const ownerB = await resolveRecipePersistenceOwnerView()
     const reopened = renderComposer()
     await openComposerRecipe(user)
-    await chooseSavedRecipe(user)
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "Update recipe" })
-      ).toBeDisabled()
-    )
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save as new recipe" })).toBeEnabled())
+    expect(screen.queryByRole("option", { name: /Surface recipe|Untitled recipe/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Update recipe" })).not.toBeInTheDocument()
     const preview = await fillTask(user, "unknown but locally editable")
     expect(
       screen.getByRole("button", { name: "Apply to user message" })
@@ -880,6 +883,7 @@ describe("actual recipe surface adapter bridges", () => {
     expect(boundary.mutationCount).toBe(1)
 
     reopened.unmount()
+    boundary.values.set("tldwConfig", config("owner-a-key"))
     const recovery = renderComposer()
     await openComposerRecipe(user)
     await chooseSavedRecipe(user)

@@ -279,6 +279,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       active.controller.abort()
       if (activeDocumentPreparationRef.current === active) {
         activeDocumentPreparationRef.current = null
+        activeSubmissionRef.current = null
         setIsPreparingDocuments(false)
       }
     }
@@ -310,11 +311,6 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       if (activeSubmissionRef.current) return
       if (!connectionReadyRef.current) {
         notificationApi.info({ message: t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") })
-        return
-      }
-      if (!draftReadyRef.current) {
-        notificationApi.info({ message: t("playground:draftLoading", "Draft still loading"),
-          description: t("playground:draftLoadingWait", "Wait for this conversation's draft to finish loading before sending.") })
         return
       }
       const connectionGeneration = connectionGenerationRef.current
@@ -353,6 +349,11 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           message: t("playground:composer.preparingChat", "Preparing chat"),
           description: t("playground:composer.preparingChatDraftRetained", "Your draft is retained. Try Send again in a moment.")
         })
+        return
+      }
+      if (!draftReadyRef.current) {
+        notificationApi.info({ message: t("playground:draftLoading", "Draft still loading"),
+          description: t("playground:draftLoadingWait", "Wait for this conversation's draft to finish loading before sending.") })
         return
       }
       const historyIsCurrent = captureHistorySelection()
@@ -782,6 +783,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       const result = await dispatch(payload, {
         beforeSend: () => {
           promptAssistAttemptId = beginPromptAssistReset()
+          if (activeSubmissionRef.current === submission) activeSubmissionRef.current = null
           clearSelectedDocuments()
           clearUploadedFiles()
           textAreaFocus()
@@ -821,7 +823,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         },
         onSendError: () => restorePromptAssistAttempt(promptAssistAttemptId)
       })
-      if (openUIRequestMode && completionIsCurrent() && isChatSubmitSuccess(normalizeChatSubmitResult(result))) {
+      if (openUIRequestMode && contextRevisionRef.current.revision === contextRevision && completionIsCurrent() && isChatSubmitSuccess(normalizeChatSubmitResult(result))) {
         clearOpenUIRequestMode()
       }
       } finally {

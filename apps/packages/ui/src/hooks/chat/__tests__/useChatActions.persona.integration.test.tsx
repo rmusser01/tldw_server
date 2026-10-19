@@ -1234,7 +1234,8 @@ describe("useChatActions persona integration", () => {
       ...createHookOptions(),
       selectedAssistant: null,
       serverChatId: "existing-global-chat",
-      serverChatTitle: "Existing global chat"
+      serverChatTitle: "Existing global chat",
+      serverChatMetaLoaded: true
     }
     const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
@@ -1328,6 +1329,7 @@ describe("useChatActions persona integration", () => {
     const options = {
       ...createHookOptions(),
       serverChatId: "persona-chat-existing",
+      serverChatMetaLoaded: true,
       serverChatAssistantKind: "persona" as const,
       serverChatAssistantId: "garden-helper",
       serverChatCharacterId: "char-shadow",

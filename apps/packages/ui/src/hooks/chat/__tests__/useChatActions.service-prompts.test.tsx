@@ -443,7 +443,8 @@ const useChatActions = (options: Parameters<typeof useRawChatActions>[0]) => {
     const core = useStoreMessageOption.getState();
     core.startNewChatDraft(options.temporaryChat);
     useStoreMessageOption.setState({ historyId: options.historyId, serverChatId: options.serverChatId,
-      selectedModel: options.selectedModel, toolChoice: options.toolChoice, messages: options.messages, history: options.history });
+      selectedModel: options.selectedModel, toolChoice: options.toolChoice, messages: options.messages, history: options.history,
+      serverChatMetaLoaded: options.serverChatMetaLoaded, serverChatAssistantKind: options.serverChatAssistantKind, serverChatCharacterId: options.serverChatCharacterId });
     let epoch = 0;
     const account = { requestScope: snapshot.requestScope, isCurrent: () => true };
     const receiptFor = (id: string, native = false) => ({
@@ -1945,9 +1946,11 @@ describe("useChatActions Compare service prompt snapshot", () => {
   it("uses the ensured server history only after the snapshot gate succeeds", async () => {
     const pendingSnapshot = deferred<typeof snapshot>();
     loadServicePromptSnapshotMock.mockReturnValueOnce(pendingSnapshot.promise);
-    const options = createHookOptions({ serverChatId: "server-chat-7" });
-    options.ensureServerChatHistoryId.mockImplementation(async () => {
+    const options = { ...createHookOptions({ serverChatId: "server-chat-7" }), serverChatMetaLoaded: true };
+    options.ensureServerChatHistoryId.mockImplementation(async (_chatId, _title, _signal, _snapshot, scene) => {
       events.push("ensureHistory");
+      if (scene?.acceptHistoryMirror?.("history-from-server") !== true) throw new Error("Original mirror source changed");
+      useStoreMessageOption.getState().setHistoryId("history-from-server", { preserveServerChatId: true });
       return "history-from-server";
     });
     const { result } = renderHook(() =>
@@ -1983,7 +1986,8 @@ describe("useChatActions Compare service prompt snapshot", () => {
 
     await act(async () => {
       pendingSnapshot.resolve(snapshot);
-      await submission;
+      const outcome = await submission;
+      expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: "submitted" });
     });
 
     expect(options.ensureServerChatHistoryId).toHaveBeenCalledTimes(1);
@@ -2057,13 +2061,15 @@ describe("useChatActions Compare service prompt snapshot", () => {
   });
 
   it("captures only owner scope and preserves server history when Compare web search is disabled", async () => {
-    const options = createHookOptions({
+    const options = { ...createHookOptions({
       webSearch: false,
       serverChatId: "server-chat-7",
+    }), serverChatMetaLoaded: true };
+    options.ensureServerChatHistoryId.mockImplementationOnce(async (_chatId, _title, _signal, _snapshot, scene) => {
+      if (scene?.acceptHistoryMirror?.("history-from-server") !== true) throw new Error("Original mirror source changed");
+      useStoreMessageOption.getState().setHistoryId("history-from-server", { preserveServerChatId: true });
+      return "history-from-server";
     });
-    options.ensureServerChatHistoryId.mockResolvedValueOnce(
-      "history-from-server",
-    );
     const { result } = renderHook(() =>
       useChatActions(
         options as unknown as Parameters<typeof useChatActions>[0],
@@ -2074,7 +2080,8 @@ describe("useChatActions Compare service prompt snapshot", () => {
     options.setHistory.mockClear();
 
     await act(async () => {
-      await result.current.onSubmit({ message: "Compare this", image: "" });
+      const outcome = await result.current.onSubmit({ message: "Compare this", image: "" });
+      expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: "submitted" });
     });
 
     expect(loadServicePromptSnapshotMock).toHaveBeenCalledWith(

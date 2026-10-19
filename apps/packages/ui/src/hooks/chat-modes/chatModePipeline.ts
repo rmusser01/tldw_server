@@ -4,6 +4,7 @@ import {
   appendSelectedUser,
   finalizeHistorySelection,
   isDefinitiveHistoryAdmissionRejection,
+  isDefinitiveNativeEditRejection,
   prepareHistoryContext,
   nativeHistoryMessagePayload,
   parseNativeHistoryAdmission
@@ -697,7 +698,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           }
           )
         } catch (error) {
-          if (historyTurn.deferProjectionUntilAdmission && isDefinitiveHistoryAdmissionRejection(error))
+          // Exact protected-Edit refusals still need the dispatched recovery classifier.
+          const protectedEditRefusal = historyTurn.historyEdit && historyTurn.selection &&
+            isDefinitiveNativeEditRejection(error, historyTurn.selection, historyTurn.historyEdit)
+          if (historyTurn.deferProjectionUntilAdmission && isDefinitiveHistoryAdmissionRejection(error) && !protectedEditRefusal)
             historyTurn.dispatched = false
           throw error
         }

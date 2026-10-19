@@ -356,7 +356,7 @@ describe("useComposerText", () => {
     let retained = false
     await act(async () => { retained = await result.current.retainCurrentDraft() })
     expect(retained).toBe(true)
-    expect(result.current.form.getValues()).toEqual({ message: "  UNSENT\nexact  ", image: "" })
+    expect(result.current.form.getValues()).toEqual({ message: "  UNSENT\nexact  ", image: "", imageFilename: "" })
     const stored = JSON.parse(window.localStorage.getItem(`registry:draft:${draftKey}:owner:unit-owner`)!)
     expect(stored).toMatchObject({ value: { content: "  UNSENT\nexact  ", metadata: { collapsedRange: { start: 2, end: 7 }, wasExpanded: true } } })
   })
@@ -370,7 +370,7 @@ describe("useComposerText", () => {
     await waitFor(() => expect(result.current.draftReady).toBe(true))
     act(() => result.current.form.setValues({ message: "Keep this", image: "data:image/png;base64,abc" }))
     expect(await result.current.retainCurrentDraft()).toBe(false)
-    expect(result.current.form.getValues()).toEqual({ message: "Keep this", image: "data:image/png;base64,abc" })
+    expect(result.current.form.getValues()).toEqual({ message: "Keep this", image: "data:image/png;base64,abc", imageFilename: "" })
   })
 
 })

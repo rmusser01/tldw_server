@@ -19,6 +19,7 @@ import {
   type HistorySelectionController,
 } from "@/hooks/chat/useHistorySelection";
 import { useStoreMessageOption } from "@/store/option";
+import { useStoreChatModelSettings } from "@/store/model";
 import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror";
 import { SETTINGS_NAVIGATION_REQUEST_EVENT } from "@/utils/settings-return";
 
@@ -1436,3 +1437,38 @@ it("returns to Find after matching Server results remove the cached preview trig
     ).toHaveFocus(),
   );
 });
+
+// These component cases use the same profile-qualified reader as the real sidebar.
+it.each(["current", "unmounted", "failed"] as const)(
+  "reports only an accepted LocalChatList selection: %s",
+  async outcome => {
+    const row = { ...owned, last_used_prompt: { prompt_id: "saved-prompt", prompt_content: "" } };
+    io.details.mockResolvedValue(row);
+    io.prompt.mockResolvedValue({ id: "saved-prompt", content: "Saved prompt" });
+    const pending = deferred<unknown>();
+    io.preview.mockReturnValueOnce(pending.promise);
+    useStoreMessageOption.setState({ historyId: "before" });
+    useStoreChatModelSettings.getState().setSystemPrompt("before");
+    const mounted = mount();
+    fireEvent.click(await screen.findByRole("button", { name: "Owned local chat" }));
+    await waitFor(() => expect(io.preview).toHaveBeenCalled());
+    if (outcome === "unmounted") mounted.unmount();
+    if (outcome === "failed") vi.spyOn(console, "error").mockImplementation(() => undefined);
+    await act(async () => {
+      if (outcome === "failed") pending.reject(new Error("Synthetic read failure"));
+      else pending.resolve({ historyInfo: row, messages: [{ content: "Current local chat" }] });
+      await pending.promise.catch(() => undefined);
+    });
+    if (outcome === "current") {
+      await waitFor(() => expect(mounted.selected).toHaveBeenCalledWith("owned"));
+      expect(useStoreMessageOption.getState().historyId).toBe("owned");
+      expect(useStoreChatModelSettings.getState().systemPrompt).toBe("Saved prompt");
+    } else {
+      expect(mounted.selected).not.toHaveBeenCalled();
+      expect(useStoreMessageOption.getState().historyId).toBe("before");
+      if (outcome === "failed") expect(await screen.findByRole("alert")).toHaveTextContent("Could not open this chat");
+    }
+    mounted.unmount();
+    mounted.client.clear();
+  },
+);

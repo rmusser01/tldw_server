@@ -356,7 +356,7 @@ const useChatActions = (options: Parameters<typeof useRawChatActions>[0]) => {
     Object.assign(state, { historyId, serverChatId: serverId, chatDraftRevision: state.chatDraftRevision ?? 0,
       chatDraftAddress: state.chatDraftAddress ?? (owner && view ? chatDraftAddressForReceipt({ owner, view }) : freshChatDraftAddress(options.temporaryChat)),
       selectedModel: options.selectedModel, selectedModelRevision: state.selectedModelRevision ?? 0, toolChoice: options.toolChoice,
-      temporaryChat: options.temporaryChat })
+      temporaryChat: options.temporaryChat, serverChatMetaLoaded: options.serverChatMetaLoaded })
     fixture.current = { requestScope: structuredClone(requestScope), accountIsCurrent }
   }
   React.useLayoutEffect(() => {
@@ -440,6 +440,7 @@ const createHookOptions = () => ({
   ragEnableCitations: true,
   ragSources: [],
   ragAdvancedOptions: {},
+  serverChatMetaLoaded: true,
   serverChatId: "tracked-chat-1",
   serverChatTitle: "Tracked character chat",
   serverChatCharacterId: "char-tracked",

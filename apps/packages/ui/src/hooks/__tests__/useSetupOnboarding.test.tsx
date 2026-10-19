@@ -118,7 +118,10 @@ describe("useSetupOnboarding", () => {
     expect(tldwClient.updateFirstRunState).toHaveBeenCalledWith({
       step: "providers",
       data
-    })
+    }, expect.objectContaining({
+      configSnapshot: expect.objectContaining({ serverUrl: "https://declared-setup.test", authMode: "single-user" }),
+      abortSignal: expect.any(AbortSignal)
+    }))
     expect(result.current.state?.step_data.providers).toEqual(data)
     expect(result.current.state?.completed_steps).not.toContain("providers")
   })

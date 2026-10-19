@@ -25,7 +25,8 @@ vi.mock("@/services/tldw/request-core", () => ({
     (mocks.tldwRequest as (...args: unknown[]) => unknown)(...args)
 }))
 
-vi.mock("@/utils/safe-storage", () => ({
+vi.mock("@/utils/safe-storage", async original => ({
+  ...await original<typeof import("@/utils/safe-storage")>(),
   createSafeStorage: (options?: { area?: string }) => ({
     get: (...args: unknown[]) =>
       options?.area === "session"

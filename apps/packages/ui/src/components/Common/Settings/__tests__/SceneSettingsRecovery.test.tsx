@@ -143,7 +143,8 @@ vi.mock("@/services/model-settings", () => ({
   getAllModelSettings: io.modelSettings
 }))
 vi.mock("@/services/ocr", () => ({ getOCRLanguage: async () => null }))
-vi.mock("@/components/Common/system-prompt-utils", () => ({
+vi.mock("@/components/Common/system-prompt-utils", async original => ({
+  ...await original<typeof import("@/components/Common/system-prompt-utils")>(),
   resolveSelectedSystemPromptContent: async () => ""
 }))
 vi.mock("../ActorEditor", async (importOriginal) => {
@@ -874,6 +875,7 @@ it("does not apply a held Scene Director reset to a newly selected scene", async
   act(() => target("scene-two"))
   await waitFor(() => expect(useActorStore.getState().settings?.notes).toBe("New scene."))
   fireEvent.click(confirm)
+  fireEvent.click(await screen.findByRole("button", { name: /^Scene notes/ }))
   expect(screen.getAllByLabelText("Scene notes").map(input => (input as HTMLInputElement).value))
     .toEqual(["New scene."])
 }, 15_000)

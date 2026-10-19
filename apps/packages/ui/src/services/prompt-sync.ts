@@ -505,9 +505,7 @@ type ExistingPullReconciliation =
   | { safe: true }
   | { safe: false; error: string }
 
-/** Copy server content first, but keep the durable recipe lock until the
- * application-wide authority proves that every exact-ID marker is reconciled.
- */
+/** Hold the exact-ID reconciliation lease through the local content commit. */
 async function updateExistingFromServer(
   local: LocalPrompt,
   serverPrompt: ServerPrompt,
@@ -536,13 +534,6 @@ async function updateExistingFromServer(
   const copiedFields = { ...updateFields }
   delete copiedFields.syncStatus
   delete copiedFields.lastSyncedAt
-  if (
-    (await db.prompts.update(local.id, {
-      ...copiedFields,
-      syncStatus: "error"
-    })) === 0
-  )
-    throw new Error("Local prompt disappeared during reconciliation")
 
   const ownerId =
     ownership?.dispatch.state === "dispatched"
@@ -569,6 +560,14 @@ async function updateExistingFromServer(
     return { safe: false, error: "Recipe has an unresolved operation" }
 
   try {
+    if (
+      (await db.prompts.update(local.id, {
+        ...copiedFields,
+        syncStatus: "error"
+      })) === 0
+    )
+      throw new Error("Local prompt disappeared during reconciliation")
+
     if (
       (await db.prompts.update(local.id, {
         syncStatus: "synced",
@@ -1233,6 +1232,8 @@ export async function pullFromStudio(
       syncStatus: "synced"
     }
   } catch (error: unknown) {
+    if (error instanceof PromptOwnershipError)
+      return promptOwnerFailure(existingLocalId ?? "", error)
     const reconciledLocalId = recipeOwnership?.localId || existingLocalId || ""
     const current = reconciledLocalId
       ? await db.prompts.get(reconciledLocalId).catch(() => undefined)

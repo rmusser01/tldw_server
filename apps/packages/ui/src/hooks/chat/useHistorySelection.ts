@@ -1072,6 +1072,8 @@ export function useHistorySelection(
           }
           if (operation.epoch !== epoch.current || !isCurrent()) return false
           if (target.onDeviceScope && owner.profile_id !== target.onDeviceScope.profileId) return false
+          // Profile qualification may await before open advances its owned epoch.
+          const captureEpoch = epoch.current + 1
           const opening = open(owner, reference, opened, isCurrent,
             target.onDeviceScope ? {
               profileId: target.onDeviceScope.profileId,
@@ -1081,7 +1083,6 @@ export function useHistorySelection(
               }
             } : undefined
           )
-          const captureEpoch = epoch.current
           const result = await opening
           if (!result || captureEpoch !== epoch.current || live.current.owner !== owner || !isCurrent()) return false
           if (target.bindUnbound && target.resumeAfterBind) return target.resumeAfterBind()

@@ -89,6 +89,20 @@ vi.mock("antd", async () => ({
   },
 }));
 
+// Explicitly accept the same unsaved-draft confirmation used by the component.
+const selectSavedNote = async (user: ReturnType<typeof userEvent.setup>, label: string) => {
+  let confirmation: Parameters<typeof Modal.confirm>[0] | undefined
+  const confirm = vi.spyOn(Modal, "confirm").mockImplementation(config => {
+    confirmation = config
+    return { destroy: vi.fn(), update: vi.fn() }
+  })
+  try {
+    await user.click(await screen.findByRole("button", { name: label }))
+    expect(confirmation?.title).toBe("Unsaved Changes")
+    act(() => { void confirmation?.onOk?.() })
+  } finally { confirm.mockRestore() }
+}
+
 const noteId = "9f0a165c-6f62-4b76-8cfb-e5d1a719f13b"
 const otherId = "cb438f03-d609-4b4b-9f64-32bc769a55cb"
 const draft = (id: string | undefined = noteId): WorkspaceNote => ({
@@ -828,7 +842,10 @@ describe("Quick Notes conflict base and owned detail reads", () => {
       expect(request.headers["Idempotency-Key"]).toBeTruthy()
     }
     expect(writes()[1][0].headers["Idempotency-Key"]).not.toBe(writes()[0][0].headers["Idempotency-Key"])
-    expect(useWorkspaceStore.getState().currentNote).toEqual(initial)
+    expect(useWorkspaceStore.getState().currentNote).toEqual({
+      ...initial,
+      pendingNoteWriteKey: expect.stringContaining('surface:quick-notes:["workspace-a","workspace:a"]:')
+    })
     expect(server).toMatchObject({ content: "Concurrent server paragraph", version: 2, knowledge_provenance_version: 5 })
     expect(detailCalls()).toEqual([])
     expect(mocks.success).not.toHaveBeenCalled()
@@ -936,7 +953,7 @@ describe("Quick Notes conflict base and owned detail reads", () => {
     })
     const view = render(<QuickNotesSection />)
     const user = userEvent.setup()
-    await user.click(await screen.findByRole("button", { name: "Other saved note" }))
+    await selectSavedNote(user, "Other saved note")
     await waitFor(() => expect(selectionReads).toHaveLength(1))
     expect(selectionReads[0].abortSignal?.aborted).toBe(false)
     if (change === "unmount") view.unmount()
@@ -1011,7 +1028,7 @@ describe("Quick Notes conflict base and owned detail reads", () => {
       return []
     })
     render(<QuickNotesSection />)
-    await userEvent.setup().click(await screen.findByRole("button", { name: "Other saved note" }))
+    await selectSavedNote(userEvent.setup(), "Other saved note")
     await waitFor(() => expect(request).toBeDefined())
     expect(request).toMatchObject({
       method: "GET", path: `/api/v1/notes/${otherId}`,
@@ -1050,9 +1067,9 @@ describe("Quick Notes conflict base and owned detail reads", () => {
     })
     render(<QuickNotesSection />)
     const user = userEvent.setup()
-    await user.click(await screen.findByRole("button", { name: "Older selection" }))
+    await selectSavedNote(user, "Older selection")
     await waitFor(() => expect(reads).toHaveLength(1))
-    await user.click(screen.getByRole("button", { name: "Newer selection" }))
+    await selectSavedNote(user, "Newer selection")
     await waitFor(() => expect(reads).toHaveLength(2))
     expect(reads[0].abortSignal?.aborted).toBe(true)
     expect(reads[1].abortSignal?.aborted).toBe(false)
@@ -1092,7 +1109,7 @@ describe("Quick Notes conflict base and owned detail reads", () => {
     await waitFor(() => expect(mocks.error).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(document.querySelector("button.ant-btn-loading")).toBeNull())
     const original = writes()[0][0]
-    await user.click(await screen.findByRole("button", { name: "Other saved note" }))
+    await selectSavedNote(user, "Other saved note")
     await waitFor(() => expect(read).toBeDefined())
     const content = screen.getByRole("textbox", { name: "Note content" })
     await user.clear(content)
@@ -2557,7 +2574,7 @@ it.each([
       if (request.path.includes("/search/")) return [];
       if (request.method === "PUT")
         throw { status: 409, message: "version conflict" };
-      if (++readCount > 1) await gate.promise;
+      if (++readCount === 1) await gate.promise;
       return { ...draft(), content: "Remote newer", version: 3 };
     });
     render(<QuickNotesSection />);
@@ -2575,7 +2592,7 @@ it.each([
       )![0].content,
     );
     fireEvent.click(screen.getByRole("button", { name: "Reload latest" }));
-    await waitFor(() => expect(readCount).toBe(2));
+    await waitFor(() => expect(readCount).toBe(1));
     act(() => {
       if (change === "edit")
         useWorkspaceStore.getState().updateNoteContent("Later text");

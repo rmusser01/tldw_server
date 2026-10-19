@@ -120,6 +120,7 @@ const buildDeps = (overrides: Partial<UsePlaygroundPersistenceDeps> = {}) => {
     setServerChatAssistantId: vi.fn((id: string | number | null) =>
       state.setServerChatAssistantId(id === null ? null : String(id))),
     setServerChatPersonaMemoryMode: vi.fn(state.setServerChatPersonaMemoryMode),
+    setServerChatMetaLoaded: vi.fn(state.setServerChatMetaLoaded),
     history: [{ role: "user", content: "Hello" }],
     clearChat: vi.fn(),
     selectedCharacter: null,

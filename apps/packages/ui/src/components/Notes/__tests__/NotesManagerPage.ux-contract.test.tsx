@@ -18,10 +18,28 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
-// The list query is gated on a verified notes authority scope; pin one owner.
-vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", () => ({
-  useNotesGraphAuthorityScope: () => "notes-contract-owner"
+// The list and mutations share the same verified connection and principal.
+const notesConnectionConfig = {
+  serverUrl: "https://notes.example.test",
+  authMode: "multi-user" as const,
+  accessToken: "notes-contract-test-token"
+}
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: notesConnectionConfig, loading: false, authorityLoading: false
+  })
 }))
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true })) }
+}))
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/Notes/hooks/useNotesGraphAuthorityScope")>()
+  return {
+    ...actual,
+    useNotesGraphAuthorityScope: () =>
+      actual.createNotesGraphAuthorityScope(notesConnectionConfig.serverUrl, 1)
+  }
+})
 
 const {
   mockBgRequest,
@@ -473,5 +491,8 @@ describe("NotesManagerPage UX contract reproductions (#3103)", { timeout: 60_000
     )
     expect(String(patchCall?.[0]?.path || "")).toContain("/api/v1/notes/note-1")
     expect([...(patchCall?.[0]?.body?.keywords ?? [])].sort()).toEqual(["a", "b", "c"])
+    expect(patchCall?.[0]?.headers).toMatchObject({
+      "X-TLDW-Expected-User-ID": "1", "expected-version": "1"
+    })
   })
 })

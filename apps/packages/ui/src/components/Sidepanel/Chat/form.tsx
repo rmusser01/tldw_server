@@ -532,6 +532,7 @@ export const SidepanelForm = ({
   const currentDocumentSelectionKeyRef = React.useRef(
     currentDocumentSelectionKey
   )
+  const activeSubmissionRef = React.useRef<symbol | null>(null);
   const sidepanelDocumentPreparationRef = React.useRef<{
     controller: AbortController
     selectionKey: string
@@ -542,7 +543,10 @@ export const SidepanelForm = ({
     const active = sidepanelDocumentPreparationRef.current
     if (active && (active.selectionKey !== currentDocumentSelectionKey || !isConnectionReady || !active.isCurrent())) {
       active.controller.abort()
-      if (sidepanelDocumentPreparationRef.current === active) sidepanelDocumentPreparationRef.current = null
+      if (sidepanelDocumentPreparationRef.current === active) {
+        sidepanelDocumentPreparationRef.current = null
+        activeSubmissionRef.current = null
+      }
     }
   }, [currentDocumentSelectionKey, isConnectionReady, sourceDraftRevision])
   React.useEffect(
@@ -1971,7 +1975,6 @@ export const SidepanelForm = ({
     if (draftReady && keyboardShortcutsEnabled) onComposerReady?.();
   }, [draftReady, keyboardShortcutsEnabled, onComposerReady]);
 
-  const activeSubmissionRef = React.useRef<symbol | null>(null);
   const contextKeyFor = (mode = chatMode, searchEnabled = webSearch) =>
     JSON.stringify([
       selectedModel,

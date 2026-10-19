@@ -16,6 +16,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PromptSelect } from "../PromptSelect"
 
+vi.mock("@/hooks/usePromptLocalAuthority", () => ({
+  usePromptLocalAuthority: () => ({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), ready: true, boundaryKey: "ux-server-library-fixture" })
+}))
+vi.mock("@/services/recipe-persistence-uncertainty", async original => ({
+  ...await original<typeof import("@/services/recipe-persistence-uncertainty")>(),
+  resolveRecipePersistenceOwnerView: async () => ({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), authorizationRevision: "ux-server-library-fixture" })
+}))
+vi.mock("@/services/api-send", () => ({
+  apiSend: async (payload: unknown) => ({ ok: true, status: 200, data: await mocks.bgRequest(payload) })
+}))
+
 const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn(),
   getAllPrompts: vi.fn(async () => [] as unknown[]),

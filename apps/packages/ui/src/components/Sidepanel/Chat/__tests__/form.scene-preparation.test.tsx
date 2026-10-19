@@ -47,7 +47,15 @@ const code = ts.transpileModule(`return function useDirect(scope) {
   currentDocumentSelectionKeyRef.current = currentDocumentSelectionKey;
   ${preparationEffect.getText(ast)}
   const captureCompletionGuard = () => { const captured = useStoreMessageOption.getState(); return () => useStoreMessageOption.getState().chatDraftAddress === captured.chatDraftAddress && useStoreMessageOption.getState().chatDraftRevision === captured.chatDraftRevision; };
-  const resolveSubmissionIntent = combinedMessage => ({ combinedMessage, isImageCommand: false });
+  const activeSubmissionRef = React.useRef(null), draftReady = true;
+  const contextRevisionRef = React.useRef({ key: "fixture-context", revision: 0 });
+  const contextKeyFor = () => "fixture-context";
+  const captureDraftOwnership = () => {
+    const revision = form.getRevision(), ownerIsCurrent = captureCompletionGuard();
+    const isCurrent = () => ownerIsCurrent() && form.getRevision() === revision;
+    return { isCurrent, isOwnerCurrent: ownerIsCurrent, normalizeMessage: message => isCurrent() && message === form.getValues().message };
+  };
+  const resolveSubmissionIntent = message => ({ message, combinedMessage: message, isImageCommand: false });
   const notification = { error: () => {} }, t = (key, fallback) => fallback ?? key;
   const selectedDocuments = [], selectedModel = "fixture-model", availableChatModelIds = new Set(["fixture-model"]), history = [];
   const normalizeChatModelId = id => id, findUnavailableChatModel = () => null;

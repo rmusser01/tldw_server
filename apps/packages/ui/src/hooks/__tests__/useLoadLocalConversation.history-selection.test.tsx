@@ -513,10 +513,20 @@ it("explicit imported local consent resumes verified readable rows and all metad
   mocks.modelPreference.mockResolvedValue(true)
   mocks.prompt.mockResolvedValue({ id: "saved-prompt", content: "Saved prompt" })
   mocks.files.mockResolvedValue([{ id: "saved-file" }])
+  const receipt = {
+    owner: { kind: "local" as const, conversation_id: "imported", owner_key: "local-imported",
+      profile_id: "browser-profile", validate_lease: () => bound },
+    view: { view_session_id: "imported-view", owner_key: "local-imported", conversation_id: "imported",
+      interpretation: { kind: "parent_graph_v1" as const }, cursor: { kind: "empty" as const }, selection_revision: 1 }
+  }
   mocks.selection = {
     beginLoad: vi.fn(), fence: () => () => true,
-    loadConversation: vi.fn(async (value: any) => { target = value; return true }),
-    getCurrent: () => bound ? { owner: { kind: "local", conversation_id: "imported" }, capture: { status: "unsupported_history_capability", code: "unsupported_local_message_assets" } } : { owner: { kind: "unavailable", code: "unbound_local_history" } }
+    loadConversation: vi.fn(async (value: any, _view: unknown, onLoaded?: (value: typeof receipt) => void) => {
+      target = value
+      if (bound) onLoaded?.(receipt)
+      return true
+    }),
+    getCurrent: () => bound ? { ...receipt, capture: { status: "unsupported_history_capability", code: "unsupported_local_message_assets" } } : { owner: { kind: "unavailable", code: "unbound_local_history" } }
   }
   const deps = { setServerChatId: vi.fn(), setHistoryId: vi.fn(), setHistory: vi.fn(), setMessages: vi.fn(), setSelectedModel: vi.fn(), setSelectedSystemPrompt: vi.fn(), setSystemPrompt: vi.fn(), setContextFiles: vi.fn() }
   const { result, unmount } = renderHook(() => useLoadLocalConversation(deps, { t: key => key, errorLogPrefix: "load", errorDefaultMessage: "failed" }))

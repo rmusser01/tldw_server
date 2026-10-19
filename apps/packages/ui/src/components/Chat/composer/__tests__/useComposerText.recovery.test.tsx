@@ -71,6 +71,7 @@ const deployedAfterSend = (
 ) =>
   new Function(
     "promptAssistAttemptId",
+    "draftOwnership",
     "markPromptAssistAttemptSaved",
     "clearDraft",
     "restorePromptAssistAttempt",
@@ -87,6 +88,7 @@ const deployedAfterSend = (
     `${afterSendCode}; return afterSend;`
   )(
     attempt,
+    composer.captureDraftOwnership(),
     composer.markPromptAssistAttemptSaved,
     composer.clearDraft,
     composer.restorePromptAssistAttempt,
@@ -143,6 +145,7 @@ const deployedWebAfterSend = (
 ) =>
   new Function(
     "promptAssistAttemptId",
+    "draftOwnership",
     "markPromptAssistAttemptSaved",
     "restorePromptAssistAttempt",
     "isChatSubmitSuccess",
@@ -152,6 +155,7 @@ const deployedWebAfterSend = (
     `${webAfterSendCode}; return afterSend;`
   )(
     attempt,
+    composer.captureDraftOwnership(),
     composer.markPromptAssistAttemptSaved,
     composer.restorePromptAssistAttempt,
     isChatSubmitSuccess,
@@ -844,7 +848,8 @@ describe("retained fresh composer recovery", () => {
       act(() => view.result.current.restorePromptAssistAttempt(attempt))
       expect(view.result.current.form.values).toEqual({
         message: "  ORIGINAL COMPOSER TEXT  ",
-        image: "original-image"
+        image: "original-image",
+        imageFilename: ""
       })
       expect(view.result.current.promptAssistSavedAttemptId).toBeNull()
     }

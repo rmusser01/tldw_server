@@ -56,7 +56,7 @@ const io = vi.hoisted(() => ({
   captureNative: false,
   useComposer: false,
   useRecovery: false,
-  write: vi.fn(),
+  write: vi.fn(async (key: string, value: unknown): Promise<void> => { io.data.set(key, value) }),
   physicalTabId: 7 as number | null,
   controller: null as HistorySelectionController | null,
   keyboardNew: null as (() => void) | null,
@@ -172,7 +172,8 @@ vi.mock("@/db/dexie/history-selection", async original => ({
 }))
 vi.mock("@/services/chat-history-selection", async original => ({
   ...await original<typeof import("@/services/chat-history-selection")>(),
-  captureHistorySnapshot: async (owner: HistoryOwnerV1, incoming: HistoryCaptureRequestV1["view"], purpose: string) => {
+  captureHistorySnapshot: async (owner: HistoryOwnerV1, incoming: HistoryCaptureRequestV1["view"], purpose: "send" | "fork", signal?: AbortSignal, requiredCapability?: "tldw_history_existing_input_v1" | "tldw_history_server_existing_input_v1") => {
+    if (requiredCapability) return (await vi.importActual<typeof import("@/services/chat-history-selection")>("@/services/chat-history-selection")).captureHistorySnapshot(owner, incoming, purpose, signal, requiredCapability)
     if (owner.kind === "unavailable" || (owner.kind === "native" && (!io.captureNative || owner.conversation_id === "failed"))) throw new Error("unsupported_history_capability")
     const cached = owner.kind === "native" ? { historyInfo: { id: owner.conversation_id }, messages: [] } : await io.local(owner.conversation_id)
     if (!cached || cached.historyInfo.id !== owner.conversation_id) throw new Error("missing_conversation")
@@ -1928,7 +1929,13 @@ describe.each([
   ])("revokes the mounted chat for positive %s authority loss without deleting saved tabs", async (_reason, error) => {
     io.data.set(storedKey("alice"), tabsState())
     render(<Route />)
+    await screen.findByText("alice first")
     fireEvent.click(await screen.findByRole("button", { name: "alice two" }))
+    await waitFor(() => expect(useStoreMessageOption.getState().messages[0]?.message).toBe("alice inactive"))
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0))
+      window.dispatchEvent(new Event("beforeunload"))
+    })
     const durable = io.data.get(storedKey("alice"))
     io.scope.mockRejectedValue(error)
     act(() => window.dispatchEvent(new Event("focus")))
@@ -2061,7 +2068,7 @@ describe.each([
     const source = useStoreMessageOption.getState().chatDraftAddress
     let finishCopy!: () => void
     io.write.mockImplementation(async (key, value) => {
-      if (key.startsWith("registry:draft:") && value.value?.content === "OLDER RECOVERY TEXT")
+      if (key.startsWith("registry:draft:") && (value as { value?: { content?: string } })?.value?.content === "OLDER RECOVERY TEXT")
         await new Promise<void>(resolve => { finishCopy = resolve })
       io.data.set(key, value)
     })
@@ -2103,7 +2110,7 @@ describe.each([
     })
     if (boundary === "declined navigation") window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, event => event.preventDefault(), { once: true })
     if (boundary === "New during copy") io.write.mockImplementation(async (key, value) => {
-      if (key.startsWith("registry:draft:") && value.value?.content === "OLD RETAINED TEXT")
+      if (key.startsWith("registry:draft:") && (value as { value?: { content?: string } })?.value?.content === "OLD RETAINED TEXT")
         await new Promise<void>(resolve => { finish = resolve })
       io.data.set(key, value)
     })
@@ -2521,9 +2528,13 @@ describe.each([
     io.local.mockResolvedValue({ historyInfo: { id: "owned", title: "Owned review", server_scope_key: ownerKey("alice") },
       messages: [{ id: "row", role: "user", content: "OWNED REVIEW TEXT" }] })
     render(<Route />)
+    await waitFor(() => {
+      expect(useSidepanelChatTabsStore.getState().ownerKey).toBe(ownerKey("alice"))
+      expect(screen.queryByLabelText("Restoring previous chat")).not.toBeInTheDocument()
+    })
     fireEvent.click(await screen.findByRole("button", { name: "Open cached history" }))
     await screen.findByText("OWNED REVIEW TEXT")
-    fireEvent.click(screen.getByRole("button", { name: "Expand in full page" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Expand in full page" }))
     await waitFor(() => expect(window.open).toHaveBeenCalled())
     const route = String(vi.mocked(window.open).mock.calls.at(-1)![0])
     expect(parseHistorySelectionHandoff(route)).toMatchObject({ owner_kind: "local", conversation_id: "owned" })
@@ -2696,6 +2707,7 @@ describe.each([
   it("restores and selects same-owner tabs, clears them for Bob and recovers Alice on return", async () => {
     io.data.set(storedKey("alice"), tabsState())
     render(<Route />)
+    await screen.findByText("alice first")
     fireEvent.click(await screen.findByRole("button", { name: "alice two" }))
     await waitFor(() =>
       expect(useStoreMessageOption.getState().messages[0]?.message).toBe(
@@ -2719,8 +2731,8 @@ describe.each([
     )
     switchAccount("alice")
     await screen.findByRole("button", { name: "alice two" })
-    expect(useStoreMessageOption.getState().messages[0]?.message).toBe(
-      "alice inactive"
+    await waitFor(() =>
+      expect(useStoreMessageOption.getState().messages[0]?.message).toBe("alice inactive")
     )
   })
 
@@ -2936,7 +2948,9 @@ describe.each([
   it("retains the active tab on same-owner rotation and a failed focus recheck", async () => {
     io.data.set(storedKey("alice"), tabsState())
     render(<Route />)
+    await screen.findByText("alice first")
     fireEvent.click(await screen.findByRole("button", { name: "alice two" }))
+    await waitFor(() => expect(useStoreMessageOption.getState().messages[0]?.message).toBe("alice inactive"))
     io.scope.mockRejectedValueOnce(new Error("offline"))
     act(() => {
       window.dispatchEvent(
@@ -3019,6 +3033,10 @@ describe.each([
       ]
     })
     render(<Route />)
+    await waitFor(() => {
+      expect(useSidepanelChatTabsStore.getState().ownerKey).toBe(ownerKey("alice"))
+      expect(screen.queryByLabelText("Restoring previous chat")).not.toBeInTheDocument()
+    })
     fireEvent.click(
       await screen.findByRole("button", { name: "Open cached history" })
     )

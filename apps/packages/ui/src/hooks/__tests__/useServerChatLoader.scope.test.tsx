@@ -291,6 +291,22 @@ describe("useServerChatLoader scoped local history", () => {
     expect(mocks.reconcileServerChatMirror).not.toHaveBeenCalled()
   })
 
+  it("does not replace a user selection made while the canonical read is debounced", async () => {
+    mocks.store.serverChatCharacterId = 4
+    mocks.getCharacter.mockResolvedValue({ id: 4, name: "Old profile" })
+    const mounted = renderHook(() => useServerChatLoader({
+      ensureServerChatHistoryId: vi.fn().mockResolvedValue("history-a"),
+      notification: { error: vi.fn() }, t: translate
+    }))
+    // The public selection writer advances this revision before the scheduled read starts.
+    selectionRevision++
+    await act(async () => { await vi.advanceTimersByTimeAsync(200) })
+    expect(mocks.listChatMessages).toHaveBeenCalledOnce()
+    expect(mocks.setSelectedAssistant).not.toHaveBeenCalled()
+    expect(mocks.store.serverChatId).toBe("chat-a")
+    mounted.unmount()
+  })
+
   it("does not apply a late Cedar profile after the current selection changes to Robot", async () => {
     const profile = deferred<{ id: number; name: string }>()
     const rows = deferred<ServerChatMessage[]>()

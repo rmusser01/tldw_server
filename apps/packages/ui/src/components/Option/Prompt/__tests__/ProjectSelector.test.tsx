@@ -4,6 +4,10 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ProjectSelector } from "../ProjectSelector"
 
+vi.mock("@/hooks/usePromptLocalAuthority", () => ({
+  usePromptLocalAuthority: () => ({ ownerId: "qualified-project-owner", ready: true })
+}))
+
 const createProjectMock = vi.fn()
 const invalidateQueriesMock = vi.fn()
 const useQueryMock = vi.fn()
@@ -137,7 +141,9 @@ describe("ProjectSelector", () => {
       expect(createProjectMock).toHaveBeenCalledWith(
         expect.objectContaining({
           name: "My Sync Project"
-        })
+        }),
+        undefined,
+        { recipePersistence: { mode: "owner", expectedOwnerId: "qualified-project-owner" } }
       )
       expect(onSelect).toHaveBeenCalledWith(42)
     })

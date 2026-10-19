@@ -49,6 +49,12 @@ vi.mock("@/db/dexie/history-selection", () => ({
     owner_key: "local-owner",
     conversation_id: id
   }),
+  bindUnboundLocalHistory: async (id: string) => ({
+    kind: "local",
+    profile_id: "profile",
+    owner_key: "local-owner",
+    conversation_id: id
+  }),
   loadHistoryTurnRecoveries: async () => [],
   dismissHistoryTurnRecovery: async () => {},
   loadHistoryBookmark: async (scope: any, owner: any) =>

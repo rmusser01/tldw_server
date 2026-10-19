@@ -785,7 +785,7 @@ it.each([true, false])(
       acknowledge = resolve
     })
     void persisted.catch(() => undefined)
-    const submit = vi.fn(() => persisted)
+    const submit = vi.fn<NonNullable<React.ComponentProps<typeof PlaygroundMessage>["onEditFormSubmit"]>>(() => persisted)
     const props = {
       ...baseProps,
       isBot: false,
@@ -806,10 +806,15 @@ it.each([true, false])(
       await user.clear(screen.getByRole("textbox"))
       await user.type(screen.getByRole("textbox"), "Older authored draft")
       fireEvent.click(screen.getByRole("button", { name: "save" }))
-      expect(submit.mock.calls).toEqual([["Older authored draft", false]])
+      expect(submit.mock.calls).toEqual([["Older authored draft", false, expect.any(Function), expect.any(Function)]])
+      const [, , currentEdit, currentOrigin] = submit.mock.calls[0]
+      expect(currentEdit()).toBe(true)
+      expect(currentOrigin()).toBe(true)
       expect(screen.getByRole("textbox")).toHaveValue("Older authored draft")
 
       view.rerender(<PlaygroundMessage {...props} messageId="target-B" />)
+      expect(currentEdit()).toBe(false)
+      expect(currentOrigin()).toBe(false)
       expect(screen.getByRole("textbox")).toHaveValue("Same message")
       await user.clear(screen.getByRole("textbox"))
       await user.type(screen.getByRole("textbox"), "Replacement draft")

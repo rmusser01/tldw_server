@@ -42,10 +42,13 @@ export const useOriginalSdkSceneFixture = (
       history: options.history,
       selectedModel: options.selectedModel ?? store.getState().selectedModel,
       toolChoice: options.toolChoice,
+      serverChatMetaLoaded: options.serverChatMetaLoaded,
+      serverChatAssistantId: options.serverChatAssistantId,
+      serverChatPersonaMemoryMode: options.serverChatPersonaMemoryMode,
       serverChatAssistantKind: options.serverChatAssistantKind,
       serverChatCharacterId: options.serverChatCharacterId
     })
-    for (const key of ["setHistoryId", "setServerChatId"] as const) {
+    for (const key of ["setHistoryId", "setServerChatId", "setServerChatMetaLoaded", "setServerChatAssistantKind", "setServerChatAssistantId", "setServerChatCharacterId", "setServerChatPersonaMemoryMode"] as const) {
       const spy = options[key]
       if (!vi.isMockFunction(spy)) {
         if (spy !== store.getState()[key])

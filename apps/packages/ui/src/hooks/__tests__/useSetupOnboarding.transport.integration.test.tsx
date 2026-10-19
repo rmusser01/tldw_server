@@ -429,6 +429,9 @@ beforeEach(() => {
         }
         return Response.json(stateFor(target.origin))
       }
+      if (target.pathname === "/api/v1/setup/first-run/state" && method === "POST") {
+        return Response.json(stateFor(target.origin))
+      }
       if (target.pathname === "/api/v1/setup/first-run/metadata")
         return Response.json(metadataFor(target.origin, metadataAuthMode))
       if (target.pathname === "/api/v1/auth/refresh" && method === "POST") {

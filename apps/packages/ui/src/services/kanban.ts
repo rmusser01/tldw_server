@@ -42,7 +42,10 @@ export function createKanbanClient(
     const options = requestOptions?.()
     if (options?.abortSignal?.aborted) throw new DOMException("Kanban workspace retired", "AbortError")
     const result = await sendRequest<T>({
-      ...init, ...options, headers: { ...init.headers, ...options?.headers }
+      ...init, ...options,
+      ...(init.headers || options?.headers
+        ? { headers: { ...init.headers, ...options?.headers } }
+        : {})
     })
     if (options?.abortSignal?.aborted) throw new DOMException("Kanban workspace retired", "AbortError")
     return result

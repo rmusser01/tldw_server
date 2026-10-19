@@ -4,9 +4,19 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
-vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", () => ({
-  useNotesGraphAuthorityScope: () => "test-notes-authority"
+import { createNotesGraphAuthorityScope } from "../hooks/useNotesGraphAuthorityScope"
+const notesConfig = { serverUrl: "https://notes.example.test", authMode: "multi-user" as const, accessToken: "notes-list-fixture-token" }
+const notesAuthority = createNotesGraphAuthorityScope(notesConfig.serverUrl, 1)
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({ config: notesConfig, loading: false, authorityLoading: false })
 }))
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true })) }
+}))
+vi.mock("@/components/Notes/hooks/useNotesGraphAuthorityScope", async original => {
+  const actual = await original<typeof import("../hooks/useNotesGraphAuthorityScope")>()
+  return { ...actual, useNotesGraphAuthorityScope: () => actual.createNotesGraphAuthorityScope(notesConfig.serverUrl, 1) }
+})
 
 const {
   mockBgRequest,
@@ -260,7 +270,7 @@ describe("NotesManagerPage stage 46 list reliability", () => {
     })
 
     const latestRecentWrite = mockSetSetting.mock.calls
-      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened:test-notes-authority")
+      .filter(([setting]) => setting?.key === `tldw:notesRecentOpened:${notesAuthority}`)
       .at(-1)
 
     expect(latestRecentWrite?.[1]).toEqual([])
@@ -352,7 +362,7 @@ describe("NotesManagerPage stage 46 list reliability", () => {
     })
 
     const latestRecentWrite = mockSetSetting.mock.calls
-      .filter(([setting]) => setting?.key === "tldw:notesRecentOpened:test-notes-authority")
+      .filter(([setting]) => setting?.key === `tldw:notesRecentOpened:${notesAuthority}`)
       .at(-1)
 
     expect(latestRecentWrite?.[1]).toEqual([])

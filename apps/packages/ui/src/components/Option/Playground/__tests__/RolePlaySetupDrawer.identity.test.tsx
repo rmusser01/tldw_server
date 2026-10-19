@@ -588,6 +588,7 @@ describe("conversation setup identity", () => {
     );
     expect(onApply).toHaveBeenCalledOnce();
     expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Clear identity" }));
     await user.click(
       await screen.findByRole("button", { name: "Apply", exact: true }),
     );
