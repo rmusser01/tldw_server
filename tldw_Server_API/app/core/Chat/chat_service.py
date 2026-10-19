@@ -96,7 +96,10 @@ from tldw_Server_API.app.core.Chat.persistence_service import (
     save_assistant_message,
     save_tool_messages,
 )
-from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
+from tldw_Server_API.app.core.Chat.prompt_cost_envelope import (
+    build_prompt_cost_envelope,
+    estimate_segment_tokens,
+)
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
     PromptCostGuardrailDecision,
     evaluate_prompt_cost_guardrails,
@@ -223,7 +226,6 @@ from tldw_Server_API.app.core.Usage.pricing_catalog import (
 )
 from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
 from tldw_Server_API.app.core.Utils.cpu_bound_handler import process_large_json_async
-from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
 
 _CHAT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ChatAPIError,
@@ -3027,61 +3029,21 @@ def inject_research_context_into_prompt(
 
 
 def estimate_tokens_from_json(request_json: str) -> int:
-    """Rough estimate: assume ~4 chars per token for rate limiting.
+    """Heuristic prompt size for rate limits, quotas, billing and queue admission.
 
-    This matches the existing heuristic in the endpoint.
+    The chat path's one estimate (``estimate_segment_tokens``: data:image payloads
+    redacted, four characters per token rounded up), never below 1.
     """
     try:
-        sanitized = _sanitize_data_uris(request_json)
-        return max(1, len(sanitized) // 4)
+        return max(1, estimate_segment_tokens(request_json))
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         return 1
 
 
-def _sanitize_data_uris(text: str) -> str:
-    """Redact data URI payloads to avoid inflating token estimates."""
-    try:
-        return DATA_URI_REDACT_RE.sub(r"\1<omitted>", text)
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        return text
-
-
-def _sanitize_messages_for_token_estimate(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return a copy of messages with base64 image payloads replaced."""
-    sanitized: list[dict[str, Any]] = []
-    for msg in messages or []:
-        if not isinstance(msg, dict):
-            continue
-        msg_copy = msg.copy()
-        content = msg_copy.get("content")
-        if isinstance(content, list):
-            new_parts: list[Any] = []
-            for part in content:
-                if not isinstance(part, dict):
-                    new_parts.append(part)
-                    continue
-                if part.get("type") == "image_url":
-                    image_url = part.get("image_url") or {}
-                    if isinstance(image_url, dict):
-                        url_val = image_url.get("url")
-                        if isinstance(url_val, str) and url_val.startswith("data:image"):
-                            new_image_url = dict(image_url)
-                            new_image_url["url"] = "data:image/omitted"
-                            new_parts.append({**part, "image_url": new_image_url})
-                            continue
-                new_parts.append(part)
-            msg_copy["content"] = new_parts
-        elif isinstance(content, str):
-            msg_copy["content"] = _sanitize_data_uris(content)
-        sanitized.append(msg_copy)
-    return sanitized
-
-
 def _estimate_tokens_from_messages(messages: list[dict[str, Any]]) -> int:
-    """Estimate tokens from message payloads with base64 redaction."""
+    """The same estimate for a message list, taken over its JSON."""
     try:
-        sanitized = _sanitize_messages_for_token_estimate(messages)
-        return max(1, len(_json.dumps(sanitized, default=str)) // 4)
+        return estimate_tokens_from_json(_json.dumps(messages, default=str))
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         return 1
 

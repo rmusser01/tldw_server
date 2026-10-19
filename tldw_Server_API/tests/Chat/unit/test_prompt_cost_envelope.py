@@ -1,3 +1,5 @@
+import json
+
 from tldw_Server_API.app.core.Chat.prompt_cost_envelope import (
     FINGERPRINT_VERSION,
     build_prompt_cost_envelope,
@@ -118,3 +120,45 @@ def test_token_estimate_is_conservative_deterministic_and_non_negative() -> None
     assert estimate_segment_tokens("abcd") == 1
     assert estimate_segment_tokens("abcde") == 2
     assert estimate_segment_tokens("same text") == estimate_segment_tokens("same text")
+
+
+def test_redaction_keeps_positions_when_lowercase_changes_length() -> None:
+    # "İ".lower() is two characters. A scanner that finds "data:image" in text.lower() and
+    # slices the original text with that index lands past the real comma: it keeps the
+    # payload and puts "<omitted>" after the next comma instead.
+    text = "İ" * 30 + " data:image/png;base64," + "A" * 400 + " tail, end"
+    redacted = "İ" * 30 + " data:image/png;base64,<omitted> tail, end"
+
+    canonical = json.loads(canonicalize_messages([{"role": "user", "content": text}]))
+    envelope = build_prompt_cost_envelope([{"role": "user", "content": text}])
+
+    assert canonical[0]["content"] == redacted
+    assert envelope.total_estimated_tokens == (len(redacted) + 3) // 4
+
+
+def test_fingerprints_of_ordinary_base64_images_do_not_change() -> None:
+    # Pinned from origin/dev before TASK-13843: a well-formed base64 data URI redacts to the
+    # same text under the old scanner and the shared pattern, so stored or echoed
+    # fingerprints of ordinary prompts stay valid. Change this value only with a
+    # FINGERPRINT_VERSION bump.
+    messages = [
+        {"role": "system", "content": "You are helpful."},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Describe this image."},
+                {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo" + "A" * 400 + "=="}},
+            ],
+        },
+        {"role": "assistant", "content": "It is a square."},
+        {"role": "user", "content": "And this one? data:image/jpeg;base64,/9j/4AAQSkZJRg" + "B" * 400},
+    ]
+    envelope = build_prompt_cost_envelope(
+        messages,
+        world_book_text="World info: data:image/gif;base64,R0lGOD" + "C" * 100,
+    )
+
+    assert envelope.aggregate_fingerprint == (
+        "prompt-v1:sha256:b21e1c8ad7bb61b6a4d7347b110559fa337f6a911c990fef890f368a06bd52ce"
+    )
+    assert envelope.total_estimated_tokens == 36
