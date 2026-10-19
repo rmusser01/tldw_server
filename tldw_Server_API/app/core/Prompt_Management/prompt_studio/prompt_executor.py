@@ -27,7 +27,7 @@ from tldw_Server_API.app.core.Chat.streaming_utils import (
     provider_result_contains_error,
 )
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import PromptStudioDatabase
-from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     ensure_app_config,
@@ -189,6 +189,8 @@ class PromptExecutor:
                 }
             }
 
+        except LLMQuotaExceededError:
+            raise  # the user's limit, not a failed execution reported as a provider error
         except Exception as e:
             logger.error(
                 "Prompt execution failed; error_type={}",
@@ -556,6 +558,8 @@ class PromptExecutor:
             if on_provider_success is not None:
                 await await_owned_worker(on_provider_success())
             return {"content": content, "tokens": tokens}
+        except LLMQuotaExceededError:
+            raise  # the user's limit, not "Provider returned an error response"
         except Exception as e:
             logger.error(
                 "LLM call failed for {}/{}; error_type={}",
