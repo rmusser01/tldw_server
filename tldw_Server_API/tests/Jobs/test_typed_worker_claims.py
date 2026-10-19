@@ -119,6 +119,16 @@ def test_scalar_unfiltered_and_singleton_set_contracts(jobs, filters, expected):
     assert claimed["job_type"] == expected  # nosec B101 - pytest compatible public selection assertion.
 
 
+def test_allowed_set_keeps_sql_and_json_metacharacters_literal(jobs):
+    """Both acquisition modes bind each allowed type as its exact string value."""
+    kind = "job' OR 1=1 --,[雪]"
+    foreign = create(jobs, "foreign", priority=1)
+    wanted = create(jobs, kind, priority=5)
+    claimed = acquire(jobs, job_types=(kind, "unused"))
+    assert claimed["id"] == wanted["id"]  # nosec B101 - pytest exact bound selection assertion.
+    assert jobs.get_job(foreign["id"])["status"] == "queued"  # nosec B101 - pytest foreign row preservation assertion.
+
+
 @pytest.mark.parametrize("tie", ["fifo", "lifo"])
 def test_allowed_set_keeps_mixed_type_priority_and_tie_order(jobs, monkeypatch, tie):
     monkeypatch.setenv("JOBS_ACQUIRE_TIE_BREAK", tie)

@@ -1,4 +1,4 @@
-# ADR-067: Settle a selected existing chat question
+# ADR-077: Settle a selected existing chat question
 
 **Status:** Proposed
 **Date:** 2026-10-08

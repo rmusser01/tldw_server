@@ -2,7 +2,7 @@
 
 Repair Regenerate in both configured clients. Append one assistant alternative under the existing selected question, using its owner-validated ancestry and prepared provider context. Preserve source question, answers, suffix, IDs and legacy interpretation. Local qualification does not accept the real 43 UAT workflows.
 
-ADR assessment: a narrow public existing-input settlement/recovery contract requires Proposed ADR067; ADR049/050 still govern ownership and lifecycle. Reuse the message endpoint, protected authority field and transaction helpers. No new store/table or fabricated admission receipt.
+ADR assessment: a narrow public existing-input settlement/recovery contract requires Proposed ADR077; ADR049/050 still govern ownership and lifecycle. Reuse the message endpoint, protected authority field and transaction helpers. No new store/table or fabricated admission receipt.
 
 Design: `Docs/Design/2026-10-08-selected-existing-input-chat-regeneration.md`.
 

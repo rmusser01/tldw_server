@@ -1,4 +1,3 @@
-import { AdminQueryProvider } from "@/components/Option/Admin/AdminQueryProvider"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import "../styles/globals.css"
 // react-pdf layer CSS must stay app-wide: the Next.js pages router forbids
@@ -52,6 +51,11 @@ import {
 const OptionLayout = dynamic(
   () => import("@web/components/layout/WebLayout"),
   { ssr: false }
+)
+
+const AdminQueryProvider = dynamic(
+  () => import("@/components/Option/Admin/AdminQueryProvider").then(module => module.AdminQueryProvider),
+  { ssr: false, loading: () => <PageAssistLoader label="Loading Admin…" autoFocus={false} /> }
 )
 
 const ChatServerSetupDialog = dynamic(
@@ -560,13 +564,14 @@ export default function App({ Component, pageProps }: AppProps) {
     )
   }
 
-  const layoutContent = (
-    <AdminQueryProvider active={isAdminRoute(routePath)}>
-      <OptionLayout {...layoutProps}>
-        <Component {...pageProps} />
-      </OptionLayout>
-    </AdminQueryProvider>
+  const routeContent = (
+    <OptionLayout {...layoutProps}>
+      <Component {...pageProps} />
+    </OptionLayout>
   )
+  const layoutContent = isAdminRoute(routePath)
+    ? <AdminQueryProvider>{routeContent}</AdminQueryProvider>
+    : routeContent
 
   const gatedContent = isPublicAuthRoute ? (
     <Component {...pageProps} />

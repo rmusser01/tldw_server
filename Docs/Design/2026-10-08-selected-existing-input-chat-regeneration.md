@@ -1,7 +1,7 @@
 # Selected existing input Regenerate
 
 **Task:** TASK-13260.278.18.83.45
-**Decision:** [Proposed ADR-067](../ADR/067-selected-existing-input-chat-regeneration.md)
+**Decision:** [Proposed ADR-077](../ADR/077-selected-existing-input-chat-regeneration.md)
 **Plan:** [Native Regenerate](../Plans/IMPLEMENTATION_PLAN_uat_native_regenerate_20261008.md)
 
 ## Behavior

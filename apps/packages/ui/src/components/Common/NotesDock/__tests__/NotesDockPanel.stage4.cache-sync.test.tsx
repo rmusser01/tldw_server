@@ -34,6 +34,19 @@ const {
   }
 }))
 
+const requestScope = {
+  config: { serverUrl: "https://notes.example.test", authMode: "multi-user" as const, accessToken: "fixture-token" },
+  userId: 1
+}
+vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {
+  initialize: vi.fn(async () => undefined),
+  ensureConfigForRequest: vi.fn(async () => ({ serverUrl: "https://notes.example.test", authMode: "multi-user", accessToken: "fixture-token" }))
+} }))
+vi.mock("@/services/tldw/TldwAuth", () => ({ tldwAuth: {
+  getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true }))
+} }))
+vi.mock("@/services/tldw/deployment-mode", () => ({ isHostedTldwDeployment: () => false }))
+
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: stableTranslate
@@ -76,11 +89,12 @@ describe("NotesDockPanel stage 4 cross-surface cache sync", () => {
 
     mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request.path || "")
+      const pathname = path.split("?")[0]
       const method = String(request.method || "GET").toUpperCase()
       if (path.startsWith("/api/v1/notes/?page=1")) {
         return { items: [], pagination: { total_items: 0, total_pages: 1 } }
       }
-      if (path === "/api/v1/notes/101" && method === "PUT") {
+      if (pathname === "/api/v1/notes/101" && method === "PUT") {
         return {
           id: 101,
           title: "Dock note",
@@ -104,6 +118,7 @@ describe("NotesDockPanel stage 4 cross-surface cache sync", () => {
           content: "Updated dock content",
           keywords: ["research"],
           version: 2,
+          requestScope,
           snapshot: {
             title: "Dock note",
             content: "Old content",
@@ -136,6 +151,11 @@ describe("NotesDockPanel stage 4 cross-surface cache sync", () => {
 
     await waitFor(() => {
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["notes"] })
+      expect(mockBgRequest).toHaveBeenCalledWith(expect.objectContaining({
+        path: "/api/v1/notes/101?expected_version=2",
+        method: "PUT",
+        headers: expect.objectContaining({ "X-TLDW-Expected-User-ID": "1" })
+      }))
     })
     invalidateSpy.mockRestore()
   })

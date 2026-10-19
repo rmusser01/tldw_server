@@ -2,11 +2,11 @@
 
 Task: TASK-13260.278.18.83.45. User approved the review/fix/validation cycle, using requesting-code-review instead of Qodo. All work stays in the isolated publication checkout; the active UAT checkout and runtimes are untouched.
 
-ADR required: no new durable rule for integration. Existing ADR007/012/013/020/059 and the included ADR067 govern their respective changes. Reassess any substantive architecture correction.
+ADR required: no new durable rule for integration. Existing ADR007/012/013/020/059 govern their respective changes; Proposed ADR077 documents the selected-input contract. Its number replaces the branch's colliding Proposed ADR067 without changing the decision or the Accepted upstream ADR067. Reassess any substantive architecture correction.
 
 ## Current integration candidate — 2026-10-18
 
-Latest integrated dev is `3f45238a0f29e63f417da26466f90f4df5c1da20`. The validated integration was published as `ee08fe312dda905e7fa68280edb22dc410834f87`, marked ready, then rebased conflict-free after this five-path upstream advance. Updated exact-lease publication and final-head qualification remain in progress. Historical source/base and review-running paragraphs below are retained as history and superseded by this section.
+Latest integrated dev is `3f45238a0f29e63f417da26466f90f4df5c1da20`. The conflict-free rebase is published as `b76b67d0693dfb6a5b8027afe69f5ed4110bf7eb`, directly on that dev commit, with normal hooks and an exact lease against prior published `ee08fe312dda905e7fa68280edb22dc410834f87`. PR3269 is ready, its authored description and preserved external suffix were read back exactly, and final-head hosted qualification remains in progress. Historical source/base and review-running paragraphs below are retained as history and superseded by this section.
 
 The new delta is PR3267's Watchlist summary/error and unreachable-cache cleanup: two production modules, two test modules and one foreign task. Every changed patch and affected caller was read; no additional actionable source finding was substantiated. Both changed test modules pass all 65 tests on proper Python3.12; four modules compile. Ruff retains 12 baseline diagnostics and Bandit retains 135 inherited findings with no new findings/errors. No API schema, frontend or dependency delta requires replay of unchanged qualified checks. The tree differs from the prior qualified source in exactly these five incoming paths.
 
@@ -14,9 +14,13 @@ The current candidate passes the 75-case mounted chat/recovery group and 71 hand
 
 Final manual review covers conflict compositions, new causal repairs, affected callers and assertion preservation. Earlier independent review remains partial; no fresh reviewer agent or exhaustive narrative/test-body review is claimed. ADR069 documents the implemented API artifact package and remains Proposed. The requester expressly waived the human-written Change summary for PR3269 only.
 
-Finish the normal integration checkpoint, preserve a backup branch and squash the reviewed tree onto exact live dev, then verify with `git rebase`. Publish with an exact remote lease and normal hooks, retain external PR-description suffixes, and qualify the final head before merge. Main UAT work, private profiles, runtime/model state and untracked functional outputs remain excluded.
+The integration checkpoint is preserved on a backup branch, the reviewed tree was squashed onto exact live dev and verified with `git rebase`, and guarded publication is complete. Qualify the final head before merge. Main UAT work, private profiles, runtime/model state and untracked functional outputs remain excluded.
 
-### External approval-service blocker
+### Current hosted queue — 2026-10-19 04:54 UTC
+
+The required license audit run39199907010 is pending with its ubuntu-latest job unassigned after about 23 minutes. Current-head census: 60 checks, 29 queued, 28 skipped, two superseded audit cancellations and one neutral review; no failed checks, formal reviews or inline findings. PR remains mergeable on exact current dev. The only queued run on superseded ee08, actionlint39198982634, was cancelled through the normal API and confirmed completed/cancelled; all current-head and other-PR runs were preserved. An optional `gh run watch` invocation did not execute because automatic approval review was at capacity; the already-authorized API monitor remains functional. No further human approval is pending. These post-publication notes stay local while the published head qualifies; no tracking-only push resets CI.
+
+### Historical approval-service blocker
 
 The validated integration checkpoint is `3de9eaf0fddf15de763f91f1e1ab581125431034` (tree `7a5a70179f19ef09c6427d4e9178eee34e2f7ba5`). Three exact remote-head read attempts were not executed because automatic approval review failed with “Selected model is at capacity.” This is a review-service failure, not a safety rejection or missing human authorization. No final reset/rebase, publication, ready-for-review transition, hosted qualification or merge has occurred. Do not bypass approval review or treat cached remote heads as fresh; await restored service capacity or a supported approval path. Only this blocker note and the related official task note are dirty after the checkpoint.
 
@@ -32,7 +36,7 @@ The service recovered in the renewed-authorization continuation. Fresh GitHub AP
 **Goal:** Preserve current-dev behavior and accumulated UAT fixes while resolving demonstrated defects/conflicts.
 **Success Criteria:** No removed ownership/security/version/cancellation contracts or weakened tests; each new repair has a causal regression and affected checks.
 **Tests:** Relevant configured suites, compile/lint, scoped baseline/current Bandit, canonical API generation when affected.
-**Status:** Complete
+**Status:** In Progress
 
 ## Stage3: Final review and publication
 **Goal:** Fresh actual/staged review, normal hooks and guarded publication to PR3269.
@@ -73,3 +77,15 @@ The requester answered “Waived” to the human Change summary requirement for 
 - OpenCode delivery now has an exact pinned source patch, MIT license and rebuild recipe. Pure apply/byte comparison passed for all four files and independent source review is clear. No new build/test/platform qualification or prebuilt binary delivery is claimed.
 - Current-dev integration is isolated at `/private/tmp/tldw-pr3269-integration-20261018`, with 94 unresolved conflicts after 43 narrow compositions against 7c94. Dev additionally advanced to 9ddc9d83f4df28bebdb949bbc93fff3983337b26; its 13-path delta is independently source-reviewed, not integrated. No partial merge or integration-test acceptance.
 - Repair-scope lint: ESLint baseline/current 819 identical warnings, zero errors/new warnings across 23 files. Scoped TypeScript baseline/current retain two process-global diagnostics and add none; this is not whole-project typecheck. Five Python sources compile, Ruff passes, three production files have baseline/current Bandit zero findings/errors, and both new tests have zero findings/errors. Requested reviewer cleared the repair deltas; full integrated review remains open.
+
+## b76 hosted-failure corrections — 2026-10-19
+
+- Docs: resolve the colliding Proposed selected-input ADR as077, preserve Accepted067 exactly, refresh only its published mirror/index, and retain hidden interactive admin-password policy in the five applicable guides. Causal old guards failed; full Docs215pass and strict MkDocs build pass. Two new ADR guards prevent duplicate numbers/unindexed decisions. No decision-rationale change.
+- Jobs: SQLite candidate and scheduled precheck bind allowed job-type sets through the existing json_each(?) pattern. Original SQL AST guard failed then all149 selected contracts/claims pass,36PG cases deselected. New malicious/Unicode job-type case keeps the foreign high-priority job queued. Scoped Ruff/compile/Bandit clear with no new findings; no localPG qualification.
+- Accessibility: repair explicit-history fixture missing bindUnboundLocalHistory; preserve unbound and foreign-owner negative coverage and no-bind assertions. Exact UI accessibility54pass, WebUI search/Admin53pass, UI Admin19pass; overlapping scopes, not an all-project run.
+- Bundle: make the Admin query provider asynchronous and render it only for Admin routes, preserving verified owner/abort/cache behavior. Actual baseline shared801.5KB failed; corrected build and unchanged budget checker shared592.7KB/heaviest873.4KB pass600/900. Container and advanced UX failures show the same eager app-shell cause. No budget increase.
+- Notes: real cache-sync fixture initially2fail; capture verified owner scope, route the versioned PUT and assert expected-user header. Full Notes remediation plus task-backed ownership suite81pass. Production trust boundary unchanged.
+- Shards: five new tests were absent from every matrix variant. Add each to its existing domain shard in all five variants; guard855patterns/5171files/new_uncovered0. No ignore/baseline weakening.
+- Extension: hosted Research job exhausted the default~4GB Node heap. Exact unchanged frozen local Chrome production build passes in63.648s/50.34MB with that same default, and a separate same-head hosted extension job passed. One failed-job-only hosted retry requested; no speculative source/heap cap change. No browser/runtime launch or model changes.
+
+These fixes are local WIP until final review/hooks and exact-head publication. New-head required CI and affected browser outcomes remain mandatory; no new43-workflow acceptance is claimed.

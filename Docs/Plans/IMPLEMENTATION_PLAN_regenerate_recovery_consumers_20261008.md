@@ -2,7 +2,7 @@
 
 Task: TASK-13260.278.18.83.45 (parent owns the Backlog record; separate review-found fix unit recorded before edits).
 
-ADR check: ADR required: no. [ADR-049](../ADR/049-chat-history-selection-ownership.md) and [Proposed ADR-067](../ADR/067-selected-existing-input-chat-regeneration.md) already govern owner-bound capture, stable exact replay and retained recovery. This fixes implementation gaps without changing those rules or either existing design artifact.
+ADR check: ADR required: no. [ADR-049](../ADR/049-chat-history-selection-ownership.md) governs owner-bound capture; [Proposed ADR-077](../ADR/077-selected-existing-input-chat-regeneration.md) documents stable exact replay and retained recovery. This fixes implementation gaps without changing those rules or either existing design artifact.
 
 Scope: normal Chat's pre-settlement recovery record; the mounted Keep hook and shared recovery review; Playground and Sidepanel consumers; their focused local/native regression and existing affected tests. No backend, Prompt/Character, dependencies, provider, build/runtime, Git/index/ref or network actions. Preserve owner, lease, profile, operation, view, capability and exact-payload checks.
 
