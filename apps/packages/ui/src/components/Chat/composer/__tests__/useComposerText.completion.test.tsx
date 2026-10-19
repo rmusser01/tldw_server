@@ -421,6 +421,7 @@ const compactCleanup = (imageCommand = false) => {
     clearDraft = vi.fn();
   const bindings = {
     promptAssistAttemptId: 1,
+    draftOwnership: { isOwnerCurrent: () => true },
     markPromptAssistAttemptSaved: mark,
     clearDraft,
     restorePromptAssistAttempt: vi.fn(),

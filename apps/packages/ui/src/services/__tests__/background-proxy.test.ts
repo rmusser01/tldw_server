@@ -2009,6 +2009,20 @@ describe("background proxy fallback safety", () => {
     expect(body.get("target_voice")).toBeInstanceOf(Blob)
   })
 
+  it("uploads one large file when the canonical multipart field is explicit", async () => {
+    mocks.tldwRequest.mockResolvedValue({ ok: true, status: 200, data: { ok: true } })
+    const { bgUpload } = await importProxy()
+    const bytes = new Uint8Array(5820016)
+    await bgUpload({
+      path: "/api/v1/media/process-pdfs", method: "POST", preferDirect: true,
+      fileFieldName: "files", file: { name: "scan.pdf", type: "application/pdf", data: bytes }
+    })
+    const body = mocks.tldwRequest.mock.calls[0][0].body as FormData
+    expect(body.getAll("files")).toHaveLength(1)
+    expect((body.get("files") as Blob).size).toBe(bytes.byteLength)
+    expect(body.has("file")).toBe(false)
+  })
+
   it("appends single direct-fallback uploads to files and the legacy file alias", async () => {
     mocks.tldwRequest.mockResolvedValue({
       ok: true,

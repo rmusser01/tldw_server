@@ -254,8 +254,8 @@ export const ChatModelSelectorDropdown = React.memo(
               }`}
               title={
                 t(
-                  "playground:composer.providerStatusTooltip",
-                  "Provider status"
+                  "playground:composer.statusTooltip",
+                  "Status"
                 ) as string
               }
             >

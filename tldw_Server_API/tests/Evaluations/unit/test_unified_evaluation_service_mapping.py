@@ -919,3 +919,28 @@ async def test_cancel_run_cleans_up_terminal_task_without_rewriting_status_or_lo
     assert "run_terminal" not in service.runner.running_tasks
     assert status_updates == []
     audit_log.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("eval_type", "expected_sub_type"),
+    [("geval", "summarization"), ("rag", "rag"), ("response_quality", "response_quality")],
+)
+async def test_crud_schema_default_subtype_reaches_advertised_evaluator(
+    tmp_path, eval_type, expected_sub_type,
+):
+    """A nullable API default must not change which evaluator the user selected."""
+    from tldw_Server_API.app.api.v1.schemas.evaluation_schemas_unified import CreateEvaluationRequest
+
+    request = CreateEvaluationRequest(name="default_subtype", eval_type=eval_type, eval_spec={})
+    service = UnifiedEvaluationService(str(tmp_path / "default-subtype.db"), enable_webhooks=False)
+    try:
+        evaluation = await service.create_evaluation(
+            name=request.name, eval_type=request.eval_type,
+            eval_spec=request.eval_spec.model_dump(), created_by="owner",
+        )
+        assert evaluation["eval_spec"]["sub_type"] == expected_sub_type  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
+        selected = service.runner._get_evaluation_function(evaluation["eval_type"], evaluation["eval_spec"])
+        assert selected == getattr(service.runner, "_eval_" + expected_sub_type)  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
+    finally:
+        await service.shutdown()

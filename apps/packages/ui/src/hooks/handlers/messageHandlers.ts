@@ -1,3 +1,6 @@
+import { loadHistoryTurnRecoveries } from "@/db/dexie/history-selection"
+import { throwIfChatSubmitUnsuccessful } from "@/hooks/chat/chat-action-utils"
+import type { HistoryEditAndSendBoundary } from "@/types/chat-modes"
 import { getMessageDeleteFeedback } from "@/utils/message-delete-feedback"
 import { removeAcknowledgedServerMirrorMessage, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { nativeRegenerationFeedback } from "@/hooks/chat/native-character-preflight"
@@ -166,6 +169,36 @@ export const createRegenerateLastMessage = ({
         historyRegenerate: intent, controller: dispatch?.controller ?? new AbortController(),
         actorSceneSend,
         assertCurrent: () => { if (!intent.isOriginCurrent()) throw new Error("stale_selection") } })
+    }
+    if (historySelection?.getCurrent().owner?.kind === "local") {
+      const current = historySelection.getCurrent()
+      const capture = current.capture
+      const answer = capture?.status === "captured" ? capture.rows.at(-1) : null
+      const question = capture?.status === "captured"
+        ? capture.rows.at(-2)
+        : null
+      const content = capture?.status === "captured"
+        ? capture.selected_content.find((row) => row.id === question?.id)
+        : null
+      if (
+        current.status !== "ready" || !current.owner || !current.view ||
+        !answer || answer.role !== "assistant" || !question || question.role !== "user" ||
+        (current.view.interpretation.kind === "parent_graph_v1" && answer.parent_id !== question.id) ||
+        !content || (content.images?.length ?? 0) > 1 || !validateBeforeSubmitFn()
+      ) throw new Error("unsupported_history_regeneration")
+      return onSubmit({
+        ...dispatch,
+        message: content.message,
+        image: content.images?.[0] ?? "",
+        historyRegenerateBoundary: {
+          answerId: answer.id,
+          questionId: question.id,
+          questionRevision: question.revision,
+          owner: current.owner,
+          originView: structuredClone(current.view),
+          originIsCurrent: historySelection.fence()
+        }
+      })
     }
     if (!allowOrdinaryRetry || historySelection) {
       const target = [...messages].reverse().find((row) => row.isBot && row.id)
@@ -386,9 +419,36 @@ export const createNativeDeleteMessage = (options: {
   }
 }
 
+// Local captures add display-adapter fields even for plain messages. Accept only
+// those known defaults; all other metadata still makes Edit-and-Send unavailable.
+const isPlainLocalEditMetadata = (metadata: unknown, targetName: string): boolean => {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return false
+  const fields = metadata as Record<string, unknown>
+  if (Object.keys(fields).some((key) => !["sender_name", "sender_role", "local_history"].includes(key))) return false
+  if (fields.sender_role !== "user" ||
+    (fields.sender_name !== targetName && !(fields.sender_name === undefined && targetName === "You"))) return false
+  const local = fields.local_history
+  if (!local || typeof local !== "object" || Array.isArray(local)) return false
+  const history = local as Record<string, unknown>
+  const emptyDisplay = (value: unknown) => value == null || value === ""
+  if (Object.keys(history).some((key) => ![
+    "messageType", "sources", "search", "documents", "discoSkillComment",
+    "generationInfo", "reasoning_time_taken", "clusterId", "modelId",
+    "modelName", "modelImage"
+  ].includes(key))) return false
+  return emptyDisplay(history.messageType) &&
+    (history.sources == null || (Array.isArray(history.sources) && history.sources.length === 0)) &&
+    (history.search == null || history.search === false) &&
+    history.documents == null && history.discoSkillComment == null &&
+    history.generationInfo == null && history.reasoning_time_taken == null &&
+    emptyDisplay(history.clusterId) && emptyDisplay(history.modelId) &&
+    emptyDisplay(history.modelName) && emptyDisplay(history.modelImage)
+}
+
 export const createEditMessage = (options: {
   messages: Message[]
   getMessages?: () => Message[]
+  temporaryChat?: boolean
   historySelection?: HistorySelectionController | null
   history: ChatHistory
   setMessages: (messages: Message[]) => void
@@ -421,6 +481,70 @@ export const createEditMessage = (options: {
     if (!canMutate()) return chatSubmitSkipped("response_in_progress")
     const target = options.messages[index]
     if (!target?.id) throw new Error("missing_message")
+    if (isHuman && isSend && options.historySelection?.getCurrent().owner?.kind === "local") {
+      const controller = options.historySelection
+      const origin = controller?.getCurrent()
+      const localViewCurrent = controller?.fence()
+      const current = localViewCurrent ? () => localViewCurrent() && sourceCurrent() && isEditorCurrent?.() !== false : undefined
+      const owner = origin?.owner
+      const view = origin?.view
+      const selectedTarget = origin?.capture?.status === "captured"
+        ? origin.capture.rows.find((row) => row.id === target.id && row.role === "user")
+        : undefined
+      const selectedContent = origin?.capture?.status === "captured"
+        ? origin.capture.selected_content.find((row) => row.id === target.id)
+        : undefined
+      const plainMetadata = owner?.kind === "local"
+        ? selectedContent !== undefined &&
+          isPlainLocalEditMetadata(target.metadataExtra, target.name) &&
+          isPlainLocalEditMetadata(selectedContent.extra_metadata, target.name)
+        : (!target.metadataExtra || Object.keys(target.metadataExtra).length === 0) &&
+          (!selectedContent?.extra_metadata || Object.keys(selectedContent.extra_metadata).length === 0)
+      if (
+        options.temporaryChat || !controller || !current || !origin ||
+        origin.status !== "ready" || !owner || owner.kind === "unavailable" ||
+        !view || !origin.bookmarkScope || !selectedTarget || !selectedContent ||
+        owner.validate_lease?.() === false ||
+        target.isBot || (target.role !== undefined && target.role !== "user") ||
+        target.message !== selectedContent.message ||
+        target.images?.length || target.documents || target.sources?.length ||
+        target.search || target.discoSkillComment || target.generationInfo ||
+        target.messageType || target.clusterId || target.modelId ||
+        target.modelName || target.modelImage || target.reasoning_time_taken != null ||
+        !plainMetadata ||
+        target.toolCalls?.length || target.toolResults?.length ||
+        selectedTarget.metadata?.length || selectedTarget.assets?.length ||
+        selectedTarget.comparison || selectedContent.images.length ||
+        selectedContent.tool_calls?.length
+      ) {
+        const error = new Error(`unsupported_history_edit_and_send:${target.id}`)
+        options.notification?.error({ message: "Message action unavailable", description: error.message })
+        throw error
+      }
+      const editBoundary: HistoryEditAndSendBoundary = {
+        targetId: target.id,
+        owner,
+        originView: structuredClone(view),
+        originIsCurrent: current
+      }
+      const recoveries = await loadHistoryTurnRecoveries(origin.bookmarkScope, view)
+      if (!current() || controller.getCurrent().owner !== owner)
+        throw new Error("stale_selection")
+      if (recoveries.some(({ turn }) =>
+        turn.owner_key === view.owner_key &&
+        turn.conversation_id === view.conversation_id &&
+        turn.outcome !== "complete"
+      )) throw new Error("history_edit_reconciliation_required")
+      const result = await options.onSubmit({
+        message,
+        image: "",
+        historyEditBoundary: editBoundary
+      })
+      if (!result || typeof result !== "object" || !("status" in result))
+        throw new Error("history_edit_admission_unacknowledged")
+      throwIfChatSubmitUnsuccessful(result as ChatSubmitResult)
+      return result as ChatSubmitResult
+    }
     // Unsupported forms must not choose/truncate or mutate the captured stable target.
     if (isHuman && isSend) {
       const origin = options.historySelection?.getCurrent()
@@ -451,6 +575,16 @@ export const createEditMessage = (options: {
           content: message,
           createdAt: target.createdAt ?? Date.now()
         })
+        if (!origin.bookmarkScope) return chatSubmitSkipped("stale_selection")
+        const recoveries = await loadHistoryTurnRecoveries(origin.bookmarkScope, origin.view)
+        if (!current() || !sourceCurrent() || !isEditorCurrent() ||
+            options.historySelection?.getCurrent().owner !== origin.owner)
+          return chatSubmitSkipped("stale_selection")
+        if (recoveries.some(({ turn }) =>
+          turn.owner_key === origin.view!.owner_key &&
+          turn.conversation_id === origin.view!.conversation_id &&
+          turn.action === "edit_resend" && turn.outcome !== "complete"
+        )) throw new Error("history_edit_reconciliation_required")
         if (!options.validateBeforeSubmitFn())
           return chatSubmitSkipped("validation_failed")
         const result = await options.onSubmit({

@@ -23,9 +23,10 @@ describe("media navigation content extraction", () => {
     const hydrationEnd = source.indexOf("} catch (error) {", hydrationStart)
     const hydrationBlock = source.slice(hydrationStart, hydrationEnd)
 
+    expect(hydrationBlock.indexOf("publishSelected(hydratedSelection)")).toBeGreaterThan(-1)
     expect(hydrationBlock.indexOf("setLastFetchedId(resolvedId)")).toBeGreaterThan(-1)
     expect(hydrationBlock.indexOf("setLastFetchedId(resolvedId)")).toBeLessThan(
-      hydrationBlock.indexOf("setSelected(hydratedSelection)")
+      hydrationBlock.indexOf("publishSelected(hydratedSelection)")
     )
   })
 })

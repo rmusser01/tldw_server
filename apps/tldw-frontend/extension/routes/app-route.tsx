@@ -1,3 +1,5 @@
+import { AdminQueryProvider } from "@/components/Option/Admin/AdminQueryProvider"
+import { isAdminRoute } from "@/components/Option/Admin/admin-modules"
 import React from "react"
 import type { ErrorInfo, ReactNode } from "react"
 import {
@@ -373,11 +375,11 @@ export const ExtensionRouteShell = ({
       >
         {kind === "options" ? (
           <OptionsErrorBoundary onReset={handleOptionsReset}>
-            {routesContent}
+            <AdminQueryProvider active={isAdminRoute(location.pathname)}>{routesContent}</AdminQueryProvider>
           </OptionsErrorBoundary>
         ) : (
           <SidepanelErrorBoundary onReset={handleSidepanelReset}>
-            {routesContent}
+            <AdminQueryProvider active={isAdminRoute(location.pathname)}>{routesContent}</AdminQueryProvider>
           </SidepanelErrorBoundary>
         )}
       </React.Suspense>

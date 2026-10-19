@@ -63,6 +63,24 @@ const makeTurn = () => {
   }
   return turn
 }
+const makeExistingTurn = () => {
+  const turn = makeTurn()
+  turn.existingSelection = true
+  turn.capture.view = {
+    ...turn.capture.view,
+    cursor: { kind: "after_message", message_id: "question" }
+  }
+  turn.capture.snapshot.nodes = [{
+    id: "question", revision: "question-revision", parent_id: null,
+    role: "user", settled: true, preview: "question"
+  }]
+  turn.capture.rows = turn.capture.snapshot.nodes
+  turn.capture.selected_content = [{
+    id: "question", revision: "question-revision", message: "question", images: []
+  }]
+  turn.currentView = () => turn.capture.view
+  return turn
+}
 const mode: any = {
   id: "normal",
   buildUserMessage: (ctx: any) => ({
@@ -80,13 +98,13 @@ const mode: any = {
     humanMessage: new HumanMessage("question")
   })
 }
-const invoke = (turn: any, overrides = {}, customMode = mode) =>
+const invoke = (turn: Parameters<typeof runChatPipeline>[7]["historyTurn"], overrides = {}, customMode = mode, visibleMessages: Parameters<typeof runChatPipeline>[4] = []) =>
   runChatPipeline(
     customMode,
     "question",
     "",
     false,
-    [],
+    visibleMessages,
     [],
     new AbortController().signal,
     {
@@ -137,6 +155,54 @@ beforeEach(() => {
   })
 })
 describe("selected normal send admission boundary", () => {
+  it("Regenerate loses its view after the accepted-intent write before provider dispatch", async () => {
+    const turn = makeExistingTurn()
+    turn.afterAdmission = vi.fn(async () => {
+      turn.canUpdateView = () => false
+    })
+    await invoke(turn, { userMessageId: "question" })
+    expect(turn.afterAdmission).toHaveBeenCalledTimes(1)
+    expect(mocks.append).not.toHaveBeenCalled()
+    expect(mocks.stream).not.toHaveBeenCalled()
+    expect(turn.recover).toHaveBeenCalledTimes(1)
+  })
+
+  it("Regenerate preserves the original display rows while its provider is paused", async () => {
+    const turn = makeExistingTurn()
+    const original: Parameters<typeof runChatPipeline>[4] = [
+      { id: "question", message: "question", isBot: false, name: "Original You",
+        sources: [{ name: "original-source", url: "https://example.test/source" }] },
+      { id: "old-answer", message: "old answer", isBot: true,
+        parentMessageId: "question", name: "Original model", sources: [] }
+    ]
+    let displayed = original
+    const setMessages: Parameters<typeof runChatPipeline>[7]["setMessages"] = (next) => {
+      displayed = typeof next === "function" ? next(displayed) : next
+    }
+    let entered!: () => void
+    let release!: () => void
+    const started = new Promise<void>((resolve) => { entered = resolve })
+    const paused = new Promise<void>((resolve) => { release = resolve })
+    mocks.stream.mockImplementation(async function* () {
+      entered()
+      await paused
+      yield "another answer"
+    })
+    const pending = invoke(turn, { userMessageId: "question", setMessages }, mode, original)
+    try {
+      await Promise.race([
+        started,
+        pending.then((result) => { throw new Error(`Regenerate provider did not start: ${JSON.stringify(result)}`) })
+      ])
+      expect(displayed.slice(0, 2)).toEqual(original)
+      expect(displayed[0]).toBe(original[0])
+      expect(mocks.append).not.toHaveBeenCalled()
+    } finally {
+      release()
+      await pending
+    }
+  })
+
   it("admits once before provider dispatch and carries accepted parent to settlement", async () => {
     const turn = makeTurn()
     const save = vi.fn(async () => "chat")
@@ -188,6 +254,23 @@ describe("selected normal send admission boundary", () => {
     expect(await invoke(turn)).toEqual({ status: "submitted" })
     expect(mocks.stream).toHaveBeenCalledTimes(1)
   })
+  it("an Edit-and-Send view replaced during admission retains the input without dispatching its provider turn", async () => {
+    const turn = makeTurn()
+    turn.deferProjectionUntilAdmission = true
+    const append = mocks.append.getMockImplementation()!
+    mocks.append.mockImplementation(async (...args) => {
+      turn.currentView = () => ({ ...turn.capture.view, selection_revision: 2 })
+      turn.canUpdateView = () => false
+      return append(...args)
+    })
+    const errorSave = vi.fn()
+    await invoke(turn, { saveMessageOnError: errorSave })
+    expect(mocks.append).toHaveBeenCalledTimes(1)
+    expect(turn.admission?.input_message_id).toBe("user-new")
+    expect(mocks.stream).not.toHaveBeenCalled()
+    expect(turn.recover).toHaveBeenCalledTimes(1)
+    expect(errorSave).not.toHaveBeenCalled()
+  })
   it("retains accepted unsent input when the composer lease changes while admission is in flight", async () => {
     const turn = makeTurn()
     const append = mocks.append.getMockImplementation()!
@@ -205,6 +288,7 @@ describe("selected normal send admission boundary", () => {
   it("provider failure retains admission and does not invoke legacy error user persistence", async () => {
     const turn = makeTurn()
     mocks.stream.mockImplementation(async function* () {
+      yield* []
       throw new Error("provider down")
     })
     const errorSave = vi.fn()

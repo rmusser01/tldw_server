@@ -478,3 +478,54 @@ async def test_two_row_exact_match_run_retains_scores_and_dataset(
     finally:
         if backend is not None:
             backend.get_pool().close_all()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("model,expected_model,model_source", [
+    ("openai:grader-fixture", "grader-fixture", "override"),
+    (None, None, "provider_default"),
+], ids=["override", "provider-default"])
+async def test_model_run_persists_allowlisted_grader_rationale_and_rubric(
+    tmp_path, model, expected_model, model_source, monkeypatch,
+):
+    """The saved run must explain its scores without persisting provider secrets."""
+    runner = EvaluationRunner(str(tmp_path / "grader-provenance.db"))
+
+    from unittest.mock import create_autospec
+
+    evaluate = create_autospec(runner.quality_evaluator.evaluate, return_value={
+        "metrics": {"accuracy": {"score": 1.0, "raw_score": 5,
+            "rationale": "The answer matches Mira Vale in the source.",
+            "rubric": "Rate factual accuracy against the supplied source, 1-5.",
+            "api_key": "must-not-persist"}}, "overall_quality": 1.0,
+    })
+    monkeypatch.setattr(runner.quality_evaluator, "evaluate", evaluate)
+    dataset_id = runner.db.create_dataset(name="grounded", samples=[{
+        "input": {"prompt": "Who leads Rowan? Source: Dr Mira Vale.", "response": "Dr Mira Vale"},
+        "expected": "Dr Mira Vale",
+    }], created_by="owner")
+    evaluation_id = runner.db.create_evaluation(
+        name="grounded", eval_type="model_graded", dataset_id=dataset_id, created_by="owner",
+        eval_spec={"sub_type": "response_quality", "model": model},
+    )
+    run_id = runner.db.create_run(evaluation_id, target_model="display-label-only")
+    await runner.run_evaluation(run_id, evaluation_id, {"created_by": "owner"}, background=False)
+    assert evaluate.await_count == 1  # nosec B101 - One real runner invocation reaches the typed evaluator seam.
+    assert evaluate.await_args.kwargs["api_name"] == "openai"  # nosec B101 - Preserve the original provider argument contract.
+    assert evaluate.await_args.kwargs["model"] == expected_model  # nosec B101 - Preserve the original model argument contract.
+    saved = runner.db.get_run(run_id, created_by="owner")
+    row = saved["results"]["sample_results"][0]
+    assert row["grader"] == {"provider": "openai", "model": expected_model, "model_source": model_source, "temperature": 0.1}  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
+    assert row["metric_results"] == {"accuracy": {"score": 1.0, "raw_score": 5,  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
+        "rationale": "The answer matches Mira Vale in the source.",
+        "rubric": "Rate factual accuracy against the supplied source, 1-5."}}
+    assert row["input"]["response"] == "Dr Mira Vale"  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
+    assert runner.db.get_run(run_id, created_by="foreign-owner") is None  # nosec B101 - Pytest C03 causal behavior/ownership assertion.
+
+
+@pytest.mark.parametrize("score,minimum,passed", [(1.0, 0.7, True), (0.5, 0.7, False), (0.0, 0.0, True)])
+def test_response_quality_saved_ui_min_score_is_a_global_threshold(tmp_path, score, minimum, passed):
+    runner = EvaluationRunner(str(tmp_path / "ui-threshold.db"))
+    assert runner._evaluate_passed({"accuracy": score, "overall_quality": score}, score, {  # nosec B101 - Existing UI threshold is a global minimum.
+        "thresholds": {"min_score": minimum},
+    }) is passed

@@ -1914,7 +1914,10 @@ class WorkflowEngine:
         adapter = get_adapter(step_type)
         if adapter is None:
             raise RuntimeError(f"Unsupported step type: {step_type}")
-        return await adapter(step_cfg, ctx)
+        result = await adapter(step_cfg, ctx)
+        if step_type == "flashcard_generate" and isinstance(result, dict) and result.get("error"):
+            raise AdapterError(str(result["error"]))
+        return result
 
     async def _reap_orphans(self) -> None:
         """Single pass to mark long-stale running steps as failed (orphaned) and requeue."""

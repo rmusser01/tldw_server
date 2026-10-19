@@ -526,3 +526,13 @@ describe("SpeechPlaygroundPage audio source", () => {
     expect(transcribeAudioMock.mock.calls[0]?.[1]).not.toHaveProperty("model")
   })
 })
+
+vi.mock("@/hooks/useSpeechHistory", () => ({
+  useSpeechHistory: () => {
+    const key = "speechPlaygroundHistory"
+    return [storageValues.get(key) || [], (next: unknown) => {
+      const old = storageValues.get(key) || []
+      storageValues.set(key, typeof next === "function" ? next(old) : next)
+    }] as const
+  }
+}))

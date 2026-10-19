@@ -21,6 +21,11 @@ import { readFileSync } from "node:fs"
 import path from "node:path"
 import ts from "typescript"
 import React from "react"
+import * as historyController from "@/hooks/chat/useHistorySelection"
+import * as historyRecoveryStorage from "@/db/dexie/history-selection"
+import { resolveHistorySelection } from "@/utils/history-selection"
+import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
+import { resetHistoryTurnRegistry } from "@/services/history-turn-keep"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -51,7 +56,7 @@ const io = vi.hoisted(() => ({
   captureNative: false,
   useComposer: false,
   useRecovery: false,
-  write: vi.fn(),
+  write: vi.fn(async (key: string, value: unknown): Promise<void> => { io.data.set(key, value) }),
   physicalTabId: 7 as number | null,
   controller: null as HistorySelectionController | null,
   keyboardNew: null as (() => void) | null,
@@ -70,7 +75,9 @@ const io = vi.hoisted(() => ({
   scope: vi.fn(),
   server: vi.fn(),
   submit: vi.fn(),
-  notifyError: vi.fn()
+  notifyError: vi.fn(),
+  capture: vi.fn(),
+  settle: vi.fn()
 }))
 // Keep real Drawer/content and expose retained motion callbacks for boundary controls.
 vi.mock("antd", async original => {
@@ -165,7 +172,8 @@ vi.mock("@/db/dexie/history-selection", async original => ({
 }))
 vi.mock("@/services/chat-history-selection", async original => ({
   ...await original<typeof import("@/services/chat-history-selection")>(),
-  captureHistorySnapshot: async (owner: HistoryOwnerV1, incoming: HistoryCaptureRequestV1["view"], purpose: string) => {
+  captureHistorySnapshot: async (owner: HistoryOwnerV1, incoming: HistoryCaptureRequestV1["view"], purpose: "send" | "fork", signal?: AbortSignal, requiredCapability?: "tldw_history_existing_input_v1" | "tldw_history_server_existing_input_v1") => {
+    if (requiredCapability) return (await vi.importActual<typeof import("@/services/chat-history-selection")>("@/services/chat-history-selection")).captureHistorySnapshot(owner, incoming, purpose, signal, requiredCapability)
     if (owner.kind === "unavailable" || (owner.kind === "native" && (!io.captureNative || owner.conversation_id === "failed"))) throw new Error("unsupported_history_capability")
     const cached = owner.kind === "native" ? { historyInfo: { id: owner.conversation_id }, messages: [] } : await io.local(owner.conversation_id)
     if (!cached || cached.historyInfo.id !== owner.conversation_id) throw new Error("missing_conversation")
@@ -477,6 +485,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: async () => {},
     listChatMessages: (...args: unknown[]) => io.server(...args),
+    captureHistorySelection: (...args: unknown[]) => io.capture(...args),
+    addChatMessage: (...args: unknown[]) => io.settle(...args),
     ensureConfigForRequest: async () => ({
       serverUrl: "http://chat.test",
       authMode: "multi-user"
@@ -513,6 +523,97 @@ const snapshot = (text = "ALICE TRANSCRIPT"): SidepanelChatSnapshot => ({
   serverChatExternalRef: null,
   queuedMessages: [],
   modelSettings: { systemPrompt: "ALICE PRIVATE PROMPT" }
+})
+
+it("mounted shared Sidepanel keeps a stale completed Regenerate through the guarded service", async () => {
+  io.user = "alice"
+  io.data.clear()
+  io.read.mockImplementation(async key => io.data.get(key))
+  io.scope.mockImplementation(async () => ({
+    requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" },
+    scopeSignal: new AbortController().signal,
+    scopeInvalidatedSignal: new AbortController().signal,
+    release: io.noop
+  }))
+  useSidepanelChatTabsStore.getState().clear()
+  resetHistoryTurnRegistry()
+  const scope = { profile_id: "sidepanel-profile", client_session_id: "sidepanel-client" }
+  const view = {
+    view_session_id: "retained-sidepanel", owner_key: "server-owner", conversation_id: "sidepanel-server",
+    interpretation: { kind: "legacy_linear_v1" as const, projection_id: "reviewed" },
+    cursor: { kind: "after_message" as const, message_id: "question" }, selection_revision: 3
+  }
+  const source = {
+    version: 1 as const, owner_key: view.owner_key, conversation_id: view.conversation_id,
+    fences: { conversation: "3", history: "3", settings: "1" },
+    nodes: [{ id: "question", revision: "q1", role: "user" as const, parent_id: null,
+      legacy_projection_id: "reviewed", settled: true }],
+    source_digest: "sidepanel-source", storage_context_digest: "sidepanel-storage",
+    interpretation_status: { kind: "legacy_linear_v1" as const, projection_id: "reviewed", ordered_path_ids: ["question"] }
+  }
+  const selected = resolveHistorySelection(source, view, "send", "original-prepared")
+  if (selected.status !== "ready") throw new Error("invalid_sidepanel_recovery_fixture")
+  const assistant = {
+    id: "sidepanel-alternative", history_id: view.conversation_id, role: "assistant" as const,
+    name: "Original model", content: "Complete Sidepanel alternative", createdAt: 7,
+    images: [], parent_message_id: "question"
+  }
+  const entry: HistoryTurnRecoveryEntry = { scope, turn: {
+    operation_id: "sidepanel-regenerate", origin_view: view,
+    selection_digest: selected.selection.selection_digest,
+    request_context_digest: selected.selection.request_context_digest,
+    owner_key: view.owner_key, conversation_id: view.conversation_id,
+    input_id: "question", assistant_id: assistant.id, created_at: 7,
+    input_text: "Original question", input_images: [], result_text: assistant.content,
+    state: "generated_unsaved", outcome: "complete",
+    existing_selection: selected.selection, settlement_payload: assistant
+  } }
+  const state = {
+    status: "stale_selection" as const, settingsQualified: true, view, bookmarkScope: scope,
+    owner: { kind: "native" as const, conversation_id: view.conversation_id, owner_key: view.owner_key,
+      request_scope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" as const }, userId: "alice" },
+      validate_lease: () => true }
+  }
+  // This fixture isolates Sidepanel's controller consumption. Capability
+  // parsing, owner binding and Keep's fences still use production services.
+  const controller = {
+    ...state, capture: null, error: "stale_projection", recoveries: [entry],
+    getCurrent: () => state, fence: () => () => true, getReference: () => null,
+    activate: io.noop, reset: io.noop, beginLoad: io.noop,
+    getSignal: () => new AbortController().signal,
+    loadConversation: async () => false, prepareExpansionPath: async () => null,
+    choose: async () => false, refreshRecovery: async () => {}, dismissRecovery: async () => {}
+  } as unknown as historyController.HistorySelectionController
+  const selection = vi.spyOn(historyController, "useHistorySelection").mockReturnValue(controller)
+  const load = vi.spyOn(historyRecoveryStorage, "loadHistoryTurnRecoveries").mockResolvedValue([entry])
+  const dismiss = vi.spyOn(historyRecoveryStorage, "dismissHistoryTurnRecovery").mockResolvedValue()
+  io.capture.mockReset().mockImplementation(async (_id, request) => ({
+    status: "legacy_review_required", code: "legacy_review_required",
+    acknowledged_capability: "tldw_history_existing_input_v1",
+    snapshot: { ...source, interpretation_status: { kind: "legacy_review_required" } },
+    view: request.view
+  }))
+  io.settle.mockReset().mockResolvedValue({ id: assistant.id })
+  const mounted = render(<SidepanelChat />)
+  try {
+    await waitFor(() => expect(io.settle).toHaveBeenCalledOnce())
+    expect(io.capture.mock.calls[0][1]).toMatchObject({
+      required_capability: "tldw_history_existing_input_v1",
+      view: { cursor: { kind: "empty" }, interpretation: { kind: "parent_graph_v1" } }
+    })
+    expect(io.settle.mock.calls[0]).toMatchObject([
+      view.conversation_id,
+      { id: assistant.id, content: assistant.content, parent_message_id: "question",
+        role: "assistant", tldw_history_existing_input_v1: selected.selection },
+      { requestScope: state.owner.request_scope }
+    ])
+    await waitFor(() => expect(dismiss).toHaveBeenCalledOnce())
+  } finally {
+    mounted.unmount()
+    selection.mockRestore()
+    load.mockRestore()
+    dismiss.mockRestore()
+  }
 })
 const tabsState = (user = "alice") => ({
   version: 2,
@@ -1828,7 +1929,13 @@ describe.each([
   ])("revokes the mounted chat for positive %s authority loss without deleting saved tabs", async (_reason, error) => {
     io.data.set(storedKey("alice"), tabsState())
     render(<Route />)
+    await screen.findByText("alice first")
     fireEvent.click(await screen.findByRole("button", { name: "alice two" }))
+    await waitFor(() => expect(useStoreMessageOption.getState().messages[0]?.message).toBe("alice inactive"))
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0))
+      window.dispatchEvent(new Event("beforeunload"))
+    })
     const durable = io.data.get(storedKey("alice"))
     io.scope.mockRejectedValue(error)
     act(() => window.dispatchEvent(new Event("focus")))
@@ -1961,7 +2068,7 @@ describe.each([
     const source = useStoreMessageOption.getState().chatDraftAddress
     let finishCopy!: () => void
     io.write.mockImplementation(async (key, value) => {
-      if (key.startsWith("registry:draft:") && value.value?.content === "OLDER RECOVERY TEXT")
+      if (key.startsWith("registry:draft:") && (value as { value?: { content?: string } })?.value?.content === "OLDER RECOVERY TEXT")
         await new Promise<void>(resolve => { finishCopy = resolve })
       io.data.set(key, value)
     })
@@ -2003,7 +2110,7 @@ describe.each([
     })
     if (boundary === "declined navigation") window.addEventListener(SETTINGS_NAVIGATION_REQUEST_EVENT, event => event.preventDefault(), { once: true })
     if (boundary === "New during copy") io.write.mockImplementation(async (key, value) => {
-      if (key.startsWith("registry:draft:") && value.value?.content === "OLD RETAINED TEXT")
+      if (key.startsWith("registry:draft:") && (value as { value?: { content?: string } })?.value?.content === "OLD RETAINED TEXT")
         await new Promise<void>(resolve => { finish = resolve })
       io.data.set(key, value)
     })
@@ -2421,9 +2528,13 @@ describe.each([
     io.local.mockResolvedValue({ historyInfo: { id: "owned", title: "Owned review", server_scope_key: ownerKey("alice") },
       messages: [{ id: "row", role: "user", content: "OWNED REVIEW TEXT" }] })
     render(<Route />)
+    await waitFor(() => {
+      expect(useSidepanelChatTabsStore.getState().ownerKey).toBe(ownerKey("alice"))
+      expect(screen.queryByLabelText("Restoring previous chat")).not.toBeInTheDocument()
+    })
     fireEvent.click(await screen.findByRole("button", { name: "Open cached history" }))
     await screen.findByText("OWNED REVIEW TEXT")
-    fireEvent.click(screen.getByRole("button", { name: "Expand in full page" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Expand in full page" }))
     await waitFor(() => expect(window.open).toHaveBeenCalled())
     const route = String(vi.mocked(window.open).mock.calls.at(-1)![0])
     expect(parseHistorySelectionHandoff(route)).toMatchObject({ owner_kind: "local", conversation_id: "owned" })
@@ -2596,6 +2707,7 @@ describe.each([
   it("restores and selects same-owner tabs, clears them for Bob and recovers Alice on return", async () => {
     io.data.set(storedKey("alice"), tabsState())
     render(<Route />)
+    await screen.findByText("alice first")
     fireEvent.click(await screen.findByRole("button", { name: "alice two" }))
     await waitFor(() =>
       expect(useStoreMessageOption.getState().messages[0]?.message).toBe(
@@ -2619,8 +2731,8 @@ describe.each([
     )
     switchAccount("alice")
     await screen.findByRole("button", { name: "alice two" })
-    expect(useStoreMessageOption.getState().messages[0]?.message).toBe(
-      "alice inactive"
+    await waitFor(() =>
+      expect(useStoreMessageOption.getState().messages[0]?.message).toBe("alice inactive")
     )
   })
 
@@ -2836,7 +2948,9 @@ describe.each([
   it("retains the active tab on same-owner rotation and a failed focus recheck", async () => {
     io.data.set(storedKey("alice"), tabsState())
     render(<Route />)
+    await screen.findByText("alice first")
     fireEvent.click(await screen.findByRole("button", { name: "alice two" }))
+    await waitFor(() => expect(useStoreMessageOption.getState().messages[0]?.message).toBe("alice inactive"))
     io.scope.mockRejectedValueOnce(new Error("offline"))
     act(() => {
       window.dispatchEvent(
@@ -2919,6 +3033,10 @@ describe.each([
       ]
     })
     render(<Route />)
+    await waitFor(() => {
+      expect(useSidepanelChatTabsStore.getState().ownerKey).toBe(ownerKey("alice"))
+      expect(screen.queryByLabelText("Restoring previous chat")).not.toBeInTheDocument()
+    })
     fireEvent.click(
       await screen.findByRole("button", { name: "Open cached history" })
     )

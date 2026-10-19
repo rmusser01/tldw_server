@@ -60,6 +60,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.sse_consumer impor
 from tldw_Server_API.app.core.Agent_Client_Protocol.event_bus import SessionEventBus
 from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
     ACPGovernanceDeniedError,
+    get_existing_runner_client,
     get_runner_client,
 )
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPResponseError
@@ -76,7 +77,11 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
 from tldw_Server_API.app.core.Streaming.streams import WebSocketStream
 from tldw_Server_API.app.core.testing import is_explicit_pytest_runtime
 from tldw_Server_API.app.services.acp_runtime_policy_service import ACPRuntimePolicyService
-from tldw_Server_API.app.services.admin_acp_sessions_service import get_acp_session_store
+from tldw_Server_API.app.services.admin_acp_sessions_service import (
+    ACPSessionStore,
+    SessionRecord,
+    get_acp_session_store,
+)
 
 router = APIRouter(prefix="/acp", tags=["acp"])
 
@@ -1029,10 +1034,11 @@ async def _record_acp_prompt(
     session_id: str,
     prompt: list[dict[str, Any]],
     result: dict[str, Any],
+    assistant_text: str | None = None,
 ) -> ACPTokenUsage | None:
     try:
         store = await get_acp_session_store()
-        turn_usage_data = await store.record_prompt(session_id, prompt, result)
+        turn_usage_data = await store.record_prompt(session_id, prompt, result, assistant_text=assistant_text)
         if turn_usage_data:
             return ACPTokenUsage(
                 prompt_tokens=turn_usage_data.prompt_tokens,
@@ -1096,6 +1102,9 @@ async def _execute_acp_prompt(
     if require_access_check:
         await _require_session_access(client, session_id=session_id, user_id=int(user_id))
 
+    from tldw_Server_API.app.core.Agent_Client_Protocol.prompt_utils import normalize_prompt_content
+
+    normalize_prompt_content(prompt)
     runtime_prompt, used_bootstrap = await _prepare_acp_runtime_prompt(
         session_id=session_id,
         prompt=prompt,
@@ -1108,7 +1117,8 @@ async def _execute_acp_prompt(
             prompt=prompt,
             user_id=int(user_id),
         )
-        result = await client.prompt(session_id, runtime_prompt)
+        native_text: list[str] = []
+        result = await client.prompt(session_id, runtime_prompt, on_native_text=native_text.append)
     except ACPGovernanceDeniedError:
         _acp_record_audit_event(
             action="prompt_blocked",
@@ -1130,6 +1140,7 @@ async def _execute_acp_prompt(
         session_id=session_id,
         prompt=prompt,
         result=result,
+        assistant_text="".join(native_text) if native_text else None,
     )
     if used_bootstrap:
         await _clear_acp_bootstrap_state(session_id)
@@ -1183,6 +1194,26 @@ async def _require_session_access(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session_not_found")
 
 
+async def _require_persisted_session_access(*, session_id: str, user_id: int) -> tuple[ACPSessionStore, SessionRecord]:
+    """Authorize stored reads from the durable owner, without restoring execution."""
+    store = await get_acp_session_store()
+    record = await store.get_session(session_id)
+    if record is None or record.user_id != int(user_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session_not_found")
+    return store, record
+
+
+async def _session_runtime_presence(*, session_id: str, user_id: int) -> tuple[bool, bool]:
+    """Project current runtime ownership independently of persisted session status."""
+    try:
+        client = get_existing_runner_client()
+        if client is None or not await client.verify_session_access(session_id, user_id):
+            return False, False
+        return True, client.has_websocket_connections(session_id)
+    except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+        return False, False
+
+
 # -----------------------------------------------------------------------------
 # WebSocket Endpoint
 # -----------------------------------------------------------------------------
@@ -1209,6 +1240,8 @@ async def acp_session_stream(
     - permission_request: Permission required for tool execution
     - error: Error occurred
     - prompt_complete: Prompt execution completed
+    - update.prompt_active: Server-computed RPC activity; metadata alone does not establish active work
+    - prompt_settled: No active prompt remains, including pre-dispatch failure; not a task success signal
 
     Message types (Client → Server):
     - permission_response: Approve/deny permission request
@@ -1266,6 +1299,7 @@ async def acp_session_stream(
     send_callback: Any | None = None
     reconnect_broadcaster: Any | None = None
     reconnect_conn_id: str | None = None
+    prompt_task: asyncio.Task | None = None
 
     try:
         await stream.start()
@@ -1311,17 +1345,42 @@ async def acp_session_stream(
 
         logger.info("WebSocket connected for ACP session {} (user={})", session_id, user_id)
 
+        async def _run_socket_prompt(data: dict[str, Any]) -> None:
+            try:
+                await _handle_client_message(client, session_id, data, stream, user_id=int(user_id))
+            except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
+                logger.exception("Error handling WebSocket prompt for session {}", session_id)
+                await stream.send_json({
+                    "type": "error", "code": "internal_error", "message": str(exc),
+                    "session_id": session_id,
+                })
+
+        def _observe_socket_prompt(task: asyncio.Task) -> None:
+            if not task.cancelled() and task.exception() is not None:
+                logger.warning("ACP WebSocket prompt response task failed")
+
         # Main message loop
         while True:
             try:
                 data = await stream.receive_json()
-                await _handle_client_message(
-                    client,
-                    session_id,
-                    data,
-                    stream,
-                    user_id=int(user_id),
-                )
+                if data.get("type") == "prompt":
+                    if prompt_task is not None and not prompt_task.done():
+                        await stream.send_json({
+                            "type": "error", "code": "prompt_busy",
+                            "message": "A prompt is already active for this session",
+                            "session_id": session_id,
+                        })
+                    else:
+                        prompt_task = asyncio.create_task(_run_socket_prompt(data))
+                        prompt_task.add_done_callback(_observe_socket_prompt)
+                else:
+                    await _handle_client_message(
+                        client,
+                        session_id,
+                        data,
+                        stream,
+                        user_id=int(user_id),
+                    )
             except WebSocketDisconnect:
                 logger.info("WebSocket disconnected for ACP session {}", session_id)
                 break
@@ -1344,6 +1403,13 @@ async def acp_session_stream(
     except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS:
         logger.exception("WebSocket error for ACP session {}", session_id)
     finally:
+        if prompt_task is not None:
+            if not prompt_task.done():
+                try:
+                    await client.cancel(session_id)
+                except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS:
+                    logger.warning("Failed to send ACP Stop during socket cleanup")
+            await asyncio.gather(prompt_task, return_exceptions=True)
         if reconnect_broadcaster is not None:
             from tldw_Server_API.app.core.Agent_Client_Protocol.consumers.ws_broadcaster import (
                 stop_reconnect_replay,
@@ -2092,7 +2158,7 @@ async def acp_health(
             else:
                 runner_probe = {"status": "not_running", "detail": "Runner process is not started"}
         except _ACP_ENDPOINT_NONCRITICAL_EXCEPTIONS as exc:
-            logger.warning("ACP runner probe failed: {}", exc)
+            logger.warning("ACP runner probe failed: {}", type(exc).__name__)
             runner_probe = {"status": "error", "detail": "ACP runner probe failed"}
     result["runner_probe"] = runner_probe
 
@@ -2127,17 +2193,22 @@ async def acp_health(
     # 5. Overall status
     any_agent_available = any(a.get("is_configured") for a in agents_status)
     runner_ok = runner_status.get("status") == "ok"
+    runner_live = runner_ok and runner_probe.get("status") == "ok"
 
-    if runner_ok and any_agent_available:
+    if runner_live and any_agent_available:
         result["overall"] = "ok"
-    elif runner_ok and not any_agent_available:
+    elif runner_live and not any_agent_available:
         result["overall"] = "degraded"
         result["message"] = "Runner binary found but no agents are fully configured"
     elif not runner_ok:
         result["overall"] = "unavailable"
         result["message"] = "ACP runner binary not found or not configured"
     else:
-        result["overall"] = "degraded"
+        result["overall"] = "unavailable"
+        result["message"] = (
+            "ACP runner could not start. Check runner_command, runner_args and "
+            "runner_cwd in [ACP] before dispatching tasks."
+        )
 
     return result
 
@@ -3040,8 +3111,7 @@ async def acp_session_reconciliation(
     user: User = Depends(get_request_user),
 ) -> dict[str, Any]:
     _acp_enforce_control_rate_limit(user_id=int(user.id), action="reconciliation")
-    client = await get_runner_client()
-    await _require_session_access(client, session_id=session_id, user_id=int(user.id))
+    await _require_persisted_session_access(session_id=session_id, user_id=int(user.id))
     _acp_record_audit_event(
         action="reconciliation_query",
         user_id=int(user.id),
@@ -3146,7 +3216,6 @@ async def acp_list_sessions(
     """List ACP sessions for the authenticated user."""
     _acp_enforce_control_rate_limit(user_id=int(user.id), action="list_sessions")
     store = await get_acp_session_store()
-    client = await get_runner_client()
     records, total = await store.list_sessions(
         user_id=int(user.id),
         status=status_filter,
@@ -3157,9 +3226,11 @@ async def acp_list_sessions(
     )
     sessions = []
     for rec in records:
+        runtime_available, has_websocket = await _session_runtime_presence(session_id=rec.session_id, user_id=int(user.id))
         info = rec.to_info_dict(
-            has_websocket=client.has_websocket_connections(rec.session_id),
+            has_websocket=has_websocket,
         )
+        info["runtime_available"] = runtime_available
         info["workspace_context"] = _build_acp_workspace_context(rec)
         sessions.append(ACPSessionInfo(**info))
     return ACPSessionListResponse(
@@ -3189,17 +3260,14 @@ async def acp_session_detail(
 ) -> ACPSessionDetailResponse:
     """Get detailed information about an ACP session."""
     _acp_enforce_control_rate_limit(user_id=int(user.id), action="session_detail")
-    client = await get_runner_client()
-    await _require_session_access(client, session_id=session_id, user_id=int(user.id))
-    store = await get_acp_session_store()
-    rec = await store.get_session(session_id)
-    if not rec:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session_not_found")
+    store, rec = await _require_persisted_session_access(session_id=session_id, user_id=int(user.id))
+    runtime_available, has_websocket = await _session_runtime_presence(session_id=session_id, user_id=int(user.id))
     fork_lineage = await store.get_fork_lineage(session_id)
     detail = rec.to_detail_dict(
-        has_websocket=client.has_websocket_connections(session_id),
+        has_websocket=has_websocket,
         fork_lineage=fork_lineage,
     )
+    detail["runtime_available"] = runtime_available
     detail["workspace_context"] = _build_acp_workspace_context(rec)
     if redacted:
         detail["messages"] = _redact_acp_messages(detail.get("messages") or [])
@@ -3218,12 +3286,7 @@ async def acp_session_usage(
 ) -> ACPSessionUsageResponse:
     """Get token usage for an ACP session."""
     _acp_enforce_control_rate_limit(user_id=int(user.id), action="usage")
-    client = await get_runner_client()
-    await _require_session_access(client, session_id=session_id, user_id=int(user.id))
-    store = await get_acp_session_store()
-    rec = await store.get_session(session_id)
-    if not rec:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session_not_found")
+    _store, rec = await _require_persisted_session_access(session_id=session_id, user_id=int(user.id))
     _acp_record_audit_event(
         action="usage_query",
         user_id=int(user.id),
@@ -3261,12 +3324,7 @@ async def acp_session_events(
 ) -> dict[str, Any]:
     """Query persisted ACP session events/messages."""
     _acp_enforce_control_rate_limit(user_id=int(user.id), action="events")
-    client = await get_runner_client()
-    await _require_session_access(client, session_id=session_id, user_id=int(user.id))
-    store = await get_acp_session_store()
-    rec = await store.get_session(session_id)
-    if not rec:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session_not_found")
+    _store, rec = await _require_persisted_session_access(session_id=session_id, user_id=int(user.id))
 
     events: list[dict[str, Any]] = []
     for idx, msg in enumerate(getattr(rec, "messages", []) or []):
@@ -3414,12 +3472,7 @@ async def acp_session_artifacts(
 ) -> dict[str, Any]:
     """Query artifacts emitted in ACP session messages."""
     _acp_enforce_control_rate_limit(user_id=int(user.id), action="artifacts")
-    client = await get_runner_client()
-    await _require_session_access(client, session_id=session_id, user_id=int(user.id))
-    store = await get_acp_session_store()
-    rec = await store.get_session(session_id)
-    if not rec:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session_not_found")
+    _store, rec = await _require_persisted_session_access(session_id=session_id, user_id=int(user.id))
 
     artifacts: list[dict[str, Any]] = []
     for msg in getattr(rec, "messages", []) or []:
@@ -3469,12 +3522,7 @@ async def acp_session_diagnostics(
 ) -> dict[str, Any]:
     """Return normalized, non-sensitive diagnostics for an ACP session."""
     _acp_enforce_control_rate_limit(user_id=int(user.id), action="diagnostics")
-    client = await get_runner_client()
-    await _require_session_access(client, session_id=session_id, user_id=int(user.id))
-    store = await get_acp_session_store()
-    rec = await store.get_session(session_id)
-    if not rec:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="session_not_found")
+    _store, rec = await _require_persisted_session_access(session_id=session_id, user_id=int(user.id))
 
     diagnostics = _extract_session_diagnostics(session_id, list(getattr(rec, "messages", []) or []))
     reconciliation = _acp_get_reconciliation(session_id)
@@ -3506,8 +3554,7 @@ async def acp_session_audit(
         if not getattr(user, "is_admin", False):
             raise HTTPException(status_code=403, detail="Admin role required for agent audit")
     else:
-        client = await get_runner_client()
-        await _require_session_access(client, session_id=session_id, user_id=int(user.id))
+        await _require_persisted_session_access(session_id=session_id, user_id=int(user.id))
     events = _acp_list_audit_events(session_id=session_id)
     return {
         "session_id": session_id,

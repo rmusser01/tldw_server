@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import {
   nativeCharacterPreflightMessage,
-  validateNativeCharacterConfiguration
+  resolveNativeCharacterConfiguration
 } from "@/hooks/chat/native-character-preflight"
 import { getSelectedAssistantOperationRevision } from "@/hooks/useSelectedAssistant"
 import { useSimpleForm } from "@/hooks/useSimpleForm"
@@ -124,7 +124,7 @@ const fixture = () => {
     useStoreChatModelSettings,
     usePlaygroundSessionStore,
     useMcpToolsStore,
-    validateNativeCharacterConfiguration,
+    resolveNativeCharacterConfiguration,
     nativeCharacterPreflightMessage,
     buildChatModelUsability,
     resolveMessageSteering,

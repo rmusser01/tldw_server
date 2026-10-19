@@ -31,7 +31,7 @@ Clean-session review of PR #3273: 0 Critical, 0 Important, 2 Minor, both fixed. 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-A rate-limited audio analysis now waits 30 s, then 60 s, then 120 s before retrying (a provider failure 5, 10, 20 s), and these failures never quarantine the job: fail_job(quarantine=False), new on both Jobs backends, keeps them out of the failure streak while retries still stop at max_retries. When the retries run out, TASK-13847 stores the transcript with analysis_error. Documented in Docs/Code_Documentation/Jobs_Module.md (whose quarantine default now reads 2, the code's) and Docs/API-related/Audio_Jobs_API.md.
+A rate-limited audio analysis now waits 30 s, then 60 s, then 120 s before retrying (a provider failure 5, 10, 20 s), and these failures never quarantine the job: fail_job(quarantine=False), new on both Jobs backends, prevents quarantine for those failures but still advances the failure streak; retries still stop at max_retries. When the retries run out, TASK-13847 stores the transcript with analysis_error. Documented in Docs/Code_Documentation/Jobs_Module.md (whose quarantine default now reads 2, the code's) and Docs/API-related/Audio_Jobs_API.md.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

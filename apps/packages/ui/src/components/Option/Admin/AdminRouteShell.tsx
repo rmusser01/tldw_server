@@ -1,6 +1,5 @@
 import React from "react"
 import { Link } from "react-router-dom"
-import { AdminQueryProvider } from "./AdminQueryProvider"
 import {
   ADMIN_MODULES,
   adminModuleForRoute,
@@ -92,9 +91,7 @@ export const AdminRouteShell: React.FC<{
       {/* tabIndex={-1} makes the skip-link target programmatically focusable,
           so activating the link actually moves keyboard focus past the nav. */}
       <div id="admin-content" tabIndex={-1} className="min-h-0 flex-1 outline-none">
-        {/* Every admin page shares one query client so reference data is
-            fetched once per stale window across surfaces (B-S4 / F11). */}
-        <AdminQueryProvider>{children}</AdminQueryProvider>
+        {children}
       </div>
     </div>
   )

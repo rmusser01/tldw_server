@@ -1,3 +1,4 @@
+import Dexie from "dexie"
 import { CLEAR_TASK_RECIPE } from "@/components/Common/PromptAssist/recipes/built-in-recipes"
 import {
   canApplyRecipe,
@@ -101,6 +102,7 @@ vi.mock("@/db/dexie/schema", () => ({
   }
 }))
 vi.mock("@/services/prompt-studio-settings", () => ({
+  getPromptStudioDefaultsForOwner: async () => ({ defaultProjectId: 42, autoSyncWorkspacePrompts: true }),
   getPromptStudioDefaults: async () => ({
     defaultProjectId: 42,
     autoSyncWorkspacePrompts: true
@@ -197,9 +199,11 @@ const serverPrompt = (id: number) => ({
 const successfulPromptResponse = (id: number) =>
   response(200, { success: true, data: serverPrompt(id) })
 
-const seedRecipe = (id: string, serverId?: number) => {
+const seedRecipe = async (id: string, serverId?: number) => {
+  const ownerId = (await resolveRecipePersistenceOwnerView())!.ownerId
   extension.rows.set(id, {
     id,
+    ownerId,
     title: `Local ${id}`,
     name: `Local ${id}`,
     content: "Local recipe",
@@ -817,7 +821,7 @@ describe("real sync stack through direct and extension authorities", () => {
       const id = localId(`active-put-${surface}-${phase}`)
       extension.values.set("tldwConfig", storedManualConfig(`${id}-key`))
       if (surface === "extension") await startExtensionBackground()
-      seedRecipe(id, 101)
+      await seedRecipe(id, 101)
       const owner = (await resolveRecipePersistenceOwnerView())!
       let release!: () => void
       let signalStarted!: () => void
@@ -831,8 +835,9 @@ describe("real sync stack through direct and extension authorities", () => {
       let localCommitHeld = false
       const update = vi
         .spyOn(db.prompts, "update")
-        .mockImplementation(async (...args) => {
-          const fields = args[1] as Record<string, unknown>
+        .mockImplementation((...args) => Dexie.Promise.resolve().then(async () => {
+          const result = await originalUpdate(...args)
+          const fields = extension.rows.get(id)!
           if (
             !localCommitHeld &&
             ((phase === "local commit" &&
@@ -843,8 +848,8 @@ describe("real sync stack through direct and extension authorities", () => {
             signalStarted()
             await held
           }
-          return originalUpdate(...args)
-        })
+          return result
+        }))
       let putCount = 0
       vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {
         if (init.method === "PUT") {
@@ -869,7 +874,9 @@ describe("real sync stack through direct and extension authorities", () => {
       const first = pushToStudio(id, 42, { expectedOwnerId: owner.ownerId })
       try {
         await started
+        const beforePull = structuredClone(extension.rows.get(id))
         const pull = await pullFromStudio(101, id)
+        expect(extension.rows.get(id)).toEqual(beforePull)
         const second = await pushToStudio(id, 42, {
           expectedOwnerId: owner.ownerId
         })
@@ -921,7 +928,7 @@ describe("real sync stack through direct and extension authorities", () => {
       const id = localId(`${label}-full-stack`)
       const config = storedManualConfig(`${id}-key`)
       extension.values.set("tldwConfig", config)
-      seedRecipe(id)
+      await seedRecipe(id)
       const mutationFetch = vi.fn(async () => successfulPromptResponse(101))
       vi.stubGlobal("fetch", mutationFetch)
 
@@ -957,7 +964,7 @@ describe("real sync stack through direct and extension authorities", () => {
     extension.values.set("tldwConfig", storedManualConfig("extension-key"))
     await startExtensionBackground()
     const id = "extension-scoped-full-stack"
-    seedRecipe(id)
+    await seedRecipe(id)
     const owner = await resolveRecipePersistenceOwnerView()
     expect(owner?.ownerId).toMatch(/^recipe-owner:sha256:/)
     let mutationCount = 0
@@ -1012,7 +1019,7 @@ describe("real sync stack through direct and extension authorities", () => {
     extension.values.set("tldwConfig", storedManualConfig("extension-key"))
     await startExtensionBackground()
     const id = "extension-unknown-full-stack"
-    seedRecipe(id)
+    await seedRecipe(id)
     const owner = await resolveRecipePersistenceOwnerView()
     let mutationCount = 0
     vi.stubGlobal("fetch", async (_url: string, init: RequestInit) => {

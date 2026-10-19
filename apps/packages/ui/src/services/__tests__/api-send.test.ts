@@ -4,8 +4,8 @@ const mocks = vi.hoisted(() => ({
   sendMessage: vi.fn(),
   tldwRequest: vi.fn(),
   runtimeId: "test-extension" as string | null,
-  storageGet: vi.fn(async () => ({ serverUrl: "http://127.0.0.1:8000" })),
-  sessionStorageGet: vi.fn(async () => null)
+  storageGet: vi.fn(async (_key: string): Promise<unknown> => ({ serverUrl: "http://127.0.0.1:8000" })),
+  sessionStorageGet: vi.fn(async (_key: string): Promise<unknown> => null)
 }))
 
 vi.mock("wxt/browser", () => ({
@@ -25,7 +25,8 @@ vi.mock("@/services/tldw/request-core", () => ({
     (mocks.tldwRequest as (...args: unknown[]) => unknown)(...args)
 }))
 
-vi.mock("@/utils/safe-storage", () => ({
+vi.mock("@/utils/safe-storage", async original => ({
+  ...await original<typeof import("@/utils/safe-storage")>(),
   createSafeStorage: (options?: { area?: string }) => ({
     get: (...args: unknown[]) =>
       options?.area === "session"

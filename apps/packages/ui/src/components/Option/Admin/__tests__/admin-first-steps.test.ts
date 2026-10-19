@@ -1,3 +1,5 @@
+vi.mock("@/hooks/usePrivateWorkspaceScope", () => ({ usePrivateWorkspaceScope: () => ({ scope: null, retry: vi.fn() }) }))
+import { createAdminTestSession } from "./admin-query-fixture"
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -13,16 +15,20 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 import { loadAdminFirstSteps } from "../admin-first-steps"
 
+let session = createAdminTestSession()
+
 describe("loadAdminFirstSteps", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    session.client.clear()
+    session = createAdminTestSession()
     apiMock.listBackupSchedules.mockResolvedValue({ schedules: [] })
     apiMock.listAlertRules.mockResolvedValue([])
     apiMock.getGovernorCoverage.mockResolvedValue({ coverage_pct: 78.9 })
   })
 
   it("marks every step undone on a fresh server", async () => {
-    const steps = await loadAdminFirstSteps()
+    const steps = await loadAdminFirstSteps(session)
 
     expect(steps).toEqual([
       {
@@ -53,7 +59,7 @@ describe("loadAdminFirstSteps", () => {
     apiMock.listAlertRules.mockResolvedValue([{ id: 1 }])
     apiMock.getGovernorCoverage.mockResolvedValue({ coverage_pct: 92.5 })
 
-    const steps = await loadAdminFirstSteps()
+    const steps = await loadAdminFirstSteps(session)
 
     expect(steps.map((step) => step.done)).toEqual([true, true, true])
   })
@@ -62,7 +68,7 @@ describe("loadAdminFirstSteps", () => {
     apiMock.listBackupSchedules.mockResolvedValue([{ id: 1 }])
     apiMock.listAlertRules.mockResolvedValue({ items: [{ id: 1 }] })
 
-    const steps = await loadAdminFirstSteps()
+    const steps = await loadAdminFirstSteps(session)
 
     expect(steps.find((s) => s.key === "backup-schedule")?.done).toBe(true)
     expect(steps.find((s) => s.key === "alert-rule")?.done).toBe(true)
@@ -71,7 +77,7 @@ describe("loadAdminFirstSteps", () => {
   it("treats missing coverage data as done rather than nagging", async () => {
     apiMock.getGovernorCoverage.mockResolvedValue({})
 
-    const steps = await loadAdminFirstSteps()
+    const steps = await loadAdminFirstSteps(session)
 
     expect(steps.find((s) => s.key === "coverage-review")?.done).toBe(true)
   })
@@ -79,7 +85,7 @@ describe("loadAdminFirstSteps", () => {
   it("drops a failed probe instead of failing or misreporting the rest", async () => {
     apiMock.listAlertRules.mockRejectedValue(new Error("Request failed: 503"))
 
-    const steps = await loadAdminFirstSteps()
+    const steps = await loadAdminFirstSteps(session)
 
     expect(steps.map((step) => step.key)).toEqual([
       "backup-schedule",

@@ -13,6 +13,7 @@ import {
 } from "@/hooks/chat/chat-action-utils"
 import { historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers"
 import { sendNativeHistoryCharacter } from "./native-history-character-send"
+import { loadHistoryRecoveryRetryContext, retryHistoryTurnRecovery, type HistoryRecoveryRetryContext } from "@/services/history-turn-retry"
 import { useHistorySelectionContext, type HistoryLoadReceipt } from "./useHistorySelection"
 import { resetStaleSelectionForFreshTurn } from "./fresh-chat-selection"
 import { excludeLocalRagDiagnostics, getLocalRagDiagnosticUser, isLocalRagDiagnosticInfo } from "@/utils/local-rag-diagnostic"
@@ -71,6 +72,7 @@ import {
   createBranchMessage
 } from "@/hooks/handlers/messageHandlers"
 import { type UploadedFile } from "@/db/dexie/types"
+import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
 import { buildAssistantErrorContent, decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent"
 import { buildCharacterChatAssistantErrorContent, classifyCharacterChatFailureRecovery } from "./useCharacterChatMode"
@@ -179,7 +181,7 @@ import {
   type ToolChoice
 } from "@/store/option"
 import type { ChatModelSettings } from "@/store/model"
-import type { SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
+import type { HistoryEditAndSendBoundary, HistoryRegenerateBoundary, SaveMessageData, SaveMessageErrorData } from "@/types/chat-modes"
 import type { DynamicUIRequest } from "@/types/dynamic-ui"
 import type { VisualIdentityResolveResponse } from "@/types/visual-identities"
 import {
@@ -769,6 +771,14 @@ export const useChatActions = ({
     inheritedPersonaMemoryMode,
     routingSelectedAssistant
   ])
+  const greetingSettingsKey = JSON.stringify([
+    chatSettings?.greetingEnabled,
+    chatSettings?.greetingSelectionId,
+    chatSettings?.greetingsChecksum,
+    chatSettings?.useCharacterDefault
+  ])
+  const greetingSettingsKeyRef = React.useRef(greetingSettingsKey)
+  greetingSettingsKeyRef.current = greetingSettingsKey
   const greetingEnabled = chatSettings?.greetingEnabled ?? true
   const greetingSelectionId =
     typeof chatSettings?.greetingSelectionId === "string"
@@ -3532,6 +3542,13 @@ export const useChatActions = ({
     greetingIsCurrent,
     actorSceneSend: requestedActorSceneSend,
     historyRetryAdmission,
+    historyServerExistingInput,
+    historyRetryRecoveries,
+    historyEditBoundary,
+    historyRegenerateBoundary,
+    historyRecoveryRetry,
+    historyRecoveryRetryIsCurrent,
+    historyRecoveryRetrySystemPrompts,
     historyEditResend,
     historyRegenerate,
     assertCurrent
@@ -3570,11 +3587,20 @@ export const useChatActions = ({
      * already has with the selected history's owner. The turn settles a new
      * reply against it instead of admitting the question again.
      */
+    historyServerExistingInput?: import("./native-history-character-send").NativeHistoryExistingInput
     historyRetryAdmission?: HistoryAdmissionReferenceV1
+    historyRetryRecoveries?: HistoryTurnRecoveryEntry[]
+    historyRecoveryRetry?: boolean
+    historyRecoveryRetryIsCurrent?: () => boolean
+    historyRecoveryRetrySystemPrompts?: string[]
+    historyEditBoundary?: HistoryEditAndSendBoundary
+    historyRegenerateBoundary?: HistoryRegenerateBoundary
     historyEditResend?: NativeHistoryEditResend
     historyRegenerate?: NativeHistoryRegenerate
   }, beginResponse: () => boolean): Promise<ChatSubmitResult> => {
     const greetingSeed = requestedGreetingSeed ? structuredClone(requestedGreetingSeed) : undefined
+    if (historyServerExistingInput && (compareModeActive || temporaryChat || isRegenerate || isContinue ||
+        !historyServerExistingInput.isCurrent())) return chatSubmitFailed("unsupported_history_action_context")
     assertCurrent?.()
     controller?.signal.throwIfAborted()
     // CS-01 (#3106) defence in depth: a turn that addresses no conversation
@@ -3824,6 +3850,7 @@ export const useChatActions = ({
         ? null
         : historySelection
 
+    let identityPreflightRefused = false
     const selectedLocalContextTurn = selectedHistoryTurn &&
       currentHistorySelection?.owner?.kind === "local" &&
       !isRegenerate && !isContinue && !compareModeActive && !turnUsesImageMode &&
@@ -3832,6 +3859,7 @@ export const useChatActions = ({
     try {
       if (
         isSavedRoleplayConversation(historySelection) &&
+        !historyServerExistingInput &&
         !greetingSeed &&
         !historyEditResend &&
         !historyRegenerate &&
@@ -3936,6 +3964,39 @@ export const useChatActions = ({
           ? historySelection
           : null
       )
+      if (historyServerExistingInput && (
+        !historyServerExistingInput.isCurrent() || !historySelection || temporaryChat || compareModeActive ||
+        turnResolvedSendMode !== "tracked_character" || isRegenerate || isContinue ||
+        replyActive || turnUsesImageMode || turnContextFiles.length > 0 ||
+        docs?.length || documentContext?.length || turnShouldUseRag ||
+        turnWebSearchEnabled || turnUploadedFiles.length > 0 ||
+        shouldConsumeSteering || turnDynamicUIRequest || turnUserMetadataExtra
+      )) throw new Error("unsupported_history_action_context")
+      if (historyEditBoundary && (
+        !normalHistorySelection || temporaryChat || compareModeActive ||
+        turnResolvedSendMode !== "plain" || isRegenerate || isContinue ||
+        replyActive || turnUsesImageMode || turnContextFiles.length > 0 ||
+        docs?.length || documentContext?.length || turnShouldUseRag ||
+        turnWebSearchEnabled || turnUploadedFiles.length > 0 ||
+        shouldConsumeSteering || turnDynamicUIRequest || turnUserMetadataExtra
+      )) throw new Error("unsupported_history_action_context")
+      if (historyRegenerateBoundary && (
+        !normalHistorySelection || temporaryChat || compareModeActive ||
+        turnResolvedSendMode !== "plain" || isRegenerate || isContinue ||
+        replyActive || turnUsesImageMode || turnContextFiles.length > 0 ||
+        docs?.length || documentContext?.length || turnShouldUseRag ||
+        turnWebSearchEnabled || turnUploadedFiles.length > 0 ||
+        shouldConsumeSteering || turnDynamicUIRequest || turnUserMetadataExtra
+      )) throw new Error("unsupported_history_action_context")
+      if (historyRecoveryRetry && (
+        !normalHistorySelection || !historyRetryAdmission || !historyRetryRecoveries?.length ||
+        !historyRecoveryRetryIsCurrent?.() || !historyRecoveryRetrySystemPrompts || temporaryChat || compareModeActive ||
+        turnResolvedSendMode !== "plain" || isRegenerate || isContinue ||
+        replyActive || turnUsesImageMode || turnContextFiles.length > 0 ||
+        docs?.length || documentContext?.length || turnShouldUseRag ||
+        turnWebSearchEnabled || turnUploadedFiles.length > 0 ||
+        shouldConsumeSteering || turnDynamicUIRequest || turnUserMetadataExtra
+      )) throw new Error("unsupported_history_action_context")
       const normalSelectionSource: Parameters<typeof normalChatMode>[6]["selectionSource"] = {
         model: normalizeSelectedModel(requestOverrides?.selectedModel) ? "explicit" : "global",
         toolChoice: requestOverrides?.toolChoice === "auto" || requestOverrides?.toolChoice === "required" || requestOverrides?.toolChoice === "none"
@@ -4039,6 +4100,30 @@ export const useChatActions = ({
       ), onResponseDispatch: markSteeringApplied }
       signal.throwIfAborted()
       assertCurrent?.()
+      if (needsSavedNormalScope && turnServicePromptSnapshot) {
+        // An owned local-to-server promotion must finish before identity is checked.
+        await waitForChatPromotion(setServerChatId, historyId, turnServicePromptSnapshot)
+        signal.throwIfAborted()
+        assertCurrent?.()
+      }
+      const savedIdentity = useStoreMessageOption.getState()
+      const requestedSavedChatId = serverChatIdOverride || serverChatId
+      if (requestedSavedChatId && savedIdentity.serverChatId === requestedSavedChatId &&
+          !savedIdentity.serverChatMetaLoaded) {
+        identityPreflightRefused = true
+        throw new Error(savedIdentity.serverChatLoadState === "failed"
+          ? t("common:serverChatIdentityLoadFailed", { defaultValue: "Chat details could not load. Reload the conversation before sending. Your message text is retained." })
+          : t("common:serverChatIdentityLoading", { defaultValue: "Wait for chat details to load before sending. Your message text is retained." }))
+      }
+      if (requestedSavedChatId && savedIdentity.serverChatId === requestedSavedChatId &&
+          savedIdentity.serverChatMetaLoaded &&
+          (savedIdentity.serverChatAssistantKind === "character" ||
+            savedIdentity.serverChatAssistantKind == null && savedIdentity.serverChatCharacterId != null) &&
+          turnResolvedSendMode !== "tracked_character" &&
+          turnResolvedSendMode !== "tracked_persona") {
+        identityPreflightRefused = true
+        throw new Error(t("common:serverChatIdentityChanged", { defaultValue: "Chat details changed while preparing this message. Review the conversation before sending again." }))
+      }
       const baseMessages = chatHistory || messages
       const baseHistory = memory || history
       const replyOverrides = replyActive
@@ -4407,10 +4492,10 @@ export const useChatActions = ({
                   effectiveSelectedAssistant
                 )
               : null
-          if (
-            resolvedSendMode === "tracked_character" &&
-            resolvedSelectedCharacter?.id
-          ) {
+          if (historyServerExistingInput && (!historyServerExistingInput.isCurrent() ||
+              resolvedSendMode !== "tracked_character" || !resolvedSelectedCharacter?.id || !historySelection))
+            throw new Error("native_history_existing_input_owner_required")
+          if (resolvedSendMode === "tracked_character" && resolvedSelectedCharacter?.id) {
             const resolvedModel = effectiveSelectedModel?.trim()
             if (!resolvedModel) {
               notification.error({
@@ -4426,6 +4511,7 @@ export const useChatActions = ({
               const greeting = await sendNativeHistoryCharacter({
                 surface: "playground",
                 t,
+                existingInput: historyServerExistingInput,
                 controller: historySelection,
                 actorSceneSend,
                 originIsCurrent: historyOriginIsCurrent!,
@@ -4436,6 +4522,7 @@ export const useChatActions = ({
                 serverChatId: serverChatIdOverride || serverChatId,
                 scope,
                 characterId: resolvedSelectedCharacter.id,
+                greetingSettings: chatSettings ?? undefined,
                 model: resolvedModel,
                 currentModel: getEffectiveSelectedModel(),
                 toolChoice: servicePromptChatModeParams.toolChoice,
@@ -4443,7 +4530,7 @@ export const useChatActions = ({
                 message,
                 image,
                 greetingSeed,
-                greetingIsCurrent,
+                greetingIsCurrent: () => greetingSettingsKeyRef.current === greetingSettingsKey && (greetingIsCurrent?.() ?? true),
                 historyEditResend,
                 setServerChatId,
                 setMessages,
@@ -4575,7 +4662,7 @@ export const useChatActions = ({
               historySelection: normalHistorySelection
                 ? {
                     controller: normalHistorySelection,
-                    originIsCurrent: historyOriginIsCurrent!,
+                    originIsCurrent: () => historyOriginIsCurrent!() && (!historyRecoveryRetry || historyRecoveryRetryIsCurrent!()),
                     sourceIsCurrent: commandSessionIsCurrent,
                     onResultFollow: consumeReplyTarget,
                     temporary: temporaryChat,
@@ -4591,6 +4678,18 @@ export const useChatActions = ({
                       !useConnectionStore.getState().state.offlineBypass,
                     ...(historyRetryAdmission
                       ? { retryAdmission: historyRetryAdmission }
+                      : {}),
+                    ...(historyRetryRecoveries
+                      ? { retryRecoveries: historyRetryRecoveries }
+                      : {}),
+                    ...(historyRecoveryRetry
+                      ? { reviewedSystemPrompts: historyRecoveryRetrySystemPrompts }
+                      : {}),
+                    ...(historyEditBoundary
+                      ? { editAndSend: historyEditBoundary }
+                      : {}),
+                    ...(historyRegenerateBoundary
+                      ? { regenerate: historyRegenerateBoundary }
                       : {})
                   }
                 : undefined
@@ -4668,7 +4767,7 @@ export const useChatActions = ({
           let compareReceipt: HistoryLoadReceipt | undefined
           let compareAdoptionIsCurrent: (() => boolean) | undefined
           let temporaryCompareBound = false
-          let compareHistoryId = commandDraftSource.historyId
+          let compareHistoryId = acceptedSceneMirror ?? commandDraftSource.historyId
           let compareMetadataRetired = false
           const compareMetadataIsCurrent = () => {
             const current = useStoreMessageOption.getState()
@@ -5022,7 +5121,7 @@ export const useChatActions = ({
       }
       return requestCancelled
         ? chatSubmitSkipped("Request cancelled")
-        : chatSubmitFailed(errorMessage)
+        : { ...chatSubmitFailed(errorMessage), ...(identityPreflightRefused ? { restoreDraft: true as const } : {}) }
     } finally {
       if (discardCurrentTurnOnAbortSignalRef.current === signal) {
         discardCurrentTurnOnAbortSignalRef.current = null
@@ -5586,6 +5685,7 @@ export const useChatActions = ({
       if (!sourceFence() || !sameSource() || current.owner !== actionSelectionState?.owner) return retired()
       if (!validateBeforeSubmitFn())
         return chatSubmitSkipped("Retry was not submitted")
+      const originalIsCurrent = selection.fence()
       // Read the records rather than the render's list: a reply that just
       // ended may not have reached it yet.
       const recoveries =
@@ -5597,10 +5697,15 @@ export const useChatActions = ({
           : selection.recoveries ?? []
       if (!sourceFence() || !sameSource()) return retired()
       const retained = recoveries.filter(
-        (entry) => entry.turn.persistence !== "server" && (
-          entry.turn.input_id === question.id ||
-          entry.turn.admission?.input_message_id === question.id)
+        (entry) =>
+          entry.turn.persistence !== "server" &&
+          entry.scope.profile_id === current.bookmarkScope?.profile_id &&
+          entry.turn.owner_key === current.view?.owner_key &&
+          entry.turn.conversation_id === current.view?.conversation_id &&
+          (entry.turn.input_id === question.id ||
+            entry.turn.admission?.input_message_id === question.id)
       )
+      const retryRecoveries = structuredClone(retained)
       // A server chat's partial reply exists only in its record on this
       // device; a local chat stores the question with its admission.
       let questionAdmission: HistoryAdmissionReferenceV1 | null =
@@ -5620,6 +5725,8 @@ export const useChatActions = ({
       if (!sourceFence() || !sameSource()) return retired()
       dispatch?.controller?.signal.throwIfAborted()
       dispatch?.assertCurrent?.()
+      if (!originalIsCurrent())
+        return chatSubmitFailed("history_selection_changed")
       const choosing = selection.choose({
         kind: "before_message",
         message_id: question.id
@@ -5644,6 +5751,8 @@ export const useChatActions = ({
         if (!retryFence() || !sameSource()) return retired()
         dispatch?.controller?.signal.throwIfAborted()
         dispatch?.assertCurrent?.()
+        // Replacement settlement owns cleanup of a known interrupted result.
+        if (entry.turn.outcome === "interrupted" || entry.turn.outcome === "stopped") continue
         const dismissed = await selection.dismissRecovery(entry, () => {
           if (
             !retryFence() ||
@@ -5684,7 +5793,8 @@ export const useChatActions = ({
           // again as a new branch from the same point.
           ...(questionAdmission
             ? { historyRetryAdmission: questionAdmission }
-            : {})
+            : {}),
+          historyRetryRecoveries: retryRecoveries
         })
       )
     }
@@ -5711,6 +5821,29 @@ export const useChatActions = ({
       if (!dispatchIsCurrent() || (capture && !capture.isCurrent())) return chatSubmitSkipped("actor_settings_scope_changed")
       throw error
     }
+  }
+
+  const recoveryRetrySource = React.useRef({ model: "", selectedSystemPrompt, systemPrompt: currentChatModelSettings.systemPrompt, systemPromptAppendix })
+  recoveryRetrySource.current = { model: getEffectiveSelectedModel() || "", selectedSystemPrompt, systemPrompt: currentChatModelSettings.systemPrompt, systemPromptAppendix }
+  const getRecoveryRetryContext = () => {
+    const source = { ...recoveryRetrySource.current }
+    return loadHistoryRecoveryRetryContext(source, () =>
+      JSON.stringify(source) === JSON.stringify(recoveryRetrySource.current))
+  }
+  const retryRecoveredHistoryTurn = (entry: HistoryTurnRecoveryEntry, review: { contextReviewed: boolean; context: HistoryRecoveryRetryContext }) =>
+    retryHistoryTurnRecovery(historySelection, entry, review, async submission => {
+      if (!validateBeforeSubmitFn()) return chatSubmitSkipped("Retry was not submitted")
+      return onSubmit(submission)
+    }, getRecoveryRetryContext)
+
+  const getSavedQuestionReview = async () => {
+    const {reviewServerSavedQuestion} = await import("@/services/history-turn-retry")
+    return reviewServerSavedQuestion(historySelection, await getRecoveryRetryContext())
+  }
+  const retrySavedQuestion = async (review: import("@/services/history-turn-retry").SavedQuestionReview) => {
+    if (!review.isCurrent()) return chatSubmitFailed("history_selection_changed")
+    if (!validateBeforeSubmitFn()) return chatSubmitSkipped("Retry was not submitted")
+    return onSubmit({message: review.text, image: "", historyServerExistingInput: review})
   }
 
   const stopStreamingRequest = React.useCallback(
@@ -5756,6 +5889,7 @@ export const useChatActions = ({
     setMessages,
     setHistory,
     historyId,
+    temporaryChat,
     validateBeforeSubmitFn,
     onSubmit
   })
@@ -6005,6 +6139,10 @@ export const useChatActions = ({
     onSubmit,
     sendPerModelReply,
     regenerateLastMessage,
+    getRecoveryRetryContext,
+    retryRecoveredHistoryTurn,
+    getSavedQuestionReview,
+    retrySavedQuestion,
     stopStreamingRequest,
     editMessage,
     deleteMessage,

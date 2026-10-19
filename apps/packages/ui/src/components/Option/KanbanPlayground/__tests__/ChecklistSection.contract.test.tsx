@@ -1,3 +1,4 @@
+import { testKanbanScope } from "./scope-fixture"
 import "@testing-library/jest-dom/vitest"
 import { Component, type ReactNode } from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -12,6 +13,11 @@ vi.mock("@/services/background-proxy", () => ({
 
 import { listChecklists } from "@/services/kanban"
 import { ChecklistSection } from "../ChecklistSection"
+import { KanbanScopeProvider } from "../KanbanScope"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
+
+const scopeConfig = { serverUrl: "https://kanban.example.test", authMode: "single-user" as const, apiKey: "fixture-key" }
+const checklistKey = ["kanban", deriveConnectionAuthorityId(scopeConfig), "kanban-card-checklists", 7]
 
 class CardBoundary extends Component<
   { children: ReactNode },
@@ -35,12 +41,14 @@ async function renderLoadedChecklists() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } }
   })
-  client.setQueryData(["kanban-card-checklists", 7], data)
+  client.setQueryData(checklistKey, data)
   render(
     <QueryClientProvider client={client}>
+      <KanbanScopeProvider scope={testKanbanScope(scopeConfig)}>
       <CardBoundary>
         <ChecklistSection cardId={7} />
       </CardBoundary>
+      </KanbanScopeProvider>
     </QueryClientProvider>
   )
   return client
@@ -106,11 +114,13 @@ describe("ChecklistSection canonical API data", () => {
     })
     render(
       <QueryClientProvider client={client}>
-        <ChecklistSection cardId={7} />
+        <KanbanScopeProvider scope={testKanbanScope(scopeConfig)}>
+          <ChecklistSection cardId={7} />
+        </KanbanScopeProvider>
       </QueryClientProvider>
     )
     await waitFor(() =>
-      expect(client.getQueryState(["kanban-card-checklists", 7])?.status).toBe(
+      expect(client.getQueryState(checklistKey)?.status).toBe(
         "error"
       )
     )
@@ -128,7 +138,7 @@ describe("ChecklistSection canonical API data", () => {
     transport.request.mockRejectedValue(new Error("Checklist unavailable"))
     await act(async () => {
       await client.invalidateQueries({
-        queryKey: ["kanban-card-checklists", 7]
+        queryKey: checklistKey
       })
     })
     await screen.findByRole("alert")

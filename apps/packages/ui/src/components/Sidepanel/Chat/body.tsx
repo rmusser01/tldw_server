@@ -31,6 +31,18 @@ type Props = {
 
 const EMPTY_IMAGES: string[] = []
 
+const getStableRowHandler = <T extends (...args: never[]) => unknown>(
+  cache: React.MutableRefObject<Map<string, unknown>>,
+  key: string,
+  factory: () => T
+): T => {
+  const existing = cache.current.get(key) as T | undefined
+  if (existing) return existing
+  const handler = factory()
+  cache.current.set(key, handler)
+  return handler
+}
+
 export const SidePanelBody = ({
   scrollParentRef,
   searchQuery,
@@ -121,20 +133,40 @@ export const SidePanelBody = ({
   )
 
   // Stable callbacks for PlaygroundMessage
-  const handleEditMessage = React.useCallback(
-    (
-      index: number,
-      value: string,
-      isUser: boolean,
-      isSend: boolean,
-      editIsCurrent?: () => boolean,
-                          editOriginIsCurrent?: () => boolean
-    ) => editMessage(index, value, isUser, isSend, editIsCurrent, editOriginIsCurrent),
-    [editMessage]
-  )
   const handleDeleteMessage = React.useCallback(
     (index: number) => deleteMessage(index),
     [deleteMessage]
+  )
+  const editMessageRef = React.useRef(editMessage)
+  editMessageRef.current = editMessage
+  // Per-row handler cache keyed by message id; cleared when the conversation
+  // instance changes so it cannot grow unbounded across conversations.
+  const rowHandlerCache = React.useRef(new Map<string, unknown>())
+  React.useEffect(() => {
+    rowHandlerCache.current.clear()
+  }, [conversationInstanceId])
+  const getRowEditSubmitHandler = React.useCallback(
+    (messageId: string | undefined) =>
+      getStableRowHandler(
+        rowHandlerCache,
+        `edit:${messageId ?? ""}`,
+        () => (value: string, isSend: boolean, editIsCurrent?: () => boolean, editOriginIsCurrent?: () => boolean) => {
+          const index = messagesRef.current.findIndex(
+            (row) => row.id === messageId
+          )
+          const row = index >= 0 ? messagesRef.current[index] : null
+          if (!row) return
+          return editMessageRef.current(
+            index,
+            value,
+            !row.isBot,
+            isSend,
+            editIsCurrent,
+            editOriginIsCurrent
+          )
+        }
+      ),
+    []
   )
   const handleNewBranch = React.useCallback(
     (index: number) => createChatBranch(messagesRef.current[index]?.id ?? ""),
@@ -304,16 +336,7 @@ export const SidePanelBody = ({
                   isProcessing={isProcessing}
                   isSearchingInternet={isSearchingInternet}
                   sources={message.sources}
-                  onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
-                    return handleEditMessage(
-                      index,
-                      value,
-                      !message.isBot,
-                      isSend,
-                      editIsCurrent,
-                      editOriginIsCurrent
-                    )
-                  }}
+                  onEditFormSubmit={getRowEditSubmitHandler(message.id)}
                   onDeleteMessage={() => {
                     return handleDeleteMessage(index)
                   }}

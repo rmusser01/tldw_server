@@ -33,6 +33,7 @@ from ....core.LLM_Calls.adapter_utils import (
     resolve_provider_model,
     split_system_message,
 )
+from ..structured_prompts import StructuredPromptAssemblyError
 from .program_evaluator import ProgramEvaluator
 from .prompt_executor import PromptExecutor
 
@@ -170,7 +171,8 @@ class TestRunner:
         inputs = test_case.get("inputs") or {}
         expected = test_case.get("expected_outputs") or {}
 
-        # Call LLM
+        # Assembly errors are input failures; provider errors stay sanitized.
+        prompt_request = None
         try:
             signature = None
             if prompt.get("signature_id"):
@@ -216,18 +218,30 @@ class TestRunner:
             _log.info("PS testrun.llm.done time_ms={}", int((time.time() - start_time) * 1000))
 
         except Exception as e:
-            safe_error = sanitized_provider_stream_exception(e)
-            _log.error(
-                "PS testrun.llm.error error_code={} time_ms={}",
-                safe_error.code,
-                int((time.time() - start_time) * 1000),
-            )
-            if strict_provider_errors:
-                raise_detached_error(safe_error)
-            actual_output = {
-                "error": str(safe_error),
-                "error_code": safe_error.code,
-            }
+            if prompt_request is None and isinstance(e, StructuredPromptAssemblyError):
+                if strict_provider_errors:
+                    raise
+                actual_output = {
+                    "error": (
+                        "Required prompt inputs are missing or empty."
+                        if e.code == "missing_required_variable"
+                        else "The prompt template could not be assembled."
+                    ),
+                    "error_code": e.code,
+                }
+            else:
+                safe_error = sanitized_provider_stream_exception(e)
+                _log.error(
+                    "PS testrun.llm.error error_code={} time_ms={}",
+                    safe_error.code,
+                    int((time.time() - start_time) * 1000),
+                )
+                if strict_provider_errors:
+                    raise_detached_error(safe_error)
+                actual_output = {
+                    "error": str(safe_error),
+                    "error_code": safe_error.code,
+                }
 
         execution_time_ms = int((time.time() - start_time) * 1000)
         tokens_used = None

@@ -3,7 +3,7 @@ vi.mock(
   () =>
     import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"),
 );
-import { readKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance";
+import { readKnowledgeNoteProvenance, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance";
 import React from "react";
 import {
   fireEvent,
@@ -306,10 +306,10 @@ describe("QuickNotesSection Stage 4 layout and export", () => {
     fireEvent.change(screen.getByLabelText("Note content"), {
       target: { value: "Edited body" },
     })
-    const edited = workspaceStoreState.updateNoteContent.mock.lastCall![0]
-    expect(edited).toContain("Edited body")
-    expect(readKnowledgeNoteProvenance(edited)).toEqual(original)
-    workspaceStoreState.currentNote.content = edited
+    const edited = workspaceStoreState.setCurrentNote.mock.lastCall![0]
+    expect(edited.content).toBe("Edited body")
+    expect(edited.knowledge_provenance).toEqual(original)
+    workspaceStoreState.currentNote = edited
     view.rerender(<QuickNotesSection />)
     fireEvent.click(screen.getByRole("button", { name: "Update" }))
     await waitFor(() =>
@@ -319,7 +319,7 @@ describe("QuickNotesSection Stage 4 layout and export", () => {
           headers: expect.objectContaining({ "expected-version": "1" }),
           method: "PUT",
           body: expect.objectContaining({
-            content: edited,
+            content: retainKnowledgeNoteProvenance(edited.content, edited),
             keywords: expect.arrayContaining([
               "workspace:workspace-a",
               "workspace:test",
@@ -328,6 +328,8 @@ describe("QuickNotesSection Stage 4 layout and export", () => {
         }),
       ),
     )
+    const saved = mockBgRequest.mock.calls.find(([request]) => request.method === "PUT")![0]
+    expect(readKnowledgeNoteProvenance(saved.body.content)).toEqual(original)
   })
   it.each(["Hi", "", "<!-- tldw-knowledge:v1:invalid -->"])(
     "hides validated provenance in Load-note preview for %s",

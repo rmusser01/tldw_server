@@ -152,6 +152,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
     promptAssistSavedAttemptId,
+    captureDraftOwnership,
     textAreaFocus,
     captureCompletionGuard,
     captureStopGuard,
@@ -705,6 +706,7 @@ export function useComposerInput(deps: UseComposerInputDeps) {
     restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
     promptAssistSavedAttemptId,
+    captureDraftOwnership,
     typing,
     // Message value helpers
     setMessageValue,

@@ -540,8 +540,8 @@ docker compose -f Dockerfiles/docker-compose.multi-user-postgres.yml up -d --bui
 <summary>Manual virtualenv, environment, auth, and startup steps</summary>
 
 Supported Python versions:
-- Minimum: Python 3.11+
-- CI-tested: Python 3.11, 3.12, and 3.13
+- Minimum: Python 3.12+
+- CI configurations use Python 3.12 and 3.13
 - Recommended for local development: Python 3.12
 
 Prerequisites:
@@ -568,11 +568,11 @@ Windows notes:
 1) **Create and activate a virtual environment**
 ```bash
 # macOS/Linux: choose a supported interpreter explicitly (3.12 recommended)
-python3.12 -m venv .venv  # or python3.13 / python3.11
+python3.12 -m venv .venv  # or python3.13
 source .venv/bin/activate
 
 # Windows (PowerShell)
-py -3.12 -m venv .venv  # or -3.13 / -3.11
+py -3.12 -m venv .venv  # or -3.13
 .venv\Scripts\Activate.ps1
 
 # Confirm venv interpreter version

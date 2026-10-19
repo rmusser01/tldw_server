@@ -31,6 +31,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     get_auth_principal,
     get_request_user,
     rbac_rate_limit,
+    require_expected_user_if_present,
 )
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import require_within_limit
 from tldw_Server_API.app.api.v1.API_Deps.llm_routing_deps import (
@@ -109,7 +110,7 @@ from .llm_providers import get_configured_providers
 #
 # Functions:
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_expected_user_if_present)])
 
 _TEMPLATE_VAR_RE = re.compile(r"\{\{\s*([a-zA-Z0-9_]+)\s*\}\}")
 _MAX_DUPLICATE_NAME_ITERATIONS = 10000
@@ -394,10 +395,11 @@ async def _resolve_prompts_auth_user(
     Authorization: Optional[str] = Header(None, alias="Authorization"),
 ) -> Optional[User]:
     """
-    Validate the legacy Token header for prompts endpoints.
+    Authenticate prompts requests, including the legacy Token header.
 
-    Single-user mode validates against SINGLE_USER_API_KEY. Multi-user mode
-    defers to the unified AuthNZ path for API keys/JWTs.
+    Headerless requests resolve canonical cookie-session owners. Single-user
+    headers validate against SINGLE_USER_API_KEY; multi-user headers defer to
+    the unified AuthNZ path for API keys/JWTs.
     """
     raw_token = None
     for candidate in (Token, x_api_key, Authorization):
@@ -406,6 +408,17 @@ async def _resolve_prompts_auth_user(
             break
 
     if not raw_token:
+        if request is not None:
+            try:
+                return await get_request_user(
+                    request,
+                    api_key=None,
+                    token=None,
+                    legacy_token_header=None,
+                )
+            except HTTPException as exc:
+                if exc.status_code != status.HTTP_401_UNAUTHORIZED:
+                    raise
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing authentication token",

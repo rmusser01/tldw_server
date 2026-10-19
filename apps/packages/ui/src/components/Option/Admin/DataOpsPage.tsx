@@ -99,6 +99,25 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
   const [creatingSchedule, setCreatingSchedule] = useState(false)
   const selectedScheduleDataset = Form.useWatch("dataset", scheduleForm)
 
+  const getRestoreTarget = (record: {
+    id?: unknown
+    backup_id?: unknown
+    dataset?: unknown
+    user_id?: unknown
+  }) => {
+    const backupId = record.id ?? record.backup_id
+    if (typeof backupId !== "string" || !backupId.trim()) return null
+    const dataset = record.dataset
+    if (typeof dataset !== "string" || (!PER_USER_BACKUP_DATASETS.has(dataset) && dataset !== "authnz")) return null
+    const userId = record.user_id
+    if (userId != null) {
+      if (typeof userId !== "number" || !Number.isSafeInteger(userId) || userId <= 0) return null
+    } else if (PER_USER_BACKUP_DATASETS.has(dataset)) {
+      return null
+    }
+    return { backupId, dataset, userId: typeof userId === "number" ? userId : undefined }
+  }
+
   const loadBackups = useCallback(async () => {
     setLoading(true)
     try {
@@ -155,10 +174,15 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
     }
   }
 
-  const handleRestore = async (backupId: string) => {
-    setRestoring(backupId)
+  const handleRestore = async (target: ReturnType<typeof getRestoreTarget>) => {
+    if (!target) return
+    setRestoring(target.backupId)
     try {
-      await tldwClient.restoreBackup(backupId)
+      await tldwClient.restoreBackup(target.backupId, {
+        dataset: target.dataset,
+        user_id: target.userId,
+        confirm: true
+      })
       message.success(t("settings:adminDataOps.backupRestored", "Backup restored successfully"))
       void loadBackups()
     } catch (err: any) {
@@ -202,6 +226,12 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
 
   const backupColumns = [
     {
+      title: t("settings:adminDataOps.colId", "ID"),
+      dataIndex: "id",
+      key: "id",
+      render: (v: string, record: { backup_id?: string }) => <code>{v ?? record.backup_id ?? "\u2014"}</code>
+    },
+    {
       title: t("settings:adminDataOps.colDataset", "Dataset"),
       dataIndex: "dataset",
       key: "dataset",
@@ -223,10 +253,10 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
     },
     {
       title: t("settings:adminDataOps.colSize", "Size"),
-      dataIndex: "size",
-      key: "size",
+      dataIndex: "size_bytes",
+      key: "size_bytes",
       width: 100,
-      render: (v: number | string) => v ?? "\u2014"
+      render: (v: number | string, record: { size?: number | string }) => v ?? record.size ?? "\u2014"
     },
     {
       title: t("settings:adminDataOps.colStatus", "Status"),
@@ -242,23 +272,38 @@ const BackupsTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardErr
       title: t("settings:adminDataOps.colActions", "Actions"),
       key: "actions",
       width: 100,
-      render: (_: any, record: any) => (
-        <Popconfirm
-          title={t("settings:adminDataOps.restoreConfirm", "Restore this backup? This will overwrite current data.")}
-          onConfirm={() => handleRestore(record.id ?? record.backup_id)}
-          okText={t("settings:adminDataOps.restore", "Restore")}
-          okButtonProps={{ danger: true }}
-        >
-          <Button
-            type="text"
-            size="small"
-            icon={<UndoOutlined />}
-            loading={restoring === (record.id ?? record.backup_id)}
+      render: (_: any, record: any) => {
+        const target = getRestoreTarget(record)
+        return (
+          <Popconfirm
+            title={t("settings:adminDataOps.restoreConfirm", "Restore this backup? This will overwrite current data.")}
+            description={target && (
+              <div>
+                <div>{t("settings:adminDataOps.backupArtifact", "Backup artifact")}: <code>{target.backupId}</code></div>
+                <div>{t("settings:adminDataOps.colDataset", "Dataset")}: <strong>{target.dataset}</strong></div>
+                <div>{target.dataset === "authnz"
+                  ? t("settings:adminDataOps.restoreServerWide", "Server-wide users and authentication data")
+                  : <>{t("settings:adminDataOps.colUser", "User")}: <strong>{target.userId}</strong></>}
+                </div>
+              </div>
+            )}
+            disabled={!target}
+            onConfirm={() => handleRestore(target)}
+            okText={t("settings:adminDataOps.restore", "Restore")}
+            okButtonProps={{ danger: true }}
           >
-            {t("settings:adminDataOps.restore", "Restore")}
-          </Button>
-        </Popconfirm>
-      )
+            <Button
+              type="text"
+              size="small"
+              icon={<UndoOutlined />}
+              disabled={!target}
+              loading={restoring === target?.backupId}
+            >
+              {t("settings:adminDataOps.restore", "Restore")}
+            </Button>
+          </Popconfirm>
+        )
+      }
     }
   ]
 
@@ -548,7 +593,7 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
     setLoading(true)
     try {
       const result = await tldwClient.listDsrs({ limit: 100 })
-      setDsrs(Array.isArray(result) ? result : result?.data ?? result?.requests ?? [])
+      setDsrs(Array.isArray(result) ? result : result?.items ?? result?.data ?? result?.requests ?? [])
     } catch (err) {
       onGuardError(err)
     } finally {
@@ -570,7 +615,7 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
         categories: values.categories?.length ? values.categories : undefined
       })
       setPreviewData(result)
-      setPendingDsr(values)
+      setPendingDsr({ ...values, client_request_id: crypto.randomUUID() })
       setPreviewModalOpen(true)
     } catch (err: any) {
       if (err?.errorFields) return
@@ -588,7 +633,7 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
         requester_identifier: pendingDsr.requester_identifier,
         request_type: pendingDsr.request_type || "erasure",
         categories: pendingDsr.categories?.length ? pendingDsr.categories : undefined,
-        client_request_id: pendingDsr.client_request_id || undefined,
+        client_request_id: pendingDsr.client_request_id,
         notes: pendingDsr.notes || undefined
       })
       message.success(t("settings:adminDataOps.dsrRecorded", "DSR recorded"))
@@ -652,10 +697,13 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
     },
     {
       title: t("settings:adminDataOps.colCreated", "Created"),
-      dataIndex: "created_at",
-      key: "created_at",
+      dataIndex: "requested_at",
+      key: "requested_at",
       width: 180,
-      render: (v: string) => (v ? formatAdminDateTime(v) : "\u2014")
+      render: (v: string, record: { created_at?: string }) => {
+        const value = v || record.created_at
+        return value ? formatAdminDateTime(value) : "\u2014"
+      }
     },
     {
       title: t("settings:adminDataOps.colActions", "Actions"),
@@ -714,8 +762,7 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
                 options={[
                   { value: "erasure", label: t("settings:adminDataOps.typeErasure", "Erasure (Right to be Forgotten)") },
                   { value: "export", label: t("settings:adminDataOps.typeExport", "Data Export") },
-                  { value: "access", label: t("settings:adminDataOps.typeAccess", "Access Request") },
-                  { value: "rectification", label: t("settings:adminDataOps.typeRectification", "Rectification") }
+                  { value: "access", label: t("settings:adminDataOps.typeAccess", "Access Request") }
                 ]}
               />
             </Form.Item>
@@ -725,11 +772,11 @@ const DsrTab: React.FC<{ onGuardError: (err: any) => void }> = ({ onGuardError }
                 placeholder={t("settings:adminDataOps.categoriesPlaceholder", "Select categories to include")}
                 allowClear
                 options={[
-                  { value: "media", label: t("settings:adminDataOps.categoryMedia", "Media") },
-                  { value: "chats", label: t("settings:adminDataOps.categoryChats", "Chats") },
+                  { value: "media_records", label: t("settings:adminDataOps.categoryMedia", "Media") },
+                  { value: "chat_messages", label: t("settings:adminDataOps.categoryChats", "Chats") },
                   { value: "notes", label: t("settings:adminDataOps.categoryNotes", "Notes") },
-                  { value: "embeddings", label: t("settings:adminDataOps.categoryEmbeddings", "Embeddings") },
-                  { value: "profile", label: t("settings:adminDataOps.categoryProfile", "Profile") }
+                  { value: "audit_events", label: t("settings:adminDataOps.datasetAudit", "Audit log") },
+                  { value: "embeddings", label: t("settings:adminDataOps.categoryEmbeddings", "Embeddings") }
                 ]}
               />
             </Form.Item>

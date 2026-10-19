@@ -68,6 +68,21 @@ export type HistorySelectionReference = HistoryBookmarkScope & {
     projection_id: string
   }
 }
+// Only the writer of a handoff may revoke it during provisional-load cancellation.
+const sessionHandoffWriters = new Map<string, object>()
+
+type HistoryLoadTarget = {
+  historyId?: string | null
+  serverChatId?: string | null
+  temporary?: boolean
+  scope?: ChatScope
+  bindUnbound?: boolean
+  onDeviceScope?: import("@/db/dexie/history-selection").OnDeviceHistoryScope
+  qualifyCapture?: (capture: HistoryCaptureResultV1, owner: HistoryOwnerV1) => void
+  isCurrent?: () => boolean
+  resetOnCancel?: boolean
+  resumeAfterBind?: () => Promise<boolean>
+}
 type PendingConfirmation = {
   scope: HistoryBookmarkScope
   view: HistoryViewSelectionV1
@@ -196,6 +211,7 @@ export function useHistorySelection(
   )
   const activeLogicalView = useRef("default")
   const releaseOwnerLease = useRef<(() => void) | null>(null)
+  const bindCandidate = useRef<{ target: HistoryLoadTarget; reference?: HistorySelectionReference | null; epoch: number } | null>(null)
   const epoch = useRef(0)
   const sendChoice = useRef<{
     kind: "conflict" | "branch"
@@ -210,12 +226,14 @@ export function useHistorySelection(
   const mounted = useRef(true)
   const saves = useRef(Promise.resolve())
   const storageKey = useRef(options.storageKey)
+  const handoffWriter = useRef({})
   const publish = useCallback((next: SelectionState) => {
     live.current = next
     if (mounted.current) setState(next)
   }, [])
   const invalidate = useCallback(() => {
     epoch.current += 1
+    bindCandidate.current = null
     sendChoice.current = null
     freshnessRequest.current?.abort()
     freshnessRequest.current = null
@@ -249,10 +267,16 @@ export function useHistorySelection(
   }, [invalidate, publish])
   const retireCancelledLoad = useCallback((token: number, owner: HistoryOwnerV1, view?: HistoryViewSelectionV1) => {
     if (token !== epoch.current || live.current.owner !== owner || (view && live.current.view !== view)) return
-    reset()
+    invalidate()
+    releaseOwnerLease.current?.()
+    releaseOwnerLease.current = null
+    if (storageKey.current && sessionHandoffWriters.get(storageKey.current) === handoffWriter.current) {
+      sessionStorage.removeItem(storageKey.current)
+      sessionHandoffWriters.delete(storageKey.current)
+    }
     // Retiring provisional ownership is not consent to replay the old load.
     publish({ ...initialState(), status: "stale_selection" })
-  }, [publish, reset])
+  }, [invalidate, publish])
   const persist = useCallback(
     async (scope: HistoryBookmarkScope, view: HistoryViewSelectionV1, isCurrent: () => boolean) => {
       const operation = saves.current
@@ -272,7 +296,8 @@ export function useHistorySelection(
       scope: HistoryBookmarkScope,
       token: number,
       pending: PendingConfirmation | null = null,
-      isCurrentLoad: () => boolean = () => true
+      isCurrentLoad: () => boolean = () => true,
+      retainedView?: HistoryViewSelectionV1
     ) => {
       const current = () =>
         mounted.current &&
@@ -303,26 +328,29 @@ export function useHistorySelection(
         forkSettings,
         owner,
         bookmarkScope: scope,
-        view: result.view,
+        view: retainedView ?? result.view,
         capture: result,
         pending,
-        status: pending
+        status: retainedView
+          ? "stale_selection"
+          : pending
           ? "pending_unknown"
           : result.status === "captured"
             ? "ready"
             : result.status,
-        error: result.status === "captured" ? null : result.code
+        error: retainedView ? "stale_projection" : result.status === "captured" ? null : result.code
       })
-      if (storageKey.current && sameView(live.current.view, result.view)) {
+      if (storageKey.current && current() && sameView(live.current.view, retainedView ?? result.view)) {
+        sessionHandoffWriters.set(storageKey.current, handoffWriter.current)
         sessionStorage.setItem(storageKey.current, JSON.stringify({
           ...scope,
-          owner_key: result.view.owner_key,
-          conversation_id: result.view.conversation_id,
+          owner_key: (retainedView ?? result.view).owner_key,
+          conversation_id: (retainedView ?? result.view).conversation_id,
           owner_kind: owner.kind,
           pending_confirmation_reference: pendingReference(pending)
         }))
       }
-      if (result.status === "captured") onCapture.current?.(result)
+      if (!retainedView && result.status === "captured") onCapture.current?.(result)
       return current()
     },
     [persist, publish]
@@ -439,12 +467,31 @@ export function useHistorySelection(
               cursor: { kind: "empty" },
               selection_revision: revision
             }
-        let result = await captureHistorySnapshot(
-          owner,
-          view,
-          "send",
-          operation.signal
-        )
+        let retainedStaleView = false
+        let result: HistoryCaptureResultV1
+        try {
+          result = await captureHistorySnapshot(owner, view, "send", operation.signal)
+        } catch (error) {
+          const failure = error as {
+            status?: number
+            detail?: { code?: string }
+            details?: { detail?: { code?: string } }
+          }
+          if (owner.kind !== "native" || !bookmark ||
+              view.interpretation.kind !== "legacy_linear_v1" ||
+              pendingBookmark?.pending_confirmation ||
+              failure.status !== 409 ||
+              (failure.details?.detail?.code !== "stale_projection" &&
+                failure.detail?.code !== "stale_projection" &&
+                errorCode(error) !== "stale_projection"))
+            throw error
+          result = await captureHistorySnapshot(owner, {
+            ...view,
+            interpretation: { kind: "parent_graph_v1" },
+            cursor: { kind: "empty" }
+          }, "send", operation.signal, "tldw_history_existing_input_v1")
+          retainedStaleView = true
+        }
         if (operation.epoch !== epoch.current || !isCurrentLoad() || !ownerLeaseValid(owner)) return false
         // A fresh graph uses its last owner-ordered tip. An explicit empty bookmark never does.
         if (
@@ -491,7 +538,10 @@ export function useHistorySelection(
           scope,
           operation.epoch,
           pending,
-          isCurrentLoad
+          isCurrentLoad,
+          retainedStaleView && bookmark
+            ? { ...view, owner_key: bookmark.view.owner_key }
+            : undefined
         )
         if (
           installed &&
@@ -927,16 +977,7 @@ export function useHistorySelection(
   }, [])
   const loadConversation = useCallback(
     async (
-      target: {
-        historyId?: string | null
-        serverChatId?: string | null
-        temporary?: boolean
-        scope?: import("@/types/chat-scope").ChatScope
-        bindUnbound?: boolean
-        onDeviceScope?: import("@/db/dexie/history-selection").OnDeviceHistoryScope
-        isCurrent?: () => boolean
-        qualifyCapture?: (capture: HistoryCaptureResultV1, owner: HistoryOwnerV1) => void
-      },
+      target: HistoryLoadTarget,
       reference?: HistorySelectionReference | null,
       onLoaded?: (receipt: HistoryLoadReceipt) => void
     ) => {
@@ -963,6 +1004,23 @@ export function useHistorySelection(
         return result
       }
       const operation = invalidate()
+      const offerBinding = async (code: string) => {
+        const owner = { kind: "unavailable" as const, code }
+        const opening = open(owner)
+        const openedEpoch = epoch.current
+        const result = await opening
+        if (mounted.current && openedEpoch === epoch.current && live.current.owner === owner && isCurrent()) {
+          bindCandidate.current = { target: { ...target, scope: target.scope ? structuredClone(target.scope) : undefined }, reference: reference == null ? reference : structuredClone(reference), epoch: openedEpoch }
+          releaseOwnerLease.current = watchChatAccountChanges(invalidated => {
+            if (invalidated && openedEpoch === epoch.current) {
+              invalidate()
+              publish(revokedState(live.current))
+            }
+          })
+          publish({ ...live.current })
+        }
+        return result
+      }
       let releaseCandidateLease: (() => void) | null = null
       let releaseLoadLease: (() => void) | null = null
       if (target.temporary || target.historyId === "temp")
@@ -993,16 +1051,30 @@ export function useHistorySelection(
           throw new Error("owner_conversation_mismatch")
         const chatId = target.serverChatId || details?.server_chat_id
         if (!chatId && !details?.server_scope_key) {
+          if (!details || details.message_source === "server") throw new Error("owner_conversation_mismatch")
           // Only an existing profile-owned copy is account-independent. Do not
           // turn an unowned cache into proof of ownership by installing a key.
-          if (!details?.local_owner_key)
-            throw new Error("owner_conversation_mismatch")
-          const { getLocalHistoryOwner } =
+          if (!details?.local_owner_key && !target.bindUnbound)
+            return offerBinding("unbound_local_history")
+          const { getLocalHistoryOwner, bindUnboundLocalHistory } =
             await import("@/db/dexie/history-selection")
-          const owner = await getLocalHistoryOwner(target.historyId!, target.onDeviceScope)
+          let owner: HistoryOwnerV1
+          if (!details?.local_owner_key) {
+            let valid = true
+            const stop = watchChatAccountChanges(invalidated => {
+              if (invalidated) { valid = false; if (operation.epoch === epoch.current) invalidate() }
+            })
+            try {
+              owner = await bindUnboundLocalHistory(target.historyId!, { signal: operation.signal, validate_lease: () => valid && operation.epoch === epoch.current && isCurrent() })
+            } finally { stop() }
+          } else {
+            owner = await getLocalHistoryOwner(target.historyId!, target.onDeviceScope)
+          }
           if (operation.epoch !== epoch.current || !isCurrent()) return false
           if (target.onDeviceScope && owner.profile_id !== target.onDeviceScope.profileId) return false
-          return completed(await open(owner, reference, opened, isCurrent,
+          // Profile qualification may await before open advances its owned epoch.
+          const captureEpoch = epoch.current + 1
+          const opening = open(owner, reference, opened, isCurrent,
             target.onDeviceScope ? {
               profileId: target.onDeviceScope.profileId,
               installLease: () => {
@@ -1010,14 +1082,18 @@ export function useHistorySelection(
                 releaseOwnerLease.current = null
               }
             } : undefined
-          ))
+          )
+          const result = await opening
+          if (!result || captureEpoch !== epoch.current || live.current.owner !== owner || !isCurrent()) return false
+          if (target.bindUnbound && target.resumeAfterBind) return target.resumeAfterBind()
+          return completed(result)
         }
         if (
           details?.server_chat_id &&
           !details.server_scope_key &&
           !target.bindUnbound
         )
-          return open({ kind: "unavailable", code: "unbound_server_mirror" })
+          return offerBinding("unbound_server_mirror")
         const {
           resolveServicePromptScope,
           subscribeToServicePromptConfigChanges
@@ -1143,6 +1219,14 @@ export function useHistorySelection(
     },
     [invalidate, open, publish, retireCancelledLoad]
   )
+  const bindUnavailableConversation = useCallback(async () => {
+    const candidate = bindCandidate.current
+    if (!mounted.current || !candidate || candidate.epoch !== epoch.current || candidate.target.isCurrent?.() === false || live.current.owner?.kind !== "unavailable") return false
+    if (live.current.error === "unbound_local_history" && !candidate.target.resumeAfterBind) return false
+    bindCandidate.current = null
+    return loadConversation({ ...candidate.target, bindUnbound: true }, candidate.reference)
+  }, [loadConversation])
+
   const fence = useCallback(() => {
     const token = epoch.current
     return () => mounted.current && token === epoch.current
@@ -1953,6 +2037,8 @@ export function useHistorySelection(
     prepareExpansionPath,
     open,
     loadConversation,
+    bindUnavailableConversation,
+    canBindUnavailable: bindCandidate.current?.target.isCurrent?.() !== false && bindCandidate.current?.epoch === epoch.current && (state.error === "unbound_server_mirror" || (state.error === "unbound_local_history" && Boolean(bindCandidate.current?.target.resumeAfterBind))),
     activate,
     choose,
     refresh,

@@ -53,6 +53,11 @@ const OptionLayout = dynamic(
   { ssr: false }
 )
 
+const AdminQueryProvider = dynamic(
+  () => import("@/components/Option/Admin/AdminQueryProvider").then(module => module.AdminQueryProvider),
+  { ssr: false, loading: () => <PageAssistLoader label="Loading Admin…" autoFocus={false} /> }
+)
+
 const ChatServerSetupDialog = dynamic(
   () => import("@/components/Chat/composer/ChatServerSetupDialog").then(module => module.ChatServerSetupDialog),
   { ssr: false }
@@ -559,11 +564,14 @@ export default function App({ Component, pageProps }: AppProps) {
     )
   }
 
-  const layoutContent = (
+  const routeContent = (
     <OptionLayout {...layoutProps}>
       <Component {...pageProps} />
     </OptionLayout>
   )
+  const layoutContent = isAdminRoute(routePath)
+    ? <AdminQueryProvider>{routeContent}</AdminQueryProvider>
+    : routeContent
 
   const gatedContent = isPublicAuthRoute ? (
     <Component {...pageProps} />

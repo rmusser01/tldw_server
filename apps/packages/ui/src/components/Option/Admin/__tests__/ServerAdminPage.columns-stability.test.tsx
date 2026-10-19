@@ -1,8 +1,10 @@
+vi.mock("@/hooks/usePrivateWorkspaceScope", () => ({ usePrivateWorkspaceScope: () => ({ scope: null, retry: vi.fn() }) }))
+import { AdminTestQueryProvider } from "./admin-query-fixture"
 // @vitest-environment jsdom
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen } from "@testing-library/react"
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query"
+import { type QueryClient } from "@tanstack/react-query"
 import ServerAdminPage from "../ServerAdminPage"
 import { createAdminQueryClient } from "../AdminQueryProvider"
 
@@ -83,7 +85,7 @@ const renderPage = (ui: React.ReactElement) => {
   const client = createAdminQueryClient()
   adminQueryClients.push(client)
   return render(
-    <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    <AdminTestQueryProvider client={client}>{ui}</AdminTestQueryProvider>
   )
 }
 

@@ -125,7 +125,8 @@ def offline_client(tmp_path, monkeypatch):
     # Quota remains outside this native parser/persistence harness.
     quota_service = SimpleNamespace(check_quota=AsyncMock(return_value=(True, {})))
     monkeypatch.setattr(storage_quota_service, "get_storage_quota_service", lambda: quota_service)
-    monkeypatch.setattr(persistence, "_enforce_and_record_media_bytes", AsyncMock())
+    # AuthNZ daily accounting is outside this focused parser/persistence harness.
+    monkeypatch.setattr(persistence, "_enforce_and_record_media_bytes", AsyncMock(return_value=None))
     monkeypatch.setattr(concurrency_quota, "user_quota", AsyncMock(return_value=None))
     db = MediaDatabase(db_path=str(tmp_path / "media.db"), client_id="offline-email-test")
     app = FastAPI()
@@ -213,6 +214,110 @@ def test_offline_client_allows_windows_socketpair_fallback_and_blocks_remote_con
     offline_client.app.state.offline_forbidden_calls.clear()
 
 
+@pytest.mark.parametrize(
+    "boundary",
+    [
+        "socket.getaddrinfo",
+        "socket.connect_ex",
+        "Summarization_General_Lib.analyze",
+        "claims_utils.extract_claims_for_chunks",
+        "ChatAutoChunkBoundaryAssistant.refine",
+        "EmbeddingsJobsAdapter.create_job",
+        "BackgroundTasks.add_task",
+        *[
+            f"http_client.{name}"
+            for name in (
+                "fetch",
+                "afetch",
+                "apost",
+                "fetch_json",
+                "afetch_json",
+                "download",
+                "adownload",
+                "astream_bytes",
+                "astream_sse",
+                "stream_response",
+            )
+        ],
+    ],
+)
+def test_offline_guard_reports_boundary_and_caller_without_arguments(offline_client, boundary):
+    """Keep swallowed forbidden attempts actionable without retaining inputs."""
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Chunking.auto_boundary_assistant import ChatAutoChunkBoundaryAssistant
+    from tldw_Server_API.app.core.Claims_Extraction import claims_utils
+    from tldw_Server_API.app.core.Embeddings.jobs_adapter import EmbeddingsJobsAdapter
+    from tldw_Server_API.app.core.LLM_Calls import Summarization_General_Lib
+
+    targets = {
+        "socket.getaddrinfo": socket.getaddrinfo,
+        "socket.connect_ex": socket.socket.connect_ex,
+        "Summarization_General_Lib.analyze": Summarization_General_Lib.analyze,
+        "claims_utils.extract_claims_for_chunks": claims_utils.extract_claims_for_chunks,
+        "ChatAutoChunkBoundaryAssistant.refine": ChatAutoChunkBoundaryAssistant.refine,
+        "EmbeddingsJobsAdapter.create_job": EmbeddingsJobsAdapter.create_job,
+        "BackgroundTasks.add_task": BackgroundTasks.add_task,
+    }
+    if boundary.startswith("http_client."):
+        target = getattr(http_client, boundary.split(".", 1)[1])
+    else:
+        target = targets[boundary]
+    private_input = "synthetic-private-input.example.test"
+    with pytest.raises(AssertionError, match="Offline email validation forbids"):
+        target(offline_probe=private_input)
+    attempts = list(offline_client.app.state.offline_forbidden_calls)
+    # This test deliberately probes the tripwire, as the socketpair test does.
+    offline_client.app.state.offline_forbidden_calls.clear()
+    assert len(attempts) == 1  # nosec B101 - pytest rejects extra forbidden calls during the deliberate probe.
+    diagnostic = repr(attempts)
+    assert boundary in diagnostic  # nosec B101 - pytest verifies forbidden-boundary attribution.
+    assert "test_offline_guard_reports_boundary_and_caller_without_arguments" in diagnostic  # nosec B101 - pytest verifies caller attribution.
+    assert private_input not in diagnostic  # nosec B101 - pytest verifies input privacy.
+
+
+@pytest.fixture
+def offline_accounting_probes(offline_client, monkeypatch):
+    """Observe excluded AuthNZ accounting while retaining the real offline upload path."""
+    from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import ResourceDailyLedger
+
+    quota_lookup = AsyncMock(return_value=None)
+    ledger_initialize = AsyncMock(side_effect=AssertionError("AuthNZ accounting is outside the offline harness"))
+    monkeypatch.setattr(persistence, "_media_ingestion_daily_ledger", None)
+    monkeypatch.setattr(persistence.quota_checks, "user_quota", quota_lookup)
+    monkeypatch.setattr(ResourceDailyLedger, "initialize", ledger_initialize)
+    return quota_lookup, ledger_initialize
+
+
+@pytest.fixture
+def offline_pool_probe(offline_client, monkeypatch):
+    """Reject excluded AuthNZ pool access and restore its quota resolver state."""
+    from tldw_Server_API.app.core.AuthNZ import database
+    from tldw_Server_API.app.core.DB_Management import Resource_Daily_Ledger
+    from tldw_Server_API.app.core.Usage import quota_resolver
+
+    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
+    quota_resolver.invalidate_all()
+    monkeypatch.setattr(persistence, "_media_ingestion_daily_ledger", None)
+    pool_entry = AsyncMock(side_effect=RuntimeError("AuthNZ is outside the offline email harness"))
+    monkeypatch.setattr(database, "get_db_pool", pool_entry)
+    monkeypatch.setattr(Resource_Daily_Ledger, "get_db_pool", pool_entry)
+    yield pool_entry
+    quota_resolver.invalidate_all()
+
+
+def test_offline_upload_does_not_initialize_authnz_accounting(offline_client, offline_accounting_probes):
+    """A cold upload keeps AuthNZ quota and ledger bootstrap outside this harness."""
+    quota_lookup, ledger_initialize = offline_accounting_probes
+
+    upload(offline_client, "synthetic.eml", synthetic_message(701).as_bytes())
+
+    assert {  # nosec B101 - pytest rejects AuthNZ accounting bootstrap in the focused offline harness.
+        "quota_lookups": quota_lookup.await_count,
+        "ledger_initializations": ledger_initialize.await_count,
+    } == {"quota_lookups": 0, "ledger_initializations": 0}
+
+
+
 def synthetic_message(number: int, *, html_only: bool = False, same_body: bool = False) -> EmailMessage:
     """Build synthetic MIME mail, optionally reproducing TASK-13250's collision."""
     message = EmailMessage()
@@ -258,19 +363,10 @@ def search(client, query: str):
 
 
 def test_offline_upload_does_not_enter_authnz_pool(
-    offline_client: TestClient, monkeypatch: pytest.MonkeyPatch,
+    offline_client: TestClient, offline_pool_probe,
 ) -> None:
     """Daily accounting cannot bootstrap AuthNZ in the native email harness."""
-    from tldw_Server_API.app.core.AuthNZ import database
-    from tldw_Server_API.app.core.DB_Management import Resource_Daily_Ledger
-    from tldw_Server_API.app.core.Usage import quota_resolver
-
-    monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
-    quota_resolver.invalidate_all()
-    monkeypatch.setattr(persistence, "_media_ingestion_daily_ledger", None)
-    pool_entry = AsyncMock(side_effect=RuntimeError("AuthNZ is outside the offline email harness"))
-    monkeypatch.setattr(database, "get_db_pool", pool_entry)
-    monkeypatch.setattr(Resource_Daily_Ledger, "get_db_pool", pool_entry)
+    pool_entry = offline_pool_probe
 
     result = upload(offline_client, "synthetic-quota.eml", synthetic_message(77).as_bytes())
     rows = search(offline_client, "uniquequartz")

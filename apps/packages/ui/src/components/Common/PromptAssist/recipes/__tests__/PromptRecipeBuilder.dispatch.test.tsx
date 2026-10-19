@@ -16,6 +16,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { createPrompt as createPublicRecipe, type PromptCreatePayload } from "@/services/prompt-studio";
 import { PromptRecipeBuilder } from "../PromptRecipeBuilder";
 import { CLEAR_TASK_RECIPE } from "../built-in-recipes";
 
@@ -121,6 +122,10 @@ vi.mock("@/services/prompt-studio-settings", () => ({
     };
   },
   setPromptStudioDefaults: vi.fn(),
+  getPromptStudioDefaultsForOwner: async () => {
+    await mocks.beforeDefaults();
+    return { defaultProjectId: mocks.defaultProjectId, autoSyncWorkspacePrompts: true };
+  },
 }));
 vi.mock("@/db/dexie/chat", () => ({ PageAssistDatabase: class {} }));
 vi.mock("@/db/dexie/schema", () => ({
@@ -161,6 +166,9 @@ vi.mock("@/db/dexie/schema", () => ({
         equals: (value: unknown) => ({
           first: async () =>
             [...mocks.rows.values()].find((row) => row[field] === value),
+          filter: (predicate: (row: Record<string, unknown>) => boolean) => ({
+            first: async () => [...mocks.rows.values()].find(row => row[field] === value && predicate(row)),
+          }),
         }),
       }),
     },
@@ -169,9 +177,11 @@ vi.mock("@/db/dexie/schema", () => ({
 vi.mock("@/db/dexie/helpers", () => ({
   generateID: () => "dispatch-id",
   getAllPrompts: async () => structuredClone([...mocks.rows.values()]),
-  savePrompt: async (fields: object) => {
+  getSharedLocalPrompts: async () => structuredClone([...mocks.rows.values()].filter(row => row.ownerId == null && row.serverId == null)),
+  savePrompt: async (fields: { expectedOwnerId?: string | null }) => {
     const row = {
       ...fields,
+      ownerId: fields.expectedOwnerId,
       id: "dispatch-id",
       createdAt: 1,
       syncStatus: "local",
@@ -223,6 +233,11 @@ const promptRequests = () =>
   );
 const promptMutations = () =>
   promptRequests().filter(([, init]) => init.method !== "GET");
+// Account-bound local reads may resolve /auth/me. Project, provider and all
+// other requests remain forbidden in the project-less controls below.
+const nonAuthRequests = () => mocks.fetch.mock.calls.filter(([url]) =>
+  new URL(String(url)).pathname !== "/api/v1/auth/me",
+);
 const principalResponse = (init: RequestInit) => {
   const bearer = new Headers(init.headers).get("Authorization");
   if (
@@ -251,6 +266,31 @@ const serverRecord = () => ({
   prompt_schema_version: 2,
   prompt_definition: CLEAR_TASK_RECIPE.definition,
 });
+// An independent public body exercises transport recovery without reading,
+// relabeling, or mutating another account's private local prompt.
+const publicRecipeBody: PromptCreatePayload = {
+  project_id: 42,
+  name: "Public transport recovery control",
+  prompt_format: "structured",
+  prompt_schema_version: 2,
+  prompt_definition: {
+    schema_version: 2,
+    format: "structured",
+    definition_kind: "single_text_recipe",
+    assembly_config: {
+      assembly_mode: "single_text",
+      target_role: "system",
+      render_format: "xml",
+      block_separator: "\n\n",
+    },
+    variables: [],
+    blocks: [],
+  },
+};
+const sendPublicRecipe = (expectedOwnerId: string) =>
+  createPublicRecipe(publicRecipeBody, {
+    recipePersistence: { mode: "require", expectedOwnerId, localId: "dispatch-id" },
+  });
 const jsonResponse = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
     status,
@@ -279,19 +319,20 @@ const renderBuilder = (scope: string) =>
       />
     </QueryClientProvider>,
   );
-const selectSaved = async (user: ReturnType<typeof userEvent.setup>) => {
+const selectSaved = async (user: ReturnType<typeof userEvent.setup>, localId = "dispatch-id") => {
   await screen.findByRole("option", {
     name: /Dispatch recipe|Untitled recipe/,
   });
   await user.selectOptions(
     screen.getByRole("combobox", { name: "Recipe source" }),
-    "saved:dispatch-id",
+    `saved:${localId}`,
   );
 };
 
 const seed = (operation: string) => {
   if (operation !== "update") return;
   mocks.rows.set("dispatch-id", {
+    ownerId: ownerScope,
     id: "dispatch-id",
     title: "Dispatch recipe",
     content: "",
@@ -361,7 +402,18 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
       expect(
         await readRecipePersistenceUncertainty("dispatch-id", nextOwner),
       ).toBe(lost === "request" ? "unknown_owner" : "clear");
-      await pushToStudio("dispatch-id", 42, { expectedOwnerId: nextOwner });
+      const privateRow = structuredClone(mocks.rows.get("dispatch-id"));
+      expect(await pushToStudio("dispatch-id", 42, { expectedOwnerId: nextOwner })).toMatchObject({
+        success: false, failureKind: "validation",
+        recipeOwnership: { dispatch: { state: "not_dispatched" } },
+      });
+      expect(mocks.rows.get("dispatch-id")).toEqual(privateRow);
+      const recovery = await sendPublicRecipe(nextOwner);
+      expect(recovery.ok).toBe(lost === "reply");
+      expect(recovery.recipePersistence).toEqual(lost === "reply"
+        ? { state: "dispatched", actualOwnerId: nextOwner }
+        : { state: "not_dispatched", actualOwnerId: null });
+      expect(mocks.rows.get("dispatch-id")).toEqual(privateRow);
       expect(promptMutations()).toHaveLength(lost === "request" ? 1 : 2);
     },
   );
@@ -458,13 +510,24 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
     expect
       .soft(await readRecipePersistenceUncertainty("dispatch-id", nextOwner))
       .toBe("unknown_owner");
+    const privateRow = structuredClone(mocks.rows.get("dispatch-id"));
     expect(
       await pushToStudio("dispatch-id", 42, { expectedOwnerId: nextOwner }),
     ).toMatchObject({
       success: false,
-      recipeWriteBlocked: true,
+      failureKind: "validation",
       recipeOwnership: { dispatch: { state: "not_dispatched" } },
     });
+    expect(mocks.rows.get("dispatch-id")).toEqual(privateRow);
+    // The real transport's reservation, rather than a local-row mutation,
+    // rejects the still-unacknowledged operation for every owner.
+    const blocked = await sendPublicRecipe(nextOwner);
+    expect(blocked).toMatchObject({
+      ok: false, status: 0,
+      recipePersistence: { state: "not_dispatched", actualOwnerId: null },
+    });
+    expect(blocked.error).toMatch(/unresolved operation/);
+    expect(mocks.rows.get("dispatch-id")).toEqual(privateRow);
     expect(promptMutations()).toHaveLength(1);
   });
 
@@ -483,7 +546,19 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
       expect(
         await readRecipePersistenceUncertainty("dispatch-id", nextOwner),
       ).toBe("clear");
-      await pushToStudio("dispatch-id", 42, { expectedOwnerId: nextOwner });
+      const privateRow = structuredClone(mocks.rows.get("dispatch-id"));
+      expect(await pushToStudio("dispatch-id", 42, { expectedOwnerId: nextOwner })).toMatchObject({
+        success: false, failureKind: "validation",
+        recipeOwnership: { dispatch: { state: "not_dispatched" } },
+      });
+      expect(mocks.rows.get("dispatch-id")).toEqual(privateRow);
+      const recovery = await sendPublicRecipe(nextOwner);
+      expect(recovery).toMatchObject({
+        ok: true,
+        recipePersistence: { state: "dispatched", actualOwnerId: nextOwner },
+      });
+      expect(JSON.parse(String(promptMutations()[1][1].body))).toEqual(publicRecipeBody);
+      expect(mocks.rows.get("dispatch-id")).toEqual(privateRow);
       expect(promptMutations()).toHaveLength(2);
     },
   );
@@ -667,7 +742,7 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
         });
       await clickWrite(user, operation);
       await reached.promise;
-      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(nonAuthRequests()).toHaveLength(0);
       await pushToStudio("dispatch-id", 42, { expectedOwnerId: ownerScope });
       expect(mocks.rows.get("dispatch-id").syncStatus).toBe("error");
       release.resolve();
@@ -745,7 +820,7 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
         expectedOwnerId: ownerScope,
       });
       await reached.promise;
-      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(nonAuthRequests()).toHaveLength(0);
       const ambiguous = await pushToStudio("dispatch-id", 42, {
         expectedOwnerId: ownerScope,
       });
@@ -820,7 +895,7 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
         ).toBeEnabled(),
       );
 
-      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(nonAuthRequests()).toHaveLength(0);
       expect(mocks.rows.get("dispatch-id")).toMatchObject({
         id: "dispatch-id",
         syncStatus: "pending",
@@ -847,16 +922,19 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
       delete mocks.rows.get("dispatch-id").serverId;
       mocks.defaultProjectId = null;
       mocks.config = switchedOwners[0];
+      const original = structuredClone(mocks.rows.get("dispatch-id"));
       const result = await autoSyncPrompt("dispatch-id", undefined, {
         expectedOwnerId: ownerScope,
       });
       expect(result).toMatchObject({
         success: false,
-        syncStatus: "pending",
+        syncStatus: "local",
+        failureKind: "validation",
         recipeOwnership: { dispatch: { state: "not_dispatched" } },
       });
-      expect(mocks.fetch).not.toHaveBeenCalled();
-      expect(mocks.rows.get("dispatch-id").syncStatus).toBe("pending");
+      expect(nonAuthRequests()).toHaveLength(0);
+      expect(mocks.rows.get("dispatch-id")).toEqual(original);
+      expect(mocks.rows.get("dispatch-id").syncStatus).toBe("synced");
     },
   );
 
@@ -1031,6 +1109,8 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
             const originalOwner = (await resolveRecipePersistenceOwnerView())!
               .ownerId;
             seed(operation);
+            if (operation === "update") mocks.rows.get("dispatch-id").ownerId = originalOwner;
+            const originalConfig = { ...mocks.config };
             const originalRow = structuredClone(mocks.rows.get("dispatch-id"));
             const user = userEvent.setup();
             const view = renderBuilder(originalOwner);
@@ -1053,14 +1133,18 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
               .ownerId;
             expect(actualOwner).not.toBe(originalOwner);
             view.unmount();
+            const retryId = operation === "update" ? "dispatch-b-id" : "dispatch-id";
+            if (operation === "update") {
+              mocks.rows.set(retryId, { ...structuredClone(originalRow), id: retryId, ownerId: actualOwner, serverId: 202 });
+            }
             const retry = renderBuilder(actualOwner);
-            if (operation === "update") await selectSaved(user);
+            if (operation === "update") await selectSaved(user, retryId);
             await clickWrite(user, operation);
             await screen.findByText(/server outcome.*not.*verified/i);
             expect(promptMutations()).toHaveLength(1);
             expect(
               await readRecipePersistenceUncertainty(
-                "dispatch-id",
+                retryId,
                 actualOwner,
               ),
             ).toBe("scoped");
@@ -1070,11 +1154,11 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
                 originalOwner,
               ),
             ).toBe("clear");
-            expect(mocks.rows.has("dispatch-id")).toBe(true);
-            expect(mocks.rows.get("dispatch-id")?.syncStatus).not.toBe("error");
+            expect(mocks.rows.has(retryId)).toBe(true);
+            expect(mocks.rows.get(retryId)?.syncStatus).not.toBe("error");
             retry.unmount();
             const reopened = renderBuilder(actualOwner);
-            await selectSaved(user);
+            await selectSaved(user, retryId);
             await waitFor(() =>
               expect(
                 screen.getByRole("button", { name: "Save as new recipe" }),
@@ -1100,15 +1184,23 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
             await clickWrite(user, operation);
             expect(promptMutations()).toHaveLength(1);
             reopened.unmount();
+            mocks.config = originalConfig;
+            mocks.runtimeKey = null;
             const unrelatedOwner = renderBuilder(originalOwner);
-            await selectSaved(user);
+            if (operation === "update") {
+              await selectSaved(user);
+              expect(mocks.rows.get("dispatch-id")).toEqual(originalRow);
+            } else {
+              await screen.findByRole("combobox", { name: "Recipe source" });
+              expect(screen.queryByRole("option", { name: "Dispatch recipe" })).toBeNull();
+            }
             await waitFor(() =>
               expect(
                 screen.getByRole("button", { name: "Save as new recipe" }),
               ).toBeEnabled(),
             );
             unrelatedOwner.unmount();
-            await clearRecipePersistenceScoped("dispatch-id", actualOwner);
+            await clearRecipePersistenceScoped(retryId, actualOwner);
           },
         );
       }
@@ -1210,9 +1302,9 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
     },
   );
 
-  it.each(["create", "update", "pull"])(
-    "keeps v1 %s compatible without requiring owner identity",
-    async (operation) => {
+  it.each(["create", "update", "pull"].flatMap(operation => [[operation, true], [operation, false]] as const))(
+    "keeps v1 %s bound to actual ownership (authenticated=%s)",
+    async (operation, authenticated) => {
       const definition = {
         schema_version: 1,
         format: "structured",
@@ -1224,10 +1316,11 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
           block_separator: "\\n\\n",
         },
       };
-      mocks.config = { ...owner, accessToken: "opaque-token" };
+      mocks.config = authenticated ? owner : { ...owner, accessToken: "opaque-token" };
       mocks.rows.set("dispatch-id", {
         id: "dispatch-id",
         title: "V1",
+        ownerId: authenticated ? ownerScope : undefined,
         syncStatus: "local",
         promptFormat: "structured",
         promptSchemaVersion: 1,
@@ -1251,20 +1344,25 @@ describe("builder through real sync, Prompt Studio, apiSend and request-core", (
               },
             }),
       );
+      const original = structuredClone(mocks.rows.get("dispatch-id"));
       const result =
         operation === "pull"
           ? await pullFromStudio(101, "dispatch-id")
           : await autoSyncPrompt("dispatch-id", 42);
       expect(result).toMatchObject({
-        success: true,
+        success: authenticated,
         recipeOwnership: {
-          dispatch: { state: "dispatched", actualOwnerId: null },
+          dispatch: authenticated ? { state: "dispatched", actualOwnerId: ownerScope } : { state: "not_dispatched", actualOwnerId: null },
         },
       });
       expect(
         await readRecipePersistenceUncertainty("dispatch-id", ownerScope),
-      ).toBe("scoped");
-      expect(promptMutations()).toHaveLength(operation === "pull" ? 0 : 1);
+      ).toBe(authenticated ? "clear" : "scoped");
+      expect(promptMutations()).toHaveLength(authenticated && operation !== "pull" ? 1 : 0);
+      if (!authenticated) {
+        expect(nonAuthRequests()).toHaveLength(0);
+        expect(mocks.rows.get("dispatch-id")).toEqual(original);
+      }
     },
   );
 });

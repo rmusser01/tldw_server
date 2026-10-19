@@ -156,3 +156,67 @@ def test_unexpected_turn_failure_logs_safe_correlated_diagnostic(
         assert "secret-provider-payload" not in str(failures[0])
     finally:
         logger.remove(sink)
+
+
+@pytest.fixture
+def persistent_setup_session(tmp_path, monkeypatch):
+    async def auth(*_args, **_kwargs):
+        return "1", True, True
+
+    monkeypatch.setattr(ep, "_resolve_authenticated_user_id", auth)
+    sid = "persistent-setup-test"
+    _seed_persona_session(tmp_path, monkeypatch, user_id="1", session_id=sid, mode="persistent_scoped")
+    return sid
+
+
+@pytest.mark.parametrize("outage", [False, True])
+def test_persona_setup_persistent_typed_reply_and_outage_retry(monkeypatch, persistent_setup_session, outage):
+    calls = []
+
+    async def answer(**kwargs):
+        calls.append(kwargs)
+        if outage and len(calls) == 1:
+            raise live_conversation.PersonaConversationError("Chat provider unavailable. Retry when ready.")
+        return "ORBIT-742"
+
+    monkeypatch.setattr(live_conversation, "complete_persona_conversation", answer)
+    with TestClient(fastapi_app) as client, client.websocket_connect("/api/v1/persona/stream") as ws:
+        first_id = "setup-743" if outage else "setup-742"
+        ws.send_json(
+            {
+                "type": "user_message",
+                "session_id": persistent_setup_session,
+                "client_message_id": first_id,
+                "text": "Reply with exactly ORBIT-743" if outage else "Reply with exactly ORBIT-742",
+                "use_companion_context": False,
+            }
+        )
+        event = _recv_until(
+            ws,
+            lambda value: (
+                value.get("event") == "assistant_delta" or value.get("reason_code") == "CONVERSATION_UNAVAILABLE"
+            ),
+        )
+        # Pytest behavior checks use assertions; application guards remain enabled.
+        assert event["session_id"] == persistent_setup_session  # nosec B101
+        assert event["client_message_id"] == first_id  # nosec B101
+        if outage:
+            assert event["reason_code"] == "CONVERSATION_UNAVAILABLE"  # nosec B101
+            assert event["event"] == "notice"  # nosec B101
+            assert "Retry" in event["message"]  # nosec B101
+            ws.send_json(
+                {
+                    "type": "user_message",
+                    "session_id": persistent_setup_session,
+                    "client_message_id": "setup-742-retry",
+                    "text": "Reply with exactly ORBIT-742",
+                    "use_companion_context": False,
+                }
+            )
+            event = _recv_until(ws, lambda value: value.get("event") == "assistant_delta")
+            assert event["session_id"] == persistent_setup_session  # nosec B101
+            assert event["client_message_id"] == "setup-742-retry"  # nosec B101
+        assert event["event"] == "assistant_delta"  # nosec B101
+        assert event["text_delta"] == "ORBIT-742"  # nosec B101
+        assert event["done"] is True  # nosec B101
+    assert len(calls) == (2 if outage else 1)  # nosec B101

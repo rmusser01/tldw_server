@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 PROFILE_DOCS = [
     Path("Docs/Getting_Started/Profile_Docker_Single_User.md"),
     Path("Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md"),
@@ -30,6 +29,14 @@ PUBLIC_ONBOARDING_DOCS = [
     Path("Dockerfiles/README.md"),
     Path("Docs/Website/index.html"),
 ]
+
+INTERACTIVE_ADMIN_PASSWORD_DOCS = {
+    Path("Docs/Getting_Started/README.md"),
+    Path("Docs/Getting_Started/QUICKSTART.md"),
+    Path("Docs/Getting_Started/Profile_Docker_Multi_User_Postgres.md"),
+    Path("Docs/Published/Getting_Started/README.md"),
+    Path("Docs/Published/Getting_Started/Profile_Docker_Multi_User_Postgres.md"),
+}
 
 AUDIO_DOCS = [
     Path("Docs/Getting_Started/First_Time_Audio_Setup_CPU.md"),
@@ -154,7 +161,24 @@ def test_multi_user_docs_generate_and_persist_admin_password() -> None:
         assert "replace-with-a-long-password" not in text, f"{path} uses a static admin password"
         assert "ADMIN_USERNAME" in text, f"{path} should persist ADMIN_USERNAME for login examples"
         assert "ADMIN_PASSWORD" in text, f"{path} should persist ADMIN_PASSWORD for login examples"
-        assert "secrets.token_urlsafe(24)" in text, f"{path} should generate ADMIN_PASSWORD"
+        if path not in INTERACTIVE_ADMIN_PASSWORD_DOCS:
+            assert "secrets.token_urlsafe(24)" in text, f"{path} should generate ADMIN_PASSWORD"
+
+
+def test_interactive_multi_user_docs_hide_and_export_the_password() -> None:
+    for path in INTERACTIVE_ADMIN_PASSWORD_DOCS:
+        text = path.read_text(encoding="utf-8")
+        # These pytest guards retain secret input, persistence and active-policy guidance.
+        assert "IFS= read -rs ADMIN_PASSWORD" in text  # nosec B101
+        assert "export ADMIN_PASSWORD" in text  # nosec B101
+        for requirement in (
+            "at least 10 characters",
+            "uppercase and lowercase letters",
+            "a number, and a symbol",
+            "Avoid your username",
+            "three-character repeats or sequences",
+        ):
+            assert requirement in text, f"{path} missing password policy guidance"  # nosec B101
 
 
 def test_multi_user_external_postgres_docs_use_override_vars() -> None:

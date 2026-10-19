@@ -103,17 +103,17 @@ def test_user_quota_endpoints_emit_the_admin_user_update_audit_event(
     with TestClient(app) as client:
         user_id = me(client, auth_headers)
         try:
-            assert client.put(url_fmt.format(user_id), headers=auth_headers, json={"quota_mb": 300}).status_code == 200
-            assert client.put(url_fmt.format(user_id), headers=auth_headers, json={"quota_mb": None}).status_code == 200
-            assert client.put(url_fmt.format(987654321), headers=auth_headers, json={"quota_mb": 5}).status_code == 404
+            assert client.put(url_fmt.format(user_id), headers=auth_headers, json={"quota_mb": 300}).status_code == 200  # nosec B101 - pytest assertion; not a production guard.
+            assert client.put(url_fmt.format(user_id), headers=auth_headers, json={"quota_mb": None}).status_code == 200  # nosec B101 - pytest assertion; not a production guard.
+            assert client.put(url_fmt.format(987654321), headers=auth_headers, json={"quota_mb": 5}).status_code == 404  # nosec B101 - pytest assertion; not a production guard.
         finally:
             patch_quota(client, auth_headers, user_id, None)
 
-    assert [event["metadata"] for event in events] == [{"storage_quota_mb": 300}, {"storage_quota_mb": None}]
+    assert [event["metadata"] for event in events] == [{"storage_quota_mb": 300}, {"storage_quota_mb": None}]  # nosec B101 - pytest assertion; not a production guard.
     for event in events:
-        assert event["event_type"] == AuditEventType.USER_UPDATED
-        assert event["category"] == AuditEventCategory.AUTHORIZATION
-        assert event["action"] == "admin.user.update"
-        assert event["resource_type"] == "user_account" and event["resource_id"] == str(user_id)
-        assert event["target_user_id"] == user_id
-        assert event["actor_id"] == user_id  # the test admin edits its own quota
+        assert event["event_type"] == AuditEventType.USER_UPDATED  # nosec B101 - pytest assertion; not a production guard.
+        assert event["category"] == AuditEventCategory.AUTHORIZATION  # nosec B101 - pytest assertion; not a production guard.
+        assert event["action"] == "admin.user.update"  # nosec B101 - pytest assertion; not a production guard.
+        assert event["resource_type"] == "user_account" and event["resource_id"] == str(user_id)  # nosec B101 - pytest assertion; not a production guard.
+        assert event["target_user_id"] == user_id  # nosec B101 - pytest assertion; not a production guard.
+        assert event["actor_id"] == user_id  # nosec B101 - pytest assertion; test admin edits its own quota.

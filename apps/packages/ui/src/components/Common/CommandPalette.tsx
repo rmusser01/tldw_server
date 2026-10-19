@@ -40,7 +40,7 @@ import {
   getRouteCommandPaletteLabel
 } from "@/routes/route-metadata"
 import { ADMIN_MODULES } from "@/components/Option/Admin/admin-modules"
-import { RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
+import { CLAIMS_REVIEW_PATH, RESEARCH_WORKSPACE_PATH } from "@/routes/route-paths"
 import { searchSettings } from "@/data/settings-index"
 import { cn } from "@/libs/utils"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
@@ -308,6 +308,14 @@ export function CommandPalette({
           ...knowledgeRouteCommand,
           category: "navigation" as const,
           keywords: ["knowledge", "qa", "rag", "search"],
+        },
+        {
+          id: "nav-claims-review",
+          label: getRouteCommandPaletteLabel(CLAIMS_REVIEW_PATH),
+          icon: <BookText className="size-4" />,
+          ...buildRouteCommand(CLAIMS_REVIEW_PATH),
+          category: "navigation" as const,
+          keywords: ["claims", "review", "decisions", "audit"],
         },
         {
           id: "nav-media",

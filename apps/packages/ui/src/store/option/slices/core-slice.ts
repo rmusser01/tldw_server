@@ -30,6 +30,7 @@ export const createCoreSlice: StoreSlice<
     | "isProcessing"
     | "setIsProcessing"
     | "selectedModel"
+    | "selectedModelInitialized"
     | "selectedModelStorageHandled"
     | "selectedModelRevision"
     | "setSelectedModel"
@@ -190,11 +191,13 @@ export const createCoreSlice: StoreSlice<
   setSpeechToTextLanguage: (language) =>
     set({ speechToTextLanguage: language }),
   selectedModel: null,
+  selectedModelInitialized: false,
   selectedModelStorageHandled: false,
   selectedModelRevision: 0,
   setSelectedModel: (selectedModel, options) =>
     set((state) => ({
       selectedModel,
+      selectedModelInitialized: true,
       selectedModelStorageHandled: options?.storageHandled === true,
       selectedModelRevision: state.selectedModelRevision + 1
     })),

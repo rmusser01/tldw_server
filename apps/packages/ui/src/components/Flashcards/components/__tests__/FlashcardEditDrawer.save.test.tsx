@@ -226,3 +226,55 @@ describe("FlashcardEditDrawer save handling", () => {
     expect(onSave).not.toHaveBeenCalled()
   }, 15000)
 })
+
+
+describe("FlashcardEditDrawer deck assignment", () => {
+  it.each([
+    { name: "cleared deck", initial: 1, action: "clear", expected: null },
+    { name: "retained deck", initial: 1, action: "retain", expected: 1 },
+    { name: "already undecked card", initial: null, action: "retain", expected: null },
+    { name: "reassigned deck", initial: 1, action: "move", expected: 2 }
+  ])("serializes the $name explicitly through JSON", async ({ initial, action, expected }) => {
+    const onSave = vi.fn().mockResolvedValue(undefined)
+    render(
+      <FlashcardEditDrawer
+        open
+        onClose={vi.fn()}
+        card={{ ...sampleCard, deck_id: initial }}
+        onSave={onSave}
+        onDelete={vi.fn()}
+        decks={[1, 2].map(id => ({
+          id,
+          name: `Deck ${id}`,
+          description: null,
+          review_prompt_side: "front" as const,
+          deleted: false,
+          client_id: "1",
+          version: 1,
+          scheduler_type: "sm2_plus" as const,
+          scheduler_settings: DEFAULT_SCHEDULER_SETTINGS_ENVELOPE
+        }))}
+      />
+    )
+    await screen.findByDisplayValue("Front text")
+    const deckInput = document.querySelector("#deck_id")!
+    if (action === "clear") {
+      const clear = deckInput.closest(".ant-select")!.querySelector(".ant-select-clear")!
+      expect(clear).not.toBeNull()
+      fireEvent.mouseDown(clear)
+      fireEvent.click(clear)
+    } else if (action === "move") {
+      fireEvent.mouseDown(deckInput)
+      fireEvent.click(await screen.findByText("Deck 2"))
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1))
+    const payload = JSON.parse(JSON.stringify(onSave.mock.calls[0][0]))
+    expect(payload).toMatchObject({
+      deck_id: expected,
+      front: "Front text",
+      back: "Back text",
+      expected_version: 3
+    })
+  }, 15000)
+})

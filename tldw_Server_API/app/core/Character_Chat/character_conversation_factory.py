@@ -110,6 +110,8 @@ PROMPT_COMPLETION_SETTING_CLASSIFICATION = dict.fromkeys(
         "autoSummaryWindowMessages",
         "characterMemoryById",
         "chatGenerationOverride",
+        "chat_dictionary_id",
+        "chat_dictionary_ids",
         "chatPresetOverrideId",
         "conversationContext",
         "deepResearchAttachment",
@@ -2087,6 +2089,15 @@ def _materialize_roleplay_behavior_settings_once(
         "effective_completion": effective,
         "participants": participants,
     }
+    if {"chat_dictionary_id", "chat_dictionary_ids", "conversationContext"}.intersection(changed_keys):
+        from tldw_Server_API.app.core.Character_Chat.chat_dictionary import ChatDictionaryService
+        from tldw_Server_API.app.core.Character_Chat.frozen_dictionary_context import assigned_dictionary_ids
+
+        dictionary_ids = assigned_dictionary_ids(merged_settings)
+        if dictionary_ids:
+            values["dictionaries"] = ChatDictionaryService.snapshot_assigned_dictionaries(conn, dictionary_ids)
+        else:
+            values.pop("dictionaries", None)
     pending_greeting = _validated_pending_greeting(
         merged_settings.get(PENDING_GREETING_SETTINGS_KEY),
         conversation=conversation,
@@ -2320,6 +2331,73 @@ def materialize_roleplay_behavior_settings(
         if first == second:
             return second
     raise InputError("Behavior sources changed during settings materialization.")
+
+
+def bind_legacy_assigned_dictionaries(
+    db: Any, conn: Any, *, conversation_id: str, owner_user_id: str,
+    owner_key: str, view: dict[str, Any], scope_type: str, workspace_id: str | None,
+) -> None:
+    """Normalize valid owner-assigned legacy IDs before the H1 capture statement.
+
+    Existing malformed authority is never replaced. All other saved effects are
+    projected first; only then may the ordinary materializer read the catalog.
+    The caller supplies the capture transaction, and the settings CAS protects
+    a concurrent assignment. This writes no messages and dispatches no provider.
+    """
+    from copy import deepcopy
+
+    from tldw_Server_API.app.core.Character_Chat.chat_settings_validation import validate_chat_settings_storage
+    from tldw_Server_API.app.core.Character_Chat.frozen_dictionary_context import (
+        assigned_dictionary_ids,
+        without_dictionary_assignment,
+    )
+    from tldw_Server_API.app.core.Chat.history_context import project_history_context
+    from tldw_Server_API.app.core.Chat.history_selection import (
+        HistorySelectionError,
+        resolve_history_selection,
+        snapshot_to_wire,
+    )
+
+    state = db.get_roleplay_resume_state(conversation_id, conn=conn, lock_for_update=True, owner_client_id=owner_user_id)
+    conversation = state["conversation"]
+    if (conversation.get("scope_type") or "global", conversation.get("workspace_id")) != (scope_type, workspace_id):
+        raise HistorySelectionError("scope_mismatch")
+    settings = state.get("settings") or {}
+    try:
+        dictionary_ids = assigned_dictionary_ids(settings)
+        if not dictionary_ids:
+            return
+        materialized = state.get("materialized_settings")
+        if materialized is None:
+            raise InputError("Assigned dictionaries require valid existing materialized behavior.")
+        if "dictionaries" in materialized["values"]:
+            project_history_context(state)
+            return
+        preflight = deepcopy(state)
+        preflight["settings"] = without_dictionary_assignment(settings)
+        controls = preflight["materialized_settings"]["values"]["behavior_controls"]
+        controls["applied_overrides"] = without_dictionary_assignment(controls["applied_overrides"])
+        controls["prompt_context"] = without_dictionary_assignment(controls["prompt_context"])
+        project_history_context(preflight)
+        prior = db.get_conversation_history_snapshot(conversation_id, owner_client_id=owner_user_id,
+            owner_key=owner_key, projection_id=view["interpretation"].get("projection_id"), conn=conn)
+        resolved = resolve_history_selection(snapshot_to_wire(prior), view, "send", "")
+        if resolved["status"] != "ready":
+            raise HistorySelectionError(resolved["code"])
+        materialized = materialize_roleplay_behavior_settings(
+            conn, conversation=state["conversation"], resume_state=state, merged_settings=settings,
+            owner_user_id=owner_user_id, changed_keys={"chat_dictionary_id", "chat_dictionary_ids"},
+        )
+        if materialized is None:
+            raise InputError("Assigned dictionaries could not be materialized.")
+        updated = {**settings, "roleplayBehaviorV1": materialized}
+        updated = validate_chat_settings_storage(updated, reject_credentials=True, allow_internal=True,
+                                                  behavior_snapshot=state["behavior_snapshot"], conversation=state["conversation"])
+        if not db.upsert_conversation_settings(conversation_id, updated, conn=conn,
+                                               expected_settings_version=state["settings_version"] or 0):
+            raise HistorySelectionError("stale_settings")
+    except InputError as exc:
+        raise HistorySelectionError("unsupported_history_context_dictionaries") from exc
 
 
 def create_character_conversation(

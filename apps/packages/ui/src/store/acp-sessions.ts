@@ -19,6 +19,7 @@ import type {
   ACPMCPServerConfig,
 } from "@/services/acp/types"
 import { SESSION_CONFIG } from "@/services/acp/constants"
+import { ACP_MESSAGE_UPDATE_TYPES, countACPUpdateMessages } from "@/services/acp/update-projection"
 
 // -----------------------------------------------------------------------------
 // Storage Configuration
@@ -40,8 +41,6 @@ const createMemoryStorage = (): StateStorage => ({
 })
 
 const DATE_FIELDS = new Set(["createdAt", "updatedAt", "requestedAt", "timestamp", "lastActivityAt"])
-
-const MESSAGE_UPDATE_TYPES = new Set(["text", "assistant_text", "user_text"])
 
 const toIsoDate = (value: string | null | undefined): Date | null => {
   if (!value) return null
@@ -290,7 +289,7 @@ export const useACPSessionsStore = createWithEqualityFn<ACPSessionsStore>()(
             const backendStatus = normalizeBackendSessionStatus(serverSession.status)
             const fallbackState = resolveStateFromBackendStatus(
               backendStatus,
-              serverSession.has_websocket
+              serverSession.runtime_available !== false && serverSession.has_websocket
             )
 
             const baseSession: ACPSession = existing ?? {
@@ -328,7 +327,7 @@ export const useACPSessionsStore = createWithEqualityFn<ACPSessionsStore>()(
             }
 
             const nextState =
-              existing && shouldKeepLiveState(existing.state) && backendStatus === "active"
+              existing && shouldKeepLiveState(existing.state) && backendStatus === "active" && serverSession.runtime_available !== false
                 ? existing.state
                 : fallbackState
 
@@ -362,6 +361,8 @@ export const useACPSessionsStore = createWithEqualityFn<ACPSessionsStore>()(
               policyRefreshError:
                 serverSession.policy_refresh_error ?? baseSession.policyRefreshError ?? null,
               backendStatus,
+              runtimeAvailable: serverSession.runtime_available,
+              pendingPermissions: serverSession.runtime_available === false ? [] : baseSession.pendingPermissions,
               messageCount: Math.max(baseSession.messageCount ?? 0, serverSession.message_count),
               usage: mergedUsage,
               lastActivityAt: toIsoDate(serverSession.last_activity_at),
@@ -385,10 +386,10 @@ export const useACPSessionsStore = createWithEqualityFn<ACPSessionsStore>()(
           const backendStatus = normalizeBackendSessionStatus(detail.status)
           const fallbackState = resolveStateFromBackendStatus(
             backendStatus,
-            detail.has_websocket
+            detail.runtime_available !== false && detail.has_websocket
           )
           const nextState =
-            existing && shouldKeepLiveState(existing.state) && backendStatus === "active"
+            existing && shouldKeepLiveState(existing.state) && backendStatus === "active" && detail.runtime_available !== false
               ? existing.state
               : fallbackState
 
@@ -426,11 +427,34 @@ export const useACPSessionsStore = createWithEqualityFn<ACPSessionsStore>()(
             updatedAt: toIsoDate(detail.last_activity_at) ?? new Date(),
           }
 
+          const hydrateHistory = existing?.state !== "running" && existing?.state !== "waiting_permission"
+            && Array.isArray(detail.messages)
+          const historyUpdates: ACPUpdate[] = hydrateHistory ? detail.messages.flatMap((message) => {
+            const timestamp = toIsoDate(typeof message.timestamp === "string" ? message.timestamp : null) ?? baseSession.createdAt
+            const result = message.raw_result as Record<string, unknown> | undefined
+            const cancelled = message.role === "assistant" && result?.stopReason === "cancelled"
+            const updates: ACPUpdate[] = typeof message.content === "string" ? [{
+              type: message.role === "assistant" ? "assistant_text" : message.role === "user" ? "user_text" : "system_text",
+              data: { text: message.content }, timestamp
+            }] : cancelled ? [] : [{ type: "history_diagnostic", data: message, timestamp }]
+            if (cancelled) updates.push({ type: "prompt_complete", data: { raw_result: result }, timestamp })
+            return updates
+          }) : []
+          const canonicalCancellation = historyUpdates.some((update) => update.type === "prompt_complete")
+          const retainedEvents = baseSession.updates.filter((update) =>
+            !ACP_MESSAGE_UPDATE_TYPES.has(update.type) && !["system_text", "history_diagnostic"].includes(update.type)
+          ).map((update) => {
+            const result = update.data.raw_result as Record<string, unknown> | undefined
+            const cancelled = update.type === "cancelled" || (update.type === "prompt_complete" && result?.stopReason === "cancelled")
+            return canonicalCancellation && cancelled ? { ...update, type: "history_turn_boundary" } : update
+          })
+
           return {
             sessions: {
               ...state.sessions,
               [sessionId]: {
                 ...baseSession,
+                updates: hydrateHistory ? [...historyUpdates, ...retainedEvents] : baseSession.updates,
                 name: detail.name || baseSession.name,
                 cwd: detail.cwd || baseSession.cwd,
                 forkParentSessionId: detail.forked_from ?? baseSession.forkParentSessionId ?? null,
@@ -456,7 +480,9 @@ export const useACPSessionsStore = createWithEqualityFn<ACPSessionsStore>()(
                 policyRefreshError:
                   detail.policy_refresh_error ?? baseSession.policyRefreshError ?? null,
                 backendStatus,
-                messageCount: Math.max(baseSession.messageCount ?? 0, detail.message_count),
+                runtimeAvailable: detail.runtime_available,
+                pendingPermissions: detail.runtime_available === false ? [] : baseSession.pendingPermissions,
+                messageCount: hydrateHistory ? detail.message_count : Math.max(baseSession.messageCount ?? 0, detail.message_count),
                 usage: mergeUsage(baseSession.usage, detail.usage),
                 lastActivityAt: toIsoDate(detail.last_activity_at),
                 createdAt: toIsoDate(detail.created_at) ?? baseSession.createdAt,
@@ -675,6 +701,7 @@ export const useACPSessionsStore = createWithEqualityFn<ACPSessionsStore>()(
 
           // Limit updates in memory
           let updates = [...session.updates, newUpdate]
+          const messageCountIncrement = Math.max(0, countACPUpdateMessages(updates) - countACPUpdateMessages(session.updates))
           if (updates.length > SESSION_CONFIG.MAX_UPDATES_PER_SESSION) {
             updates = updates.slice(-SESSION_CONFIG.MAX_UPDATES_PER_SESSION)
           }
@@ -694,7 +721,6 @@ export const useACPSessionsStore = createWithEqualityFn<ACPSessionsStore>()(
               }
             : session.usage ?? null
 
-          const messageCountIncrement = MESSAGE_UPDATE_TYPES.has(newUpdate.type) ? 1 : 0
           const nextMessageCount = (session.messageCount ?? 0) + messageCountIncrement
 
           return {

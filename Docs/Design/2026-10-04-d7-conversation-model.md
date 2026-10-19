@@ -14,7 +14,7 @@
 
 ### The decision in one paragraph
 
-Make the **server conversation the only identity a chat has**. Every chat that is not temporary gets a server conversation id at its first send (this is D1), and every surface (WebUI, extension full page, side panel) addresses it by that id. Each browser origin keeps a **device cache** of server chats (the Dexie mirror that already exists) and, later, a small **outbox** for sends made while the server is unreachable. A side-panel tab becomes a **view**: a conversation id, a position in the message graph and a draft, with no copy of the messages. The server's parent graph is the only place branches live. A send that would silently fork (because the client's view is stale) is refused by the server and shown as "updated elsewhere", on every surface. Generation moves to the server in two steps: first the server **settles turns itself, saves partial replies and records model metadata** (CM-04), then it **runs turns detached from the HTTP request** so a reload or a closed laptop no longer loses the reply, and any surface can re-attach to it.
+Make the **server conversation the only identity a chat has**. Every chat that is not temporary gets a server conversation id at its first send (this is D1), and every surface (WebUI, extension full page, side panel) addresses it by that id. Each browser origin keeps a **device cache** of server chats (the Dexie mirror that already exists) and, later, a small **outbox** for sends made while the server is unreachable. A server-bound side-panel tab becomes a **view**: a conversation id, a position in the message graph and a draft, with no copy of the messages. Temporary chats retain device-only message arrays until closed or cleared (Q3). The server's parent graph is the only place branches live. A send that would silently fork (because the client's view is stale) is refused by the server and shown as "updated elsewhere", on every surface. Generation moves to the server in two steps: first the server **settles turns itself, saves partial replies and records model metadata** (CM-04), then it **runs turns detached from the HTTP request** so a reload or a closed laptop no longer loses the reply, and any surface can re-attach to it.
 
 This is option C in §3 (server identity, device cache, outbox), delivered "A first": the outbox comes last and only if the owner wants offline sends (Q1 in §8).
 
@@ -31,15 +31,15 @@ This is option C in §3 (server identity, device cache, outbox), delivered "A fi
 - Every chat has a link (`/chat/<id>`), and the side panel, full page and WebUI open the same chat from it.
 - Continuing a chat that changed elsewhere never silently forks it; the user sees "Updated in another window" instead.
 - After step 2 of generation, a reload, a route change or a closed side panel no longer loses a reply. The reply keeps generating, and the chat shows it when the user returns.
-- Temporary chats stay on the device and never reach the server.
+- Temporary chats are not persisted as server conversations. Their prompts still reach the server for inference; their device-only message arrays survive reload until closed or cleared.
 
 ### Cost
 
-17 PRs in three phases (§6), each shippable alone:
+18 PR slots in three phases (§6): 15 scheduled in Phases 1–2 and three unscheduled outbox slots. Q4 adds the Sync v2 prerequisite P0; its size still needs estimation.
 
-- **Phase 1 (one identity):** 10 PRs, mostly S–M. Four have a backend part, three of them small. Phase 1 is the D1 work plus its cleanup, so most of it is already scheduled.
+- **Phase 1 (one identity):** 11 PRs including P0, mostly S–M with P0 unestimated. Five have a backend part, three of them small. P0 must ship before D1/P4 is enabled for Sync v2 users.
 - **Phase 2 (resumable generation):** 4 PRs, backend M–L.
-- **Phase 3 (offline outbox):** 3 PRs, optional (Q1).
+- **Phase 3 (offline outbox):** 3 PRs, unscheduled under Q1’s read-only offline decision.
 
 Phase 1 retires the three Stage 1 workarounds this spike was asked to address (§1.3).
 
@@ -228,7 +228,7 @@ All verified in code:
 - URL `/chat/<id>`, with `?branch=<leafId>` and `#msg-<id>` as N4 proposes. The extension uses `options.html#/chat/<id>` and `sidepanel.html#/chat/<id>`.
 
 **Side-panel tabs**
-- `{tabId, conversationId | temporary, view reference, draft, mode/model settings}`, with no messages.
+- Server-bound tabs hold `{tabId, conversationId, view reference, draft, mode/model settings}`, with no messages. Temporary tabs additionally retain their device-only message arrays until closed or cleared (Q3).
 - Tabs hold views, so two tabs can show the same chat.
 
 **New chat**
@@ -241,7 +241,7 @@ All verified in code:
 
 **Temporary chats**
 - Unchanged: owner "unavailable", never sent to the chats API.
-- Q3 asks whether they should survive a reload. Today the side panel's do (via the snapshot) and the full page's don't.
+- Q3 requires reload survival until closed or cleared on every surface, without importing temporary chats as ordinary local chats. Prompts still reach the server for inference.
 
 **Branching**
 - Only the server graph. A view is a cursor on it (`HistoryViewSelectionV1`, unchanged).
@@ -461,7 +461,7 @@ The browser still holds the stream open, but the server writes the reply.
 
 - S3-1 is small, uses existing server paths and is needed regardless: N8 Stopped and Interrupted states, N9 model chip, CM-04. It also removes #3163's "partial only on this device" for server chats.
 - S3-3 then makes the server own the whole turn. It builds on S3-1's server settlement and metadata, so none of S3-1 is thrown away.
-- #3163's client checkpointing remains for temporary and legacy local chats, which never touch the server.
+- #3163's client checkpointing remains for temporary and legacy local chats, which have no server conversation persistence before explicit import; inference still uses the server.
 
 ---
 
@@ -491,13 +491,14 @@ Each PR is independently shippable, starts with a red test, and names its review
 
 | # | PR | Size | Slot | Retires or enables |
 |---|---|---|---|---|
+| P0 | **Backend: Sync v2 compatibility for versioned history writes (Q4).** Emit Sync v2 envelopes for versioned history writes so active Sync profiles can use native capture, admission and settlement. | To estimate | Stage 2, before D1/P4 enablement | Prerequisite for P4 and the server-turn clients P13/P14; preserves support for Sync v2 users. |
 | P1 | **Backend: leaf check at admission.** Under the owner lock, refuse with 409 `history_branch_changed` and the current leaf ids when the selection's last message already has a live child, unless the request marks the send as an explicit branch. Apply it in both admission paths: `MessageCreate` (`message_store.py:700-782`) and server completions (`append_selected_history_inputs`, `:784-878`). Clients opt in with a request field *next to* `tldw_history_selection_v1`, not inside the digest-covered selection: `tldw_history_branch: false` means "must extend the latest message" and `true` means "explicit branch". Requests without the field keep today's behaviour, so existing clients and digests are unaffected. Contract tests. | S | Stage 2 | R3 on every surface. Enables P6. |
 | P2 | **Backend: S3-1 server side.** Settle native turns with `model_id`, `provider`, `finish_reason`, usage and `generation_status` in `message_metadata.extra_json`. Save the partial on cancel or error (`streaming_utils.py:2191`). Define one allow-list of metadata keys, reused by P8's import. | S–M | Stage 2 (pulls CM-04 forward from G17) | CM-04, CM-03, the backend for N8/N9 |
 | P3 | **Backend: idempotent create.** Optional client `id` (UUID) on `POST /chats/`, with replay if the same owner sends the same id and body, and 409 otherwise. Alternatively, route new chats through `/chats/workspace-startup`-style `Idempotency-Key`. | S | Stage 2 | P4; no duplicate or empty chats on retry (CS-N3 class) |
-| P4 | **Frontend: D1 through the native owner.** A new non-temporary chat creates its server conversation at the first send (client id from P3) and sends through the native owner. Remove the auto-promotion effect for new chats. The local owner is used only for existing local chats. Flip #3139's CS-03 `it.fails`. | M | Stage 2 slice 9 (D1) | CS-03, XS-05, XP-01 (most new chats now have server ids) |
+| P4 | **Frontend: D1 through the native owner.** Requires P0 before enablement for Sync v2 users. A new non-temporary chat creates its server conversation at the first send (client id from P3) and sends through the native owner. Remove the auto-promotion effect for new chats. The local owner is used only for existing local chats. Flip #3139's CS-03 `it.fails`. | M | Stage 2 slice 9 (D1) | CS-03, XS-05, XP-01 (most new chats now have server ids) |
 | P5 | **Frontend: server-settled turns.** Drop `clientManagedHistory` for native owners. Read the admission and `tldw_message_id` frames. Render `generation_status` (Stopped, Interrupted, Incomplete) and the model chip from `metadata_extra`. Server-chat partials no longer stay device-only. | M | Stage 2 slice 4 (G06) | **Retires #3163's local-only partial replies for server chats**; CM-02, N8, N9 |
 | P6 | **Frontend: one freshness rule for every surface.** Send selections with the P1 opt-in. On 409 `history_branch_changed`, refresh the view, show #3161's `ServerChatFreshnessNotice` ("Updated in another window or tab"), and keep the text in the composer with "Send after latest" or "Branch here". Generalize the focus check to the full page using `GET /chats/{id}` `history_version`, with a capture only when it changed. Delete `SidepanelSendGateContext` and the pre-send capture. | M | Stage 4 (G19) or earlier | **Retires the side-panel send gate**; XP-08 on the full page |
-| P7 | **Frontend: side-panel tabs become views.** Snapshot v3 = `{conversation ref or temporary, view reference, draft, chatMode, model settings, queued messages}`, without `messages` or `history`. Migrate v2 (§6.4). Load messages from the Dexie cache, then the server. Remove `recoverCompletedSnapshotReplies`. Pins move to the server (XP-18 recommendation). | M | Stage 4 (G19, XS-06/XP-18) | Retires the snapshot copies; simplifies #3152's `pendingOpenTabIdRef` |
+| P7 | **Frontend: side-panel tabs become views.** Server-bound snapshot v3 = `{conversation ref, view reference, draft, chatMode, model settings, queued messages}`, without `messages` or `history`. Temporary snapshots retain their device-only message arrays until closed or cleared (Q3), on every surface. Migrate v2 (§6.4), excluding temporary chats from ordinary local-chat import. Load server-chat messages from the Dexie cache, then the server. Remove `recoverCompletedSnapshotReplies` only where server persistence replaces it. Pins move to the server (XP-18 recommendation). | M | Stage 4 (G19, XS-06/XP-18) | Retires server-chat snapshot copies; re-evaluates #3152's `pendingOpenTabIdRef` with temporary persistence retained |
 | P8 | **Backend + frontend: lossless import of local chats.** `POST /api/v1/chats/import` takes a conversation id, title and messages with ids, parents, roles, timestamps, images and allow-listed metadata, in one transaction, idempotent by conversation id. The UI adds an "On this device" section in the history list (mounts the existing `LocalChatList`) with **Save to server** per chat and **Save all**. | M | List in Stage 2 (G07, CS-02 step 1); import in Stage 4 | Retires promotion (`usePlaygroundPersistence.tsx:250-565`); CS-02's "local chats listed nowhere" |
 | P9 | **Frontend: status from durable state.** The status chip (N14) reads the server id, the last acknowledged write and (after P15) the outbox. #3147's store becomes a thin view of this, or is removed. | S | Stage 3 (N14, after D1) | **Retires in-memory save-status tracking** |
 | P10 | **Addresses.** `/chat/<id>` (WebUI), `#/chat/<id>` (extension), hand-off carrying the conversation id plus the draft (N6, XP-09). Same paths as G18/XP-05; this doc only requires that the id is the server id. | S–M | Stage 4 (G18) | XP-05, XP-09, N6 |
@@ -508,10 +509,10 @@ Each PR is independently shippable, starts with a red test, and names its review
 |---|---|---|---|
 | P11 | Backend: `chat_turns` table, in-process turn runner, checkpointing, heartbeat, and the startup and periodic sweep. Behind a config flag, default off. | M | Reuses the P2 settlement and metadata code |
 | P12 | Backend: `POST /chats/{id}/turns`, `GET /chat/turns/{id}/events` (Last-Event-ID, snapshot fallback), `POST /chat/turns/{id}/cancel`, and `active_turn_id` on `GET /chats/{id}` | M | Contract tests, including a two-worker test that simulates a re-attach on the other worker (§9) |
-| P13 | Frontend: start, attach and cancel via turns. On mount, attach to `active_turn_id`. Stop calls cancel. Remove client settlement and the `HistoryTurnRecovery` checkpointing for server chats (kept for local and temporary). | M | CS-04 fully, across devices |
-| P14 | Frontend: cross-surface live view. The side panel and full page both attach to the same active turn; the side panel's `beforeunload` guard can go for server chats. | S | |
+| P13 | Frontend: start, attach and cancel via turns. On mount, attach to `active_turn_id`. Stop calls cancel. Remove client settlement and the `HistoryTurnRecovery` checkpointing for server chats (kept for local and temporary). | M | Requires P0 and P11/P12; CS-04 fully, across devices |
+| P14 | Frontend: cross-surface live view. The side panel and full page both attach to the same active turn; the side panel's `beforeunload` guard can go for server chats. | S | Requires P0 and P13 |
 
-**Phase 3: offline outbox (option C's addition; only if Q1 says yes)**
+**Phase 3: offline outbox (unscheduled under the accepted Q1 read-only offline decision)**
 
 | # | PR | Size | Notes |
 |---|---|---|---|
@@ -545,8 +546,8 @@ Each PR is independently shippable, starts with a red test, and names its review
 | `HistoryTurnRecovery` checkpointing for server chats (#3163) | P13 | Server-run turns on |
 | `server-chat-save-status` store (#3147) | P9 | Status derived from durable state |
 | `chat-promotion.ts` guard (#3163) and `handleSaveChatToServer` auto-path | P4 / P8 | Replaced by create-at-first-send and import |
-| Side-panel snapshot `messages`/`history`, `recoverCompletedSnapshotReplies` | P7 | v2 → v3 migration shipped and the v2 key kept read-only for two extension releases |
-| `pendingOpenTabIdRef` (#3152) | P7 (re-evaluate) | Tabs no longer write message snapshots, so the race it guards can't corrupt data |
+| Server-chat side-panel snapshot `messages`/`history`, `recoverCompletedSnapshotReplies` | P7 | v2 → v3 migration shipped and the v2 key kept read-only for two extension releases; temporary message arrays and required device-only recovery remain |
+| `pendingOpenTabIdRef` (#3152) | P7 (re-evaluate) | Server-bound tabs no longer write message snapshots; temporary persistence remains and must still be guarded |
 
 ### 6.4 Data migration
 
@@ -566,7 +567,8 @@ Each PR is independently shippable, starts with a red test, and names its review
 
 **Side-panel snapshots v2 → v3** (P7):
 
-- For each tab, if the snapshot has messages that are in neither Dexie nor the server (temporary tabs, failed saves), write them to Dexie as a local chat first, then drop the arrays.
+- Temporary tabs keep their device-only message arrays until closed or cleared. Preserve their temporary status and exclude them from ordinary local-chat import and Save all.
+- For a non-temporary failed-save tab whose messages are in neither Dexie nor the server, write them to Dexie as a legacy local chat before dropping its snapshot arrays.
 - Keep the v2 key read-only for two extension releases as a backup.
 - Tabs bound to a server chat keep only their reference and view.
 
@@ -642,7 +644,7 @@ Only questions whose answers change the design:
    - In multi-user deployments, should bulk import be offered at all, or per chat only?
 3. **Q3: Temporary chats across reloads.**
    - Today a temporary chat survives a side-panel reload (its messages sit in `chrome.storage.local`) but not a full-page reload.
-   - Should "temporary" mean "never leaves this device" (keep a local copy until closed) or "gone on reload" (memory only)?
+   - Should "temporary" mean "no server conversation persistence" (keep a device-only copy until closed) or "gone on reload" (memory only)? Inference still sends prompts to the server.
    - This decides whether P7 keeps a message array for temporary tabs.
 4. **Q4: Sync v2 users.**
    - With an active Sync v2 profile, every history-selection capture and write returns 409 `sync_owner_unsupported`, so after D1 such a user couldn't send from the WebUI at all.
@@ -655,8 +657,8 @@ Only questions whose answers change the design:
 | D7a–c, D6 | Adopted as recommended. | Phase 1 (one identity, including D1) and CM-04 proceed in Stage 2. The side-panel Notes quick panel (no editor) follows G01 and XP-05. |
 | Q1 | **Read-only offline.** Cached chats stay readable; Send waits for the connection. | Phase 3 (outbox, P15–P17) is not scheduled. |
 | Q2 | Not asked separately; the recommendation stands. | Import is explicit, per chat or "Save all", never automatic, and always to the signed-in account. |
-| Q3 | **Temporary chats survive a reload on this device**, until closed or cleared, and never reach the server. | P7 keeps a local message array for temporary tabs, on every surface (the full page gains this). |
-| Q4 | **Sync v2 users are in scope.** | Phase 1 gains a backend task so versioned history writes emit Sync v2 envelopes and D1 doesn't lock these users out. |
+| Q3 | **Temporary chats survive a reload on this device**, until closed or cleared, without server conversation persistence. Inference still sends prompts to the server. | P7 keeps a local message array for temporary tabs, on every surface (the full page gains this). |
+| Q4 | **Sync v2 users are in scope.** | Phase 1 includes backend P0 so versioned history writes emit Sync v2 envelopes before D1/P4 enablement; P13/P14 also require it. |
 
 ---
 
@@ -681,14 +683,14 @@ All three are open PRs, not yet on `dev`.
 
 | Need | Where | For |
 |---|---|---|
-| **Backend contract tests** for P1 (branch-changed 409 and its opt-in), P2 (metadata at settlement; partial saved on cancel, error and length), P3 (idempotent create), P8 (import fidelity and idempotency), and P11/P12 (turn lifecycle, Last-Event-ID replay, snapshot fallback, cancel, sweep) | `tldw_Server_API/tests/Character_Chat_NEW/integration/`, `tests/Chat/` | R3, R6, S3 |
+| **Backend contract tests** for P0 (active Sync v2 profile capture, admission and settlement emitting envelopes), P1 (branch-changed 409 and its opt-in), P2 (metadata at settlement; partial saved on cancel, error and length), P3 (idempotent create), P8 (import fidelity and idempotency), and P11/P12 (turn lifecycle, Last-Event-ID replay, snapshot fallback, cancel, sweep) | `tldw_Server_API/tests/Character_Chat_NEW/integration/`, `tests/Chat/` | R3, R6, S3 |
 | **Disconnect test:** a client drops mid-stream (httpx with a cancelled stream) → with S3-1 the partial is saved as interrupted; with S3-3 generation completes and the turn is `completed` | Backend integration | 4.1 items 1–2 |
 | **Two-worker test** for S3-3: start a turn on one app instance and attach from a second instance sharing the database. Expect a snapshot plus polling, then the terminal state. | Backend integration (two `TestClient`s on one DB) | Multi-worker correctness |
 | **Fake-server parity:** extend `fake-tldw-server.ts` with P1's 409, P2's metadata, P3's create id and the turn endpoints. Add a check that the fake's routes and fields match the real OpenAPI, via the generated types (N28), so the review's theme 3 ("mocks agreed with the client") can't recur. | `ui/components/Option/Playground/__tests__/harness/` | All frontend PRs |
 | **Playground integration tests:** new chat → `POST /chats` with a client id, then admission (P4); stale view → 409 → notice, text kept, no fork (P6); reload mid-stream → reply resumes (P13); Stop → Stopped with partial (P5) | #3139 harness | P4–P6, P13 |
 | **Side-panel tests:** v2 → v3 snapshot migration as unit tests with fixtures (temporary tab, server tab, failed-save tab) (P7); tab = view, two tabs on one chat both update | Vitest + #3146 e2e | P7 |
 | **Cross-surface e2e:** one backend, the WebUI page plus the extension side panel (or two pages). Send in A, focus B: B shows the turn. Send from stale B: notice, no fork. Trash in A: B's tab shows Trash state. Rename in A: B's title. Turn started in B: streams in A (P14). | #3136 + #3146 combined fixture | R1, R3, S2 acceptance |
-| **Migration e2e:** seed Dexie with legacy local chats (branches, images, variants, linear legacy), run Save all, and compare the server graph with the original. Run it twice to prove idempotency. | #3136 (seeded browser state) | R6 |
+| **Migration e2e:** seed Dexie with legacy local chats (branches, images, variants, linear legacy) and a temporary tab, run Save all, and compare the server graph with the original. Run it twice to prove idempotency; the temporary tab must remain device-only and excluded. | #3136 (seeded browser state) | R6 |
 | **Deterministic mock LLM** (plan Stage 0 item 2): delayed first token, mid-stream pause, truncation (`finish_reason: length`), hang | Stage 0 | S3 tests; CM-N1 |
 
 **Flip list.** P4 flips #3139's CS-03. #3161 already flips #3146's XP-08 staleness test; P6 adds the fork case #3146 couldn't reproduce (a send from a stale tab) once composer sends work. P5 flips the server-chat half of #3163's interrupted-reply test from "kept on this device" to "kept on server".

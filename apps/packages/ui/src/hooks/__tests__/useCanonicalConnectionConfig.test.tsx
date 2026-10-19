@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const useStorageMock = vi.hoisted(() => vi.fn())
 const getConfigMock = vi.hoisted(() => vi.fn())
+const getCurrentUserMock = vi.hoisted(() => vi.fn())
 
 vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (...args: unknown[]) => useStorageMock(...args)
@@ -14,7 +15,12 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: (...args: unknown[]) => getCurrentUserMock(...args) }
+}))
+
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { useNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
 
 const originalDeploymentMode = process.env.NEXT_PUBLIC_TLDW_DEPLOYMENT_MODE
 
@@ -57,6 +63,7 @@ describe("useCanonicalConnectionConfig", () => {
   beforeEach(() => {
     useStorageMock.mockReset()
     getConfigMock.mockReset()
+    getCurrentUserMock.mockReset()
     useStorageMock.mockImplementation(createUseStorageImplementation({}))
   })
 
@@ -241,4 +248,48 @@ describe("useCanonicalConnectionConfig", () => {
     expect(result.current.config).not.toBeNull()
     expect(result.current.authorityLoading).toBe(true)
   })
+
+  it.each(["failed", "missing"])("A02 recovers %s canonical authority on a renewal event without changed storage", async (initial) => {
+    const canonical = { serverUrl: "https://notes.example.test", authMode: "multi-user" as const, accessToken: "renewed-token" }
+    if (initial === "failed") getConfigMock.mockRejectedValueOnce(new Error("Initial canonical lookup failed"))
+    else getConfigMock.mockResolvedValueOnce(null)
+    getConfigMock.mockResolvedValue(canonical)
+    getCurrentUserMock.mockResolvedValue({ id: 7, is_active: true })
+    const { result } = renderHook(() => {
+      const connection = useCanonicalConnectionConfig()
+      const scope = useNotesGraphAuthorityScope({ config: connection.config, loading: connection.authorityLoading })
+      return { ...connection, scope }
+    })
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.authorityLoading).toBe(true)
+    expect(result.current.scope).toBeNull()
+    expect(getCurrentUserMock).not.toHaveBeenCalled()
+
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } })))
+
+    await waitFor(() => expect(result.current.authorityLoading).toBe(false))
+    await waitFor(() => expect(result.current.scope).not.toBeNull())
+    expect(getConfigMock).toHaveBeenCalledTimes(2)
+    expect(getCurrentUserMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("A02 keeps unresolved canonical renewal guarded when another lookup returns null", async () => {
+    getConfigMock.mockResolvedValue(null)
+    const { result } = renderHook(useCanonicalConnectionConfig)
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } })))
+    await waitFor(() => expect(getConfigMock).toHaveBeenCalledTimes(2))
+    expect(result.current.authorityLoading).toBe(true)
+  })
+
+
+  it("A02 keeps verified canonical authority through a benign config event", async () => {
+    getConfigMock.mockResolvedValue({ serverUrl: "https://notes.example.test", authMode: "multi-user", accessToken: "verified-token" })
+    const { result } = renderHook(useCanonicalConnectionConfig)
+    await waitFor(() => expect(result.current.authorityLoading).toBe(false))
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } })))
+    expect(result.current.authorityLoading).toBe(false)
+    expect(getConfigMock).toHaveBeenCalledTimes(1)
+  })
+
 })

@@ -10,6 +10,15 @@ import {
   servicePromptSingleUserApiKeyScopeMatches,
   servicePromptTargetsMatch
 } from "../service-prompt-scope-error"
+describe("B09 scoped analysis versions", () => {
+  it.each([
+    ["/api/v1/media/42/versions", "POST", true],
+    ["/api/v1/media/42/versions/2", "POST", false],
+    ["/api/v1/media/42/versions", "PUT", false],
+    ["/api/v1/media/a%2fb/versions", "POST", false],
+    ["/api/v1/media/../versions", "POST", false]
+  ])("bounds %s %s", (path, method, allowed) => expect(isServicePromptRequestPath(path, method)).toBe(allowed))
+})
 describe("Service Prompt scope policy", () => {
   it.each([
     ["/api/v1/config/docs-info", "GET", true],
@@ -97,7 +106,7 @@ describe("Service Prompt scope policy", () => {
     ["/api/v1/notes/search/extra", "GET", false],
     ["/api/v1/notes/private-note", "GET", true],
     ["/api/v1/notes/private-note", "PUT", true],
-    ["/api/v1/notes/", "GET", false],
+    ["/api/v1/notes/", "GET", true],
     ["/api/v1/notes/private-note", "DELETE", true],
     ["/api/v1/notes/private-note", "PATCH", false],
     ["/api/v1/notes/private-note/attachments", "POST", false],
@@ -408,6 +417,79 @@ describe("canonical raw URL controls", () => {
   )
 })
 
+describe("Notes checkbox original ownership", () => {
+  it.each([
+    ["/api/v1/notes/", "GET", true],
+    ["/api/v1/notes/?page=1&limit=20", "GET", true],
+    ["/api/v1/notes/tasks/status", "POST", true],
+    ["/api/v1/notes/tasks/status?source=checkbox", "POST", true],
+    ["/api/v1/notes/tasks/status", "GET", false],
+    ["/api/v1/notes/tasks/status", "PATCH", false],
+    ["/api/v1/notes/tasks/status/", "POST", false],
+    ["/api/v1/notes/tasks/status/other", "POST", false],
+    ["/api/v1/notes/tasks/status%2fother", "POST", false],
+    ["/api/v1/notes/tasks", "POST", false]
+  ])("bounds scoped checkbox %s %s to %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+})
+
+describe("Notes activity original ownership", () => {
+  it.each([
+    ["/api/v1/notes/tasks/activity/event-1", "PATCH", true],
+    ["/api/v1/notes/tasks/activity/event-1?source=notice", "PATCH", true],
+    ["/api/v1/notes/tasks/activity/event-1", "GET", false],
+    ["/api/v1/notes/tasks/activity/event-1", "POST", false],
+    ["/api/v1/notes/tasks/activity/event-1", "PUT", false],
+    ["/api/v1/notes/tasks/activity/event-1", "DELETE", false],
+    ["/api/v1/notes/tasks/activity", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/event-1/", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/event-1/other", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/event%2fother", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/event%5cother", "PATCH", false],
+    ["/api/v1/notes/tasks/activity/%2e%2e", "PATCH", false],
+    ["/api/v1/notes/tasks/activity-events/event-1", "PATCH", false],
+    ["/api/v1/notes/tasks/event-1", "PATCH", false]
+  ] as const)("bounds owned activity %s %s to %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+})
+
+
+describe("owned Persona transport: bounded setup scope", () => {
+  it.each([
+    ["/api/v1/persona/profiles/owned", "PATCH", true],
+    ["/api/v1/persona/profiles/owned?expected_version=2", "PATCH", true],
+    ["/api/v1/persona/profiles/owned/voice-commands", "GET", true],
+    ["/api/v1/persona/profiles/owned/voice-commands?include_disabled=true", "GET", true],
+    ["/api/v1/persona/profiles/owned/connections", "GET", true],
+    ["/api/v1/persona/profiles/owned", "GET", true],
+    ["/api/v1/persona/profiles/owned", "PUT", false],
+    ["/api/v1/persona/profiles/owned/voice-commands", "POST", false],
+    ["/api/v1/persona/profiles/owned/connections", "PATCH", false],
+    ["/api/v1/persona/profiles/owned/connections/extra", "GET", false],
+    ["/api/v1/persona/profiles/owned/voice-commands/extra", "GET", false],
+    ["/api/v1/persona/profiles/owned/policy-rules", "GET", false],
+    ["/api/v1/persona/profiles/a%2fb/connections", "GET", false],
+    ["/api/v1/persona/profiles/%2e%2e", "PATCH", false],
+    ["/api/v1/persona/profiles//connections", "GET", false]
+  ])("owned Persona transport: %s %s", (path, method, allowed) => {
+    expect(isServicePromptRequestPath(path, method)).toBe(allowed)
+  })
+})
+
+// B05 captures a transcript upload's account, without broadening other audio operations.
+it.each([
+  ["/api/v1/audio/transcriptions", "POST", true],
+  ["/api/v1/audio/transcriptions", "GET", false],
+  ["/api/v1/audio/transcriptions/extra", "POST", false],
+  ["/api/v1/audio/translations", "POST", false],
+  ["/api/v1/audio/speech", "POST", false],
+  ["/api/v1/audio/../transcriptions", "POST", false],
+])("B05 scoped transcription path %s %s", (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed);
+});
 
 it.each([
   ["/api/v1/messages/owned", "GET", true],

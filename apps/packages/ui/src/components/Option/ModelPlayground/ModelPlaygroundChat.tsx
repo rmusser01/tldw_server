@@ -155,11 +155,12 @@ export const ModelPlaygroundChat: React.FC = () => {
       return
     }
 
+    const submittedMessage = message.trim()
+    setMessage("")
     await onSubmit({
-      message: message.trim(),
+      message: submittedMessage,
       image: ""
     })
-    setMessage("")
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -498,6 +499,7 @@ export const ModelPlaygroundChat: React.FC = () => {
             <Tooltip title={t("common:send", "Send")}>
               <button
                 type="button"
+                aria-label={t("common:send", "Send")}
                 onClick={handleSend}
               disabled={!message.trim() || isProcessing || !canSend}
               className="rounded-xl bg-primary p-3 text-white transition hover:bg-primaryStrong disabled:opacity-50 disabled:cursor-not-allowed"

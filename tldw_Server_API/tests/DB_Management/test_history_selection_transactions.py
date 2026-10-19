@@ -477,6 +477,67 @@ def selected(db, cid, cursor=None):
     return result["selection"]
 
 
+def test_regenerate_existing_input_success_replay_and_outer_rollback(history_db):
+    db, cid = history_db
+    question = add(db, cid, "original question", id="existing-question")
+    original = db.get_message_by_id(question)
+    selection = selected(db, cid, {"kind": "after_message", "message_id": question})
+    reply = {"id": "alternative-answer", "sender": "assistant", "content": "alternative"}
+    with pytest.raises(RuntimeError, match="outer rollback"):
+        with db.transaction() as conn:
+            db.settle_selected_existing_input(
+                cid, selection, reply, owner_client_id="alice", owner_key=OWNER_KEY, conn=conn
+            )
+            raise RuntimeError("outer rollback")
+    assert db.get_message_by_id("alternative-answer") is None  # nosec B101 # pytest contract assertion
+    assert db.get_message_by_id(question) == original  # nosec B101 # pytest contract assertion
+    assert db.settle_selected_existing_input(  # nosec B101 # pytest contract assertion
+        cid, selection, reply, owner_client_id="alice", owner_key=OWNER_KEY
+    ) == "alternative-answer"
+    assert db.settle_selected_existing_input(  # nosec B101 # pytest contract assertion
+        cid, selection, reply, owner_client_id="alice", owner_key=OWNER_KEY
+    ) == "alternative-answer"
+    assert db.get_message_by_id("alternative-answer")["parent_message_id"] == question  # nosec B101 # pytest contract assertion
+    assert db.count_messages_for_conversation(cid) == 2  # nosec B101 # pytest contract assertion
+
+
+@pytest.mark.parametrize("tamper", [
+    "changed_proof", "malformed_proof", "missing_proof", "deleted_result", "workspace_scope"
+])
+def test_regenerate_existing_input_replay_refuses_changed_proof_result_or_scope(history_db, tamper):
+    db, cid = history_db
+    question = add(db, cid, "original question", id="existing-question")
+    selection = selected(db, cid, {"kind": "after_message", "message_id": question})
+    reply = {"id": "alternative-answer", "sender": "assistant", "content": "alternative"}
+    db.settle_selected_existing_input(
+        cid, selection, reply, owner_client_id="alice", owner_key=OWNER_KEY
+    )
+    if tamper == "workspace_scope":
+        db.upsert_workspace("other", "Other")
+    with db.transaction() as conn:
+        if tamper == "changed_proof":
+            authority = json.loads(conn.execute(
+                "SELECT history_admission_json FROM messages WHERE id = ?", (reply["id"],)
+            ).fetchone()["history_admission_json"])
+            authority["intent_digest"] = "different-intent"
+            conn.execute("UPDATE messages SET history_admission_json = ? WHERE id = ?",
+                         (json.dumps(authority), reply["id"]))
+        elif tamper == "malformed_proof":
+            conn.execute("UPDATE messages SET history_admission_json = ? WHERE id = ?",
+                         ("{malformed", reply["id"]))
+        elif tamper == "missing_proof":
+            conn.execute("UPDATE messages SET history_admission_json = NULL WHERE id = ?", (reply["id"],))
+        elif tamper == "deleted_result":
+            conn.execute("UPDATE messages SET deleted = TRUE WHERE id = ?", (reply["id"],))
+        else:
+            conn.execute("UPDATE conversations SET scope_type = 'workspace', workspace_id = 'other' WHERE id = ?",
+                         (cid,))
+    with pytest.raises(HistorySelectionError, match="message_id_conflict"):
+        db.settle_selected_existing_input(
+            cid, selection, reply, owner_client_id="alice", owner_key=OWNER_KEY
+        )
+
+
 def admit(db, cid, selection, mid="accepted-user", **kwargs):
     return db.append_selected_history_input(
         cid, selection, {"id": mid, "sender": "user", "content": "new input", **kwargs},
@@ -910,3 +971,127 @@ def test_selected_history_rejects_corrupt_metadata(history_db, field):
         db.get_conversation_history_selected_content(
             cid, [mid], snapshot=snap, owner_client_id="alice", owner_key=OWNER_KEY
         )
+
+
+@pytest.fixture(params=["sqlite", "postgres"])
+def admission_capture_db(request, tmp_path):
+    """Use ordinary storage and the official restricted PostgreSQL role."""
+    kwargs = {"db_path": str(tmp_path / "admission.sqlite"), "client_id": "alice"}
+    if request.param == "postgres":
+        kwargs["backend"] = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_restricted_backend").config)
+    db = CharactersRAGDB(**kwargs)
+    cid = db.add_conversation({"character_id": None, "title": "Admission capture"})
+    try:
+        yield db, cid
+    finally:
+        db.close_connection()
+        if request.param == "postgres":
+            db.backend.get_pool().close_all()
+
+
+def admission_reference(admission):
+    return {key: admission[key] for key in (
+        "version", "owner_key", "conversation_id", "input_message_id", "input_message_revision", "selection_digest"
+    )}
+
+
+def test_native_admission_capture_proves_unchanged_input_without_equating_revision_domains(admission_capture_db):
+    db, cid = admission_capture_db
+    reference = admission_reference(admit(db, cid, selected(db, cid)))
+    captured = snapshot(db, cid)
+    original = db.get_message_by_id(reference["input_message_id"])
+    assert reference["input_message_revision"] == "1"  # nosec B101: Receipt remains the physical message version.
+    assert captured.nodes[0]["revision"] != "1"  # nosec B101: Capture retains its complete semantic hash.
+    proof = db.validate_history_admission(cid, reference, snapshot=captured, owner_client_id="alice", owner_key=OWNER_KEY)
+    assert proof == {"admission": reference, "input_revision": captured.nodes[0]["revision"]}  # nosec B101: Explicit owner proof binds the capture hash.
+    assert db.get_message_by_id(reference["input_message_id"]) == original  # nosec B101: Validation is read-only.
+    assert db.count_messages_for_conversation(cid) == 1  # nosec B101: No repeated admission.
+
+
+@pytest.mark.parametrize("drift", ["edit", "delete", "metadata", "asset", "receipt", "owner", "scope", "snapshot"])
+def test_native_admission_capture_refuses_changed_input_or_capture(admission_capture_db, drift):
+    db, cid = admission_capture_db
+    reference = admission_reference(admit(db, cid, selected(db, cid), extra_metadata={"original": True}))
+    captured = snapshot(db, cid)
+    if drift == "edit":
+        db.update_message(reference["input_message_id"], {"content": "edited input"}, expected_version=1)
+    elif drift == "delete":
+        db.soft_delete_message(reference["input_message_id"], expected_version=1)
+    elif drift == "metadata":
+        db.add_message_metadata(reference["input_message_id"], extra={"changed": True})
+        assert db.get_message_by_id(reference["input_message_id"])["version"] == 1  # nosec B101: Metadata must be fenced without a physical version bump.
+    elif drift == "asset":
+        db.append_message_image(reference["input_message_id"], b"new image", "image/png")
+        assert db.get_message_by_id(reference["input_message_id"])["version"] == 1  # nosec B101: Asset changes must also be fenced independently.
+    elif drift == "receipt":
+        reference["selection_digest"] = "tampered"
+    elif drift == "owner":
+        reference["owner_key"] = "other owner"
+    elif drift == "scope":
+        db.upsert_workspace("other", "Changed scope", initial_assistant_opt_out=True)
+        current = db.get_conversation_by_id(cid)
+        db.upsert_conversation_from_sync(
+            conversation_id=cid, title=current["title"], sync_client_id="alice",
+            object_revision=current["version"] + 1, object_hash="fixture-scope-change",
+            scope_type="workspace", workspace_id="other",
+        )
+    else:
+        add(db, cid, "later unrelated input")
+    with pytest.raises(HistorySelectionError):
+        db.validate_history_admission(cid, reference, snapshot=captured, owner_client_id="alice", owner_key=OWNER_KEY)
+
+
+def test_native_admission_capture_refuses_metadata_change_and_restore(admission_capture_db):
+    db, cid = admission_capture_db
+    reference = admission_reference(admit(db, cid, selected(db, cid), extra_metadata={"original": True}))
+    captured = snapshot(db, cid)
+    db.add_message_metadata(reference["input_message_id"], extra={"changed": True})
+    db.add_message_metadata(reference["input_message_id"], extra={"original": True})
+    assert db.get_message_by_id(reference["input_message_id"])["version"] == 1  # nosec B101: Metadata ABA leaves the physical version unchanged.
+    with pytest.raises(HistorySelectionError):
+        db.validate_history_admission(cid, reference, snapshot=captured, owner_client_id="alice", owner_key=OWNER_KEY)
+
+
+def test_native_admission_capture_refuses_drift_between_validation_and_proof(admission_capture_db, monkeypatch):
+    db, cid = admission_capture_db
+    reference = admission_reference(admit(db, cid, selected(db, cid)))
+    captured = snapshot(db, cid)
+    validate = db.message_store._validate_history_parent
+
+    def change_after_validation(*args, **kwargs):
+        authority = validate(*args, **kwargs)
+        db.add_message_metadata(reference["input_message_id"], extra={"changed": True}, conn=kwargs["conn"])
+        return authority
+
+    monkeypatch.setattr(db.message_store, "_validate_history_parent", change_after_validation)
+    with pytest.raises(HistorySelectionError, match="stale_source"):
+        with db.transaction() as conn:
+            db.validate_history_admission(
+                cid, reference, snapshot=captured, owner_client_id="alice", owner_key=OWNER_KEY, conn=conn
+            )
+    assert db.get_message_metadata(reference["input_message_id"]) is None  # nosec B101: Rejected caller transaction rolls back the racing change.
+
+
+def test_b02_unanswered_completion_serializes_competing_answers(history_db):
+    db, cid = history_db
+    question = add(db, cid, "one saved question", id="b02-competing-question")
+    selection = selected(db, cid, {"kind": "after_message", "message_id": question})
+    gate = threading.Barrier(2)
+    def answer(index):
+        gate.wait(timeout=15)
+        try:
+            return db.settle_selected_existing_input(cid, selection,
+                {"id": f"b02-answer-{index}", "sender": "assistant", "content": f"answer {index}"},
+                owner_client_id="alice", owner_key=OWNER_KEY, require_unanswered=True)
+        except HistorySelectionError as exc:
+            return exc.code
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(answer, (1, 2)))
+    assert results.count("existing_input_already_answered") == 1  # nosec B101 - The locked fresh check refuses the losing answer.
+    winner = next(result for result in results if result != "existing_input_already_answered")
+    assert db.count_messages_for_conversation(cid) == 2  # nosec B101 - One question and exactly one answer survive concurrent completion.
+    row = db.get_message_by_id(winner)
+    assert row["parent_message_id"] == question  # nosec B101 - The winning answer retains canonical parent identity.
+    assert db.settle_selected_existing_input(cid, selection,
+        {"id": winner, "sender": "assistant", "content": row["content"]},
+        owner_client_id="alice", owner_key=OWNER_KEY, require_unanswered=True) == winner  # nosec B101 - Exact settled replay stays idempotent.

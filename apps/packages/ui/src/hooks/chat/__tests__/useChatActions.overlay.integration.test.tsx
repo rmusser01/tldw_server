@@ -405,7 +405,7 @@ describe("useChatActions overlay integration", () => {
         historyId: null,
         serverChatId: "server-chat-42",
         serverChatTitle: "Saved identity",
-        serverChatCharacterId: "saved-character",
+        serverChatCharacterId: null,
         serverChatVersion: 7,
         serverChatMetaLoaded: true
       })
@@ -431,7 +431,8 @@ describe("useChatActions overlay integration", () => {
       Object.assign(options, {
         historyId: null,
         serverChatId: "server-chat-42",
-        serverChatCharacterId: "saved-character",
+        serverChatCharacterId: null,
+        serverChatMetaLoaded: true,
         setHistoryId: store.getState().setHistoryId
       })
       options.ensureServerChatHistoryId.mockImplementationOnce(async (_id, _title, _signal, _snapshot, scene) => {
@@ -462,6 +463,7 @@ describe("useChatActions overlay integration", () => {
       })
       try {
         await waitFor(() => expect(saveLocalSuccessMock).toHaveBeenCalledOnce())
+        store.getState().setServerChatCharacterId("saved-character")
         if (retired) {
           store.getState().startNewChatDraft()
           store.setState({ historyId: "newer-local-history" })

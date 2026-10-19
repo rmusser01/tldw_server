@@ -1202,7 +1202,7 @@ class CharactersRAGDB:
         ) -> bool: ...
 
     _CURRENT_SCHEMA_VERSION = 81  # Server-issued conversation source incarnation
-    _POSTGRES_SCHEMA_VERSION = 85
+    _POSTGRES_SCHEMA_VERSION = 86
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -18534,6 +18534,45 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_db_version(conn) != 78:
             raise SchemaError("Knowledge provenance receipt SQLite migration failed version verification.")
 
+    def _verify_native_quota_owner_schema_postgres(self, conn: Any) -> None:
+        """Keep the completed native quota descriptor contract under a catalog lock."""
+        self.backend.execute("LOCK TABLE native_chat_quota_intents IN ACCESS SHARE MODE", connection=conn)
+        columns = self.backend.get_table_info("native_chat_quota_intents", connection=conn)
+        descriptor = next((column for column in columns if column["name"] == "quota_owner_json"), None)
+        if descriptor is None or descriptor["type"] != "text" or descriptor["nullable"] is not True:
+            raise SchemaError("Native quota owner descriptor schema is missing or invalid.")
+
+    def _verify_dictionary_schema_postgres(self, conn: Any) -> None:
+        """Validate registered shared catalog ownership without request DDL."""
+        from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import verify_postgres_dictionary_schema
+
+        verify_postgres_dictionary_schema(
+            self.backend, getattr(conn, "_connection", conn),
+            self._normalize_postgres_catalog_expression,
+        )
+
+    def _migrate_from_v85_to_v86_postgres(self, conn: Any) -> None:
+        """Converge the two historical V83 shapes without adopting unowned rows."""
+        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_dictionary_rls_sql
+        from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import (
+            postgres_dictionary_schema_statements,
+        )
+
+        self.backend.execute(
+            "ALTER TABLE native_chat_quota_intents ADD COLUMN IF NOT EXISTS quota_owner_json TEXT",
+            connection=conn,
+        )
+        for statement in (*postgres_dictionary_schema_statements(), *build_dictionary_rls_sql()):
+            self.backend.execute(statement, connection=conn)
+        self._verify_dictionary_schema_postgres(conn)
+        self._verify_native_quota_owner_schema_postgres(conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 85",
+            (86, self._SCHEMA_NAME), connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 86:
+            raise SchemaError("PostgreSQL V83 convergence failed version verification.")
+
     def _migrate_from_v81_to_v82_postgres(self, conn: Any) -> None:
         """Install permanent local receipts with forced owner RLS before the version bump."""
         from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (
@@ -26199,6 +26238,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._verify_note_attachment_schema_postgres(conn, runtime=True)
         self._verify_note_task_schema_postgres(conn, runtime=True)
         self._verify_notes_moodboard_studio_schema_postgres(conn)
+        if current_version >= 86:
+            self._verify_dictionary_schema_postgres(conn)
+            self._verify_native_quota_owner_schema_postgres(conn)
         for fts_table, source_table, _ in self._FTS_CONFIG:
             # Required PostgreSQL capability stays lazy and bound before mapping each source.
             register_fts_table: Callable[[str, str], None] = getattr(self.backend, "register_fts_table")  # noqa: B009
@@ -26271,7 +26313,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -26317,6 +26359,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 85 and current_version < 85:
                     self._migrate_from_v84_to_v85_postgres(conn)
                     current_version = 85
+                if target_version >= 86 and current_version < 86:
+                    self._migrate_from_v85_to_v86_postgres(conn)
+                    current_version = 86
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -26794,6 +26839,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v84_to_v85_postgres(conn)
                 self._runtime_schema_version = 85
                 current_version = 85
+            if target_version >= 86 and current_version < 86:
+                self._migrate_from_v85_to_v86_postgres(conn)
+                self._runtime_schema_version = 86
+                current_version = 86
 
             if current_version < target_version:
                 logger.warning(
@@ -27329,43 +27378,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
 
     def _sync_postgres_sequences(self, conn) -> None:
-        """Advance managed PostgreSQL serials without reusing allocated IDs."""
+        """Advance ChaCha-owned serials without reusing tenant-hidden allocations."""
+        from tldw_Server_API.app.core.DB_Management.backends.postgres_sequence_maintenance import (
+            sync_owned_postgres_sequences,
+        )
 
-        backend = self.backend
+        sync_owned_postgres_sequences(
+            self, conn, self._POSTGRES_SEQUENCE_TABLES, continue_on_error=True
+        )
 
-        for table_name, column_name in self._POSTGRES_SEQUENCE_TABLES:
-            try:
-                # Skip tables that may not exist yet at this schema version
-                try:
-                    if not backend.table_exists(table_name, connection=conn):
-                        continue
-                except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                    continue
-                sequence_rows = backend.execute(
-                    "SELECT ns.nspname AS sequence_schema, seq.relname AS sequence_name "
-                    "FROM pg_class seq JOIN pg_namespace ns ON ns.oid = seq.relnamespace "
-                    "WHERE seq.oid = pg_get_serial_sequence(%s, %s)::regclass",
-                    (table_name, column_name),
-                    connection=conn,
-                ).rows
-                if not sequence_rows:
-                    continue
-                sequence = sequence_rows[0]
-                advance_postgres_serial(
-                    backend,
-                    conn,
-                    table_name=table_name,
-                    column_name=column_name,
-                    sequence_schema=sequence["sequence_schema"],
-                    sequence_name=sequence["sequence_name"],
-                )
-            except BackendDatabaseError as exc:  # noqa: BLE001
-                logger.warning(
-                    "Failed to synchronize PostgreSQL sequence for {}.{}: {}",
-                    table_name,
-                    column_name,
-                    exc,
-                )
 
     # --- Internal Helpers ---
     def _get_current_utc_timestamp_iso(self) -> str:
@@ -46663,8 +46684,10 @@ for _message_store_method in (
     "validate_history_selection",
     "append_selected_history_input",
     "append_selected_history_inputs",
+    "validate_history_admission",
     "reuse_selected_history_admission",
     "settle_history_admission",
+    "settle_selected_existing_input",
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "tombstone_unsynced_message_from_sync",

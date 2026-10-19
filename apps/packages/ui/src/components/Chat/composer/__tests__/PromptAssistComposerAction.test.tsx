@@ -105,6 +105,7 @@ vi.mock("@/db/dexie/helpers", async (importOriginal) => {
   return {
     ...original,
     getAllPrompts: (...args: unknown[]) => mocks.getAllPrompts(...args),
+    getSharedLocalPrompts: () => mocks.getAllPrompts(),
     updatePrompt: (...args: unknown[]) => mocks.updatePrompt(...args),
     markPromptSyncError: (...args: unknown[]) =>
       mocks.markPromptSyncError(...args)

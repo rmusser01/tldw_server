@@ -1391,6 +1391,127 @@ describe("CharactersManager first-use onboarding", () => {
     })
   }, 60000)
 
+  it.each(["error", "pending"] as const)(
+    "preserves attachments when a main-field save starts with %s world-book loading", async (state) => {
+    const characterRecord = {
+      id: 101,
+      name: "Unavailable Worldbooks",
+      system_prompt: "Existing system prompt.",
+      greeting: "Hi",
+      description: "Existing description",
+      version: 4
+    }
+    let releasePut: (() => void) | undefined
+    if (state === "pending") {
+      tldwClientMock.updateCharacter.mockImplementationOnce(
+        () => new Promise<Record<string, never>>((resolve) => {
+          releasePut = () => resolve({})
+        })
+      )
+    }
+    let worldBookState = makeUseQueryResult({
+      data: undefined,
+      status: state === "pending" ? "pending" : "error",
+      isFetching: state === "pending",
+      error: state === "pending" ? null : new Error("Catalog unavailable")
+    })
+    tldwClientMock.listCharacterWorldBooks.mockResolvedValue([
+      { world_book_id: 11, world_book_name: "Keep this attachment" }
+    ])
+    useMutationMock.mockImplementation((opts: {
+      mutationFn?: (values: unknown) => Promise<unknown>
+      onSuccess?: (...args: unknown[]) => void
+      onError?: (...args: unknown[]) => void
+    }) => ({
+      mutate: async (variables: unknown) => {
+        try {
+          const result = await opts?.mutationFn?.(variables)
+          opts?.onSuccess?.(result, variables, undefined)
+        } catch (error) {
+          opts?.onError?.(error, variables, undefined)
+        }
+      },
+      mutateAsync: vi.fn(),
+      isPending: false
+    }))
+    useQueryMock.mockImplementation((opts: { queryKey?: readonly unknown[] }) => {
+      const key = opts?.queryKey?.[0]
+      if (key === "tldw:listCharacters") {
+        return makeUseQueryResult({ data: [characterRecord] })
+      }
+      if (key === "tldw:characterEditWorldBooks") {
+        return worldBookState
+      }
+      if (key === "tldw:characterConversationCounts") {
+        return makeUseQueryResult({ data: {} })
+      }
+      return makeUseQueryResult({ data: [] })
+    })
+    const view = render(<CharactersManager />)
+    fireEvent.click(await screen.findByRole("button", { name: /Edit character/i }))
+    const save = await findEditSubmitButton()
+    const editor = within(save.closest("form")!)
+    fireEvent.click(editor.getByRole("button", { name: "Show advanced fields" }))
+    fireEvent.click(editor.getByRole("button", { name: "Metadata" }))
+    fireEvent.click(save)
+    await waitFor(() => expect(tldwClientMock.updateCharacter).toHaveBeenCalled())
+    if (state === "pending") {
+      worldBookState = makeUseQueryResult({
+        data: { options: [{ id: 11, name: "Lore Atlas" }], attachedIds: [11] }
+      })
+      view.rerender(<CharactersManager />)
+      await screen.findByText("Lore Atlas")
+      await act(async () => { releasePut!() })
+    }
+    await waitFor(() => expect(notificationMock.success).toHaveBeenCalled())
+    expect(tldwClientMock.listCharacterWorldBooks).not.toHaveBeenCalled()
+    expect(tldwClientMock.detachWorldBookFromCharacter).not.toHaveBeenCalled()
+    expect(tldwClientMock.attachWorldBookToCharacter).not.toHaveBeenCalled()
+  }, 30000)
+
+  it("initializes world-book attachments after Retry without overwriting later edits on refetch", async () => {
+    const characterRecord = {
+      id: 101, name: "Retry Worldbooks", system_prompt: "Existing system prompt.",
+      greeting: "Hi", version: 4
+    }
+    const retry = vi.fn()
+    let worldBookState = makeUseQueryResult({
+      error: new Error("Catalog unavailable"), status: "error", refetch: retry
+    })
+    useQueryMock.mockImplementation((opts: { queryKey?: readonly unknown[] }) => {
+      const key = opts?.queryKey?.[0]
+      if (key === "tldw:listCharacters") return makeUseQueryResult({ data: [characterRecord] })
+      if (key === "tldw:characterEditWorldBooks") return worldBookState
+      if (key === "tldw:characterConversationCounts") return makeUseQueryResult({ data: {} })
+      return makeUseQueryResult({ data: [] })
+    })
+    const view = render(<CharactersManager />)
+    fireEvent.click(await screen.findByRole("button", { name: /Edit character/i }))
+    const save = await findEditSubmitButton()
+    const editor = within(save.closest("form")!)
+    fireEvent.click(editor.getByRole("button", { name: "Show advanced fields" }))
+    fireEvent.click(editor.getByRole("button", { name: "Metadata" }))
+    fireEvent.click(editor.getByRole("button", { name: "Retry world books" }))
+    expect(retry).toHaveBeenCalledTimes(1)
+    worldBookState = makeUseQueryResult({
+      data: { options: [{ id: 11, name: "Lore Atlas" }], attachedIds: [11] },
+      refetch: retry
+    })
+    view.rerender(<CharactersManager />)
+    const field = editor.getByText("World book attachments").closest(".ant-form-item")!
+    await within(field as HTMLElement).findByText("Lore Atlas")
+    const remove = field.querySelector(".ant-select-selection-item-remove")
+    expect(remove).not.toBeNull()
+    fireEvent.click(remove!)
+    expect(within(field as HTMLElement).queryByText("Lore Atlas")).not.toBeInTheDocument()
+    worldBookState = makeUseQueryResult({
+      data: { options: [{ id: 11, name: "Lore Atlas" }], attachedIds: [11] },
+      refetch: retry
+    })
+    await act(async () => { view.rerender(<CharactersManager />) })
+    expect(within(field as HTMLElement).queryByText("Lore Atlas")).not.toBeInTheDocument()
+  }, 30000)
+
   it("syncs selected world-book attachments after creating a character", async () => {
     const user = userEvent.setup()
     window.localStorage.setItem(TEMPLATE_CHOOSER_SEEN_KEY, "true")

@@ -132,34 +132,37 @@ vi.mock("@/services/background-proxy", () => ({
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>()
   const React = require("react") as typeof import("react")
+  function useFixtureQuery(options: {
+    queryFn: () => Promise<unknown>
+    queryKey: unknown[]
+    enabled?: boolean
+  }) {
+    const { queryFn, queryKey } = options
+    const [data, setData] = React.useState<unknown>([])
+    const [isFetching, setIsFetching] = React.useState(false)
+    const queryFnRef = React.useRef(queryFn)
+    queryFnRef.current = queryFn
+    const queryHash = JSON.stringify(queryKey)
+    const run = React.useCallback(async () => {
+      setIsFetching(true)
+      const result = await queryFnRef.current()
+      setData(result)
+      setIsFetching(false)
+      return { data: result }
+    }, [])
+
+    React.useEffect(() => {
+      void run()
+    }, [run, queryHash])
+
+    return { data, isFetching, refetch: run }
+  }
   return {
     ...actual,
     keepPreviousData: {},
-    useQuery: (options: {
-      queryFn: () => Promise<unknown>
-      queryKey: unknown[]
-      enabled?: boolean
-    }) => {
-      const { queryFn, queryKey } = options
-      if (mocks.realQuery) return actual.useQuery(options)
-      const [data, setData] = React.useState<unknown>([])
-      const [isFetching, setIsFetching] = React.useState(false)
-      const queryFnRef = React.useRef(queryFn)
-      queryFnRef.current = queryFn
-      const queryHash = JSON.stringify(queryKey)
-      const run = React.useCallback(async () => {
-        setIsFetching(true)
-        const result = await queryFnRef.current()
-        setData(result)
-        setIsFetching(false)
-        return { data: result }
-      }, [])
-
-      React.useEffect(() => {
-        void run()
-      }, [run, queryHash])
-
-      return { data, isFetching, refetch: run }
+    useQuery: (options: Parameters<typeof useFixtureQuery>[0]) => {
+      const useQueryImplementation = mocks.realQuery ? actual.useQuery : useFixtureQuery
+      return useQueryImplementation(options)
     }
   }
 })

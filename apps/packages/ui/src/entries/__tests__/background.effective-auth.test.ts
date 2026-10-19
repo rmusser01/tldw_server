@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+const runtimeSendMessage = vi.hoisted(() => vi.fn(async () => ({ handled: true })))
+
 const connectListeners = new Set<(port: any) => void>()
 const runtimeMessageListeners = new Set<(
   message: unknown,
@@ -64,7 +66,7 @@ vi.mock("wxt/browser", () => ({
     runtime: {
       id: "extension-id",
       getURL: (path: string) => `chrome-extension://extension-id${path}`,
-      sendMessage: vi.fn(async () => ({ handled: true })),
+      sendMessage: runtimeSendMessage,
       onConnect: {
         addListener: (listener: (port: any) => void) => connectListeners.add(listener)
       },
@@ -162,7 +164,22 @@ import background from "@/entries/background"
 import { deriveConnectionAuthorityId, deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 import { tldwAuth } from "@/services/tldw/TldwAuth"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
-import { browser } from "wxt/browser"
+import { browser, type Browser } from "wxt/browser"
+
+const contextMenuTab: Browser.tabs.Tab = {
+  id: 8,
+  index: 0,
+  pinned: false,
+  highlighted: true,
+  windowId: 1,
+  active: true,
+  frozen: false,
+  incognito: false,
+  selected: true,
+  discarded: false,
+  autoDiscardable: true,
+  groupId: -1
+}
 
 const WORKER_API_KEY_SCOPE = deriveSingleUserApiKeyCredentialScope(
   "single-user",
@@ -230,7 +247,7 @@ describe("background effective extension auth", () => {
         sidePanel: { setOptions: vi.fn().mockResolvedValue(undefined), open },
         notifications: { create: vi.fn() },
       })
-      vi.mocked(browser.runtime.sendMessage)
+      runtimeSendMessage
         .mockClear()
         .mockResolvedValue({ handled: true })
       const calls = vi.mocked(browser.contextMenus.onClicked.addListener).mock
@@ -240,10 +257,11 @@ describe("background effective extension auth", () => {
       await onClick(
         {
           menuItemId,
+          editable: false,
           selectionText: "Selected source",
           pageUrl: "https://example.com/story",
         },
-        { id: 8, title: "Story" },
+        { ...contextMenuTab, title: "Story" },
       )
 
       expect(open).toHaveBeenCalledWith({ tabId: 8 })
@@ -268,8 +286,8 @@ describe("background effective extension auth", () => {
       .calls
 
     await calls[calls.length - 1][0](
-      { menuItemId: "save-to-notes-pa", selectionText: "Selected source" },
-      { id: 8 },
+      { menuItemId: "save-to-notes-pa", editable: false, selectionText: "Selected source" },
+      contextMenuTab,
     )
 
     expect(open).toHaveBeenCalledTimes(1)
@@ -369,6 +387,51 @@ describe("background effective extension auth", () => {
     expect(storageState.persistent.get("tldwConfig")).toEqual(config)
   })
 
+  it("preserves a rejected scoped refresh with a malformed matching org ID without invalidating credentials", async () => {
+    const config = {
+      serverUrl: "https://api.example.test",
+      authMode: "multi-user",
+      authSource: "manual",
+      orgId: "7",
+      accessToken: jwtForUser(42),
+      refreshToken: "expired-refresh"
+    }
+    storageState.persistent.set("tldwConfig", config)
+    storageState.persistent.delete("tldwCookieSessionConfig")
+    const persistentBefore = new Map(storageState.persistent)
+    const sessionBefore = new Map(storageState.session)
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
+      new Response("unauthorized", { status: 401 })
+    )
+    vi.stubGlobal("fetch", fetchSpy)
+
+    await expect(sendRuntimeMessage({
+      type: "tldw:request",
+      payload: {
+        path: "/api/v1/service-prompts/chat.rag.answer",
+        method: "GET",
+        servicePromptConfig: {
+          serverUrl: config.serverUrl,
+          authMode: "multi-user",
+          authSource: "manual",
+          orgId: "7",
+          expectedUserId: 42
+        }
+      }
+    })).resolves.toMatchObject({
+      ok: false,
+      status: 401,
+      error: "Session expired. Please log in again."
+    })
+    expect(fetchSpy.mock.calls.map(([input]) => new URL(String(input)).pathname)).toEqual([
+      "/api/v1/service-prompts/chat.rag.answer",
+      "/api/v1/auth/refresh"
+    ])
+    expect(storageState.persistent).toEqual(persistentBefore)
+    expect(storageState.session).toEqual(sessionBefore)
+    expect(storageState.set).not.toHaveBeenCalled()
+  })
+
   it("invalidates a rejected scoped worker refresh in shared effective credentials", async () => {
     const config = {
       serverUrl: "https://api.example.test", authMode: "multi-user", authSource: "manual",
@@ -392,7 +455,7 @@ describe("background effective extension auth", () => {
   })
 
   it("authenticates ordinary worker requests with session credentials", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -447,7 +510,7 @@ describe("background effective extension auth", () => {
   })
 
   it("rejects a same-target single-user API-key change before worker dispatch", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ id: "wrong-account-write" }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -479,7 +542,7 @@ describe("background effective extension auth", () => {
   })
 
   it("uses the current worker credential after the configured target matches", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -514,7 +577,7 @@ describe("background effective extension auth", () => {
       authSource: "manual",
       accessToken: "current-account-token"
     })
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -1032,7 +1095,7 @@ describe("background effective extension auth", () => {
     "/api/v1/rag/search",
     "/api/v1/research/websearch"
   ])("allows a checked target for the exact worker route %s", async (path) => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -1095,7 +1158,7 @@ describe("background effective extension auth", () => {
   })
 
   it("authenticates worker uploads with session credentials", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -1128,7 +1191,7 @@ describe("background effective extension auth", () => {
       refreshToken: "refresh-token"
     })
     storageState.persistent.delete("tldwCookieSessionConfig")
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -1218,7 +1281,7 @@ describe("background effective extension auth", () => {
   })
 
   it("preserves an expected-user rejection from a scoped worker upload", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({
         detail: {
           code: "request_config_scope_changed",
@@ -1323,7 +1386,7 @@ describe("background effective extension auth", () => {
   })
 
   it("cleans up a completed cancelable worker request", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -1354,7 +1417,7 @@ describe("background effective extension auth", () => {
   })
 
   it("authenticates worker HTTP streams with session credentials", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {
         status: 200,
         headers: { "content-type": "text/event-stream" }
@@ -1581,7 +1644,7 @@ describe("background effective extension auth", () => {
       accessToken: "current-account-token",
       refreshToken: "refresh-token"
     })
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response("data: [DONE]\n\n", {
         status: 200,
         headers: { "content-type": "text/event-stream" }
@@ -2747,6 +2810,7 @@ describe("background effective extension auth", () => {
     ["/api/v1/media/ingest-web-content", "POST"],
     ["/api/v1/web-clipper/925871f6-30fa-470b-a2c4-2272051f2373", "GET"],
     ["/api/v1/web-clipper/clip%20with%20spaces/", "GET"],
+    ["/api/v1/media/71/versions", "POST"],
     ["/api/v1/media/71/versions?include_content=true", "GET"],
     ["/api/v1/media/71/versions?include_content=true&limit=10&page=2", "GET"],
     ["/api/v1/media/71/versions/7?include_content=true", "GET"],
@@ -2775,7 +2839,7 @@ describe("background effective extension auth", () => {
       storageState.persistent.delete("tldwCookieSessionConfig")
       const body =
         method === "POST"
-          ? { urls: ["https://example.com/story"], credential_free: true }
+          ? path.endsWith("/versions") ? { content: "Reviewed source revision", expected_version: 7 } : { urls: ["https://example.com/story"], credential_free: true }
           : undefined
       const fetchSpy = vi.fn(
         async (_input: RequestInfo | URL, _init?: RequestInit) =>
@@ -2815,7 +2879,6 @@ describe("background effective extension auth", () => {
   it.each([
     ["/api/v1/media/ingest-web-content", "GET"],
     ["/api/v1/media/ingest-web-content/extra", "POST"],
-    ["/api/v1/media/71/versions", "POST"],
     ["/api/v1/media/71/versions/0", "GET"],
     ["/api/v1/media/71/versions/advanced", "GET"],
     ["/api/v1/media/71/versions/7/metadata", "GET"],

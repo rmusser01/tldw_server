@@ -1,3 +1,4 @@
+import Dexie from "dexie"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 const calls = vi.hoisted(() => ({
   capture: vi.fn(),
@@ -95,10 +96,11 @@ it.each(["capture", "confirm", "admit", "settle"] as const)(
     }
     const read = vi.spyOn(db.userSettings, "get").mockRejectedValue(new Error("private_read_started"))
     // Use the real local transaction callback; only pause its storage boundary.
-    vi.spyOn(db, "transaction").mockImplementationOnce(async (_mode, _tables, run) => {
+    vi.spyOn(db, "transaction").mockImplementationOnce((_mode, _tables, run) => Dexie.Promise.resolve().then(async () => {
       current = false
-      return (run as (tx: { abort(): void }) => Promise<never>)({ abort() {} })
-    })
+      if (typeof run !== "function") throw new Error("Expected transaction scope fixture")
+      return Reflect.apply(run, undefined, [{ abort() {} }])
+    }))
     const scope = { profile_id: "profile", client_session_id: "session" }
     const intent = {
       version: 1 as const,
@@ -226,6 +228,118 @@ describe("native completion capture capability", () => {
 })
 
 describe("history owner service", () => {
+  it("requires an explicit scoped Regenerate acknowledgement after an ordinary capture", async () => {
+    const native = owner()
+    await service.captureHistorySnapshot(native, view, "send")
+    calls.capture.mockResolvedValueOnce(capture())
+    await expect(service.captureHistorySnapshot(
+      native, view, "send", undefined, "tldw_history_existing_input_v1"
+    )).rejects.toMatchObject({ code: "unsupported_history_capability" })
+    expect(calls.capture.mock.calls[1][1]).toEqual({
+      view,
+      purpose: "send",
+      required_capability: "tldw_history_existing_input_v1"
+    })
+    expect(calls.capture.mock.calls[1][2]).toMatchObject({ requestScope: native.request_scope })
+    expect(calls.append).not.toHaveBeenCalled()
+  })
+
+  it("refuses old-server and wrong Regenerate acknowledgements, then probes a reopened owner", async () => {
+    const native = owner()
+    calls.capture.mockRejectedValueOnce({ status: 422 })
+    await expect(service.captureHistorySnapshot(
+      native, view, "send", undefined, "tldw_history_existing_input_v1"
+    )).rejects.toMatchObject({ code: "unsupported_history_capability" })
+    calls.capture.mockResolvedValueOnce({
+      ...capture(), acknowledged_capability: "different_capability"
+    })
+    await expect(service.captureHistorySnapshot(
+      native, view, "send", undefined, "tldw_history_existing_input_v1"
+    )).rejects.toMatchObject({ code: "unsupported_history_capability" })
+    calls.capture.mockResolvedValueOnce({
+      ...capture(), acknowledged_capability: "tldw_history_existing_input_v1"
+    })
+    expect((await service.captureHistorySnapshot(
+      native, view, "send", undefined, "tldw_history_existing_input_v1"
+    )).status).toBe("captured")
+    const reopened = owner()
+    calls.capture.mockResolvedValueOnce(capture())
+    await expect(service.captureHistorySnapshot(
+      reopened, view, "send", undefined, "tldw_history_existing_input_v1"
+    )).rejects.toMatchObject({ code: "unsupported_history_capability" })
+  })
+
+  it("accepts a bound non-ready opt-in response without claiming a captured path", async () => {
+    const response = capture() as Record<string, unknown>
+    delete response.rows
+    delete response.selected_content
+    delete response.purpose
+    delete response.storage_context_digest
+    response.status = "legacy_review_required"
+    response.code = "legacy_review_required"
+    response.acknowledged_capability = "tldw_history_existing_input_v1"
+    calls.capture.mockResolvedValueOnce(response)
+    const result = await service.captureHistorySnapshot(
+      owner(), view, "send", undefined, "tldw_history_existing_input_v1"
+    )
+    expect(result.status).toBe("legacy_review_required")
+    expect(calls.append).not.toHaveBeenCalled()
+  })
+
+  it("settles only through the same owner that acknowledged Regenerate", async () => {
+    const native = owner()
+    const chosen = {
+      version: 1, owner_key: view.owner_key, conversation_id: view.conversation_id,
+      interpretation: view.interpretation,
+      cursor: { kind: "after_message", message_id: "question" },
+      selection_revision: 1, purpose: "send",
+      messages: [{ id: "question", revision: "question-revision" }],
+      fences: capture().snapshot.fences,
+      storage_context_digest: "storage", request_context_digest: "prepared"
+    } as unknown as Omit<Parameters<typeof service.settleSelectedExistingInput>[1], "selection_digest"> & { selection_digest: string }
+    chosen.selection_digest = selectionDigest(chosen)
+    const reply: Parameters<typeof service.settleSelectedExistingInput>[2] = {
+      id: "alternative", history_id: "chat", role: "assistant",
+      name: "Assistant", content: "new answer", createdAt: 1,
+      parent_message_id: "question"
+    }
+    await service.captureHistorySnapshot(native, view, "send")
+    await expect(service.settleSelectedExistingInput(native, chosen, reply))
+      .rejects.toMatchObject({ code: "unsupported_history_capability" })
+    expect(calls.append).not.toHaveBeenCalled()
+    calls.capture.mockResolvedValueOnce({
+      ...capture(), acknowledged_capability: "tldw_history_existing_input_v1"
+    })
+    await service.captureHistorySnapshot(native, view, "send", undefined,
+      "tldw_history_existing_input_v1")
+    calls.append.mockResolvedValueOnce({ id: "alternative" })
+    await expect(service.settleSelectedExistingInput(native, chosen, reply))
+      .resolves.toHaveProperty("id", "alternative")
+    expect(calls.append).toHaveBeenCalledWith("chat", {
+      id: "alternative", role: "assistant", content: "new answer",
+      parent_message_id: "question", tldw_history_existing_input_v1: chosen
+    }, expect.objectContaining({ requestScope: native.request_scope }))
+    await expect(service.settleSelectedExistingInput(owner(), chosen, reply))
+      .rejects.toMatchObject({ code: "unsupported_history_capability" })
+    expect(calls.append).toHaveBeenCalledTimes(1)
+
+    const reopened = owner()
+    calls.capture.mockResolvedValueOnce({
+      status: "legacy_review_required", code: "legacy_review_required",
+      acknowledged_capability: "tldw_history_existing_input_v1",
+      snapshot: { ...capture().snapshot, interpretation_status: { kind: "legacy_review_required" } },
+      view
+    })
+    const probe = await service.captureHistorySnapshot(
+      reopened, view, "send", undefined, "tldw_history_existing_input_v1"
+    )
+    expect(probe.status).toBe("legacy_review_required")
+    calls.append.mockResolvedValueOnce({ id: "alternative" })
+    await expect(service.settleSelectedExistingInput(reopened, chosen, reply))
+      .resolves.toHaveProperty("id", "alternative")
+    expect(calls.append.mock.calls[1][1].tldw_history_existing_input_v1).toEqual(chosen)
+  })
+
   it("returns capture before composition and freezes the exact explicit payload", async () => {
     const native = owner()
     const captured = await service.captureHistorySnapshot(native, view, "send")
@@ -899,6 +1013,29 @@ it("verified legacy ownership permits scoped settings without granting captured-
 })
 
 
+it.each(["valid", "missing", "receipt", "revision", "unsolicited"] as const)(
+  "native retry capture requires the exact read-only receipt proof (%s)", async variant => {
+    const admission = { version: 1 as const, owner_key: view.owner_key, conversation_id: view.conversation_id,
+      input_message_id: "question", input_message_revision: "1", selection_digest: "original-admission" }
+    const chosen = { ...view, cursor: { kind: "after_message" as const, message_id: "question" } }
+    const question = { id: "question", revision: "sha256:complete-input-state", role: "user", parent_id: null, settled: true }
+    const proof = { admission: { ...admission }, input_revision: question.revision }
+    if (variant === "receipt") proof.admission.selection_digest = "other-admission"
+    if (variant === "revision") proof.input_revision = "other-capture"
+    calls.capture.mockResolvedValueOnce({ ...capture(), view: chosen,
+      rows: [question], selected_content: [{ id: question.id, revision: question.revision, message: "Original question", images: [] }],
+      snapshot: { ...capture().snapshot, nodes: [question] },
+      ...(variant !== "missing" ? { validated_admission: proof } : {}) })
+    const result = service.captureHistorySnapshot(owner(), chosen, "send", undefined, undefined,
+      variant === "unsolicited" ? undefined : admission)
+    if (variant === "valid") {
+      expect((await result).status).toBe("captured")
+      expect(calls.capture.mock.calls[0][1].accepted_input_admission).toEqual(admission)
+      expect(calls.append).not.toHaveBeenCalled()
+    } else await expect(result).rejects.toMatchObject({ code: "invalid_admission_capture" })
+
+})
+
 it.each([
   { metadata: [{ id: "tool", revision: "1", kind: "tool" }] },
   { assets: [{ id: "file", revision: "1", kind: "document" }] },
@@ -1060,6 +1197,21 @@ it.each([false, true])(
   }
 )
 
+
+it("B02 server completion capability does not grant client alternative-answer writes", async () => {
+  const native = owner()
+  calls.capture.mockResolvedValue({...capture(), acknowledged_capability: "tldw_history_server_existing_input_v1"})
+  await service.captureHistorySnapshot(native, view, "send", undefined, "tldw_history_server_existing_input_v1")
+  const chosen = {version: 1, owner_key: view.owner_key, conversation_id: view.conversation_id,
+    interpretation: view.interpretation, cursor: {kind: "after_message", message_id: "question"},
+    selection_revision: 1, purpose: "send", messages: [{id: "question", revision: "question-revision"}],
+    fences: capture().snapshot.fences, storage_context_digest: "storage", request_context_digest: "prepared", selection_digest: ""} as any
+  chosen.selection_digest = selectionDigest(chosen)
+  await expect(service.settleSelectedExistingInput(native, chosen,
+    {id: "answer", history_id: "chat", role: "assistant", name: "Assistant", content: "answer", createdAt: 1}))
+    .rejects.toMatchObject({code: "unsupported_history_capability"})
+
+})
 
 it("native user payload accepts only a matching structural sender role", () => {
   expect(

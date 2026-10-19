@@ -432,12 +432,12 @@ describe("ChatPane Stage 1 reliability and controls", () => {
     expect(mockStopStreamingRequest).toHaveBeenCalledTimes(1)
   })
 
-  it("uses the design-system registry label for connected provider status", () => {
+  it("reports server connectivity separately from provider readiness", () => {
     renderChatPane()
 
     const selector = screen.getByTestId("model-selector")
-    expect(selector).toHaveTextContent(registryLabels.ready)
-    expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith("ready")
+    expect(selector).toHaveTextContent("Server connected")
+    expect(selector).not.toHaveTextContent(registryLabels.ready)
   })
 
   it("uses the design-system registry label for degraded provider status", () => {

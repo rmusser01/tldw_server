@@ -69,7 +69,7 @@ const translateErrorText = (key: string, fallback: string): string => {
     : fallback
 }
 
-const findModelUnavailableError = (error: unknown): unknown => {
+const findRecoveryServerError = (error: unknown): unknown => {
   const seen = new Set<unknown>()
   let current = error
   while (current && typeof current === "object" && !seen.has(current)) {
@@ -78,8 +78,9 @@ const findModelUnavailableError = (error: unknown): unknown => {
       details?: { detail?: unknown }
       detail?: unknown
       cause?: unknown
+      status?: unknown
     }
-    if ([record, record.details, record.details?.detail, record.detail].some(
+    if (record.status === 413 || [record, record.details, record.details?.detail, record.detail].some(
       value => value && typeof value === "object" &&
         (value as { error_code?: unknown }).error_code === "model_not_available"
     )) return current
@@ -93,7 +94,17 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
   const lower = detail.toLowerCase()
   // Ordinary chat wraps the direct transport error in Error.cause. Preserve
   // its model-selection guidance without changing unrelated error handling.
-  const modelUnavailable = findModelUnavailableError(rawError)
+  const recoveryError = findRecoveryServerError(rawError)
+  const tooLarge = (recoveryError as { status?: unknown } | undefined)?.status === 413
+  const modelUnavailable = tooLarge ? undefined : recoveryError
+
+  if (tooLarge) {
+    return encodeChatErrorPayload({
+      summary: translateErrorText("common:error.friendlyMessageTooLargeSummary", "Your message is too large."),
+      hint: translateErrorText("common:error.friendlyMessageTooLargeHint", "Use a smaller image or shorten your message, then try again."),
+      detail: sanitizeServerErrorMessage(recoveryError, "Your message is too large.")
+    })
+  }
 
   if (rawError instanceof ChatStreamTimeoutError) {
     const startup = rawError.phase === "startup"

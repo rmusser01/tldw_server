@@ -1,3 +1,5 @@
+import { AdminQueryProvider } from "@/components/Option/Admin/AdminQueryProvider"
+import { isAdminRoute } from "@/components/Option/Admin/admin-modules"
 import React from "react"
 import type { ErrorInfo, ReactNode } from "react"
 import {
@@ -554,7 +556,7 @@ export const RouteShell = ({
           location.pathname.startsWith("/settings/")
         }
       >
-        {routesContent}
+        <AdminQueryProvider active={isAdminRoute(location.pathname)}>{routesContent}</AdminQueryProvider>
       </OptionLayout>
     )
     : routesContent  // sidepanel has its own layout

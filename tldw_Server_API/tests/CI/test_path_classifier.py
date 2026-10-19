@@ -125,6 +125,14 @@ def test_backlog_py_change_runs_backend_gate_without_coverage() -> None:
     assert flags["coverage_required"] is False
 
 
+def test_merge_queue_implementation_only_change_runs_backend_safety_suites() -> None:
+    """Queue code alone must run the backend gate that owns its safety regressions."""
+    flags = classify_paths(["Helper_Scripts/ci/merge_queue.py"])
+    assert flags["backend_changed"] is True  # nosec B101 - pytest regression assertion.
+    assert flags["security_relevant_changed"] is True  # nosec B101 - pytest regression assertion.
+    assert flags["coverage_required"] is False  # nosec B101 - pytest regression assertion.
+
+
 def test_workflow_only_change_keeps_backend_gate_but_skips_coverage() -> None:
     flags = classify_paths(
         [

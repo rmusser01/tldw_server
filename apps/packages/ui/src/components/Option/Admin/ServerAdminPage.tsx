@@ -18,7 +18,6 @@ import {
 import { useTranslation } from "react-i18next"
 import {
   tldwClient,
-  type TldwConfig,
   type AdminUserListResponse,
   type AdminUserSummary,
   type AdminRole,
@@ -39,6 +38,9 @@ import {
 } from "@/components/ui/state"
 import { Alert } from "@/components/ui/primitives"
 import { useAntdMessage } from "@/hooks/useAntdMessage"
+import type { PrivateWorkspaceScope } from "@/hooks/usePrivateWorkspaceScope"
+import { useAdminQuerySession } from "./AdminQueryProvider"
+import { requestScopeFields } from "@/services/tldw/domains/service-prompts"
 
 const { Title, Text } = Typography
 const SYSTEM_STATS_TIMEOUT_MS = 10_000
@@ -96,9 +98,22 @@ const formatRetryAfterForAdmin = (value: number | null | undefined): string => {
 }
 
 export const ServerAdminPage: React.FC = () => {
+  const { scope } = useAdminQuerySession()
+  return <ServerAdminWorkspace key={scope.key} scope={scope} />
+}
+
+const ServerAdminWorkspace: React.FC<{ scope: PrivateWorkspaceScope }> = ({ scope }) => {
+  const config = scope.config
+  const captureRequest = React.useCallback(() => {
+    if (!scope.isCurrent()) throw new DOMException("Workspace retired", "AbortError")
+    return {
+      configSnapshot: { ...scope.config },
+      abortSignal: scope.signal,
+      headers: requestScopeFields(scope.requestScope).headers
+    }
+  }, [scope])
   const message = useAntdMessage()
   const { t } = useTranslation(["option", "settings"])
-  const [config, setConfig] = React.useState<TldwConfig | null>(null)
   // System statistics are shared admin reference data (B-S4/F11): the query
   // hook dedupes the fetch with the other admin surfaces inside the stale
   // window. The stats request keeps its dedicated timeout cap.
@@ -129,6 +144,20 @@ export const ServerAdminPage: React.FC = () => {
   const [usersPage, setUsersPage] = React.useState(1)
   const [usersPageSize, setUsersPageSize] = React.useState(20)
   const [updatingUserId, setUpdatingUserId] = React.useState<number | null>(null)
+  const [userChange, setUserChange] = React.useState<{
+    user: AdminUserSummary
+    patch: { is_active: boolean } | { role: "user" | "admin" }
+  } | null>(null)
+  const [userChangeError, setUserChangeError] = React.useState<string | null>(null)
+  const [userChangeForm] = Form.useForm<{ reason: string; admin_password?: string }>()
+  const userChangeSubmitting = React.useRef(false)
+  const userChangeRequest = React.useRef<AbortController | null>(null)
+  React.useEffect(() => () => userChangeRequest.current?.abort(), [])
+  React.useLayoutEffect(() => {
+    const abort = () => userChangeRequest.current?.abort()
+    scope.signal.addEventListener("abort", abort)
+    return () => scope.signal.removeEventListener("abort", abort)
+  }, [scope])
   const [resetPasswordResult, setResetPasswordResult] = React.useState<{
     username: string
     temporaryPassword: string
@@ -168,32 +197,36 @@ export const ServerAdminPage: React.FC = () => {
           limit,
           role,
           is_active
-        })
+        }, captureRequest())
+        if (!scope.isCurrent()) return
         setUsersData(data)
         setUsersError(null)
       } catch (e: any) {
+        if (!scope.isCurrent()) return
         setUsersError(sanitizeAdminErrorMessage(e, "Failed to load users."))
         markAdminGuardFromError(e)
       } finally {
         setUsersLoading(false)
       }
     },
-    [markAdminGuardFromError]
+    [captureRequest, markAdminGuardFromError, scope]
   )
 
   const loadRoles = React.useCallback(async () => {
     try {
       setRolesLoading(true)
-      const data = await tldwClient.listAdminRoles()
+      const data = await tldwClient.listAdminRoles(captureRequest())
+      if (!scope.isCurrent()) return
       setRoles(data || [])
       setRolesError(null)
     } catch (e: any) {
+      if (!scope.isCurrent()) return
       setRolesError(sanitizeAdminErrorMessage(e, "Failed to load roles."))
       markAdminGuardFromError(e)
     } finally {
       setRolesLoading(false)
     }
-  }, [markAdminGuardFromError])
+  }, [captureRequest, markAdminGuardFromError, scope])
 
   const loadMediaBudget = React.useCallback(
     async (userId: number, policyId: string = "media.default") => {
@@ -202,10 +235,12 @@ export const ServerAdminPage: React.FC = () => {
         const data = await tldwClient.getMediaIngestionBudgetDiagnostics({
           userId,
           policyId: policyId || "media.default"
-        })
+        }, captureRequest())
+        if (!scope.isCurrent()) return
         setMediaBudget(data)
         setMediaBudgetError(null)
     } catch (e: any) {
+      if (!scope.isCurrent()) return
       setMediaBudgetError(
         sanitizeAdminErrorMessage(
           e,
@@ -217,13 +252,14 @@ export const ServerAdminPage: React.FC = () => {
       setMediaBudgetLoading(false)
       }
     },
-    [markAdminGuardFromError]
+    [captureRequest, markAdminGuardFromError, scope]
   )
 
   // Query errors keep the page's guard + timeout messaging contract: 403/404
   // map to the admin guard, timeouts get their dedicated retry hint, and the
   // error clears once a fetch succeeds again.
   React.useEffect(() => {
+    if (!scope.isCurrent()) return
     const err: unknown = systemStatsQuery.error
     if (!err) {
       setError(null)
@@ -241,25 +277,9 @@ export const ServerAdminPage: React.FC = () => {
             "Failed to load system statistics."
           )
     )
-  }, [systemStatsQuery.error, markAdminGuardFromError, t])
+  }, [systemStatsQuery.error, markAdminGuardFromError, scope, t])
 
-  React.useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      try {
-        const cfg = await tldwClient.getConfig()
-        if (!cancelled) {
-          setConfig(cfg)
-        }
-      } catch {
-        // ignore; health checks will surface errors
-      }
-    }
-    load()
-    return () => {
-      cancelled = true
-    }
-  }, [])
+
 
   React.useEffect(() => {
     if (initialLoadRef.current) return
@@ -329,24 +349,49 @@ export const ServerAdminPage: React.FC = () => {
     void loadUsers(1, usersPageSize, role, active)
   }
 
-  // Handlers the memoized table columns close over are stable themselves
-  // (useCallback), so the column arrays survive unrelated state changes
-  // like the reset-password reveal modal (C-S5).
-  const handleToggleUserActive = React.useCallback(
-    async (user: AdminUserSummary, nextActive: boolean) => {
-      try {
-        setUpdatingUserId(user.id)
-        await tldwClient.updateAdminUser(user.id, { is_active: nextActive })
-        await loadUsers(usersPage, usersPageSize, userRoleFilter, userActiveFilter)
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error("Failed to update user active state", e)
-      } finally {
+  const handleToggleUserActive = React.useCallback((user: AdminUserSummary, nextActive: boolean) => {
+    if (!config || updatingUserId !== null || nextActive === user.is_active) return
+    setUserChangeError(null)
+    setUserChange({ user, patch: { is_active: nextActive } })
+  }, [config, updatingUserId])
+
+  const closeUserChange = () => {
+    if (userChangeSubmitting.current) return
+    userChangeForm.resetFields()
+    setUserChange(null)
+    setUserChangeError(null)
+  }
+
+  const confirmUserChange = async (values: { reason: string; admin_password?: string }) => {
+    if (!userChange || !config || userChangeSubmitting.current) return
+    userChangeSubmitting.current = true
+    const controller = new AbortController()
+    userChangeRequest.current = controller
+    setUpdatingUserId(userChange.user.id)
+    setUserChangeError(null)
+    try {
+      await tldwClient.updateAdminUser(userChange.user.id, {
+        ...userChange.patch,
+        reason: values.reason.trim(),
+        ...(values.admin_password ? { admin_password: values.admin_password } : {})
+      }, { ...captureRequest(), abortSignal: controller.signal })
+      if (controller.signal.aborted) return
+      userChangeForm.resetFields()
+      setUserChange(null)
+      await loadUsers(usersPage, usersPageSize, userRoleFilter, userActiveFilter)
+      if (!controller.signal.aborted) message.success(t("settings:admin.users.updated", "User updated"))
+    } catch (err) {
+      if (controller.signal.aborted) return
+      setUserChangeError(sanitizeAdminErrorMessage(err, t("settings:admin.users.updateFailed", "Unable to update user")))
+    } finally {
+      userChangeSubmitting.current = false
+      if (!controller.signal.aborted) {
+        userChangeRequest.current = null
         setUpdatingUserId(null)
       }
-    },
-    [loadUsers, usersPage, usersPageSize, userRoleFilter, userActiveFilter]
-  )
+    }
+  }
+
 
   // The reset endpoint requires the admin to supply the temporary password
   // and an audit reason; generate a strong one and reveal it exactly once so
@@ -362,6 +407,7 @@ export const ServerAdminPage: React.FC = () => {
 
   const handleResetUserPassword = React.useCallback(
     async (user: AdminUserSummary) => {
+      if (!scope.isCurrent()) return
       const temporaryPassword = generateTemporaryPassword()
       try {
         setUpdatingUserId(user.id)
@@ -369,40 +415,34 @@ export const ServerAdminPage: React.FC = () => {
           temporary_password: temporaryPassword,
           reason: "Admin-initiated password reset from Server Admin",
           force_password_change: true
-        })
+        }, captureRequest())
+        if (!scope.isCurrent()) return
         setResetPasswordResult({
           username: user.username,
           temporaryPassword
         })
       } catch (e) {
+        if (!scope.isCurrent()) return
         message.error(
           sanitizeAdminErrorMessage(
             e,
             t("settings:admin.users.resetPasswordFailed", "Failed to reset the password")
           )
+
         )
       } finally {
         setUpdatingUserId(null)
       }
     },
-    [message, t]
+    [captureRequest, message, scope, t]
   )
 
-  const handleChangeUserRole = React.useCallback(
-    async (user: AdminUserSummary, role: string) => {
-      try {
-        setUpdatingUserId(user.id)
-        await tldwClient.updateAdminUser(user.id, { role })
-        await loadUsers(usersPage, usersPageSize, userRoleFilter, userActiveFilter)
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error("Failed to update user role", e)
-      } finally {
-        setUpdatingUserId(null)
-      }
-    },
-    [loadUsers, usersPage, usersPageSize, userRoleFilter, userActiveFilter]
-  )
+  const handleChangeUserRole = React.useCallback((user: AdminUserSummary, role: string) => {
+    if (!config || updatingUserId !== null || role === user.role || (role !== "user" && role !== "admin")) return
+    setUserChangeError(null)
+    setUserChange({ user, patch: { role } })
+  }, [config, updatingUserId])
+
 
   const handleCreateRole = async () => {
     try {
@@ -411,10 +451,12 @@ export const ServerAdminPage: React.FC = () => {
       const description = values.description ? String(values.description).trim() : undefined
       if (!name) return
       setCreatingRole(true)
-      await tldwClient.createAdminRole(name, description)
+      await tldwClient.createAdminRole(name, description, captureRequest())
+      if (!scope.isCurrent()) return
       roleForm.resetFields()
       await loadRoles()
     } catch (e) {
+      if (!scope.isCurrent()) return
       // validation or request error; log-only
       // eslint-disable-next-line no-console
       if (e) console.error("Failed to create role", e)
@@ -423,33 +465,27 @@ export const ServerAdminPage: React.FC = () => {
     }
   }
 
-  const handleDeleteRole = React.useCallback(
-    async (roleId: number) => {
-      try {
-        setDeletingRoleId(roleId)
-        await tldwClient.deleteAdminRole(roleId)
-        await loadRoles()
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.error("Failed to delete role", e)
-      } finally {
-        setDeletingRoleId(null)
-      }
-    },
-    [loadRoles]
-  )
+  const handleDeleteRole = React.useCallback(async (roleId: number) => {
+    try {
+      setDeletingRoleId(roleId)
+      await tldwClient.deleteAdminRole(roleId, captureRequest())
+      if (!scope.isCurrent()) return
+      await loadRoles()
+    } catch (e) {
+      if (!scope.isCurrent()) return
+      // eslint-disable-next-line no-console
+      console.error("Failed to delete role", e)
+    } finally {
+      setDeletingRoleId(null)
+    }
+  }, [captureRequest, loadRoles, scope])
 
-  const userRoleOptions = React.useMemo(
-    () =>
-      roles && roles.length > 0
-        ? roles.map((r) => ({ label: r.name, value: r.name }))
-        : [
-            { label: "user", value: "user" },
-            { label: "admin", value: "admin" },
-            { label: "service", value: "service" }
-          ],
-    [roles]
-  )
+
+  const userRoleOptions = React.useMemo(() => [
+    { label: "user", value: "user" },
+    { label: "admin", value: "admin" }
+  ], [])
+
 
   // Memoized table columns/options: rebuilding these arrays on every page
   // render re-rendered the (paged) users and roles tables even when nothing
@@ -478,6 +514,7 @@ export const ServerAdminPage: React.FC = () => {
           onChange={(value) => handleChangeUserRole(record, value)}
           loading={updatingUserId === record.id}
           options={userRoleOptions}
+          disabled={!config || updatingUserId !== null}
         />
       )
     },
@@ -489,6 +526,7 @@ export const ServerAdminPage: React.FC = () => {
         <Switch
           size="small"
           checked={Boolean(value)}
+          disabled={!config || updatingUserId !== null}
           onChange={(checked) => handleToggleUserActive(record, checked)}
           loading={updatingUserId === record.id}
         />
@@ -542,6 +580,7 @@ export const ServerAdminPage: React.FC = () => {
     [
       t,
       userRoleOptions,
+      config,
       updatingUserId,
       handleChangeUserRole,
       handleToggleUserActive,
@@ -1136,6 +1175,45 @@ export const ServerAdminPage: React.FC = () => {
         <AdminAudioInstallerCard />
       </Space>
 
+      {userChange && (
+        <Modal
+          title={t("settings:admin.users.confirmChange", "Confirm user change")}
+          open
+          confirmLoading={updatingUserId !== null}
+          okText={t("settings:admin.users.confirm", "Confirm change")}
+          cancelText={t("common:cancel", "Cancel")}
+          cancelButtonProps={{ disabled: updatingUserId !== null }}
+          closable={updatingUserId === null}
+          onCancel={closeUserChange}
+          onOk={() => userChangeForm.submit()}
+        >
+          <p>
+            {"is_active" in userChange.patch
+              ? (userChange.patch.is_active ? t("settings:admin.users.activate", "Activate") : t("settings:admin.users.deactivate", "Deactivate"))
+              : t("settings:admin.users.changeRole", "Change role")}
+            {": "}{userChange.user.username}
+            {"role" in userChange.patch ? " → " + userChange.patch.role : ""}
+          </p>
+          <Form form={userChangeForm} name="admin-user-change" layout="vertical" onFinish={confirmUserChange} disabled={updatingUserId !== null}>
+            {userChangeError && <Alert variant="error" title={userChangeError} />}
+            <Form.Item name="reason" label={t("settings:admin.users.auditReason", "Audit reason")} rules={[{
+              required: true, min: 8, max: 500,
+              transform: (value) => String(value || "").trim(),
+              message: t("settings:admin.users.auditReasonRule", "Enter an audit reason of 8–500 characters.")
+            }]}>
+              <Input.TextArea rows={3} maxLength={500} />
+            </Form.Item>
+            <Form.Item name="admin_password" label={t("settings:admin.users.adminPassword", "Your current admin password")}
+              extra={config?.authMode === "single-user"
+                ? t("settings:admin.users.adminPasswordOptional", "Required only when your server enforces admin reauthentication.")
+                : t("settings:admin.users.adminPasswordHelp", "Confirm with your own existing password, not this user's password.")}
+              rules={[{ required: config?.authMode !== "single-user", whitespace: true, min: 8, max: 128,
+                message: t("settings:admin.users.adminPasswordRule", "Enter your current admin password (8–128 characters).") }]}>
+              <Input.Password autoComplete="current-password" />
+            </Form.Item>
+          </Form>
+        </Modal>
+      )}
       <Modal
         title={t("settings:admin.users.resetPasswordDoneTitle", "Temporary password created")}
         open={Boolean(resetPasswordResult)}
@@ -1200,12 +1278,15 @@ export const ServerAdminPage: React.FC = () => {
                 email: values.email.trim(),
                 password: values.password,
                 role: values.role
-              })
+              }, captureRequest())
+              if (!scope.isCurrent()) return
               setCreateUserOpen(false)
               createUserForm.resetFields()
               await loadUsers(usersPage, usersPageSize, userRoleFilter, userActiveFilter)
+              if (!scope.isCurrent()) return
               message.success(t("settings:admin.users.created", "User created"))
             } catch (err) {
+              if (!scope.isCurrent()) return
               setCreateUserError(sanitizeAdminErrorMessage(err, t("settings:admin.users.createFailed", "Unable to create user")))
             } finally {
               setCreatingUser(false)

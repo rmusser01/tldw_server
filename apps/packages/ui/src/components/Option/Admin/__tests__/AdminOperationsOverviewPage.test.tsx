@@ -1,3 +1,4 @@
+vi.mock("@/hooks/usePrivateWorkspaceScope", () => ({ usePrivateWorkspaceScope: () => ({ scope: null, retry: vi.fn() }) }))
 // @vitest-environment jsdom
 import React from "react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
@@ -41,8 +42,11 @@ vi.mock("@/store/connection", () => {
 })
 
 import { AdminOperationsOverviewPage } from "../AdminOperationsOverviewPage"
-import { getAdminQueryClient } from "../AdminQueryProvider"
+import { createAdminTestSession } from "./admin-query-fixture"
 import { ADMIN_MODULES } from "../admin-modules"
+
+let session: ReturnType<typeof createAdminTestSession>
+vi.mock("../AdminQueryProvider", async (importOriginal) => ({ ...(await importOriginal<object>()), useAdminQuerySession: () => session }))
 
 describe("AdminOperationsOverviewPage", () => {
   beforeEach(() => {
@@ -51,7 +55,7 @@ describe("AdminOperationsOverviewPage", () => {
     window.localStorage.clear()
     // Signals share the admin query cache (B-S4); drop leftovers so each
     // test exercises its own mocks instead of the previous test's cache.
-    getAdminQueryClient().clear()
+    session = createAdminTestSession()
     apiMock.getSystemStats.mockResolvedValue({ users: { total: 1 } })
     apiMock.getSecurityAlertStatus.mockResolvedValue({ health: "ok" })
     apiMock.listBackups.mockResolvedValue({ backups: [] })
@@ -72,9 +76,9 @@ describe("AdminOperationsOverviewPage", () => {
     ).toBeInTheDocument()
 
     const modules = screen.getByTestId("admin-operations-modules")
-    for (const module of ADMIN_MODULES) {
-      const link = within(modules).getByRole("link", { name: module.label })
-      expect(link).toHaveAttribute("href", module.route)
+    for (const adminModule of ADMIN_MODULES) {
+      const link = within(modules).getByRole("link", { name: adminModule.label })
+      expect(link).toHaveAttribute("href", adminModule.route)
     }
     // Guard against regressing to a partial list (2026-09 audit finding S1).
     expect(ADMIN_MODULES.length).toBeGreaterThanOrEqual(17)
@@ -191,6 +195,7 @@ describe("AdminOperationsOverviewPage", () => {
     // ...but connecting to a different server gets its own checklist.
     second.unmount()
     connectionMock.serverUrl = "http://other-server.local:8000"
+    session = createAdminTestSession()
     render(<AdminOperationsOverviewPage />)
     expect(await screen.findByTestId("admin-first-steps")).toBeInTheDocument()
   })
@@ -202,6 +207,7 @@ describe("AdminOperationsOverviewPage", () => {
 
     // Same mounted overview, new server: stale results must not linger.
     connectionMock.serverUrl = "http://other-server.local:8000"
+    session = createAdminTestSession()
     view.rerender(<AdminOperationsOverviewPage />)
 
     await waitFor(() => {

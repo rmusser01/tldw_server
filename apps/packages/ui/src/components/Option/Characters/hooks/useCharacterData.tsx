@@ -491,7 +491,9 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
   // --- Edit world books ---
   const {
     data: characterWorldBookData = EMPTY_CHARACTER_WORLD_BOOK_DATA,
-    isFetching: worldBookOptionsLoading
+    isFetching: worldBookOptionsLoading,
+    error: worldBookOptionsError,
+    refetch: refetchWorldBookOptions
   } = useQuery<{ options: CharacterWorldBookOption[]; attachedIds: number[] }>({
     queryKey: ["tldw:characterEditWorldBooks", editCharacterNumericId],
     queryFn: async () => {
@@ -547,7 +549,8 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
       return
     }
     if (editCharacterNumericId == null) return
-    if (worldBookOptionsLoading) return
+    if (worldBookOptionsLoading || worldBookOptionsError) return
+    if (characterWorldBookData === EMPTY_CHARACTER_WORLD_BOOK_DATA) return
     if (editWorldBooksInitializedRef.current) return
     const attachedIds = normalizeWorldBookIds(characterWorldBookData.attachedIds)
     editWorldBooksInitializedRef.current = true
@@ -557,7 +560,9 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
     editCharacterNumericId,
     editForm,
     openEdit,
-    worldBookOptionsLoading
+    worldBookOptionsLoading,
+    worldBookOptionsError,
+    characterWorldBookData
   ])
 
   // --- Filtered/merged data ---
@@ -859,6 +864,8 @@ export function useCharacterData(deps: UseCharacterDataDeps) {
     previewCharacterWorldBooksLoading,
     characterWorldBookData,
     worldBookOptionsLoading,
+    worldBookOptionsError,
+    refetchWorldBookOptions,
     worldBookOptions,
 
     // Tags & filters

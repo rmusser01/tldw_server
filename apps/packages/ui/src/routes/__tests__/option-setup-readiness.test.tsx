@@ -91,6 +91,7 @@ vi.mock("@/hooks/useConnectionState", () => ({
 const firstRunState = (status: string) => ({ status })
 
 const firstRunMetadata = () => ({
+  auth_mode: "single_user",
   setup_required: true,
   setup_completed: false,
   remote_setup_enabled: false,
@@ -117,7 +118,9 @@ const setupReturn = ({
   loading,
   error,
   refresh: mocks.refresh,
-  adoptState: mocks.adoptState
+  adoptState: mocks.adoptState,
+  connectionConfigured: true,
+  connectionChecking: false
 })
 
 const renderRoute = () =>
@@ -135,6 +138,117 @@ describe("OptionSetup readiness route", () => {
       serverUrl: "http://127.0.0.1:8000"
     })
     mocks.useSetupOnboarding.mockReturnValue(setupReturn())
+  })
+
+  it.each(["not_started", "in_progress", "completed", null])(
+    "preserves multi-user guidance for setup state %s",
+    (status) => {
+      mocks.useSetupOnboarding.mockReturnValue(
+        setupReturn({
+          state: status === null ? null : firstRunState(status),
+          metadata: {
+            ...firstRunMetadata(),
+            auth_mode: "multi_user",
+            setup_required: false,
+            setup_completed: true
+          }
+        })
+      )
+
+      renderRoute()
+
+      expect(
+        screen.getByRole("heading", { name: "Multi-user setup guide" })
+      ).toBeInTheDocument()
+      expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("button", { name: "Test connection" })
+      ).not.toBeInTheDocument()
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open connection settings" })
+      )
+      expect(mocks.navigate).toHaveBeenCalledWith("/settings/tldw")
+      fireEvent.click(screen.getByRole("button", { name: "Return home" }))
+      expect(mocks.navigate).toHaveBeenCalledWith("/")
+      expect(mocks.setConfigPartial).not.toHaveBeenCalled()
+    }
+  )
+
+  it("re-enters completed setup without replacing the working connection", () => {
+    mocks.useConnectionState.mockReturnValue({
+      serverUrl: "http://127.0.0.1:18985"
+    })
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("completed"),
+        metadata: {
+          ...firstRunMetadata(),
+          setup_required: false,
+          setup_completed: true
+        }
+      })
+    )
+
+    renderRoute()
+
+    expect(
+      screen.getByRole("heading", { level: 2, name: "Setup complete" })
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText("Server URL")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("API Key")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("setup-required-panel")).not.toBeInTheDocument()
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open connection settings" })
+    )
+    expect(mocks.navigate).toHaveBeenCalledWith("/settings/tldw")
+    fireEvent.click(screen.getByRole("button", { name: "Return home" }))
+    expect(mocks.navigate).toHaveBeenCalledWith("/")
+    expect(mocks.setConfigPartial).not.toHaveBeenCalled()
+    expect(mocks.testConnectionFromOnboarding).not.toHaveBeenCalled()
+  })
+
+  it.each(["not_started", "in_progress", "blocked", "skipped", null])(
+    "does not declare setup complete for state %s",
+    (status) => {
+      mocks.useSetupOnboarding.mockReturnValue(
+        setupReturn({
+          state: status === null ? null : firstRunState(status),
+          metadata: {
+            ...firstRunMetadata(),
+            setup_required: false,
+            setup_completed: true
+          }
+        })
+      )
+
+      renderRoute()
+
+      expect(
+        screen.queryByRole("heading", { name: "Setup complete" })
+      ).not.toBeInTheDocument()
+      expect(screen.getByLabelText("API Key")).toBeInTheDocument()
+    }
+  )
+
+  it.each([
+    { setup_required: true, setup_completed: true },
+    { setup_required: false, setup_completed: false }
+  ])("requires matching completion metadata %j", (completion) => {
+    mocks.useSetupOnboarding.mockReturnValue(
+      setupReturn({
+        state: firstRunState("completed"),
+        metadata: { ...firstRunMetadata(), ...completion }
+      })
+    )
+
+    renderRoute()
+
+    expect(
+      screen.queryByRole("heading", { name: "Setup complete" })
+    ).not.toBeInTheDocument()
+    expect(screen.getByLabelText("API Key")).toBeInTheDocument()
   })
 
   it("opens connection settings from an unconfigured route without a backend retry or recovery panel", () => {

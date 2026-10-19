@@ -1,27 +1,17 @@
 // @vitest-environment jsdom
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, fireEvent, render as renderComponent, screen, waitFor, within } from "@testing-library/react"
 import { App, message } from "antd"
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query"
 import ServerAdminPage from "../ServerAdminPage"
-import { createAdminQueryClient } from "../AdminQueryProvider"
+import { AdminQueryProvider } from "../AdminQueryProvider"
+import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 
-/**
- * Render the page under a fresh admin query client so each test owns its
- * cache (B-S4): system stats now flow through react-query.
- */
-const adminQueryClients: QueryClient[] = []
-const renderPage = (ui: React.ReactElement) => {
-  const client = createAdminQueryClient()
-  adminQueryClients.push(client)
-  return render(
-    <QueryClientProvider client={client}>{ui}</QueryClientProvider>
-  )
-}
+const renderPage = (ui: React.ReactElement) => renderComponent(<AdminQueryProvider>{ui}</AdminQueryProvider>)
+
 
 const apiMock = vi.hoisted(() => ({
-  getConfig: vi.fn(),
+  getConfig: vi.fn(), resolveScope: vi.fn(),
   getSystemStats: vi.fn(),
   listAdminUsers: vi.fn(),
   createAdminUser: vi.fn(),
@@ -51,6 +41,7 @@ vi.mock("react-i18next", () => ({
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: apiMock
 }))
+vi.mock("@/services/service-prompts", () => ({ resolveServicePromptScope: (...args: unknown[]) => apiMock.resolveScope(...args) }))
 
 vi.mock("@/components/Common/PageShell", () => ({
   PageShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>
@@ -136,10 +127,14 @@ describe("ServerAdminPage design-system states", () => {
   const docsUrl = "https://github.com/rmusser01/tldw_server#documentation--resources"
 
   beforeEach(() => {
-    vi.clearAllMocks()
-    apiMock.getConfig.mockReset()
+    vi.resetAllMocks()
     mockMatchMedia()
     resolveBaseAdminCalls()
+    apiMock.resolveScope.mockImplementation(async () => {
+      const config = await apiMock.getConfig.mock.results.at(-1)?.value
+      return { config: { ...config, expectedSingleUserApiKeyScope: deriveSingleUserApiKeyCredentialScope(config.authMode, config.apiKey) },
+        userId: 1, scopeKey: "admin-fixture-owner", clientPrincipalVerified: true }
+    })
     vi.spyOn(window, "open").mockImplementation(() => null)
   })
 
@@ -153,6 +148,19 @@ describe("ServerAdminPage design-system states", () => {
     expect(await screen.findByRole("button", { name: "Create user" })).toBeVisible()
     expect(apiMock.getSystemStats).toHaveBeenCalledOnce()
   })
+
+  it.each(["tldw:auth-principal-changed", "tldw:auth-credentials-changed"])(
+    "retires admin controls on %s without a configuration change",
+    async (eventName) => {
+      apiMock.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user", authSource: "cookie-session" })
+      renderPage(<ServerAdminPage />)
+      await screen.findByRole("button", { name: "Create user" })
+      apiMock.resolveScope.mockImplementation(() => new Promise(() => {}))
+      act(() => window.dispatchEvent(new CustomEvent(eventName)))
+      expect(screen.queryByRole("button", { name: "Create user" })).not.toBeInTheDocument()
+      expect(screen.getByRole("status")).toHaveTextContent("Resolving Admin workspace")
+    }
+  )
 
   it("does not start dashboard requests when a config lookup resolves after unmount", async () => {
     let resolveConfig!: (value: unknown) => void
@@ -187,7 +195,11 @@ describe("ServerAdminPage design-system states", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Create user" }))
     await waitFor(() => expect(apiMock.createAdminUser).toHaveBeenCalledWith({
       username: "alice", email: "alice@example.com", password: "A-strong-password-21!", role: "user"
-    }))
+    }, expect.objectContaining({
+      configSnapshot: expect.objectContaining({ authMode: "multi-user" }),
+      abortSignal: expect.any(AbortSignal),
+      headers: { "X-TLDW-Expected-User-ID": "1" }
+    })))
     await waitFor(() => expect(apiMock.listAdminUsers).toHaveBeenCalledTimes(2))
     expect(await screen.findByText("User created")).toBeVisible()
     expect(staticSuccess).not.toHaveBeenCalled()
@@ -206,6 +218,29 @@ describe("ServerAdminPage design-system states", () => {
     expect(await within(dialog).findByText("Username already exists")).toBeInTheDocument()
     expect(within(dialog).getByLabelText("Username")).toHaveValue("alice")
     expect(apiMock.listAdminUsers).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not publish create-user success after its account retires during list refresh", async () => {
+    apiMock.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
+    apiMock.createAdminUser.mockResolvedValue({ id: 12 })
+    let finishRefresh!: (value: unknown) => void
+    const originalUsers = await apiMock.listAdminUsers()
+    apiMock.listAdminUsers.mockClear()
+    apiMock.listAdminUsers.mockResolvedValueOnce(originalUsers)
+      .mockImplementationOnce(() => new Promise(resolve => { finishRefresh = resolve }))
+    const success = vi.spyOn(message, "success").mockImplementation(() => (() => {}) as never)
+    renderPage(<ServerAdminPage />)
+    fireEvent.click(await screen.findByRole("button", { name: "Create user" }))
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.change(within(dialog).getByLabelText("Username"), { target: { value: "alice" } })
+    fireEvent.change(within(dialog).getByLabelText("Email"), { target: { value: "alice@example.com" } })
+    fireEvent.change(within(dialog).getByLabelText("Password"), { target: { value: "A-strong-password-21!" } })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create user" }))
+    await waitFor(() => expect(apiMock.listAdminUsers).toHaveBeenCalledTimes(2))
+    apiMock.resolveScope.mockImplementation(() => new Promise(() => {}))
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed")))
+    await act(async () => { finishRefresh(originalUsers) })
+    expect(success).not.toHaveBeenCalled()
   })
 
   it("uses PermissionNotice with an actionable recovery path for forbidden admin APIs", async () => {
@@ -257,6 +292,7 @@ describe("ServerAdminPage design-system states", () => {
       })
 
     renderPage(<ServerAdminPage />)
+    await waitFor(() => expect(apiMock.getSystemStats).toHaveBeenCalledOnce())
 
     const errorLabel = await screen.findByText("Error")
     expect(errorLabel).toBeInTheDocument()
@@ -282,7 +318,10 @@ describe("ServerAdminPage design-system states", () => {
 
     renderPage(<ServerAdminPage />)
 
-    expect(await screen.findByText("Empty")).toBeInTheDocument()
+    await waitFor(() => expect(apiMock.listAdminUsers).toHaveBeenCalledOnce())
+    expect(await apiMock.listAdminUsers.mock.results[0].value).toHaveProperty("users", [])
+    const budgetMessage = await screen.findByText("Select a user to inspect media ingestion limits and usage.")
+    expect(within(budgetMessage.closest("section") as HTMLElement).getByText("Empty")).toBeInTheDocument()
     expect(
       screen.getByText("Select a user to inspect media ingestion limits and usage.")
     ).toBeInTheDocument()
@@ -322,7 +361,7 @@ describe("ServerAdminPage design-system states", () => {
 
     // Diagnostics only fire after an explicit user selection (B-S5); the
     // mousedown handler lives on the `.ant-select` root in antd v6.
-    const mediaBudgetCard = screen.getByText("Media ingestion budget").closest(
+    const mediaBudgetCard = (await screen.findByText("Media ingestion budget")).closest(
       ".ant-card"
     ) as HTMLElement
     const userSelect = (
@@ -330,6 +369,10 @@ describe("ServerAdminPage design-system states", () => {
     )
     fireEvent.mouseDown(userSelect)
     fireEvent.click(await screen.findByText("admin (#11)"))
+
+    await waitFor(() => expect(apiMock.getMediaIngestionBudgetDiagnostics).toHaveBeenCalledOnce())
+
+    await waitFor(() => expect(apiMock.getMediaIngestionBudgetDiagnostics).toHaveBeenCalledOnce())
 
     const alert = await expectDesignSystemAlertForTitle(
       "Unable to load media ingestion budget diagnostics"
@@ -353,23 +396,13 @@ describe("ServerAdminPage design-system states", () => {
 
       renderPage(<ServerAdminPage />)
 
-      const rowButton = (
-        await screen.findAllByRole("button", { name: "Reset password" })
-      )[0]
-      fireEvent.click(rowButton)
-      // Popconfirm opens with a verb-labeled confirm of the same name. Wait
-      // for it explicitly: findAllByRole resolves as soon as the row button
-      // exists, so grabbing "the last match" without this could re-click the
-      // row button if the popconfirm portal has not landed yet.
-      await waitFor(() => {
-        expect(
-          screen.getAllByRole("button", { name: "Reset password" }).length
-        ).toBeGreaterThan(1)
-      })
-      const confirmButtons = screen.getAllByRole("button", {
-        name: "Reset password"
-      })
-      fireEvent.click(confirmButtons[confirmButtons.length - 1])
+    await waitFor(() => expect(apiMock.listAdminUsers).toHaveBeenCalledOnce())
+    expect(await apiMock.listAdminUsers.mock.results[0].value).toHaveProperty("users.0.username", "admin")
+    const row = (await screen.findByText("admin@example.com")).closest("tr")!
+    const rowButton = within(row).getByRole("button", { name: "Reset password" })
+    fireEvent.click(rowButton)
+    const confirmation = await screen.findByRole("tooltip")
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Reset password" }))
 
       await waitFor(() => {
         expect(apiMock.resetAdminUserPassword).toHaveBeenCalledTimes(1)

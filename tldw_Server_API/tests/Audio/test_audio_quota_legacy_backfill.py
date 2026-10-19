@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 import pytest
+from tldw_Server_API.tests.helpers.audio_quota_state import cold_audio_ledger as cold_audio_ledger
 
 
 pytestmark = pytest.mark.integration
@@ -63,3 +64,35 @@ async def test_legacy_audio_usage_daily_backfilled_into_resource_daily_ledger(tm
         assert 145 <= total_units <= 155, f"Expected ~150 seconds from backfill, got {total_units}"
     finally:
         await pool.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("first_period", ["daily", "monthly"])
+async def test_reporting_first_backfills_legacy_audio_minutes(tmp_path, monkeypatch, first_period, cold_audio_ledger):
+    """A reporting-first upgrade includes legacy usage before any admission."""
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+    from tldw_Server_API.app.core.Usage import audio_quota, quota_checks
+
+    monkeypatch.setenv("AUTH_MODE", "single_user")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'reporting_first.db'}")
+    await reset_db_pool()
+    pool = await get_db_pool()
+    cold_audio_ledger()
+    try:
+        await audio_quota._ensure_tables(pool)
+        await pool.execute(
+            "INSERT INTO audio_usage_daily (user_id, day, minutes_used, jobs_started) VALUES (?, ?, ?, 0)",
+            7,
+            datetime.now(timezone.utc).date().isoformat(),
+            2.5,
+        )
+        read = audio_quota.get_daily_minutes_used if first_period == "daily" else audio_quota.get_monthly_minutes_used
+        assert await read(7) == 2.5  # nosec B101 - pytest regression assertion.
+        assert await audio_quota.get_daily_minutes_used(7) == 2.5  # nosec B101 - pytest regression assertion.
+        assert await audio_quota.get_monthly_minutes_used(7) == 2.5  # nosec B101 - pytest regression assertion.
+        # A fresh process repeats the existing idempotent migration without doubling usage.
+        cold_audio_ledger()
+        assert await read(7) == 2.5  # nosec B101 - pytest regression assertion.
+    finally:
+        quota_checks.reset_ledger_cache()
+        await reset_db_pool()

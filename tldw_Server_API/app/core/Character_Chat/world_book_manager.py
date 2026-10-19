@@ -2117,12 +2117,6 @@ class WorldBookService:
             token_budget = int(kwargs['max_tokens'])
         include_diagnostics = _coerce_metadata_bool(kwargs.get("include_diagnostics", False), default=False)
         recursive_depth = int(kwargs.get('recursive_depth', 0) or 0)
-        # Clamp recursive depth to prevent infinite loops
-        if recursive_depth > MAX_RECURSIVE_DEPTH:
-            logger.warning(f"Recursive depth {recursive_depth} exceeds max {MAX_RECURSIVE_DEPTH}, clamping")
-            recursive_depth = MAX_RECURSIVE_DEPTH
-        if recursive_depth > 0:
-            recursive_scanning = True
 
         # Gather applicable world books
         books_to_use = []
@@ -2664,6 +2658,33 @@ class WorldBookService:
 
     def count_tokens(self, text: str) -> int:
         return _count_tokens(text)
+
+
+def match_world_book_entries(
+    text: str,
+    books_to_use: Sequence[Mapping[str, Any]],
+    entries_by_book: Mapping[int, Sequence[WorldBookEntry]],
+    *,
+    scan_depth: int = 3,
+    token_budget: int = 500,
+    recursive_scanning: bool | None = None,
+    recursive_depth: int = 0,
+    include_diagnostics: bool = False,
+    count_tokens: Callable[[str], int] = _count_tokens,
+) -> tuple[dict[str, Any], list[WorldBookEntry]]:
+    """Keep frozen-preview compatibility while sharing canonical priority and packing."""
+    response, entries = process_loaded_world_book_context(
+        text,
+        books_to_use,
+        entries_by_book,
+        count_tokens=count_tokens,
+        scan_depth=scan_depth,
+        token_budget=token_budget,
+        recursive_scanning=recursive_scanning,
+        recursive_depth=recursive_depth,
+        include_diagnostics=include_diagnostics,
+    )
+    return response, list(entries)
 
 
 # Export main classes

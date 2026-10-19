@@ -85,6 +85,7 @@ export type SelectedModelSaveOperation = {
  */
 export const useSelectedModel = () => {
   const selectedModelFromStore = useStoreMessageOption((s) => s.selectedModel);
+  const selectedModelInitialized = useStoreMessageOption((s) => s.selectedModelInitialized);
   useStoreMessageOption((s) => s.selectedModelRevision);
   const selectedModelStorageHandled = useStoreMessageOption(
     (s) => s.selectedModelStorageHandled,
@@ -100,11 +101,11 @@ export const useSelectedModel = () => {
 
   const selectedModel = React.useMemo(
     () =>
-      selectedModelStorageHandled
+      selectedModelInitialized || selectedModelStorageHandled
         ? normalizeSelectedModel(selectedModelFromStore)
-        : (normalizeSelectedModel(selectedModelFromStore) ??
-          normalizeSelectedModel(storedSelectedModel)),
-    [selectedModelFromStore, storedSelectedModel, selectedModelStorageHandled],
+        : normalizeSelectedModel(selectedModelFromStore) ??
+          normalizeSelectedModel(storedSelectedModel),
+    [selectedModelFromStore, selectedModelInitialized, storedSelectedModel, selectedModelStorageHandled],
   );
 
   const [failedModelSave, setFailedModelSave] = React.useState<SelectedModelSaveOperation | null>(null)
@@ -164,12 +165,14 @@ export const useSelectedModel = () => {
     const current = useStoreMessageOption.getState();
     if (
       current.selectedModel !== selectedModelFromStore ||
+      current.selectedModelInitialized !== selectedModelInitialized ||
       current.selectedModelStorageHandled
     )
       return;
     const normalizedStoreModel = normalizeSelectedModel(selectedModelFromStore);
     const normalizedStoredModel = normalizeSelectedModel(storedSelectedModel);
-    if (!normalizedStoreModel && normalizedStoredModel) {
+    // A deliberate clear must not hydrate the previous stored selection.
+    if (!selectedModelInitialized && !normalizedStoreModel && normalizedStoredModel) {
       setSelectedModelInStore(normalizedStoredModel);
       return;
     }
@@ -183,6 +186,7 @@ export const useSelectedModel = () => {
     }
   }, [
     selectedModelFromStore,
+    selectedModelInitialized,
     selectedModelStorageHandled,
     setSelectedModelInStore,
     setStoredSelectedModel,

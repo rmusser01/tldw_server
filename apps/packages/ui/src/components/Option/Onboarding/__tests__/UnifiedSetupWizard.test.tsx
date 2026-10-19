@@ -9,7 +9,10 @@ import { HashRouter, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { useStoreMessageOption } from "@/store/option";
-import type { FirstRunState } from "@/types/setup-onboarding";
+import type {
+  FirstRunState,
+  SetupProviderCatalogEntry,
+} from "@/types/setup-onboarding";
 
 vi.mock("@plasmohq/storage", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"));
 vi.mock("@plasmohq/storage/hook", () => import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage-hook"));
@@ -25,6 +28,7 @@ const setupHookMocks = vi.hoisted(() => ({
   setConfigPartial: vi.fn(),
   saveStep: vi.fn(),
   skip: vi.fn(),
+  providerCatalog: null as SetupProviderCatalogEntry[] | null,
   loadProviderCatalog: vi.fn(),
   loadMcpToolsCatalog: vi.fn(),
   loadAudioRecommendations: vi.fn(),
@@ -162,7 +166,7 @@ vi.mock("@/hooks/useSetupOnboarding", () => ({
       setup_paths: [],
       multi_user_exit: { guide_path: "/docs/multi-user" },
     } : null,
-    providerCatalog: [
+    providerCatalog: setupHookMocks.providerCatalog ?? [
       {
         provider_key: "openai",
         label: "OpenAI",
@@ -221,6 +225,7 @@ describe("UnifiedSetupWizard", () => {
   beforeEach(() => {
     window.localStorage.clear();
     useStoreMessageOption.setState({ selectedModel: "tldw:existing-choice" });
+    setupHookMocks.providerCatalog = null;
     setupHookMocks.authMode = "single_user";
     setupHookMocks.stateAvailable = true;
     setupHookMocks.connectionConfigured = true;
@@ -800,6 +805,7 @@ describe("UnifiedSetupWizard", () => {
           acknowledged: true,
           default_provider: "openai",
           default_model: "gpt-4.1-mini",
+          default_base_url: null,
           default_provider_credential_configured: true,
         },
       });
@@ -1157,6 +1163,53 @@ describe("UnifiedSetupWizard", () => {
         confirmation_version: "v1",
       });
     });
+  });
+
+  it("resumes a saved local provider draft without resetting its endpoint or bypassing validation", async () => {
+    setupHookMocks.providerCatalog = [
+      {
+        provider_key: "llamacpp",
+        label: "llama.cpp",
+        provider_type: "local_endpoint",
+        default_base_url: "http://127.0.0.1:8080/v1",
+        supports_preflight: true,
+        recommended_for_first_chat: false,
+      },
+    ];
+    const state = initialStateForCompletedSteps([
+      "setup_path",
+      "privacy_security",
+    ]);
+    state.step_data.providers = {
+      acknowledged: false,
+      default_provider: "llamacpp",
+      default_model: "real-model",
+      default_base_url: "http://127.0.0.1:8010/v1",
+    };
+    const { UnifiedSetupWizard } = await import("../UnifiedSetupWizard");
+    render(<UnifiedSetupWizard initialState={state} />);
+    expect(await screen.findByLabelText(/llama.cpp base url/i)).toHaveValue(
+      "http://127.0.0.1:8010/v1",
+    );
+    expect(screen.getByLabelText(/default model/i)).toHaveValue("real-model");
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /validate llama.cpp/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    await waitFor(() =>
+      expect(setupHookMocks.saveStep).toHaveBeenCalledWith({
+        step: "providers",
+        data: {
+          acknowledged: true,
+          default_provider: "llamacpp",
+          default_model: "real-model",
+          default_base_url: "http://127.0.0.1:8010/v1",
+          default_provider_credential_configured: false,
+        },
+      }),
+    );
   });
 
   it("refreshes readiness after a failed skip attempt", async () => {

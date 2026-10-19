@@ -102,4 +102,31 @@ describe("ordinary chat unavailable-model recovery through browser transport", (
     })
     expect(requests[1].body.conversation_id).toBe("saved-chat")
   })
+
+  it("makes an oversized-image HTTP413 actionable through the real wrapped stream error", async () => {
+    const requests: Record<string, unknown>[] = []
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)))
+      return new Response(JSON.stringify({ detail: "Image at index 1 in message 0 too large (maximum 3145728 bytes)." }), {
+        status: 413, headers: { "content-type": "application/json" }
+      })
+    }))
+    let error: unknown
+    const content = [{ type: "text" as const, text: "Exact image question" },
+      { type: "image_url" as const, image_url: { url: "data:image/png;base64,synthetic-unit-input" } }]
+    try {
+      for await (const _token of new TldwChatService().streamMessage([{ role: "user", content }], {
+        model: "test-vision", apiProvider: "llama.cpp", clientMessageId: "one-image-question"
+      })) { /* consume real service/parser; only remote response is replaced */ }
+    } catch (caught) { error = caught }
+    expect(error).toMatchObject({ message: "Stream completion failed", cause: { status: 413 } })
+    expect(decodeChatErrorPayload(buildAssistantErrorContent("", error))).toMatchObject({
+      summary: "Your message is too large.",
+      hint: "Use a smaller image or shorten your message, then try again.",
+      detail: "Image at index 1 in message 0 too large (maximum 3145728 bytes)."
+    })
+    expect(requests).toHaveLength(1)
+    expect(requests[0].messages).toEqual([{ role: "user", content }])
+  })
+
 })

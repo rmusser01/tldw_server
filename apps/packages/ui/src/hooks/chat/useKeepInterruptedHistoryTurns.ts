@@ -53,13 +53,15 @@ export function useKeepInterruptedHistoryTurns({
 
   React.useEffect(() => {
     const controller = selectionRef.current
-    if (!controller || status !== "ready" || !recoveries?.length) return
+    if (!controller || !recoveries?.length) return
     const pending = recoveries
       .filter(
         (entry) =>
+          (status === "ready" ||
+            (status === "stale_selection" && entry.turn.existing_selection)) &&
           entry.turn.action === undefined &&
           !entry.turn.roleplay_resume &&
-          (entry.turn.persistence !== 'server' || entry.turn.settled_message_id) &&
+          (entry.turn.persistence !== 'server' || entry.turn.settled_message_id || entry.turn.existing_selection) &&
           entry.turn.outcome &&
           !isHistoryTurnLive(entry.turn.operation_id) &&
           !keptRef.current.has(entry.turn.operation_id)
@@ -109,7 +111,6 @@ export function useKeepInterruptedHistoryTurns({
       const inputId = inputIdOf(entry)
       const index = messages.findIndex((message) => message.id === inputId)
       if (index < 0) continue
-      const next = messages[index + 1]
       if (index === messages.length - 1 && last && !last.isBot) {
         // The question is the last message: show the kept partial reply.
         setMessages((previous) =>
@@ -118,9 +119,6 @@ export function useKeepInterruptedHistoryTurns({
             ? previous
             : [...previous, retainedReplyMessage(entry.turn)]
         )
-      } else if (next && next.id !== entry.turn.assistant_id) {
-        // The user continued after it: the cut-off reply is no longer needed.
-        void selectionRef.current?.dismissRecovery(entry)
       }
     }
   }, [messages, retainedReplies, setMessages])
@@ -130,6 +128,7 @@ export function useKeepInterruptedHistoryTurns({
       isHistoryTurnLive(entry.turn.operation_id) ||
       (entry.turn.action === undefined &&
         !entry.turn.roleplay_resume &&
+        !(entry.turn.existing_selection && entry.turn.outcome === "complete") &&
         (entry.turn.persistence !== 'server' ||
           messages.some((message) => message.id === entry.turn.settled_message_id)) &&
         Boolean(entry.turn.outcome) &&

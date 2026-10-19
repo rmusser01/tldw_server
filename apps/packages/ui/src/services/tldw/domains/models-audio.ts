@@ -1,3 +1,5 @@
+import { requestScopeFields } from "./service-prompts"
+import type { AdminRequestOptions } from "./admin"
 import {
   bgRequest,
   sanitizeResponseData
@@ -574,32 +576,35 @@ export const modelsAudioMethods = {
   },
 
   // Admin / diagnostics helpers
-  async getSystemStats(options?: { timeoutMs?: number }): Promise<any> {
+  async getSystemStats(options?: AdminRequestOptions & { timeoutMs?: number }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/stats",
       method: "GET",
-      timeoutMs: options?.timeoutMs
+      timeoutMs: options?.timeoutMs,
+      ...options
     })
   },
 
   async getMediaIngestionBudgetDiagnostics(params: {
     userId: number
     policyId?: string
-  }): Promise<MediaIngestionBudgetDiagnostics> {
+  }, options?: AdminRequestOptions): Promise<MediaIngestionBudgetDiagnostics> {
     const query = buildQuery({
       user_id: params.userId,
       policy_id: params.policyId || "media.default"
     })
     return await bgRequest<MediaIngestionBudgetDiagnostics>({
       path: `/api/v1/resource-governor/diag/media-budget${query}`,
-      method: "GET"
+      method: "GET",
+      ...options
     })
   },
 
-  async getLlamacppStatus(): Promise<any> {
+  async getLlamacppStatus(options?: AdminRequestOptions): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/llamacpp/status",
       method: "GET",
+      ...options,
       // 503 means the managed backend is deliberately not configured -
       // callers surface that state in the UI; no console noise (#2896).
       expectedStatuses: [503]
@@ -916,10 +921,11 @@ export const modelsAudioMethods = {
   },
 
   // MLX admin helpers
-  async getMlxStatus(): Promise<MlxStatus> {
+  async getMlxStatus(options?: AdminRequestOptions): Promise<MlxStatus> {
     return await bgRequest<MlxStatus>({
       path: "/api/v1/llm/providers/mlx/status",
-      method: "GET"
+      method: "GET",
+      ...options
     })
   },
 
@@ -1071,7 +1077,9 @@ export const modelsAudioMethods = {
     audioFile: File | Blob,
     options?: any
   ): Promise<any> {
+    options?.signal?.throwIfAborted()
     await this.ensureConfigForRequest(true)
+    options?.signal?.throwIfAborted()
     const fields: Record<string, any> = {}
     if (options) {
       if (options.model != null) fields.model = options.model
@@ -1102,9 +1110,11 @@ export const modelsAudioMethods = {
       }
     }
     const data = await audioFile.arrayBuffer()
+    options?.signal?.throwIfAborted()
     const name = (typeof File !== 'undefined' && audioFile instanceof File && (audioFile as File).name) ? (audioFile as File).name : 'audio'
     const type = (audioFile as any)?.type || 'application/octet-stream'
-    return await this.upload<any>({ path: '/api/v1/audio/transcriptions', method: 'POST', fields, file: { name, type, data } })
+    // Local ASR can exceed the generic ten-second request budget.
+    return await this.upload<any>({ path: '/api/v1/audio/transcriptions', method: 'POST', ...requestScopeFields(options?.requestScope), abortSignal: options?.signal, timeoutMs: options?.timeoutMs ?? 180000, fields, file: { name, type, data } })
   },
 
   async synthesizeSpeech(

@@ -1,3 +1,4 @@
+import { useAdminQuerySession } from "./AdminQueryProvider"
 import React from "react"
 import { PageShell } from "@/components/Common/PageShell"
 import { useConnectionState } from "@/hooks/useConnectionState"
@@ -53,6 +54,7 @@ const ModuleSignalBadge: React.FC<{
 }
 
 export const AdminOperationsOverviewPage: React.FC = () => {
+  const session = useAdminQuerySession()
   const [signals, setSignals] = React.useState<
     Record<string, AdminModuleSignal>
   >({})
@@ -98,16 +100,16 @@ export const AdminOperationsOverviewPage: React.FC = () => {
     setSignals({})
     setFirstSteps([])
     if (!serverUrl) return
-    void loadAdminModuleSignals().then((loaded) => {
-      if (!cancelled) setSignals(loaded)
+    void loadAdminModuleSignals(session).then((loaded) => {
+      if (!cancelled && session.scope.isCurrent()) setSignals(loaded)
     })
-    void loadAdminFirstSteps().then((steps) => {
-      if (!cancelled) setFirstSteps(steps)
+    void loadAdminFirstSteps(session).then((steps) => {
+      if (!cancelled && session.scope.isCurrent()) setFirstSteps(steps)
     })
     return () => {
       cancelled = true
     }
-  }, [serverUrl])
+  }, [serverUrl, session])
 
   // The card earns its place only while something is left to do; a finished
   // (or dismissed, or unconnected) checklist renders nothing.

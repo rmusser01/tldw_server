@@ -409,3 +409,72 @@ def test_clip_upsert_rejects_missing_references(client_audio_studio: TestClient)
     )
     assert missing_artifact.status_code == 400
     assert missing_artifact.json()["detail"] == "audio_studio_artifact_not_found"
+
+
+@pytest.mark.parametrize("lookup", ["detail", "list"])
+def test_b06_project_readback_restores_sections_tracks_clips(client_audio_studio, lookup):
+    created = client_audio_studio.post(
+        "/api/v1/audio-studio/projects", json={"title": "B06 persisted timeline", "workflow": "narration"}
+    ).json()
+    path = "/api/v1/audio-studio/projects/" + created["project_id"]
+    revision = created["current_revision_id"]
+    for section_id, order, text in [("second", 1, "Second segment"), ("first", 0, "First segment")]:
+        response = client_audio_studio.put(
+            path + "/sections/" + section_id,
+            json={"base_revision_id": revision, "title": section_id, "body_text": text, "order_index": order},
+        )
+        assert response.status_code == 200  # nosec B101 - Existing real persistence and revision contract.
+        revision = response.json()["current_revision_id"]
+    track = client_audio_studio.put(
+        path + "/tracks/speech", json={"base_revision_id": revision, "name": "Narration", "kind": "speech"}
+    )
+    assert track.status_code == 200  # nosec B101 - Existing real timeline write.
+    clip = client_audio_studio.put(
+        path + "/clips/first",
+        json={
+            "base_revision_id": track.json()["current_revision_id"],
+            "track_id": "speech",
+            "section_id": "first",
+            "clip_type": "speech",
+            "start_ms": 0,
+            "duration_ms": 2500,
+        },
+    )
+    assert clip.status_code == 200  # nosec B101 - Persist a real clip, not an invented client snapshot.
+    response = client_audio_studio.get(path if lookup == "detail" else "/api/v1/audio-studio/projects")
+    assert response.status_code == 200  # nosec B101 - Public readback contract.
+    project = (
+        response.json()
+        if lookup == "detail"
+        else next(row for row in response.json()["projects"] if row["project_id"] == created["project_id"])
+    )
+    if lookup == "list":
+        # Lists remain metadata summaries; hydrate only the selected project.
+        project = client_audio_studio.get(path).json()
+    assert [(row["section_id"], row["body_text"], row["order_index"]) for row in project["sections"]] == [
+        ("first", "First segment", 0),
+        ("second", "Second segment", 1),
+    ]  # nosec B101 - Exact saved identities/text/order survive readback.
+    assert [(row["track_id"], row["name"], row["kind"]) for row in project["tracks"]] == [
+        ("speech", "Narration", "speech")
+    ]  # nosec B101 - Correct track restored.
+    assert [(row["clip_id"], row["section_id"], row["track_id"], row["duration_ms"]) for row in project["clips"]] == [
+        ("first", "first", "speech", 2500)
+    ]  # nosec B101 - Correct clip remains attached to its section/track.
+    assert project["current_revision_id"] == clip.json()["current_revision_id"]  # nosec B101 - Latest revision retained, not rolled back by readback.
+
+
+def test_b06_archive_between_lookup_and_snapshot_is_404(client_audio_studio, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase
+    project = client_audio_studio.post("/api/v1/audio-studio/projects", json={"title": "Archive race", "workflow": "narration"}).json()
+    snapshot = CollectionsDatabase.get_audio_studio_project_snapshot
+    def archive_then_read(self, project_row_id):
+        row = self.get_audio_studio_project(project_row_id)
+        self.archive_audio_studio_project(project_row_id=project_row_id, base_revision_id=row.current_revision_id,
+            revision_id="rev_b06_archive_race", content_hash="b06-archive-race", payload_json="{}")
+        return snapshot(self, project_row_id)
+    monkeypatch.setattr(CollectionsDatabase, "get_audio_studio_project_snapshot", archive_then_read)
+    response = client_audio_studio.get("/api/v1/audio-studio/projects/" + project["project_id"])
+    assert response.status_code == 404  # nosec B101 - Concurrent archive is absence, not an internal500 or stale owner disclosure.
+
+    assert response.json() == {"detail": "audio_studio_project_not_found"}  # nosec B101 - The archive race must preserve the typed absence contract.

@@ -20,7 +20,7 @@ const mockState = vi.hoisted(() => ({
   queryKey: (queryKey: unknown) =>
     JSON.stringify(Array.isArray(queryKey) ? queryKey : [queryKey]),
   executeMutations: false,
-  resolveApiProviderForModel: vi.fn(async () => null as string | null),
+  resolveApiProviderForModel: vi.fn(async (_options: { modelId?: string | null; explicitProvider?: string | null }) => null as string | null),
   streamCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
   sendCalls: [] as Array<{ messages: unknown[]; options: Record<string, unknown> }>,
   sendResponses: [] as Array<string | Promise<string>>,
@@ -2220,4 +2220,115 @@ describe("WritingPlayground phase1 baseline", () => {
     expect(within(queue).getByRole("button", { name: /apply/i })).toBeEnabled()
     expect(latestRevisionPrompt()).toContain("Target summary: whole document")
   })
+})
+
+
+describe("Writing model target", () => {
+  it.each(["stream", "nonstream", "revision"])(
+    "resolves the catalog provider and strips only the client namespace for %s",
+    async (mode) => {
+      mockState.storageValues.set("selectedModel", "tldw:qwen2.5:0.5b")
+      mockState.resolveApiProviderForModel.mockResolvedValue("ollama")
+      seedWritingSession({ prompt: "Original paragraph.", settings: { token_streaming: mode === "stream" } })
+      mockState.sendResponses.push(structuredReplacement("Reviewed paragraph."))
+      render(<WritingPlayground />)
+      if (mode === "revision") {
+        selectEditorText(getEditor(), "Original paragraph.")
+        fireEvent.click(screen.getByRole("button", { name: /^rewrite$/i }))
+      } else {
+        fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+      }
+      const calls = mode === "stream" ? mockState.streamCalls : mockState.sendCalls
+      await waitFor(() => expect(calls).toHaveLength(1))
+      expect(calls[0]?.options).toMatchObject({ model: "qwen2.5:0.5b", apiProvider: "ollama" })
+      expect(mockState.resolveApiProviderForModel).toHaveBeenCalledWith({ modelId: "tldw:qwen2.5:0.5b", explicitProvider: undefined })
+      if (mode === "revision") expect(getEditor()).toHaveValue("Original paragraph.")
+    }
+  )
+
+  it.each(["auto", "family:model/opaque"])("preserves opaque or server-routed model %s", async (model) => {
+    mockState.storageValues.set("selectedModel", model)
+    seedWritingSession({ prompt: "Original paragraph." })
+    render(<WritingPlayground />)
+    fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+    await waitFor(() => expect(mockState.streamCalls).toHaveLength(1))
+    expect(mockState.streamCalls[0]?.options.model).toBe(model)
+    expect(mockState.streamCalls[0]?.options.apiProvider).toBeUndefined()
+  })
+
+  it("normalizes a padded client catalog model without changing its local tag", async () => {
+    mockState.storageValues.set("selectedModel", "  tldw:qwen2.5:0.5b  ")
+    mockState.resolveApiProviderForModel.mockResolvedValue("ollama")
+    seedWritingSession({ prompt: "Original paragraph." })
+    render(<WritingPlayground />)
+    fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+    await waitFor(() => expect(mockState.streamCalls).toHaveLength(1))
+    expect(mockState.streamCalls[0]?.options).toMatchObject({ model: "qwen2.5:0.5b", apiProvider: "ollama" })
+  })
+
+  it("retains explicit provider preference at the target resolver", async () => {
+    mockState.storageValues.set("selectedModel", "tldw:model-local")
+    useStoreChatModelSettings.setState({ apiProvider: "ollama" })
+    mockState.resolveApiProviderForModel.mockResolvedValue("ollama")
+    seedWritingSession({ prompt: "Original paragraph." })
+    render(<WritingPlayground />)
+    fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+    await waitFor(() => expect(mockState.streamCalls).toHaveLength(1))
+    expect(mockState.streamCalls[0]?.options).toMatchObject({ model: "model-local", apiProvider: "ollama" })
+    expect(mockState.resolveApiProviderForModel).toHaveBeenCalledWith({ modelId: "tldw:model-local", explicitProvider: "ollama" })
+  })
+
+  it.each(["continuation", "revision"])("does not dispatch %s after unmount during target lookup", async (mode) => {
+    const lookup = deferred<string | null>()
+    mockState.storageValues.set("selectedModel", "tldw:qwen2.5:0.5b")
+    mockState.resolveApiProviderForModel.mockImplementation(() => lookup.promise)
+    seedWritingSession({ prompt: "Original paragraph." })
+    const view = render(<WritingPlayground />)
+    if (mode === "revision") {
+      selectEditorText(getEditor(), "Original paragraph.")
+      fireEvent.click(screen.getByRole("button", { name: /^rewrite$/i }))
+    } else {
+      fireEvent.click(screen.getByTestId("writing-topbar-generate"))
+    }
+    await waitFor(() => expect(mockState.resolveApiProviderForModel.mock.calls.some(([target]) =>
+      target?.modelId === "tldw:qwen2.5:0.5b" && Object.hasOwn(target, "explicitProvider")
+    )).toBe(true))
+    view.unmount()
+    await act(async () => { lookup.resolve("ollama"); await lookup.promise })
+    expect(mockState.streamCalls).toHaveLength(0)
+    expect(mockState.sendCalls).toHaveLength(0)
+  })
+})
+
+describe("Writing malformed regeneration", () => {
+  it.each(["Unstructured model advice.", '{"replacement":42}'])(
+    "retains the usable source and copy-only output for %s",
+    async (responseText) => {
+      mockState.storageValues.set("selectedModel", "mock-model")
+      mockState.sendResponses.push(
+        structuredReplacement("Useful revision.", "Usable original"),
+        responseText
+      )
+      seedWritingSession({ prompt: "Original paragraph." })
+      render(<WritingPlayground />)
+      selectEditorText(getEditor(), "Original paragraph.")
+      fireEvent.click(screen.getByRole("button", { name: /^rewrite$/i }))
+      await screen.findByText("Usable original")
+      const original = screen.getByText("Usable original").closest("article")!
+      fireEvent.click(within(original).getByRole("button", { name: /regenerate/i }))
+      const rawText = await screen.findByText(responseText)
+      const raw = rawText.closest("article")!
+
+      expect(within(raw).getByText("raw_suggestion")).toBeInTheDocument()
+      expect(within(raw).getByRole("button", { name: /copy/i })).toBeEnabled()
+      expect(
+        within(raw).queryByRole("button", { name: /apply|reject|regenerate/i })
+      ).toBeNull()
+      expect(within(original).getByText("pending")).toBeInTheDocument()
+      expect(within(original).getByRole("button", { name: /apply/i })).toBeEnabled()
+      expect(getEditor()).toHaveValue("Original paragraph.")
+      fireEvent.click(within(original).getByRole("button", { name: /apply/i }))
+      await waitFor(() => expect(getEditor()).toHaveValue("Useful revision."))
+    }
+  )
 })

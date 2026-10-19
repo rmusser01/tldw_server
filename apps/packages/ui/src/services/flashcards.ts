@@ -720,8 +720,17 @@ export async function createDeck(
 export async function updateDeck(
   deck_id: number,
   input: DeckUpdate,
-  options?: { signal?: AbortSignal }
+  options?: FlashcardsRequestOptions
 ): Promise<Deck> {
+  if (options?.requestScope) {
+    return bgRequest<Deck, AllowedPath, "PATCH">({
+      path: `/api/v1/flashcards/decks/${deck_id}` as AllowedPath,
+      method: "PATCH",
+      ...requestScopeFields(options.requestScope),
+      body: input,
+      abortSignal: options.signal
+    })
+  }
   return await decksClient.update<Deck>(String(deck_id), input, {
     abortSignal: options?.signal
   })

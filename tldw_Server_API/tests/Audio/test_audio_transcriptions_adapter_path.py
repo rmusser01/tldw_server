@@ -24,7 +24,23 @@ def _make_wav_bytes(duration_sec: float = 0.1, sr: int = 16000) -> bytes:
     return buf.getvalue()
 
 
+@pytest.mark.parametrize(
+    "content_type, expected_status",
+    [
+        ("audio/wav", 200),
+        ("audio/webm;codecs=opus", 200),
+        ("Audio/WebM; codecs=opus", 200),
+        ("audio/ogg;codecs=opus", 200),
+        ("audio/webm-untrusted;codecs=opus", 415),
+        ("application/octet-stream;audio/webm", 415),
+        ("text/plain;codecs=opus", 415),
+        (";codecs=opus", 415),
+        (" ; codecs=opus", 415),
+    ],
+)
 def test_audio_transcriptions_uses_adapter_base_dir(
+    content_type: str,
+    expected_status: int,
     monkeypatch: pytest.MonkeyPatch,
     bypass_api_limits: Any,
 ) -> None:
@@ -111,7 +127,7 @@ def test_audio_transcriptions_uses_adapter_base_dir(
     with bypass_api_limits(app), TestClient(app) as client:
         wav_bytes = _make_wav_bytes()
         headers = {"X-API-KEY": TEST_API_KEY}
-        files = {"file": ("sample.wav", io.BytesIO(wav_bytes), "audio/wav")}
+        files = {"file": ("sample.wav", io.BytesIO(wav_bytes), content_type)}
         data = {"model": "external:stub", "response_format": "json"}
         resp = client.post(
             "/api/v1/audio/transcriptions",
@@ -121,7 +137,11 @@ def test_audio_transcriptions_uses_adapter_base_dir(
         )
         if resp.status_code == 404:
             pytest.skip("audio/transcriptions endpoint not mounted in this build")
-        assert resp.status_code == 200, resp.text
+        assert resp.status_code == expected_status, resp.text  # nosec B101 - pytest regression assertion, not a runtime security guard.
+        if expected_status == 415:
+            assert not captured_conversion  # nosec B101 - Unsupported MIME must stop before conversion.
+            assert "Unsupported media type" in resp.json()["detail"]  # nosec B101 - Verify retained unsupported-type rejection.
+            return
         body = resp.json()
         assert body["text"] == "stub transcript"
         assert Path(captured_conversion["path"]).suffix == ".wav"

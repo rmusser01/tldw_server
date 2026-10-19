@@ -8,6 +8,7 @@
 import { PageAssistDatabase } from "@/db/dexie/chat"
 import { generateID } from "@/db/dexie/helpers"
 import { db } from "@/db/dexie/schema"
+import { PromptOwnershipError, assertPromptOwnedBy, resolvePromptOwnerId } from "@/services/prompt-local-owner"
 import {
   FewShotExample,
   Prompt as LocalPrompt,
@@ -24,11 +25,13 @@ import {
   createProject,
   createPrompt as createServerPrompt,
   getPrompt as getServerPrompt,
+  getProject,
   listProjects,
   updatePrompt as updateServerPrompt
 } from "@/services/prompt-studio"
 import {
   getPromptStudioDefaults,
+  getPromptStudioDefaultsForOwner,
   setPromptStudioDefaults
 } from "@/services/prompt-studio-settings"
 import type { RecipeDeliveryReceipt } from "@/services/recipe-persistence-registry"
@@ -502,15 +505,15 @@ type ExistingPullReconciliation =
   | { safe: true }
   | { safe: false; error: string }
 
-/** Copy server content first, but keep the durable recipe lock until the
- * application-wide authority proves that every exact-ID marker is reconciled.
- */
+/** Hold the exact-ID reconciliation lease through the local content commit. */
 async function updateExistingFromServer(
   local: LocalPrompt,
   serverPrompt: ServerPrompt,
   ownership: RecipeSyncOwnership | null
 ): Promise<ExistingPullReconciliation> {
   const updateFields = serverToLocalFields(serverPrompt)
+  if (ownership?.dispatch.state === "dispatched")
+    updateFields.ownerId = ownership.dispatch.actualOwnerId
   const localIdentity = parsePromptIdentity(
     local.structuredPromptDefinition,
     local.promptFormat,
@@ -531,13 +534,6 @@ async function updateExistingFromServer(
   const copiedFields = { ...updateFields }
   delete copiedFields.syncStatus
   delete copiedFields.lastSyncedAt
-  if (
-    (await db.prompts.update(local.id, {
-      ...copiedFields,
-      syncStatus: "error"
-    })) === 0
-  )
-    throw new Error("Local prompt disappeared during reconciliation")
 
   const ownerId =
     ownership?.dispatch.state === "dispatched"
@@ -564,6 +560,14 @@ async function updateExistingFromServer(
     return { safe: false, error: "Recipe has an unresolved operation" }
 
   try {
+    if (
+      (await db.prompts.update(local.id, {
+        ...copiedFields,
+        syncStatus: "error"
+      })) === 0
+    )
+      throw new Error("Local prompt disappeared during reconciliation")
+
     if (
       (await db.prompts.update(local.id, {
         syncStatus: "synced",
@@ -620,6 +624,19 @@ async function updateExistingFromServer(
   return { safe: true }
 }
 
+async function readOwnedLocalPrompt(localId: string, expectedOwnerId?: string | null): Promise<LocalPrompt | undefined> {
+  const ownerId = await resolvePromptOwnerId(expectedOwnerId)
+  const local = await db.prompts.get(localId)
+  if (local) assertPromptOwnedBy(local, ownerId)
+  return local
+}
+
+const promptOwnerFailure = (localId: string, error: unknown): SyncResult => ({
+  success: false, localId, recipeOwnership: notDispatched(localId),
+  error: error instanceof Error ? error.message : "Prompt owner is unavailable",
+  syncStatus: "local", failureKind: "validation"
+})
+
 async function persistServerPrompt(
   localId: string,
   local: LocalPrompt,
@@ -627,6 +644,13 @@ async function persistServerPrompt(
   input: RecipePersistenceInput | undefined,
   createCopy: boolean
 ): Promise<SyncResult> {
+  let ownerId: string
+  try {
+    const currentOwner = await resolvePromptOwnerId(input?.expectedOwnerId)
+    if (!currentOwner) throw new Error("Prompt persistence owner is unavailable")
+    assertPromptOwnedBy(local, currentOwner)
+    ownerId = currentOwner
+  } catch (error) { return promptOwnerFailure(localId, error) }
   let recipeOwnership: RecipeSyncOwnership | null = notDispatched(localId)
   let isRecipe = false
   const originalStatus = local.syncStatus || "local"
@@ -666,11 +690,13 @@ async function persistServerPrompt(
     }
   }
   let payload: PromptCreatePayload | PromptUpdatePayload
+  let dispatchedRevision: string
   let policy: RecipePersistenceRequestPolicy
   try {
     payload = createCopy
       ? localToServerPayload(local, projectId)
       : localToServerUpdatePayload(local)
+    dispatchedRevision = JSON.stringify([local.updatedAt, localToServerUpdatePayload(local)])
     isRecipe = payload.prompt_schema_version === 2
     if (isRecipe) {
       if (local.syncStatus === "error") return durableRecipeBlock(localId)
@@ -684,10 +710,15 @@ async function persistServerPrompt(
       const blocked = await readRecipeWriteBlock(localId, input.expectedOwnerId)
       if (blocked) return blocked
     } else {
-      policy = { mode: "capture" }
+      policy = { mode: "owner", expectedOwnerId: ownerId }
     }
   } catch (error) {
     return failure(error, "validation")
+  }
+
+  if (!local.ownerId) {
+    await db.prompts.update(localId, { ownerId })
+    local = { ...local, ownerId }
   }
 
   // Any exception crossing the transport boundary without dispatch metadata is ambiguous.
@@ -696,6 +727,7 @@ async function persistServerPrompt(
     dispatch: { state: "unknown", actualOwnerId: null }
   }
   let deliveryReceipt: RecipeDeliveryReceipt | undefined
+  let acknowledgedServerId: number | undefined
   try {
     const response = createCopy
       ? await createServerPrompt(payload as PromptCreatePayload, {
@@ -749,6 +781,12 @@ async function persistServerPrompt(
         "invalid_server_payload"
       )
     }
+    if (!isRecipe && (
+      recipeOwnership.dispatch.state !== "dispatched" ||
+      recipeOwnership.dispatch.actualOwnerId !== ownerId
+    )) {
+      return await failure("Prompt response owner is unavailable or changed", "validation")
+    }
     if (isKnownMutationRejection(response)) {
       await clearReconciledOwner(recipeOwnership)
       return await failure(response.error || "Prompt rejected", "validation")
@@ -761,20 +799,52 @@ async function persistServerPrompt(
         "invalid_server_payload"
       )
     }
+    acknowledgedServerId = serverPrompt.id
     let fields: Partial<LocalPrompt>
     try {
       fields = serverToLocalFields(serverPrompt)
     } catch (error) {
       return await failure(error, "invalid_server_payload")
     }
+    fields.ownerId = ownerId
     if (createCopy) fields.studioProjectId = projectId
-    const updated = await db.prompts.update(localId, fields)
+    let newerLocalEdit = false
+    const updated = await db.prompts.update(localId, current => {
+      assertPromptOwnedBy(current, ownerId)
+      if ((current.serverId ?? null) !== (local.serverId ?? null))
+        throw new PromptOwnershipError("Prompt link changed during sync")
+      const currentRevision = JSON.stringify([current.updatedAt, localToServerUpdatePayload(current)])
+      if (currentRevision !== dispatchedRevision) {
+        // Retain the create receipt so retry updates this source instead of duplicating it.
+        Object.assign(current, {
+          serverId: serverPrompt.id,
+          studioPromptId: serverPrompt.id,
+          studioProjectId: createCopy ? projectId : current.studioProjectId,
+          versionNumber: serverPrompt.version_number,
+          serverParentVersionId: serverPrompt.parent_version_id,
+          serverUpdatedAt: serverPrompt.updated_at,
+          syncStatus: "pending"
+        })
+        newerLocalEdit = true
+      } else {
+        Object.assign(current, fields)
+      }
+    })
     if (updated === 0)
       return await failure(
         "Local prompt disappeared during reconciliation",
         "transient"
       )
     await clearReconciledOwner(recipeOwnership)
+    if (newerLocalEdit) return {
+      success: false,
+      localId,
+      recipeOwnership,
+      serverId: serverPrompt.id,
+      syncStatus: "pending",
+      failureKind: "transient",
+      error: "Newer local edits remain pending sync"
+    }
     return {
       success: true,
       localId,
@@ -783,6 +853,15 @@ async function persistServerPrompt(
       syncStatus: "synced"
     }
   } catch (error) {
+    if (error instanceof PromptOwnershipError) return {
+      success: false,
+      localId,
+      recipeOwnership,
+      ...(acknowledgedServerId ? { serverId: acknowledgedServerId } : {}),
+      error: error.message,
+      syncStatus: originalStatus,
+      failureKind: "validation"
+    }
     if (
       policy.mode === "require" &&
       classifyRecipeDispatch(recipeOwnership.dispatch) === "unknown_owner"
@@ -815,24 +894,41 @@ export async function shouldAutoSyncWorkspacePrompts(): Promise<boolean> {
 }
 
 export async function resolveAutoSyncProjectId(
-  preferredProjectId?: number | null
+  preferredProjectId?: number | null,
+  expectedOwnerId?: string
 ): Promise<number | null> {
+  const ownerId = await resolvePromptOwnerId(expectedOwnerId)
+  if (!ownerId) return null
   if (isValidProjectId(preferredProjectId)) {
     return preferredProjectId
   }
 
-  let defaults = await getPromptStudioDefaults()
+  let defaults = await getPromptStudioDefaultsForOwner(ownerId)
   if (isValidProjectId(defaults.defaultProjectId)) {
-    return defaults.defaultProjectId
+    const cachedId = defaults.defaultProjectId
+    const response = await getProject(cachedId, {
+      recipePersistence: { mode: "owner", expectedOwnerId: ownerId }
+    })
+    if (response.status === 404) {
+      throw new Error("Saved Prompt Studio project is unavailable. Choose another default project in Prompt Studio settings, then retry the save.")
+    }
+    if (response.ok === false || response.data?.success === false) {
+      throw new Error(response.error || response.data?.error || "Failed to load Prompt Studio project")
+    }
+    const project = unwrapResponseData<Project>(response)
+    if (!project || project.id !== cachedId) {
+      throw new Error("Invalid server project response")
+    }
+    return cachedId
   }
 
-  const projects = await getAvailableProjects()
+  const projects = await getAvailableProjectsForOwner(ownerId)
   const firstProjectId = projects.find((project) =>
     isValidProjectId(project.id)
   )?.id
 
   if (isValidProjectId(firstProjectId)) {
-    await setPromptStudioDefaults({ defaultProjectId: firstProjectId })
+    await setPromptStudioDefaults({ defaultProjectId: firstProjectId }, ownerId)
     return firstProjectId
   }
 
@@ -841,11 +937,11 @@ export async function resolveAutoSyncProjectId(
       await createProject({
         name: AUTO_SYNC_PROJECT_NAME,
         description: AUTO_SYNC_PROJECT_DESCRIPTION
-      })
+      }, undefined, { recipePersistence: { mode: "owner", expectedOwnerId: ownerId } })
     )
     const createdId = created?.id
     if (isValidProjectId(createdId)) {
-      await setPromptStudioDefaults({ defaultProjectId: createdId })
+      await setPromptStudioDefaults({ defaultProjectId: createdId }, ownerId)
       return createdId
     }
   } catch {
@@ -853,12 +949,12 @@ export async function resolveAutoSyncProjectId(
   }
 
   // Avoid repeated failed create attempts in the same session by caching "no default".
-  defaults = await getPromptStudioDefaults()
+  defaults = await getPromptStudioDefaultsForOwner(ownerId)
   if (
     defaults.defaultProjectId !== null &&
     defaults.defaultProjectId !== undefined
   ) {
-    await setPromptStudioDefaults({ defaultProjectId: null })
+    await setPromptStudioDefaults({ defaultProjectId: null }, ownerId)
   }
   return null
 }
@@ -869,7 +965,9 @@ export async function autoSyncPrompt(
   input?: RecipePersistenceInput
 ): Promise<SyncResult> {
   const recipeOwnership = notDispatched(localId)
-  const local = await db.prompts.get(localId)
+  let local: LocalPrompt | undefined
+  try { local = await readOwnedLocalPrompt(localId, input?.expectedOwnerId) }
+  catch (error) { return promptOwnerFailure(localId, error) }
   if (!local) {
     return {
       success: false,
@@ -919,14 +1017,21 @@ export async function autoSyncPrompt(
     const blocked = await readRecipeWriteBlock(localId, input.expectedOwnerId)
     if (blocked) return blocked
   }
+  const ownerId = await resolvePromptOwnerId(input?.expectedOwnerId)
+  if (!ownerId) return promptOwnerFailure(localId, new Error("Prompt persistence owner is unavailable"))
+  if (!local.ownerId) {
+    await db.prompts.update(localId, { ownerId })
+    local = { ...local, ownerId }
+  }
+  const capturedInput = { expectedOwnerId: ownerId }
   const projectId = isRecipe
     ? isValidProjectId(preferredProjectId)
       ? preferredProjectId
       : isValidProjectId(local.studioProjectId)
         ? local.studioProjectId
-        : (await getPromptStudioDefaults()).defaultProjectId
+        : (await getPromptStudioDefaultsForOwner(ownerId)).defaultProjectId
     : await resolveAutoSyncProjectId(
-        preferredProjectId ?? local.studioProjectId
+        preferredProjectId ?? local.studioProjectId, ownerId
       )
 
   if (!isValidProjectId(projectId)) {
@@ -943,7 +1048,7 @@ export async function autoSyncPrompt(
     }
   }
 
-  const result = await pushToStudio(localId, projectId, input)
+  const result = await pushToStudio(localId, projectId, capturedInput)
   if (
     !result.success &&
     result.failureKind === "transient" &&
@@ -951,8 +1056,7 @@ export async function autoSyncPrompt(
   ) {
     if (
       await markLocalPending(localId, isRecipe, {
-        studioProjectId: projectId,
-        updatedAt: Date.now()
+        studioProjectId: projectId
       })
     )
       return durableRecipeBlock(localId)
@@ -979,8 +1083,9 @@ export async function pushToStudio(
   const recipeOwnership = notDispatched(localId)
   let local: LocalPrompt | undefined
   try {
-    local = await db.prompts.get(localId)
+    local = await readOwnedLocalPrompt(localId, input?.expectedOwnerId)
   } catch (error) {
+    if (error instanceof PromptOwnershipError) return promptOwnerFailure(localId, error)
     return {
       success: false,
       localId,
@@ -1010,14 +1115,28 @@ export async function pushToStudio(
  */
 export async function pullFromStudio(
   serverId: number,
-  existingLocalId?: string
+  existingLocalId?: string,
+  expectedOwnerId?: string | null
 ): Promise<SyncResult> {
   let recipeOwnership: RecipeSyncOwnership | null = null
   try {
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId)
+    if (!ownerId) throw new Error("Prompt owner is unavailable")
+    if (existingLocalId) assertPromptOwnedBy(await db.prompts.get(existingLocalId), ownerId)
     const response = await getServerPrompt(serverId, {
-      recipePersistence: { mode: "capture" }
+      recipePersistence: { mode: "owner", expectedOwnerId: ownerId }
     })
     const dispatch = response.recipePersistence
+    if (dispatch?.state !== "dispatched" || dispatch.actualOwnerId !== ownerId) {
+      // A recipe pull with untrustworthy dispatch ownership must retain the
+      // durable lock, but cannot copy response content into an owned row.
+      if (existingLocalId && dispatch?.state !== "not_dispatched") {
+        const local = await db.prompts.get(existingLocalId)
+        if (local?.promptFormat === "structured" && local.promptSchemaVersion === 2)
+          await db.prompts.update(existingLocalId, { syncStatus: "error" })
+      }
+      throw new Error("Prompt response owner is unavailable or changed")
+    }
     recipeOwnership = dispatch
       ? { localId: existingLocalId || "", dispatch }
       : null
@@ -1069,7 +1188,8 @@ export async function pullFromStudio(
     }
 
     // Check if we already have this prompt locally by serverId
-    const existing = await db.prompts.where("serverId").equals(serverId).first()
+    const existing = await db.prompts.where("serverId").equals(serverId)
+      .filter(prompt => prompt.ownerId === ownerId).first()
     if (existing) {
       recipeOwnership = dispatch ? { localId: existing.id, dispatch } : null
       const reconciliation = await updateExistingFromServer(
@@ -1099,7 +1219,7 @@ export async function pullFromStudio(
     }
 
     // Create new local prompt
-    const newLocal = serverToNewLocalPrompt(serverPrompt)
+    const newLocal = { ...serverToNewLocalPrompt(serverPrompt), ownerId }
     await db.prompts.add(newLocal)
     recipeOwnership = dispatch ? { localId: newLocal.id, dispatch } : null
     await clearReconciledOwner(recipeOwnership)
@@ -1112,6 +1232,8 @@ export async function pullFromStudio(
       syncStatus: "synced"
     }
   } catch (error: unknown) {
+    if (error instanceof PromptOwnershipError)
+      return promptOwnerFailure(existingLocalId ?? "", error)
     const reconciledLocalId = recipeOwnership?.localId || existingLocalId || ""
     const current = reconciledLocalId
       ? await db.prompts.get(reconciledLocalId).catch(() => undefined)
@@ -1150,7 +1272,9 @@ export async function linkPrompts(
 ): Promise<SyncResult> {
   const recipeOwnership = null
   try {
-    const local = await db.prompts.get(localId)
+    const ownerId = await resolvePromptOwnerId()
+    if (!ownerId) throw new Error("Prompt owner is unavailable")
+    const local = await readOwnedLocalPrompt(localId, ownerId)
     if (!local) {
       return {
         success: false,
@@ -1163,7 +1287,11 @@ export async function linkPrompts(
     }
     const identity = getLocalPromptComparablePayload(local)
 
-    const response = await getServerPrompt(serverId)
+    const response = await getServerPrompt(serverId, {
+      recipePersistence: { mode: "owner", expectedOwnerId: ownerId }
+    })
+    if (response.recipePersistence?.state !== "dispatched" || response.recipePersistence.actualOwnerId !== ownerId)
+      throw new Error("Prompt response owner is unavailable or changed")
     const serverPrompt = unwrapResponseData<ServerPrompt>(response)
 
     if (!serverPrompt) {
@@ -1182,6 +1310,7 @@ export async function linkPrompts(
     // Link by updating local with server reference
     if (
       await markLocalPending(localId, identity.promptSchemaVersion === 2, {
+        ownerId,
         serverId,
         studioProjectId: serverPrompt.project_id,
         studioPromptId: serverId,
@@ -1213,12 +1342,12 @@ export async function linkPrompts(
 /**
  * Unlink a local prompt from server (keep local copy).
  */
-export async function unlinkPrompt(localId: string): Promise<SyncResult> {
+export async function unlinkPrompt(localId: string, expectedOwnerId?: string | null): Promise<SyncResult> {
   const recipeOwnership = null
   let local: LocalPrompt | undefined
   let unlinkOperationId: string | null = null
   try {
-    local = await db.prompts.get(localId)
+    local = await readOwnedLocalPrompt(localId, expectedOwnerId)
     if (!local) {
       return {
         success: false,
@@ -1348,7 +1477,8 @@ export async function getSyncStatus(localId: string): Promise<{
   lastSyncedAt?: number
   hasConflict: boolean
 }> {
-  const local = await db.prompts.get(localId)
+  const ownerId = await resolvePromptOwnerId()
+  const local = await readOwnedLocalPrompt(localId, ownerId)
   if (!local) {
     return { status: "local", hasConflict: false }
   }
@@ -1360,7 +1490,10 @@ export async function getSyncStatus(localId: string): Promise<{
   // Check for conflict by comparing timestamps and content fingerprints.
   try {
     getLocalPromptComparablePayload(local)
-    const response = await getServerPrompt(local.serverId)
+    if (!ownerId) throw new Error("Prompt owner is unavailable")
+    const response = await getServerPrompt(local.serverId, {
+      recipePersistence: { mode: "owner", expectedOwnerId: ownerId }
+    })
     const serverPrompt = unwrapResponseData<ServerPrompt>(response)
 
     if (!serverPrompt) {
@@ -1401,14 +1534,19 @@ export async function getSyncStatus(localId: string): Promise<{
  * Get detailed conflict information.
  */
 export async function getConflictInfo(
-  localId: string
+  localId: string,
+  expectedOwnerId?: string | null
 ): Promise<ConflictInfo | null> {
-  const local = await db.prompts.get(localId)
+  const ownerId = await resolvePromptOwnerId(expectedOwnerId)
+  const local = await readOwnedLocalPrompt(localId, ownerId)
   if (!local || !local.serverId) return null
 
   try {
     getLocalPromptComparablePayload(local)
-    const response = await getServerPrompt(local.serverId)
+    if (!ownerId) throw new Error("Prompt owner is unavailable")
+    const response = await getServerPrompt(local.serverId, {
+      recipePersistence: { mode: "owner", expectedOwnerId: ownerId }
+    })
     const serverPrompt = unwrapResponseData<ServerPrompt>(response)
     if (!serverPrompt) return null
     getServerPromptComparablePayload(serverPrompt)
@@ -1433,7 +1571,7 @@ export async function resolveConflict(
   input?: RecipePersistenceInput
 ): Promise<SyncResult> {
   const recipeOwnership = null
-  const local = await db.prompts.get(localId)
+  const local = await readOwnedLocalPrompt(localId, input?.expectedOwnerId)
   if (!local || !local.serverId) {
     return {
       success: false,
@@ -1451,7 +1589,7 @@ export async function resolveConflict(
 
     case "keep_server":
       // Pull server to local (overwrite local)
-      return await pullFromStudio(local.serverId, localId)
+      return await pullFromStudio(local.serverId, localId, input?.expectedOwnerId)
 
     case "keep_both":
       // Validate/create first; preserve the existing link until one final update.
@@ -1514,21 +1652,30 @@ export async function getAllPromptsWithSyncStatus(): Promise<
 export async function getPromptsByProject(
   projectId: number
 ): Promise<LocalPrompt[]> {
-  return await db.prompts
-    .where("studioProjectId")
-    .equals(projectId)
-    .filter((p) => !p.deletedAt)
-    .toArray()
+  return (await new PageAssistDatabase().getAllPrompts()).filter(prompt => prompt.studioProjectId === projectId)
 }
 
 /**
  * Get available projects for syncing.
  */
-export async function getAvailableProjects(): Promise<Project[]> {
-  try {
-    const response = await listProjects({ per_page: 100 })
-    return unwrapResponseData<Project[]>(response) ?? []
-  } catch {
-    return []
+export async function getAvailableProjectsForOwner(expectedOwnerId?: string): Promise<Project[]> {
+  const ownerId = await resolvePromptOwnerId(expectedOwnerId)
+  if (!ownerId) return []
+  const response = await listProjects({ per_page: 100 }, {
+    recipePersistence: { mode: "owner", expectedOwnerId: ownerId }
+  })
+  if (response.ok === false || response.data?.success === false) {
+    throw new Error(
+      response.error || response.data?.error || "Failed to load Prompt Studio projects"
+    )
   }
+  const projects = unwrapResponseData<Project[]>(response)
+  if (!Array.isArray(projects)) {
+    throw new Error("Invalid server project response")
+  }
+  return projects
+}
+
+export async function getAvailableProjects(): Promise<Project[]> {
+  return await getAvailableProjectsForOwner()
 }

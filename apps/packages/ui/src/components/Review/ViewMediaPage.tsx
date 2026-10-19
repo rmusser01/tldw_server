@@ -1,3 +1,4 @@
+import { MediaCollectionManager } from './MediaCollectionManager'
 import { MediaKnowledgeActions } from "./MediaKnowledgeActions"
 import FeatureEmptyState from '@/components/Common/FeatureEmptyState'
 import FeatureHint from '@/components/Common/FeatureHint'
@@ -938,7 +939,8 @@ const MediaPageContent: React.FC = () => {
   const handoffSelectionRef = useRef(nav.selected)
   handoffSelectionRef.current = nav.selected
   const fullContentReady = Boolean(ownerScope && nav.selected && !nav.detailLoading && !nav.detailFetchError &&
-    String(nav.lastFetchedId) === String(nav.selected.id) && nav.selectedContent.trim())
+    String(nav.lastFetchedId) === String(nav.selected.id) &&
+    (nav.permalinkMediaId == null || nav.permalinkMediaId === String(nav.selected.id)) && nav.selectedContent.trim())
   const chatWithMediaDisabledReason = fullContentReady ? undefined : !ownerScope
     ? t('review:mediaPage.fullContentOwnerLoading', { defaultValue: 'Checking account…' }) : nav.detailLoading
     ? t('review:mediaPage.fullContentLoading', { defaultValue: 'Loading full content…' })
@@ -1201,8 +1203,7 @@ const MediaPageContent: React.FC = () => {
     </div>
   ) : null
 
-  if (isEmptyLibrary) {
-    return (
+  const emptyLibraryView = (
       <div
         className="relative flex min-h-0 flex-1 overflow-auto bg-bg"
       >
@@ -1248,9 +1249,11 @@ const MediaPageContent: React.FC = () => {
         </div>
       </div>
     )
-  }
 
   return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <MediaCollectionManager key={ownerScope || 'unverified'} selection={selection} />
+      {isEmptyLibrary && !nav.detailFetchError && !nav.detailLoading ? emptyLibraryView : (
     <div
       className="relative flex flex-col md:flex-row min-h-0 min-w-0 flex-1 overflow-hidden bg-bg"
     >
@@ -1669,7 +1672,7 @@ const MediaPageContent: React.FC = () => {
                 onPageChange={search.setPage}
                 totalItems={search.activeTotalCount}
                 itemsPerPage={search.pageSize}
-                currentItemsCount={search.results.length}
+                currentItemsCount={displayResults.length}
                 pageSizeOptions={[20, 50, 100]}
                 onItemsPerPageChange={(nextPageSize) => {
                   if (nextPageSize === search.pageSize) return
@@ -1880,17 +1883,17 @@ const MediaPageContent: React.FC = () => {
               </button>
             </div>
             {staleSelectionNotice}
-            {nav.selected &&
-            nav.detailFetchError &&
-            String(nav.detailFetchError.mediaId) === String(nav.selected.id) ? (
+            {nav.detailFetchError ? (
               <div
                 className="mx-3 mt-3 rounded-md border border-warn/30 bg-warn/10 px-3 py-2 text-sm text-warn"
+                role="alert"
                 data-testid="media-detail-fetch-error"
               >
                 <p className="m-0">{nav.detailFetchError.message}</p>
                 <button
                   type="button"
                   onClick={nav.handleRetryDetailFetch}
+                  disabled={nav.detailLoading}
                   className="mt-2 inline-flex items-center rounded border border-warn/40 bg-surface px-2 py-1 text-xs text-warn hover:bg-surface2"
                   data-testid="media-detail-fetch-retry"
                 >
@@ -1944,9 +1947,7 @@ const MediaPageContent: React.FC = () => {
               onGenerateFlashcardsFromContent={handleGenerateFlashcardsFromMedia}
               onRefreshMedia={handleRefreshMedia}
               onKeywordsUpdated={(mediaId, keywords) => {
-                if (nav.selected && nav.selected.id === mediaId) {
-                  nav.setSelected({ ...nav.selected, keywords })
-                }
+                nav.setSelected(current => current && current.id === mediaId ? { ...current, keywords } : current)
                 search.refetch()
               }}
               onDeleteItem={nav.selected?.kind === 'note' || mediaCapabilities.canDelete ? selection.handleDeleteItem : undefined}
@@ -1971,6 +1972,8 @@ const MediaPageContent: React.FC = () => {
           onClose={() => keyboard.setShortcutsOverlayOpen(false)}
         />
       </React.Suspense>
+    </div>
+      )}
     </div>
   )
 }

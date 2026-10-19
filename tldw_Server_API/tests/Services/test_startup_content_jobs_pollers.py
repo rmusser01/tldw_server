@@ -130,6 +130,7 @@ def _standalone_config(
         "audio_jobs_task",
         "tts_jobs_task",
         "audiobook_jobs_task",
+        "audio_studio_jobs_task",
         "presentation_render_jobs_task",
         "standalone_html_generation_jobs_task",
         "research_workspace_output_jobs_task",
@@ -161,13 +162,52 @@ def test_content_jobs_worker_specs_match_legacy_worker_contract(
     assert callable(spec.factory)
 
 
+@pytest.mark.parametrize(
+    "flag,test_mode,sidecar,route,expected",
+    [
+        (None, False, False, True, True),
+        ("0", False, False, True, False),
+        ("1", False, False, True, True),
+        (None, False, False, False, False),
+        (None, True, False, True, False),
+        ("1", False, True, True, False),
+        ("1", True, False, True, True),
+    ],
+)
+def test_b06_audio_studio_worker_preserves_default_and_explicit_startup_policy(
+    monkeypatch: pytest.MonkeyPatch,
+    flag,
+    test_mode,
+    sidecar,
+    route,
+    expected,
+) -> None:
+    if flag is None:
+        monkeypatch.delenv("AUDIO_STUDIO_JOBS_WORKER_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("AUDIO_STUDIO_JOBS_WORKER_ENABLED", flag)
+    context = WorkerLifecycleContext(
+        app=object(),
+        settings={},
+        test_mode=test_mode,
+        sidecar_mode=sidecar,
+        route_enabled=lambda *_args, **_kwargs: route,
+        logger=None,
+        startup_guard_exceptions=(),
+        import_exceptions=(),
+    )
+    spec = _specs_by_name(_import_startup_content_jobs_pollers())["audio_studio_jobs_task"]
+    assert spec.enabled(context) is expected  # nosec B101 - Existing route/flag/test/sidecar startup contract.
+
+
 def test_content_jobs_worker_specs_use_expected_names() -> None:
     startup_pollers = _import_startup_content_jobs_pollers()
 
-    assert [spec.name for spec in startup_pollers.provide_content_jobs_worker_specs()] == [
+    assert [spec.name for spec in startup_pollers.provide_content_jobs_worker_specs()] == [  # nosec B101 - Unit catalog contract now includes the Studio worker.
         "audio_jobs_task",
         "tts_jobs_task",
         "audiobook_jobs_task",
+        "audio_studio_jobs_task",
         "presentation_render_jobs_task",
         "standalone_html_generation_jobs_task",
         "research_workspace_output_jobs_task",
@@ -194,6 +234,7 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         ("audio_jobs_task", "_run_audio_jobs_worker_service"),
         ("tts_jobs_task", "_run_tts_jobs_worker_service"),
         ("audiobook_jobs_task", "_run_audiobook_jobs_worker_service"),
+        ("audio_studio_jobs_task", "_run_audio_studio_jobs_worker_service"),
         ("presentation_render_jobs_task", "_run_presentation_render_jobs_worker_service"),
         ("standalone_html_generation_jobs_task", "_run_standalone_html_generation_jobs_service"),
         ("research_workspace_output_jobs_task", "_run_research_workspace_output_jobs_worker_service"),
@@ -223,10 +264,11 @@ def test_content_jobs_worker_spec_factories_delegate_to_existing_worker_services
         assert spec.factory is not None
         assert spec.factory(_context(), f"{spec_name}-stop") == f"{spec_name}-awaitable"
 
-    assert calls == [
+    assert calls == [  # nosec B101 - Unit delegation contract includes the existing Studio service.
         ("audio_jobs_task", "audio_jobs_task-stop"),
         ("tts_jobs_task", "tts_jobs_task-stop"),
         ("audiobook_jobs_task", "audiobook_jobs_task-stop"),
+        ("audio_studio_jobs_task", "audio_studio_jobs_task-stop"),
         ("presentation_render_jobs_task", "presentation_render_jobs_task-stop"),
         ("standalone_html_generation_jobs_task", "standalone_html_generation_jobs_task-stop"),
         ("research_workspace_output_jobs_task", "research_workspace_output_jobs_task-stop"),

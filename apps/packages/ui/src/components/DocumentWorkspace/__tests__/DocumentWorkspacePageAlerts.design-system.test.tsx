@@ -174,7 +174,7 @@ describe("DocumentWorkspacePage design-system alerts", () => {
     fireEvent.click(screen.getByTestId("document-open-picker-button"))
     await screen.findByText("Picker mounted")
     const controller = new AbortController()
-    const operation: QuickIngestOperation = { authorityKey: "owner-a", requestScope: { config: { serverUrl: "https://a.test", authMode: "multi-user" }, userId: 1 }, signal: controller.signal, isCurrent: () => !controller.signal.aborted, assertCurrent: () => controller.signal.throwIfAborted() }
+    const operation: QuickIngestOperation = { authorityKey: "owner-a", authorityRevision: 0, requestScope: { config: { serverUrl: "https://a.test", authMode: "multi-user" }, userId: 1 }, signal: controller.signal, isCurrent: () => !controller.signal.aborted, assertCurrent: () => controller.signal.throwIfAborted() }
     let pending!: Promise<void>
     await act(async () => { pending = testState.openFromPicker!(7, "pdf", operation); await Promise.resolve() })
     expect(testState.getMediaDetails).toHaveBeenCalledWith(7, expect.objectContaining({ requestScope: operation.requestScope, signal: operation.signal }))

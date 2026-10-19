@@ -366,7 +366,12 @@ describe("ImportExportTab deck creation flows", () => {
       scopeSignal: controller.signal, scopeInvalidatedSignal: controller.signal, capability: "unchecked", definitions: {}, release: () => controller.abort()
     } as ServicePromptSnapshot
     const refetch = vi.fn().mockRejectedValue(new Error("Deck service unavailable"))
-    vi.mocked(useDecksQuery).mockReturnValue({ data: [], isLoading: state === "pending", isError: state === "error", isSuccess: state === "ready", refetch } as ReturnType<typeof useDecksQuery>)
+    const decksQuery: Partial<ReturnType<typeof useDecksQuery>> = state === "pending"
+      ? { data: [], isLoading: true, isError: false, isSuccess: false, refetch }
+      : state === "error"
+        ? { data: [], isLoading: false, isError: true, isSuccess: false, refetch }
+        : { data: [], isLoading: false, isError: false, isSuccess: true, refetch }
+    vi.mocked(useDecksQuery, { partial: true }).mockReturnValue(decksQuery)
     generateMutateAsync.mockResolvedValue({ flashcards: [{ front: "Question", back: "Answer", model_type: "basic" }], count: 1 })
     createDeckMutateAsync.mockResolvedValue({ id: 12, name: "Generated Flashcards", version: 1 })
     createCardMutateAsync.mockResolvedValue({})

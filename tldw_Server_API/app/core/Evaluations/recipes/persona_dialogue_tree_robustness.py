@@ -389,11 +389,12 @@ def _build_target(
         character=character,
         index=index,
     )
-    return {
-        "target_id": target_id,
-        "persona": persona or {},
-        "character": character or {},
-    }
+    target: dict[str, Any] = {"target_id": target_id}
+    if persona:
+        target["persona"] = persona
+    if character:
+        target["character"] = character
+    return target
 
 
 def _derive_target_id(

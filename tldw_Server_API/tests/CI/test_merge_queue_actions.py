@@ -142,7 +142,8 @@ class FakeGh:
                  reread=None, dispatch_refused=(), rebase_lag=1, disarm_error=False, line_page_size=None,
                  late_runs=None, late_statuses=None, dispatch_status=422,
                  late_nodes=None, rebase_error_text="gh: rebase refused (HTTP 422)", approve_error=None, rerun_error=None,
-                 run_status=None, behind_by=None):
+                 run_status=None, behind_by=None,
+                 disarm_error_text="Pull request is not in the correct state to disable auto-merge"):
         self.nodes = {n["number"]: n for n in nodes}
         self.checks = checks or {}
         self.statuses = statuses or {}
@@ -153,6 +154,7 @@ class FakeGh:
         self.dispatch_refused = set(dispatch_refused)
         self.rebase_lag = rebase_lag
         self.disarm_error = disarm_error
+        self.disarm_error_text = disarm_error_text
         self.line_page_size = line_page_size
         self.late_runs = late_runs or {}
         self.late_statuses = late_statuses or {}
@@ -201,7 +203,7 @@ class FakeGh:
         if "disablePullRequestAutoMerge" in query:
             self._record(("disarm", v["id"]))
             if self.disarm_error:
-                raise mq.GhError("Pull request is not in the correct state to disable auto-merge")
+                raise mq.GhError(self.disarm_error_text)
             return {"data": {}}
         self.reads += 1
         if "comments(last" in query:
@@ -485,6 +487,36 @@ def test_first_rebase_failure_warns_without_evicting():
     assert "rebasing onto dev failed (gh: rebase refused (HTTP 422)); will retry" in body
 
 
+def test_genuine_graphql_bot_marker_deduplicates_and_records_failed_rebase():
+    """GraphQL Bot.login omits the REST/event suffix; its marker still records the first failure."""
+    marker = f"<!-- merge-queue:rebase-failed:{OLD} -->"
+    gh = FakeGh([_node(1)], rebase_error=True, comments={1: [{
+        "body": f"{marker}\nfirst failure",
+        "author": {"__typename": "Bot", "login": "github-actions"},
+    }]})
+    assert mq.comment_once(gh, 1, "rebase-failed", OLD, "duplicate") is False  # nosec B101 - pytest regression assertion.
+    _run(gh)
+    assert [c[0] for c in gh.calls] == ["rebase", "comment", "disarm"]  # nosec B101 - pytest regression assertion.
+    assert gh.calls[-2][2].startswith(f"<!-- merge-queue:evict-rebase:{OLD} -->\n")  # nosec B101 - pytest regression assertion.
+
+
+@pytest.mark.parametrize(("author", "prefix"), [
+    ({"__typename": "User", "login": "contributor"}, ""),
+    ({"__typename": "Bot", "login": "other-app[bot]"}, ""),
+    (None, ""),
+    ({"__typename": "Bot", "login": "github-actions"}, "quoted "),
+])
+def test_spoofed_rebase_failure_marker_does_not_consume_the_retry(author, prefix):
+    """Only the queue bot's own leading marker records an earlier failed rebase."""
+    marker = f"<!-- merge-queue:rebase-failed:{OLD} -->"
+    gh = FakeGh([_node(1)], rebase_error=True, comments={1: [
+        {"body": f"{prefix}{marker}\nforged failure", "author": author},
+    ]})
+    _run(gh)
+    assert [c[0] for c in gh.calls] == ["rebase", "comment"]  # nosec B101 - pytest regression assertion.
+    assert gh.calls[1][2].startswith(f"{marker}\nMerge queue:")  # nosec B101 - pytest regression assertion.
+
+
 def test_refused_rebase_rereads_once_more_before_counting_it_as_a_failure():
     """A racing run's rebase was accepted, but the ref moves about 1 s later. Our pinned-head
     mutation is refused inside that window; the first reread still shows the old head. One more
@@ -520,6 +552,27 @@ def test_eviction_for_a_new_reason_on_the_same_head_still_comments():
     _run(gh)
     comment = next(c for c in gh.calls if c[0] == "comment")
     assert f"<!-- merge-queue:evict-conflict:{OLD} -->" in comment[2]
+
+
+def test_disarm_failure_still_comments():
+    """A merge fires push:dev and pull_request:closed; the losing run's disarm hits an
+    already-disarmed PR. That must not crash the run or skip the comment."""
+    gh = FakeGh([_node(1, state="DIRTY"), _node(2, armed="2026-10-04T11:00:00Z")],
+                disarm_error=True, reread={1: _node(1, armed=None)})
+    _run(gh)
+    assert ("disarm", "PR_1") in gh.calls  # nosec B101 - pytest regression assertion, not a runtime security guard.
+    assert any(c[0] == "comment" and "conflicts with dev" in c[2] for c in gh.calls)  # nosec B101 - pytest regression assertion, not a runtime security guard.
+    assert ("rebase", "PR_2", OLD) in gh.calls  # nosec B101 - pytest regression assertion.
+
+
+def test_failed_disarm_of_an_armed_front_stops_before_the_next_pr():
+    """An API failure cannot mark the still-armed front as departed and mutate its successor."""
+    gh = FakeGh([_node(1, state="DIRTY"), _node(2, armed="2026-10-04T11:00:00Z")],
+                disarm_error=True, disarm_error_text=DISPATCH_ERRORS[502])
+    with pytest.raises(mq.GhError, match=r"\(HTTP 502\)"):
+        _run(gh)
+    assert [c[0] for c in gh.calls] == ["comment", "disarm"]
+    assert not any(c[0] == "rebase" for c in gh.calls)  # nosec B101 - pytest regression assertion.
 
 
 def test_blocked_green_waits_for_auto_merge_and_never_asks_about_review_threads():
@@ -1350,7 +1403,7 @@ def test_a_broken_runs_second_retry_on_the_same_head_evicts():
     gh = FakeGh([_node(1, state="BLOCKED")], runs={OLD: [broken]}, comments={1: [marker]},
                 **_green({SECURITY: None}))
     _run(gh)
-    assert [c[0] for c in gh.calls] == ["comment", "disarm"]
+    assert [c[0] for c in gh.calls] == ["comment", "disarm"]  # nosec B101 - pytest regression assertion, not a runtime security guard.
     assert f"merge-queue:evict-failed-twice:{OLD}" in gh.calls[0][2]
 
 

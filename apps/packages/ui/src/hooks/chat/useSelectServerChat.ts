@@ -13,6 +13,7 @@ import { updatePageTitle } from "@/utils/update-page-title"
 import { requestSettingsNavigation } from "@/utils/settings-return"
 import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
 import { resolveServerChatAssistantIdentity } from "@/hooks/chat/useServerChatLoader"
+import { dispatchChatRouteReplacement } from "@/utils/character-chat-mode-intent"
 
 const resolveCharacterId = (value: unknown): string | number | null => {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -125,6 +126,21 @@ export const useSelectServerChat = () => {
           usePlaygroundSessionStore.getState().sourceSelectionRevision !== session.sourceSelectionRevision) return false
       }
       if (!callerIsCurrent()) return false
+      const assistantIdentity = resolveServerChatAssistantIdentity(
+        chat as unknown as Record<string, unknown>
+      )
+      const characterId = resolveCharacterId(assistantIdentity.characterId)
+      const replacementSource = captureChatDraftSource(selectionIsCurrent)
+      const current = useStoreMessageOption.getState()
+      dispatchChatRouteReplacement({
+        serverChatId: current.serverChatId,
+        historyId: current.historyId,
+        restoreRevision: usePlaygroundSessionStore.getState().restoreRevision,
+        characterId: characterId == null ? null : String(characterId),
+        nextChatId: chat.id,
+        onRestoreCancelled: replacementSource.acceptRestoreCancelled
+      })
+      if (!replacementSource.isCurrent() || !callerIsCurrent()) return false
       const acceptDraft = captureChatDraftLoad("switch")
       usePlaygroundSessionStore.getState().cancelPendingRestore()
       if (typeof window !== "undefined") {
@@ -143,10 +159,6 @@ export const useSelectServerChat = () => {
       setRagMediaIds(null)
       setServerChatId(chat.id)
       setServerChatTitle(chat.title || "")
-      const assistantIdentity = resolveServerChatAssistantIdentity(
-        chat as unknown as Record<string, unknown>
-      )
-      const characterId = resolveCharacterId(assistantIdentity.characterId)
       setServerChatCharacterId(characterId)
       setServerChatAssistantKind(assistantIdentity.assistantKind)
       setServerChatAssistantId(assistantIdentity.assistantId)

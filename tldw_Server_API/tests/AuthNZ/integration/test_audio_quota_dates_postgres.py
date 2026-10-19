@@ -10,6 +10,8 @@ import asyncpg
 import pytest
 import pytest_asyncio
 
+from tldw_Server_API.tests.helpers.audio_quota_state import cold_audio_ledger as cold_audio_ledger
+
 pytestmark = pytest.mark.integration
 
 
@@ -27,6 +29,7 @@ async def audio_postgres(isolated_test_environment, monkeypatch):
         "datetime",
         SimpleNamespace(now=lambda _tz: datetime(2026, 9, 10, 12, tzinfo=timezone.utc)),
     )
+    monkeypatch.setattr(audio_quota, "_daily_ledger", None)
     monkeypatch.setattr(audio_quota, "_audio_minutes_legacy_backfill_done", False)
     return client, pool
 
@@ -228,3 +231,34 @@ async def test_postgres_legacy_audio_backfill_preserves_current_day_usage_once(a
             "op_id": "audio-minutes-legacy:7:2026-09-10",
         }
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("minutes_used", [None])
+async def test_postgres_reporting_first_backfills_legacy_usage(configured_audio_profile_user, monkeypatch, cold_audio_ledger):
+    """A profile-first upgrade reports migrated daily usage and remaining allowance."""
+    from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
+    from tldw_Server_API.app.core.Usage import audio_quota, quota_checks
+
+    client, _pool, user_id, headers = configured_audio_profile_user
+    pool = await get_db_pool()
+    monkeypatch.setattr(audio_quota, "datetime", datetime)
+    cold_audio_ledger()
+    await pool.execute(
+        "INSERT INTO audio_usage_daily (user_id, day, minutes_used, jobs_started) VALUES ($1, $2, 2.5, 0)",
+        user_id,
+        datetime.now(timezone.utc).date(),
+    )
+    try:
+        response = client.get("/api/v1/users/me/profile", headers=headers)
+        assert response.status_code == 200  # nosec B101 - pytest regression assertion.
+        audio = response.json()["quotas"]["audio"]
+        assert audio["daily_minutes_used"] == 2.5  # nosec B101 - pytest regression assertion.
+        assert audio["daily_minutes_remaining"] == 27.5  # nosec B101 - pytest regression assertion.
+        # Retry migration through a fresh reporting read; the legacy op_id stays unique.
+        cold_audio_ledger()
+        response = client.get("/api/v1/users/me/profile", headers=headers)
+        assert response.status_code == 200  # nosec B101 - pytest regression assertion.
+        assert response.json()["quotas"]["audio"]["daily_minutes_used"] == 2.5  # nosec B101 - pytest regression assertion.
+    finally:
+        quota_checks.reset_ledger_cache()

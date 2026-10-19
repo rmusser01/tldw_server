@@ -1,3 +1,6 @@
+import { createAdminTestSession } from "@/components/Option/Admin/__tests__/admin-query-fixture"
+vi.mock("@/hooks/usePrivateWorkspaceScope", () => ({ usePrivateWorkspaceScope: () => ({ scope: workspace.scope, retry: vi.fn() }) }))
+let workspace: ReturnType<typeof createAdminTestSession>
 // @vitest-environment jsdom
 
 import React from "react"
@@ -23,7 +26,7 @@ import {
 } from "@/services/tldw/adminQueries"
 import {
   AdminQueryProvider,
-  getAdminQueryClient
+  useAdminQuerySession
 } from "@/components/Option/Admin/AdminQueryProvider"
 import {
   loadAdminModuleSignals,
@@ -44,19 +47,20 @@ const StatsProbe: React.FC<{ label: string }> = ({ label }) => {
 }
 
 const SignalsProbe: React.FC = () => {
+  const session = useAdminQuerySession()
   const [signals, setSignals] = React.useState<Record<
     string,
     AdminModuleSignal
   > | null>(null)
   React.useEffect(() => {
     let cancelled = false
-    void loadAdminModuleSignals().then((loaded) => {
+    void loadAdminModuleSignals(session).then((loaded) => {
       if (!cancelled) setSignals(loaded)
     })
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [session])
   if (!signals) {
     return <p data-testid="signals-loading">loading</p>
   }
@@ -84,7 +88,7 @@ describe("adminQueries shared reference-data cache (admin perf B-S4)", () => {
     resolveAllSignalMocks()
     // The admin surfaces share one QueryClient; drop any cache left over from
     // the previous test so every test starts with a cold window.
-    getAdminQueryClient().clear()
+    workspace = createAdminTestSession()
   })
 
   afterEach(() => {
@@ -152,12 +156,7 @@ describe("adminQueries shared reference-data cache (admin perf B-S4)", () => {
     expect(apiMock.getSystemStats).toHaveBeenCalledTimes(1)
     expect(apiMock.listBackups).toHaveBeenCalledTimes(1)
 
-    first.unmount()
-    render(
-      <AdminQueryProvider>
-        <SignalsProbe />
-      </AdminQueryProvider>
-    )
+    first.rerender(<AdminQueryProvider><React.Fragment key="second"><SignalsProbe /></React.Fragment></AdminQueryProvider>)
     expect(await screen.findByTestId("signals-loaded")).toBeTruthy()
 
     // The second mount is served from the shared query cache within the

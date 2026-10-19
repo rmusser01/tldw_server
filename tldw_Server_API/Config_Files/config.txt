@@ -122,7 +122,7 @@ project_root_allowed_base_paths =
 
 [ACP-WORKSPACE]
 # Optional. If set, workspace root_path must be under one of these paths (comma-separated).
-# Leave empty to allow any absolute path.
+# Empty blocks workspace creation; configure explicit absolute base paths.
 allowed_base_paths =
 # Default max depth for workspace discovery scanning.
 discovery_max_depth = 3

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto"
 // @vitest-environment jsdom
 import React from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, fireEvent, render as renderComponent, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render as renderComponent, screen, waitFor } from "@testing-library/react"
 import { App } from "antd"
 import { CharacterSelect } from "@/components/Common/CharacterSelect"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -182,7 +182,7 @@ const setStorageAssistant = async (selection: AssistantSelection | null) => {
 }
 const setTestAssistant = async (selection: AssistantSelection | null) => { await realLoader.setSelection?.(selection) }
 const useRealServerConversation = ({
-  hydrateServerChat = true,
+  hydrateServerChat = false,
 }: { hydrateServerChat?: boolean } = {}) => {
   const clearChat = useClearChat()
   const store = useStoreMessageOption() as SelectionTestState
@@ -201,7 +201,7 @@ const useRealServerConversation = ({
   return { ...messageOptionState.value, ...store, clearChat, assistantSelectionMeta, effectiveAssistantState: resolved, selectedAssistant: effectiveAssistantStateToSelection(resolved) ?? assistant, setSelectedAssistant: setAssistant, ...(realLoader.session || realLoader.route ? { setSelectedCharacter: async (character: { id: string | number; name: string }) => setAssistant({ kind: "character", id: String(character.id), name: character.name, metadata: { selectionMode: "tracked" } }) } : {}) }
 }
 
-const AdditionalServerLoader = () => { useRealServerConversation(); return null }
+const AdditionalServerLoader = () => { useRealServerConversation({ hydrateServerChat: true }); return null }
 const SavedChatSelection = ({ ordinary = false }: { ordinary?: boolean }) => {
   const select = useSelectServerChat()
   return <button onClick={() => select((ordinary ? { id: "ordinary", title: "Ordinary saved chat", source: "webui-chat" } : { id: "robot", title: "Robot chat", character_id: 5, assistant_kind: "character", assistant_id: "5", source: "webui-character-chat" }) as Parameters<typeof select>[0])}>Open saved {ordinary ? "ordinary chat" : "Robot"}</button>
@@ -609,7 +609,10 @@ function prepareSharedClearFixture() {
 
 let queryClient: QueryClient
 beforeEach(() => { queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } }) })
-afterEach(() => queryClient.clear())
+afterEach(async () => {
+  await act(async () => { cleanup() })
+  queryClient.clear()
+})
 const render = (ui: React.ReactElement) => renderComponent(ui, {
   wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
 })
@@ -810,9 +813,9 @@ describe("Playground coordinator integration", () => {
     await selectedAssistantStorage.set("playgroundChatWorkflowMode", "character")
     useStoreMessageOption.setState({ ...useStoreMessageOption.getInitialState(), selectedModel: "test-model", temporaryChat: false,
       serverChatId: "alice-character", serverChatMetaLoaded: true, serverChatCharacterId: 4, serverChatAssistantKind: "character",
-      messages: [{ id: "alice-private", isBot: true, message: "Alice private answer", sources: [] }]
+      messages: [{ id: "alice-private", isBot: true, name: undefined, message: "Alice private answer", sources: [] }]
     }, true)
-    useMessageOptionMock.mockImplementation(() => ({ ...messageOptionState.value, ...useStoreMessageOption(), selectedAssistant: null }))
+    useMessageOptionMock.mockImplementation(() => ({ ...messageOptionState.value, ...useStoreMessageOption(state => state), selectedAssistant: null }))
     const view = render(<><Playground /><OrdinarySend /></>)
     try {
       act(() => {
@@ -1457,6 +1460,38 @@ describe("Playground coordinator integration", () => {
   })
 
 
+  it.each([[0, false], [70, false], [0, true], [70, true]] as const)("B02 history selection retires the saved route before a %sms navigation (ordinary=%s)", async (delay, ordinary) => {
+    realLoader.enabled = realLoader.webStorage = realLoader.route = realLoader.additionalLoader = true
+    routeCommitDelay = delay
+    useMessageOptionMock.mockImplementation(useRealServerConversation)
+    localStorage.clear()
+    await setOwnedAssistant({ kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } })
+    useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false })
+    tldwClientState.getChat.mockImplementation(async (id: string) => id === "ordinary" ? { id, title: "Ordinary saved chat", source: "webui-chat", scope_type: "global" } : { id, title: id === "cedar" ? "Cedar chat" : "Robot chat", character_id: id === "cedar" ? 4 : 5, assistant_kind: "character", assistant_id: id === "cedar" ? "4" : "5", source: "webui-character-chat", scope_type: "global" })
+    tldwClientState.listChatMessages.mockImplementation(async (id: string) => [{ id: `${id}-answer`, role: "assistant", content: id === "cedar" ? "Cedar answer" : id === "ordinary" ? "Ordinary answer" : "BEEP BOOP", version: 1 }])
+    for (const id of ["cedar", "ordinary", "robot"]) setFixtureTranscript(id, [{
+      id: `${id}-answer`, role: "assistant", content: id === "cedar" ? "Cedar answer" : id === "ordinary" ? "Ordinary answer" : "BEEP BOOP", version: 1
+    }])
+    tldwClientState.getCharacter.mockImplementation(async (id: string | number) => ({ id: Number(id), name: Number(id) === 4 ? "Cedar" : "Robot" }))
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=4&chatId=cedar")
+    const view = render(<><Playground /><SavedChatSelection ordinary={ordinary} /></>)
+    const expected = ordinary ? "Ordinary answer" : "BEEP BOOP"
+    try {
+      await waitFor(() => expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual(["Cedar answer"]))
+      fireEvent.click(screen.getByRole("button", { name: ordinary ? "Open saved ordinary chat" : "Open saved Robot" }))
+      await waitFor(() => expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual([expected]))
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)) })
+      expect(useStoreMessageOption.getState().serverChatId).toBe(ordinary ? "ordinary" : "robot")
+      expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual([expected])
+      expect(window.location.href).not.toContain("chatId=cedar")
+      expect(screen.getByTestId("playground-form")).toHaveAttribute("data-character-workflow", String(!ordinary))
+      act(() => navigateRoute("/chat?mode=character&characterId=4&chatId=cedar"))
+      await waitFor(() => expect(useStoreMessageOption.getState().messages.map(row => row.message)).toEqual(["Cedar answer"]))
+      expect(useStoreMessageOption.getState().serverChatId).toBe("cedar")
+    } finally { view.unmount(); localStorage.clear() }
+  })
+
+
   it('keeps the prior saved source stable while a fresh card read is pending', async () => {
     realLoader.enabled = realLoader.webStorage = realLoader.route = true;
     localStorage.clear();
@@ -1756,6 +1791,12 @@ describe("Playground coordinator integration", () => {
     tldwClientState.getCharacter.mockImplementation(async () => { await pending; return { id: 5, name: "Late Robot" } })
     window.history.pushState({}, "", "/chat?settingsServerChatId=robot")
     const view = render(<><Playground /><AssistantSelect /></>)
+    let picked = false
+    const selectionWatcher = { [selectionKey()]: (change: { newValue?: unknown }) => {
+      const next = (change.newValue as { selection?: AssistantSelection })?.selection
+      if (next?.id === (choice === "Robot" ? "5" : "7") && next.name === choice && next.metadata?.selectionMode === "tracked") picked = true
+    } }
+    selectedAssistantStorage.watch(selectionWatcher)
     try {
       await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalled())
       fireEvent.click(await screen.findByRole("button", { name: "Robot" }))
@@ -1763,10 +1804,11 @@ describe("Playground coordinator integration", () => {
       fireEvent.click(buttons.at(-1)!)
       // The handler detaches synchronously, before selection persistence or the held profile.
       expect(useStoreMessageOption.getState().serverChatId).toBe(choice === "Robot" ? "robot" : null)
+      await waitFor(() => expect(picked).toBe(true))
       await act(async () => { release(); await pending })
       await waitFor(async () => expect(await getOwnedAssistant()).toMatchObject({ id: choice === "Robot" ? "5" : "7", name: choice }))
       expect(useStoreMessageOption.getState().serverChatId).toBe(choice === "Robot" ? "robot" : null)
-    } finally { release(); view.unmount(); queryClient.clear() }
+    } finally { selectedAssistantStorage.unwatch(selectionWatcher); release(); view.unmount(); queryClient.clear() }
   })
 
   it.each(["search", "hash", "roundtrip"])("UAT068 replaces a fully loaded saved Character from its %s route without restoring it", async routeKind => {

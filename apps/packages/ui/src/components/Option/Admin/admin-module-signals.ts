@@ -1,7 +1,6 @@
-import { useConnectionStore } from "@/store/connection"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { adminKeys } from "@/services/tldw/adminQueries"
-import { getAdminQueryClient } from "./AdminQueryProvider"
+import type { AdminQuerySession } from "./AdminQueryProvider"
 
 /**
  * Optional live signals for the Admin Operations overview (#2876): one cheap
@@ -53,10 +52,11 @@ export const withSignalTimeout = async <T>(work: Promise<T>): Promise<T> => {
  * the overview.
  */
 const adminSignalFetch = <T>(
+  session: AdminQuerySession,
   queryKey: readonly unknown[],
   fetch: () => Promise<T>
 ): Promise<T> =>
-  getAdminQueryClient().fetchQuery({
+  session.client.fetchQuery({
     queryKey,
     queryFn: fetch
   })
@@ -64,10 +64,10 @@ const adminSignalFetch = <T>(
 const plural = (count: number, noun: string): string =>
   `${count} ${noun}${count === 1 ? "" : "s"}`
 
-const SIGNAL_FETCHERS: Record<string, () => Promise<AdminModuleSignal>> = {
+const signalFetchers = (session: AdminQuerySession): Record<string, () => Promise<AdminModuleSignal>> => ({
   "/admin/server": async () => {
     const stats = await withSignalTimeout(
-      adminSignalFetch(adminKeys.systemStats, () => tldwClient.getSystemStats())
+      adminSignalFetch(session, adminKeys.systemStats, () => tldwClient.getSystemStats(session.requestOptions()))
     )
     const total = stats?.users?.total
     return {
@@ -81,8 +81,8 @@ const SIGNAL_FETCHERS: Record<string, () => Promise<AdminModuleSignal>> = {
     // list of open alerts, so the aggregated security alert health is the
     // honest signal here ("ok" | "degraded" | "errors").
     const status = await withSignalTimeout(
-      adminSignalFetch(adminKeys.securityAlertStatus, () =>
-        tldwClient.getSecurityAlertStatus()
+      adminSignalFetch(session, adminKeys.securityAlertStatus, () =>
+        tldwClient.getSecurityAlertStatus(session.requestOptions())
       )
     )
     const health = String(status?.health ?? "").toLowerCase()
@@ -96,7 +96,7 @@ const SIGNAL_FETCHERS: Record<string, () => Promise<AdminModuleSignal>> = {
   },
   "/admin/data-ops": async () => {
     const result = await withSignalTimeout(
-      adminSignalFetch(adminKeys.backups, () => tldwClient.listBackups())
+      adminSignalFetch(session, adminKeys.backups, () => tldwClient.listBackups(undefined, session.requestOptions()))
     )
     const backups = Array.isArray(result)
       ? result
@@ -108,8 +108,8 @@ const SIGNAL_FETCHERS: Record<string, () => Promise<AdminModuleSignal>> = {
   },
   "/admin/llamacpp": async () => {
     const status = await withSignalTimeout(
-      adminSignalFetch(adminKeys.llamacppStatus, () =>
-        tldwClient.getLlamacppStatus()
+      adminSignalFetch(session, adminKeys.llamacppStatus, () =>
+        tldwClient.getLlamacppStatus(session.requestOptions())
       )
     )
     const state = String(status?.state ?? status?.status ?? "").toLowerCase()
@@ -119,7 +119,7 @@ const SIGNAL_FETCHERS: Record<string, () => Promise<AdminModuleSignal>> = {
   },
   "/admin/mlx": async () => {
     const status = await withSignalTimeout(
-      adminSignalFetch(adminKeys.mlxStatus, () => tldwClient.getMlxStatus())
+      adminSignalFetch(session, adminKeys.mlxStatus, () => tldwClient.getMlxStatus(session.requestOptions()))
     )
     return status?.active
       ? { state: "healthy", detail: "Model loaded" }
@@ -127,8 +127,8 @@ const SIGNAL_FETCHERS: Record<string, () => Promise<AdminModuleSignal>> = {
   },
   "/admin/rate-limiting": async () => {
     const coverage = await withSignalTimeout(
-      adminSignalFetch(adminKeys.governorCoverage, () =>
-        tldwClient.getGovernorCoverage()
+      adminSignalFetch(session, adminKeys.governorCoverage, () =>
+        tldwClient.getGovernorCoverage(undefined, session.requestOptions())
       )
     )
     const pct = coverage?.coverage_pct
@@ -139,7 +139,7 @@ const SIGNAL_FETCHERS: Record<string, () => Promise<AdminModuleSignal>> = {
         }
       : { state: "healthy", detail: "Governor reachable" }
   }
-}
+})
 
 /**
  * A backend that answers "this module is not configured/enabled" is off on
@@ -156,47 +156,16 @@ const isNotConfiguredError = (reason: unknown): boolean => {
 // visit (#2896).
 const loggedSignalFailures = new Set<string>()
 
-/** The connection target the cached admin queries were fetched against.
- *  Starts at a sentinel no real target can equal, so the session's first
- *  signal load also drops the cache (pages may already have populated it
- *  against a previous server before the overview ever ran). */
-const NO_SIGNAL_TARGET_LOADED = Symbol("no-admin-signal-target-loaded")
-let lastSignalTarget: string | typeof NO_SIGNAL_TARGET_LOADED =
-  NO_SIGNAL_TARGET_LOADED
-
-const currentSignalTarget = (): string => {
-  try {
-    return String(
-      useConnectionStore.getState().state.serverUrl ?? ""
-    ).trim()
-  } catch {
-    return ""
-  }
-}
-
-/**
- * Drop every cached admin query when the connection target changed since the
- * last signal load: cached stats/roles/permissions belong to the previous
- * server and must not be served against the new one (the overview reloads
- * signals on exactly this transition). The sentinel initialization also
- * covers the first load of a session, where the target has never been
- * recorded yet — removeQueries on an empty cache is a no-op.
- */
-const dropAdminQueriesIfTargetChanged = (target: string): void => {
-  if (lastSignalTarget !== target) {
-    getAdminQueryClient().removeQueries({ queryKey: adminKeys.all })
-  }
-  lastSignalTarget = target
-}
-
-export const loadAdminModuleSignals = async (): Promise<
+export const loadAdminModuleSignals = async (session: AdminQuerySession): Promise<
   Record<string, AdminModuleSignal>
 > => {
-  dropAdminQueriesIfTargetChanged(currentSignalTarget())
-  const routes = Object.keys(SIGNAL_FETCHERS)
+  if (!session.scope.isCurrent()) return {}
+  const fetchers = signalFetchers(session)
+  const routes = Object.keys(fetchers)
   const results = await Promise.allSettled(
-    routes.map((route) => SIGNAL_FETCHERS[route]())
+    routes.map((route) => fetchers[route]())
   )
+  if (!session.scope.isCurrent()) return {}
   const signals: Record<string, AdminModuleSignal> = {}
   routes.forEach((route, index) => {
     const result = results[index]

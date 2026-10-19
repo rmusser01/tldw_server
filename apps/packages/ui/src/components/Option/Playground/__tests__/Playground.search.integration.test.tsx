@@ -12,6 +12,7 @@ import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { resolveHistorySelection } from "@/utils/history-selection"
+import { bindUnboundLocalHistory } from "@/db/dexie/history-selection"
 import { Playground } from "../Playground"
 import { PageHelpModalHost } from "@/components/Common/PageHelpModalHost"
 import { useTutorialStore } from "@/store/tutorials"
@@ -881,6 +882,9 @@ describe("Playground thread search integration", () => {
 
 vi.mock("@/db/dexie/history-selection", () => ({
   ensureLocalProfileId: async () => "profile",
+  bindUnboundLocalHistory: vi.fn(async () => {
+    throw new Error("Unexpected binding while opening a history bookmark")
+  }),
   getLocalHistoryOwner: async (id: string) => ({
     kind: "local",
     profile_id: "profile",
@@ -951,6 +955,7 @@ describe("Playground H1 URL initialization with the mounted session/controller",
     h1.controller = null
     h1.bookmarks.clear()
     h1.confirm.mockClear()
+    vi.mocked(bindUnboundLocalHistory).mockClear()
     h1.historyInfo.mockReset().mockImplementation(async (id: string) =>
       ["chat-one", "chat-two"].includes(id)
         ? { id, title: id, createdAt: 1, is_rag: false, message_source: "branch", local_owner_key: "local-owner" }
@@ -1044,9 +1049,10 @@ describe("Playground H1 URL initialization with the mounted session/controller",
       const reference = seed()
       window.history.replaceState({}, "", "/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference)))
       const page = render(<Playground />)
-      await waitFor(() =>
+      await waitFor(() => {
+        expect(h1.controller?.error).toBeNull()
         expect(screen.getByTestId("playground-chat")).toHaveAttribute("data-selected-history", "chat-one answer A")
-      )
+      })
       page.unmount()
     } finally {
       // This describe's beforeEach does not reset the flag, so reset it here.
@@ -1055,11 +1061,13 @@ describe("Playground H1 URL initialization with the mounted session/controller",
   })
 
   it.each([
-    { name: "missing history", details: null, code: "owner_conversation_mismatch" },
-    { name: "unowned history", details: { id: "chat-one", message_source: "branch" }, code: "owner_conversation_mismatch" },
-    { name: "unbound server mirror", details: { id: "chat-one", message_source: "server", server_chat_id: "foreign-chat" }, code: "unbound_server_mirror" }
-  ])("rejects a bookmarked $name without publishing selected rows", async ({ details, code }) => {
+    { name: "missing history", details: null, code: "owner_conversation_mismatch", foreignOwner: false },
+    { name: "unbound local history", details: { id: "chat-one", message_source: "branch" }, code: "unbound_local_history", foreignOwner: false },
+    { name: "foreign bookmark owner", details: { id: "chat-one", message_source: "branch", local_owner_key: "local-owner" }, code: "owner_conversation_mismatch", foreignOwner: true },
+    { name: "unbound server mirror", details: { id: "chat-one", message_source: "server", server_chat_id: "foreign-chat" }, code: "unbound_server_mirror", foreignOwner: false }
+  ])("rejects a bookmarked $name without publishing selected rows", async ({ details, code, foreignOwner }) => {
     const reference = seed()
+    if (foreignOwner) reference.owner_key = "foreign-owner"
     h1.historyInfo.mockResolvedValue(details)
     window.history.replaceState(null, "", "/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference)))
     const page = render(<Playground />)
@@ -1067,6 +1075,7 @@ describe("Playground H1 URL initialization with the mounted session/controller",
     expect(h1.controller?.capture).toBeNull()
     expect(h1.controller?.view).toBeNull()
     expect(useStoreMessageOption.getState().messages).toEqual([])
+    expect(bindUnboundLocalHistory).not.toHaveBeenCalled()
     expect(h1.bookmarks.size).toBe(1)
     expect(window.location.search).toContain("historySelection")
     page.unmount()

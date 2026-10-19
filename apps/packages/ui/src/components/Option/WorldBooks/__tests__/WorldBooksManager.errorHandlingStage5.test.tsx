@@ -208,6 +208,66 @@ describe("WorldBooksManager error-handling stage-5 edge warnings", () => {
     })
   })
 
+  it.each([
+    [new Error("Catalog read unavailable"), "Catalog read unavailable"],
+    [null, "Could not load world books right now. Check your server connection and try again."]
+  ] as const)("shows a distinct catalog read error and explicit retry (%s)", async (error, message) => {
+    const user = userEvent.setup()
+    const refetch = vi.fn(async () => makeUseQueryResult({}))
+    const normalQuery = useQueryMock.getMockImplementation()
+    if (!normalQuery) throw new Error("Expected the existing worldbook query fixture")
+    useQueryMock.mockImplementation((options: { queryKey: readonly unknown[] }) =>
+      options.queryKey[0] === "tldw:listWorldBooks"
+        ? makeUseQueryResult({ data: undefined, status: "error", error, refetch })
+        : normalQuery(options)
+    )
+    render(<WorldBooksManager />)
+
+    expect(screen.getByRole("alert")).toHaveTextContent(message)
+    expect(screen.getByRole("heading", { name: "Unable to load world books" })).toBeVisible()
+    expect(screen.queryByRole("button", { name: "Create your first world book", exact: true })).not.toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Retry", exact: true }))
+    expect(refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("blocks duplicate catalog retries while the read is in flight", async () => {
+    const user = userEvent.setup()
+    const refetch = vi.fn()
+    const normalQuery = useQueryMock.getMockImplementation()
+    if (!normalQuery) throw new Error("Expected the existing worldbook query fixture")
+    useQueryMock.mockImplementation((options: { queryKey: readonly unknown[] }) =>
+      options.queryKey[0] === "tldw:listWorldBooks"
+        ? makeUseQueryResult({ data: undefined, status: "error", error: new Error("Unavailable"), isFetching: true, refetch })
+        : normalQuery(options)
+    )
+    render(<WorldBooksManager />)
+
+    const retry = screen.getByRole("button", { name: "Retry", exact: true })
+    expect(retry).toBeDisabled()
+    await user.click(retry)
+    expect(refetch).not.toHaveBeenCalled()
+  })
+
+  it("restores the actual catalog after an explicit successful retry", async () => {
+    const user = userEvent.setup()
+    const normalQuery = useQueryMock.getMockImplementation()
+    if (!normalQuery) throw new Error("Expected the existing worldbook query fixture")
+    let failed = true
+    const refetch = vi.fn(async () => { failed = false })
+    useQueryMock.mockImplementation((options: { queryKey: readonly unknown[] }) =>
+      options.queryKey[0] === "tldw:listWorldBooks" && failed
+        ? makeUseQueryResult({ data: undefined, status: "error", error: new Error("Unavailable"), refetch })
+        : normalQuery(options)
+    )
+    const view = render(<WorldBooksManager />)
+
+    await user.click(screen.getByRole("button", { name: "Retry", exact: true }))
+    view.rerender(<WorldBooksManager />)
+    expect(refetch).toHaveBeenCalledTimes(1)
+    expect(screen.queryByRole("heading", { name: "Unable to load world books" })).not.toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "World books table" })).toHaveTextContent("Arcana")
+  })
+
   afterEach(() => {
     vi.clearAllMocks()
   })

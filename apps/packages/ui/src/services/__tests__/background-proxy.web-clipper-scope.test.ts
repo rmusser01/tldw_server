@@ -411,7 +411,7 @@ describe("public article capture through actual scoped direct transport", () => 
   it.each([
     ["/api/v1/media/ingest-web-content", "GET"],
     ["/api/v1/media/ingest-web-content/extra", "POST"],
-    ["/api/v1/media/71/versions", "POST"],
+    ["/api/v1/media/71/versions", "PATCH"],
     ["/api/v1/media/71/versions/0", "GET"],
     ["/api/v1/media/71/versions/-1", "GET"],
     ["/api/v1/media/71/versions/advanced", "GET"],
@@ -443,6 +443,16 @@ describe("public article capture through actual scoped direct transport", () => 
       expect(boundary.sendMessage).not.toHaveBeenCalled()
     }
   )
+
+  it("permits an owned media version append with the captured account", async () => {
+    const captured = options()
+    await bgRequest({ ...requestScopeFields(captured.requestScope), path: "/api/v1/media/71/versions", method: "POST", body: { content: "Reviewed content" } })
+    expect(boundary.fetch).toHaveBeenCalledOnce()
+    const [url, init] = boundary.fetch.mock.calls[0]
+    expect(url).toBe(config().serverUrl + "/api/v1/media/71/versions")
+    expect(new Headers(init.headers).get("X-TLDW-Expected-User-ID")).toBe("7")
+    expect(init.method).toBe("POST")
+  })
 
   it.each(["\t", "\r", "\n"])(
     "rejects raw URL-normalizing control %j before direct capture dispatch",

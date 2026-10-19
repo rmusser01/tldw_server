@@ -75,7 +75,7 @@ export const EvaluationRecoveryCallout: React.FC<EvaluationRecoveryCalloutProps>
   title,
   endpoint,
   error,
-  response,
+  response: explicitResponse,
   message,
   primaryAction,
   secondaryActions,
@@ -83,6 +83,8 @@ export const EvaluationRecoveryCallout: React.FC<EvaluationRecoveryCalloutProps>
   "data-testid": dataTestId
 }) => {
   const { t } = useTranslation()
+  const response =
+    explicitResponse ?? (error as (Error & { resp?: ApiResponseLike }) | null)?.resp
   const detail = getEvaluationRecoveryDetail(error, response)
   const capabilityState = buildCapabilityState({
     featureName: "Evaluations",
@@ -117,10 +119,14 @@ export const EvaluationRecoveryCallout: React.FC<EvaluationRecoveryCalloutProps>
       title={title}
       message={
         message ??
-        t("evaluations:recoveryDefaultMessage", {
-          defaultValue:
-            "Check server connection and try again. Open Health & diagnostics if this continues."
-        })
+        (capabilityState.state === "permission_denied"
+          ? t("evaluations:recoveryPermissionMessage", {
+              defaultValue: capabilityState.message
+            })
+          : t("evaluations:recoveryDefaultMessage", {
+              defaultValue:
+                "Check server connection and try again. Open Health & diagnostics if this continues."
+            }))
       }
       diagnostics={diagnostics}
       primaryAction={primaryAction}

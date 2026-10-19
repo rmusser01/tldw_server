@@ -24,9 +24,11 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import require_expected_user
 from tldw_Server_API.app.api.v1.API_Deps.prompt_studio_deps import (
     get_prompt_studio_db,
     get_prompt_studio_user,
+    require_project_access,
     require_project_write_access,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
@@ -445,6 +447,8 @@ async def create_evaluation(
                 provider_credentials=provider_credentials,
                 timeout_seconds=timeout_seconds,
                 on_provider_success=_mark_provider_success,
+                name=evaluation.name or "Evaluation",
+                description=evaluation.description or "",
             )
 
             return EvaluationResponse(
@@ -495,7 +499,78 @@ async def create_evaluation(
         if credential_runtime is not None and not credential_runtime_transferred:
             await await_owned_worker(credential_runtime.close())
 
-@router.get("/evaluations", response_model=EvaluationList, openapi_extra={
+def _public_evaluation_response(record: dict[str, Any], *, project_id: int | None = None) -> dict[str, Any]:
+    """Project recorded read metadata without exposing execution secrets or rerunning it."""
+    # Older synchronous producers stored one dict; asynchronous producers
+    # stored a list. Keep only recorded public names/parameters, never keys,
+    # endpoints or arbitrary historical execution configuration.
+    configs = record.get("model_configs")
+    if isinstance(configs, str):
+        try:
+            configs = json.loads(configs)
+        except (json.JSONDecodeError, TypeError):
+            configs = None
+    if isinstance(configs, dict):
+        configs = [configs]
+    public_configs = None
+    if isinstance(configs, list) and all(isinstance(item, dict) for item in configs):
+        string_fields = {"provider", "api_name", "model", "model_name"}
+        numeric_fields = {"temperature", "max_tokens", "top_p", "frequency_penalty",
+                          "presence_penalty", "timeout_seconds", "retry_count", "parallel_requests"}
+        public_configs = [{key: value for key, value in item.items()
+                           if (key in string_fields and isinstance(value, str))
+                           or (key in numeric_fields and type(value) in (int, float))}
+                          for item in configs]
+
+    # Normalize metrics
+    agg = record.get("aggregate_metrics")
+    if isinstance(agg, str) and agg:
+        try:
+            metrics_obj = json.loads(agg)
+        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
+            metrics_obj = {}
+    elif isinstance(agg, dict):
+        metrics_obj = agg
+    else:
+        metrics_obj = {}
+
+    # Normalize timestamps to strings
+    def _ts(val):
+        try:
+            import datetime as _dt
+            if isinstance(val, (_dt.datetime, _dt.date)):
+                return val.isoformat()
+        except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
+            pass
+        return val
+
+    # Derive status fallback: if pending but started_at set, treat as running
+    status_val = record.get("status", "pending")
+    if status_val == "pending" and record.get("started_at"):
+        status_val = "running"
+
+    return {
+        "id": int(record["id"]),
+        "uuid": str(record.get("uuid", "")),
+        "project_id": int(record.get("project_id", project_id or 0)),
+        "prompt_id": int(record.get("prompt_id", 0)) if record.get("prompt_id") is not None else 0,
+        "name": record.get("name"),
+        "description": record.get("description"),
+        "status": status_val,
+        "created_at": _ts(record.get("created_at", "")),
+        "completed_at": _ts(record.get("completed_at")),
+        "metrics": metrics_obj,
+        "config": public_configs[0] if public_configs else {},
+        "model_configs": public_configs,
+        "test_case_ids": record.get("test_case_ids"),
+        "test_run_ids": record.get("test_run_ids"),
+        "aggregate_metrics": metrics_obj if agg is not None else None,
+        "error_message": record.get("error_message"),
+        "tags": []
+    }
+
+
+@router.get("/evaluations", response_model=EvaluationList, dependencies=[Depends(require_expected_user)], openapi_extra={
     "responses": {"200": {"description": "Evaluations", "content": {"application/json": {"examples": {"list": {"summary": "Eval list", "value": [{"id": 501, "project_id": 1, "prompt_id": 12, "status": "running"}]}}}}}}
 })
 async def list_evaluations(
@@ -521,6 +596,7 @@ async def list_evaluations(
     Returns:
         List of evaluations
     """
+    await require_project_access(project_id, user_context=user_context, db=db)
     try:
         # Use EvaluationManager to list evaluations
         eval_manager = EvaluationManager(db)
@@ -550,18 +626,7 @@ async def list_evaluations(
         # Convert to response format
         evaluations = []
         for eval_data in evaluation_rows:
-            evaluations.append(EvaluationResponse(
-                id=eval_data["id"],
-                uuid=eval_data.get("uuid", ""),
-                project_id=project_id,  # Add project_id since it might not be in the result
-                prompt_id=eval_data["prompt_id"],
-                name=eval_data.get("prompt_name", "Evaluation"),
-                description="",  # Not returned by manager
-                status=eval_data.get("status", "pending"),
-                created_at=eval_data.get("created_at", ""),
-                completed_at=eval_data.get("completed_at"),
-                metrics=eval_data.get("aggregate_metrics") or {},
-            ))
+            evaluations.append(EvaluationResponse(**_public_evaluation_response(eval_data, project_id=project_id)))
 
         pagination_data = result.get("pagination") if isinstance(result.get("pagination"), dict) else {}
         total = int(pagination_data.get("total", result.get("total", len(evaluations))))
@@ -610,6 +675,7 @@ async def list_evaluations(
 @router.get(
     "/evaluations/{evaluation_id}",
     response_model=EvaluationResponse,
+    dependencies=[Depends(require_expected_user)],
     openapi_extra={
         "responses": {
             "200": {
@@ -655,47 +721,9 @@ async def get_evaluation(
         if not eval_dict:
             raise HTTPException(status_code=404, detail="Evaluation not found")
 
-        # Normalize metrics
-        agg = eval_dict.get("aggregate_metrics")
-        if isinstance(agg, str) and agg:
-            try:
-                metrics_obj = json.loads(agg)
-            except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-                metrics_obj = {}
-        elif isinstance(agg, dict):
-            metrics_obj = agg
-        else:
-            metrics_obj = {}
+        await require_project_access(eval_dict["project_id"], user_context=user_context, db=db)
 
-        # Normalize timestamps to strings
-        def _ts(val):
-            try:
-                import datetime as _dt
-                if isinstance(val, (_dt.datetime, _dt.date)):
-                    return val.isoformat()
-            except _PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS:
-                pass
-            return val
-
-        # Derive status fallback: if pending but started_at set, treat as running
-        status_val = eval_dict.get("status", "pending")
-        if status_val == "pending" and eval_dict.get("started_at"):
-            status_val = "running"
-
-        return {
-            "id": int(eval_dict["id"]),
-            "uuid": str(eval_dict.get("uuid", "")),
-            "project_id": int(eval_dict.get("project_id", 0)),
-            "prompt_id": int(eval_dict.get("prompt_id", 0)) if eval_dict.get("prompt_id") is not None else 0,
-            "name": eval_dict.get("name", ""),
-            "description": eval_dict.get("description", ""),
-            "status": status_val,
-            "created_at": _ts(eval_dict.get("created_at", "")),
-            "completed_at": _ts(eval_dict.get("completed_at")),
-            "metrics": metrics_obj,
-            "config": {},
-            "tags": []
-        }
+        return _public_evaluation_response(eval_dict)
 
     except HTTPException:
         raise

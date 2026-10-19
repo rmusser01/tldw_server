@@ -17,9 +17,11 @@ import {
   projectTokenBudget
 } from "../usage-metrics"
 import { useComposerSubmit } from "@/components/Chat/composer/hooks/useComposerSubmit"
+import type { ComposerDraftOwnership } from "@/components/Chat/composer/hooks/useComposerText"
 import {
   isChatSubmitSuccess,
-  normalizeChatSubmitResult
+  normalizeChatSubmitResult,
+  type ChatSubmitResult
 } from "@/hooks/chat/chat-action-utils"
 import type { ChatResearchContext } from "@/services/tldw/TldwApiClient"
 import {
@@ -50,12 +52,18 @@ type DocumentProcessingTurnReservation = {
 export type UsePlaygroundSubmitDeps = {
   form: any
   beginPromptAssistReset: () => number
+  captureDraftOwnership: () => ComposerDraftOwnership
+  captureHistorySelection: () => () => boolean
   restorePromptAssistAttempt: (attemptId: number) => void
   markPromptAssistAttemptSaved: (attemptId: number, acknowledgedDelivery?: boolean) => void
   isSending: boolean
   isConnectionReady: boolean
   draftReady: boolean
   webSearch: boolean
+  chatMode: string
+  systemPrompt?: string
+  selectedSystemPrompt?: string | null
+  systemPromptTemplateId?: string
   compareModeActive: boolean
   compareSelectedModels: string[]
   selectedModel: string | null | undefined
@@ -150,10 +158,16 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     beginPromptAssistReset,
     restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
+    captureDraftOwnership,
+    captureHistorySelection,
     isSending,
     isConnectionReady,
     draftReady,
     webSearch,
+    chatMode,
+    systemPrompt,
+    selectedSystemPrompt,
+    systemPromptTemplateId,
     compareModeActive,
     compareSelectedModels,
     selectedModel,
@@ -202,12 +216,53 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   draftReadyRef.current = draftReady
   const sourceDraftRevision = useStoreMessageOption(state => state.chatDraftRevision)
 
+
   const submitFormRef = React.useRef<
     (options?: { ignorePinnedResults?: boolean }) => void
   >(() => undefined)
   const [isPreparingDocuments, setIsPreparingDocuments] = React.useState(false)
+  const activeSubmissionRef = React.useRef<symbol | null>(null)
   const currentDocumentSelectionKey =
     documentProcessingSelectionKey(uploadedFiles)
+  const contextKeyFor = (searchEnabled: boolean, mode = chatMode) => JSON.stringify([
+    historyId ?? null,
+    serverChatId ?? null,
+    selectedModel ?? null,
+    mode,
+    systemPrompt ?? null,
+    selectedSystemPrompt ?? null,
+    systemPromptTemplateId ?? null,
+    compareModeActive,
+    compareSelectedModels,
+    searchEnabled,
+    fileRetrievalEnabled,
+    selectedDocuments.map((doc: any) => [doc.id, doc.title, doc.url]),
+    currentDocumentSelectionKey,
+    Boolean(currentContextSnapshot?.temporaryChat),
+    jsonMode,
+    importedSidepanelContext ?? null,
+    openUIRequestMode,
+    researchContext ?? null,
+    ragPinnedResults
+  ])
+  const contextKey = contextKeyFor(webSearch)
+  const contextRevisionRef = React.useRef({ key: contextKey, revision: 0 })
+  const pageContext = importedSidepanelContext ?? null
+  const pageContextRevisionRef = React.useRef({ value: pageContext, revision: 0 })
+  React.useLayoutEffect(() => {
+    if (contextRevisionRef.current.key !== contextKey) {
+      contextRevisionRef.current = {
+        key: contextKey,
+        revision: contextRevisionRef.current.revision + 1
+      }
+    }
+    if (pageContextRevisionRef.current.value !== pageContext) {
+      pageContextRevisionRef.current = {
+        value: pageContext,
+        revision: pageContextRevisionRef.current.revision + 1
+      }
+    }
+  }, [contextKey, pageContext])
   const currentDocumentSelectionKeyRef = React.useRef(
     currentDocumentSelectionKey
   )
@@ -224,6 +279,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       active.controller.abort()
       if (activeDocumentPreparationRef.current === active) {
         activeDocumentPreparationRef.current = null
+        activeSubmissionRef.current = null
         setIsPreparingDocuments(false)
       }
     }
@@ -252,13 +308,9 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   const submitForm = (options?: { ignorePinnedResults?: boolean }) => {
     if (getSubmitDisabledReason?.()) return
     form.onSubmit(async (value: any) => {
+      if (activeSubmissionRef.current) return
       if (!connectionReadyRef.current) {
         notificationApi.info({ message: t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") })
-        return
-      }
-      if (!draftReadyRef.current) {
-        notificationApi.info({ message: t("playground:draftLoading", "Draft still loading"),
-          description: t("playground:draftLoadingWait", "Wait for this conversation's draft to finish loading before sending.") })
         return
       }
       const connectionGeneration = connectionGenerationRef.current
@@ -273,15 +325,63 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           setIsPreparingDocuments(false)
         }
       }
+      if (historySelection?.getCurrent().status === "unsupported_history_capability") {
+        notificationApi.error({
+          message: t("playground:historyReview.unavailable", "Selected history unavailable"),
+          description: t(
+            "playground:historyReview.unsupportedDraftRetained",
+            "Review the selected conversation or start a new chat. Your draft is retained."
+          )
+        })
+        return
+      }
+      const submission = Symbol("playground-submit")
+      activeSubmissionRef.current = submission
       let documentPreparation: {
         controller: AbortController
         selectionKey: string
         isCurrent: () => boolean
       } | null = null
       try {
+      const draftOwnership = captureDraftOwnership()
+      if (!draftOwnership.isOwnerCurrent()) {
+        notificationApi.warning({
+          message: t("playground:composer.preparingChat", "Preparing chat"),
+          description: t("playground:composer.preparingChatDraftRetained", "Your draft is retained. Try Send again in a moment.")
+        })
+        return
+      }
+      if (!draftReadyRef.current) {
+        notificationApi.info({ message: t("playground:draftLoading", "Draft still loading"),
+          description: t("playground:draftLoadingWait", "Wait for this conversation's draft to finish loading before sending.") })
+        return
+      }
+      const historyIsCurrent = captureHistorySelection()
+      const contextRevision = contextRevisionRef.current.revision
+      const pageContextRevision = pageContextRevisionRef.current.revision
+      let ownSlashToggleKey: string | null = null
+      const isCurrent = () =>
+        draftOwnership.isCurrent() &&
+        historyIsCurrent() &&
+        pageContextRevisionRef.current.revision === pageContextRevision &&
+        (contextRevisionRef.current.revision === contextRevision ||
+          (ownSlashToggleKey !== null &&
+            contextRevisionRef.current.revision === contextRevision + 1 &&
+            contextRevisionRef.current.key === ownSlashToggleKey))
+      if (!isCurrent()) return
       const intent = resolveSubmissionIntent(value.message)
+      if (intent.handled && /^\/web(?:\s|$)/i.test(value.message.trimStart())) {
+        ownSlashToggleKey = contextKeyFor(!webSearch)
+      } else if (
+        intent.handled && /^\/search(?:\s|$)/i.test(value.message.trimStart())
+      ) {
+        ownSlashToggleKey = contextKeyFor(
+          webSearch,
+          chatMode === "rag" ? "normal" : "rag"
+        )
+      }
       if (intent.handled && !intent.invalidImageCommand) {
-        form.setFieldValue("message", intent.message)
+        if (!draftOwnership.normalizeMessage(intent.message)) return
       }
       if (intent.invalidImageCommand) {
         notificationApi.error({
@@ -382,6 +482,19 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
             return
           }
           if (!validateSelectedChatModelsAvailability([normalizedSelectedModel])) {
+            return
+          }
+          if (
+            value.image.length > 0 &&
+            !compareModelsSupportCapability([String(selectedModel)], "vision")
+          ) {
+            form.setFieldError(
+              "message",
+              t(
+                "playground:composer.validationVisionInline",
+                "Image support is not confirmed for this model. Choose a model that supports images, or remove the attachment."
+              )
+            )
             return
           }
         } else if (
@@ -488,8 +601,9 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
 
       if (!intent.isImageCommand && webSearch) {
         const defaultEM = await defaultEmbeddingModelForRag()
+        if (!isCurrent()) return
         const simpleSearch = await getIsSimpleInternetSearch()
-        if (!currentDraft() || !preparationIsCurrent()) return
+        if (!isCurrent() || !currentDraft() || !preparationIsCurrent()) return
         if (!defaultEM && !simpleSearch) {
           form.setFieldError("message", t("formError.noEmbeddingModel"))
           return
@@ -497,7 +611,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       }
       if (!intent.isImageCommand && uploadedFiles.length > 0) {
         if (!documentPreparation) return
-        if (!currentDraft()) return
+        if (!isCurrent() || !currentDraft()) return
         const waitingMetadata = buildPendingDocumentProcessingMetadata(
           uploadedFiles,
           "waiting_for_files"
@@ -523,6 +637,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           })
         } catch (error) {
           if (
+            !isCurrent() ||
             documentPreparation.controller.signal.aborted ||
             (error instanceof Error && error.name === "AbortError")
           ) {
@@ -537,6 +652,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           throw error
         }
         if (
+          !isCurrent() ||
           documentPreparation.controller.signal.aborted ||
           currentDocumentSelectionKeyRef.current !==
             documentPreparation.selectionKey
@@ -624,7 +740,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           }
         }
       }
-      if (!currentDraft()) return
+      if (!isCurrent() || !currentDraft()) return
       let promptAssistAttemptId!: number
 
       const payload = {
@@ -664,10 +780,10 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         activeDocumentPreparationRef.current = null
         setIsPreparingDocuments(false)
       }
-      const result = await dispatch(payload, {
+      await dispatch(payload, {
         beforeSend: () => {
           promptAssistAttemptId = beginPromptAssistReset()
-          form.reset()
+          if (activeSubmissionRef.current === submission) activeSubmissionRef.current = null
           clearSelectedDocuments()
           clearUploadedFiles()
           textAreaFocus()
@@ -696,9 +812,12 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           setLastSubmittedContext(currentContextSnapshot)
         },
         afterSend: (result) => {
-          if (isChatSubmitSuccess(normalizeChatSubmitResult(result as any))) {
+          if (draftOwnership.isOwnerCurrent() && isChatSubmitSuccess(normalizeChatSubmitResult(result as ChatSubmitResult | undefined))) {
             markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
-            if (messageForModel) {
+            if (openUIRequestMode && contextRevisionRef.current.revision === contextRevision && completionIsCurrent()) {
+              clearOpenUIRequestMode()
+            }
+            if (messageForModel && pageContextRevisionRef.current.revision === pageContextRevision) {
               clearImportedSidepanelContext?.()
             }
           } else {
@@ -707,10 +826,10 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         },
         onSendError: () => restorePromptAssistAttempt(promptAssistAttemptId)
       })
-      if (openUIRequestMode && completionIsCurrent() && isChatSubmitSuccess(normalizeChatSubmitResult(result))) {
-        clearOpenUIRequestMode()
-      }
       } finally {
+        if (activeSubmissionRef.current === submission) {
+          activeSubmissionRef.current = null
+        }
         if (
           documentPreparation &&
           activeDocumentPreparationRef.current === documentPreparation

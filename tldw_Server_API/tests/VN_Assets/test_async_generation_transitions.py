@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.DB_Management import VNAssetPacks_DB
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.exceptions import VNAssetGenerationError
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig
 from tldw_Server_API.app.core.VN_Assets.jobs import vn_asset_generation_jobs_queue
 from tldw_Server_API.app.core.VN_Assets.service import VNAssetPackService
 from tldw_Server_API.app.core.VN_Assets.worker import VNAssetGenerationWorker
@@ -523,6 +524,11 @@ async def test_public_worker_transition_drains_off_loop(
         repo=repo, jobs_manager=handoff.jobs, image_registry=FakeImageRegistry(adapter),
         backend_gate=FakeGenerationGate(), save_vn_asset_image=storage,
         generated_files_repo=storage,
+        # Select terminal failure persistence for the native thread/drain assertions.
+        worker_config=WorkerConfig(
+            domain=handoff.job["domain"], queue=handoff.job["queue"],
+            worker_id=handoff.job["worker_id"], retry_on_exception=False,
+        ),
     )
     name = "start_variant_generation" if operation == "start" else "finish_legacy_display"
     original = getattr(repo, name)

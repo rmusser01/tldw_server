@@ -17,16 +17,25 @@ import { DISCUSS_MEDIA_PROMPT_SETTING } from "@/services/settings/ui-settings"
 import { useChatActions } from "@/hooks/chat/useChatActions"
 import { useStoreChatModelSettings } from "@/store/model"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
-import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
 import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
-import { freshChatDraftAddress } from "@/utils/chat-draft-address"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
 import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPersistence"
+import { HistorySelectionProvider, useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
+import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { db } from "@/db/dexie/schema"
+import { resolveHistorySelection } from "@/utils/history-selection"
+import { formatSelectedHistory } from "@/db/dexie/helpers"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { TldwApiClientCore } from "@/services/tldw/TldwApiClient"
+const renderForm = (ui: React.ReactElement) => {
+  const wrap = (content: React.ReactElement) => <HistorySelectionProvider>{content}</HistorySelectionProvider>
+  const view = render(wrap(ui))
+  return { ...view, rerender: (content: React.ReactElement) => view.rerender(wrap(content)) }
+}
+const SourceFlowActionsContext = React.createContext<ReturnType<typeof useSourceFlowActions> | null>(null)
 const handoff = vi.hoisted(() => ({ scope: "server-a:alice" as string | null, search: "", draftReady: true, verificationState: "ready" as "pending" | "ready" | "error", retryVerification: vi.fn(), models: vi.fn(async () => [{ model: "tldw:gpt-4o-mini", provider: "openai", is_configured: true, provider_is_configured: true }]), get: vi.fn(), clear: vi.fn(), setRagMediaIds: vi.fn() }))
 vi.mock("@/hooks/useHomeMilestoneScope", () => ({ useHomeMilestoneScope: () => handoff.scope }))
 
@@ -39,16 +48,19 @@ const sourceFlow = vi.hoisted(() => ({
   getFullChatData: vi.fn(),
   snapshot: null as ServicePromptSnapshot | null,
   restore: null as null | (() => Promise<unknown>),
+  authority: null as AbortController | null,
   sessionReady: false,
+  preparation: null as Promise<void> | null,
   config: { serverUrl: "https://handoff.test", authMode: "single-user" as const, apiKey: "synthetic-handoff" }
 }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: (...args: unknown[]) => sourceFlow.request(...args) }))
 vi.mock("@/services/service-prompts", async () => ({
   ...await vi.importActual<typeof import("@/services/service-prompts")>("@/services/service-prompts"),
-  loadServicePromptSnapshot: async () => sourceFlow.snapshot
+  loadServicePromptSnapshot: async () => sourceFlow.snapshot,
+  resolveServicePromptScope: async () => sourceFlow.snapshot?.requestScope ?? { config: sourceFlow.config, userId: 1 }
 }))
 vi.mock("@/models", () => ({ pageAssistModel: async () => ({ stream: sourceFlow.stream }) }))
-const sceneIo = vi.hoisted(() => ({ read: vi.fn(), submissions: vi.fn(), staticController: null as any, sdkAddress: null as ReturnType<typeof freshChatDraftAddress> | null }))
+const sceneIo = vi.hoisted(() => ({ read: vi.fn(), submissions: vi.fn(), staticController: null as any }))
 vi.mock("@/services/actor-settings", async importOriginal => ({
   ...await importOriginal<typeof import("@/services/actor-settings")>(),
   getActorSceneForChat: (...args: unknown[]) => sceneIo.read(...args)
@@ -57,28 +69,10 @@ vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
   const actual = await importOriginal<typeof import("@/hooks/chat/useHistorySelection")>()
   return { ...actual, useHistorySelectionContext: () => sourceFlow.enabled ? actual.useHistorySelectionContext() : sceneIo.staticController }
 })
-vi.mock("@/hooks/chat/actor-scene-source", async importOriginal => {
-  const actual = await importOriginal<typeof import("@/hooks/chat/actor-scene-source")>()
-  return { ...actual, captureActorSceneSend: (controller: any, commandIsCurrent = () => true) => {
-    if (!sourceFlow.enabled || controller !== null) return actual.captureActorSceneSend(controller, commandIsCurrent)
-    // Standalone SDK source tests retain a private Scene without claiming H1 readiness.
-    const entry = sourceFlow.snapshot
-    if (!entry) return null
-    const key = chatDraftOwnerKey(entry.requestScope)
-    const account = { requestScope: entry.requestScope, isCurrent: () => sourceFlow.snapshot === entry &&
-      !entry.scopeSignal.aborted && !entry.scopeInvalidatedSignal.aborted &&
-      chatDraftOwnerKey(sourceFlow.snapshot.requestScope) === key }
-    const session = usePlaygroundSessionStore.getState()
-    const address = sceneIo.sdkAddress
-    const isCurrent = () => sceneIo.sdkAddress === address && commandIsCurrent() && account.isCurrent() &&
-      usePlaygroundSessionStore.getState().restoreRevision === session.restoreRevision &&
-      usePlaygroundSessionStore.getState().sourceSelectionRevision === session.sourceSelectionRevision
-    const source = captureChatDraftSource(isCurrent)
-    const target = captureActorSettingsTarget({ address,
-      requestScope: account.requestScope, accountIsCurrent: account.isCurrent, isCurrent: source.isCurrent })
-    return actual.captureActorSceneSendForTarget(target, account, source.isCurrent, isCurrent)
-  } }
-})
+vi.mock("@/db/dexie/schema", async original => ({
+  ...await original<typeof import("@/db/dexie/schema")>(),
+  db: (await import("./harness/memory-dexie")).createMemoryDexie()
+}))
 vi.mock("@/db/dexie/nickname", () => ({ getModelNicknameByID: async () => null }))
 vi.mock("@/services/chat-settings", async importOriginal => ({
   ...await importOriginal<typeof import("@/services/chat-settings")>(), syncChatSettingsForServerChat: async () => null }))
@@ -355,9 +349,14 @@ vi.mock("@plasmohq/storage/hook", () => ({
 
 vi.mock("~/hooks/useMessageOption", () => ({
   useMessageOption: () => {
+    const sourceActions = React.useContext(SourceFlowActionsContext)
+    const staticOptions = useStaticMessageOptions()
     // The fixture is selected before mount and reset only after cleanup.
-    const useOptions = sourceFlow.enabled ? useSourceFlowActions : useStaticMessageOptions
-    return useOptions()
+    if (sourceFlow.enabled) {
+      if (!sourceActions) throw new Error("Missing source-flow actions")
+      return sourceActions
+    }
+    return staticOptions
   }
 }))
 
@@ -447,11 +446,12 @@ vi.mock("@/hooks/useAudioSourceCatalog", () => ({
 
 vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
   useCanonicalConnectionConfig: () => ({
-    config: {
+    config: sourceFlow.enabled ? sourceFlow.config : {
       serverUrl: "http://localhost:8000",
       authMode: "single-user",
       apiKey: "test-api-key"
     },
+    authorityLoading: false,
     loading: false
   })
 }))
@@ -636,6 +636,22 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
     getConfig: async () => sourceFlow.config,
+    getChat: async (id: string) => ({ id, title: "Cedar saved chat", character_id: null, assistant_id: null, assistant_kind: null, version: 1 }),
+    captureHistorySelection: async (id: string, request: Parameters<typeof tldwClient.captureHistorySelection>[1]) => {
+      const ownerKey = `native-history-v1:sha256:${chatDraftOwnerKey(sourceFlow.snapshot!.requestScope)}`
+      const data = await sourceFlow.getFullChatData(id)
+      const nodes = data.messages.map((row: typeof cedarRows[number], index: number) => ({ id: row.id, revision: "1", role: row.role,
+        parent_id: index ? data.messages[index - 1].id : null, settled: true, preview: row.content }))
+      const snapshot = { version: 1 as const, owner_key: ownerKey, conversation_id: id, nodes,
+        fences: { conversation: "1", history: "1", settings: "1" }, source_digest: "cedar-source",
+        storage_context_digest: "cedar-storage", interpretation_status: { kind: "parent_graph_v1" as const } }
+      const view = { ...request.view, owner_key: ownerKey }
+      const resolved = resolveHistorySelection(snapshot, view, request.purpose, "")
+      if (resolved.status !== "ready") throw new Error(resolved.code)
+      return { status: "captured", snapshot, view, rows: resolved.rows,
+        selected_content: resolved.rows.map(row => ({ id: row.id, revision: row.revision, message: row.preview, images: [] })),
+        purpose: request.purpose, storage_context_digest: snapshot.storage_context_digest }
+    },
     ragSearch: (query: string, options: unknown) => chatRagMethods.ragSearch.call({ normalizeRagQuery: (value: string) => value } as unknown as TldwApiClientCore, query, options),
     createResearchRun: vi.fn(async () => ({})),
     updateChat: vi.fn(async () => ({}))
@@ -879,7 +895,15 @@ vi.mock("../hooks", async () => {
       useDroppedFiles: vi.fn()
     }),
     useComposerInput: () => {
-      const form = useSimpleForm({initialValues:{message:"",image:""}})
+      const simpleForm = useSimpleForm({initialValues:{message:"",image:""}})
+      const form = { ...simpleForm, onSubmit: (handler: Parameters<typeof simpleForm.onSubmit>[0]) => {
+        const submit = simpleForm.onSubmit(handler)
+        return (event?: React.FormEvent) => {
+          const pending = submit(event)
+          sourceFlow.preparation = pending
+          return pending
+        }
+      } }
       const values = form.values
       const renderedOwner = handoff.scope
       const isDraftOwnerCurrent = React.useMemo(() => () => handoff.scope === renderedOwner, [renderedOwner])
@@ -889,6 +913,11 @@ vi.mock("../hooks", async () => {
         restorePromptAssistAttempt: vi.fn(),
         beginPromptAssistReset: vi.fn(() => 1),
         markPromptAssistAttemptSaved: vi.fn(),
+        captureDraftOwnership: () => ({
+          isCurrent: () => true,
+          isOwnerCurrent: () => true,
+          normalizeMessage: () => true
+        }),
         typing: false,
         setMessageValue: (value: string) =>
           form.setFieldValue("message", value),
@@ -982,6 +1011,7 @@ vi.mock("../hooks", async () => {
       normalizeImageGenerationEventSyncPolicy: (value: string) => value
     }),
     usePlaygroundPersistence: () => ({
+      flushDraft: vi.fn(),
       persistenceTooltip: "Persist",
       focusConnectionCard: vi.fn(),
       getPersistenceModeLabel: () => "Saved",
@@ -1164,7 +1194,11 @@ function useSourceFlowActions() {
     t: sourceFlowI18n.t,
     notification: { error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn(), open: vi.fn(), destroy: vi.fn() },
     currentChatModelSettings: { apiProvider: "openai", setSystemPrompt: vi.fn() },
-    ensureServerChatHistoryId: async () => "cedar-local",
+    ensureServerChatHistoryId: async (_chatId: string, _title: string | undefined, _signal: AbortSignal | undefined, _snapshot: unknown, scene: { acceptHistoryMirror: (id: string) => boolean }) => {
+      if (!scene.acceptHistoryMirror("cedar-local")) return null
+      state.setHistoryId("cedar-local", { preserveServerChatId: true })
+      return "cedar-local"
+    },
     compareModeActive: false,
     compareFeatureEnabled: false,
     compareMaxModels: 3,
@@ -1186,11 +1220,37 @@ function useStaticMessageOptions() {
   return messageOptionState.value
 }
 
-function SourceFlowHarness() {
+function SourceFlowInner({ sourceActions }: { sourceActions: ReturnType<typeof useSourceFlowActions> }) {
   const session = usePlaygroundSessionPersistence()
+  const selection = useHistorySelectionContext()!
+  const selectionFence = selection.fence
+  const chatId = useStoreMessageOption(state => state.serverChatId)
+  const owner = selection.getCurrent().owner
+  React.useEffect(() => {
+    if (!chatId || owner?.kind !== "native" || owner.conversation_id !== chatId) return
+    let mounted = true
+    const current = selectionFence()
+    void tldwClient.getChat(chatId).then(detail => {
+      if (mounted && current() && useStoreMessageOption.getState().serverChatId === detail.id)
+        useStoreMessageOption.getState().setServerChatMetaLoaded(true)
+    })
+    return () => { mounted = false }
+  }, [chatId, owner, selectionFence])
   sourceFlow.restore = session.restoreSession
   sourceFlow.sessionReady = session.sessionScopeReady
-  return <PlaygroundForm droppedFiles={[]} />
+  return (
+    <SourceFlowActionsContext.Provider value={sourceActions}>
+      <PlaygroundForm droppedFiles={[]} />
+    </SourceFlowActionsContext.Provider>
+  )
+}
+
+function SourceFlowHarness() {
+  const sourceActions = useSourceFlowActions()
+  return <HistorySelectionProvider onCapture={capture => {
+    const display = formatSelectedHistory(capture)
+    useStoreMessageOption.setState({ messages: display.messages, history: display.history })
+  }}><SourceFlowInner sourceActions={sourceActions} /></HistorySelectionProvider>
 }
 
 const defer = <T,>() => {
@@ -1203,7 +1263,7 @@ const cedarRows = [
   { id: "cedar-question", history_id: "cedar-local", role: "user", content: "Tell me about the old Cedar garden.", images: [], sources: [], createdAt: 1 },
   { id: "cedar-answer", history_id: "cedar-local", role: "assistant", content: "Cedar has a green gate.", images: [], sources: [], createdAt: 2 }
 ]
-const cedarData = { historyInfo: { id: "cedar-local", title: "Cedar saved chat", server_chat_id: "cedar-server", server_scope_key: '["https://handoff.test","single-user","manual",null,"1",null]' }, messages: cedarRows }
+const cedarData = { historyInfo: { createdAt: 1, is_rag: false, id: "cedar-local", title: "Cedar saved chat", server_chat_id: "cedar-server", server_scope_key: '["https://handoff.test","single-user","manual",null,"1",null]' }, messages: cedarRows }
 const rowanPayload: MediaChatHandoffPayload = { ownerScope: "server-a:alice", mediaId: "42", title: "Rowan.md", content: "Summarize this source.", mode: "rag_media" }
 const rowanText = "The Rowan archive keeps violet maps in the east room."
 
@@ -1227,7 +1287,6 @@ beforeEach(() => {
   useStoreChatModelSettings.getState().updateSettings(modelSettingsFixture)
   useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
   useStoreMessageOption.getState().startNewChatDraft(false)
-  sceneIo.sdkAddress = freshChatDraftAddress(false)
   useStoreMessageOption.setState({ selectedModel: "deepseek-chat" })
   const requestScope = { config: structuredClone(sourceFlow.config), userId: 1 }
   const owner = handoff.scope
@@ -1250,6 +1309,8 @@ const render = (ui: React.ReactElement) => renderComponent(ui, {
 
 describe("Home source handoff through the real Chat and RAG send boundary", () => {
   beforeEach(() => {
+    ;(db as any).resetAll()
+    void db.chatHistories.put(structuredClone(cedarData.historyInfo))
     sourceFlow.enabled = true
     sourceFlow.sessionReady = false
     sourceFlow.restore = null
@@ -1265,6 +1326,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
       scopeKey, historyId: "cedar-local", serverChatId: "cedar-server", chatMode: "normal", ragMediaIds: null
     })
     const controller = new AbortController()
+    sourceFlow.authority = controller
     sourceFlow.snapshot = {
       scopeKey, requestScope: { config: sourceFlow.config, userId: 1 },
       scopeSignal: controller.signal, scopeInvalidatedSignal: controller.signal,
@@ -1317,7 +1379,11 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     await act(async () => { await sourceFlow.restore!() })
   }
   const send = async () => {
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(true))
+    sourceFlow.preparation = null
     await userEvent.setup().click(screen.getAllByRole("button", { name: "Send" })[0])
+    expect(sourceFlow.preparation).not.toBeNull()
+    await act(async () => { await sourceFlow.preparation })
     await waitFor(() => expect(useStoreMessageOption.getState().streaming).toBe(false))
   }
 
@@ -1325,12 +1391,14 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     render(<SourceFlowHarness />)
     await restore()
     await consume()
+    const originalAddress = useStoreMessageOption.getState().chatDraftAddress
     await send()
     const receipt = sceneIo.submissions.mock.calls[0][0].actorSceneSend
-    expect(receipt.scene.target.address).toEqual(sceneIo.sdkAddress)
+    expect(receipt.scene.target.address).toEqual(originalAddress)
     expect(receipt.requestScope).toEqual(sourceFlow.snapshot!.requestScope)
     expect(receipt.isCurrent()).toBe(true)
-    sourceFlow.snapshot = { ...sourceFlow.snapshot!, scopeInvalidatedSignal: new AbortController().signal }
+    sourceFlow.authority!.abort()
+    act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
     expect(receipt.isCurrent()).toBe(false)
   })
 
@@ -1637,7 +1705,9 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     await waitFor(() => expect(sourceFlow.sessionReady).toBe(true))
     await consume()
     if (changed === "account") sourceFlow.config.apiKey = "synthetic-other-owner"
-    sourceFlow.getFullChatData.mockResolvedValue({ ...cedarData, historyInfo: { ...cedarData.historyInfo, id: "other-local", server_chat_id: "other-server" } })
+    const otherData = { ...cedarData, historyInfo: { ...cedarData.historyInfo, id: "other-local", server_chat_id: "other-server" } }
+    await db.chatHistories.put(otherData.historyInfo)
+    sourceFlow.getFullChatData.mockResolvedValue(otherData)
     await act(async () => usePlaygroundSessionStore.getState().saveSession({ scopeKey: buildChatSurfaceScopeKeyFromConfig(sourceFlow.config), historyId: "other-local", serverChatId: "other-server", chatMode: "rag", ragMediaIds: [7] }))
     await restore()
     expect(useStoreMessageOption.getState().ragMediaIds).toEqual([7])
@@ -1887,7 +1957,7 @@ describe("PlaygroundForm OpenUI mode", () => {
   it("ignores legacy unowned shared handoffs instead of assigning them to the current tab", async () => {
     handoff.scope = null
     handoff.get.mockResolvedValue({ mediaId: "42", content: "Private legacy source" })
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
     await act(async () => {})
     expect(screen.getByTestId("composer-textarea")).toHaveValue("")
     expect(handoff.setRagMediaIds).not.toHaveBeenCalled()
@@ -1897,7 +1967,7 @@ describe("PlaygroundForm OpenUI mode", () => {
   it("does not let an unrelated mounted Character tab consume a shared media payload or replace its draft", async () => {
     const user = userEvent.setup()
     messageOptionState.value.serverChatId = "testbot-chat"
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "PRIVATE TESTBOT DRAFT")
     handoff.clear.mockClear()
     let pending = { ownerScope: "server-a:alice", mediaId: "1", title: "Media source", content: "All source lines", mode: "normal" } as unknown
@@ -1916,7 +1986,7 @@ describe("PlaygroundForm OpenUI mode", () => {
   it("leaves an explicitly addressed source untouched in an unrelated mounted Character tab", async () => {
     const user = userEvent.setup()
     messageOptionState.value.serverChatId = "testbot-chat"
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "ALICE-CHARACTER-DRAFT-742")
     const source = { ...rowanPayload, content: Array.from({ length: 13 }, (_, i) => 'Source line ' + i).join('\n') }
     const token = await mediaHandoff.createMediaChatHandoff(source)
@@ -1930,11 +2000,11 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it("cannot replay a consumed token after the composer remounts", async () => {
     const token = await openMediaHandoff(rowanPayload)
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await waitFor(() => expect(handoff.search).toBe(""))
     view.unmount()
     handoff.search = new URL(mediaHandoff.buildMediaChatHandoffRoute(token), "http://localhost").search
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
     await userEvent.setup().type(screen.getByTestId("composer-textarea"), "NEW PRIVATE DRAFT")
     expect(screen.getByTestId("composer-textarea")).toHaveValue("NEW PRIVATE DRAFT")
     expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:alice")).toBeNull()
@@ -1944,7 +2014,7 @@ describe("PlaygroundForm OpenUI mode", () => {
     handoff.scope = null
     handoff.draftReady = false
     const token = await openMediaHandoff(rowanPayload)
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await act(async () => {})
     handoff.scope = "server-a:alice"
     view.rerender(<PlaygroundForm droppedFiles={[]} />)
@@ -1959,7 +2029,7 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it.each(["insert", "replace", "cancel"])("preserves a destination draft until the user chooses %s", async action => {
     const user = userEvent.setup()
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "MY EXISTING DRAFT")
     let token!: string
     await act(async () => { token = await openMediaHandoff(rowanPayload) })
@@ -1974,7 +2044,7 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it.each(["Insert media source", "Replace current draft"])("does not consume or apply a delayed %s after the destination unmounts", async action => {
     const user = userEvent.setup()
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "PRIVATE DESTINATION DRAFT")
     let token!: string
     await act(async () => { token = await openMediaHandoff(rowanPayload) })
@@ -1996,7 +2066,7 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it("does not expose or consume a source addressed to a different account", async () => {
     const token = await openMediaHandoff({ ...rowanPayload, ownerScope: "server-a:bob" })
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
     await act(async () => {})
     expect(screen.getByTestId("composer-textarea")).toHaveValue("")
     expect(await mediaHandoff.readMediaChatHandoff(token, "server-a:bob")).not.toBeNull()
@@ -2006,7 +2076,7 @@ describe("PlaygroundForm OpenUI mode", () => {
     let resolve!: (value: unknown) => void
     onSubmitMock.mockImplementation(() => new Promise(done => { resolve = done }) as never)
     const user = userEvent.setup()
-    const view = render(<PlaygroundForm droppedFiles={[]} />)
+    const view = renderForm(<PlaygroundForm droppedFiles={[]} />)
     await user.type(screen.getByTestId("composer-textarea"), "Hello")
     await user.click(screen.getAllByRole("button", { name: "Send" })[0])
     await waitFor(() => expect(resolve).toBeTypeOf("function"))
@@ -2043,7 +2113,7 @@ describe("PlaygroundForm OpenUI mode", () => {
 
   it("sends the next prompt with OpenUI request overrides", async () => {
     const user = userEvent.setup()
-    render(<PlaygroundForm droppedFiles={[]} />)
+    renderForm(<PlaygroundForm droppedFiles={[]} />)
 
     const openUIButton = screen.getByRole("button", { name: /OpenUI/i })
     expect(openUIButton).toBeInTheDocument()

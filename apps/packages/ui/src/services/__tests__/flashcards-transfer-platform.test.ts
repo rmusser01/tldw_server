@@ -81,7 +81,7 @@ describe("private Flashcards producer platform boundary", () => {
     const ready = deferred<void>()
     mocks.initialize.mockReturnValueOnce(ready.promise)
     const acquire = vi.fn(() => intent)
-    const navigate = vi.fn(() => expect(transferKeys()).toHaveLength(1))
+    const navigate = vi.fn((_url: string) => expect(transferKeys()).toHaveLength(1))
     const pending = transferFlashcardsSource(acquire, { navigate })
     expect(acquire).not.toHaveBeenCalled()
     expect(navigate).not.toHaveBeenCalled()

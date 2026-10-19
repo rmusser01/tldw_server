@@ -150,6 +150,18 @@ const buildBlocks = (messages: TimelineMessageShape[]): TimelineBlock[] => {
 
 const EMPTY_IMAGES: string[] = []
 
+const getStableRowHandler = <T extends (...args: never[]) => unknown>(
+  cache: React.MutableRefObject<Map<string, unknown>>,
+  key: string,
+  factory: () => T
+): T => {
+  const existing = cache.current.get(key) as T | undefined
+  if (existing) return existing
+  const handler = factory()
+  cache.current.set(key, handler)
+  return handler
+}
+
 export const PlaygroundChat = ({
   scrollParentRef,
   navigationRef,
@@ -1203,6 +1215,86 @@ export const PlaygroundChat = ({
     [historySelection, messages, setMessages]
   )
 
+  // Latest row-handler mirror: the destructured handlers are recreated every
+  // render (they close over the latest `messages`), so rows receive stable
+  // wrappers that dispatch through this ref. This keeps PlaygroundMessage's
+  // memo comparator effective during streaming flushes.
+  const messagesRef = React.useRef(messages)
+  messagesRef.current = messages
+  const latestRowHandlers = React.useRef({
+    editMessage,
+    toggleMessagePinned,
+    createChatBranch,
+    handleVariantSwipe,
+    regenerateLastMessage,
+    stopStreamingRequest,
+    handleRegenerateGeneratedImage
+  })
+  latestRowHandlers.current = {
+    editMessage,
+    toggleMessagePinned,
+    createChatBranch,
+    handleVariantSwipe,
+    regenerateLastMessage,
+    stopStreamingRequest,
+    handleRegenerateGeneratedImage
+  }
+  // Per-row handler cache keyed by message id; cleared when the conversation
+  // instance changes so it cannot grow unbounded across conversations.
+  const rowHandlerCache = React.useRef(new Map<string, unknown>())
+  React.useEffect(() => {
+    rowHandlerCache.current.clear()
+  }, [conversationInstanceId])
+  const getRowEditSubmitHandler = React.useCallback(
+    (messageId: string | undefined) =>
+      getStableRowHandler(
+        rowHandlerCache,
+        `edit:${messageId ?? ""}`,
+        () => (value: string, isSend: boolean, editIsCurrent?: () => boolean, editOriginIsCurrent?: () => boolean) => {
+          const index = messagesRef.current.findIndex(
+            (row) => row.id === messageId
+          )
+          const row = index >= 0 ? messagesRef.current[index] : null
+          if (!row) return
+          return latestRowHandlers.current.editMessage(
+            index,
+            value,
+            !row.isBot,
+            isSend,
+            editIsCurrent,
+            editOriginIsCurrent
+          )
+        }
+      ),
+    []
+  )
+  const getRowTogglePinnedHandler = React.useCallback(
+    (messageId: string | undefined) =>
+      getStableRowHandler(
+        rowHandlerCache,
+        `pin:${messageId ?? ""}`,
+        () => () => {
+          const index = messagesRef.current.findIndex(
+            (row) => row.id === messageId
+          )
+          if (index < 0) return
+          void latestRowHandlers.current.toggleMessagePinned(index)
+        }
+      ),
+    []
+  )
+  const getRowNewBranchHandler = React.useCallback(
+    (messageId: string | undefined) =>
+      getStableRowHandler(
+        rowHandlerCache,
+        `branch:${messageId ?? ""}`,
+        () => () => {
+          void latestRowHandlers.current.createChatBranch(messageId ?? "")
+        }
+      ),
+    []
+  )
+
   return (
     <>
       <div className="relative flex w-full flex-col items-center pt-1 pb-4 sm:pt-8">
@@ -1421,25 +1513,10 @@ export const PlaygroundChat = ({
                 isProcessing={isProcessing}
                 isSearchingInternet={isSearchingInternet}
                 sources={message.sources}
-                onEditFormSubmit={(value, isSend, editIsCurrent, editOriginIsCurrent) => {
-                  return editMessage(
-                    block.index,
-                    value,
-                    !message.isBot,
-                    isSend,
-                    editIsCurrent,
-                    editOriginIsCurrent
-                  )
-                }}
-                onDeleteMessage={() => {
-                  return deleteMessage(block.index)
-                }}
-                onTogglePinned={() => {
-                  void toggleMessagePinned(block.index)
-                }}
-                onNewBranch={() => {
-                  void createChatBranch(message.id ?? "")
-                }}
+                onEditFormSubmit={getRowEditSubmitHandler(message.id)}
+                onDeleteMessage={() => deleteMessage(block.index)}
+                onTogglePinned={getRowTogglePinnedHandler(message.id)}
+                onNewBranch={getRowNewBranchHandler(message.id)}
                 isTTSEnabled={ttsEnabled}
                 generationInfo={message?.generationInfo}
                 toolCalls={message?.toolCalls}

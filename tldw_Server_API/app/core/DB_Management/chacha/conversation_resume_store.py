@@ -37,6 +37,7 @@ _MATERIALIZED_VALUE_KEYS = frozenset(
     {
         "assistant_overlay",
         "base_snapshot",
+        "dictionaries",
         "behavior_controls",
         "effective_completion",
         "greeting",
@@ -1125,6 +1126,9 @@ class ConversationResumeStore:
                 "behavior_snapshot": snapshot,
                 "settings": settings,
                 "materialized_settings": materialized_settings,
+                "dictionary_catalog_owner": (
+                    self._db.owner_user_id if self._db.backend_type == BackendType.POSTGRESQL else None
+                ),
                 "settings_version": record.get("settings_version"),
                 "history_version": int(record["history_version"]),
                 "message_count": int(record.get("message_count") or 0),

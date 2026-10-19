@@ -23,7 +23,9 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuickNotesSection } from "../StudioPane/QuickNotesSection";
 import { useWorkspaceStore, buildWorkspaceSnapshot } from "@/store/workspace";
+import userEvent from "@testing-library/user-event"
 import type { WorkspaceNote } from "@/types/workspace"
+import { knowledgeNoteHead, readKnowledgeNoteProvenance, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 
 const mocks = vi.hoisted(() => ({
   serverUrl: "https://research-a.example",
@@ -36,7 +38,9 @@ const mocks = vi.hoisted(() => ({
   success: vi.fn(),
   error: vi.fn(),
   open: vi.fn(),
-}));
+  destroy: vi.fn(),
+  messages: new Map<string, { onClose?: () => void }>()
+}))
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, fallback?: string) => fallback || key
@@ -77,13 +81,27 @@ vi.mock("antd", async () => ({
         success: mocks.success,
         error: mocks.error,
         open: mocks.open,
-        destroy: vi.fn(),
-        warning: vi.fn(),
+        destroy: mocks.destroy,
+        warning: vi.fn()
       },
       null,
     ],
   },
 }));
+
+// Explicitly accept the same unsaved-draft confirmation used by the component.
+const selectSavedNote = async (user: ReturnType<typeof userEvent.setup>, label: string) => {
+  let confirmation: Parameters<typeof Modal.confirm>[0] | undefined
+  const confirm = vi.spyOn(Modal, "confirm").mockImplementation(config => {
+    confirmation = config
+    return { destroy: vi.fn(), update: vi.fn() }
+  })
+  try {
+    await user.click(await screen.findByRole("button", { name: label }))
+    expect(confirmation?.title).toBe("Unsaved Changes")
+    act(() => { void confirmation?.onOk?.() })
+  } finally { confirm.mockRestore() }
+}
 
 const noteId = "9f0a165c-6f62-4b76-8cfb-e5d1a719f13b"
 const otherId = "cb438f03-d609-4b4b-9f64-32bc769a55cb"
@@ -166,9 +184,17 @@ function changeContext(change: string) {
     state.clearCurrentNote()
     if (change === "clear-then-type")
       state.updateNoteContent("A different unsaved note")
-  } else if (change === "account") {
+  } else if (change === "newer-edits") {
+    state.updateNoteTitle("Newer human title")
+    state.updateNoteContent("Newer human body")
+    state.updateNoteKeywords(["newer-human-tag"])
+  } else if (change.startsWith("account")) {
     mocks.userId = "bob"
     window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+    if (change === "account-return") {
+      mocks.userId = "alice"
+      window.dispatchEvent(new Event("tldw:auth-principal-changed"))
+    }
   } else {
     mocks.serverUrl = "https://research-b.example"
     window.dispatchEvent(
@@ -176,6 +202,12 @@ function changeContext(change: string) {
         detail: { authorityChanged: true }
       })
     )
+    if (change === "server-return") {
+      mocks.serverUrl = "https://research-a.example"
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", {
+        detail: { authorityChanged: true }
+      }))
+    }
   }
 }
 beforeEach(() => {
@@ -199,6 +231,22 @@ beforeEach(() => {
   );
   vi.clearAllMocks();
   window.localStorage.clear();
+  vi.clearAllMocks()
+  mocks.messages.clear()
+  mocks.open.mockImplementation((config: { key?: string; onClose?: () => void }) => {
+    if (config.key) {
+      mocks.messages.set(config.key, config)
+    }
+  })
+  mocks.destroy.mockImplementation((key?: string) => {
+    if (!key) {
+      mocks.messages.clear()
+      return
+    }
+    const config = mocks.messages.get(key)
+    mocks.messages.delete(key)
+    config?.onClose?.()
+  })
   mocks.serverUrl = "https://research-a.example"
   mocks.userId = "alice"
   mocks.authMode = "multi-user";
@@ -682,6 +730,455 @@ it("retains explicit capture history when the acknowledgment does not confirm it
     useWorkspaceStore.getState().currentNote.pendingKnowledgeProvenance
   ).toEqual(replacement)
   expect(mocks.success).not.toHaveBeenCalled()
+})
+
+describe("Quick Notes conflict base and owned detail reads", () => {
+  const localHistory = { origin: "knowledge_qa" as const, question: "Original evidence question" }
+  const remoteHistory = { origin: "knowledge_qa" as const, question: "Concurrent evidence question" }
+  const localDraft = (): WorkspaceNote => ({
+    ...draft(),
+    version: 1,
+    knowledge_provenance_state: "active",
+    knowledge_provenance_version: 2,
+    knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+    knowledge_provenance: localHistory
+  })
+  const remoteNote = (): WorkspaceNote => ({
+    id: noteId,
+    title: "Server title",
+    content: "Concurrent server paragraph",
+    keywords: ["server-tag", "workspace:a"],
+    version: 2,
+    isDirty: false,
+    knowledge_provenance_state: "active",
+    knowledge_provenance_version: 5,
+    knowledge_provenance_hash: `sha256:${"b".repeat(64)}`,
+    knowledge_provenance: remoteHistory
+  })
+  const detailCalls = () => mocks.request.mock.calls
+    .map(([request]) => request as BgRequestInit)
+    .filter((request) => request.method === "GET" && request.path === `/api/v1/notes/${noteId}`)
+  const conflict = () => Object.assign(new Error("Note version conflict"), { status: 409 })
+  const finishRead = async (gate: ReturnType<typeof deferred>) => {
+    await act(async () => {
+      gate.resolve()
+      await gate.promise
+      // Drain the resolved request and the component's continuation, including
+      // implementations that perform owner verification before the detail GET.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+  }
+  const prepareReload = async () => {
+    const initial = localDraft()
+    const remote = remoteNote()
+    const gate = deferred()
+    const explicitReads: BgRequestInit[] = []
+    let explicitReload = false
+    useWorkspaceStore.setState({ currentNote: initial })
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      if (request.method === "PUT") throw conflict()
+      if (request.method === "GET" && request.path === `/api/v1/notes/${noteId}`) {
+        if (explicitReload) {
+          explicitReads.push(request)
+          // Deliberately deliver late responses even when the transport is
+          // aborted: the component must also refuse stale publication.
+          await gate.promise
+        }
+        return remote
+      }
+      return []
+    })
+    const view = render(<QuickNotesSection />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "Update" }))
+    await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(document.querySelector("button.ant-btn-loading")).toBeNull())
+    const config = mocks.open.mock.calls[0][0] as { content: React.ReactNode }
+    const toast = render(<>{config.content}</>)
+    const startReload = async () => {
+      explicitReload = true
+      await user.click(toast.getByRole("button", { name: "Reload latest" }))
+    }
+    return { view, toast, initial, remote, gate, explicitReads, startReload }
+  }
+  const changes = [
+    "note", "workspace", "account", "server", "note-return", "workspace-return",
+    "account-return", "server-return", "newer-edits", "clear", "clear-then-type"
+  ] as const
+
+  it("keeps the original version and source history through an ordinary retry after 409", async () => {
+    const initial = localDraft()
+    let server = remoteNote()
+    useWorkspaceStore.setState({ currentNote: initial })
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      if (request.method === "GET" && request.path === `/api/v1/notes/${noteId}`) return server
+      if (request.method === "PUT") {
+        const body = request.body as Record<string, unknown>
+        if (Number(request.headers?.["expected-version"]) !== server.version) throw conflict()
+        server = { ...server, title: String(body.title), content: String(body.content), version: server.version! + 1 }
+        return server
+      }
+      return []
+    })
+    render(<QuickNotesSection />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "Update" }))
+    await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(document.querySelector("button.ant-btn-loading")).toBeNull())
+    await user.click(screen.getByRole("button", { name: "Update" }))
+    await waitFor(() => expect(writes()).toHaveLength(2))
+    await waitFor(() => expect(document.querySelector("button.ant-btn-loading")).toBeNull())
+
+    expect({
+      expectedVersions: writes().map(([request]) => request.headers["expected-version"]),
+      server: { content: server.content, version: server.version, provenanceVersion: server.knowledge_provenance_version }
+    }).toEqual({
+      expectedVersions: ["1", "1"],
+      server: { content: "Concurrent server paragraph", version: 2, provenanceVersion: 5 }
+    })
+    for (const [request] of writes()) {
+      expect(request.body).not.toHaveProperty("knowledge_provenance")
+      expect(request.body).not.toHaveProperty("expected_provenance_version")
+      expect(request.headers["Idempotency-Key"]).toBeTruthy()
+    }
+    expect(writes()[1][0].headers["Idempotency-Key"]).not.toBe(writes()[0][0].headers["Idempotency-Key"])
+    expect(useWorkspaceStore.getState().currentNote).toEqual({
+      ...initial,
+      pendingNoteWriteKey: expect.stringContaining('surface:quick-notes:["workspace-a","workspace:a"]:')
+    })
+    expect(server).toMatchObject({ content: "Concurrent server paragraph", version: 2, knowledge_provenance_version: 5 })
+    expect(detailCalls()).toEqual([])
+    expect(mocks.success).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("quick-notes-saved-indicator")).not.toBeInTheDocument()
+  })
+
+  it.each(changes)("retains %s instead of publishing a delayed explicit reload", async (change) => {
+    const pending = await prepareReload()
+    await pending.startReload()
+    await waitFor(() => expect(pending.explicitReads).toHaveLength(1))
+    expect(pending.explicitReads[0].abortSignal?.aborted).toBe(false)
+    act(() => changeContext(change))
+    expect(pending.explicitReads[0].abortSignal?.aborted).toBe(true)
+    const replacement = useWorkspaceStore.getState().currentNote
+    await finishRead(pending.gate)
+
+    expect(useWorkspaceStore.getState().currentNote).toBe(replacement)
+    expect(mocks.success).not.toHaveBeenCalled()
+    expect(mocks.error).not.toHaveBeenCalled()
+    expect(writes()).toHaveLength(1)
+  })
+
+  it.each([
+    "note", "workspace", "account", "server", "note-return", "workspace-return",
+    "account-return", "server-return"
+  ] as const)("rejects the original conflict action after %s before its click", async (change) => {
+    const pending = await prepareReload()
+    act(() => changeContext(change))
+    const replacement = useWorkspaceStore.getState().currentNote
+    await pending.startReload()
+    await finishRead(pending.gate)
+
+    expect(useWorkspaceStore.getState().currentNote).toBe(replacement)
+    expect(pending.explicitReads).toEqual([])
+    expect(mocks.success).not.toHaveBeenCalled()
+    expect(mocks.error).not.toHaveBeenCalled()
+  })
+
+  it("does not publish an explicit reload after the component unmounts", async () => {
+    const pending = await prepareReload()
+    await pending.startReload()
+    await waitFor(() => expect(pending.explicitReads).toHaveLength(1))
+    const replacement = useWorkspaceStore.getState().currentNote
+    pending.view.unmount()
+    pending.toast.unmount()
+    expect(pending.explicitReads[0].abortSignal?.aborted).toBe(true)
+    await finishRead(pending.gate)
+
+    expect(useWorkspaceStore.getState().currentNote).toBe(replacement)
+    expect(mocks.success).not.toHaveBeenCalled()
+    expect(mocks.error).not.toHaveBeenCalled()
+  })
+
+  it("merges the full remote note and local draft under the original owner", async () => {
+    const pending = await prepareReload()
+    await pending.startReload()
+    await waitFor(() => expect(pending.explicitReads).toHaveLength(1))
+    // Keyed toast destruction must leave the transferred read lease alive.
+    expect(mocks.destroy).toHaveBeenCalledWith("workspace-note-version-conflict")
+    expect(pending.explicitReads[0].abortSignal?.aborted).toBe(false)
+    await finishRead(pending.gate)
+    expect(pending.explicitReads[0].abortSignal?.aborted).toBe(true)
+
+    expect(pending.explicitReads[0]).toMatchObject({
+      path: `/api/v1/notes/${noteId}`,
+      method: "GET",
+      servicePromptConfig: { serverUrl: "https://research-a.example", expectedUserId: "alice" },
+      headers: { "X-TLDW-Expected-User-ID": "alice" },
+      abortSignal: expect.any(AbortSignal)
+    })
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      id: noteId,
+      title: "Alice draft",
+      keywords: ["server-tag", "evidence"],
+      version: 2,
+      isDirty: true,
+      knowledge_provenance_state: "active",
+      knowledge_provenance_version: 5,
+      knowledge_provenance_hash: `sha256:${"b".repeat(64)}`,
+      knowledge_provenance: remoteHistory
+    })
+    expect(useWorkspaceStore.getState().currentNote.content).toContain("Concurrent server paragraph")
+    expect(useWorkspaceStore.getState().currentNote.content).toContain("## Local Draft (Unsaved)")
+    expect(useWorkspaceStore.getState().currentNote.content).toContain("Original draft body")
+    expect(mocks.success).toHaveBeenCalledWith("Loaded latest note and preserved your unsaved draft.")
+    expect(writes()).toHaveLength(1)
+  })
+
+  it.each([
+    "note", "workspace", "account", "server", "note-return", "workspace-return",
+    "account-return", "server-return", "newer-edits", "unmount"
+  ] as const)("retains %s instead of publishing a delayed workspace-chip selection", async (change) => {
+    const gate = deferred()
+    const selected = { ...remoteNote(), id: otherId, title: "Other saved note" }
+    const selectionReads: BgRequestInit[] = []
+    useWorkspaceStore.setState({ currentNote: localDraft() })
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      if (request.path.includes("/search/")) return [selected]
+      if (request.method === "GET" && request.path === `/api/v1/notes/${otherId}`) {
+        selectionReads.push(request)
+        await gate.promise
+        return selected
+      }
+      return []
+    })
+    const view = render(<QuickNotesSection />)
+    const user = userEvent.setup()
+    await selectSavedNote(user, "Other saved note")
+    await waitFor(() => expect(selectionReads).toHaveLength(1))
+    expect(selectionReads[0].abortSignal?.aborted).toBe(false)
+    if (change === "unmount") view.unmount()
+    else act(() => changeContext(change))
+    expect(selectionReads[0].abortSignal?.aborted).toBe(true)
+    const replacement = useWorkspaceStore.getState().currentNote
+    await finishRead(gate)
+
+    expect(useWorkspaceStore.getState().currentNote).toBe(replacement)
+    expect(mocks.success).not.toHaveBeenCalled()
+    expect(mocks.error).not.toHaveBeenCalled()
+    expect(writes()).toEqual([])
+  })
+
+  it("releases a keyed dismissed conflict and refuses its retained callback", async () => {
+    const pending = await prepareReload()
+    const request = writes()[0][0] as BgRequestInit
+    expect(request.abortSignal?.aborted).toBe(false)
+    act(() => mocks.destroy("workspace-note-version-conflict"))
+    expect(request.abortSignal?.aborted).toBe(true)
+    const replacement = useWorkspaceStore.getState().currentNote
+    await pending.startReload()
+    await finishRead(pending.gate)
+    expect(pending.explicitReads).toEqual([])
+    expect(useWorkspaceStore.getState().currentNote).toBe(replacement)
+    expect(mocks.success).not.toHaveBeenCalled()
+  })
+
+  it("releases the displaced conflict without its old callback destroying the replacement", async () => {
+    const pending = await prepareReload()
+    const displaced = writes()[0][0] as BgRequestInit
+    await userEvent.setup().click(screen.getByRole("button", { name: "Update" }))
+    await waitFor(() => expect(mocks.open).toHaveBeenCalledTimes(2))
+    expect(displaced.abortSignal?.aborted).toBe(true)
+    const replacement = writes()[1][0] as BgRequestInit
+    expect(replacement.abortSignal?.aborted).toBe(false)
+    await pending.startReload()
+    expect(pending.explicitReads).toEqual([])
+    expect(mocks.destroy).not.toHaveBeenCalled()
+    expect(replacement.abortSignal?.aborted).toBe(false)
+    pending.view.unmount()
+    expect(replacement.abortSignal?.aborted).toBe(true)
+  })
+
+  it("merges the current human edits made before clicking the owned conflict action", async () => {
+    const pending = await prepareReload()
+    act(() => changeContext("newer-edits"))
+    await pending.startReload()
+    await waitFor(() => expect(pending.explicitReads).toHaveLength(1))
+    await finishRead(pending.gate)
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      title: "Newer human title", keywords: ["server-tag", "newer-human-tag"],
+      version: 2, knowledge_provenance_version: 5, isDirty: true
+    })
+    expect(useWorkspaceStore.getState().currentNote.content).toContain("Concurrent server paragraph")
+    expect(useWorkspaceStore.getState().currentNote.content).toContain("Newer human body")
+    expect(mocks.success).toHaveBeenCalledTimes(1)
+  })
+
+  it("loads the full workspace-chip note under its captured owner and cleans up", async () => {
+    const gate = deferred()
+    const selected = { ...remoteNote(), id: otherId, title: "Other saved note" }
+    let request: BgRequestInit | undefined
+    useWorkspaceStore.setState({ currentNote: localDraft() })
+    mocks.request.mockImplementation(async (input: BgRequestInit) => {
+      if (input.path.includes("/search/")) return [selected]
+      if (input.path === `/api/v1/notes/${otherId}`) {
+        request = input
+        await gate.promise
+        return selected
+      }
+      return []
+    })
+    render(<QuickNotesSection />)
+    await selectSavedNote(userEvent.setup(), "Other saved note")
+    await waitFor(() => expect(request).toBeDefined())
+    expect(request).toMatchObject({
+      method: "GET", path: `/api/v1/notes/${otherId}`,
+      servicePromptConfig: { serverUrl: "https://research-a.example", expectedUserId: "alice" },
+      headers: { "X-TLDW-Expected-User-ID": "alice" }, abortSignal: expect.any(AbortSignal)
+    })
+    expect(request!.abortSignal?.aborted).toBe(false)
+    await finishRead(gate)
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      id: otherId, title: "Other saved note", content: retainKnowledgeNoteProvenance(selected.content, selected),
+      keywords: ["server-tag"], version: 2, isDirty: false,
+      knowledge_provenance_version: 5, knowledge_provenance: remoteHistory
+    })
+    expect(mocks.success).toHaveBeenCalledWith("Note loaded")
+    expect(request!.abortSignal?.aborted).toBe(true)
+    expect(writes()).toEqual([])
+  })
+
+  it("cancels an older chip read and publishes only the newer selected full note", async () => {
+    const olderGate = deferred()
+    const newerGate = deferred()
+    const older = { ...remoteNote(), id: otherId, title: "Older selection" }
+    const newerId = "dea60b7b-a04f-4808-8ed0-92c1d8571e7a"
+    const newer = { ...remoteNote(), id: newerId, title: "Newer selection", content: "Newer full body" }
+    const reads: BgRequestInit[] = []
+    useWorkspaceStore.setState({ currentNote: localDraft() })
+    const initial = useWorkspaceStore.getState().currentNote
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      if (request.path.includes("/search/")) return [older, newer]
+      if (request.path === `/api/v1/notes/${otherId}` || request.path === `/api/v1/notes/${newerId}`) {
+        reads.push(request)
+        await (request.path.endsWith(otherId) ? olderGate.promise : newerGate.promise)
+        return request.path.endsWith(otherId) ? older : newer
+      }
+      return []
+    })
+    render(<QuickNotesSection />)
+    const user = userEvent.setup()
+    await selectSavedNote(user, "Older selection")
+    await waitFor(() => expect(reads).toHaveLength(1))
+    await selectSavedNote(user, "Newer selection")
+    await waitFor(() => expect(reads).toHaveLength(2))
+    expect(reads[0].abortSignal?.aborted).toBe(true)
+    expect(reads[1].abortSignal?.aborted).toBe(false)
+    await finishRead(olderGate)
+    expect(useWorkspaceStore.getState().currentNote).toBe(initial)
+    expect(mocks.success).not.toHaveBeenCalled()
+    await finishRead(newerGate)
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      id: newerId, content: retainKnowledgeNoteProvenance(newer.content, newer)
+    })
+    expect(mocks.success).toHaveBeenCalledTimes(1)
+    expect(reads[1].abortSignal?.aborted).toBe(true)
+  })
+
+
+  it("retains a lost-ack Save receipt when newer typing cancels a pending chip read", async () => {
+    const gate = deferred()
+    const selected = { ...remoteNote(), id: otherId, title: "Other saved note" }
+    let read: BgRequestInit | undefined
+    useWorkspaceStore.setState({ currentNote: localDraft() })
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      if (request.path.includes("/search/")) return [selected]
+      if (request.path === `/api/v1/notes/${otherId}`) {
+        read = request
+        await gate.promise
+        return selected
+      }
+      if (request.method === "PUT") {
+        if (writes().length === 1) throw new Error("Response lost after Save")
+        return { ...request.body, id: noteId, version: 2 }
+      }
+      return []
+    })
+    render(<QuickNotesSection />)
+    const user = userEvent.setup()
+    await user.click(screen.getByRole("button", { name: "Update" }))
+    await waitFor(() => expect(mocks.error).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(document.querySelector("button.ant-btn-loading")).toBeNull())
+    const original = writes()[0][0]
+    await selectSavedNote(user, "Other saved note")
+    await waitFor(() => expect(read).toBeDefined())
+    const content = screen.getByRole("textbox", { name: "Note content" })
+    await user.clear(content)
+    await user.type(content, "Newer human body")
+    expect(content).toHaveValue("Newer human body")
+    const typedDraft = useWorkspaceStore.getState().currentNote
+    expect(read!.abortSignal?.aborted).toBe(true)
+    await user.click(screen.getByRole("button", { name: "Update" }))
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith("Note updated"))
+    expect(writes()).toHaveLength(2)
+    expect(writes()[1][0].headers["Idempotency-Key"]).toBe(original.headers["Idempotency-Key"])
+    expect(writes()[1][0].body).toEqual(original.body)
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      ...typedDraft, id: noteId, version: 2, isDirty: true
+    })
+    const acknowledged = useWorkspaceStore.getState().currentNote
+    await finishRead(gate)
+    expect(useWorkspaceStore.getState().currentNote).toBe(acknowledged)
+    expect(mocks.success).toHaveBeenCalledTimes(1)
+  })
+
+})
+
+
+describe("Quick Notes native provenance typing", () => {
+  it.each(["canonical", "legacy-marker"] as const)("preserves spaced multiline typing and %s history through Save", async (kind) => {
+    const history = { origin: "knowledge_qa" as const, question: "Retained typing evidence" }
+    const initial: WorkspaceNote = {
+      ...draft(), version: 1, isDirty: false,
+      ...(kind === "canonical" ? {
+        knowledge_provenance_state: "active" as const,
+        knowledge_provenance_version: 2,
+        knowledge_provenance_hash: `sha256:${"a".repeat(64)}`,
+        knowledge_provenance: history
+      } : {
+        content: retainKnowledgeNoteProvenance("Original draft body", { knowledge_provenance: history })
+      })
+    }
+    useWorkspaceStore.setState({ currentNote: initial })
+    mocks.request.mockImplementation(async (request: BgRequestInit) => {
+      if (request.method === "PUT") return {
+        ...request.body, id: noteId, version: 2, ...knowledgeNoteHead(initial)
+      }
+      return []
+    })
+    render(<QuickNotesSection />)
+    const user = userEvent.setup()
+    const content = screen.getByRole("textbox", { name: "Note content" })
+    await user.clear(content)
+    await user.type(content, "Alpha beta{enter}Gamma delta")
+    const expected = "Alpha beta\nGamma delta"
+    expect(content).toHaveValue(expected)
+    expect(useWorkspaceStore.getState().currentNote).toMatchObject({
+      knowledge_provenance: history,
+      ...(kind === "canonical" ? {
+        knowledge_provenance_state: "active", knowledge_provenance_version: 2,
+        knowledge_provenance_hash: `sha256:${"a".repeat(64)}`
+      } : {})
+    })
+    await user.click(screen.getByRole("button", { name: "Update" }))
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith("Note updated"))
+    expect(writes()).toHaveLength(1)
+    const request = writes()[0][0]
+    expect(request.headers["expected-version"]).toBe("1")
+    expect(request.body.content).toBe(retainKnowledgeNoteProvenance(expected, { knowledge_provenance: history }))
+    expect(readKnowledgeNoteProvenance(request.body.content)).toEqual(history)
+    expect(content).toHaveValue(expected)
+    expect(useWorkspaceStore.getState().currentNote.knowledge_provenance).toEqual(history)
+  })
 })
 
 function CollapsibleQuickNotes() {
@@ -2077,7 +2574,7 @@ it.each([
       if (request.path.includes("/search/")) return [];
       if (request.method === "PUT")
         throw { status: 409, message: "version conflict" };
-      if (++readCount > 1) await gate.promise;
+      if (++readCount === 1) await gate.promise;
       return { ...draft(), content: "Remote newer", version: 3 };
     });
     render(<QuickNotesSection />);
@@ -2095,7 +2592,7 @@ it.each([
       )![0].content,
     );
     fireEvent.click(screen.getByRole("button", { name: "Reload latest" }));
-    await waitFor(() => expect(readCount).toBe(2));
+    await waitFor(() => expect(readCount).toBe(1));
     act(() => {
       if (change === "edit")
         useWorkspaceStore.getState().updateNoteContent("Later text");

@@ -8,6 +8,7 @@ BACKEND_GLOBS = [
     "Helper_Scripts/export_openapi_schema.py",
     "tldw_Server_API/**",
     "Helper_Scripts/ci/emit_ci_gate_flags.py",
+    "Helper_Scripts/ci/merge_queue.py",
     "Helper_Scripts/ci/path_classifier.py",
     "Helper_Scripts/ci/vitest_base_ratchet.py",
     "tools/backlog-py/**",

@@ -270,13 +270,13 @@ const choosePersona = async () => {
   const user = userEvent.setup();
   await waitFor(() =>
     expect(
-      screen.getByRole("button", { name: "Apply", exact: true }),
+      screen.getByRole("button", { name: "Apply" }),
     ).toBeEnabled(),
   );
   await user.click(screen.getByTestId("character-select"));
   await user.click(await screen.findByRole("tab", { name: "Personas" }));
   await user.click(
-    await screen.findByRole("button", { name: "Guide Persona", exact: true }),
+    await screen.findByRole("button", { name: "Guide Persona" }),
   );
   return user;
 };
@@ -455,7 +455,7 @@ describe("conversation setup identity", () => {
     const user = userEvent.setup();
     await waitFor(() =>
       expect(
-        screen.getByRole("button", { name: "Apply", exact: true }),
+        screen.getByRole("button", { name: "Apply" }),
       ).toBeEnabled(),
     );
     await user.click(screen.getByTestId("character-select"));
@@ -508,7 +508,7 @@ describe("conversation setup identity", () => {
     });
     const user = await choosePersona();
     await user.click(
-      screen.getByRole("button", { name: "Save setup", exact: true }),
+      screen.getByRole("button", { name: "Save setup" }),
     );
     expect(onSaveRolePlaySetup).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -580,10 +580,19 @@ describe("conversation setup identity", () => {
     mocks.saveScene.mockResolvedValueOnce(false);
     const { onApply, onClose } = renderDrawer();
     const user = await choosePersona();
-    await user.click(screen.getByRole("button", { name: "Apply", exact: true }));
-    await screen.findByRole("alert");
-    await user.click(screen.getByRole("button", { name: "Clear identity", exact: true }));
-    await user.click(screen.getByRole("button", { name: "Apply", exact: true }));
+    await user.click(
+      screen.getByRole("button", { name: "Apply", exact: true }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /could not be saved/i,
+    );
+    expect(onApply).toHaveBeenCalledOnce();
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Clear identity" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Apply", exact: true }),
+    );
+    await waitFor(() => expect(onApply).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
     expect(onApply).toHaveBeenCalledTimes(2);
     expect(onApply).toHaveBeenLastCalledWith(expect.objectContaining({ clearIdentity: true }), expect.anything());
@@ -833,7 +842,7 @@ describe("conversation setup identity", () => {
       target: { value: "Draft scene" },
     });
     await user.click(
-      screen.getByRole("button", { name: "Apply", exact: true }),
+      screen.getByRole("button", { name: "Apply" }),
     );
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /could not be applied/i,

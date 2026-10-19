@@ -9,7 +9,7 @@ import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
 import { captureActorSceneSendForTarget, type ActorSceneSend } from "@/hooks/chat/actor-scene-source"
 import { useHistorySelection } from "@/hooks/chat/useHistorySelection"
 import { sendNativeHistoryCharacter } from "@/hooks/chat/native-history-character-send"
-import { NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, validateNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
+import { NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, resolveNativeCharacterConfiguration } from "@/hooks/chat/native-character-preflight"
 import { classifyCharacterChatFailureRecovery } from "@/hooks/chat/useCharacterChatMode"
 import { useStoreChatModelSettings } from "@/store/model"
 import { loadHistoryTurnRecoveries } from "@/db/dexie/history-selection"
@@ -265,8 +265,8 @@ export function useCharacterQuickChat(deps: UseCharacterQuickChatDeps) {
         if (!capture) throw new Error("actor_settings_unavailable")
         actorSceneSend = await capture.read()
         if (!preparing()) return
-        validateNativeCharacterConfiguration({ temporary: false, settings, model: activeQuickChatModel!, toolChoice: "none", clientToolCount: 0,
-          actorEnabled: actorSceneSend.scene.settings.isEnabled })
+        await resolveNativeCharacterConfiguration({ temporary: false, settings, model: activeQuickChatModel!, toolChoice: "none", clientToolCount: 0,
+          actorEnabled: actorSceneSend.scene.settings.isEnabled }, preparing)
       }
       if (!(await retain(preparing))) throw new Error("native_history_draft_not_retained")
       const outstanding = await listChatCreationRecovery(handle.ownerHash, { type: "global" })

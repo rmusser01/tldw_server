@@ -21,7 +21,7 @@ vi.mock("@/services/service-prompts", () => ({
     release: vi.fn()
   })
 }))
-vi.mock("@/db/dexie/chat", () => ({ pageAssistDatabase: { getChatHistoriesPaginated: async () => ({ histories: [{ id: "owned", title: "Owned local chat", createdAt: Date.now() }], hasMore: false, totalCount: 1 }) }, PageAssistDatabase: class {
+vi.mock("@/db/dexie/chat", () => ({ watchOnDeviceHistoryChanges: () => () => {}, pageAssistDatabase: { getChatHistoriesPaginated: async () => ({ histories: [{ id: "owned", title: "Owned local chat", createdAt: Date.now() }], hasMore: false, totalCount: 1 }) }, PageAssistDatabase: class {
   getChatHistory(id: string) { return io.readMessages(id) }
   getHistoryInfo(id: string) { return io.readInfo(id) }
 } }))
@@ -37,7 +37,9 @@ vi.mock("@/services/model-settings", () => ({
   lastUsedChatModelEnabled: () => io.readModelPreference()
 }))
 vi.mock("antd", async importOriginal => ({ ...await importOriginal<typeof import("antd")>(), message: { error: (value: unknown) => io.notifyError(value) } }))
-vi.mock("@/hooks/useMessageOption", () => ({ useMessageOption: () => ({ ...io.deps, historyId: null, clearChat: vi.fn() }) }))
+vi.mock("@/store/option", async original => ({ ...await original<typeof import("@/store/option")>() }))
+vi.mock("@/hooks/chat/useSelectedModel", () => ({ useSelectedModel: () => ({ setSelectedModel: io.deps?.setSelectedModel }) }))
+vi.mock("@/hooks/chat/useClearChat", () => ({ useClearChat: () => vi.fn() }))
 vi.mock("@/store/model", () => ({ useStoreChatModelSettings: () => ({ setSystemPrompt: io.deps?.setSystemPrompt }) }))
 vi.mock("@/hooks/useConnectionState", () => ({ useIsConnected: () => false }))
 vi.mock("@/hooks/useUndoNotification", () => ({ useUndoNotification: () => ({ showUndoNotification: vi.fn() }) }))
@@ -183,6 +185,8 @@ describe("local conversation load ownership", () => {
     expect(state.prompt).toBe("Saved prompt")
     unmount()
   })
+
+
 
 
 })

@@ -1,5 +1,7 @@
+vi.mock("@/hooks/usePrivateWorkspaceScope", () => ({ usePrivateWorkspaceScope: () => ({ scope: null, retry: vi.fn() }) }))
+import { AdminTestQueryProvider } from "./admin-query-fixture"
 import React from "react"
-import { QueryClientProvider, type QueryClient } from "@tanstack/react-query"
+import { type QueryClient } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import ServerAdminPage from "../ServerAdminPage"
@@ -14,7 +16,7 @@ const renderPage = (ui: React.ReactElement) => {
   const client = createAdminQueryClient()
   adminQueryClients.push(client)
   return render(
-    <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    <AdminTestQueryProvider client={client}>{ui}</AdminTestQueryProvider>
   )
 }
 
@@ -156,7 +158,7 @@ describe("ServerAdminPage media budget diagnostics", () => {
       expect(apiMock.getMediaIngestionBudgetDiagnostics).toHaveBeenCalledWith({
         userId: 11,
         policyId: "media.default"
-      })
+      }, expect.objectContaining({ abortSignal: expect.any(AbortSignal), headers: { "X-TLDW-Expected-User-ID": "1" }, configSnapshot: expect.objectContaining({ authMode: "multi-user" }) }))
     })
 
     expect(await screen.findByText("Media ingestion budget")).toBeTruthy()
@@ -215,7 +217,7 @@ describe("ServerAdminPage media budget diagnostics", () => {
     expect(apiMock.getMediaIngestionBudgetDiagnostics).toHaveBeenLastCalledWith({
       userId: 11,
       policyId: "abcd"
-    })
+    }, expect.objectContaining({ abortSignal: expect.any(AbortSignal), headers: { "X-TLDW-Expected-User-ID": "1" }, configSnapshot: expect.objectContaining({ authMode: "multi-user" }) }))
   })
 
   it("formats oversized legacy storage values as bytes", async () => {
@@ -267,11 +269,11 @@ describe("ServerAdminPage media budget diagnostics", () => {
       expect(apiMock.getSystemStats).toHaveBeenCalledTimes(2)
     })
 
-    expect(apiMock.getSystemStats).toHaveBeenNthCalledWith(1, {
-      timeoutMs: 10000
-    })
-    expect(apiMock.getSystemStats).toHaveBeenNthCalledWith(2, {
-      timeoutMs: 10000
-    })
+    expect(apiMock.getSystemStats).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      timeoutMs: 10000, abortSignal: expect.any(AbortSignal), headers: { "X-TLDW-Expected-User-ID": "1" }
+    }))
+    expect(apiMock.getSystemStats).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      timeoutMs: 10000, abortSignal: expect.any(AbortSignal), headers: { "X-TLDW-Expected-User-ID": "1" }
+    }))
   }, 15000)
 })

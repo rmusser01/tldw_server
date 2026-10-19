@@ -1381,6 +1381,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_loaded_world_book_priority.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_manager.py
           - name: chat-character-unit-prd
@@ -1503,6 +1504,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_monitoring_*.py
               tldw_Server_API/tests/Claims/test_claims_output_parser.py
+              tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
               tldw_Server_API/tests/Claims/test_claims_prompt_validation.py
               tldw_Server_API/tests/Claims/test_claims_rebuild_*.py
               tldw_Server_API/tests/Claims/test_claims_response_format_contracts.py
@@ -1559,6 +1561,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
               tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
+              tldw_Server_API/tests/Evaluations/test_run_progress_response.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -1656,6 +1659,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
               tldw_Server_API/tests/Workflows/test_workflow_stress.py
               tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
+              tldw_Server_API/tests/Workflows/test_scheduled_workflow_execution.py
           - name: product-workflows-api
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
@@ -1664,6 +1668,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
+              tldw_Server_API/tests/Workflows/test_workflow_expected_user.py
               tldw_Server_API/tests/Workflows/test_workflow_investigation_api.py
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
@@ -3054,6 +3059,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_loaded_world_book_priority.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_manager.py
           - name: chat-character-unit-prd
@@ -3176,6 +3182,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_monitoring_*.py
               tldw_Server_API/tests/Claims/test_claims_output_parser.py
+              tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
               tldw_Server_API/tests/Claims/test_claims_prompt_validation.py
               tldw_Server_API/tests/Claims/test_claims_rebuild_*.py
               tldw_Server_API/tests/Claims/test_claims_response_format_contracts.py
@@ -3232,6 +3239,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
               tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
+              tldw_Server_API/tests/Evaluations/test_run_progress_response.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -3327,6 +3335,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
               tldw_Server_API/tests/Workflows/test_workflow_stress.py
               tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
+              tldw_Server_API/tests/Workflows/test_scheduled_workflow_execution.py
           - name: product-workflows-api
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
@@ -3335,6 +3344,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
+              tldw_Server_API/tests/Workflows/test_workflow_expected_user.py
               tldw_Server_API/tests/Workflows/test_workflow_investigation_api.py
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
@@ -4564,6 +4574,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_loaded_world_book_priority.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_manager.py
           - name: chat-character-unit-prd
@@ -4686,6 +4697,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_monitoring_*.py
               tldw_Server_API/tests/Claims/test_claims_output_parser.py
+              tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
               tldw_Server_API/tests/Claims/test_claims_prompt_validation.py
               tldw_Server_API/tests/Claims/test_claims_rebuild_*.py
               tldw_Server_API/tests/Claims/test_claims_response_format_contracts.py
@@ -4742,6 +4754,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
               tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
+              tldw_Server_API/tests/Evaluations/test_run_progress_response.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -4837,6 +4850,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
               tldw_Server_API/tests/Workflows/test_workflow_stress.py
               tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
+              tldw_Server_API/tests/Workflows/test_scheduled_workflow_execution.py
           - name: product-workflows-api
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
@@ -4845,6 +4859,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
+              tldw_Server_API/tests/Workflows/test_workflow_expected_user.py
               tldw_Server_API/tests/Workflows/test_workflow_investigation_api.py
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
@@ -5985,6 +6000,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_loaded_world_book_priority.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_manager.py
           - name: chat-character-unit-prd
@@ -6107,6 +6123,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_monitoring_*.py
               tldw_Server_API/tests/Claims/test_claims_output_parser.py
+              tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
               tldw_Server_API/tests/Claims/test_claims_prompt_validation.py
               tldw_Server_API/tests/Claims/test_claims_rebuild_*.py
               tldw_Server_API/tests/Claims/test_claims_response_format_contracts.py
@@ -6163,6 +6180,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
               tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
+              tldw_Server_API/tests/Evaluations/test_run_progress_response.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -6258,6 +6276,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
               tldw_Server_API/tests/Workflows/test_workflow_stress.py
               tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
+              tldw_Server_API/tests/Workflows/test_scheduled_workflow_execution.py
           - name: product-workflows-api
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
@@ -6266,6 +6285,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
+              tldw_Server_API/tests/Workflows/test_workflow_expected_user.py
               tldw_Server_API/tests/Workflows/test_workflow_investigation_api.py
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py
@@ -7397,6 +7417,7 @@ jobs:
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_roleplay_resume_contract.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_stream_persist_lookup.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_appendable.py
+              tldw_Server_API/tests/Character_Chat_NEW/unit/test_loaded_world_book_priority.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_estimate_tokens_shim_removed.py
               tldw_Server_API/tests/Character_Chat_NEW/unit/test_world_book_manager.py
           - name: chat-character-unit-prd
@@ -7519,6 +7540,7 @@ jobs:
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_monitoring_*.py
               tldw_Server_API/tests/Claims/test_claims_output_parser.py
+              tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
               tldw_Server_API/tests/Claims/test_claims_prompt_validation.py
               tldw_Server_API/tests/Claims/test_claims_rebuild_*.py
               tldw_Server_API/tests/Claims/test_claims_response_format_contracts.py
@@ -7575,6 +7597,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
               tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
+              tldw_Server_API/tests/Evaluations/test_run_progress_response.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -7670,6 +7693,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
               tldw_Server_API/tests/Workflows/test_workflow_stress.py
               tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
+              tldw_Server_API/tests/Workflows/test_scheduled_workflow_execution.py
           - name: product-workflows-api
             paths: >-
               tldw_Server_API/tests/Workflows/test_artifact_*.py
@@ -7678,6 +7702,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_runs_*.py
               tldw_Server_API/tests/Workflows/test_webhook_*.py
               tldw_Server_API/tests/Workflows/test_workflow_approval_permissions.py
+              tldw_Server_API/tests/Workflows/test_workflow_expected_user.py
               tldw_Server_API/tests/Workflows/test_workflow_investigation_api.py
               tldw_Server_API/tests/Workflows/test_workflow_preflight_api.py
               tldw_Server_API/tests/Workflows/test_workflow_templates_api.py

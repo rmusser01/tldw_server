@@ -51,7 +51,7 @@ class CircuitBreakerConfig:
         self,
         failure_threshold: int = 5,
         success_threshold: int = 2,
-        timeout: float = 30.0,
+        timeout: float | None = 30.0,
         recovery_timeout: float = 60.0,
         expected_exception: type = Exception,
     ):
@@ -97,7 +97,8 @@ class CircuitBreaker:
 
     Key difference from direct use: ``call()`` wraps in
     ``asyncio.wait_for()`` with the configured *timeout*, preserving the
-    original behaviour for all Evaluations callers.
+    original behaviour for all Evaluations callers. ``None`` leaves deadlines
+    to the orchestrated work while preserving breaker accounting.
     """
 
     def __init__(self, name: str, config: Optional[CircuitBreakerConfig] = None):
@@ -217,6 +218,8 @@ class CircuitBreaker:
             self.stats.consecutive_failures += 1
             self.stats.consecutive_successes = 0
             self.stats.last_failure_time = datetime.now()
+            if self.config.timeout is None:
+                raise
             raise TimeoutError(
                 f"Call through circuit breaker {self.name} timed out "
                 f"after {self.config.timeout}s"

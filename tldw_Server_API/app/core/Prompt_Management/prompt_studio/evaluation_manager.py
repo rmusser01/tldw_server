@@ -332,6 +332,8 @@ class EvaluationManager:
         provider_credentials: ProviderCallCredentials | None = None,
         timeout_seconds: Optional[float] = None,
         on_provider_success: Callable[[], Awaitable[None]] | None = None,
+        name: str | None = None,
+        description: str | None = None,
     ) -> dict[str, Any]:
         """Create and run an evaluation asynchronously."""
         prompt = self.db.get_prompt(prompt_id)
@@ -350,6 +352,8 @@ class EvaluationManager:
             },
             test_case_ids=test_case_ids,
             client_id=self.db.client_id,
+            name=name,
+            description=description,
         )
         eval_id = int(evaluation_record.get("id"))
         return await self.run_evaluation_with_existing_record(

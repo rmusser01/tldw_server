@@ -472,6 +472,7 @@ class MessageCreate(BaseModel):
     tldw_history_branch: StrictBool | None = Field(None, description=HISTORY_BRANCH_FIELD_DESCRIPTION)
     tldw_history_edit_v1: HistoryEditTargetV1 | None = Field(None, description=HISTORY_EDIT_FIELD_DESCRIPTION)
     tldw_history_admission_v1: HistoryAdmissionReferenceV1 | None = None
+    tldw_history_existing_input_v1: HistorySelectionV1 | None = None
 
     @model_validator(mode="after")
     def _validate_history_fields(self) -> "MessageCreate":
@@ -491,7 +492,14 @@ class MessageCreate(BaseModel):
             raise ValueError("Selection requires user role")
         if self.tldw_history_admission_v1 is not None and self.role != "assistant":
             raise ValueError("Admission requires assistant role")
-        if (self.tldw_history_selection_v1 is not None or self.tldw_history_admission_v1 is not None) and not self.id:
+        if self.tldw_history_existing_input_v1 is not None and self.role != "assistant":
+            raise ValueError("Existing input requires assistant role")
+        if sum(value is not None for value in (
+            self.tldw_history_selection_v1, self.tldw_history_admission_v1, self.tldw_history_existing_input_v1
+        )) > 1:
+            raise ValueError("Choose one history write contract")
+        if (self.tldw_history_selection_v1 is not None or self.tldw_history_admission_v1 is not None
+                or self.tldw_history_existing_input_v1 is not None) and not self.id:
             raise ValueError("Versioned messages require a stable id")
         return self
 
@@ -673,6 +681,14 @@ class CharacterChatCompletionPrepRequest(BaseModel):
     Controls pagination and optional user message appending for preparation.
     """
 
+    saved_native_lore: StrictBool = Field(
+        False,
+        description=(
+            "For prompt-preview only: return saved native lore over complete, settled, "
+            "linear text history and the appended user text. Other prompt sections are excluded; "
+            "unsupported controls or history are rejected instead of reading live lore."
+        ),
+    )
     include_character_context: bool = Field(True, description="Include character system context")
     limit: int = Field(100, ge=1, le=1000, description="Max messages to include")
     offset: int = Field(0, ge=0, description="Messages offset")

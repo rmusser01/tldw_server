@@ -30,7 +30,8 @@ const previousPrompt: Prompt = {
   is_system: true,
   createdAt: 1,
   updatedAt: 1,
-  sourceSystem: "workspace"
+  sourceSystem: "workspace",
+  ownerId: "snapshot-owner"
 }
 const snapshot = (
   overrides: Partial<StartupTemplateRolePlayMetadata> = {}
@@ -46,6 +47,9 @@ const snapshot = (
 const createDeps = (
   overrides: Partial<UsePromptTemplatesDeps> = {}
 ): UsePromptTemplatesDeps => ({
+  promptOwnerId: "snapshot-owner",
+  promptOwnerReady: true,
+  promptOwnerBoundaryKey: "snapshot-owner",
   startupTemplatesRaw: "[]",
   setStartupTemplatesRaw: vi.fn(),
   promptLibrary: [previousPrompt],
@@ -71,6 +75,7 @@ const createDeps = (
 })
 const conflictingBundle = (rolePlay: StartupTemplateRolePlayMetadata) =>
   createStartupTemplateBundle({
+    ownerId: "snapshot-owner",
     name: "Imported setup",
     source: "role-play-setup",
     selectedModel: null,
@@ -345,6 +350,7 @@ describe("saved roleplay snapshot authority", () => {
     const deps = createDeps()
     const legacy = createStartupTemplateBundle({
       name: "Legacy",
+      ownerId: "snapshot-owner",
       selectedModel: null,
       character: previousCharacter,
       systemPrompt: "Older text",

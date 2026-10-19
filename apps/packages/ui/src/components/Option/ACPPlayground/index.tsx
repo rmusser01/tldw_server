@@ -5,7 +5,7 @@ import { useStorage } from "@plasmohq/storage/hook"
 import { Drawer, Tabs } from "antd"
 import { Bot, MessageSquare, Wrench, Terminal } from "lucide-react"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
-import { useMobile } from "@/hooks/useMediaQuery"
+import { useMobile, useDesktop } from "@/hooks/useMediaQuery"
 import { useACPSession } from "@/hooks/useACPSession"
 import { ACPRestClient, fetchACPRequest } from "@/services/acp/client"
 import { buildACPClientConfig } from "@/services/acp/connection"
@@ -70,6 +70,7 @@ const normalizeQueryValue = (value: string | null): string | null => {
 export const ACPPlayground: React.FC = () => {
   const { t } = useTranslation(["playground", "option", "common"])
   const isMobile = useMobile()
+  const isDesktop = useDesktop()
 
   // Pane state with persistence
   const [leftPaneOpen, setLeftPaneOpen] = useStorage(ACP_LEFT_PANE_KEY, true)
@@ -79,6 +80,13 @@ export const ACPPlayground: React.FC = () => {
   // Mobile drawer state
   const [leftDrawerOpen, setLeftDrawerOpen] = React.useState(false)
   const [rightDrawerOpen, setRightDrawerOpen] = React.useState(false)
+
+  React.useEffect(() => {
+    if (isMobile || isDesktop) {
+      setLeftDrawerOpen(false)
+      setRightDrawerOpen(false)
+    }
+  }, [isMobile, isDesktop])
 
   // Mobile tab state
   const [activeTab, setActiveTab] = React.useState<"sessions" | "chat" | "tools" | "workspace">("chat")
@@ -113,6 +121,7 @@ export const ACPPlayground: React.FC = () => {
   const cleanupExpiredSessions = useACPSessionsStore((s) => s.cleanupExpiredSessions)
   const workspaceTabLabel = t("playground:acp.workspace.title", "Workspace")
   const [isHydratingSessions, setIsHydratingSessions] = React.useState(false)
+  const [completedTurnRevision, setCompletedTurnRevision] = React.useState(0)
 
   const restClient = React.useMemo(
     () =>
@@ -194,8 +203,8 @@ export const ACPPlayground: React.FC = () => {
     approvePermission,
     denyPermission,
   } = useACPSession({
-    sessionId: activeSessionId ?? undefined,
-    autoConnect: Boolean(activeSessionId && connectionConfig),
+    sessionId: activeSession?.runtimeAvailable === false ? undefined : activeSessionId ?? undefined,
+    autoConnect: Boolean(activeSession && activeSession.runtimeAvailable !== false && connectionConfig),
     onConnected: (message) => {
       updateSessionState(message.session_id, "connected")
       setGlobalError(null)
@@ -226,8 +235,12 @@ export const ACPPlayground: React.FC = () => {
       })
     },
     onPromptComplete: (message) => {
+      addUpdate(message.session_id, { type: "prompt_complete", data: {
+        raw_result: message.raw_result
+      } })
       clearPendingPermissions(message.session_id)
       updateSessionState(message.session_id, "connected")
+      if (message.session_id === activeSessionId) setCompletedTurnRevision((revision) => revision + 1)
     },
     onError: (message) => {
       if (message.session_id) {
@@ -236,6 +249,11 @@ export const ACPPlayground: React.FC = () => {
       setGlobalError(message.message)
     },
   })
+
+  const submitPrompt: typeof sendPrompt = (messages) => {
+    sendPrompt(messages)
+    if (activeSessionId) addUpdate(activeSessionId, { type: "prompt_start", data: {} })
+  }
 
   // Cleanup expired sessions on mount
   useEffect(() => {
@@ -344,10 +362,10 @@ export const ACPPlayground: React.FC = () => {
     return () => {
       cancelled = true
     }
-  }, [activeSessionId, restClient, applySessionDetail, applySessionUsage])
+  }, [activeSessionId, restClient, applySessionDetail, applySessionUsage, completedTurnRevision])
 
   const handleToggleLeftPane = () => {
-    if (isMobile) {
+    if (!isDesktop) {
       setLeftDrawerOpen(!leftDrawerOpen)
     } else {
       setLeftPaneOpen(!leftPaneOpen)
@@ -355,7 +373,7 @@ export const ACPPlayground: React.FC = () => {
   }
 
   const handleToggleRightPane = () => {
-    if (isMobile) {
+    if (!isDesktop) {
       setRightDrawerOpen(!rightDrawerOpen)
     } else {
       setRightPaneOpen(!rightPaneOpen)
@@ -474,7 +492,7 @@ export const ACPPlayground: React.FC = () => {
           updates={activeSession?.updates ?? []}
           connect={connect}
           error={globalError ?? websocketError}
-          sendPrompt={sendPrompt}
+          sendPrompt={submitPrompt}
           cancel={cancel}
           reconnectInfo={reconnectInfo}
         />
@@ -561,8 +579,8 @@ export const ACPPlayground: React.FC = () => {
   return (
     <div className="relative flex h-full flex-col bg-bg text-text">
       <ACPPlaygroundHeader
-        leftPaneOpen={!!leftPaneOpen}
-        rightPaneOpen={!!rightPaneOpen}
+        leftPaneOpen={isDesktop ? !!leftPaneOpen : leftDrawerOpen}
+        rightPaneOpen={isDesktop ? !!rightPaneOpen : rightDrawerOpen}
         onToggleLeftPane={handleToggleLeftPane}
         onToggleRightPane={handleToggleRightPane}
         acpHealthy={acpHealthy}
@@ -612,7 +630,7 @@ export const ACPPlayground: React.FC = () => {
             updates={activeSession?.updates ?? []}
             connect={connect}
             error={globalError ?? websocketError}
-            sendPrompt={sendPrompt}
+            sendPrompt={submitPrompt}
             cancel={cancel}
             reconnectInfo={reconnectInfo}
           />
@@ -668,7 +686,6 @@ export const ACPPlayground: React.FC = () => {
                 label: t("playground:acp.tools", "Tools"),
                 children: renderAcpToolsPanel({
                   onHide: () => {
-                    setRightPaneOpen(false)
                     setRightDrawerOpen(false)
                   },
                 }),

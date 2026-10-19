@@ -2438,7 +2438,7 @@ async def check_sources_now(
                 try:
                     refreshed = db.get_source(source_id)
                     status_value = str(getattr(refreshed, "status", "") or "").lower()
-                    if status_value in {"error", "deferred", "forum_disabled"}:
+                    if status_value.startswith(("error", "partial:")) or status_value in {"deferred", "forum_disabled"}:
                         active_results[source_id] = SourceCheckNowItem(
                             source_id=source_id,
                             status="error",

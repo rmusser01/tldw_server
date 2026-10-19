@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 
 type RgbTuple = [number, number, number]
@@ -45,7 +46,10 @@ const contrastRatio = (foreground: RgbTuple, background: RgbTuple): number => {
 
 describe("Knowledge QA contrast token audit", () => {
   const css = readFileSync(
-    resolve(process.cwd(), "src/assets/tailwind-shared.css"),
+    path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../../../../assets/tailwind-shared.css"
+    ),
     "utf8"
   )
   const lightTokens = parseSection(css, ":root")

@@ -26,13 +26,21 @@ const makeForm = () => {
 const makeWebDeps = (ready: boolean, busy: boolean, imageCommand = false) => {
   const test = makeForm()
   const deps: UsePlaygroundSubmitDeps = {
+    captureDraftOwnership: () => {
+      const revision = test.form.getRevision()
+      const { message, image } = test.form.values
+      const isCurrent = () => test.form.getRevision() === revision && test.form.values.message === message && test.form.values.image === image
+      return { isCurrent, isOwnerCurrent: isCurrent, normalizeMessage: (next: string) => isCurrent() && next === message }
+    },
+    captureHistorySelection: () => () => true,
+    chatMode: "normal",
     form: test.form, beginPromptAssistReset: vi.fn(() => 1), restorePromptAssistAttempt: vi.fn(), markPromptAssistAttemptSaved: vi.fn(),
     isSending: busy, isConnectionReady: ready, draftReady: true, webSearch: false, compareModeActive: false, compareSelectedModels: [], selectedModel: "gpt-test",
     fileRetrievalEnabled: false, ragPinnedResults: [], selectedDocuments: [{ id: "keep-tab" }], uploadedFiles: [], currentContextSnapshot: {},
     conversationTokenCount: 0, characterContextTokenEstimate: 0, pinnedSourceTokenEstimate: 0, resolvedMaxContext: 8000, jsonMode: false,
     openUIRequestMode: false, sendMessage: vi.fn(async () => ({ status: "submitted" })), clearOpenUIRequestMode: vi.fn(), clearSelectedDocuments: vi.fn(), clearUploadedFiles: vi.fn(),
     textAreaFocus: vi.fn(), setLastSubmittedContext: vi.fn(), estimateTokensForText: () => 1,
-    resolveSubmissionIntent: vi.fn(() => ({ message: "NORMALIZED", combinedMessage: "NORMALIZED", handled: imageCommand, isImageCommand: imageCommand, imageBackendOverride: "test" })),
+    resolveSubmissionIntent: vi.fn((message: string) => ({ message, combinedMessage: message, handled: imageCommand, isImageCommand: imageCommand, imageBackendOverride: "test" })),
     queueSubmission: vi.fn(() => ({ id: "queued" })), validateSelectedChatModelsAvailability: () => true, compareModelsSupportCapability: () => true,
     notificationApi: { info: vi.fn(), error: vi.fn(), warning: vi.fn() }, t
   }
@@ -120,12 +128,16 @@ findHelper(ast)
 if (!directHelper) throw new Error("Missing actual compact preparation helper")
 const helperSource = ts.transpileModule(`const {
   connectionReadyRef, connectionGenerationRef, sidepanelDocumentPreparationRef, resolveSubmissionIntent, notification, t, selectedDocuments, contextFiles,
+  captureDraftOwnership, draftReady, useStoreMessageOption,
   stopListening, selectedModel, availableChatModelIds, form, ensureEmbeddingModelAvailable, conversationContextComposition, history,
   submitDispatch, beginPromptAssistReset, textAreaFocus, markPromptAssistAttemptSaved, clearDraft, clearSelectedDocuments, setContextFiles,
   setKnowledgeMentionActive, restorePromptAssistAttempt, knowledgeMentionRevision, clearSubmittedDocuments, captureCompletionGuard,
   currentDocumentSelectionKeyRef, greetingHistorySelection, isSavedRoleplayConversation, captureChatDispatchSource, captureActorSceneSend,
   nativeCharacterPreflightMessage, chatMode, webSearch, selectedSystemPrompt, toolChoice, pageContextActive
 } = scope;
+const activeSubmissionRef = { current: null };
+const contextRevisionRef = { current: { key: "fixture-context", revision: 0 } };
+const contextKeyFor = () => "fixture-context";
 ${directHelper.getText(ast)}
 return sendCurrentFormMessage;`, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
 const compactDirect = new Function("normalizeChatModelId", "findUnavailableChatModel", "normalizeChatSubmitResult", "isChatSubmitSuccess", "scope", helperSource)
@@ -136,7 +148,7 @@ it.each([false, true])("actual compact context preparation does not clear or sen
   const test = makeWebDeps(true, false)
   const dispatcher = renderHook(() => useComposerSubmit({ sendMessage: test.deps.sendMessage }))
   const scope = {
-    ...test.deps, notification: test.deps.notificationApi, contextFiles: [], history: [], availableChatModelIds: new Set(["gpt-test"]),
+    ...test.deps, useStoreMessageOption, notification: test.deps.notificationApi, contextFiles: [], history: [], availableChatModelIds: new Set(["gpt-test"]),
     connectionReadyRef: { current: true }, connectionGenerationRef: { current: 0 }, sidepanelDocumentPreparationRef: { current: null },
     stopListening: vi.fn(async () => {}), ensureEmbeddingModelAvailable: vi.fn(async () => true),
     conversationContextComposition: { composeForSend: vi.fn(() => waiting) }, submitDispatch: dispatcher.result.current.dispatch,
@@ -228,11 +240,13 @@ it("actual Compact saved Roleplay preparation uses literal input without reading
     serverChatAssistantKind: "character",
     temporaryChat: false
   })
+  test.form.values = { message: "  Exact literal\n", image: "" }
   const dispatcher = renderHook(() =>
     useComposerSubmit({ sendMessage: test.deps.sendMessage })
   )
   const scope = {
     ...test.deps,
+    useStoreMessageOption,
     notification: test.deps.notificationApi,
     selectedDocuments: [],
     contextFiles: [],

@@ -568,10 +568,7 @@ const webTransportRuntimeFor = (baseURL: string | undefined) => ({
     const methodUp = context.method.toUpperCase();
     const needsCsrf = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(methodUp) && !xApiKey;
     if (needsCsrf && !context.shouldSkipAuth) {
-      const match = document.cookie.match(
-        new RegExp('(?:^|; )csrf_token=([^;]*)')
-      );
-      const csrf = match ? decodeURIComponent(match[1]) : null;
+      const csrf = getCookie('csrf_token');
       if (csrf && !existingHas('x-csrf-token')) {
         headers['X-CSRF-Token'] = csrf;
       }

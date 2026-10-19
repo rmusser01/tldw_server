@@ -1,0 +1,1390 @@
+# Remaining UAT bugs and PR3084 integration
+
+Task: TASK-13260.278.18.83.45. User authorized remaining repairs then rebase on 2026-10-06.
+Candidate starts at dev 17c47c49d857a2a1fd1e58602b704213760a4a85.
+ADR required: no. Restore existing migration and retry contracts; retain ADR-003, ADR-059 and ADR-064.
+
+
+## Current UAT tracking index — 2026-10-18
+
+**Active workflow: C05 — ACP session, tool permission and workspace boundaries.** 25/43 selected accepted,18open. C04 selected gates complete: real native README/retention, cancellation, all four SQLite/PostgreSQL single/multi compositions, Alice/Bob isolation, human UX and independent review. Historical failures retained; SQLite used Stop-state client, PostgreSQL used activity repair; orchestration stays per-user SQLite. Original API24302/24284 ready23.228s and activity frontend7463/7414/buildSKfCB34iD2vfVQaR_VOoX retained; final Admin/originalChat/draft/fullrecords restored with zero protected writes/inference. C05 inventory begins before admissions. Frozen523ef+WIP/unpublished/notlatestdev; broaderreleasegatesopen,heartbeatPAUSED. The active C05 execution plan remains only in the main UAT worktree and is excluded from this publication snapshot.
+
+The43 IDs below are existing workflow families in [the release catalog](../../apps/tldw-frontend/scripts/live-tier-uat/release-catalog-data.mjs), with426 planned variants. C01, C02 and C03 selected acceptances are closed;19 families remain open. Selected acceptance does not close broader release gates or convert historical failed runs into passing runs.
+
+- [TASK-13260](../../backlog/tasks/task-13260%20-%20Run-fresh-single-user-and-multi-user-UAT-across-core-workflow-loops.md): existing overall single-user/multi-user UAT, In Progress.
+- [TASK-13260.281](../../backlog/tasks/task-13260.281%20-%20Correct-root-causes-from-resumed-release-UAT-before-continuing.md): existing resumed-UAT root-cause work, In Progress.
+- [TASK-13260.278.18.83.45](../../backlog/tasks/task-13260.278.18.83.45%20-%20Diagnose-repeated-macOS-Prompt-Studio-post-summary-shutdown-UAT556.md): current repair/reproduction/check/live-outcome notes, In Progress. Its historical title is narrower than the current authorized scope.
+- C02 historical required-empty unit: [retained earlier scope](IMPLEMENTATION_PLAN_uat_required_empty_variables_20261009.md). Its results and failed outcomes remain historical; selected functional/recovery/mode qualification and human UX acceptance are recorded in the [C02 closure](#c02-prompt-studio-selected-closure).
+- C03 historical provenance unit: [saved result provenance/export/history](IMPLEMENTATION_PLAN_uat_c03_result_provenance_20261009.md). Local causal repair and account-cache follow-up passed the affected UI/WebUI checks and both typechecks, with clear independent review. At that earlier checkpoint, live load/export was blocked by a failed frontend build and PostgreSQL by a read-only fixture filesystem; these are historical limits, not freshly checked current blockers. The selected C03 workflow is closed; current evidence is in the selected closure below and official task notes. Its completed owned20261018 plan was removed after independent review. [TASK-13260.278.5.2](../../backlog/tasks/task-13260.278.5.2%20-%20Require-a-completed-two-example-exact-match-evaluation-in-C03.md) is Done for its earlier narrow two-example criterion, not full C03 acceptance.
+
+| ID | Existing workflow | Selected functional status |
+|---|---|---|
+| A01 | Fresh setup and first Chat | FUNCTIONAL ACCEPTED on frozen523 candidate: four principal cells, fresh/manual clean-installed components, all applicable recoveries including real SQLite/PG failed-provider to working Retry, canonical save/reload/reopen/source action and human UX. Rebase/release-wide qualification remains open; full173 storage/API timeout unqualified. |
+| A02 | Login, persistence, logout and recovery | FUNCTIONAL ACCEPTED on frozen523; four-cell scoped access/recovery matrix and human UX. Controlled expiry-policy and release limits retained in its plan. |
+| A03 | Multi-turn Chat, stream controls and Retry | FUNCTIONAL ACCEPTED on frozen523 by explicit recorded composition; context/history/controls/Retry and human UX. Failed provider samples and extra shutdown stress stay unaccepted. |
+| A04 | Image attachments and model capability | FUNCTIONAL ACCEPTED on frozen523; four-mode vision/persistence plus shared client recovery controls and human UX. Broader engineering/release scope stays open. |
+| A05 | File/URL ingestion and background processing | FUNCTIONAL ACCEPTED on frozen523 by recorded composition and human UX; raw spelling mismatch explicitly waived, TASK-13676 To Do. Failed histories and B05 accuracy remain separate. |
+| A06 | Media search, batch actions, deletion and restore | FUNCTIONAL ACCEPTED on frozen523 by explicit four-cell composition; exact source/content/versions/metadata restoration, permission denial, actual Admin lifecycle and separate permanent-disposable variant, causal restricted-PG media.update seed repair and human UX. Failed histories/common engineering/release gates retained. |
+| A07 | RAG, citations and grounded Chat | FUNCTIONAL ACCEPTED on frozen523 by explicit four-cell composition and human UX; cited source/loaded+cold handoff/Chat+price/canonicalreload/stale-link recovery, causal invalid-permalink and selected-timeout repairs qualified. Historical failures remain failed; unready vector/hybrid/reranking and common engineering/release scope remain unaccepted. |
+| A08 | Notes lifecycle, search and export | FUNCTIONAL ACCEPTED on frozen523+WIP by explicit SQLite/PostgreSQL single/multi composition and human UX; draft-transition repair verified, failed first runs preserved. Common gates remain open; [A08 plan](IMPLEMENTATION_PLAN_uat_a08_notes_lifecycle_20261014.md). |
+| A09 | Chat to Note/card and provenance | FUNCTIONAL ACCEPTED by explicit four-mode composition and human UX yes2026-10-15; firstfailures retained. [A09 plan](IMPLEMENTATION_PLAN_uat_a09_chat_knowledge_provenance_20261014.md). |
+| A10 | Generate, review and manage cards | FUNCTIONAL CHECKS COMPLETE; four-mode real five-card generation, ownership/provenance, management/reload; original-mode JSON roundtrip and partial-save recovery verified. Human UX accepted2026-10-15; failed original runs preserved. [A10 plan](IMPLEMENTATION_PLAN_uat_a10_five_generated_cards_20261015.md). |
+| A11 | Study scheduling, practice and analytics | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED; original lineage, once-only reviews, practice/rerate/lapse analytics, mixed/undecked recovery, scoped scheduler/conflict/source/images; four-mode generated-study composition. Engineering/release closeout open. [A11 plan](IMPLEMENTATION_PLAN_uat_a11_study_scheduling_analytics_20261015.md). |
+| A12 | Settings and provider readiness | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED; two causal client repairs, settings/scope/advanced behavior, six recovery families and four-mode composition. Failed first attempts and common engineering/release gates retained. [A12 plan](IMPLEMENTATION_PLAN_uat_a12_settings_provider_readiness_20261015.md). |
+| B01 | Character create/edit/import/export | SELECTED ACCEPTED; four database/auth modes, real JSON/PNG roundtrip, deletion/conversation retention, recovery and three causal shared-UI fixes validated; human UX accepted. Broad UI types/common integration gates remain open. [B01 plan](IMPLEMENTATION_PLAN_uat_b01_character_lifecycle_20261015.md). |
+| B02 | Character conversation and ordinary Chat | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit four-mode composition, including exact TestBot/ordinary transitions, canonical existing-question recovery, stale readiness, real Stop/Interrupted reload and PG controlled first-response delay. Both SQLite/cancellation/strict custom-format operators retain FAILED; native receipt and diagnostic limits remain explicit. Common engineering handoff open. [B02 plan](IMPLEMENTATION_PLAN_uat_b02_character_chat_transitions_20261015.md). |
+| B03 | Worldbooks and dictionary context | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit four-mode composition; corrected PGmulti Alice33/Bob34 both native turns/reload/owner isolation passed, primary context/dictionary/lifecycle/overlap/recovery and full original handback passed. Earlier failures retained, unknown historical timeout cause, entry-level CAS unsupported and common engineering gates open. [B03 plan](IMPLEMENTATION_PLAN_uat_b03_worldbooks_dictionary_context_20261015.md). |
+| B04 | TTS voices and playback | SELECTED FUNCTIONAL + HUMAN UX/LISTENING ACCEPTED; four causal repairs, real playback/export/reopen/history/cancel/Retry and four-mode owner isolation passed; both actual listening verdicts accepted and original handoff restored. Earlier failures and common engineering gates retained. [B04 plan](IMPLEMENTATION_PLAN_uat_b04_tts_playback_20261016.md). |
+| B05 | STT files and microphone | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit four-mode composition; real file/microphone, spelling waiver, source/Notes/history/export, corrupt/silence/offlineRetry/Clear/permission/oversize and missing-model recovery pass. PG STT schema causal repair/live multi-user and original-profile real200 qualified; exact canonical Chat/draft handback0inference. Earlier failures/common engineering gates retained. [B05 plan](IMPLEMENTATION_PLAN_uat_b05_file_microphone_transcription_20261016.md). |
+| B06 | Audio Studio render/export | SELECTED FUNCTIONAL + HUMAN UX/LISTENING ACCEPTED. Four speech mode composition, actual ACE-Step1.5 Music generation/render/export15s and exact originalChat/draft handback0inference passed. Prior failures and common engineering gates retained. [Recorded closure](#b06-selected-closure). |
+| B07 | Watchlist scheduling and notifications | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED2026-10-17; actual schedule/disabled interval/notifications, five scoped causal repair units, four modes/ownership/restart/recovery and exact original Chat handback passed. Failed histories/common gates retained. [Recorded closure](#b07-selected-closure). |
+| B08 | Collections and sharing | Accepted2026-10-17; browser/account-local membership, recovery and source retention; sharing not offered. [Closure](#b08-collections-membership-and-retention-selected-closure). |
+| B09 | Content review and reanalysis | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED2026-10-17; four modes, source-preserving draft/analysis recovery and original handback passed. [Closure](#b09-content-review-and-reanalysis-selected-closure). |
+| C01 | Prompt library and applied Chat | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit four-mode/recovery composition; capitalization-only waiver and human-approved stronger Prompt, real administrative provider recovery, saved rows/reload/owner isolation and original handback pass. Earlier failures retained. [Closure](#c01-prompt-library-and-applied-chat-selected-closure). |
+| C02 | Studio variables, tests and revisions | FUNCTIONAL/UX ACCEPTED; four-mode composition/recovery, immutable provenance and repaired generated candidates qualified. No optimization quality-improvement claim. [Closure](#c02-prompt-studio-selected-closure). |
+| C03 | Evaluation datasets and single/batch results | Accepted; selected functional/mode/recovery/UX checks and original handback passed; independent closure CLEAR. Optional saved-min_score defaults remain not live-qualified after operator STOP. |
+| C04 | Agent registry and completed task | Accepted selected scope; real completion/reload, Stop/recovery, all four mode compositions, account isolation, human UX and final handback passed. Historical failures and release limits retained. |
+| C05 | ACP permissions and workspace | In Progress; existing agent/controlled worker and disposable workspace inventory before live permission actions. |
+| C06 | Writing review and saved/exported revision | Open |
+| C07 | Repository text bundle | Open |
+| C08 | Admin account, role and quota | Open |
+| C09 | Health, backup, restore and maintenance | Open |
+| C10 | Model runtime admin and inference | Open |
+| C11 | MCP discovery and scoped execution | Open |
+| C12 | Workflow scheduled/monitored result | Open |
+| X01 | Upgrade without data loss | Open |
+| X02 | Account/browser isolation | Open |
+| X03 | Usability, accessibility and responsive UI | Open |
+| X04 | Extension capture and sidepanel continuity | Open |
+| S01 | Quiz and study assistance | Open |
+| S02 | Chatbooks and portable backup | Open |
+| S03 | Artifact editors | Open |
+| S04 | Research and source workspace | Open |
+| S05 | Moderation and claims review | Open |
+| S06 | Specialized tools and discovery | Open |
+
+Heartbeat stays PAUSED; no tracking-only commit, new task, window or proof artifact follows from this index.
+
+## Stage 1: Repair cold audio reporting and V1 retry disposition
+**Goal**: Reporting-first legacy usage migrates before daily/monthly reads; V1 outcomes follow real WorkerSDK/Jobs retry and quarantine disposition, retaining cancellation authority.
+**Success Criteria**: Real causal red then green, retained ownership/lease/cancellation/storage boundaries, affected checks and independent source review.
+**Tests**: Cold SQLite and official isolated PostgreSQL reporting before admission, repeated migration and finite/null/zero reporting; real Jobs transient ordinary exception then permitted retry, typed retryable exhaustion and configured quarantine then terminal slot/batch and legitimate new Retry; unchanged backend quarantine cutoff policies; disabled SDK retries and PostgreSQL zero-backoff with an explicit cutoff of one.
+**Status**: Complete
+
+## Stage 2: Combine and rebase reviewed work
+**Goal**: Combine new fixes, committed bf8 repairs, six qualified readers and published fe117 repairs onto fresh current dev, preserving original worktrees and all published behavior.
+**Success Criteria**: Exact source/ref and owned patch guards, resolved conflicts without assertion loss, supported combined API export/types, scoped lint/security and final actual/staged review.
+**Tests**: Genuinely affected incoming suites and new regressions; preserve VN call_soon_threadsafe/release_observed/direct-await/finally-drain oracle, audio finite quota/cache/DSN cleanup, offline accounting mock and causal guard.
+**Status**: In Progress
+
+## Stage 3: Qualification and acceptance
+**Goal**: Publish with normal hooks/exact lease and exact human-summary readback; satisfy current-head hosted and real UAT/native/installer gates before merge.
+**Success Criteria**: Final candidate checks and actual acceptance evidence; exhausted controls remain stopped unless separately justified by a new repair and authorized bounded scope.
+**Tests**: 43 UAT/15 runtime bug acceptance, native first-import and whole-process Prompt shutdown, installer 53/55/56, fresh runtime/client/principal context, applicable queue-platform acceptance. After a qualified source freeze, use the approved fresh private runtime/build/browser cell within the 120-second startup and 600-second build caps, preserving previous runtimes. No queue mutation, model/environment reconstruction or proof bundles.
+**Status**: In Progress
+
+## Current qualification
+
+- Local rebase completed: 143282af365cd8b462f842c6b8907d6120ce0ea7 on guarded dev 7ba48f251ec47a1e0bb680f49f9b7d86ec2b988d; 14 committed patches compare equal to the previous range. Five-path owned WIP is byte-identical, and only two incoming docs/task paths changed the committed tree. Unpublished.
+- Independent integrated-source review clear; published main/control-plane/Sync/lifetime files, VN loop-release oracle, audio assertions, offline guards/accounting regressions and task history preserved.
+- Canonical API export/types and final drift check passed: 2,107 paths, 3,248 schemas, exactly three published descriptions added.
+- 133 changed Python files compile. Focused 49-path incoming production and 28-path owned Python Bandit/Ruff comparisons have no new production or unpublished findings; eight dev-relative test assertions are retained published B101 warnings.
+- First 27-module VN/storage batch hit the unchanged 600-second outer limit and is unqualified. Smaller affected checks retain the limit; no fourth V1 production revision is authorized.
+- Human approved the separate Python setup, frozen current-lock frontend install and persistent heartbeat metadata save. Both installations completed; metadata saving preserves PAUSED status. No API start/restart, build, browser/native acceptance, queue mutation or merge follows from these approvals.
+- All broader UAT/native/installer acceptance and retained STOPs remain open. Stage 2 stays In Progress and Stage 3 Not Started.
+
+- New Jobs fixture probe correction: standard asyncio entry-point name replaces duplicate module-path registration; original guards preserved, corrected four-case qualification passed (4 passed), independent review clear. The eight-file run's 271 passes remain qualified within that run; the unrelated fourteen-file timeout is unqualified.
+
+- Five smaller AuthNZ modules passed 226 cases. The first smaller VN/storage batch passed 94 and failed seven terminal-disposition parameters. Reviewed test-only WorkerConfig(retry_on_exception=False) setup at two constructors preserves every assertion; those 21 parameters passed, with clear independent source review, Ruff lint and no new scoped Bandit findings. Production repair remains unchanged and at its three-attempt cap.
+
+- Seven VN generation/receipt/lease modules passed 321 cases; seven backend consumer modules passed 296 with normal Evaluations opt-in. Remaining VN recovery, AuthNZ generated-file and quota/reporting checks subsequently passed; the approved frozen current-lock frontend installation is now complete; affected client qualification follows. No hosted or real UAT/native/installer acceptance is claimed.
+
+- Remaining selected backend batches passed: VN recovery 272, AuthNZ generated-file integration 79, quota/reporting 58, usage/header/ratchet 53; no failures/skips reported in these four runs. Reviewed dev7ba changes only two foreign docs/task paths. Guarded autostash rebase preserved fourteen commits and five-path WIP before the pending test-fix commit.
+
+- The approved Python3.12 application environment disappeared after these runs; no reconstruction or additional application execution. Existing primary Python3.11 is used only for standalone backlog-py (floor3.10), plan editing and static hooks. The new separate Python setup and frozen frontend installation are complete; real UAT/native/installer acceptance and hosted qualification remain open.
+
+- The hook/commit blocker is resolved by the separately approved Python3.12.13 environment with pre-commit4.6.2. Normal five-path hooks and an updated staged prose review still precede commit; no lower-version or hook bypass. All API/build/browser/native/installer/queue caps remain.
+
+- Approved setup outcome: Python installation natural0/251.231s, 130 applicable declared requirements missing0/mismatch0, pip check clean and exact candidate module binding; frozen Bun installation natural0/81.430s, 3,640 packages, unchanged lockfile, corrected dependency versions and identical real React resolution. Affected UI/WebUI unit qualification starts with 116 changed UI modules and two VN frontend modules. This does not accept runtime UAT or authorize further startup/build.
+
+- Normal five-path pre-commit qualification passed naturally0/2.224s with pre-commit4.6.2; syntax/task/whitespace/security and HTTP/legacy-body guards passed. Wizard-only Ruff/Black hooks had no files; prior scoped lint/security remains recorded. Three test-fix bodies are unchanged, and updated prose receives final staged review before commit. Changed UI unit qualification is running separately.
+
+- Current local committed candidate is 3e61cc2656e6d4f726ed3e3dc61f6519a2017343, fifteen owned commits on reviewed dev7ba. The normal retry-fixture commit exactly matched the reviewed index (five paths,52 insertions/one deletion); source branch remains unpublished. The following frontend WIP is separate and unstaged.
+- Approved automation metadata save completed with exact188432-character prompt readback; PAUSED/name/schedule/kind/thread fields preserved. This is metadata persistence, not automation resume.
+- Changed UI116 unit files completed2,385 tests:2,376 passed/nine failed, natural1/193.960s. Synthetic valid device configuration through existing mocked storage repaired five cache-memory cases; all five passed1.864s, no production/authority/cache/assertion changes. Both VN frontend suites passed317 cases85.998s under the normal Web configuration.
+- Four default5000ms failures reproduced unchanged. Reviewed test-only setup corrections removed unnecessary Conversation mounts for numeric cases, narrowed actual Save/reset queries with visibility/access-name checks, and used guarded real Ctrl+A for the footer setup. Original assertions retained by TypeScript AST (9/56/100); parse0. Proper ESLint baseline/current diagnostics identical, including inherited Media no-require error and42 warnings; no ignored files. Bandit is N/A for TypeScript/prose-only changes.
+- Final bounded complete two-suite run:172 tests164 passed/eight failed/no pending, natural1/85.376s. Original two numeric cases and template remount passed1.005/1.015/1.790s; footer timed out5.608s, third attempt consumed/STOP. Seven other Settings failures remain unqualified; oversized operator reporting truncated the detailed inventory, so no exhaustive failure/cause claim. No fourth correction or unchanged replay. Preserve both unqualified test edits as WIP; do not include them in a source commit/publication.
+- Unaffected Web114 unit files and the two normal configured TypeScript checks are running. The two capped suites remain excluded/open. All real43 UAT/15 bugs/native/installer/runtime/queue and publication gates remain open.
+
+- Web114 qualification completed 2,213 cases:2,184 passed/29 failed/no pending, 206.969s. All failures were one background-authority fixture that passed UI. Exact afterEach spy restoration repaired the leak: complete file47 passed under Web5.067s and UI3.555s, no pending/unhandled. All220 assertion texts unchanged, parse0 and ESLint0/0; independent source review clear. Existing scope/worker/timeout guards retained.
+- Four uncapped test fixtures remove nine incoming lint errors: exact empty-tab-result type, effect-based committed Knowledge QA probe handles, and distinct stable-per-mount real/fake query hook implementations. All original606/65/94/24 assertions unchanged, parse0;139 passed UI16.662s and139 passed Web17.399s. No new warning count; two inherited stage3 require-import errors remain. The reading-context incoming require error remains with capped unqualified WIP. The feature-flags error was shifted existing source, not a new error.
+- Full configured direct UI/Web TypeScript checks aborted before diagnostics. A second bounded UI diagnostic captured exact default-heap exhaustion after80.291s. The repository-declared WebUI typecheck script has an existing8192MB budget and is running with incremental false and the unchanged600s outer limit. No compiler pass is claimed and no larger timeout, build, application import or runtime action follows.
+- Bounded recovery of38 affected lint-file reports found139 unmatched diagnostic entries under first-line normalization, including129 warnings. This is diagnostic inventory, not complete semantic attribution of all242 files or proof of production defects. Broad frontend lint remains non-clear.
+- Six qualified fixture edits may be committed with owned tracking after final actual/staged review and normal hooks; the two Settings/reading-context timeout edits remain unstaged/unqualified at their retained STOP. The candidate and all broader acceptance gates remain unpublished/open.
+
+- Declared WebUI typecheck qualified naturally0/84.137s with zero diagnostics using its existing8192MB package-script budget and no incremental/emitted output. Earlier direct default4096MB aborts remain historical unqualified operator invocations. Final allowed UI configuration attempt uses the same declared budget with its unchanged tsconfig; result pending, no further retry if unqualified. Independent actual source reviews of all six eligible fixtures are clear.
+
+- Final UI compiler attempt completed naturally2/111.364s with365 diagnostics at the repository8192MB budget. Only the first20 bodies are retained; no complete365-body inventory or baseline/new attribution. Third attempt consumed/STOP; no fourth compiler run without distinct approval. Declared WebUI remains qualified zero diagnostics. Broad UI lint, two timeout suites, real43UAT/15bugs/native/installer/publication/merge remain open.
+- Local fixture commit scope is exactly six qualified test files plus this plan and the official task. It excludes Settings/reading-context WIP; applicable unit checks/source reviews are qualified, with inherited fixture lint and broad compiler limits explicit. Normal hooks and independent exact staged review precede commit; no push or acceptance follows.
+
+
+## Approved UI recovery ledger
+
+Latest human `continue, approved` grants both pending ONE recovery cycles. Both cycles are consumed. Final UI typing and UI/Web runtime qualification failed; the typing recovery is stopped. A distinct further Settings cycle was asked once and remains pending. No API/build/browser/native/installer/queue or publication action follows. Existing task and this plan carry the ledger; no duplicate diagnostic or review bundles.
+
+| Task | Contract and overlap | State |
+| --- | --- | --- |
+| Timeout fixture recovery | Real Settings form/QueryClient and Media authority/assertions; default5s cases/600s command | UI172 total166 passed/six Settings visibility failures; Web172 total165 passed/seven Settings failures; Media142 passed both before later real-div fixture change; further Settings cycle pending |
+| Fixture typing recovery | Existing UI types/config, retain every behavioral assertion; reading-context overlaps qualified footer edits | 92 fixture/helper paths reviewed; parse0; scoped lint old2errors/544warnings, current0errors/544warnings; UI compiler11 fixture diagnostics; Web compiler0; final runtime UI2801passed/16failed, Web2783passed/34failed |
+| Production typing diagnosis | 32 remaining errors in five files; actual storage/config/response contracts and ownership guards | Four minimal storage/config/serde/upload source changes independently reviewed; parse0/lint0errors/109 unchanged warnings; matching malformed-org-ID401 regression original failed/corrected passed; no production compiler diagnostics |
+| Review and final qualification | Fresh actual and staged review, normal hooks, one final compiler validation at declared8192MB/600s | Compiler/runtime qualification failed; no staging/commit/publication. Settings separately pending; all broader acceptance gates open |
+
+Ruling: Reuse the owned task/plan for subagent-development records instead of duplicate workspace/brief/report/proof files, because the human prohibited recreated proof bundles. Cost if insufficient: concise task records may require later source re-reading; no execution acceptance is inferred.
+
+
+### Final approved typing-cycle outcome — 2026-10-07
+
+Declared UI compiler: exit2/70.171s, eleven fixture diagnostics in eight files, zero production/non-file diagnostics. Declared Web compiler: exit0/45.113s, zero diagnostics. Existing8192MB budget, unchanged configs, nonincremental and600s outer limits retained.
+
+Final102-file runtime checks: UI2817total/2801passed/16failed/0pending,221.613s; Web2817total/2783passed/34failed/0pending,71.657s. No unhandled or suite failures. UI sixteen-record inventory is complete, including seven SourceView failures. Web structured reporting was truncated; only23 valid failure headers remain and11 identities are missing. No complete34-case inventory, unchanged diagnostic replay, full-project or real UAT claim.
+
+Introduced fixture defects are recorded: credential generic mocks reference unimported vi; promptName inputs and exact expected failed tasks disagree. Source-supported stale contracts concern canonical single-user credential metadata, derived Notes assistant state and retrieval-only RAG versus completion provider checks. Web global Dexie setup lacks update and shares one table across both mirrors; native Plasmo controls are bound to the Web localStorage shim. Other interaction failure causes remain unknown. A duration or leaving animation class alone does not prove timeout, flakiness or a production bug.
+
+Final92-fixture diff SHA2560fda7f699b58e5354e8381d84cad861edd7c5341093f0b36130c183166665cd2; four-production diff SHA2565148c8aa2ad86c118312c038ad9a4f1075929f1906723d688bce7814a796757b. Matching malformed-org-ID scoped refresh regression causally fails original catch and passes corrected catch while preserving original401 and credential maps. Source/static review does not accept the failing compiler/runtime candidate.
+
+Typing cycle consumed/STOP. ONE distinct further frontend recovery cycle was asked once after this review and remains pending; no dependent edits or execution before an explicit answer. The distinct Settings question remains asked once/pending. All WIP stays uncommitted/unpublished at29a63a1. Automation stays PAUSED and all43UAT/15bugs/native/installer/runtime/queue/publication gates remain open. No API approval pending or runtime restart.
+
+
+### Newly approved bounded recovery cycles — 2026-10-07
+
+Human `approved, ontinue` grants BOTH former pending cycles: Settings visibility/remaining failure and frontend type/fixture/runtime recovery. Neither approval remains pending. Settings is one async visibility correction with unchanged final UI/Web scope; typing is one11-diagnostic and verified-fixture correction batch plus bounded diagnosis of unresolved interaction failures. Default5s cases,600s outer limits,8192MB compiler budget, original configuration and behavioral assertions retain. Each final failed cycle is consumed; no automatic extra revision or replay.
+
+| Task | Shared boundary | Current state |
+| --- | --- | --- |
+| Settings recovery | Only stopped conversation-prompt test; real form, QueryClient and provider ownership | Consumed/qualified: UI30 and Web30 passed; visibility-only diagnostic failed, local installed AntD motion:false resolves fixture appearance; parse/lint0, CSS parse warnings retained |
+| Eight-file type recovery | Query snapshots, KnowledgeQA state, message/notification/reply and credential contracts | Source review clear; eleven changed runtime suites374 passed UI and374 Web; final compiler pair remains pending |
+| Verified runtime fixture contracts | Watchlists credentials, Notes effective state, prompt task metadata, grounded completion, distinct Web mirror tables/native dependency identity | Six-file independent source review clear; affected eleven suites374 passed UI and374 Web, no unhandled errors; Web warning retained |
+| Interaction diagnosis | SourceViews/deck animation candidate, Media window/request settlement, Evaluation form step, partial Web inventory | Read failure locations before any change; no presumed cause |
+| Final qualification | Affected UI/Web tests, final declared compiler pair, fresh specification/code review | Pending; all broader gates open |
+
+Ruling: Keep all task/review reports in memory and reuse this plan/task ledger; human no-proof restriction overrides duplicate skill brief/report bundles. Serial fresh implementers with read-only task reviews preserve shared-state safety.
+
+Approved-cycle progress: Settings final full checks natural0/79.142s UI and79.162s Web,30 each; eleven changed frontend suites natural0/39.546s UI and26.297s Web,374 each. SourceViews local motion wrapper is under independent review after seven focused closure failures. ONE temporary Evaluation actual-click step/error-message diagnostic is declared in task before instrumentation; original bytes must restore exactly. No real UAT/native/browser or full-project acceptance follows; final compiler and remaining interaction qualification remain open.
+
+### Final outcome and distinct further recovery request
+
+Settings is qualified:30UI and30Web. Eleven changed suites374each and Media plus two helper-consumer suites182each passed with original caps and assertions. SourceViews32passed/1failed in each33-case file; missing corrected-same-workspace Replace dialog remains stopped. The local motion wrapper fixes prior closure/focus failures, not this handoff.
+
+Declared UI compiler final exit2/60.275s with one TS2352 in ReviewTab.create-cta681; Web exit0/44.108s/zero diagnostics. Diagnostic inventory complete, UI body operator-truncated220chars. Third Evaluation native reporter diagnostic passed only the instrumented selected case in4638.312ms; all9clicks completed, two cases deselected, original bytes restored exactly. The624ms segment measured user.click, not an isolated query. All three diagnostic attempts consumed; no actual production cause or full-suite pass.
+
+ONE distinct further three-file cycle was asked once/pending: a narrow four-field Pick mock view preserving Review runtime values; explicit SourceViews closure/focus checks after both Cancel; suite-local Evaluation motion:false as an unproven trial preserving every query/assertion. Original5s/600s/8192MB caps retain; one affected UI/Web test qualification and one final compiler pair only after explicit approval. No dependent edits/execution or repeated question. Working recovery stays unstaged/uncommitted/unpublished at29a63a1; all broader43UAT/15bug/native/installer/runtime/publication gates remain open and automationPAUSED.
+
+### Human grants remaining frontend recovery and all43 efforts
+
+Human explicitly approved all efforts to address all43identified issues. The latest three-file recovery question is GRANTED, never pending/reasked. Apply the reviewed Review Pick fixture view, SourceViews cancellation/closure/focus checks and Evaluation localmotion trial, retaining original5s/600s/8192MB budgets and meaningful assertions. Then complete the actual43-case ledger and necessary corrected-candidate runtime/client/principal qualification and repaired journeys. The previous consumed approvals/outcomes remain historical. Declare bounded new repair/acceptance attempts; retain no hidden retries, no-proof/no-assets/no-GC/privacy/owned-process guards and immutable merged PRs. Automation remainsPAUSED; actual queue-platform mutations and merge require their own existing landing gates. Stage2InProgress/Stage3NotStarted until evidence accepts them.
+
+
+### All43 continuation: first three-fixture outcome
+
+All-43 granted continuation: the three approved frontend fixture edits passed independent specification review and scoped static checks (3 files, parse0, lint baseline/current0errors/97 identical warnings, no new findings; TypeScript-only Bandit N/A). Full affected UI and Web configurations each executed61 cases:58passed3failed0pending, natural1/25.745s UI and28.273s Web, no suite failures or unhandled errors. Review all25 cases passed; SourceViews corrected-state/name test still misses the final Replace dialog after both new closure/focus assertions passed; two Evaluation cases actually timed out at the unchanged5000ms budget. Native reporter captured complete actual failure messages, including the timeout text; motion/Cancel sequencing hypotheses did not resolve these failures. No production bug or causal motion claim. Ruling: the explicit human all-efforts/all43 approval covers necessary bounded diagnosis and repair without repeating an approval question; declare at most3 attempts for this new recovery, first changed-condition attempt consumed, next diagnostics only after source-supported design. UI final compiler runs at the declared8192MB/600s after the reviewed Review Pick correction; no larger caps or hidden retries. Previously qualified Settings30/374frontend/182Media-KnowledgeQA cases remain excluded from unchanged replay. No real UAT acceptance, runtime startup, publication or merge is claimed.
+
+
+### Current typing and authoritative43 catalogue
+
+Current approved final compiler pair completed naturally: UI0/86.382s and WebUI0/53.158s, zero diagnostics in both, declared8192MB budget/nonincremental/noemit/600s cap. This qualifies typing after the Review Pick correction only; the two demonstrated runtime fixture issues remain open. Authoritative catalogue recovered from Docs/Development/RELEASE_UAT_PLAYBOOK.md v1.0 and apps/tldw-frontend/scripts/live-tier-uat/release-catalog-data.mjs v1.1.0:43 workflow families A01-12/B01-09/C01-12/X01-04/S01-06 with required variants, not43 individual bug reports. TASK13260.281.1-.4 plus .281 record source/local repairs touching11 families A05/A08/A12/B01/B02/B04/C01/C07/S02/S03/S04; neither those records nor unit/type results accept complete current-candidate families. All43 acceptance remains open; remaining32 require explicit current-candidate results, never automatic fail/pass/N/A. Real built-candidate browser/app/persistence/workers, actual capability outputs, normal principal context, SQLite/PG single/multi cells and fresh/clean-install/supported-upgrade/human UX are separate criteria. No proof bundle, new evidence manifest, auth-store injection or historical qualification adoption.
+
+
+### Native diagnosis2 and final fixture treatment3
+
+New frontend recovery diagnostic2 completed natural1/9.565s: selected SourceViews corrected-state and Evaluation create/revisit failed; Evaluation edit control passed1762.856ms, all other cases selector-deselected, no unhandled/retry/repeat. Both fixtures restored exactly (EvaluationSHA5a192ebdf3a24b56ae7016d19f80c6bf13ef7e83927129ecab4ab0f8a044235c;SourceViewsSHAbfb90ec58079aad2e20dffee8cc36937f1ce850f1aca1604746643a665e95e7f). Initial operator transformation preflight found two matching Harness declarations and stopped BEFORE edits/execution; narrowing to the actual Harness fixed only that operator selector, not another application attempt. Complete37native log groups/40043characters parsed128events in memory. Replace click delivered request3/kindreplace/generation3/view1, host handled it with matching available/busy/announcement; real dialog exists at teardown. Installed rc-component/util1.7.0 hardcodes test-id under NODE_ENV=test, and retained Tooltip and Dialog title share it; actual accessibility lookup resolves aria-labelledby through the earlier same-ID tooltip. Proposed correction: suite-only partial real AntD Tooltip wrapper passes stable nativeReact.useId as explicitID, forwards props/ref and retains real Tooltip/Modal/Menu and all accessible-name assertions; no hidden:true/environment/dependency edit. Evaluation completed queries3315.967ms and completed spans5268.096ms exhausted5000ms before final click, which was pending only2.836ms; no stalled action proved. Proposed correction: narrowly select actual labelled Name/Description/type/Switch and exact Next/Back text, explicitly assert role/accessiblename/visibility/notariahidden on each selected control, preserve every native userEvent/pointer guard and behavior/payload assertion. Declare final treatment attempt3/full affected SourceViews33+Evaluation3 UI/Web pair at unchanged5s/600s; no unchanged Review25 replay. Third-failure ceiling triggers reassessment, not silent retries. Compiler pair already qualified; new fixtureimports/types get scopedstatic then genuinely affected typing verification if needed, never whole-UAT acceptance.
+
+
+### Final treatment3: SourceViews qualified, Evaluation visibility reassessment
+
+Final frontend recovery attempt3 completed: SourceViews33 passed in both configured UI/Web runs; Evaluation edit passed but both creation cases failed at first real Name input visibility guard. Full2-suite UI36total34passed2failed0pending/natural1/18.762s; Web36total34passed2failed0pending/natural1/18.335s. No unhandled/suite failures/retries/repeats; stderr0. Web captured complete native errors: expect(element).toBeVisible, real input id=name/placeholder=my_eval_run/value empty. UI failure identities/durations complete, actual body was not retained because operator reporter stdin closed; no UI replay. Scoped2 static parse0/lint old-current0errors0warnings/no new, diffSHAe19168fdc4453e68db057b995118592b86452de77af7259ba7cb0333c0410b26; inherited Next pages-discovery message retained. Independent new2-source review clear with snapshot comparison limits. SourceTooltip correction is locally runtime-qualified; Evaluation creation remains unqualified. Third issue attempt consumed/STOP: document and read real Modal/visibility and 2-3 existing patterns before any further treatment. Human all43/all-efforts approval remains granted, never pending/reasked; it permits a separately declared minimal repair after reassessment, not a silent fourth run. Preserve all meaningful role/name/visibility/native-click assertions and5s/600 caps. No current UAT/runtime/build/publication/merge claim.
+
+
+### Evaluation first-control visibility correction after reassessment
+
+Evaluation visibility reassessment after recovery3 STOP: installed Modal/rc-motion preparation still runs with motion:false; role filtering need not reject opacity0 while toBeVisible rejects it. Actual error proved early first-Name invisibility, not the precise ancestor style. Read three existing patterns: Settings timeout form waits for complete role/name/visibility/hidden-ancestor guard; authentication form waits for post-modal state; SourceViews waits for closure/focus. Choose smallest existing-native waitFor around the COMPLETE first Name checkedControl before fireEvent.change; preserve narrowing, actual Modal/form/userEvent/pointer checks, all assertions, default waitFor and5s/600 caps. Later steps directly replace content without separate step motion, so no speculative extra waits. Human all43/all-efforts grant covers this declared separate initial-visibility fixture correction after documented3-attempt reassessment; no approval pending/reasked. First new correction attempt: one-file change, independent source/static review, full Evaluation3 UI/Web once; exclude qualified Source33/Review25/Settings30/374/182 replays. After stable source, configured UI/Web typing verifies actual new helper imports/types. No production change or real UAT claim.
+
+
+### Final stable frontend qualification and new upstream review
+
+Final initial-visibility fixture repair qualified: Evaluation3 passedUI/natural0/12.102s andWeb/natural0/11.895s, no pending/suite failures/unhandled/retries/repeats/stderr. Complete first-Name role/name/visible/nohidden guard remains inside default waitFor before native action; all other fixtureactions/assertions unchanged and independent newhunkreview clear. New1file static parse0/lint0errors0warnings/no new, diffSHA91c2e6da1f069e0e0093df45a4f82e98201993e27a498f61bb126fd305e35635. SourceViews prior33each/Review25each/Settings30each/frontend374each/MediaKnowledgeQA182each remain qualified and were not replayed. Final stable configuredUI compiler0/74.056s andWeb0/51.255s, zero file/nonfile diagnostics, declared8192MB/nonincremental/noemit/600cap. These are scoped local qualification, not real43 UAT or one final full102run. Current100path frontend unit awaits fresh combined actual/staged review and normalhooks before localcommit; 4productiondiffSHA5148c8aa2ad86c118312c038ad9a4f1075929f1906723d688bce7814a796757b unchanged. Fresh07:31remote reads: PR3084OPEN/headfe117/body15558/knownfalse-dirty; live dev ADVANCED to e3c345b76f2d93527488b2015b9c3a2649c1f981. Object already local, nofetch. Actualgit7ba->e3 inventory409unique paths/206commits:55backendproduction/support63backendtests,107frontendproduction/support137frontendtests1package,3workflows24docs11taskdocs2other6excludedproof/evidence. InitialcompareAPI clipped300files/100commits and outputtruncated; notacceptedcompletecoverage/stats. Source-only incomingreviews now proceeding before approvedrebase/build; exclude all6evidence/assets/artifacts contents and foreignqualification claims. No source/ref/index/integration/build/startup/browser/UAT/publication/merge occurred. Current29a remainsunpublished/olderdev; all43acceptanceopen and automationPAUSED.
+
+
+### Approved guarded current-dev rebase and incoming fixes
+
+Approved current-dev rebase unit — 2026-10-07: human all43/all-efforts approval covers necessary fixes, rebase and later real UAT; no question pending, automation remains PAUSED. Qualified frontend unit committed locally7b0cd2fb660e57323fa1a5d1d1a4ea387d0a4e99 (100paths, reviewed index/commit SHA256cba3f44f867f5ca00c64250356cc396b6c71518daec1c671361320994895e0c9, normalhooks0). Current17ownedcommits on old7ba; tracked-clean, whole-clean not claimed. Fresh live dev1bd4a07a0b11c8dbeab62195cea50baf407de06c/PR3084OPEN-fe117/body15558, unknown mergeability not readiness. Exacte3 and1bd objects alreadylocal/no fetch. Old7ba->e3 actual409unique paths; included403 source/narrative paths covered with frontend test review continuing and integration narrative567/1303partial; excluded6proof contents unread. Newe3->1bd48paths includes33source/narrative paths under independent review and15output/playwright proof paths excluded/unread. Declare guarded local rebase of17commits onto exact1bd with a recoverable pre-rebase branch and autostash ONLY task/ownedplan notes; preserve all owned patches except reviewed semantic conflict combinations, canonical fingerprint awaits real combined regeneration. Before new source edits record real causal tests for QuickNotes409 retry base, KeepMine selection race, bulk-tag Undo authority, activeSync wikilink rewrite/undo optimistic fence, and accepted empty legacy branch admission; source-only findings, not reproduced/fixed yet. CI workflow PR trigger paths and six-stream-cap count also need minimal repair after current-source verification. Preserve5s/600/8192 budgets, no expected-failure pass as defect acceptance, no test weakening, no proofs/assets/log rereads, normalhooks/security/reviews/exactlease/human summary and all native/installer/UAT gates. No build/startup/browser/publication/merge follows from source review; freeze qualified current candidate first.
+
+
+### Rebased candidate and declared empty-history causal repair
+
+Current-dev rebase completed locally3e7472158cbf740ae1b5bc4eb77706e7ca394c08 with17ownedcommits on exact1bd4a07a0b11c8dbeab62195cea50baf407de06c; backup codex/uat-fixall-pre-1bd-20261007 retained, autostash restored exactly task/ownedplan tracking only. Three actual conflicts resolved: canonical fingerprint regenerated by normal supported exporter/types; VN oracle exactqualified7b0/allotherAST incoming/independentreviewclear; Notes saved-monitoring retains BOTH incomingModal and ownedTldwConfig imports/allbodies. First canonical operator attempt incomplete1970paths/3119schemas and codegen failed with omitted BunPATH; unqualified. Metadata/modulebindings/dependencycheckpassed. Exact committed public API-Routes copied into freshprivatepublicconfig and installedBunPATH restored: normalgenerator0/19.087s,2113paths3267schemas/sha16317ddf818d8274514bf669d4cee9463b4fd235ebe88cf9667e6d7625469233,exact3owneddescriptions. Generatedtypes functionalonly; fullbaselinecomparison/driftcheck and current-candidate type/security/test gates remain. Incominge3 production108/frontendtest137/backendproduction55/backendtests63 all changedhunks+addedtestbodies semanticallyreviewed; integrationlog567/1303partial. Newe3->1bd33includedsource/test/locale/docs/taskpaths independentlyreviewed completechangedhunks/addedbodies,15proofpathsunread. Additional newfindings: Media reading-context fixture passesjson to zeroarg handleBatchExport (source-onlyImportant; defaultstatejson); Results/ICU regressions cover1/2 but new report/task describe1/3 (Minor). Frontend harness removes all process unhandledRejection listeners and ignores recordedreasons in it.fails (P2), plus expected-failure/timeguard limits do notqualifyfixeddefects. Declare next minimal emptyacceptedlegacy history repair: realpure+SQLite/officialisolatedPG admission causalred, one shared predecessor fix, affected branchselection/admissionchecks, compile/lint/Banditbaseline-current/source+stagedreview/normalhooks; no rawoperatorSQL/fixtureshim. Root tracking/preservation only while ONEserialimplementer edits this unit. Remaining Notes3/Syncwikilink/Mediafixture/harness/CI/docs repairs and all43actualUAT/native/installer/acceptanceopen; no startup/build/browser/push/merge or consumedcontrolreplay.
+
+
+### Empty accepted-legacy admission causal outcome
+
+Empty accepted-legacy history repair qualified locally: original pure helper and actual SQLite confirm-empty-projection→resolve-send-selection→firstinput admission reproduced ValueError strictzip; sandbox PG skip was not accepted. One shared predecessor expression now pairs path with(None,*path)[:-1], preserving exactnonempty pairs andemptylengthzero. Full affected helper+branchadmission suites44passed28warnings/44.41pytest/natural0/no skips, including officialisolatedPG15492/Dockerautostartdisabled. Newrealtest assertsready/admittedID/rootNone/exactone message; ownership/fences/source digest/realconfirmation/admission retained. Three-file compile/Rufflint baseline-currentpass; all3inherited wholefileformatflags retain, no broadformat. Selected supportedapp/testenv lackedBandit, preferredpreviousbase312env absent; no reconstruction/install. User-approvedprimaryprojectvenv3.11.13/Bandit1.9.3 used STATICONLY: production0→0, helper17B101→17, admission32B101→32,0errors/identicalsource-alignedsignatures/no new; five narrow B101notes onlynewpytestasserts. ThreefilediffSHA1f0beb4c21186e9b76bdef3e9ba6f8446219a6938c33c4bf12ebb6e5de793195/diffcheck0. ADRrequired:no,sharedboundarycorrectness/no API/storage/securitychange. Independent actual/stagedreview and normalhooks remain beforecommit. Frozen rebasepreservationauditCLEAR: all17matchedcommits14unchanged3reviewedcontextdifferences;162ownedpaths152byte-identical/10incomingorcanonicalchanges/11overlaps; allownedcallback/Syncsevenexecute/VN/offline/audio/Claims/queue/native/401andfixtures preserved. AllothernewNotes/Sync/harness/Mediafixture/CI/docs repairs and43actualworkflowacceptance remainOPEN, no runtime/build/push/merge.
+
+
+### Committed history fix and current-dev fixture type repair
+
+Rebased empty-history repair committed locally60a0bc0a97f354857714565ee220b59c363e9dd2,parent3e747; exactly5paths46insertions1deletion/committedpatchmatchesindependentlyreviewedindexSHA9b371277776a470fa4341b22df8cad82f94125b1652b9fb33a566a0912b370ea. Actual+stagedreviewCLEAR/normalconfiguredprecommitallapplicablepassed(Python syntax+debug/privatekey/conflict/task/body/http guards),wizard-onlyRuffBlacknofiles/skippedNOTbroadformatterqualification; tracked-cleanlastguard/notwholeclean. No push. Current-dev UIcompilerfirstcausalqualification exit2/66.103s,unchanged8192MB/nonincremental/noemit/600outer:13completefilediagnostics inSIXfixtures,0nonfile; all13nativebodies plus138charwrapperstderr recoveredinmemoryfromsameownedprocess, sessionclosednatural2/no compilerreplay/proof. QuickIngestsession1TS2353highestStepunknown; Notesexport2TS2345provenanceoriginliteralwidening; Notessavedmonitor5TS2339/2353noteDTOmissingknowledgeheadfields; Mediareading1TS2554zeroargexport; backgroundauth3TS2345mockvoid/nativeOnClickDataeditable; Sidepaneltabs1TS2322historyrolewidening. No currentproductiontypeerrorclaimed. Declare ONEminimal6fixture contract correction usingexistingtypes/realDTO/nativefields, preservingruntimevalues/allassertions/ownerguards/nativebehavior; noany/shim/loosenedtypes/guardweakening. Roottask/plan recorded BEFOREfixture edits. ONEserialimplementer then independentactual/stagedreview, genuinelyaffected6suiteUI/Web/staticlint+parse, finalconfiguredUI/Webtypes atsame8192/600, normalhooks/localcommit. PriorSource33/Eval3/Review25/Settings30/374/182 unchangedscopesnotreplayed. AllthreeNotesproduction/Sync/harness/CI/docs and43realUAT/native/installer/currentcanonicalbaseline/drift/publication/merge remainOPEN; humanall43grantcurrent/noquestionspending/automationPAUSED.
+
+
+### Six-fixture qualification and remaining native Tab fields
+
+Six-fixture contract correction attempt 1 reviewed CLEAR (20 additions/10 removals, diff SHA256 14adb3b3830c7848cda92a2dba1dd1aef2c9733dd3f6fec0ac6cd5859d3d6d20). All 390 tests in six affected files passed in UI (22.088s) and WebUI (16.545s), no skips/failures. Parse zero errors; configured ESLint baseline/current 0 errors/115 identical warnings; 844 expectations unchanged. Final configured UI typing returned exit 2 after71.265s: only TWO TS2345 diagnostics remain at background.effective-auth.test.ts238/264, incomplete native Tab arguments {id,title}/{id}. Both full diagnostic bodies and wrapper stderr were recovered in memory from that same process; no red compiler replay or proof file. Declare attempt 2: complete those two native Tab fixtures using existing native type/default-field patterns, retaining id/title/behavior and all assertions/guards. Root records this BEFORE edits. Requalify only the affected background suite per client; prior other334 tests are unchanged and will not replay. Final configured UI/Web typing retains8192MB/600s/nonincremental/noemit. TS-only Bandit N/A. No production edits/publication/runtime/UAT acceptance; all43 remain open; no approval pending.
+
+
+### Six-fixture final qualification
+
+Six-fixture contract repair qualified on current rebased candidate. Native Tab attempt2 completes Browser.tabs.Tab fields without casts, retaining eventid8/titleStory and unchanged117 assertions; its callbacks consume only original id/title/URL. Final six-source binary diffSHA d085222994d68dcb06162714b625b961a85afdef2a7faf1083d3d1a212210e70 (38 additions/13 removals). Independent initial6 and incrementalTab actual reviews CLEAR. Full affected6files390passed in UI22.088s/Web16.545s before Tabcompletion; only genuinelychanged background56 requalified UI3.554s/Web4.258s, nofailures/skips. Other334 unchanged cases excluded from replay. Final configured whole UI typing0/66.720s and WebUItyping0/45.599s, zerofile/nonfilediagnostics,8192MB/nonincremental/noemit/600outer unchanged; both ownedprocesses closednatural0 and only normal wrapperstderr. Parse0; properlint six0errors115identicalwarnings, incrementalbackground0errors10identicalwarnings; all844 expectations unchanged. Diffcheck0; TS-only Bandit N/A. No production/typecontract/assertion/guard/timecap weakening; normalstagedreview/hooks/localcommit remain. All new Notes owner/conflict, Sync wikilink, harness, CI/docs and43realUAT/native/installer/canonicalbaseline/drift/publication/merge gates remainOPEN, no runtime/build/browser/publication here.
+
+
+### Quick Notes conflict base and scoped detail reads
+
+Six-fixture unit committed locally c2fb68def53840ee0a77e4d6ab73b96358c5fdc1 parent60a0, exactly8paths56add13delete/committedbinarySHA76356ecb63d64c9c9dd61b5c936572e1b9268c1fdea87e8e895ce779e56bfe45 equals independentlyreviewedindex. Actual+stagedreviewsCLEAR; normalconfiguredhooks applicableguards/taskformat/whitespace/privatekey/conflict allpass, TSscopePython/Ruff/Blacknofiles notwholeformatterqualification. Tracked-clean at immediateguard; no wholeclean/publication claim; automatic Gitpacking/oldGCwarnings untouched. Declare next Quick Notes causal repair unit BEFORE test/source edits: ordinary409 must retain original local content/version/provenancehead together and new Retry identity, until explicit reload; current autoGET advances version/head while retaininglocaltext and allows overwrite. Root+independent design also confirmed unscoped Reload latest637–680 and selection sibling606–626 can publish old reads into changed note/workspace/account/server. Real regression fixture must cover repeatedordinarySave against concurrentversion, deferredreload/selection, neweredit, before-click staleconflicttoast/away-return and unmount plus positive fullremote+localdraftmerge/scopedrequests. Reuse existing capture/controller/store-accountwatchers/ServicePromptSnapshot lease; retain live conflictoperation untildismissal/reload/unmount because releasedsnapshot stops observing laterchanges. Share smallest scoped detailread boundary across Reload/Select, preserve Save neweredit/ack/lostack contract and existing merge/keywords/provenanceversion. Existingstage3 unsafeversion-adoption assertion must be corrected to originalbase/noadoption before explicitreload, preserving allmergeassertions. One causal red batch on unchangedproduction, then minimalgreen and genuinelyaffected fiveQuickNotes suites UI/Web at600outer/default5snewcases; no timer/cap widening/shims/proofs. ADRrequired:no newarchitecture; reuse031Notescapability/065independentprovenance. ONEserialimplementer; independentactual+stagedreviews/properlint+parse/normalhooks/localcommit. OtherKeepMine/BulkUndo/Sync/harness/CI/docs/43realUAT/native/installer/canonical/publication/merge remainopen, no approvals pending.
+
+- Causal red completed: one normal UI batch selected 32 new cases, all 32 failed the intended assertions; 33 existing cases were excluded. Natural exit 1, outer 10.479 seconds, no timeout or selector failure. Repeated ordinary Save advanced expected version 1 to 2; deferred and stale actions overwrote replacement state; positive Reload omitted request ownership. Production remained unchanged. All failure bodies were inspected in memory; the reporter does not expose an unhandled-error count. Final test diff preserves old assertions; two harmless post-run fixture hygiene corrections were not replayed. Fresh test/spec review precedes minimal green.
+
+- Fresh test/spec review caught an incorrect ordinary-write provenance precondition in the new retry fixture; production omission policy stays intact. Corrected fake CAS now checks note version and asserts omitted provenance plus distinct definitive-retry keys. One corrected retry-only causal run failed naturally (1 failed, 64 excluded; 2.726 seconds outer). Its reporter abbreviates actual object values, so concrete remote overwrite values were not captured by that run; no third red replay. The other 31 original read-scope failures remain evidence within their scope. Native toast mock now matches keyed destruction, same-key replacement and no-argument destruction. Minimal production green is authorized.
+
+### Quick Notes exact live text and retained source history
+
+- The ownership unit stopped after three corrections. On its final attempt, real native typing produced `Newerhumanbody` instead of `Newer human body`: portable-history serialization trims a just-entered space on each keystroke. No whitespace-free fixture workaround or fourth ownership revision follows.
+- New text-editing unit: reuse standalone Notes' raw editable body and serialize portable history at the existing Save/export boundaries. Keep the shared provenance codec unchanged. Capture the existing canonical or legacy `knowledgeNoteHead` before replacing Quick Notes live content with exact event text; preserve dirty identity and full history metadata.
+- Causal checks: real typing of spaces and newlines with active and portable legacy source history, followed by normal Save representation; one fresh targeted red and minimal green with normal default 5-second cases and 600-second outer cap. Then qualify the unchanged lost-ack/native typing contract and affected UI/Web suites on the newly repaired source. Current ownership source review is clear; execution qualification remains incomplete. All broader gates remain open.
+
+- Native typing causal red: canonical and marker-only legacy cases both lost spaces and newline (`Alpha beta\nGamma delta` became `AlphabetaGammadelta`), 2 failed/71 excluded, natural exit 1/3.296 seconds. Minimal local raw-text/head fix retains the shared codec. First new-source UI batch: 155 cases,154 passed; all73 real ownership/typing cases pass. The sole Stage4 fixture still reads the old updateNoteContent spy. Extend scope to that affected fixture: capture whole setCurrentNote draft, assert exact raw text and independent history, preserve original Save path/version/keywords and assert portable content/history at Save. Qualify only corrected target in UI and full five suites in Web; no unchanged154 replay or fictional single UI155 green.
+
+### Quick Notes final local qualification
+
+- The current source retains conflict bases, fences Reload and Select by owner/identity/edit state, preserves uncertain Save receipts, and keeps raw typed spaces/newlines with independent history. Save/export serialization and the shared codec remain intact.
+- UI qualification is 154 prior full-batch passes plus the corrected Stage4 target (1 passed, 6 excluded, natural 0, 2.236s). The first complete Web run passed all 155 affected cases in five suites, natural 0, 19.105s. No unchanged UI154 replay or single-run UI155 claim.
+- Configured whole UI/Web typing passed naturally in 66.778s/46.283s with zero file/nonfile diagnostics, unchanged 8192MB/nonincremental/noemit/600 limits. Wrapper stderr lengths 138/99 were reported; contents were not separately recovered. Four TSX parses and diff check are clear. ESLint has no errors/new warnings; production retains 3 inherited warnings versus baseline 5, fixtures 0/0. TypeScript-only Bandit is N/A.
+- Independent ownership review and final typing/Stage4 delta review are clear; four-source binary diff SHA256 e3bf54c5859fda8662e4739bea6c4f29b7d0e77aa229bcdc2270aa63b3291c51. Final staged review, hooks and local commit remain. Actual GUI toast removal and all43 real UAT acceptance remain open.
+- Integration narrative semantic reading is complete across all1303 lines (prior567 plus remaining736). No linked proof content was read and no historical runtime claims were adopted. Actual integrated-source qualification remains separate.
+
+### Notes conflict-choice ownership
+
+- **Goal:** Keep mine and Use theirs apply only to the original owner, selected note and captured edit. Dirty Reload shares Use theirs. Delayed choices must preserve replacement drafts and offline receipts.
+- **Design:** Reuse the existing Save owned request and openSourceNote controller/authority/selection/edit pattern. Keep mine delegates immediately to Save and obtains the latest version inside that captured request; cancel before PUT if its lookup outlives the edit. Use theirs captures before clipboard/dialog awaits, validates owner and revision before queue removal/detail fetch, and uses existing loadDetail ownership options. Keep list refresh and success/error feedback current. Preserve ordinary acknowledgment, newer edits and uncertain receipts.
+- **Tests:** Real hook/versioned server causal red for delayed version/clipboard/dialog/detail; selection and account/server away-return, newer edits, unmount, positive choices and cancelled discard. Preserve existing lost-ack and positive conflict assertions. Normal UI/Web affected suites and configured typing; no new timer/worker/cap flags.
+- **Status:** In Progress. One serial implementer after task declaration, then minimal green/static checks/independent actual and staged reviews/normal hooks/local commit. All43 real UAT and broader acceptance gates remain open; automation PAUSED and approval granted.
+
+- Test-only causal batch on unchanged hook: 43 selected, 27 failed/16 passed, 17 old cases excluded, natural 1, 3.471s; no timeout. All8 Keep mine context and scoped-positive fail; all16 clipboard/dialog context fail; late-success8 and late-failure7/cancelled-discard pass, late-failure/new-edit and scoped Use theirs positive fail. Case inventory/durations are retained. Full failure messages were lost when the nonPTY wrapper got stdin EOF after inventory; exact first-assertion causes are not claimed and no display replay follows. Source independently shows the missing capture/owned-read/error guard. Fixture parse/diff/ESLint clear and old assertions retained. Complete test/spec review precedes production; queue preservation and uncertain receipts need explicit coverage.
+
+- Independent spec review: original43 added cases are coherent, but state/request/toast assertions can miss deletion of the replacement owned offline draft. Add a confirmed newer-entry preservation case, direct uncertain Keep mine receipt replay (original key/body/version; newer text retained), and delayed-auth Use theirs guard before production. Run only these new targets once; exclude earlier43 red and recover every failure body from that same process. Incremental review precedes minimal green.
+
+- Additional six-case RED:5failed/1passed/60excluded, natural1/1.941837s. Both confirmed replacement queue entries are deleted (Object.hasOwn false/true at800). Delayed-auth three cases reach only missing user-call count0/1 at873; later cancellation assertions unestablished. Uncertain receipt key/body/version replay passes. Complete failure messages captured once; absent JSON error fields are not zero-error qualification. Parse/diff/ESLint clear; incremental review CLEAR. Fixture45fdbebed563b4e534b723d8ba3bae5ebffaa0f1aeb788e7fa58d1e0673bb9f6; production6cc93bf unchanged before green.
+- Green scope: reuse captured owned Save for Keep mine with the new version lookup excluding matching pending PUTs; the inherited missing-version fallback remains. Preserve uncertain receipt replay. Capture Use theirs owner/config/selection/edit/controller before the first clipboard await, validate after every await, use owned detail load, and suppress stale failure after typing. Review and affected UI/Web Notes qualification remain required; no UAT claim.
+
+- Attempt1 UI9:175passed/1failed of176, natural1/14.790225s, no timeout; Web unrun. Native failure lacks exact member diff. Independent source/spec review confirms edit-case captured transient saving must settle dirty; fixture-only final dirty plus saving=false preserves all substantive assertions. Corrected UI target only (exclude175passes), then first Web9; production unchanged a82cec5d.
+
+- Dirty-only fixture correction failed1/65excluded (natural1/1.551540s); prior advice is superseded. Newly covered freshness effect observes server3/local2 after cancellation and restores conflict. Final reviewed oracle retains every draft/identity/version/head field, requires conflict/remoteVersion3/savingfalse, and quiet no-write behavior. One third corrected-target check remains; STOP if it fails. No source change or Web run yet.
+
+- Notes source qualification COMPLETE: owned conflict choices, uncertainty replay and queue preservation; UI175earlier+corrected1 (not full176greenrun), first Web9=176passed. Whole UI/Web compiler natural0/65.925s and44.479s, empty output,8192MB/nonincremental/noemit/600cap/source unchanged. Parse/diff/ESLint no new findings; TS-only Bandit N/A. Independent production/spec/final fixture review CLEAR. Sourcea82cec5d, fixture618b80e2, two-path diff f8abbaab. Three qualification outcomes consumed; no unchanged replay or runtime/UAT acceptance. Broader Stage2 stays In Progress.
+
+
+### Notes bulk Add tags, Undo and Delete ownership
+
+- Declared before edits at local408ebc7. Bind prompts, fresh version reads, writes, Undo and refresh to the original account/server/authority lifetime; away-and-return and unmount invalidate permanently. The Delete sibling is a new source finding and requires a real causal regression before fixing. Preserve bulk selection, tag/version CAS, partial success, current newer drafts and the existing notification error contract.
+- Test-only RED first, independent new-test review, then one minimal shared production correction using existing owned request/list/detail boundaries. Qualify genuinely affected Add tags/actions/selection and related ownership suites in UI/Web, proper lint/parse and whole configured typing at unchanged budgets. Independent actual/staged reviews, normal hooks and local commit follow. TypeScript-only Bandit N/A; ADR required:no new architectural decision.
+- Previous408ebc7 Notes qualification remains carried forward without unchanged replay. All43 actual UAT/native/installer, canonical baseline/drift/publication/merge remain open. Automation stays PAUSED; approvals remain granted with no pending question.
+
+- Before test edits, caller tracing added individual Delete, Restore and delete Undo to the same ownership unit: neighbor/detail/version/restore reads and side effects share the unfenced boundary. Each newly identified sibling receives causal coverage; reuse one private owned operation/request pattern. Existing presentational list seam is explicit and real list-selection coverage remains separate. No real browser/UAT acceptance follows.
+
+
+### Notes Sync monotonic product versions and durable projection receipts
+
+**Goal**: Prevent old Note optimistic tokens becoming valid again and make accepted projection replay preserve later product edits.
+**Success Criteria**: Unchanged Sync revision/base/cursor/hash contracts; independent strictly advancing product tokens; exact receipts atomic with product, graph and paired provenance; no public/internal receipt collision; trusted fresh acceptance marker; safe explicit legacy recovery; stale wikilink append/product writes rejected.
+**Tests**: Unequal counter directions and later ordinary writes; legitimate/current versus stale tokens; Rewrite/Undo stale races; product-commit/checkpoint fault; later local edit and exact replay; paired writes/tombstones/bootstrap/ingestion; client marker override, single/group retry identity, identical payload/time distinct envelopes; owner/RLS and existing SQLite/official PostgreSQL consumers.
+**Status**: Design complete; implementation not started.
+
+- ADR required: yes. New ADR-066 records the product projection receipt rule, preserves prior ADR-034 batch/fence/CAS rationale by reference and narrows its ambiguous legacy replay exception. ADR-031 and ADR-065 remain governing Notes capability and independent provenance contracts.
+- Reuse the current receipt table and owner transaction. Product token allocation happens under its real write lock. Raw internal keys have a fixed prefix outside public64hex outputs. Stamp protocol metadata only at fresh accepted Notes insertion; retain old idempotent rows. Request/group hashes ignore only that server field while receipt fingerprints bind it.
+- Applied legacy checkpoints remain authoritative. Unmarked pending/failed application cannot be inferred from bytes/time; retain it and require explicit recovery. No automatic receipt fabrication or product overwrite. Correct provenance/organization equality dependencies; retain child, task and moodboard Sync anchors.
+- Test-only causal red, minimal reviewed green, affected supported SQLite/officialPG checks, compile/lint/scoped baseline-current Bandit, independent actual/staged review and normal local commit. No source/test execution yet; all43 actual UAT/native/installer/publication gates remain open.
+- Independent incoming RAG5 modules:32passed33warnings/1.82pytest4.588outer/natural0, no timeout at408ebc7; exact test files unchanged. No full stderr or real provider/UAT qualification claim.
+
+
+### Notes mutator RED and additional same-owner publication cases
+
+- First unchanged-production causal batch: 26 intended assertion failures,3passes,8oldcases deselected,13.872390s outer/natural1/no timeout or setup failure. All26 full failure bodies recovered without replay; downstream assertions after first failure are not qualified. Absent reporter error/unhandled fields remain unavailable. The account-change tag Undo pass is incidental CAS, not ownership evidence.
+- Before GREEN, add two actual applied delayed-ACK cases for individual Delete and direct Restore: choose Beta and type a newer draft while the request is pending; after acknowledgment retain that identity/content. Current-owner scoped refresh/toast may proceed. Strengthen account-change tag Undo to forbid foreign-owner GET before rejection.
+- Independent three-case delta review precedes a second causal batch limited to those new/changed cases. Carry the prior26 failures forward; no unchanged29 replay. Production remains unchanged and the30s/600s caps remain. Real43 UAT/native/installer acceptance stays open; approval granted/no pending question; automation PAUSED.
+
+
+### Notes mutator second causal RED
+
+- Reviewed three-case batch only:39registered/3selected/3assertion failures/36excluded,6.826523958s outer/natural1/no timeout/setup failure/empty stderr. AccountUndo performs forbidden extraGET after rejection; delayed singleDelete/directRestore ACKs each lose laterBetaidentity. Downstream content assertions after first failure remain unexecuted; complete originalfailure bodies retained, reporter unhandled/error fields unavailable. Production/fixture hashes unchanged.
+- Original26 causal failures carry forward without unchanged29 replay. Root review of one shared existing Notes operation/request GREEN outline is next. Baseline source-only3353-file materialization verified at exact1bd; candidate HEAD/index/refs/common config/protected diff unchanged and no import/export/profile yet. All43 actual acceptance remains open; no pending approval; automation PAUSED.
+
+
+### Notes mutator minimal GREEN scope
+
+- Independent design review CLEAR. Reuse existing editor authority/controller and selection/edit epochs through one private captureNoteMutation(controller) accessor; remove sole-used unscoped version fallback. Page shared operation freezes original config/authority before awaits, validates active principal before reads and scopes all siblings and retained callbacks. Retained Undo validates original immutable owner token before new controller/read; post-GET dirty recheck; staleUndo throws, ordinary staleactions quiet. Finally cleanup everywhere.
+- Captured list.refetch owns generation. Check monotonic original selection/edit immediately before reset or owned loadDetail, and pass capturedrevision. Legitimate onSaved adjustment uses existing confirmDiscardIfDirty callback with original authority/newer-edit protection; never recapture after prompt. Two production files/no new framework/dependency or ADR decision. Root authorizes minimal GREEN following both causal batches; all43 real acceptance remains open.
+
+
+### Canonical baseline required static directory
+
+- Source-only baseline attempt1 failed natural1/1.601s at unchanged main.py2586: required app/static directory absent. No schema/wholecomparison/hash accepted. stdout0/stderr39288 captured in original memory but no longer retained; recorded exact missing-directory cause only, not full retainedstderrreview. Sources/generators/candidateartifact/HEADindexrefs unchanged.
+- Root source review confirms unconditional staticmount, optional localSwagger/docs serving and no schema necessity to copy assets. Restore only empty required directory structure, then ONE follow-up normalexport with same600cap/privateprofile/sourcebindings. No source/route/importshim/install/assetcopy or reducedrouter acceptance; wholeJSONdifferences must be explained. Schemaqualification excludes assetserving/UAT. All43approval granted/no pending question; automationPAUSED.
+
+
+### Notes DELETE409 retained Reload and existing fixture authority
+
+- Actual source review found the inherited conflict Reload callback can discard newer drafts or read under replacement ownership. Before edits, extend this unit with late-409 publication and retained/awaited Reload ownership regressions; preserve current legitimate reload and list-only other-note behavior. Reuse existing qualified owned Use theirs/loadLatestVersion path and remove unscoped reload duplication where possible. One new causal subset before production repair; unchanged earlier RED controls excluded.
+- Stage32/33 require real canonical config and active user seams plus real authority-scope export. Test-only adaptation preserves all5 original bodies/assertions/responses. Independent spec/delta review precedes qualification; no test-result substitution. Unchanged30s/600caps, TypeScript-only Bandit N/A and no new ADR. All43 approval granted/no pending question; automation PAUSED.
+
+
+### Shared clean Reload and baseline production-resource prerequisite
+
+- Before edits, include clean loadLatestVersion in the same captured owner/editor Reload boundary. Retain clean no-clipboard/no-discard semantics; new delayed auth/detail causal cases precede shared correction. Earlier unchanged RED excluded. No new framework or ADR.
+- Baseline export attempt2 natural1/10.366s at bundled Persona starter PNG import, no schema or comparison. Required empty static directory remains empty; no third export/asset copy/shim/route reduction. Assess exact committed production-resource metadata closure only; proof/model/shared-cache content remains protected. Approval granted/no question; automation PAUSED.
+
+
+### Canonical baseline packaged Persona resource closure
+
+- Source review confirms eagerly required production resources explicitly declared by package-data. Necessary normal checkout under all43 authorization includes136starterPNGs plus pixel-migu manifest.json (137files/610376bytes), exact1bd. Exclude PROVENANCE, foreignproof, models and sharedcache; no fake bytes/source/routes.
+- Preserve3353originalsource/generators/candidateartifact/HEADindexrefs/commonconfig/protectedWIP; only baseline private sparse metadata/index may change. Finish immediate-reader review then ONE third600cap normal full export/wholecomparison. Failure exhausts this baseline unit, no fourth retry. No resource-serving/UAT qualification; approval granted/no question, automation PAUSED.
+
+
+### Canonical route-profile mismatch and unaffected RAG adapter checks
+
+- Third baselineexport natural0/19.060s emitted reduced1970paths3119schemas; candidate2113/3267. Complete9040leafdiff classification onlypaths/components; omitted8configuredrouterfamilies, Notes task schema namespace/ref changes, and3owned common descriptions. Publicminimalprofile incorrectly omitted exactcommittedenable list; stable_only=false alone insufficient. Fullrouteparity unqualified,3attempt unit STOP/nofourthexport/profileedit. Concrete exactpublicroute correction remains proposal; no reducedrouter acceptance.
+- Original3353source/137productionresource/generators/candidateartifact/HEADindexrefs/commonconfig/protectedWIP preserved; no proof/model/cache recovery or runtime/UAT qualification.
+- New incoming RAG adapter guard module3passed32warnings/0.59pytest3.720outer/natural0/notimeout/sourceunchanged; fulloriginalstdout/stderr recovered. Fakeadapter/rawSQL guard scope only, no realproviderUAT. Earlier32RAG passes excluded from replay.
+- Frozen17new Notes Reload/Delete409/Save-positive cases + narrowstage32/33 fixtures reviewedCLEAR; ONEnewRED authorized with old41 excluded. Approval granted/no question; automationPAUSED.
+
+
+### Shared Reload causal RED and minimal GREEN
+
+- ONEnewRED58registered17selected16assertionfail1positivepass41excluded/natural1/6.372343833outer/empty stderr/notimeout/setupfailure. All16completeoriginalarrays recovered; reporter unhandled/error/retry/repeat unavailable. Allsource/fixtureguards unchanged. RealSave→Add positive passes; missingrequest/auth andstaleGET/refetch/toast/queue failures are distinct from alreadyguardedcleandetail editorpreservation.
+- Rootauthorizes reviewed smallest sharedGREEN: move takeTheirVersion earlier, copyCleanDraft option preserves explicitUseTheirs/dirtycopy and cleanquietReload; remove duplicateunscopedreloadSelected; selectedcompatReload/loadLatestdelegate; retainedtoastvalidatesoriginalowner/selection forbutton+keyboard while capturingdraftatclick; lateDELETE409requiresoriginaleditorcurrent. Othernote currentownerlistrefresh retained. No newownershipframework/ADR.
+- FirstGREEN7affectedUI/Web suites expected69each, properwholetyping/static/source+stagedreview/hooks/localcommit; no unchangedoldRED replay, testbudgetchange or realUATacceptance. AutomationPAUSED/approvalgranted/no question.
+
+
+### Notes mutations and shared Reload first GREEN
+
+- UI69/69 and WebUI69/69 across7actualfiles, first complete affected runs, natural0/19.596191791s and18.167658959s, unchanged600outer and configured case bounds. Source/fixture hashes and HEAD408 unchanged. Original full reports retained; no failures, jsdom navigation advisory identical. Missing error/unhandled/retry/repeat fields unavailable.
+- Root and independent actual Reload review CLEAR; all earlier mutator review retained. Parse/diffcheck clear; proper ESLint noerrors/noaddedwarnings, TS-only Bandit N/A. Wholeconfiguredtyping and finalactual/stagedreview/hooks/localcommit pending. Real43 UAT remains open.
+- Newly confirmed task-checkbox delayed-response ownership gap in Notes hook and Dock is a separate next repair unit; no source/test edits for it yet. AutomationPAUSED; no pendingapprovalquestion.
+
+
+### Whole Notes typing and selector correction
+
+- UI wholeconfiguredtyping natural2/60.771137458outer with8complete newfixture diagnostics:7TS2769 bulkAdd and1TS2353 conflictReload; exact:true is unsupported ByRoleOptions. Stderr empty; no production type diagnostic. Webunchanged check currently pending.
+- Beforeedit declared correction removesONLY8 ignored exact:true properties from string-name rolequeries, keepingexacttargetmatching after installed-source verification. Alltestbodies/assertions/guards retained. No first69UI/Web replay; correctedwholetyping/static/finalreview/hooks required.
+
+
+### Notes mutation and Reload qualification
+
+- Both first affected client runs passed all 69 cases across seven files. UI took 19.596s; WebUI took 18.168s. The original bounds and all source hashes stayed fixed. The same jsdom navigation advisory was disclosed.
+- Whole UI typing passed after the eight ignored selector-option removals (60.794s, empty output). WebUI typing passed on unchanged production (37.632s, empty output); the complete resolved compiler inventory excludes the two edited fixtures. Exact name matching, all other bytes and semantic AST nodes are preserved, independently reviewed. No test suites or unchanged Web typing were replayed.
+- Parse/diff checks pass; proper ESLint has no errors or new warnings. TS-only Bandit is not applicable. Source/spec reviews carry forward; final eight-path actual/staged review and normal hooks/local commit follow.
+- This source unit is complete once committed. Broader Stage 2 remains In Progress: checkbox ownership, Sync projection, Playground, canonical parity and real UAT/native/installer acceptance remain open. Automation stays PAUSED; approvals are granted.
+
+
+### Notes task-checkbox ownership
+
+**Goal**: A task checkbox write and its completion belong to the original account, selected note and draft.
+**Success Criteria**: Both callers preserve newer or replacement drafts; original-owner POST/detail/task/activity requests; verified dock row ownership survives close/reopen; unbound/foreign rows refuse; current success, dirty-local toggles, CAS and activity remain.
+**Tests**: Delayed auth/ACK/detail/errors across owner/selection/away-return/edit/unmount; dock binding/close/reopen; exact scoped POST policy and adjacent denials; real SQLite/official PostgreSQL expected-user mismatch, matching/legacy controls and stale task/note CAS.
+**Status**: Design reviewed by root; implementation not started.
+
+- Reuse hook mutation capture, existing ServicePromptSnapshot lease/request scope and existing controller cleanup. Stamp only the existing immutable request scope on the dock's nonpersisted row with an owned response; bind all three existing row writers. No new ownership framework or ADR.
+- Before source/test edits, declare six production files: editor hook, dock panel/store, task request helper, client scope policy and task endpoints. Three narrow expected-user decorators preserve legacy callers.
+- Test-only causal RED and independent new-case review precede minimal GREEN. Affected client/backend checks, typing, touched security, final review/hooks/local commit follow. All real 43 UAT outcomes remain open; automation is PAUSED.
+
+- Prior Notes mutation/Reload unit committed locally as db37c89 (eight paths), reviewed patch exact; normal hooks passed. No publication or UAT acceptance.
+
+
+### Checkbox test-only outline and row transitions
+
+- 58 proposed new cases, not executed: hook11/dock16/helper1/policy8/SQLite11/officialPG11. Actual hooks/snapshot/lease/services/native persistence and expected-user guards; existing controls retained. Complete independent new-case/seam review precedes ONE causal RED.
+- New id-less drafts may first Save and bind only the accepted owned response; existing unbound server rows require owned Open. Save all/close-tab Save retain legitimate nonactive row behavior; checkbox/Open add active-intent fencing.
+- Existing markSaved returns the exact synchronous response row. Only that known owned transition can replace the watched row, and only if live identity plus owner/intent remain valid. No broad await-time recapture or new framework.
+- Root authorizes test-only edits, production/generated files frozen. Approval granted, automation PAUSED, real43 acceptance open.
+
+
+### Dock Save completion consumers
+
+- Before fixtures, add two native close-tab/Save-all delayed completion cases; proposed new count60. Preserve later edits/new drafts and legitimate nonactive Save. Source currently returns boolean and late callers can remove/close newer work.
+- Proposed existing saveNote returns exact acceptedrow|false; caller Close checks live identity, Saveall validates every accepted row and final dirty/newrow inventory. Independent refinement review before GREEN; no new framework.
+- Adjacent archive/activity request ownership is read-only assessment only; no silent scope expansion or all-Dock-isolated claim.
+
+
+### Close intent and archive ownership amendment
+
+- Independent source review confirms Cancel-only completion must preserve the dock/tab even if content is unchanged or the modal is reopened. Add native cases before RED; existing close-intent generation invalidates old continuation.
+- Archive rows must retain the originating request scope/lifetime. Clear stale results on authority change; Open inherits original row scope and rejects retained clicks. Scope exact GET notes/ plus existing GET search, and two notes.py expected-user decorators. Seven production paths; no other route expansion.
+- Native header compatibility/mismatch and delayed archive cases precede GREEN. Final count comes from frozen source, not previous proposed60. Activity dismissal remains separate/unqualified. Automation PAUSED/all43 actual acceptance open.
+
+
+### S06 Persona typed interaction and setup-result findings
+
+- Concrete future oracle: owned profile/defaults/safety save+reload; typed Live test requests exact ORBIT-742, requires matching final actual Chat response, completes setup and reloads identity/settings/status. Outage743 must be truthful and recoverable. Controlled D, actual provider L and human U stay distinct; no durable ordinary Chat transcript or saved Persona selected-history expansion. Actual acceptance remains open.
+- Independently confirmed source-only: asynchronous terminal failure leaves setup pending; uncorrelated reply/second-send overwrite can credit wrong test. Existing socket/voice guards insufficient for typed setup, and completion lacks current owned success validation.
+- Future unit is test-first existing pending/success identity with existing request correlation and lifecycle refs, matching terminal credit/error and completion guard. Preserve ordinary Live transcript and legacy tool-plan contract. No code/tests/runtime yet; automationPAUSED.
+
+
+### Frozen helper/backend review and real stale task CAS
+
+- Four frozen files reviewed fully by root and independently: helper1/policy10/SQLite17/PG17 proposed new cases; hashes exact;36/10 inherited Python definitions AST unchanged. Source only, no execution.
+- Before new-fixture correction, replace future task token with real accepted done POST, retain old task token/current note token, then opposite open request409 and exact complete durablehead equality. Optional helper status default only; stale-note and inherited bodies unchanged.
+
+
+### First native checkbox causal batch
+
+- Root authorizes exact34newcases once:17SQLite/17officialPG, reviewed fixture/hash guards and unchanged db37 production. Proper3.12/normalplugins/300case/600outer/no-cache, required retained15492PG/Dockerautostartoff; no fabricatedDB or guardreplacement.
+- Complete original outputs retained in memory; classify actual assertions separately from setup/timeout. No frontend/production repair or qualification follows until all pending source/test reviews complete.
+
+
+### Native checkbox causal RED and archive oracle refinement
+
+- Exact34 new cases ran once on unchanged db37:10 wrong-owner HTTP200-vs412 failures,24 positive/CAS passes,33warnings;39.31pytest/41.607outer/natural1/no timeout. Full original outputs and ten failure bodies recovered in memory; holder released normally. Downstream assertions after the failed status check are unexecuted.
+- Complete22-case Dock and narrow hook layout-effect reviews are clear except detached-element archive oracle. Preserve clearing; refine one native click-before-invalidation/deferred-auth case before frontend RED. Production remains unchanged and no backend replay follows.
+
+
+### Frozen46-case client causal batch
+
+- Root+independent complete new-body/seam review is clear. Archive refinement24 Dock cases preserves preceding32794bytes; connected native account/server deferred-auth tests replace detached-click claim. Hook layout-effect lint correction also reviewed.
+- ONE46new frontend RED, four exact files/pattern, unchanged7production/db37/fixture hashes. NormalUI/Node20/Vitest4/default5s/600outer; no pool/worker/listener overrides. Native report/output held in memory; original tests/backend RED excluded. Source80new total is inventory, not executed acceptance.
+
+
+### Initial46-client result classification
+
+- Native4file JSON:46executed/38failed8passed/134originalexcluded; natural1/17.571outer/no timeout;158183stdout/stderr0. Full native report recovered; every failure assertion/location classified after initial truncated display recovery. Suite count13 denotes groups, notfiles; unreported error/unhandled/retry fields unavailable.
+-32 intended product assertions fail. Six blocked before intended cause:1literal-bracket keyboard parsing,4jsdom modal leave motion,1second-note Open setup (diagnose before correction). Native controls/guards/oracles stay. Minimal reviewed fixture correction and6-only RED precede GREEN; no46/backend replay.
+
+
+### Exact six-case fixture correction
+
+- Test-only Dock: realConfigProvider/motionfalse existing precedent, literal'[' escape for native typing, safe existing Open assertion context. Original controls/oracles/timeouts stay; no speculative product/UUID/cache/drain edits.
+- Second-note setup cause unproven; original prettyDOM budget truncation is not empty-Dock proof. Independent delta review then ONEcorrected6-only baseline batch; no other RED/control replay.
+
+
+### Future Persona Finish ownership and dormant Studio preservation
+
+- Persona refinement/root source verification: carry ORIGINAL successful-test scope/run/profile/version/generation through summary+PATCH; exact3route expected-user/policy extensions, existingDBCAS, no fresh-auth attestation or retry. Session-wide no-ID terminal differs from turn-specific matching-ID cancellation. No execution/source/UAT qualification.
+- FutureSync preservation amendment requires verifying canonicalStudio Sync anchors versus divergent product tokens through actual owner/dataset receipt proof; local-unbound/dormant/refusal/historical/placement contracts stay. No activation/rewrite/fake proof; source-only preparation.
+
+
+### Corrected six causal outcomes and first production repair
+
+- Six-only RED6failed/22excluded/natural1/7.064outer/no timeout/stderr0, full13483nativeJSON; holder normalexit0. All now reach actual unscoped save/stale reads/tab removal/all-close-after-Cancel assertions. Original Beta setup cause remains unproven; no speculative repair or single46corrected-run claim.
+- First minimal7production repair authorized: reuse current owner/request/editor guards, immutable nonpersisted Dock scope on accepted responses, exact owned row transitions and close-intent generation; preserve nonactive/idless/legacy/CAS. Five expected-user decorators/exact client policy. No newframework/ADR.
+- Four inherited Dock setups need proposed/reviewed actual owned Open before local edits; all behavioral assertions/actions stay, no fake scope. Freeze implementation for source review before first affectedGREEN. Activity dismissal remains later unit.
+
+### Notes checkbox/Dock fixture contracts before first green
+
+2026-10-07 Notes checkbox/Dock first repair: declare the narrow fixture-contract adaptation before edits. The four inherited Dock tests must open their existing server note through the actual owned archive UI before the same local edits and behavioral actions; preserve every inherited behavioral assertion/conflict/dismissal action. The existing list boundary returns the same101 detail row, and existing auth/config boundaries identify owner1. Keep the new unbound-row refusal setup unchanged. Correct only the external safe-storage mock signature to the installed object's watch/unwatch API, invoking tldwConfig on those objects; real ServicePrompt ownership/lease validation remains. These are required setup contracts for the reviewed production ownership guard, not guard replacements or accepted UAT outcomes. No tests until complete frozen candidate and fresh source review.
+
+### Notes checkbox/Dock source review refinement before green
+
+2026-10-07 Notes checkbox/Dock first-candidate source review refinement before GREEN: independent review found captureDockOperation starts original-scope snapshot/config/principal resolution before its initial row validity check. Save-all may retain B while awaited Save A permits editing/replacing B. Reject a passed stale row, closed Dock or unmounted caller at capture entry before any snapshot/auth work; keep subsequent guards and exact own response adoption. Later guard already prevented stale writes, so no runtime stale-write claim is made. Minimal entry guard only, first candidate reviewed before any green run; no issue retry or cap reset. Root read every seven-production changed hunk plus capture/save/close/store and shared lease contexts.
+
+### Notes checkbox/Dock first green declaration
+
+2026-10-07 Notes checkbox/Dock first GREEN declaration: corrected seven-production candidate frozen with Dock17d14fa7, hookb4557fd9, storead2bbf3d, helper8f22712a, policya4aaa19f, native notes_tasks16ab7ae1/notesd43b9dcf. Dock fixturef2456311 includes only declared actual-owned-Open old4 setup and object-shaped storage watcher adaptation; other five test hashes unchanged. Fresh independent actual seven-production plus narrow fixture review CLEAR; root separately read all changed production hunks/shared ownership/Save/close/store/lease and fixture deltas. Qualified RED results retain10wrong-header native failures+24controls,32intendedfrontend failures+8controls and separate corrected6-only intended failures; do not replay unchanged baseline. Declare ONE full affected four-file UI run, then same four files WebUI; ONE full affected two-file native SQLite/official-isolatedPG run. Supported3.12/Node20.19.5; normal plugins/config/defaultfrontend case limits, native300/outer600; no worker/pool override/cache or guard weakening. All7production+6fixture hashes and HEADdb37 guarded before/after. Green may execute independent native/backend and UI concurrently; retain original outputs in memory only. Activity dismissal remains a separate unqualified followup; no broaderUAT/real43 acceptance.
+
+### Notes first UI green result and narrow diagnostic
+
+2026-10-07 Notes checkbox/Dock first UI green:180cases executed,178passed2failed, four actual files (native13suite groups),17.789963666931726outer/naturalVitest1/no deadline/stderr0. Dock28/helper4passed; hook10passed1failed,policy136passed1failed. All guarded source/fixture hashes and HEAD unchanged. Operator holder lackedTTY and its stdin reachedEOF, so it released captured original JSON before root extraction; only emitted native counters/per-file counts/hashes remain. Do not claim exact failures or complete message review. No rerun of178passes merely to recover display. Static source independently establishes inherited notes/GET false row conflicts with newly approved exactGETlist contract; one hook failure not yet identified. Declare ONE narrow diagnostic on existing positive principal/signal/CAS reload hook case plus exact inherited notes/GET row, retaining real services/guards and current frozen source. Print original failure details before holder release and keepTTY for new output. This checks a concrete shared reload/setup possibility; not a reproduced hookcause yet. Backend first full2 remains running independently; WebUI first run deferred until failure diagnosis.
+
+### Notes two fixture contracts and native green result
+
+2026-10-07 Notes first-green narrow diagnostic completed2failed/146excluded/2actualfiles1.1130187090020627outer/natural1/no deadline/stderr0. Complete43068char nativeJSON recovered in memory; positive hook fails on request configundefined at167, exact inherited GETnotes/ policy fails true-v-false at80. Source traces enabled checkbox is published before original Open activity/action settles; native failure itself did not identify requestpath, so runtime caller attribution is not independently logged. Both reviewers approve fixture-only amendment: in positive hook case settle existing tracked Open action before mockClear, and settle existing tracked checkbox action before complete reload-chain assertions; keep all original config/signal/header/CAS conditions and other10case bodies. Change only inherited exactGETnotes/ expectation false→true matching the explicitly approved scoped archive-list/nativeexpected-user contract; adjacent denials unchanged. No production change. Native full two affected files qualified70passed33warnings75.22pytest77.47416283399798outer/natural0/no deadline with original official isolatedPG and normal plugins. Full1293charstdout emitted/reviewed; only1200charof89620stderr tail reviewed (metric/config logging), no full-stderr/no-error claim. No native replay. After amendment+independentdelta review, execute ONLY correctedtwo UI cases, then firstfullfour-file WebUI; do not rerun178qualifiedUIcases merely for aggregate.
+
+### Notes diagnostic STOP and independent security/type work
+
+2026-10-07 Notes checkbox/Dock qualification hold and independent security refinement: correctedtwoUI1passed1failed/146excluded2.2141375419450924outer/natural1; policyexactGETlist passes, positivehook stillconfigundefined at169. Full41280char originalnativeJSON recovered; callerpathunavailable. Positive reload diagnostic has reached3failedchecks; STOP, ONE additional path/method/scope-presence-only diagnostic exception asked once and remains pending. Static review confirms automatic checkSelectedNoteFreshness2785–2827 immediately dispatches unscoped detailGET onselectedVersionchange; this is a concrete sourcecandidate, not confirmednativecaller. Never replay178UI/70native/28Dock unchanged or inferfreshapprovalfromstatus/time. Continue independent types/lint/security. Static projectBandit1.9.3 in primaryPython3.11 (static-only, noappimports) gives productionbaseline/current0/0 and new41LOWB101 only on normal pytestasserts (SQLite19/PG22), no other new findings/scanerrors. Existing supportedfixall3.12 lacksBandit; historical20261006venvactivationmissing, not reconstructed. Declare ONLY41 narrow explained nosecB101 comments on those newassert statements, semanticwholemoduleASTexact, no inherited annotations or guards changed. Rerun scopedcurrentBandit toconfirm no new findings; native70byte-semanticqualificationcarries, no testreplay. FirstconfiguredUI/WebUItypechecks useexistingNode20.19.5/8192/noEmit/incrementalfalse600, noinstall.
+
+### Notes static checks and remaining WebUI scope
+
+2026-10-07 Notes independent static qualifications complete: configuredUItypes0/65.71811962488573outer andWebUItypes0/44.93219449999742outer, stdout/stderr empty, Node20.19.5/8192/noemit/nonincremental600, all guardedcandidatehashes/HEADunchanged. Both ownedtypeholders normalreleaseexit0, no signals. FourtouchedPython compile0/noappimports and baseline/currentRuff0/0each. ProductionBandit0/0 retained; testcurrent133SQLite/45PGonlyinheritedissues,0new/0errors after41narrowexplainedB101pytestcomments (19/22); wholemoduleASTexactandindependentannotationreviewCLEAR. StaticBanditusedselectedprimaryPython3.11 only, no below-floorappqualification; fixall3.12Banditmoduleabsent/historicalvenvmissing didnottriggerinstall/reconstruction. Positivehookdiagnostic remainsSTOP/ONEexceptionpending, untouchedsources; all native70/Dock28/UI178controls qualifiedscopeonly, no all180completepassclaim. Amend firstWebUIaffectedrun to ONLY3unaffectedfiles(policy/helper/Dock), excluding stopped11hookcases; firstnormalconfiguredWebUI169caseinventory, no worker/pooloverride/limitgrowth. FullhookWebUI and repaircloseout gatedonactualpositivecause; broader43actualUATOPEN.
+
+### Notes WebUI setup failure and dormant Studio proof design
+
+2026-10-07 firstconfiguredunaffectedWebUI3file run169executed168passed1failed,16.86556499998551outer/natural1/node20.19.5/defaultcaseconfig/600/no deadline/stderr0/allguardedhashesHEADunchanged. Helper4/policy137passed;Dock27passed1failed. Full63250char nativeJSON recoveredinmemory; failedcase 'rejects a late applied checkbox ACK after active invalidation' failed in second-note Open setup athelper459 BEFORE statusmutation/ACKoracle. Recorded rowonly101, requestlist/detail101/tasks/activity/list; no102detailrequest. NativeDOMpayloadalreadyprettyDOMtruncated, so neveremptyDock/fullDOMclaim. EarlierUI28Dockpass/corrected6baselinepassedsetup remain scoped; cause of intermittentsecond-noteabsenceUNPROVEN, notflaky/product/rootcausereproducedclaim. Shared source contains immediatearchivefetch plus250msqueryfetch; lifecycle timing is only sourcecandidate, no speculativefixture/source/timerfix. No broadWebUIrerun/168passreplay or stoppedhook11execution. Holdernormalrelease0, no signals/proofoutputfile. Notescurrentunit remainsWIP/UNPUBLISHED; no stage/commit/body/queue/merge. One additional positivehook diagnostic approval remainsrequired/pending, askedonce, status/timegenericcontinuecannotgrant. Broader43realUAT stillOPEN.
+
+Independent dormantStudio design amendment COMPLETE/source-only: guardedSyncV2Storecurrenthead/objectstate/servercursor accessors plus exactaccepted-envelope internalreceipt under callerproductconn suffice if completedactualresult records allocatedproductversion (includingpairedcoreNote); no extra schema/mappingtable/receiptversion scan. Root read these accessors/read_receipt/bootstrap/MaterializationResult in addition to earlierproducer/validator contexts. Publicreceiptkeyhashing unchanged; private stored-prefix reader only future proposal. Use acceptedwire revision/hash+owner/dataset/encryption/lifecycle/content proof underexistingfencebeforeproductTxn. Bootstrap verifies actuallockedsource attestation withoutsecondimplicitread; localcompatibilityanchors/productattestation and dormantStudio enrollment stay. Nonlocaldataset alone notcanonicalproof. Canonicalboundproducer/validatorseam must refuseunprovedproduct6→Sync2 binding, preservehistoricalrows, exact currenthashcheckfor provenwire2/product6. No activation/globalheadrewrite/source/tests/ADRedit yet; futureSyncTDDretained.
+
+
+## 2026-10-07 approved Notes diagnostic continuation
+**Status**: In Progress
+**Authorization**: Human: approved; all approvals granted to move through and validate/fix the 43 UAT workflows. No approval pending.
+**Bounded next diagnostic**: One targeted UI positive-hook run after safe inventory/index/path/method failure-label amendment only. Preserve both settlement awaits and every existing assertion/action/body. No sensitive header/config/body contents, filtering, extra waits or authority mocks. Identify the actual request path before fixing production. Separately diagnose WebUI second-note Open without arbitrary wait/cache/timer/guard changes. Existing 600-second outer and configured per-case budgets remain.
+**Ruling**: Use this existing official task and owned plan plus in-memory agent reports, instead of SDD scratch report/proof bundles, to honor the human no-proof instruction. Reviews remain mandatory.
+**Acceptance**: All 43 real UAT workflow gates remain open; automation PAUSED; no publication or merge in this continuation yet.
+
+
+### Approved positive diagnostic outcome and causal correction scope
+One UI case failed naturally in 2.189732207916677 seconds; 10 excluded; no deadline/stderr. Full native request inventory confirms the independent unscoped detail GET between owned task and activity reloads. Source: immediate checkSelectedNoteFreshness effect after accepted version assignment; current loadDetail already supplies immediate detail freshness. Preserve all existing assertions, scheduled polling and truthful conflict notice behavior. Add real-hook polling owner/selection stale-result regressions first, then smallest shared correction. WebUI Beta Open cause still unproven; inspect safe native target connectivity/event lifecycle before repair.
+
+
+### Freshness causal red and safer Dock repair investigation
+5 new real-hook freshness cases failed naturally2.542509541963227s,11 excluded,no deadline/stderr; actual scope and stale-state defects demonstrated. Keep30s polling with originalowner/editor context; remove duplicate immediate head read; existing guarded save-conflict detail supplies version notice. Auto-review rejected Dock event/connectivity instrumentation; no edit/retry/bypass. Source proves TWO initialempty-query effects. Safer ordinary behavioral test: standard unit clock throughinitial250ms, exactlyone initial list request, real Alpha/Beta archive Open. Consolidate initialemptyfetch/debouncednonemptysearch only after causalred; preserve query andownership guards. OriginalBeta setup must pass separately before qualification; no source-only timing attribution.
+
+
+### Freshness correction1 result and settled conflict repair2
+UI82executed81passed1failed,natural1/4.568464791984297s/no deadline/stderr. Ownership16passed. Existing save-machine KeepMine edit cancellation retains newerhead3 but indicator dirty insteadconflict. Sourceeffect lacks save-status dependency; duplicateGETmaskedsettlement. Attempt2: smallest truthful settled-status conflict transition, with in-flight and already-conflict guards; no newrequests/fixture/assertion/wait changes. Requalify affected66save-statecases, retain16ownershippasses without unchangedUIreplay. Fullnative33129 JSON memoryrecovered/released; no UATacceptance.
+
+
+### Notes checkbox, Dock and freshness final qualification
+
+2026-10-07 Notes checkbox, Dock and freshness qualification checkpoint. All requested efforts and diagnostic approvals are granted; no approval is pending. Final freshness UI evidence is 16/16 ownership cases on correction 1 plus 66/66 save cases on correction 2 (separate runs), and WebUI executes both files 82/82 passing. The original owner/config, selection, editor revision and cancellation guards cover scheduled 30-second polling; the already-owned save-conflict detail read supplies truthful remote-head metadata, and the settled state effect restores conflict after Keep Mine. No unchanged native 70-case qualification replay followed these frontend amendments.
+
+Dock ordinary duplicate-refresh regression failed with two initial list requests at the existing 250ms boundary. The shared effect now fetches empty search immediately once and debounces nonempty search. First complete corrected UI Dock check passed the original 28 cases, with only the new clock-controlled case failing; restore real timers after its count assertion and before native interactions, then that one case passed with 28 excluded. Complete final WebUI Dock file passes 29/29 in 16.566943s naturally, including the original Alpha-to-Beta setup. This is 28+1 scoped UI qualification across separate checks, not one final UI 29-pass run. All native request/state assertions and cleanup remain. The rejected event/connectivity instrumentation was not executed or retried; ordinary behavioral testing supplied the causal result. Full original result JSON was recovered in memory and released without proof files.
+
+Final configured UI types pass naturally in 69.499990s and WebUI types in 46.440154s, stdout/stderr empty, existing Node20.19.5/8192MiB/noEmit/nonincremental/600s. Exact final 13 source/test hashes and HEAD db37c89ad8a6080b2a98290a7bc5d6dbc2a86c1d remain guarded. Incremental TypeScript parse/lint is clean of new issues: hook51, Dock10, inherited Dock test2 warnings unchanged; new hook test0. Inherited Next pages-discovery diagnostic remains. Earlier unchanged Python compile/Ruff/Bandit qualifications and 41 narrow assertion annotations retain their exact scope; no Python/app/native replay. The unit now contains 86 new cases in six test paths plus seven production paths and tracking. Final actual/staged review and normal hooks/local commit remain. Activity-dismiss ownership is a separately confirmed next source unit; Sync, Persona, Playground, canonical parity, actual43 UAT/native/installer acceptance and publication gates remain open. Automation stays PAUSED.
+
+
+## Notes activity notice ownership
+
+2026-10-07 Notes checkbox/Dock/freshness unit committed locally as 476e5bdde8f622d4909122acbae996f7228d71c2, parent db37c89ad8a6080b2a98290a7bc5d6dbc2a86c1d. Exactly15 paths/1797 insertions143 deletions; committed binary full-index patch matches independently reviewed actual and staged SHA256 e114f7368de62e964350d87e98839f9f9c7ce01a52a17706bfb5d9b29aea0c62. Normal explicit15-file pre-commit natural0/2.150655s, syntax/task/security/whitespace/client and legacy-body guards passed; wizard-only format hooks skipped no files. Source/prose hashes unchanged. Tracked clean after commit, no whole-checkout clean claim. Normal Git background packing warnings retained without manual GC, log removal or prune. No push, PR body, queue or merge action; prior scoped test/type/security limits remain.
+
+Declare the next reviewable Notes activity-notice ownership unit before edits. Actual two dismissal callers (hook901/Dock784), helper238 and native PATCH369 lack original owned request; hook inspection and accepted save/offline-sync refresh also reach the unscoped shared task/activity read boundary. Root and serial implementer separately traced these callers read-only. Reuse existing captureNoteMutation/captureDockOperation and optional task request options. Capture original selected note, config/principal scope and actual event object before fresh authentication, retain controller/cancellation and selection/editor or exact Dock-row lifetime; ACK, error and finally cannot alter a replacement notice or a newer pending operation. Successful current PATCH may hide only its captured event; a failed PATCH keeps the notice. Dock dirty drafts stay intact. Shared hook refresh must guard tasks and activity together, including default unscoped callers, with existing supplied owned save options preserved. Keep server CAS, task/note state, RBAC, rate limits and database abstractions unchanged.
+
+Native PATCH /api/v1/notes/tasks/activity/{event_id} reuses require_expected_user, permitting absent legacy header and matching principal while wrong principal returns412/no-store before persistent mutation. Strict client policy permits only the exact nonempty single-event PATCH path; wrong methods/trailing slash/nesting/siblings stay denied. New tests use real hook/Dock operations and existing owned Open transport, encoded helper event ID/body/options, strict policy checks, and actual SQLite/official isolatedPG read/dismiss state with matching/legacy/wrong headers and owner isolation. No runtime mock UAT acceptance. Design uses existing ownership boundary; no new durable architecture decision or dependency, so no new ADR.
+
+Ruling: continue the no-proof workflow exception using this official task and owned plan as the ledger/requirements and in-memory dispatch/review reports, because the human forbids duplicate proof/snapshot/report bundles. One fresh serial implementer writes only the six existing test paths first, preserves all previous functions/oracles, and pauses before execution/production edits for root test review and declared real RED. Maximum3 causal repair attempts per issue then reassess; no unchanged-control replay or hidden ceiling reset. After RED, smallest shared production change in five paths, affected checks/static security, independent actual/staged review and normal hooks/local commit. Broader all43 actual UAT, Sync/Persona/Playground/canonical/native/installer/publication gates remain open. All approvals granted; automation stays PAUSED.
+
+### Stage 1: Reproduce original-owner activity errors
+**Goal**: Real notice dismissal and shared task/activity reload regressions on unchanged476e source.
+**Success Criteria**: Each failure reaches the actual ownership/publication assertion with existing real fixtures; matching/legacy controls remain valid.
+**Tests**: Six existing hook/Dock/helper/policy/SQLite/officialPG test paths; record exact new inventory before RED.
+**Status**: Complete
+
+### Stage 2: Reuse existing owned operation guards
+**Goal**: Scope PATCH and shared reload to the captured owner, selected note and original event; preserve newer pending work and dirty drafts.
+**Success Criteria**: Current success clears only the original event; failures and revoked lifetimes do not publish or clear replacement/current state.
+**Tests**: Affected suites in both configured clients and normal native fixtures, existing600 outer/native300 case limits.
+**Status**: Complete
+
+### Stage 3: Review and commit this unit
+**Goal**: Verified minimal source/test changes committed locally with official tracking.
+**Success Criteria**: No new touched security/lint issues; exact reviewed actual/index/commit patch; normal hooks.
+**Tests**: Supported types/compile/scoped baseline-current checks and independent actual/staged review; retain prior unchanged results without replay.
+**Status**: Complete
+
+### Pre-RED test review and selective execution
+
+2026-10-07 Notes activity ownership pre-RED review: exact new inventory87 cases (hook36, Dock20, helper2, policy15, SQLite7, officialPG7) across six existing test files. Independent test review identified two native oracle gaps before execution: read cases began already read, and isolation did not compare both owner task graphs. Tests now begin read cases unread and establish/snapshot both owned graphs through existing abstractions, with per-attempt unchanged heads. No production fix yet; five production paths remain exact476e. Root separately read all six changed test patches. Ruling: retain existing deferred-gate cleanup and awaited React act instead of adding duplicate per-test finally/transport plumbing; installed React18.3.1 finite fixture chains are drained by awaited outer act and registered gates are resolved in afterEach. Declare ONE selective real RED on unchanged476e production after scoped re-review: native14 new cases using -k activity_original_ownership with normal plugins, official isolatedPG15492 required/noautostart/native300 case/600 outer; four configured UI files'73 new cases using Notes activity original ownership, installed Node20.19.5/Vitest4.0.18/default config and600 outer, no worker/pool/time override. Source/fixture hashes guarded before/after; actual output held only in memory for diagnosis, no proof files. No automatic full-suite replay, runtime/UAT acceptance, push or merge. All43 actual workflows remain open; all approvals granted; automation PAUSED.
+
+### Selective RED outcome and bounded follow-up
+
+2026-10-07 Notes activity ONE selective real RED completed on unchanged476e production: UI73 executed48failed25passed186excluded/17.908770s outer/natural1/no deadline; native14 executed5failed9passed70excluded/19.04pytest21.214798outer/natural1/33warnings. Complete actual UI197756-char JSON and native135354-char stdout recovered in memory; no proof/log files. Wrong-user PATCH returned200 instead of412 in both backends (four failures). Native officialPG foreign-event PATCH returned500 instead of409 before state assertions; actual owner/data scope request reached real writer, composite owner/dataset/event FK is preserved, and task_store._raise_write_backend_error checks driver message strings although PostgreSQL now redacts them. SQLite equivalent isolation passed. Ruling: extend this unit to the shared chacha task_store activity-write boundary to return an owned missing-event conflict without weakening FK/RLS/privilege or parsing redacted driver text; no unrelated global backend-error mapping or logging changes. Existing native isolation case is causal red for read; dismissed branch remains unexecuted after first failure and needs green validation. UI failures reach actual missing request config/fresh auth, failed-dismiss notice loss, replacement/stale ACK or error, shared refresh/edit publication and newer pending cleanup assertions. Four Dock account/server delayed ACK/error cases stop during invalidation when the saved archive is collapsed; they are fixture setup failures, NOT causal red. Correct these new fixture paths through the real archive UI then run ONLY those four cases on unchanged production if needed, without rerunning qualified/new causal cases. Current48 fail total is not48 independently causal defects. Output holders released cleanly; no production change yet. Max3 issue attempts/no hidden retry retained; actual43 UAT/open source/publication gates remain.
+
+### RED diagnosis correction and same-transaction boundary
+
+2026-10-07 correction to the preceding Dock RED interpretation: the actual failed DOM has expanded Archive (w-64) and RefreshCcw control; root's collapsed-archive explanation was incorrect. Only unavailable saved archive Open during account/server invalidation is established; the four cases remain fixture-path failures, not causal ACK/error red. Inspect exact authority/refresh behavior before correcting new fixture, using the real visible Refresh if required, without timeout/pool/store bypass. Ruling: shared native activity missing-event guard belongs after existing authorized write-scope admission on the same transaction; require exact owner/dataset/event parent and raise existing ConflictError, with existing PostgreSQL parent-lock pattern to retain FK integrity through insert. Keep general redacted backend error mapping, schema/RLS and unrelated writers unchanged. This is supported by real PG foreign-event500 red plus exact composite FK/source; no exact redacted driver SQLSTATE claimed.
+
+### Stage 1 Complete; Stage 2 In Progress
+
+2026-10-07 corrected Dock fixture selective RED: four account/server delayed ACK/error cases now reach final post-release notice/error assertions, all4failed45excluded/5.113213outer/natural1/no deadline; full41971-char native JSON recovered in memory, holder released. Real expanded Archive Refresh/Open removes setup gap; no old cases replayed. Stage1 reproduction complete; Stage2 minimal repair begins in existing hook, Dock, task helper, strict client path policy, native expected-user PATCH dependency plus shared chacha task_store activity parent guard. Keep exact original event identity before fresh auth; current failure preserves notice; old ACK/error/finally cannot clear replacement/newer pending; existing shared capture/controller guards protect default Inspect/save/offline task+activity refresh and supplied owned options. Native guard inside current transaction exact owner/dataset/event, PostgreSQL parent lock style and existing ConflictError; unrelated backend errors remain truthful. Preserve all original tests/CAS/RBAC/schema/FKs/RLS/rate/storage/provenance rules and old successful unit. Declare affected green scope six modified suites in both configured clients, full two native files plus existing activity/missing-event/explicit transaction/private-authority DB tests and existing supported PostgreSQL owner/RLS case, proper fixtures/caps; touched lint/compile/security/types and independent actual/staged review before commit. No production change yet at this note; serial implementer may now author minimal repair, root executes qualification after review.
+
+### First GREEN review: accepted-load lifetime correction
+
+2026-10-07 Notes activity first production GREEN and fresh actual-source review: full UI and WebUI five-file325-case runs each271passed54failed/natural1/no deadline (54.979944s UI,56.158184s WebUI). Dock49/helper6/policy152 pass in both. All52 hook cases stop because normal loadDetail programmatic render advances editRevision captured immediately by shared refresh, so current tasks/activity are dropped; independent actual-source review confirms Important/P1 and Spec FAIL. Two existing save-machine cases include an account-return pending-auth fixture now gating unrelated replacement-owner refresh; one timeout followed by null hook read is not two proven product defects. Full325897/325896-char JSON recovered in memory, holders released. Native DB run still active; no native source edits during it. Static touched TS parse/ESLint no new diagnostics (existing51+10+2 warnings); Python compile/Ruff/Bandit no new, production0 and178 inherited test findings; wholefile formatter flags remain inherited. Ruling: correct accepted programmatic-load lifetime before any asynchronous boundary, never blindly accept an arbitrary revision after awaiting; preserve actual newer edit/owner/selection/signal guards. Add focused default/supplied-options initial-load render controls before correction; any save fixture correction must target only its intended held authentication while preserving all original assertions. Re-review only correction/new control scope, then affected hook+save suites both clients; unchanged passing Dock/helper/policy/native/static scopes excluded from replay.
+
+### Native GREEN and exact accepted-document ruling
+
+2026-10-07 Notes activity native GREEN completed: full two modified API files plus full existing task_store suite and restricted-role officialPG same-id-two-owner case164passed33warnings/241.76pytest244.483048outer/natural0/no deadline, supportedPython3.12.13/project0.1.46/officialPG15492/noautostart/300case/600outer; source+fixture guards unchanged and output holder released. SQLite/PG matching+legacy+wrong-user read/dismiss and foreign isolation branches now reach full state/head assertions; database helper remains qualified with exact scope, not actual UAT. Fresh scoped review approves existing save-machine864 fixture one-shot original auth gate: mockImplementationOnce preserves every assertion and lets separate account-return replacement opening use default current owner. Ruling: expand test scope to this one existing save-machine fixture line and two initial-load render controls; publish final accepted document into existing editRevisionRef synchronously before refresh, with exact keyword array identity and final queued-draft values, existing revision rule and current wysiwygInputCount preserved. No post-await revision adoption, new guard abstraction or removal of newer-edit/owner/selection/signal/dirty protections. Two new controls first, scoped review/real RED before production correction; then only affected hook+save tests/types/static requalification. Retain native/Dock/helper/policy/security greens without unchanged replay.
+
+### Accepted-load causal RED; correction authorized
+
+2026-10-07 accepted-load two new control RED completed on held first-green hooka2d08127 source:2failed0passed52excluded/3.535998outer/natural1/no deadline/no stderr. Both force committed original document render before resolving fresh auth/default or task-read/supplied-options gate, then fail at real noteTasks length0 versus1; activity assertion follows and remains to validate on green. Full22782-char JSON recovered in memory; holder released. Independent scoped control review Spec PASS/Quality CLEAR; all prior assertions untouched. Serial implementer may now apply declared synchronous final accepted draft/ref publication and reviewed one-shot save auth fixture, preserving exact keyword identity/queued draft/metadata/input count plus all actual user-edit/owner/selection/signal/dirty boundaries. Root will inspect corrected diff and run full hook54+save66 in both configured clients; retain207 passing Dock/helper/policy and164 native/database controls without replay.
+
+### Stage 2 Complete; Stage 3 In Progress
+
+2026-10-07 Notes activity Stage2 Complete; Stage3 In Progress. Accepted-document correction scoped re-review: P1 ADDRESSED/Spec PASS/Quality CLEAR, exact keyword identity/final queued draft snapshot synchronously precedes refresh; actual newer edit/owner/selection/signal/dirty guards retained. Reviewed one-shot original Use theirs auth fixture preserves all160 original save assertions. Corrected full hook54+save66 both configured clients120passed/no skips/natural0/no deadline: UI7.511601outer,WebUI7.112367outer. Earlier unchanged Dock49/helper6/policy152=207passes perclient retained; NOT one new327-case combined run. Native164/33warnings/241.76pytest244.483048outer retained unchanged. Final normal noEmit/nonincremental configured UI/Web semantic types natural0/no errors: UI86.712924outer,Web63.387463outer. Updated hook/test/save TypeScript parse+ESLint0errors/no new warnings (hook51 inherited); other TS and Python baseline/current compile/Ruff/Bandit scope retained, production0findings/tests178 identical inherited/0errors. All original ordered expect calls preserved (five frontend files375original) and source/fixture hashes unchanged during every completed check. No new runtime/browser/UAT/native/installer/publication qualification. Unit has89 new cases plus one existing auth fixture line; normal exact15-file hooks and independent final actual+staged review/local commit next. Broader all43 actual workflows remain OPEN; automation PAUSED.
+
+
+### Notes activity Stage 3 Complete; next Sync unit declared
+
+2026-10-07 Notes activity unit completed and committed locally as 59eb6d355759c3a3adba30dc7227e2d0f741575d on codex/pr3084-all-fixes-rebased-20261007 (parent476e5bdde8f622d4909122acbae996f7228d71c2):15paths950insertions69deletions. Fresh final actual+staged review Spec PASS/Quality CLEAR; exact staged/committed106973-byte full-index binary patch SHA2565392fb55f4be991e9ca8f7ed8a612177c48be536bdce60e998e1e31fbbe069d6. Normal explicit15-file hooks natural0/2.142637outer and normal commit natural0/.520739outer, no bypass. Immediate postcommit tracked clean only; no wholecheckout claim. Previously recorded scoped frontend/native/types/lint/security outcomes retained without replay. Unpublished; all43 actual UAT/native/installer/canonical/finalpublication gates remain open. Declare next unit BEFORE repository edits: implement retained Sync monotonic Notes product version and durable projection receipt design (ownedplan240-250,410-421,450-458), tests first using real SQLite/official isolatedPG/ownership/RLS/transaction boundaries, independent test review and declared causal RED before production. ADR required: Proposed Docs/ADR/066-monotonic-notes-product-versions-and-projection-receipts.md partially supersedes034 only for Notes product allocation and ambiguous replay, leaving031/065 governing. Reuse existing product transaction/notes_provenance_receipts; preserve public hashes, Sync wire revisions and exact trusted ingestion CAS. Fresh serial capable implementer; no repeated completed design/control review. All efforts approved, no approval pending; automation stays PAUSED.
+
+## Sync monotonic product versions and durable projection receipts
+
+**ADR required**: Yes — [Proposed ADR-066](../ADR/066-monotonic-notes-product-versions-and-projection-receipts.md). Notes product edit tokens and Sync wire revisions may diverge; a completed receipt inside the existing product transaction must distinguish accepted-envelope replay after checkpoint failure from a new write. Partial supersession of ADR-034 is limited to those two rules; ADR-031/065 remain governing.
+
+### Stage 1: Existing contracts and causal regression
+**Goal**: Author the retained ADR/spec and real tests for monotonic product allocation, exact accepted projection identity, replay after checkpoint fault, legacy and ownership compatibility.
+**Success Criteria**: Independent test review clear; declared selective new cases fail on unchanged59eb production for actual defects with setup failures separated.
+**Tests**: Existing Sync Notes provenance/lifecycle and real backend fixtures; no operator SQL, import shims or new proof files.
+**Status**: In Progress
+
+### Stage 2: Minimal shared-boundary repair
+**Goal**: Reuse actual product write locks and notes_provenance_receipts; protect all note/provenance/organization/Studio consumers through actual product-to-wire mappings.
+**Success Criteria**: Real causal green; unaffected canonical/wire/hash/RLS/ingestion rules preserved.
+**Tests**: Genuinely affected configured SQLite and official isolatedPG suites, rollback, concurrency, exact retry and current authority cases.
+**Status**: Not Started
+
+### Stage 3: Review, static qualification and local commit
+**Goal**: Qualify touched source and complete independent actual/staged review with normal hooks.
+**Success Criteria**: No new touched security/lint findings; exact reviewed staged/committed patch; normal local commit with broader actual43 gates retained.
+**Tests**: Compile/Ruff/scoped baseline-current Bandit and independent review. Retain qualified unchanged Notes activity controls without replay.
+**Status**: Not Started
+
+
+### Sync Stage 1 exact protocol and legacy fixture ruling
+
+2026-10-07 Sync Stage1 ruling: use reserved server-generated routing field notes_sync_projection_protocol with exact value notes-sync-projection-v1; prior retained design did not bind a field spelling. Stamp only through actual fresh accepted Notes insertion and retain original idempotent rows. Ruling: a narrowly scoped old-writer fixture may omit ONLY this marker at existing accepted serialization to construct real stored legacy state; every other field and real acceptance/backend/authority path remains. No operator SQL, store stub, production guard weakening or import shim. New regressions must reach existing public flow behavior on unchanged59eb, not fail because a future helper/import is missing. Cost if wrong: protocol/test fixture rework; immutable identity and public hashes remain required. Receipt fingerprint excludes mutable apply-status/error bookkeeping, while exact accepted payload/routing/protocol/cursor/client/device identity stays binding.
+
+
+### Sync upgrade authenticity amendment and test setup rulings
+
+2026-10-07 Sync Stage1 independent test review Spec FAIL/Quality two blockers before execution: new-note server batch revision7 violates existing sequential wire admission, and ingestion revision3/base1 catches setup validation before its claimed checkpoint. No causal RED claimed. Correct creation through existing client push; correct ingestion checkpoint control with aligned1->2 and explicit fault-hook witness. Add a distinct valid-wire unequal-product ingestion control rather than weakening wire admission. Ruling: trusted ingestion exact expected-product CAS/expected+1 refers to the product result; its accepted wire revision/base still obey existing wire base+1. Preserve low-level direct-helper compatibility separately. Cost if wrong: test/consumer mapping rework; no wire guard weakening authorized. Scoped upgrade authenticity review confirms bare routing marker and new metadata watermark preseedable under old client/writer paths. Ruling: use nullable server-only sync_envelopes.notes_sync_projection_protocol TEXT DEFAULT NULL, through existing additive SQLite/PG schema migration, no backfill/constant default/newtable/secret/cursor-cutoff/old-writer restriction. Force the value only for genuinely fresh accepted Notes INSERT, never from request; internal stored SyncEnvelope field only, public create/wire schemas unchanged. Re-read canonical accepted row with existing dataset/client lookup through held guarded store before trusting field/identity. Legacy NULL rows retain original marker-inclusive request/group hashes; authentic new rows exclude only routing marker, receipt binds persisted column and metadata. Preserve timestamp hash variants/mixed-domain members and old exact idempotent rows. Verify existing same-named column shape as canonical nullable/no constant default before trusting it. Applied legacy/bootstrap remains authoritative; ambiguous pending/failed is retained/refused. Independent scoped column amendment Spec PASS/Quality preferred; no implementation or execution. Old-writer fixture may simulate only the old physical INSERT list omitting this new column through existing real DB abstraction/acceptance path, not app/RBAC/store bypass or raw operator SQL.
+
+
+### Sync new request intent and stored legacy hash distinction
+
+2026-10-07 Sync new-intent versus stored-legacy hash ruling: SyncEnvelopeCreate and ServerOriginMutationStep describe new request/plan intent, whose default hash may exclude the routing marker that fresh acceptance forcibly replaces. Canonical stored legacy NULL-column envelopes retain original marker-inclusive routing hashes, selected only from verified stored evidence through held store; never accept both algorithms as fallback. The legacy batch retry-integrity caller must carry that verified choice when converting stored envelopes to steps, since conversion otherwise loses column evidence. Mixed domains/timestamp variants preserve member-specific choice. Cost if wrong: exact retry compatibility or integrity regression; explicit old/new single/group tests are required. Current Stage1 authored52-case review identified two setup blockers before execution; corrected scope and new upgrade tests pending, no test/production qualification claim.
+
+
+### Sync projection first causal RED declaration
+
+Sync projection Stage 1 scoped re-review: Spec PASS / Quality CLEAR for corrected test setup, legacy NULL authenticity and historical hash tests. Authored selective scope is 66 cases (37 SQLite, 29 official PostgreSQL) across the two Sync files; original assertions preserved. Declare ONE first causal RED on unchanged production HEAD 59eb6d355759c3a3adba30dc7227e2d0f741575d, normal pytest plugins, retained official isolated PostgreSQL cluster 15492 required/no autostart, 300-second case and 600-second outer caps. No production implementation or execution qualification yet. RLS/namespace/claim-completion rollback/bootstrap/organization/Studio and full-unit review remain open.
+
+
+### Sync first causal RED outcome and creation admission correction
+
+Sync first causal RED completed naturally: 52 failed, 14 passed, 75 deselected, 33 warnings; 115.46 seconds pytest / 118.131656 seconds outer, no timeout, all guarded test/source hashes unchanged. Complete stdout was recovered in memory; stderr tail only, no proof/log files. Fifty failures demonstrate version allocation, replay/checkpoint/producer recovery, marker/hash/legacy authority or Rewrite/Undo behavior. TWO creation-7 cases instead hit the unchanged notes.note revision>1 base-metadata admission guard before mutation and are not defect RED; reviewed static assumptions were incorrect. Correct those tests to valid wire1 creation and retain arbitrary incoming revision only in legitimate low-level helper compatibility scope. Pair/reopen retries currently fail at required-parent bootstrap validation after later edits, an affected producer recovery defect. Do not weaken wire admission. Production remains exact59eb. Stage1 causal finding confirmed; scoped fixture correction/review precedes production repair.
+
+
+### Sync Stage 1 causal classification; Stage 2 In Progress
+
+Independent scoped admission reassessment corrected the prior missed guard: fresh client creation must use wire1; existing test_upgrade_preserves_product_revisions_and_tombstones already covers low-level incoming7 compatibility. The two invalid creation cases will be corrected without a duplicate low-level test or admission changes. Sync Stage1 causal reproduction COMPLETE for 50 demonstrated failures, with 14 retained passes and 2 setup guards excluded. Stage2 IN PROGRESS: serial implementer is authorized for the minimum shared persistence/acceptance/producer consumer fix under amended ADR066; root owns execution, supplemental boundary tests and tracking. No second unchanged RED run is justified.
+
+
+### Sync supplemental boundary tests and scoped core approval review
+
+Before supplemental test edits: root will add real behavior coverage using existing lifecycle fixtures for internal/public receipt key separation, actual transaction claim/completion failure rollback, singleton current authority, provenance-only replay, legitimate unequal-counter readiness, caller-only internal protocol tamper, and replay of an older receipt after a newer accepted Sync checkpoint. The last case must preserve the newer checkpoint, not merely later ordinary product edits. Existing official restricted-role RLS and physical schema-upgrade fixtures will be reused separately. Production implementer holds the rejected core replacement while preparing a narrower reviewed patch; no rerun or acceptance claim. Positive guarded Studio tests wait for its real localized interface, never absent-field errors or fake authority.
+
+
+### Sync projection upgrade and receipt-integrity checks
+- Add physical legacy-table upgrade with exact old row/hash/status preservation, nullable TEXT/NULL protocol migration, repeated real initialization, fresh server stamping, and ambiguous legacy refusal.
+- Add fail-closed malformed type/nullability/default schema cases, atomic-pair torn/inconsistent receipt refusal, and official restricted-role internal/public receipt isolation.
+- Status: In Progress; new tests unexecuted. Existing 50 causal failures and 14 passes remain scoped to the initial run; two invalid wire-7 setup failures remain excluded.
+
+
+### Sync product version REST consumer
+- Add active PUT/PATCH actual product/wire mapping and immutable acknowledged organization/provenance response replay after later changes.
+- Status: In Progress; appended tests unexecuted. Reuse existing endpoint/DB/Sync fixtures, retain original assertions.
+
+
+### Retained NULL bootstrap recovery
+- Add genuine producer-authored legacy bootstrap checkpoint interruption, direct guarded recovery without product writes/receipt fabrication, and changed-source refusal on both supported backends.
+- Status: In Progress; four cases unexecuted.
+
+
+### Sync core patch held by automatic approval review
+- The independently reviewed narrow six-file patch was rejected before any source write. Reason: data-integrity/service-disruption risk and lack of specific authorization for this implementation under blanket UAT approval.
+- Exact scope: core Notes canonical receipt/direct guards; provenance atomic paired results and locked legacy bootstrap; built-in service canonical/readiness dispatch; owner result reader; accepted-projection PostgreSQL row lock; envelope-only nullable protocol migration.
+- Distinct specific-patch approval requested once; pending. No retry/split/indirect execution. Existing partial WIP preserved and unqualified.
+- New tests remain unexecuted. Core causal RED remains50 substantiated failures/14passes, with2 invalid wire7 setup failures excluded; no GREEN claim.
+
+
+### Independent Persona S06 preparation
+- Goal: real existing-interface regression tests for typed setup correlation/failure/single-flight/lifecycle and original owned successful Finish CAS.
+- Reuse existing setup/live refs, owned request/session identities and DB version checks; no new framework, global capability, fake UAT or ordinary Persona transcript persistence expansion.
+- Status: Stage1 In Progress (source/test preparation); production and execution not started. Controlled D, actual provider L and human U remain distinct.
+- Exact Sync six-file source patch remains held pending its distinct requested approval; no approval bypass or automation resume.
+
+
+### Persona S06 causal test authoring
+
+- Persona S06 preparation complete using current interfaces. Ruling: author causal tests in existing Sidepanel and setup-orchestrator suites before production edits; cover matched final typed responses, request single-flight, truthful terminal failure/retry, lifecycle retirement, and Finish prerequisites/original success scope/awaited ownership/CAS. Preserve original behavioral oracles and ordinary Live logging. New test inventory and exact hashes will be frozen and independently reviewed before ONE declared current-source RED. Backend persistent typed contract controls and exact three REST ownership routes remain subsequent phases. This is separate from the six-file Sync patch HOLD; no Sync mutation or validation is authorized by this note. All 43 actual UAT acceptance remains open.
+
+
+### Persona S06 transport causal tests
+
+- Persona S06 transport phase test-only authoring is authorized in existing test_persona_profiles_api.py, test_live_conversation_ws.py, and service-prompt-scope-error.test.ts. Ruling: use real Persona router/CharactersRAGDB and the established authenticated-principal override to test exactly profile PATCH, voice-commands GET and connections GET with wrong/matching/absent expected-user header, preserving DB CAS and profile contents. Add bounded client policy cases and persistent_scoped actual WebSocket success/outage/retry correlation controls. No production/dependency/runtime/source repair until frozen-body independent review and declared RED; controlled inference is D evidence, not actual-provider L or 43-case acceptance. Original definitions remain unchanged; Sync HOLD persists.
+
+
+### Persona S06 frozen first causal batch
+
+- Persona S06 final test source review has no blocking findings in 78 expanded NEW cases:26 Sidepanel+24 orchestrator+11 REST+2 persistent WebSocket+15 bounded policy. Original definitions/assertions append-only preserved. Ruling: execute ONE current-source causal/control batch split into independent65 UI and13 backend cases; exact frozen test/unchanged Persona-source hashes plus HEAD59eb guard, supported3.12/Node20.19.5/Vitest4/normal configured plugins+workers, no-cache backend300case/600outer. Real retained official15492 fixture required/noautostart; no provider/model/network substitutions beyond the reviewed controlled provider/harness. Exclude all original tests and all prior Notes/Sync red/green. Classify intended assertions separately from invalid setup/timeouts; no single complete GREEN/UAT acceptance follows. Actual-provider L, durable settings reload and all43 real UAT remain open. Sync exact6file patch still HOLD pending specific approval.
+
+
+### Persona S06 causal batch classification
+
+Persona S06 first frozen causal batch completed once on unchanged production: UI 49 failed/16 passed/248 original excluded (65 new cases, 15.717s outer); backend 3 failed/10 passed/25 original excluded (14.238s outer). Classification: 43 intended UI assertion failures plus 3 real missing expected-user guard failures; 26 positive/negative controls passed. Six Sidepanel cases failed before their intended cause at unavailable Disconnect/Connect controls and are NOT defect red; current setup overlay hides ordinary live controls and live_sent outcome hides setup Connect. All source/test hashes retained. Both owned output holders released naturally 0; full reports retained in memory only. One narrowly scoped fixture correction and six-only unchanged-source rerun is planned; no other previously executed case replay, production edit or UAT acceptance.
+
+
+### Persona S06 six-only corrected fixture qualification
+
+Persona S06 six fixture-only corrections are independently clear at Sidepanel SHA256 e2dcc78eb8a4a4c128f6fc83afb8d1e498a56898d09573a45bb5cc4c393803d1. Four pending cases use the actual send-error→Live detour and ordinary owned Send, then visible Disconnect/Connect or server close/reconnect; stale response enters the new socket callback. Two earned-success version/run cases remain connected after actual A→B→A reload, retaining awaited no-PATCH/no-handoff. Correction to prior classification wording: ordinary controls are hidden by overlay; reconnect label is Retry live connection for live_unavailable, not evidence of hidden live_sent Connect. Original definitions and assertions retained. Declare ONE corrected six-only current-production RED/control execution with normal UI config/plugins/workers/5s case/600 outer, full unchanged source hashes plus HEAD59eb guards. Do not replay other59UI or13backend; passing corrected cases will be controls. No production edit/UAT acceptance.
+
+
+### Persona S06 corrected causal results and minimal shared repair
+
+Persona S06 corrected six-only current-source batch:6 failed/112 excluded, natural1,8.861s outer/no timeout,40,620-character native JSON fully recovered in memory; hashes unchanged and output holder released naturally0. All six now reach intended assertions:4 stale reply falsely exposes Finish after disconnect/socketclose or A→B→A/new-run and reconnect;2 earned success reloads falsely PATCH new version/run. Combined evidence across first78 cases and ONLY6 corrected replay:52 distinct intended failing assertions(49UI+3REST),26 controls passed; no one corrected78-case run is claimed. First minimal Persona repair authorized: reuse existing socket/connect generations and setup selection/request refs/account boundary watcher, correlate typed client_message_id/session and final nonempty response, one pending setup/detour send, retire on scope/run/version/socket/account change or matching terminal error, preserve ordinary logging/legacy tools. Keep original successful persona/run/positive profile version/generation through summary+PATCH, prohibit duplicate Finish, ignore late success/error/finally without clearing newer save. Add existing require_expected_user to EXACT profilePATCH/voicecommandsGET/connectionsGET and exact bounded client policy. Backend typed provider correlation already passed and remains unchanged. No new framework/provider/environment/runtime/Sync mutation; freeze source for independent review before GREEN. Preserve original positive behavioral oracles; any necessary correlation fixture adaptation must retain actual outgoing ID and final marker.
+
+
+### Persona S06 first review and missing caller regressions
+
+Persona S06 FIRST production candidate remains frozen/unqualified before GREEN. Independent full changed-hunk/affected-caller review found5 blockers: held Finish survives retired successful outcome at disconnect/close; editing B can use retained A session; scope/account invalidation leaves retired Finish/dry-run loading stuck; Returnsetup clears oldbool but not new typed attempt; terminal notice duplicates UI retry guidance. Root independently confirms caller/identity gaps and adds runtime completion-type validation (invalid type with live_success must refuse, not infer live_session). Ruling: author ONLY missing causal assertions for these genuinely newly exposed ownership/caller gaps in existing Sidepanel/orchestrator suites; preserve all78 prior reviewed cases and one inherited correlation fixture. Freeze and independently review then ONE NEW-case-only RED on frozen FIRST candidate before source corrections. This does not replay old78/six-only controls or reset their caps; separate new-cause validation starts at attempt1, all issue maximum3 limits retained. Tests cover actual socket close during deferred Finish, actual A session with selected B, same-step Finish/dry-run loading retirement including preservation of newer request, Returnsetup then legitimate new typed request, and invalid completion type against otherwise valid live success. Duplicate retry guidance is already covered by prior terminal cases; no replay for diagnosis. No Sync patch/runtime/proof/dependency actions.
+### Persona S06 reviewed missing-caller RED
+
+Persona S06 first-candidate review regression unit: seven append-only definitions expand to exactly 12 new client cases (3 real Sidepanel callers; 3 Finish run/version/authority invalidation; 4 dry-run persona/run/version/authority invalidation; 1 newer-run loading preservation; 1 invalid completion type with valid live_success). Root read all bodies and real seams; independent fixture review CLEAR, both test modules parse without diagnostics. Existing tests/helpers untouched by this unit; frozen hashes sidepanel 8387553e858092ee777040ac12c30d09f59fc4ffe1962862ca0b8ad98619b3c9 and hook c36abe8441d48f13d1195df194fcb232acbf20a35314d86e122f753c68b03297. Seven-production-file first candidate unchanged/frozen. Next ONE new-name-only RED uses normal UI config/Node20.19.5/Vitest4 and unchanged600-second outer cap; no original78 or corrected6 RED replay. Source review and parse are not functional qualification; 43 actual UAT acceptance stays open.
+
+### Persona S06 reviewed-caller RED outcome and correction
+
+Persona S06 reviewed-caller RED ran ONCE on frozen first candidate using normal configured UI Vitest: 11 failed, 1 preservation control passed, 146 prior cases excluded; natural exit1, 4.546457875s outer, no deadline. Full55120-character native JSON recovered in memory, SHA25670b547659bdfc09119dcd33283da0764106ff90bcbac803e1b687bc29ac6dca9, source/test hashes unchanged, holder74979 released naturally0. Intended causes: B setup sent on retained A socket; Returnsetup blocked fresh Send; three Finish and four dry-run scope/authority changes left loading true; invalid completion type accepted live_success. Actual socket-close case passed no-PATCH/no-handoff/no-completion-analytics assertions but failed disabled Connect/saving retirement, so stale Finish publication remains independently confirmed SOURCE-only, not reproduced by that close case. Newer-run dry-run loading control passed. This new caller unit used attempt1; no original78/six-only RED replay or GREEN/UAT acceptance. Next minimal correction round1: earned-success identity remains required after await; release only retired Finish/dry-run loading with existing tokens/scopes; active-session-persona gate for setup sends/credit while ordinary conversation remains valid; update all old boolean retirement callers for actual typed attempt; distinct notice message; explicit two-value completion type guard. Keep backend guards/CAS/ratelimits/protocol and tests frozen, no Sync mutation or runtime/proof work.
+
+### Persona S06 narrow test assertion annotations
+
+Persona S06 scoped static security recovery: earlier verbose test JSON truncation was not accepted; first compact operator attempt stopped at an incorrect live-WS filename and produced no accepted comparison. Corrected compact baseline/current AST-signature comparison completed: endpoint persona production baseline0/current0 findings,0errors; profile test196→214 and liveWS14→25, with all210 inherited signatures retained and exactly29 new LOW/HIGH B101 pytest assertions, no other new findings. Original backend function/class ASTs unchanged; exactly18+11 assertion lines occur only in new test/fixture definitions. Apply ONLY exact B101 annotations on those29 new pytest asserts, with nearby explanations, then confirm complete file AST equality and compact security comparison. No application guard, test body, assertion, fixture or production behavior changes; no broad suppression or functional replay follows from comments.
+
+### Persona S06 corrected candidate first affected GREEN
+
+Persona S06 corrected candidate root full7-production-file diff read and independent affected-caller source review CLEAR; prior5findings plus invalidtype and required-scope retirement addressed, ordinaryA conversation/voice/tool logging and backendCAS/rate limits retained. Exact final source hashes frozen. Narrow29 new-pytest B101 annotations preserve both complete file ASTs and original backend bodies; no source behavior changed by comments. Next first corrected GREEN: full3 affected frontend test modules in normal UI configuration and full2 actual backend modules (no name filters), then configured WebUI counterpart and current-scope static/security/type checks. Original/causal tests retained; no native/liveprovider/UAT or Sync acceptance inferred, max600outer/300backendcase, no hidden retry.
+
+### Persona S06 authentic legacy completion compatibility
+
+First corrected Persona affected run: fullUI319passed6failed/325, no skipped,55.236993583souter,natural1/no deadline; all77owned UI cases passed. Fullbackend38passed50warnings20.12pytest22.504961625outer,natural0/no deadline. FullnativeUIJSON163023 and backend stdout1198/stderr50341 recovered in memory, holders57561/36654 released naturally0; no proof/log files. Root/testauthor read complete six preexisting failed handoff bodies: each has authentic positive profileversion2→3 and matched dryrun, but optional setup.run_id omitted. Canonical PersonaSetupState allows None, real profile response preserves it, oldHEAD Finish explicitly generated a run ID then persisted it through completedPATCH. This is legitimatelegacy compatibility, not invalidfixture. Independent narrow source design review CLEAR: capture null exactly in earned scope, keep exact null/non-null run equality and all persona/version/step/required/generation/authority/outcome/token fences; generate missing ID only after guardedsummary and persist it through capturedversionCAS completion, reusesameIDhandoff/analytics. Minimal one-file compatibility correction, restore createSetupRunId dependency; sixfixtures/actions/assertions unchanged. Next check only failed6 plus genuinelyaffected completion guard controls and first configuredWebUIfullsuite; no unchanged319/backend38 replay. Static currentproduction0/0errors; currentannotatedtests196+14B101 exactly oldcounts, completeASTunchanged, no newfindings; in-memorycompile3Pythonpass. Overallwork/43UAT stillopen.
+### Persona S06 legacy GREEN and final static cleanup
+Persona S06 legacy compatibility: unchanged six legacy handoff cases plus 13 affected completion guards pass (19 passed, 139 selection-excluded, 5.279s outer, natural 0, no deadline). First full affected WebUI three-module run passes all 325 cases (42.600s outer, natural 0, no skips); native JSON and 48-character inherited navigation diagnostic recovered completely in memory, source/fixture hashes unchanged. Earlier full backend two-module run remains 38 passed/50 warnings, unchanged and not replayed. Current normal UI TypeScript check passes (59.239s, natural 0). First ESLint baseline/current check identifies 7 new guarded-assignment expression errors, 25 new explicit-any warnings, a newly unused legacy text-ref destructure, and changed callback dependency warnings; verbose display was truncated, complete compact result recovered, not accepted from truncation. Before further qualification, address only these exact new lint additions using typed existing hook/mock shapes, ordinary if guards, removal of unused binding and correct captured dependencies; no assertion/fixture weakening, runtime replay, backend changes or new behavioral design. Three Persona production candidates used; this static cleanup does not reset the issue cap. All 43 real UAT workflows remain unaccepted; Sync specific patch approval and all other gates remain open.
+
+
+### Persona S06 final local qualification
+
+Persona S06 final static-cleaned unit: independent actual source/test/prose review CLEAR (no Critical/Important/Minor). Captured callbacks remain stable; explicit optional-ref guards retain retirement semantics; typed test responses preserve all actions/assertions and missing-body failure. Final genuinely affected owned setup/Finish and six legacy cases pass in UI 68/90 selection-excluded (18.533s outer) and WebUI 68/90 excluded (17.581s), natural0/no deadline, complete native JSON recovered in memory and holders released. Earlier full WebUI325 and backend38 remain scoped qualification before static-only cleanup, not replayed or summed with these runs; all90 distinct new causal/control cases retain covered results. Final configured UI TypeScript natural0/77.299s and WebUI natural0/53.957s, declared8192MB/noemit/600cap and unchanged source hashes. ESLint all10 inspected TS modules not ignored:0 errors,119 current warnings versus120 baseline; no new warning except changed text of an inherited dependency warning whose missing-name list is a strict subset after two owned bindings were resolved/removed. Whole-file Prettier flags existed on every baseline/current module, retained rather than broad formatting. Python Ruff only inherited endpointI001/SIM114 and profile-testI001; narrow normal Ruff formatting only appended new test tails preserves fullAST and old prefixes. Previous static Bandit production0/test196+14 inheritedB101 signatures/0errors/no new remain valid; Python comments/format do not alter AST. Restored five concatenated owned-plan headings with exact official task note bodies and no other content changes. No broader runtime/provider/43-workflow/native/installer/publication/merge acceptance; Sync six-file patch remains held. Next exact14-path normal hooks, staged independent review, and one related local commit; preserve every unrelated Sync/ADR change.
+
+
+## E2E PR trigger and capacity documentation corrections
+
+Task: TASK-13260.278.18.83.45. Persona unit committed locally df8529f85ac95583cda67fbc97afc62397d5eedb, parent59eb, exact14paths1558insertions40deletions; committedbinarypatch equals independently reviewed indexSHA2564b0084b3c1079b0c660692f80ffa88b43d7b39835f34d208de4493991321afaf, normal hooks and commit/no bypass. Unrelated Sync/ADR WIP remains excluded, automation PAUSED, no publication or43-workflow acceptance. Next distinct CI trigger unit: current frontend-e2e-tiers outer PR paths omit apps/extension/** and its own workflow while the internal ux-regression scope explicitly includes both. Existing license-first-paths.json mirrors the same omission, so both ordinary PR entry and admitted path selection need the exact same two additions. Reuse existing YAML BaseLoader load_workflow_trigger and real admission helper in test_license_first_admission.py, preserving YAML1.1 on/True semantics through the established loader. Author new real config/admission checks first for both missing paths in both actual outer trigger and mirrored route, plus near-miss controls; ONE selected new-case RED on unchanged config, independent review, minimal two-config correction, full affected admission/required-workflow contracts and YAML/actionlint when existing tool available, scoped baseline/current Bandit/lint/compile, final actual+staged review and normal local commit. No GitHub queue/platform mutation or hosted/browser replay. Separately correct the single five→six count in ordinary Operations and Published Env_Vars provider-capacity section after verifying its six existing entries; no runtime policy/default changes or unchanged stream controls. ADR required:no, restores existing routing and documentation contracts. All Sync-specific approval/native/installer/canonical/43 real UAT gates remain open.
+
+### Stage 1: Reproduce omitted outer triggers
+**Goal**: Existing config/admission machinery rejects required extension-only and workflow-only changes before repair.
+**Success Criteria**: New selected cases fail for missing patterns; near-miss controls remain declined.
+**Tests**: Both paths through actual YAML trigger and mirrored admission manifest, using established BaseLoader and real helper.
+**Status**: Complete
+
+### Stage 2: Restore routing and documented count
+**Goal**: Add only two existing UX paths to both outer routing configurations; correct six-item documentation count.
+**Success Criteria**: Existing job graph, license gates, scope script, policies and values remain unchanged.
+**Tests**: Affected CI contracts, YAML/static checks, documentation mirror equality.
+**Status**: Complete
+
+### Stage 3: Review and local commit
+**Goal**: Independently reviewed exact scoped patch committed with normal hooks.
+**Success Criteria**: No source/guard weakening, no new static findings; all broader UAT gates remain open.
+**Tests**: Actual and staged source review, normal scoped hooks and commit-patch parity.
+**Status**: Complete
+
+### E2E causal RED verified
+
+E2E outer trigger causal RED completed on exact df8529f85ac95583cda67fbc97afc62397d5eedb with all guarded hashes unchanged: the real configured admission path returned false for extension-only and workflow-self changes in both actual outer YAML paths and mirrored license manifest. New eight-case selection: 4 failed (both positive paths in both route sources), 4 near-miss controls passed, 76 deselected, 6 warnings, 1.21s pytest/3.261938958s outer, natural exit 1, no deadline at 600 outer/300 case. Native output recovered in owned memory; an operator output-budget truncation was recovered from the same retained memory without test replay or proof/log files. Next authorized correction is exactly apps/extension/** and .github/workflows/frontend-e2e-tiers.yml in those two route lists, preserving all other values/order; capacity prose changes only five to six in ordinary and Published Env_Vars Provider call and stream capacity sections. No application Python, GitHub/queue/runtime/browser mutation or Sync patch. Actual 43 workflow acceptance remains open.
+
+### Corrected trigger freeze contract
+
+E2E repair scope includes one existing frozen-trigger expectation in test_license_first_workflow_contracts.py: its DIRECT_TRIGGER_DIGESTS entry for frontend-e2e-tiers.yml must be regenerated from the actual corrected canonical direct-trigger JSON using the existing hash algorithm after confirming that the only semantic trigger delta is the two already authorized paths. Preserve the assertion function, every other workflow digest, all security/admission/job guards and the new literal causal test. This is maintenance of the existing exact trigger contract, not an OpenAPI fingerprint selection or a weakened assertion. No other expected values or code behavior may change.
+
+### E2E affected qualification complete
+
+Corrected E2E routing qualification COMPLETE locally: first full configured three affected CI modules produced 174 passed, 33 warnings, 14.21s pytest/16.314736333s outer, natural exit 0/no deadline/no skips, supported Python3.12.13/pytest9.1.1, unchanged guarded hashes and normal plugins at 600 outer/300 case. Complete native outputs retained/recovered/released in memory, no proof/log file or repeat. Independent six-path actual-source review CLEAR, every changed hunk/new test body and relevant routing/admission consumers covered; corrected direct-trigger digest ed6145852137a858e8003ea1d94921d840276dac56af311a357a2655a30bf272 independently reconstructed. Config semantic equality proves only the two added route patterns; both docs differ solely five to six and remain byte-identical. Python compile passes; admission Ruff lint/format clear; workflow-contract Ruff I001 and wholefile format flag identical to baseline. Scoped primary-static Bandit1.9.3 baseline/current retains exactly27 admission and232 workflow test signatures, zero errors/no new/removed findings after one narrow explained B101 annotation on only the new pytest assert; no production Python changed. A first oversized operator scan output was truncated and not accepted; compact same-scope comparison recovered exact results without repo/report files. actionlint unavailable on existing PATH, no install or actionlint qualification claimed. Scoped normal hooks and final staged review/local commit next. This is local CI routing qualification only; no GitHub queue/platform execution, hosted tests, browser/native or actual43 acceptance, and Sync-specific approval remains pending.
+
+## Saved-set three-item specified coverage
+
+E2E routing unit committed locally c2b22246aafb2404786acb6fd07818bda0d24102, parentdf8529, exactly8paths81insertions4deletions; committed binary patch byte-identical to independently reviewed index113216889ee38a61a622a90c12616ca413e3b1a87c5d8f91040200f0e4d5a306. Normal scoped hooks passed2.067339625s and final staged review CLEAR; no publication. Next reviewable test-only coverage correction: WizardResultsStep.navigation.test.tsx currently verifies exact accessible Results review labels and saved-ID handoff for counts1/2, while existing TASK-13507 AC2 requests1/3. Add one separate literal three-item case with label Review these 3 saved items and exact callbackIDs[42,43,44], preserving original1/2 test and every original function/assertion. Use existing real component/shared harness/helper. Ruling: this is an uncovered specified positive case, not a demonstrated production defect; no fabricated causal RED or production edit. First full affected navigation file in normal existing UI and WebUI configurations, exact hashes, scoped existing ESLint/static checks, independent actual/staged review and normal local commit. BanditN/A TS-only; no unchanged Python scans/typecheck/build/runtime/browser replay. Do not read/recover foreign receipts/assets or adopt historical UAT claims. Only this new source/test qualification may be reported; all43 actual workflows remain open, automationPAUSED and Sync-specific approvalpending.
+
+### Stage 1: Preserve existing cases and add specified three-item check
+**Goal**: One separate literal case verifies the real saved-set button and exactly three IDs.
+**Success Criteria**: Existing one/two cases and production are unchanged.
+**Tests**: Actual component with current harness and literal three-item accessible name/IDs.
+**Status**: Complete
+
+### Stage 2: Qualify both existing client configurations
+**Goal**: Complete affected navigation module passes UI and WebUI configurations.
+**Success Criteria**: Existing tests remain; no new lint issues or test/mock weakening.
+**Tests**: Full module twice, parse/lint and source preservation.
+**Status**: Complete
+
+### Stage 3: Review and local commit
+**Goal**: Independently reviewed scoped patch with normal hooks committed locally.
+**Success Criteria**: Exact patch parity, unrelated Sync WIP preserved, no live UAT claim.
+**Tests**: Actual/staged review and normal scoped hooks.
+**Status**: Complete
+
+### Specified three-item module qualification
+
+Specified three-item Results coverage COMPLETE locally: separate literal test, exactly9insertions0deletions, every original line byte-identical and actual component/fixtures/mocks unchanged. First full navigation module UI30passed1.852066250s outer and WebUI30passed1.663324916s outer, natural0/no deadline/no skips/no pending at normal existing Node20.19.5/Vitest4.0.18/configured workers and600outer. Complete native JSON recovered/released in memory, stderr empty, exact source/fixture/config hashes unchanged. This verifies mocked translation fallback accessible role/name Review these 3 saved items and exact saved-ID callback[42,43,44]; not actual ICU/shipped translation/native/browser/UAT acceptance. TypeScript parse passes. Official ESLint sees file (not ignored), baseline/current0errors19identical inherited no-explicit-any warnings; inherited Next pages-discovery diagnostic remains, no new finding. TS-only BanditN/A, no unchanged Python/typecheck/build/runtime replay. Independent source/test spec+quality review CLEAR. Normal scoped hooks/final staged review/local commit next; all43 real workflow acceptance and Sync-specific approval remain open.
+
+
+## Playground interrupted Retry view ownership
+
+Saved-set three-item coverage committed locally a7412b4d3d29d57e19157bc39ab7495c93f6ede6, parentc2b222, exactly3paths38insertions1deletion; committed binary patch equals independently reviewed indexSHA256d586f52db6b6b67ea1a1cd6583f6c2f0d168cd32ffe5be430a3aa388b575731b. Normal scoped hooks1.638746167s and final staged spec/quality reviewCLEAR; no publication or actual43 acceptance. Next scoped Playground interrupted-Retry ownership unit: actual useChatActions retryInterruptedHistoryTurn awaits recovery/local-admission reads before choosing a cursor without rechecking its captured view, and awaits recovery dismissal after an owned choose before dispatch without rechecking the adopted view. New causal cases first hold these actual boundaries, change selection (including same-chat different-view/ABA and account revocation), and require no stale choose/dismiss/dispatch; preserve ordinary successful Retry and its legitimate own choose transition. Reuse existing controller.fence/getCurrent/choose and actual shared hook/controller or established integrations, no parallel protocol/owner abstraction. Root declares ONE selected new-case RED on unchanged production after independent fixture review, then minimal shared-boundary repair and first full affected UI/WebUI checks, scoped lint/types/security as applicable, actual/staged independent review, normal hooks/local commit. Maximum3attempts/issue; no replay of completed Persona/Notes/Sync/native controls. ADR:no new durable decision; existingADR049 ownership/selection fence applies. Ruling: explicit all43 approval covers this bounded existing-flow repair and causal validation; do not request duplicate design approval. Specific six-file Sync automatic-review hold remains pending and unaffected, automationPAUSED, no runtime/browser/provider/GitHub/queue/proof actions.
+
+| Unit or shared boundary | Producer and consumer agreement | Ruling |
+| --- | --- | --- |
+| Interrupted Retry | Captured selection must remain current through recovery/admission reads before cursor choice | Existing controller fence; stop stale work |
+| Owned cursor choice | A successful Retry advances the selection itself | Capture its advanced fence immediately after invoking choose, before awaiting it; do not reject its legitimate own transition |
+| Recovery dismissal and Send | Dismissal waits must not dispatch into a replacement view | Recheck the adopted fence after each wait |
+| Later composer/editor units | Share useChatActions, but separate draft/editor lifecycle from Retry | Serial units; no concurrent writers or speculative public API changes |
+
+### Stage 1: Reproduce stale Retry waits
+**Goal**: New causal checks exercise real interrupted Retry waits on unchanged production.
+**Success Criteria**: Demonstrated stale cursor movement or dispatch; legitimate Retry control succeeds.
+**Tests**: Deferred recovery/admission reads and deferred dismissal, changed view/account/ABA, ordinary owned choose.
+**Status**: Complete
+
+### Stage 2: Retain captured and adopted ownership
+**Goal**: Minimal existing-fence checks stop stale work without changing admission or settlement.
+**Success Criteria**: New cases and full genuinely affected UI/WebUI modules pass; no removed guards or original assertions.
+**Tests**: Causal GREEN, existing interrupted-reply and hook/controller consumers, configured static checks.
+**Status**: Complete
+
+### Stage 3: Independent review and local commit
+**Goal**: Scoped reviewed patch committed with normal hooks, preserving unrelated Sync WIP.
+**Success Criteria**: Actual/staged review clear, no new lint/security findings, exact commit parity.
+**Tests**: Source review, normal scoped hooks, committed/index equality.
+**Status**: Complete
+
+
+### Retry causal fixture review and separate partial-retention gate
+
+Playground Retry tests-only causal patch independently reviewed CLEAR after correcting gate identity, settled ABA revision and actual Promise/teardown synchronization. Four new expanded cases run real Playground/useChatActions/controller/recovery algorithms over the existing MemoryDexie/fake external server harness; transparent wrappers delegate to actual implementations and return the exact Retry promise. All59originalexpect calls retained in order, parse0; testSHA25622cada4f9dcfc5d8cf01754f806e23d600c3e1b4cad221138e5947c419c04b50, productionunchanged5a1cfd683cfec82f0c32dc79b45c5f861fbde29ed492fc90e654028bbbd75783. Next ONE selected new-case RED plus existing saved-server positive control, normal UI Node20.19.5/Vitest4.0.18/configuredworkers/600outer. No fixture bypass/native acceptance. Reviewed minimal production design: capture initial fence before reads; call choose synchronously, capture its advanced fence immediately, then await that same choose promise; check adopted fence before stale failure notification, after dismissal waits and before dispatch. This avoids adopting an unrelated epoch after an await. Distinct OPEN source issue: existing Retry deletes native partial's only recovery record before dispatch; an abandoned/failed Retry can lose it. Current post-delete gate verifies stale-dispatch suppression only. Require a separate causal retention unit and durable result/owner reasoning later; do not claim fence repair accepts partial preservation or real A03/43 UAT.
+
+
+### Retry first RED and ABA fixture correction
+
+Playground Retry first selected RED completed ONCE on unchanged production:4failed1passed9selection-excluded,21.920282750souter,natural1/no deadline at600outer/configured frontend; all source/fixture hashesunchanged. Complete10497-character nativeJSON recovered in owned memory and holder80319 released naturally0; no proof/logfiles. Three causal failures: different-view Retry returned submitted after original view changed; account revocation still displayed old retry-unavailable notification; post-dismiss navigation returned a different failed outcome rather than selection-changed refusal (exact error value not shown by native JSON, so invalid_history_retry remains source inference). Existing saved-server legitimate own-choose control passed. ABA failed before causal release because originalRow lookup was null immediately after Review click; NOT accepted as defectRED. Author tracing actual review-row rendering and correcting only that test synchronization; after independent narrow review run ONLY this previously unqualified ABA case on unchanged production, no replay of the three cause-failures/positive control. Current official ESLint test baseline/current0errors0warnings/notignored and TypeScript parse0/original59expect calls retained. Root correction remains unimplemented until fixture repaired. Early destructive recovery dismissal remains separateOPEN, all43 actual workflows unaccepted.
+
+
+### Retry ABA RED and minimal fence correction
+
+Playground Retry ABA-only corrected-fixture RED completed ONCE on unchangedproduction5a1cfd...:1failed13excluded,9.824663084souter,natural1/no deadline, all hashesunchanged; complete7704-character nativeJSON recovered in owned memory and holder74345 released naturally0. Existing case-local offsetHeight480/offsetWidth320 geometry and awaited original-ID row reached the causal assertion: Retry returned submitted after same-chat empty-view then original-cursor ABA with advanced revision. This establishes the fourth cause independently; prior three failures/positive control were excluded from replay. Author/reviewer fixture fixes retained originalactions/assertions; no fakecontroller/Retry logic or actual nativebrowser acceptance. All four cause cases now RED; implementation candidate1 authorized: ONLY useChatActions.retryInterruptedHistoryTurn existing fences, initial before storageawaits and beforechoose, adopted fence captured synchronously immediately after invoking choose before its await, then before old false-notification and after each dismissal/before onSubmit. Return existing chatSubmitFailed(history_selection_changed) without stale UI error. No new helper/protocol/owner mechanism or unrelated assertion weakening. Next independent actualsource review and first full affected UI/WebUI interrupted-replies module plus relevant hook consumers, configured types/static as needed, normal hooks/localcommit. Distinct pre-dispatch partial-record deletion remainsOPEN/separate; Sync hold/automationPAUSED/real43/installer/native/canonical/publication gates remain.
+
+
+### Retry candidate1 local qualification
+
+Playground interrupted Retry candidate1 qualified locally: four causal RED cases repaired by existing initial/adopted selection fences. Full interrupted-replies module UI14passed/41.268s and Web14passed/40.018s; one relevant existing Regenerate fallback case UI1passed64excluded/4.282s and Web1passed64excluded/3.602s. Normal configs/Node20.19.5/Vitest4.0.18/600outer retained, no deadlines/unhandled failures. Configured types UI0/67.785s and declared Web npm typecheck0/52.445s; an operator direct cross-env invocation failed before compiler spawn because npm bin PATH was absent, then the actual npm script succeeded without source/config change. TypeScript parse0; ESLint hook0errors23identicalwarnings/test0errors0warnings, original59expect calls retained in order. Independent actual source reviewCLEAR; TS-only BanditN/A. Early recovery-record deletion remains separatelyOPEN; actual43/native/installer/canonical/publication acceptance and Sync hold remain. Next scoped4path normalhooks/finalstagedreview/localcommit only.
+
+
+## Playground interrupted Retry partial retention
+
+Interrupted Retry ownership committed locally8a5dc12ebd17e593e287acfa25a40e890fc69963, parenta7412b4, exactly4paths279insertions4deletions; committed binary patch byte-equal to independently reviewed indexSHA256465ad408bcf5f5073a89f02e0e9253e67a938c86c0d3404960f8e9b5df0cd860. Normal scoped hooks0/2.280s and final staged reviewCLEAR. Unpublished; unrelated Sync WIP preserved. Next separate partial-retention unit: existing Retry deletes original native partial's only recovery record before onSubmit; changed view or failed/cancelled preparation/provider leaves no safely stored replacement. Causal checks must preserve that original record through held preparation/failure/cancellation and retire it only after actual owner settlement, retaining legitimate Retry one-question/one-reply and local alternatives. Reuse existing HistorySendTurn complete/settlement and dismissal primitives; no new storage/protocol abstraction. Establish tests before minimal implementation, full genuinely affected UI/Web checks, scoped static/type review as needed, independent actual/staged review and normal hooks. Maximum3attempts; no blind replay/real43 claim.
+
+ADR required: no; existing ADR049 ownership and recovery settlement apply. Human all43 approval covers this bounded repair. Fence qualification does not prove durable partial retention. A submitted display result alone is insufficient: pipeline may report complete after reply generation while owner storage failed. Cleanup must follow actual owner settlement; durable cleanup remains tied to captured owner/profile rather than the current UI view. No speculative concurrent writer or broad redesign.
+
+### Stage 1: Reproduce lost partial recovery
+**Goal**: Real shared Retry/storage lifecycle demonstrates premature deletion on unchanged production.
+**Success Criteria**: Original native partial remains inspectable until genuine replacement owner settlement; failure/cancellation do not lose it.
+**Tests**: Held replacement preparation, provider failure/cancellation, successful settlement and local alternative controls using established real-component/storage algorithms.
+**Status**: Complete
+
+### Stage 2: Retire recovery after durable replacement
+**Goal**: Minimal shared-boundary correction defers old recovery removal until actual settlement.
+**Success Criteria**: Causal cases and affected configured clients pass; no owner/auth/current-view guard loss.
+**Tests**: Causal RED/GREEN, relevant recovery/admission consumers, static/types as genuinely affected.
+**Status**: Complete
+
+### Stage 3: Review and local commit
+**Goal**: Qualified small patch committed with normal hooks and exact staged parity.
+**Success Criteria**: Independent actual/staged review clear, no new lint/security findings, unrelated Sync WIP retained.
+**Tests**: Scoped hooks, index/commit parity; actual43 remains separate.
+**Status**: Complete
+
+
+### Partial-retention causal RED and shared settlement ruling
+
+Partial-retention selected RED completed on unchangedproductiona7c0e...:4failed14excluded/23.466s/no deadline/allhashesunchanged. Three cases causally found original operation record undefined during held preparation/provider503/Stop. Owner-write case initially failed at new fixture count2vs1 BEFORE retention assertion; source traced initial settlement plus existing recovery keep reattempt, no second model generation. Corrected exact2 fixture independentlyCLEAR; ONLY previously unqualified owner case reran1failed17excluded/12.416s, now original record undefined after verified rejected owner writes. All four causal failures established; no three-case replay. Complete nativeJSON recovered in ownedmemory and both holders released naturally, no log/proof files. Production candidate1: carry exact frozen original entry scopes/operation IDs through private Retry params; retire them only from HistorySendTurn.complete after settleAcceptedAssistant succeeds. Do not use submitted result, current UI epoch or blanket later query as durable cleanup authority. Preserve original through provider/cancel/preparation/owner failures. Existing early-dismiss wait case must move to an actual pending choose boundary before dispatch while retaining all stale-view assertions. Add narrow scope/snapshot preservation positive coverage. No actual43 acceptance.
+
+| Producer | Consumer | Ruling |
+| --- | --- | --- |
+| Retry original recovery snapshot | Normal history turn cleanup | Carry original scope and operation ID; never replace with later blanket read |
+| settleAcceptedAssistant owner write | HistorySendTurn.complete | Only actual owner settlement authorizes retiring superseded recovery |
+| UI selection changes | Durable cleanup | Preserve captured owner/profile authority; current view controls display only |
+| Moved cleanup boundary | Stale Retry case | Hold actual choose response before dispatch; retain no stale submission/view overwrite |
+| Other session/new recovery records | Retirement loop | Preserve original scope and leave records outside captured superseded set intact |
+
+### Candidate1 failure and second deletion caller
+
+Partial-retention candidate1 actual UI qualification: 15 passed/4 failed, natural1/51.966s, no deadline and exact guarded hashes unchanged. All four causal retention cases still lost original operation records at preparation/provider503/Stop/two rejected owner writes; candidate1 is NOT qualified. Full native JSON recovered in owned memory, holder released, no proof/log files. Source root cause independently confirmed: saveHistoryTurnRecovery merges per-operation pending_turns and bookmark writes preserve it; useKeepInterruptedHistoryTurns instead calls dismissRecovery when Retry's new assistant placeholder follows the original question. Candidate2 bounded shared-hook correction: its 'user continued' branch must require an actual user message, preserving assistant replacements until the already implemented acknowledged owner-settlement cleanup. Existing genuine user continuation behavior remains. Selected new keeper-success/status case passed1/18excluded/9.344s; API addChatMessage already uses trackServerChatWrite, so hypothesized extra tracker is rejected as redundant and not implemented. Four-file TypeScript parse0/lint0errors; useChatActions23/normal8 inherited warnings unchanged, keeper/test0. One old cursor assertion adapted for the moved nondestructive choose seam; no whole-original-assertion equality claim. Independent candidate1 review was source-only and superseded by the actual retention failures. No Web replay, types, commit/publication or real43 acceptance yet. Two observed production candidate attempts maximum remain bounded; establish fifth-file edit under this associated task.
+
+| Producer | Consumer | Ruling |
+| --- | --- | --- |
+| Retry assistant placeholder | useKeepInterruptedHistoryTurns continuation effect | A different bot ID is not a following user message and cannot retire the old partial |
+| Genuine following user message | Existing continuation effect | Preserve its established behavior; only correct the assistant/user distinction |
+| Native addChatMessage acknowledgment | Shared save-status store | Existing trackServerChatWrite covers keeper success; no duplicate tracker |
+
+### Partial-retention final local qualification
+
+Interrupted Retry partial-retention candidate2 qualified locally. Complete affected interrupted module: UI19passed/60.722s and Web19passed/60.328s; three history/admission/normal-mode consumer modules111passed per configuration/UI4.083s/Web3.158s. Natural0/no deadline/no skips/source guards unchanged. Four causal loss cases now retain original on held preparation/provider503/Stop/two rejected owner writes; genuine acknowledged direct/keeper success retires exact captured operation IDs in original session scopes and preserves late records/local alternatives. Keeper-success status already covered by API client tracker; extra tracker not implemented. Web declared typecheck0/12.118s. UI initially3 NEW unknown fixture type errors; only existing HistoryTurnRecovery annotation/Object.values generic corrected. Exact old test6a6c... and current958ec... transpile to byte-identical JS685a1499bd2421112a16c7404cf1c0dc21dec3e0c4a28c1c82e517f3a4723eda; no behavioral/Web replay. Only failed UI check reran0/98.849s, unchanged600cap. Five touched TypeScript files parse0/lint0errors/no new warnings: hook23 and normal8 inherited; other3zero. Existing whole-file Prettier flags identical baseline/current on all5; no broad format rewrite. Old cursor assertion retargeted to actual selected row at nondestructive choose seam; no claim all90 original expect call texts identical. Scoped Bandit N/A TypeScript/prose-only. Final independent actual5source/newbody/caller review CLEAR, including previously missed destructive hook. Candidate1 failure retained honestly; candidate2 bounded correction of actual observed cause, no third behavioral candidate. Native result memory recovered/released, no proof/log files. Prepare normal exact7path staged review/hooks/local commit; publication, actual provider/browser/native A03 and all43 acceptance remain OPEN. Unrelated Sync WIP/approval hold and all retained STOPs preserved.
+
+## Composer Send draft ownership
+
+Interrupted Retry partial-retention repair committed locally as2b28961349fef01c8d93b754af39217d50cdd554, parent8a5dc12, exactly7files326insertions22deletions. Normal explicit scoped hooks0/1.522s; final independent staged review CLEAR. Committed binary patch byte-equal to reviewed index SHA25620fd44fc01c116c0a8e1546378ca3f5c18e521373f998122ee7a0083d5a6ce2b/48984bytes. Index empty; unrelated11tracked Sync/ADR WIP unchanged; normal Git packing warnings left untouched. Unpublished, no actual43 acceptance. All three partial-retention unit stages complete; broader owned plan remains open. Next distinct composer Send ownership unit starts read-only design/test planning: Playground awaits embedding/search/document preparation then clears/sends captured draft without message/account/view freshness; its OpenUI cleanup runs after awaited dispatch. Sidepanel shares analogous beforeSend/afterSend draft and attachment cleanup; ModelPlayground awaits onSubmit then unconditionally clears message. Trace every actual caller and existing draft-owner/revision/attempt/controller boundaries before choosing minimum shared correction. Do not infer a failed/submitted result is input admission proof or defer all clearing until generation ends; optimistic Send must stay usable and any failure restoration must not duplicate an already admitted user turn. Associated task established before any new composer source/test edits.
+
+ADR required: assess existing ADR049/050 ownership and draft protections first; no new architecture/API contract is proposed yet. Reuse useChatDraftOwner, useComposerText messageRevision/prompt-assist attempt, history controller fence, useComposerSubmit and existing document selection cancellation. Preserve queue acceptance, native first-create/own-follow transitions, image/compare/document payloads, and old-scoped persistence. No new store/protocol/dependency. A03/A12 draft/focus/context truth is separate from actual browser/provider acceptance.
+
+### Stage 1: Reproduce stale composer work
+**Goal**: Trace actual preparation/dispatch/cleanup across each current consumer and establish causal failures on unchanged source.
+**Success Criteria**: New draft or account/view/attachment change cannot be cleared or dispatched by an old attempt; failure handling retains truthful accepted-turn identity.
+**Tests**: Held preparation, draft ABA, navigation/account revocation, attachment replacement, duplicate Send, failed/skipped/rejected dispatch and late success with newer context, plus legitimate optimistic Send/queue controls as affected.
+**Status**: Complete
+
+### Stage 2: Guard existing composer boundaries
+**Goal**: Minimal correction uses current owner/revision/attempt primitives at actual asynchronous boundaries.
+**Success Criteria**: Causal and affected UI/Web checks pass without lost drafts, duplicate admitted questions, or new context deletion.
+**Tests**: Red/green, touched shared composer/full-page/sidepanel/model consumers, configured types/lint/security as applicable; maximum3bounded attempts.
+**Status**: Complete
+
+### Stage 3: Review and local commit
+**Goal**: Fresh actual/staged review and normal hooks qualify exact scoped commit.
+**Success Criteria**: Only qualified source and associated notes staged; unrelated Sync WIP and all runtime gates preserved.
+**Tests**: Actual/staged review, scoped hooks, index/commit parity; actual43 acceptance remains separate.
+**Status**: Complete
+
+
+### Composer ownership first causal RED
+
+Composer Send ownership causal RED: 11 new real-hook/preparation cases failed on unchanged production at HEAD2b28961349, natural1/2.616s, no deadline/stderr and all guarded hashes unchanged. Stale replacement/ABA/image/account/idle-selection-epoch/history-ID/tab-context still dispatched old payload; duplicate preparation dispatched twice; submitted/failed/skipped response all invoked late stale OpenUI cleanup after immediate reset passed. Full nativeJSON19365characters recovered in owned memory and holder70026 released naturally; no proof/log files. Tests-only revised source6796e711... independently CLEAR with exact delegated form.onSubmit promises drained. Real document preparation/PDF algorithm held at bgUpload only; verified-scope resolver is an explicit boundary input, not auth-resolver qualification. Authorize first minimal Playground/shared composer candidate; Sidepanel/Model actual causal cases and all43 actual acceptance remain open. No admission/restoration protocol or status-as-admission inference.
+
+Implementation ruling: reuse the existing verified draft owner and live monotonic message/image version; pre-dispatch captured history/context/attachment state after actual awaits; one active preparation prevents duplicate Send. Keep immediate optimistic reset before provider wait, and protect late prompt/context callbacks against newer draft/owner/attempts; remove redundant late focus. Slash normalization must not invalidate its own capture. Queue acceptance remains unchanged. Existing provider status cannot prove whether input was accepted; the separate pre-admission rejection/draft-loss seam is not repaired by this unit. No new store/protocol/dependency, no actual runtime/browser/provider UAT claim. Sidepanel and Model require their own real-component regressions before source correction.
+
+### Composer candidate1 and sibling RED — 2026-10-07
+- Candidate1 original11 causal cases: UI11passed, natural0/2.828s, exact guards unchanged; source review NOT CLEAR for command-only normalization and identical new page-context instance cleanup. Prompt identity/content fence remains required.
+- Model Playground baseline3failed at immediate composer reset, natural1/2.698s; real component, provider callback held, all owned Promises drained. Minimal clear-before-await correction is next.
+- New slash/page/prompt controls must cover the review findings before candidate2. Actual Sidepanel validation and all43 workflow acceptance remain open; no admission proof inferred from generation result statuses.
+
+### Composer final candidate3 checks — 2026-10-07
+- Candidate3 document lock fix independently reviewed CLEAR in actual source; causal queue case1failed on candidate2 (1.880s), then new19pass in full affected UI run.
+- Full UI8files:96passed26failed,122total, natural1/15.746s. All26 failures are legacy Home cold-source fixture cases after global provider adaptation; fixture scope must preserve baseline legacy parent and use real provider for child Form. Existing169 expect AST calls across3modified tests intact.
+- Two new exhaustive-deps warnings require stable referenced-value/setter dependencies; no new behavior approach. Candidate3 production ceiling remains consumed.
+- Model UI3/Web3pass with held callback, format-only test typedAST equality; no native/provider admission claim. Sidepanel and all43 actual workflows stay open.
+
+
+### Composer fixture integration and current-source checks
+
+Composer current-source continuation: shared/new ownership UI49passed natural0/3.167s; Home first fixture correction23passed5failed/7.081s, second real-action context ferry corrected only the five ordinary casesUI5passed38excluded/5.206s. Existing100 OpenUI/169 total modified-test expect ASTs retained. Legacy source-flow actions/persistence stay outside provider while real child composer fence stays inside; not native acceptance. Final Web8 scope121passed1failed/9.283s, exact hashes intact, complete JSON+stderr recovered/released. Actual failure is inherited account-privacy storage spy lifecycle: UI restoreMocks=true; Web config does not restore spies, so the second tabScoped suite captures an already mocked Storage.prototype.get/set and recursively calls itself. No application cause inferred. Before edit, authorize minimal explicit vi.restoreAllMocks in this fixture afterEach using existing neighboring pattern, preserve all assertions and real storage algorithms; rerun only genuinely affected delayed-read/write lifecycle cases. UI configured types0/58.980s. Final ten-file parse0/no NEW lint, inherited warnings/style retained. New Playground test standard formatting has full emittedJS AST equality after redundant parentheses normalization; typedAST/JS byte equality NOT claimed. All43 actual acceptance, Sidepanel and Sync specific approval remain open.
+
+
+### Playground and Model composer local qualification
+
+Playground/shared and Model composer unit locally qualified within explicit scope: UI first8files96passed26failed/15.746s, current shared/newcase49passed/3.167s; Home firstcorrection23passed5failed then ONLYfive unresolved ordinary cases5passed/5.206s after real legacy parent-action/provider split. Web first8files121passed1failed/9.283s; OpenUI43/newownership19/all other returned scopes pass. Inherited storage-spy recursion corrected by explicit per-test restore; ONLYfour affected delayed-read/write lifecycle casesWeb4passed26excluded/1.995s, stderr empty. No single final122-case all-pass run claimed and no unchanged121-pass replay. Model separateUI3/Web3 held-callback checks pass. UI configuredtypes0/58.980s (before one-line test spy restoration), declaredWebtypes0/7.495s on final11-file source; no shims/config weakening. Eleven touchedTS parse0/notignored/lint0errors/noNEWmessages; original200 expect ASTs retained acrossfour modified fixtures (23+46+100+31), newtestsformatted, inherited wholefile style/warnings retained. ScopedBanditN/A TS/proseonly. Fresh actualsource reviewsCLEAR candidate3 and all final fixture/lint/format deltas; test lifecycle pre-existing early-assertion heldPromise cleanup gap remains, restoration does not claim it repaired. Complete result memory recovered/released, no proof files/runtime/model/provider/native acceptance. Production3-candidate ceiling consumed, no fourth behavior candidate. Prepare exact13paths (11TS+officialtask+ownedplan) normalhooks/freshstagedreview/localcommit; all43/Sidepanel/editor/Sync/canonical/publication/merge gates remain.
+
+The broader Composer Send unit stays open for Sidepanel. This scoped Playground/Model repair can be committed independently after normal hooks and fresh staged review; it does not complete the broader Stage 1/2/3 or any actual UAT workflow.
+
+
+### Composer local commit and Sidepanel causal fixture
+
+Composer Playground/shared + Model qualified unit committed locally58e468996a70e30169de4aa556a89d67e1744504, parent2b28961349, exactly13paths1136insertions32deletions; committed binary patch byte-equal fresh independently reviewed indexSHA25651a5d7533dec1caf4c49098203e08d7c9f44ca9408877268ade5a12c998b5194/88990bytes. Normal scopedhooks0/1.453s, normalcommit0/0.338s, indexempty, unrelated11trackedSync/ADRpatch preserved. No publication or actual43 acceptance; normalGitpacking/gc warnings untouched. OpenUI actual Form/submit/history path retains mocked useComposerInput ownership; real owner coverage comes from separate19case suite, no native selected-history acceptance inferred. Broader Composer stages remain open for Sidepanel. Next serial Sidepanel full-form fixture unit: source unchanged at5544cab...; real form/shared composer/useMessage metadata/queue guards must remain, hold only actual external provider/STT/storage/network boundaries and unrelated UI. First render smoke is fixture setup, not defectRED. Then ONE declared selected regression run on unchanged Sidepanel source: heldstopListening/embedding/composition preparation with replacement/ABA/account/context; lateprovidercompletion with new sameowner draft/attachments; legitimate optimisticSend and queuedsecondDraft controls. Trace every actual async seam, reuse captured draft ownership + actual conversationMetadata guard; no new protocol/store/AST-extracted application harness or pre-REDproduction edit. Maximum3attempts per genuinely distinct Sidepanel issue, no replay of completed Playground/Model/Retry/native controls. Specific six-fileSync approval remains pending; automationPAUSED; all43/provider/browser/native/installer/canonical/finalrebase/publication/merge gatesOPEN.
+
+#### Sidepanel Stage 1: Actual form and causal failures
+**Goal**: Faithful full-component fixture reaches the existing awaited preparation/cleanup boundaries.
+**Success Criteria**: Real composer owner, metadata and queue guards remain; demonstrated stale work on unchanged Sidepanel source.
+**Tests**: Bounded render smoke then declared selected causal cases, with every held Promise released/drained.
+**Status**: Complete
+
+#### Sidepanel Stage 2: Minimal existing-boundary repair
+**Goal**: Guard captured input at actual waits and preserve replacement drafts on late completion.
+**Success Criteria**: Causal cases and genuinely affected configured clients pass; legitimate own conversation publication/queue remains.
+**Tests**: Causal red/green, affected existing metadata/composer/queue controls, configured types/lint/security as applicable.
+**Status**: Complete
+
+#### Sidepanel Stage 3: Review and commit
+**Goal**: Exact qualified scoped patch independently reviewed and committed normally.
+**Success Criteria**: Preserve unrelated Sync WIP; no native/UAT status inferred from test doubles.
+**Tests**: Actual/staged review, normal hooks, index/commit equality.
+**Status**: Complete
+
+
+#### Sidepanel setup smoke qualified; causal Send fixture next
+
+Sidepanel initial-render setup smoke completed within three bounded attempts: first1failed/6.552s wrong composer-textarea selector; second1failed/4.690s wrong chat-send selector on default rendered variant; third1passed/natural0/4.083s using actual chat-input and accessible Queue request. All runs retained exact source/test guards, normal configured Node20/Vitest4 workers,600outer,stderr0; complete native results recovered in owned memory and holders released. Production Sidepanel source unchanged5544cab318aa870a94f76064e123a7de823bc042f76ed362f34d87b86c98f6a1. Only setup selectors corrected; no application defect RED or connected/owner/Send/UAT qualification. Existing force-unconfigured flag was setup-only; connected causal fixture must remove it, run real checkOnce against synthetic external config/probe responses and retain actual composer/message/metadata/queue guards. Shared Common/Button forwards data-testid; no Button defect inferred. Next sole tests-only fixture addition will cover stale preparation and late completion using genuine downstream holds; no production edit before valid causal RED. Specific Sync patch remains HOLD, automationPAUSED, all43 actual acceptanceOPEN.
+
+
+#### Sidepanel first connected causal batch declared
+
+Sidepanel connected fixture preflight CLEAR at93da1f3e8b8082ba3137e7626a0d888922b1336a36fa4517612c1a1d6051ba81. Declare first selected3-case run on unchanged58e468/Form5544cab: normal optimistic provider control, matching held-embedding/webSearch positive control, stale replaced-draft assertion. Other4cases excluded. Actual Form/composer/useMessage/metadata/queue and delegated submit promises retained; verified scope plus external auth/catalog/model/search/capability/provider data controlled, not algorithm/native/UAT qualification. Explicit commands catalog route added before execution. Joined submit/check/capability cleanup and caught transport tripwire retained; actual checkOnce success leaves its existing20-second inert race timer, no ALL-timers-drained claim. Normal configured Node/Vitest/600outer, no worker override/source change. Classify missing-route/setup failures separately from defectRED. All43 acceptance and Sync HOLD remain open.
+
+
+#### Sidepanel connected setup failure and bounded diagnosis
+
+Sidepanel connected setup attempt1: selected3 failed/natural1/7.625s,4excluded; all failures final unexpected-transport guard (4/5/5 recorded entries), exact18source/testhashes intact. NativeJSON elides arrays; no route cause or causal RED/control qualification claimed. Full4672stdout+181stderr recovered/released; stderrPromiseRejectionHandledWarning. Before edits, declare minimal tests-only diagnostic message JSON.stringify(unexpected) and immediate catch observation while retaining/returning exact original submit Promise; successful positive submits must be fulfilled. Then bounded setup attempt2 ONLYtwo positive controls, stale/original/other cases excluded. No speculative replies/source fix; strict caught-transport guard preserved. Sync HOLD/all43 acceptance remain open.
+
+
+### Sidepanel connected setup: final declared attempt
+**Status**: Complete
+
+Sidepanel connected setup attempt 2 completed naturally with exit 1 in 7.287 seconds: two positive controls failed, five cases excluded, exact 18 guarded hashes unchanged, stderr empty. Full native JSON recovered and released from owned-process memory. Both failures were the strict unexpected-transport guard: profile preference GETs and optional prompt-capabilities GET; the held-embedding control also requested the canonical web-search service-prompt detail. No product causal red or connected positive qualification is claimed. The tests-only correction supplies only these demonstrated routes: empty character preferences, explicit optional capabilities 404/unavailable, and validator-shaped packaged canonical web-search catalog/detail using the existing template. Production remains unchanged. Final connected setup attempt 3 will execute only those two positives plus the stale-draft regression under normal UI configuration and the unchanged 600-second outer cap; four other cases are excluded. Stop this setup unit if still unready; no fourth setup replay or speculative production fix. All real 43-workflow acceptance remains open; specific Sync patch approval hold retained.
+
+
+### Sidepanel draft ownership repair
+**Goal**: Dispatch only the captured current draft and preserve later drafts through completion.
+**Success Criteria**: Actual Sidepanel preparation rejects replaced drafts; valid Send/queue retains original payload and newer draft storage; original owner/context guard boundaries remain.
+**Tests**: Held preparation change/ABA/duplicate/account/context; held provider newer persistence; positive controls already qualified.
+**Status**: Complete
+
+Final Sidepanel connected setup attempt 3 completed naturally with exit 1 in 6.623 seconds: both positive controls passed; stale-draft regression failed at its intended provider-call assertion (one actual pipeline dispatch containing the old first question after input replacement); four other cases excluded. All 18 guarded source/fixture hashes unchanged and stderr empty. Strict unexpected-transport guard passed. Full 6376-character native JSON recovered/released from owned-process memory. This establishes scoped product causal red; setup ceiling is consumed and closed with ready controls, no fourth setup replay. Next bounded behavioral repair reuses existing captureDraftOwnership/draftReady, Sidepanel metadata dispatch/completion guards and synchronous dispatch snapshot/reset. Tests will first cover authored ABA/duplicate/account changes plus newer persisted draft retention on late completion and changed conversation context. No new store/protocol; inspect all actual callers and preserve slash own transitions, queued payloads, metadata identity publication and attachments. Actual native admission/43-workflow acceptance remains open. Specific Sync rejected-patch approval hold retained.
+
+
+#### Additional Sidepanel causal oracles
+Before further production edits, the new Sidepanel tests cover newer same-owner persisted draft retention after a held provider completes or fails, conversation-selection change during preparation, and the earlier unexecuted ABA/duplicate/account cases. Independent test review caught and corrected two oracle gaps: both late-provider cases now require the sole original form submit Promise fulfilled (real handled pipeline outcome) and duplicate preparation count is rechecked after all original submissions join. No source/transport guard weakening. The next baseline run executes only these six never-executed cases; earlier two positive controls and stale-draft red are excluded from replay. Frozen fixture SHA256 3e8ebd5de34c8fee87e1d8845bd53c428c7bff0d2b65306ffbd4528fd4256507. Normal configured UI workers, 600-second outer cap; exact source guards. Behavioral repair remains within maximum three production candidates, none authored so far; connected setup ceiling is not reset.
+
+
+#### Sidepanel candidate 1: existing guards
+Additional Sidepanel baseline completed naturally exit 1 in 10.423 seconds: six failed/four excluded, exact guarded hashes, stderr empty, complete 25299-character JSON recovered/released. Five valid causal defects: newer persisted draft deleted after earlier success, old payload sent after history change or edit/restore or account change, and duplicate embedding preparations (two calls). Account boundary is controlled; no real authentication/UAT claim. The temporary-chat synthetic provider failure variant instead rejected its submit (real pipeline rethrows when no errorSave), so its fulfilled assumption is not accepted as defect red; its oracle is being corrected to require the exact original failure and retain the new draft, while success still requires fulfillment. Candidate 1 will reuse draft ownership/readiness, monotonic relevant payload context revision, one preparation token and existing metadata completion/dispatch guard; unify the double intent resolution. Effective own slash state must drive prerequisites/payload/queue snapshot, internal async validation must guard error writes, and both preparation locks release before dispatch. Enqueue retains permission while metadata loads; dispatch alone requires loaded metadata. No new store or protocol. Clear owned attachments/draft before dispatch and remove late cleanup/focus. Knowledge Ask normalization uses captured ownership rather than immediate unguarded setter. One production candidate declared of maximum three.
+
+
+#### Sidepanel candidate 2: retain selector cancellation
+Independent actual-source review of Sidepanel candidate 1 found an Important regression before qualification: ordinary requestOverrides.selectedModel/toolChoice would be treated as explicit selection provenance and bypass the existing downstream global-selector cancellation lease. Corrected candidate 2 removes only those two ordinary overrides; own slash effective chatMode/webSearch remain, queued snapshots keep their existing explicit provenance. No tests have run on either source candidate yet. Source block formatting changed only two owned helper/submission blocks with emitted JavaScript AST equality ignoring parentheses, not full typed/source-byte equality. The temporary rejected-provider fixture now explicitly requires the sole original Synthetic provider failure rejection and durable retention, while completed-provider still requires fulfillment. No afterSend failed-result claim. New fixture default rejection generator gets an empty yield delegation for lint without emitting chunks. Maximum three production candidates; two now used. No other controls or caps reset.
+
+
+#### Sidepanel candidate 2 scoped result and remaining checks
+Corrected Sidepanel candidate 2 actual connected run completed naturally exit 1 in 11.526 seconds: eight cases passed; one rejection-retention fixture expectation failed; earlier mount smoke excluded. All exact source/test hashes and stderr empty, full 4438-character JSON recovered/released. The stale-change/ABA/duplicate/account/history and late-success persisted-draft fixes passed, alongside both original positive controls. No native/real-auth/UAT acceptance. Rejected-provider mismatch is tests-only: actual TldwChat.ts685-691 wraps the original Error as Error('Stream completion failed',{cause:error}), so exact synthetic-error equality was incorrect. Last rejection-oracle correction will require both actual wrapper message and original cause, then rerun ONLY that one failed case; eight unchanged passes excluded. Existing model-validation test extracts the former submit callback through AST and must be migrated truthfully for consolidated actual validation; source-string queue contract also needs the equivalent actual condition. No production changes just to satisfy a brittle test. Additional necessary touched UI/Web types, genuinely affected metadata/queue/model/document contracts and final source/staged review remain open. TS-only Bandit not applicable; no unchanged Python scan.
+
+
+#### Sidepanel existing validation harness migration
+**Goal**: Retain all model/queue assertions through the actual Form after consolidating submission.
+**Success Criteria**: Existing cases exercise actual validation, draft retention and queue state with strict mocked external boundaries.
+**Tests**: Both client configurations, changed validation suite; affected metadata/queue/document/selector contracts.
+**Status**: Complete
+
+Final rejection-retention control passed naturally exit 0 in 4.655 seconds: one passed/nine excluded, exact guarded source and fixture hashes, stderr empty. Full 3749-character native JSON recovered/released. Actual client wrapper message and original Synthetic provider failure cause verified; this is temporary thrown-transport retention, not failed-result afterSend qualification. Eight earlier passes excluded, so no single all-nine final-green-run claim. UI configured TypeScript check is running with exact18hashes; hold file edits until it finishes. Approved tests-only migration proposal: extract the already-working real Sidepanel Form mount, strict external responses, original-submit drains and state cleanup into one helper used by both draft-ownership and model-validation specs. Replace former AST/new Function validation harness with actual Form UI/store assertions preserving every prior missing/unavailable/reselection/edit/dismissal/Pro-image/catalog/offline/empty/valid/busy/disconnected case. No permissive mock or source patch to fit old tests. Source-only queue predicate contract changes only its now-obsolete variable-name assertion to equivalent actual busy/disconnected behavior, keeping all other expectations. Both clients and genuinely affected metadata/model-provenance/queue/document contracts plus configured types/final independent reviews remain required. Maximum three fixture migration setup attempts and three production candidates; no unchanged qualification replay.
+
+### Sidepanel affected control qualification
+Sidepanel candidate2 affected UI controls completed naturally: metadata/queue/document-processing/persistence-label four files 40 passed (2.522s), plus selector-provenance four cases 4 passed/45 excluded (2.430s), exact guarded source hashes unchanged. Complete native output recovered in process memory and released. Earlier rejection control 1 passed/9 excluded and UI typecheck exit0/64.878s retain their precise scopes. No real UAT or all43 acceptance; no unchanged controls replay.
+
+### Sidepanel WebUI controls and fixture review
+WebUI configured affected controls completed naturally: same metadata/queue/document-processing/persistence-label four files 40 passed/2.752s, plus selector provenance 4 passed/45 excluded/2.212s, guarded source hashes unchanged and complete output recovered/released. Tests-only migration review found and corrected inline hoisted export rejection, default provider recording gap, and lost explicit missing-model rerender oracle before first migration execution. Existing 15 model scenarios and nine connected ownership cases retained; busy/disconnected evidence is enqueue only. All43 actual acceptance remains open.
+
+### Sidepanel fixture migration attempt 1
+Tests-only migration attempt1 UI consumed naturally: 7 passed (queue six plus disconnected catalog), 23 failed, old disconnected mount smoke excluded, 5.636s. Twenty-two failures are fixture actual checkOnce readiness false before mounting Form; disconnected enqueue case fails persisted-draft lookup in genuine unconfigured/read-only context. No new production regression or green claim; unchanged guarded hashes. Complete native output recovered in memory and released. Read-only import/mocking and disconnected ownership diagnosis precedes any second of maximum three migration attempts. Static five-file parse0/ESLint0errors/no new warnings; model assertions deliberately map to real Form behavior rather than preserving mock-call ASTs; source whole-file inherited format flag retained.
+
+### Sidepanel migration correction proposal 2
+Migration attempt1 source diagnosis: both specs loaded the actual option store and its safe-storage dependency before the helper's module-local hoisted storage mocks; prior single-file mocks registered before all imports. Second bounded correction moves the helper import before actual application imports. The initially unconfigured textarea is intentionally read-only: disconnected queue regression will compose/persist through a truly ready Form first, then use the existing force-unconfigured flag and real checkOnce transition before Queue; it proves retained-draft enqueue only. Preserve all readiness/owner/transport algorithms and assertions. Do not replay six passing queue contracts or the passing disconnected catalog case.
+
+### Sidepanel migration correction proposal 3
+Migration2 UI completed: 21 passed (all9 connected ownership plus12 model), 2 failed, 2 excluded (old mount/disconnected catalog), 17.510s. Both remaining failures are newly introduced readiness count==1 waits for removed-model setup: actual Form and conditionally mounted ModelSelect share the catalog query, and normal staleTime0 permits a second fetch. Original unavailable/picker scenarios require catalog readiness, while the separate ordinary catalog exact-once contract remains intact and passed. Third/final tests-only correction awaits actual enabled picker in those setup waits, retaining every original error/draft/selection/dispatch oracle. Its parameterized picker wait affects empty selection too, so final focused UI check covers3 cases, excludes other12. No production/helper/config/timing edit or unchanged control replay. UItypes0/69.123s and Webtypes0/7.730s passed before this narrow final test wait edit; complete output recovered/released.
+
+### Sidepanel local source/test qualification
+Sidepanel source candidate2 completed local qualification: final UI readiness 3 passed/12 excluded/8.472s, all prior9 ownership and original model scenarios covered across focused UI runs (no claim of one final30-case UI execution); configured WebUI final3files 30 passed/1 old mount excluded/16.247s. Earlier affected controls40 plus selector4 passed per client. Final frozen client types UI0/71.932s, Web0/6.279s; five touched TS files parse0/ESLint0errors/no new warnings, inherited source/queue wholefile style flags retained; new fixture/model bodies formatted. TS/prose-only Bandit N/A. Full output recovered/released; source2of3 and migration3of3 complete, no replay. No real provider/native/admission/outage/reconnect/replay/UAT acceptance; all43 workflows remain open. Final actual+staged review/normal hooks/local commit pending; no publication/merge.
+
+### Sidepanel actual-source review
+Independent seven-path actual-source review CLEAR with no actionable findings. Every changed hunk/new helper and test body, all15 original model scenarios and affected submit/slash/queue/metadata/publication/selector provenance reviewed. Five TS hashes matched and index empty. Five Sidepanel sub-stage status updates separately read back. Final staged review, normal scoped hooks and local commit remain; all43 real workflow acceptance remains open. Unrelated Sync/ADR work is excluded.
+
+### Shared message-editor acknowledgement
+**Goal**: Keep the edited text available until actual persistence acknowledges Save; preserve the current editor on rejection.
+**Success Criteria**: Deferred save remains visible; error retains draft/retry; duplicate work is prevented; late prior completion cannot close or alter a replacement editor; all actual callers return the existing save Promise.
+**Tests**: Actual EditMessageForm with deferred/rejected/synchronous callbacks, cancellation/replacement and IME; affected virtual timeline/message and edit-handler controls in both configured clients, types/lint/security as applicable.
+**Status**: Complete
+
+#### Editor Stage 1: Causal failures and callers
+**Goal**: Trace the shared editor through each real save handler and demonstrate early-close/data-loss failures.
+**Success Criteria**: Original callbacks/storage/native-action guards remain; valid causal red uses the actual component.
+**Tests**: Deferred save, rejected save retained text/retry, duplicate action and replacement/close timing.
+**Status**: Complete
+
+#### Editor Stage 2: Existing acknowledgement boundary
+**Goal**: Await the existing persistence Promise and close only the owning operation; return that Promise through current callers.
+**Success Criteria**: Shared minimal fix, truthful errors and stable newer/cancelled editor lifecycle; no new store/protocol or relaxed native Edit-and-Send guard.
+**Tests**: Causal green and genuinely affected component/handler/timeline checks in both configurations.
+**Status**: Complete
+
+#### Editor Stage 3: Qualification and local commit
+**Goal**: Independently review and normally commit the exact qualified scoped fix.
+**Success Criteria**: Unrelated Sync/ADR bytes preserved; no local unit result counted as real43 UAT acceptance.
+**Tests**: Configured types/lint, actual+staged review, normal hooks and commit equality.
+**Status**: Complete
+
+Sidepanel completion: actual+staged reviews CLEAR, normal scoped pre_commit0/1.512s and local commit b0a5ebc0eafe2f4487891ee648d8b370790d7a150/0.380s; exact reviewed staged/committed binary patch equal, index empty and unrelated11 patch unchanged. All43 real workflow acceptance remains open; no publication.
+
+#### Editor oracle review corrections
+Independent phase1 oracle review requires actual Message identity-boundary replacement rather than a synthetic key alone, and Send-first duplicate coverage. Existing Message error-recovery fixture will carry the real boundary regression; original assertions retained. Cancellation/reopen also covers an old save committing parent value while the new editor has a dirty draft. Own current acknowledged value projection remains a valid close. No production/test execution yet; source correction before first causal run.
+
+#### Editor causal baseline and first candidate
+Independent corrected oracle review CLEAR. Unchanged production baseline:7failed1passed29excluded/natural1/2.159s, exact source/test guards unchanged, stderr0. All seven fail after premature editor closure before controlled persistence acknowledgement; IME/Escape/synchronous control passed. Full native output recovered/released in memory. Secondary dirty/replacement interleavings remain asserted by the regressions, not individually claimed reproduced past the early-close failure. First minimal production candidate may await existing returned Promises, retain errors/draft, guard active editor identity and dirty incoming-value adoption. Existing unsupported Edit-and-Send/owner/storage/view fences remain. No new protocol/store; all43 real acceptance open.
+
+#### Editor causal green and static review
+Editor candidate1 scoped causal green: configured UI 8 passed/29 excluded, natural0/2.752s, exact guarded final source/test hashes unchanged and stderr0; full native JSON recovered/released in owned-process memory. Independent twelve-production-path review and narrow static correction review CLEAR. Final fourteen TS files parse0/no new lint findings; inherited message-types lint error/warnings and existing wholefile format flags remain identical, new test formatted. Existing Message original61 expectations retained. No real UAT/provider/native acceptance; all43 workflows remain open. Both client types and genuinely affected component/handler controls remain required.
+
+#### Editor affected checks and qualification
+Editor candidate1 local qualification: UI causal8passed/29excluded (2.752s), affected original Message29+timeline6=35passed/2newexcluded (3.817s); Web configured full editor/Message/timeline43unitcases passed (4.101s), not43UAT workflows. Existing stable-ID Save/error and two unsupported native-action guards3passed/130excluded per client (UI2.223s/Web2.191s). Final configured UItypes0/60.653s and normal Web npmtypecheck0/6.246s; first Web attempt was sandbox EPERM writing normal tsbuildinfo, then identical command with proper workspace permission succeeded, no compiler/source workaround. All outputs completely recovered/released; exact guarded14source/test hashes unchanged. Final TS parse0/no new lint findings; inherited message-types error/warnings and wholefile style flags unchanged. TS/prose-only BanditN/A. Independent production12 and narrow correction review CLEAR. All43 real workflow acceptance still open. Source-only legacy messageHandlers.edit.test.ts fixture uses removed updateMessageByIndex and expects unsupported user Edit-and-Send success; this later ADR067 action-protocol unit must address its real contract, no assertion/guard weakening or false qualification here. Editor Stage2Complete, Stage3InProgress pending actual/staged review/normalhooks/localcommit. No publication.
+
+## Selected-history Edit-and-Send and Regenerate
+
+#### Native action Stage 1: Existing contract and causal cases
+**Goal**: Trace the actual shared action handlers through owner-bound selection, user admission, provider dispatch and assistant settlement; reproduce supported action failures.
+**Success Criteria**: Every actual caller and applicable local/native/context/asset limit identified; no availability guard removed on speculation.
+**Tests**: Real selected-history Save/Send/Regenerate boundaries, preserved original rows/context, duplicate prevention, refusal and stale owner/view, supported legacy fixture migration only when its old contract is truly superseded.
+**Status**: In Progress
+
+#### Native action Stage 2: Minimal existing admission repair
+**Goal**: Implement only the smallest supported shared action using existing authoritative owner and durable receipt contracts.
+**Success Criteria**: Edited question/regeneration uses the selected context and canonical identities once; rejection retains original state/draft; older completion cannot replace a newer selection; local/native storage and replay authority remain.
+**Tests**: Causal red/green and genuinely affected component/controller/handler/service/backend consumers in both configured clients and official isolated PostgreSQL where applicable.
+**Status**: In Progress
+
+#### Native action Stage 3: Review and local commit
+**Goal**: Qualify and independently review the scoped action fix before normal local commit.
+**Success Criteria**: Existing protocol/storage/security guarantees and unrelated WIP preserved; local controls are separate from actual43 acceptance.
+**Tests**: Supported types/lint/scoped baseline-current Bandit for Python, actual+staged reviews and normal hooks/commit equality.
+**Status**: Not Started
+
+Editor unit completed locally: independent actual+staged16-path reviews CLEAR; normal scoped pre_commit0/1.666s and normal local commit8f33c72720132f97956143ec80010a01643a9e07/0.344s. Reviewed index/committed43218-byte binary patch byte-identical, SHAb261e9b5ff8c8d7a6600cc5ba003098de5edce4d3482b5396e1eaf1e92a44323; index empty and unrelated11Sync/ADR patch unchanged. Editor Stage3/main subsection Complete. No publication or real43 acceptance. Next independent unit: investigate and repair actual selected-history Edit-and-Send/Regenerate by reusing existing owner/selection/admission/settlement contracts, without removing availability guards before a causal supported path exists. Native Stage1InProgress; trace all actual callers, legacy fixture contract, local/native persistence and rejection/late-completion boundaries before tests/repair. ADR assessment will link existing049/050 if sufficient or record a new durable decision only when the actual contract demands it. Specific previously rejected6fileSync hold remains pending; no unchanged test replay.
+
+## Local RAG diagnostics and shared history projection
+
+#### RAG projection Stage 1: Actual Save causal failures
+**Goal**: Reproduce local-only preflight diagnostics leaking into genuine history after Save.
+**Success Criteria**: Existing behavioral assertions preserved; real current handler/mock boundary, no algorithm substitute.
+**Tests**: Existing genuine-row and diagnostic-row Save cases, excluding independently unsupported EditSend; eligible server receipt/answered variants retained.
+**Status**: Complete
+
+#### RAG projection Stage 2: Reuse existing eligibility helper
+**Goal**: Apply existing excludeLocalRagDiagnostics at the shared visible-history projection.
+**Success Criteria**: All Edit/Delete projection callers retain only genuine context; source rows remain visible and server-acknowledged/answered variants retained.
+**Tests**: Causal green, genuinely affected projection and diagnostic helper controls in both clients.
+**Status**: Complete
+
+#### RAG projection Stage 3: Review and local commit
+**Goal**: Normally commit the independently reviewed minimal projection correction.
+**Success Criteria**: No new protocol/storage rule; TS-only BanditN/A, static/client types as affected, actual/staged reviews and normalhooks.
+**Tests**: Scoped checks and exact reviewed commit equality; real43 acceptance remains open.
+**Status**: Complete
+
+ADR required: no; reuse existing localRAG eligibility semantics and ADR049 history boundary.
+
+New source-traced shared history projection defect: historyFromVisibleMessages used by createEditMessage and five delete consumers omits existing excludeLocalRagDiagnostics. Local RAG selected-source preflight diagnostic question/answer can therefore enter inferred prompt history after an ordinary message Save; sibling submission/storage paths already apply the existing eligibility helper. Official independent RAG projection unit established before edits. Correct only stale updateMessageByIndex/deleteChatForEdit mocks in existing messageHandlers.edit test to actual updateMessageById; preserve all three behavioral assertions, run only two valid Save cases first (unsupported EditSend remains separate native unit), add only missing eligible receipt/answered-variant projection controls if not already covered. Root will execute real causal red before one minimal shared-helper green; maximum3productioncandidates, no broader guard/protocol changes. Native action architecture investigation remains read-only, and all43 real acceptance open.
+
+#### RAG causal red and native action architecture ruling
+RAG projection corrected causalRED: proper updateMessageById fixture and genuine emptyimages[] metadata retain exact two-row role/content/cardinality expectations. Both valid Save tests still fail at real leaked diagnostic pair (4actualrowsvs2), natural1/2.161s/stderr0/exact source and fixture unchanged; fullJSON recovered/released. Earlier1.853s red also demonstrated diagnostic leak but had separate stale image-metadata expectation, now corrected without weaker matchers. UnsupportedEditSend excluded, not qualified. Stage1Complete/Stage2InProgress; minimalproductioncandidate1 now reusesexistingexcludeLocalRagDiagnostics beforeexistinggreeting/image filters. Native readonlyarchitecture assessmentcomplete: EditSend must detach before-target ownercapture from originating display fence, avoiding eagerchoose/optimistic projection before realadmission ACK and inspect failed/skipped resolvedsubmitoutcomes. Regenerate requires same-parent assistants, no duplicatequestion; currentnativeGET doesn't expose savedadmission, legacyquestions maylackit. Narrowversionedselected-existing-input settlement/recoveryproof is proposed on newassistant'sprotectedauthorityfield, preserving originalquestionrevision/legacyprojection; no retroactiveuserauthority/forkstore. Existingreceipts mayreusecurrentretryAdmission. New publiccontractwillneed ADR067 ifavailable and SQLite/officialPG/APIreplay/owner/canonicalqualification. No native guard removed or nativeimplementation yet; all43 realacceptanceopen.
+
+#### RAG projection local qualification
+RAG projection candidate1 qualified locally: configured UI16passed19excluded/natural0/2.110s and Web16passed19excluded/natural0/1.803s. Scope is two exact Save regressions, thirteen existing diagnostic eligibility controls including receipts/answered variants, and stable-ID Save/error control; independently unsupported EditSend and eighteen unrelated branch cases excluded. Full native outputs recovered/released, guarded source/test hashes unchanged; utility fixture before/after SHA5c0e6ff14c1c613837f12c4ebaf380f1d9d58023a6c2ca58b3d0a527e9379d60 matched. Production helper/signature unchanged; only shared existing eligibility call and import changed. Post-green import-only formatting preserves full TypeScript AST exactly (normalizedSHA1ab3b2b2ba0eb42d1643209cbe2d811693213e327c3e6b85a04f465169330cf1); final source4e70e0fec50ac648888220c4de3581d5a600fcb6fad765e392c60087b0576b74/test6d8f358b85dca5b2ca2166f1072622aa14e6461f9dbf38981ce4a34efd7f7fbb. Two touched TS parse0/ESLint0errors/no newwarnings, source2identical inheritedwarnings/test0, diffcheck0. TS/prose-only BanditN/A; no API/public type/storage contract change or unchanged broad compiler replay. Independent two-file source review CLEAR; final four-path actual/staged review/normalhooks/localcommit pending. Stage2Complete/Stage3InProgress. Controlled handler Save proof is not real DB/native/UAT acceptance; all43 real workflows open.
+
+
+### RAG post-commit closure and bounded Edit-and-Send specification
+
+RAG unit complete at db8417d32d5e5614e0e536c9e2e7bf19bbeec5dc. Actual and staged four-path reviews CLEAR; normal hooks 0/1.465s and commit 0/0.344s. Exact reviewed 23549-byte patch matches the commit (SHA256 1a85856494ec1820c7498f5e096c4e480770b7ef68bcf1d39e08bd3feefb1a95). Index empty; unrelated eleven-path Sync/ADR patch preserved. No publication or actual UAT acceptance.
+
+**Bounded task: selected-history Edit-and-Send.** Reuse ADR049 history selection and ADR050 lifecycle; ADR required: no new durable public contract for this existing append/settlement path. Regenerate remains separate: same-parent assistant sibling, no duplicated question, and a proposed versioned existing-input settlement requires its own ADR and backend qualification.
+
+- Capture the exact user target, owner, originating selected view and operation fence synchronously. Derive a detached before_message(target ID) selection from authoritative owner capture. Display text/index alone never grants ancestry authority.
+- Route the boundary through both live submit constructors and normal selected-send capture. Keep the originating display view/fence current while provider context uses the detached prefix. Never eagerly call choose or mutate the original question/answer/suffix.
+- Append one fresh edited user input through existing admission and settle one assistant through the current receipt. Preserve original rows and alternatives; follow the completed new branch only if the originating fence still owns publication.
+- Defer this action's optimistic selected projection until real admission acknowledgement so refusal preserves the mounted editor and draft. Inspect resolved failed/skipped submit results: they must reject the editor's save acknowledgement, not close it as fulfilled success.
+- Retain temporary/mode/rich-payload/tool/owner/account/navigation/lease gates and unknown-ack recovery semantics. A late operation cannot dispatch or overwrite a replacement view. Do not remove unsupported Regenerate guards.
+- Tests first on unchanged production: strengthen the actual mounted native Edit-and-Send fixture with stable IDs, exact provider prefix, original-row preservation and rejection retention; use actual selected controller/normal capture/pipeline tests for detached-boundary and stale-view causality. Existing unit doubles are component/control proof only. Root runs normal UI causal red; no production candidate before valid red. Maximum three production candidates; no unchanged qualified replay.
+
+Then qualify affected controls in both configured clients, configured types and scoped lint, independent actual and staged review, normal hooks and exact local commit. TS-only Bandit is not applicable; any genuinely touched Python requires baseline/current Bandit. All 43 real workflows remain open. No test/report/proof bundle files, model/auth/shared-cache actions, publication, queue mutation or Sync hold bypass.
+
+
+#### Native Edit-and-Send oracle correction before baseline
+
+Independent tests-first review found one Important timing gap: an immediate 409 and final editor state can miss pre-acknowledgement unmount/recreation. Correct only the refusal fixture: hold its selected-user admission response, require the same mounted busy editor with draft/suffix and exact original rows and zero provider calls, release the existing definitive 409, then require the same idle editor and drain before transport restoration. No production or behavioral execution; causal baseline waits for narrow rereview. Regenerate remains unchanged. All 43 real acceptance stays open.
+
+
+#### Native Edit-and-Send first causal baseline declared
+
+Narrow independent timing rereview ADDRESSED/CLEAR at fixture SHA256 96c01317d84058f66114fad581151c7125ab57c679a89bc37b84ec70e1b1df18. Declare only two mounted Edit-and-Send cases on unchanged db8417d production, normal configured UI Node20.19.5/Vitest4.0.18 workers, 600-second outer cap and 35 exact source/fixture guards. Regenerate excluded. Distinguish setup/transport errors from intended causal failures; no production candidate yet. Complete output remains in owned-process memory until recovered/released. All 43 real acceptance open.
+
+
+#### Native Edit-and-Send causal result and candidate 1
+
+First unchanged-production baseline completed naturally exit 1 in 44.502s: two failed, one Regenerate case excluded, all 35 exact source/fixture guards unchanged and stderr empty. Actual mounted editor and Save-and-Send reached; current unsupported user action guard prevents any completion/admission. This is causal action unavailability, not independent reproduction of the later prefix/timing assertions. Complete 23325-character native JSON recovered/released in process memory.
+
+Authorize minimal production candidate 1 of maximum three: derive before-target selection from the captured authoritative user row; preserve originating display/fence and draft until actual admission; return explicit branch submit outcomes through both live hooks; reuse existing append, settlement and follow-result. Author focused stale-origin and unknown-ack duplicate refusal checks before implementation. Existing unresolved dispatched intent must not become an ordinary repeat with fresh IDs; preserve existing recovery authority and keep uncertain results honest. No new public protocol for this frontend task, no Regenerate guard removal or original row mutation. New source and test controls remain unqualified until root execution and independent review. All 43 actual acceptance stays open.
+
+
+#### Owned stage label reconciliation
+
+Align Notes activity and Composer owned stage labels with their already recorded local completion. Historical narratives, exact scoped qualification limits, later commit records and all real acceptance gates remain intact. No tests or new qualification; no tracking-only commit.
+
+
+### Native Edit-and-Send candidate 1 and truthful test migration
+
+The mounted baseline failed twice before admission/provider dispatch at the unsupported-action guard (natural exit 1, 44.502s outer; Regenerate excluded). Candidate 1 is frozen for actual-source review and affected checks; no green result is claimed. New source-boundary/lost-ack tests are authored and unrun. Automatic review rejected a no-owner rewrite of the stale old-answer-exclusion test before execution. The safer owner-bound migration retains that requirement in exact provider context and leaves both RAG Save cases unchanged. All real UAT acceptance remains open.
+
+
+### Native candidate 1 review and failed affected run
+
+One configured UI run failed all four controls before their waited admission/capture/provider events (4 failed, 1 Regenerate excluded; natural exit 1, 78.915909s outer). Complete native output was recovered/released in memory with unchanged source guards. The independent eight-path review requires an Edit-only originating-view fence after admission and a deterministic before-target capture assertion; it endorses the behavior-preserving owner-bound legacy fixture. Candidate 1 remains frozen and unqualified while its early refusal is traced. No held-path or real UAT acceptance is claimed.
+
+
+### Native causal diagnosis and candidate 2
+
+The focused mounted diagnostic exposed the actual unsupported edit guard (1 failed, 5 excluded; natural 1, 25.168929s). Existing formatSelectedHistory gives every plain display row an empty metadata object. Two independent new controls on unchanged candidate 1 then failed as intended (2 failed, 21 excluded; natural 1, 1.858742s): real empty-metadata projection refused, and Edit-only stale view after admission dispatched once. Complete output recovered/released in process memory with unchanged source guards.
+
+Authorize candidate 2 of maximum 3: the existing nonempty-metadata rule and an Edit-only originating-view check before model dispatch, preserving accepted input/recovery and ordinary Send/Regenerate behavior. No new public protocol or replay claims. All 43 real acceptance stays open.
+
+### Native candidate 2 checks and additional causal controls
+Normal UI: 172 passed across six affected files, one Regenerate case excluded, natural exit 0, 21.287313s outer. Complete output recovered only in process memory and released. Candidate 2 remains unqualified for real UAT: independent review identified generic sidepanel freshness choosing a new view before explicit Edit, and ordinary local adapter metadata rejected by the public action handler. The direct-normal local test does not cover that entry point. Add two real-path controls before deciding candidate 3 (maximum three production candidates). No source repair or real UAT acceptance follows from these passing component checks.
+
+### Native real-path RED and final candidate
+Two new controls failed on candidate 2 (78 excluded; natural 1; 2.424265s): real freshness chose a-new before Edit, and real local capture/formatter/action refused first-user. Complete output recovered in memory and released. Candidate 3 of maximum 3 now authorized: explicit Edit bypasses only the ordinary composer freshness gate; local adapter metadata is allowed only for plain local payloads, with genuine rich/unknown state still refused. Preserve ordinary Send, ownership, selected target and Regenerate contracts. No further production candidate is available without reassessment. Both-client qualification, types, reviews and actual UAT remain open.
+
+### Edit-and-Send local qualification
+Final candidate 3: normal UI183 passed (one Regenerate excluded; 21.985178s) and Web183 passed (one Regenerate excluded; 24.450637s), natural 0. Full outputs recovered only in memory and released. UI types0/59.419710s; Web types0/10.849999s. All thirteen touched TS files parse clean; compact complete baseline/current lint comparison has no new diagnostics (one inherited pipeline-test error and existing warnings retained). New test-only hook naming/typing cleanup preserves normalized emitted JS, independently reconstructed from the prior exact hash; no UI replay. Initial truncated diagnostic display was not accepted. Actual thirteen-path independent review CLEAR. TS/prose Bandit N/A. Edit-and-Send reproduction and repair are complete locally; final staged review/hooks/commit remain. Regenerate and all 43 real UAT acceptance remain open; overall Native stages retain In Progress.
+
+#### Edit-and-Send bounded Stage 1: Causal diagnosis
+**Goal**: Reproduce action refusal, stale dispatch and actual local/freshness entry-point failures.
+**Success Criteria**: Real controls distinguish adapter defaults from rich state and preserve original branches.
+**Tests**: Recorded mounted and actual capture/freshness causal regressions.
+**Status**: Complete
+
+#### Edit-and-Send bounded Stage 2: Existing-contract repair
+**Goal**: Reuse detached selection and existing input admission/assistant settlement.
+**Success Criteria**: Both live hooks/local actions preserve target, draft and owner boundaries.
+**Tests**: 183 affected tests per configured client and configured types/lint.
+**Status**: Complete
+
+#### Edit-and-Send bounded Stage 3: Review and local commit
+**Goal**: Commit only the independently reviewed scoped unit.
+**Success Criteria**: Actual/staged clear, normal hooks, exact reviewed commit and unrelated WIP preserved.
+**Tests**: Staged review, normal hooks and commit patch equality.
+**Status**: Complete
+
+
+### Edit-and-Send post-commit closure and Regenerate isolation
+
+Edit-and-Send completed locally at c700e42ede4e387302c4ccd77c99f28ca9d5ae07. Actual/staged15-path reviews CLEAR; normal hooks0/1.648s and commit0/2.105s. Reviewed102444-byte patch matches the commit exactly (SHA25634f477709ac8d949b703a3aeffeff81c77cc2fa1efe223f7903e00e9ce1876d1). Index empty and unrelated11 Sync/ADR WIP unchanged in the original worktree. No publication or real43 acceptance.
+
+Regenerate continues in a new managed worktree at this exact commit with no copied Sync WIP/assets/auth/cache. Its bounded plan is Docs/Plans/IMPLEMENTATION_PLAN_uat_native_regenerate_20261008.md. Overall Native stages remain open until Regenerate is qualified. The specifically rejected Sync persistence patch is still held.
+
+- A01 only: blank endpoint and saved-draft repairs passed scoped frontend/API/type/security and live fresh SQLite-single recovery. Saved llama.cpp8010 URL/model survive reload with fresh validation required; failed edit preserves working draft. Wizard and ONE canonical llama.cpp Chat completed; exact ORBIT-742/Saved-on-server retained through reload/server reopen and setup re-entry; suggested ingestion controls usable. Existing key handoff resolved. Other A01 cells/clean-install/new-context/PG/independent review/full acceptance remain open; changed-block formatting resolved, heartbeat PAUSED.
+
+## A02 fresh functional milestone — 2026-10-12
+
+A01 remains functionally accepted with human UX. A02 fresh functional checks now pass in SQLite/PostgreSQL and single-/multi-user cells, including real provider-backed saved work, credential/access refusal, account isolation, owned API outage/restart/Retry, real expiry and revocation, and persisted unsent work after required sign-in. Controlled PG6minute/7day and6minute/0day policy cases are explicitly distinct from default-lifetime waiting. Initial operator failures and consumed caps stay recorded in the A02 plan.
+
+A02 human UX is pending on the concrete single Chrome tab; A03 and all later families have not been started in this continuation. Public clean-install/previous-release/oldest-supported upgrade, current-dev rebase/combined qualification, native/installer and release acceptance gates remain OPEN. No staging, commit, push, PR or merge occurred. Heartbeat remains PAUSED.
+
+## A02 accepted / A03 active — 2026-10-12
+
+Human explicitly accepted A02 UX. A02 fresh functional scope is complete; A03 is now the sole active workflow under IMPLEMENTATION_PLAN_uat_a03_chat_stream_retry_20261012.md. Human authorized one owned API/frontend/Chrome restoration and reports llama.cpp running, confirmed by actual8010 modelsHTTP200. Prior source/release/upgrade/native/installer gates and all exhausted caps stay open; heartbeatpaused/no publication.
+
+
+#### Latest B02 recovery implementation checkpoint
+
+B01 UX acceptance retained;13/43 selected cases accepted, B02 active and30 open. Saved-question recovery has scoped backend/context/SQLite+officialPG and frontend/type/security evidence plus one reviewed84-binding build `aU7UmCb9F452zVpfnfI73` (167.974s). It is not served or live-accepted. One corrected Compare-check exception was requested once/pending after three failed runs; automatic approval review rejected a broader command excluding that check, which did not execute. B02 UX/live recovery/mode variants and final integrated/latest-dev/canonical/release gates remain open. See the owned B02 plan for exact causal outcomes/limits. No B03, runtime transition, source publication or heartbeat resume.
+
+
+### B02 active — character readiness repair and served-build transition
+
+Selected accepted remains13/43 (A01–A12,B01); B02 human UX accepted, functional gates still open. ONE approved Compare check passed and is consumed. Existing-question recovery saved one CHIRP answer without duplicating its user; original strict metadata-frame assertion failed, so full wire acceptance is not claimed. Real canonical/UI five-row retention and no-inference reload passed.
+
+Distinct stale-library/delayed attempt1 failed180s with zero inference and lost draft while character loading failed. Current backend card6 is valid; exact load failure cause unknown. Independently demonstrated readiness/draft-retention gap repaired through existing Send blocker; causal2red→2green, full affected shared UI86/configured WebUI86/types passed, lint0errors/no new categories, helper security clear, independent source review clear. New85-binding build completed227.840s; guarded frontend replacement is underway, sameAPI/profile/Chrome. One reviewed changed-source recovery is prepared, not executed. Cancellation and remaining database/auth variants still open; B03 not started. Frozen source remains unpublished/not latest dev; heartbeat paused; final integration/canonical/publication gates retain.
+
+
+### B02 readiness build served; independent cancellation active
+
+Frontend59020/59006 now serves85-binding cT2pRM2DLMgPFpJYPP4K0 ready0.962s; original API/Chrome retained. ONE changed-source card6 recovery saved fresh-context FRESH-B02 without final period, so its strict-format wait FAILED180s after one real inference. No rewrite/resend/full-wire or3s-first-byte acceptance. Latency cleanup completed. Separately reviewed real cancellation case is running once with readiness-before-Send, once-only Stop and canonical partial/draft/reload checks.13selectedacceptances unchanged; B02 active/B03 unstarted; heartbeat paused/unpublished/not-latest-dev and final release/integration gates open.
+
+
+### B02 actual interrupted-reload repair PASS
+
+ActualStop saved canonical interruptedpartial; reload exposed missingstatuslabel and was causally repaired in shared displayprojection. SharedUI32/configuredWebUI32/types passed, lint0errors/no newwarnings, helperssecurity0, actualreviewCLEAR. ONE86-binding build338.264s servedfrontend90230/90095 ready7.09s. Existing5-row/no-generation reload nowPASS with Interruptedlabel/samedraft/canonicalIDs unchanged. Both earlierfailedcancellationdrivers retained; no preStopdraftclaim. Remaining3database/auth cells prepared/operator19pass/source-reviewed, notrun.13selectedacceptances unchanged/B02active/B03unstarted; heartbeatpaused and unpublished/notlatestdev/finalreleasegatesopen.
+
+
+### B03 engineering checkpoint — 2026-10-15
+
+B03 remains the sole active workflow,14/43 selected functional/UX acceptances. Compatible explicit saved-native-lore preview is implemented and source-qualified:41 distinct new cases passed by composition,33 affected existing preview/ownership contracts passed; locked-scope and timestamp-tail defects in the new implementation were reproduced and corrected before live deployment. Current scoped compile/Ruff/Bandit are clear; independent source review clear. Default legacy preview contract is preserved. The API has not loaded this change and no B03 model generation/live acceptance is claimed. All three attachment operator attempts remain failed before submission; the existing finish-only exception is pending. Independent normal dictionary API scope/lifecycle verification is prepared, leaving the sole browser dialog untouched. Current-dev/combined schema+types/runtime/modes/UX and broader handoff gates remain open; B04 not started.
+
+
+### B03 JSON root cause fixed and live API recovery passed
+
+Actual live JSON roundtrip failed after original scoped processing/recovery checks. Browser JSON numeric1 reached legacy integer-percentage handling as0.01; export/import also lost the timing contract. Minimal JSON-boundary corrections passed22 new SQLite/official restricted-PostgreSQL cases and3 existing connected contracts; source review clear, no new lint/security findings. One guarded changed-source API restart completed (94666/94663, same private profile, stop3.033s/startready7.493s). One declared changed-source recovery passed exact deterministic imported replacement and cleanup while retaining both ordinary payloads and the inactive original dictionary. Original failed receipt remains failed. No B03 inference or full UI/Chat/matrix/UX acceptance;14/43 remains, B03active/B04notstarted. Existing selected attachment dialog is retained; its finish-only approval remains pending after all3failed operator attempts before POST. Heartbeat staysPAUSED, no rebase/publication/merge.
+
+
+### B03 active checkpoint — corrected client / pending one case exception
+
+14/43 selected functional/UX accepted; B03 alone active and B04 unstarted. Human B03UX accepted. Saved-identity correction passes259 connected tests in each configured client and WebUI tsc. Necessary89-binding buildcX5NMz3tepu4_Xcjotk76 now served by frontend95377/95367, ready0.813s. Original SQLite-multi API remains stopped; Chrome retains one about:blank tab. Initial PGmulti and diagnostic recovery remain failed. One specific changed-source PGmulti validation exception asked/pending; no fifth host or generation. Overlap order/output, original runtime/principal/B02 handback and B03 closeout remain open. No current-dev/rebase/publication/release acceptance.
+
+
+### B04 current continuation — voice/listening consumed
+
+Finish-only custom voice selection PASS; explicit approval consumed. Human accepts actual API Pocket WAV complete/intelligible. Readiness alias repair causally qualified47tests/configured client, types/lint0, reviewed91build complete but not yet delivered. First browser generation/export/playback remains open.15/43 selected accepted28open; B04active/B05unstarted. Prior picker3failures/APIwrong-backendfailure retained; no new API smoke replay/publication.
+
+
+### B04 combined current — playback passed, isolation/cancellation repairs in build
+
+Actual old90 browser generation/export/nativePlayPauseSeekResumeStop passed; StopdisabledatACK was separatelyfailed. Causal Stop+stalecaller repairs and newverifiedownerhistoryprivacy repair qualified/reviewed; finaltypes0/lint0new/security0. Combined94productionbindings clientbuilding before livecancel/Retry/history/account/database variants. Oldlegacyhistory retainedunassigned; current browserWAV listeningpending.15/43 selectedaccepted28open; B04active/B05unstarted; broaderengineering/rebase/publication gatesopen.
+
+
+B04 2026-10-16 continuation: combined94 corrected client delivered/build404.985s/ready1.216s. Real cancellation and legitimateRetry, owned history reload, exact UI export/nativefile decode passed; final Back event wait failed and was not repeated. Separate finish-only existing TTS history/text restoration passed/zeroPOSTs. APIaudio humanaccepted; initialbrowser listening and screenshot UX pending. SQLiteordinary-user isolation now running, remaining3official mode cells prepared/reviewed; B04active15/43/28open/B05unstarted. Candidate frozen523+WIP unpublished/notlatestdev; broader gates remain.
+
+### B05 current mode update — PostgreSQL multi-user failure
+
+16/43 selected accepted; B05 active, B06 unstarted. Ordinary SQLite multi-user and fresh SQLite-/PostgreSQL-single recoveries pass; PG-multi Alice12 returned500 before an accepted transcript. Actual new-log clue is UndefinedTableError, exact relation/caller not yet known. Causal normal-runtime official restricted-PG regression is prepared; no speculative repair or acceptance. OriginalAPI18940/18911 stopped/profile preserved; frontend21673/21654 build4SgxsY0UfZlzm2xCj35Cf/one Chrome retained. Missing-model negative and original handback remain open.
+
+
+## B05 selected closure — 2026-10-16
+
+17/43 selected accepted/26open. B05 final missing-model503/Blocked recovery and original-profile real20015.553s/5.56%WER/allfacts/history passed. Finish-only handback restored Admin1/five exact full canonical rows/Interrupted/unsent draft with zero inference. Initial failed schema/model/handback results remain failed. B06 next, not run before this closure. OriginalAPI63700/63687 and frontend59516/59378/vcx build running, one Chrome context. Frozen unpublished523+WIP/not latestdev and all broader engineering/release gates remain open.
+
+## B06 selected closure
+
+2026-10-16:18/43selectedaccepted25open. Human accepted B06 UX, ordered Narration and final Music (“Complete and usable”). Actual Narration/Podcast/Briefing and recovery, four database/auth speech mode composition, new officialACE-Step1.5 real15s Music generation/render/export/native playback/download, originalAdmin1 five full canonicalChat rows/Interrupted/unsentdraft handback0inference passed. SQLite-multi uses original functional positives plus zero-resubmission read-only finish; its original observer failure remains failed. All earlier timeouts/operator failures remain recorded in TASK-13260.278.18.83.45. Own completed B06 plan removed per AGENTS; no foreign/incomplete plan removed.
+
+Affected source verification:317UI/317WebUI, configuredtypes0, scopedlint0errors/3inherited; adapter26pass plus subsequent8-case malformedURL completion, compile/Ruff/Bandit0new and scoped independent source reviews. Changed128binding MusicbuildrkEG8HYKPEPNrEAhgQQHX compiler/token/budget0/0/0, source bindings restored. No unchanged suite replay or publication after listening acceptance. Worker-crash/lease external-task reconciliation, common integration/native/installer/release/latestdev/publication gates remain open. B07 begins after this closure.
+
+
+## B07 selected closure
+
+Human verdict2026-10-17: “I accept B07’s UX.” Selected acceptance19/43;24open. Real F-FEED manual/dedup/scheduled notification and whole disabled interval, denial/malformed/delay/partial/retry/restart passed. Navigation/failure bookkeeping/parser-header/client-timeout/source-alert-scope causal repairs received affected checks/security/independent reviews and changed-source live qualification. SQLite/PostgreSQL single/multi composition and ordinary Alice/Bob isolation passed; earlier operator/application failures remain failed in their concise task notes and functional controls. Disposable qualified Watchlists reversibly deleted; original configuration/Chat/five full rows/Interrupted/unsentdraft handback0inference restored. Own completed B07 plan removed only after explicit UX acceptance. Older arxiv public-fetch closeout and all broader integration/release gates remain separate/open; no latestdev/publication claim.
+
+## B08 Collections membership and retention selected closure
+
+Human verdict2026-10-17: “I accept B08’s UX.” Selected acceptance20/43;23open. The actual Media named-collection surface stores private browser/account-scoped references; Reading List, conference collections and Research groups are separate. Sharing is not offered, so conditional recipient/revocation checks are excluded without borrowing another surface.
+
+Missing empty/create/name/description/edit/member-check/remove/delete controls, partial unavailable-add acceptance, deferred duplicate/destination-removal races and failed optimistic storage rollback received causal tests and minimal shared fixes. The WebUI shim now supports actual functional render-only updates without persisting them. Configured UI72/WebUI78 tests passed; configured WebUI compiler0; lint0errors/39inheritedwarnings; scoped security0newfindings; independent actual-source review CLEAR. One132binding production build naturally passed139.35s, all functional source bindings restored; inherited build typecheck skip is separately covered by the configured compiler.
+
+Primary SQLite-multi passed by explicit composition of original create/ingest/dedup plus changed remaining-only role-based completion; all three failed operator receipts remain failed. SQLite-single and official restricted PG-single passed actual deleted-member/partial-add handling and retained references. Ordinary SQLite/PG multi-user paths retained intentional source-delete403, Alice/Bob404/UI isolation and all underlying source bodies. All modes passed metadata/filter/remove/reload/count and collection-only deletion/source retention,0inference; official fixture APIs gracefully stopped and hosts released. No full per-mode deleted-member claim for ordinary users.
+
+A historical B07 fixture PID had been reused by macOS indexing; original restore preflight safely refused before startup. Causal returned-host identity correction requires a valid positive non-boolean PID and stable current process creation after the completed receipt; unknown/live identity still refuses. Six final guard cases passed/Ruff0/Bandit0/reviewCLEAR. No receipt edits or unrelated signals. Original API76392/76361 ready34.376s. Final normal-UI Admin1 handback preserved the exact five full canonical Chat rows/Interrupted/unsent draft with0inference. Own completed B08 plan removed after final closeout review CLEAR. B09 not started; no latestdev/rebase/publication/release acceptance.
+
+
+## B09 Content review and reanalysis selected closure
+
+Human verdict2026-10-17: “I accept B09’s UX.” The separate one temporary second-tab exception was explicitly granted and consumed; the extra tab is closed. Selected acceptance21/43;22open. C01 is next and unstarted.
+
+Causal fixes preserve the existing ContentReview/draft-storage/AnalysisModal/route contracts: conditional owned draft revisions, acknowledged save publication and unsaved-navigation fencing; once-only source admission with recoverable media identity; current-target AI application; bounded scoped analysis generation/fallback/cancellation/version persistence; missing-original refusal/reattachment; explicit chunking-off behavior. No server API/schema or new durable architecture rule; existing ADR021/047/059 apply. Configured UI255/WebUI255 and TypeScript passed; lint0errors57existing-any warnings versus restored baseline1error58warnings, no new security findings and independent source/operator reviews CLEAR. One137binding production build passed132.173s and restored functional source bindings exactly; inherited build typecheck skip is covered separately by the configured compiler.
+
+Primary native Quick Ingest/edit/save/reopen/Diff/Reset/unsaved navigation and real AI correction passed. Three exact canonical source commits, duplicate-click refusal and partial commit/same-ID retry passed without extra admission. Real source reanalysis versions3/4/5/reload preserved source bodies; failed stream/fallback and version save retained prior full canonical state before legitimate recovery. Four database/auth modes passed three native commits and real analysis/version/reload; both multi-user modes passed Alice/Bob isolation. Fresh official restricted PostgreSQL fixture APIs completed graceful shutdown and hosts released before the original API restoration.
+
+Missing-original recovery retained its exact draft, refused commit until native reattachment, and created no source. The approved two-editor check retained both the saved and unsaved conflicting texts, recovered through explicit Reload saved draft and closed the extra tab. Its subsequent single commit admitted media4 exactly once; clearing only four known committed local drafts retained all four exact canonical sources. Final normal-UI Admin1 handback preserved the original five full Chat rows/Interrupted/unsent draft with0inference. Original API11932/11927 ready13.267s and frontend68662/68635/buildFmx0WpyRP0KOgkWAb2jVh are retained with one Chrome tab.
+
+Earlier failed application/operator attempts remain failed in the task and functional controls. Independent final closure review CLEAR; only the completed owned B09 plan was removed under AGENTS. No foreign plans or proof bundles were removed or created. Frozen523ef+WIP remains unpublished/notlatestdev; no rebase/publication/merge or broader engineering/native/installer/release acceptance.
+
+
+## C01 Prompt library and applied Chat selected closure
+
+Selected functional and human UX acceptance is complete on frozen523ef+WIP;22/43 accepted,21open. C02 is next and unstarted. The associated parent TASK-13260.278.18.83.45 remains In Progress with its original AC/DoD/history. All four owned C01 stages completed; only the completed C01 plan was removed. Other plans/WIP remain.
+
+Actual application repairs and affected configured UI/WebUI/type/lint/security/source reviews were qualified earlier. Composition retains primary SQLite multi-user Prompt lifecycle/search/edit/save/scope/variable/application/roundtrip/disposable-delete/recovery, SQLite single saved-Prompt/Chat/applied-context reload finish with zero Send, PostgreSQL single and PG multi-user ownership/isolation. Human accepted C01 UX and explicitly waived greeting capitalization only. The original Pirate instruction reached the model unchanged; unsupported weather in prior exact-recipe responses remains a model-output failure, not an application instruction-loss claim.
+
+Human explicitly approved strengthening the disposable Prompt: preserve the Pirate/ARRR prefix and add “Do not invent current weather. If location or current weather data is missing, ask for the location and explain that you cannot verify current conditions.” Latest actual restricted PGmulti Alice191/Bob192 run passed one real Send at normal UI temperature0. Full answer asks for port/location and states it cannot verify current conditions, with no invented weather; root and independent reviewer agree. Exact strengthened system request, one Chat/two canonical messages with admission/parent/settlement, reload, Bob exclusion/Alice return and baseline temperature recovery passed. Current Chat Model Settings are memory-only; accepting the exact blank baseline after reload corrected an operator assumption, not application persistence.
+
+Actual administrative provider-unavailability recovery is separately qualified: real backend403/provider_disabled retained Prompt/question, only the newly owned Admin override was removed/confirmed absent, then one real Retry completed and saved/reloaded. This is not a service-outage claim. That run's invented-weather answer remains failed semantically. Earlier strict network-ACK Save timeout has unknown write outcome and zero inference, not proof of zero writes. Corrected oracle follows playbook162: actual visible UI ACK2 or verified fast completion, canonical Save15. Latest update UI ACK41ms/response532ms; both per-save assertions passed, exact create ACK duration was not retained after the update overwrote the action field. Prior failures are never rewritten or accepted.
+
+Latest validation natural0:1passed1warning63.69pytest65.034outer; one generation6.533s. Node0/API57022-15/ASGIshutdown2.659s/hostreturned/noovercap/cleanupErrors[]. Final original restore API61042/owner61021/session51679 canonicalready14.045s, same private profile/data/keys/current145client and existing single Chrome tab. Actual handback passed original five full canonical rows/Interrupted/exact unsent B02 draft and primary/provider Chats unchanged,0inference. Final groundedFunctionalPassedtrue is separate from preserved historical modesAcceptedfalse.
+
+No claim of general model hallucination prevention, full release/native/installer/security acceptance, latest-dev integration, commit/publication/rebase or merge readiness. Heartbeat remains PAUSED; broader engineering/release gates stay open.
+
+
+## C02 Prompt Studio selected closure
+
+Human explicitly accepted C02 UX on2026-10-18, completing the last selected gate after independent source/outcome review and original handback. Total23/43selectedaccepted20open; C03next. Current-source variable rendering/director runs, immutable revisions/history, provider deadline/recovery with retained evaluation labels, invalid-template guidance, conflict409/draft-preserving retry, one bounded optimization comparison, real cancellation and official SQLite/PostgreSQL single-/multi-user composition were validated in their recorded scopes.
+
+Minimal repairs covered project reads/menu propagation, completed-job progress, preview/save/duplicate refusal handling, immutable conflict mapping, saved evaluation labels, actual expected/actual refinement examples, and valid generated optimizer UUIDs with exact-format owner-fenced compatibility repair. Final UUID affected scope120passed2existingSQLiteconcurrency-skips, followed only by the corrected constructor-ratchet test1pass; restrictedPGupgrade/concurrent/tenant-policy checks4pass. No full release-suite claim. Generatedcandidate12 is readable and linked to completedoptimization4; actual baseline/refined Mira answers both scored0.5, so no improvement is claimed. Historical failed receipts, provider retry and interrupted/missing-policy test attempts remain failures with stated limits.
+
+Original five full Chat rows/Interrupted/unsent B02 draft, primary/provider Chats and all12Studio runs were verified retained; one originalChrome tab restored with0handback inference. Last-qualified API55803/55799/18906 and frontend4390/4370/build150/18985 remain retained. The delayed frontend83191 force/start approval is obsolete because83191/83163 already exited naturally; no force occurred and this approval cannot be transferred to another process. Own completed C02 20261018 plan removed; older required-empty plan and all other plans preserved. Frozen candidate/rebase/publication/native frontend15s shutdown/release-wide gates remain open.
+
+
+## C03 selected acceptance — 2026-10-18
+All four own stages completed, human C03 UX accepted, independent actual-source/outcome/handback review CLEAR. Total24/43accepted19open; C04 next. Real exact two-row onepass/onefail result, malformed import/recipe guidance, immutable provenance/history/reload/one JSON export, actual correct/contradictory model rationale review, retained partial batch/cancellation, legitimate failed+unfinished-only Retry and polling reconnection, missing-provider failed status/guidance, and webhook failure visibility passed in recorded scopes. SQLite/PostgreSQL single-/multi-user initial compositions passed; PG uses official restricted isolated fixtures and explicit evals.read/manage User grants, peer404/own-positive/owner recovery.
+Webhook actual old Run_d6d4441e699d remains a failed acceptance receipt despite correct grades. Causal2red; fixed local6PASS, strengthened secrecy3PASS, official restrictedPG1PASS; production/test Bandit before/current0, inherited lint noted. Shared atomic sanitized warning preserves status/results/usage/completed_at and existing grading errors. Same-profile API72174/72166 ready11.856s; new Run_7bf53dd3d1e7 completed/[true,false]/mean+passrate0.5 with exact visible delivery warning; old Runs unchanged, owned work drained. Final originalChat/full5rows/Interrupted/exact B02 unsent draft/all3Chat records/Studio12IDs retained, zero protected writes or inference, one existing Chat tab open.
+Explicit limitation: optional-default operator STOP; saved-min_score behavior not live-qualified, not classified as unsupported. Two examples do not calibrate a grader. Initial mode composition plus affected DB/actual repair checks do not constitute a fresh whole-matrix rerun of every repair. Historical failures and prior provenance plan retained. Removed ONLY this unit’s completed IMPLEMENTATION_PLAN_uat_c03_evaluation_workflows_20261018.md per AGENTS; parent/task AC/DoD/release/native/installer/publication/latestdev gates remain open.

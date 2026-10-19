@@ -5151,7 +5151,7 @@
    "page": "cross-page",
    "persona": "power-user",
    "rationale": "Riley navigates by name; today ⌘K holds only commands and notes/chats are found through truncated, buried page-specific lists (XP-06, CS-02).",
-   "sketch": "Empty query shows Recent (last 5-10 notes/chats). Typing searches note and chat titles + content in parallel, plus prompts (server + local), characters and models, in grouped sections with type icons and dates. Enter opens the addressable URL, ⌘Enter new tab/split, Tab filters by type or attaches to current chat; '>' prefix = commands, '@' = entities; last row 'Create \"<query>\"'.",
+   "sketch": "Empty query shows Recent (last 5-10 notes/chats). Typing searches note and chat titles + content in parallel, plus prompts (server + local), characters and models, in grouped sections with type icons and dates. Enter opens the addressable URL; Cmd/Ctrl+Enter opens beside the current page (Notes Dock now, chat split view after S4); Shift+Enter opens a new browser tab (D11). Tab filters by type or attaches to current chat; '>' prefix = commands, '@' = entities; last row 'Create \"<query>\"'.",
    "sources": [
     "ft-notes",
     "lens-visual",
@@ -5363,7 +5363,7 @@
    "page": "chat",
    "persona": "both",
    "rationale": "The default composer shows ~20-22 controls, Send is the weakest (CC-07, CO-03), and the existing Casual/Pro switch doesn't change density.",
-   "sketch": "Row 1: [textarea] [Send (primary)]. Row 2: [+ Attach ▾ (Image, Document, From knowledge)] [Knowledge ☐] [Web ☐] [Model: mock-gpt-4o ▾] … [⋯ More: Compare models, Character, Tools, Response style, System prompt, Voice]. Token usage on hover over the model chip. Casual = this; Pro adds the full toolbar, rails/right panel and token chip; choice remembered per user.",
+   "sketch": "Row 1: [textarea] [Send (primary)]. Row 2: [+ Attach ▾ (Image, Document, From knowledge)] [Knowledge ☐] [Web ☐] [Model: mock-gpt-4o ▾] … [⋯ More: Compare models, Character, Tools, Response style, System prompt, Voice]. Token usage on hover over the model chip. Casual = this; Pro adds a persistent right panel absorbing the cockpit rails, without adding toolbar buttons (D9); choice remembered per user.",
    "sources": [
     "ft-chat",
     "lens-visual"

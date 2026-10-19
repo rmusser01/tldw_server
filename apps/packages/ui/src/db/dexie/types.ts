@@ -134,6 +134,7 @@ export type Message = {
   history_admission?: HistoryAdmissionV1;
   history_provenance?: { version: 1; owner_key: string; projection_id: string | null };
   history_settlement?: { input_message_id: string; selection_digest: string; result_revision: string };
+  history_existing_settlement?: { selection: import("@/types/history-selection").HistorySelectionV1; intent_digest: string; result_revision: string };
   id: string;
   history_id: string;
   name: string;
@@ -217,6 +218,8 @@ export type StructuredPromptDefinition = Record<string, any>;
 
 export type Prompt = {
   // Identity - Local
+  /** Opaque server/account identity; absent only for shared, unlinked legacy data. */
+  ownerId?: string | null;
   id: string;
   title: string;
   content: string;
@@ -272,7 +275,7 @@ export type Prompt = {
 
 export type HistoryBookmarkScope = { profile_id: string; client_session_id: string };
 export type HistoryTurnOutcome = "complete" | "interrupted" | "stopped";
-/** Recovery text is never a message, selected history, or persisted write capability. */
+/** A retained turn is scoped data; its settlement payload has no runtime owner capability. */
 export type HistoryTurnRecovery = {
   /** Explicit alternatives remain in review until the user opens their result. */
   action?: 'edit_resend' | 'regenerate';
@@ -296,6 +299,9 @@ export type HistoryTurnRecovery = {
     | "generated_unsaved"
     | "refused";
   admission?: import("@/types/history-selection").HistoryAdmissionReferenceV1;
+  existing_selection?: import("@/types/history-selection").HistorySelectionV1;
+  /** Exact credential-free assistant write, retained before its first settlement. */
+  settlement_payload?: Message;
   roleplay_resume?: import("@/services/tldw/roleplay-resume").RoleplayResumeRecovery;
   /**
    * Set when the reply belongs back in the transcript rather than in review
@@ -305,6 +311,8 @@ export type HistoryTurnRecovery = {
    */
   outcome?: HistoryTurnOutcome;
   interruption_reason?: string;
+  /** Friendly failure guidance only; raw provider diagnostics are excluded. */
+  failure_reason?: string;
   /** The reply was already written to the owner; only the view must follow it. */
   settled_message_id?: string;
   /** Display identity of the model that wrote the reply. */
@@ -505,6 +513,8 @@ export type ContentDraft = {
   updatedAt: number
   reviewedAt?: number
   committedAt?: number
+  /** Canonical admission retained until local commit finalization succeeds. */
+  pendingMediaId?: string
   expiresAt?: number
   analysis?: string
   prompt?: string
@@ -582,6 +592,7 @@ export type AudiobookChapterAsset = {
 
 export type SttRecordingRow = {
   id: string
+  ownerKey?: string // Legacy unassigned rows remain preserved but inaccessible.
   blob: Blob
   mimeType: string
   durationMs: number

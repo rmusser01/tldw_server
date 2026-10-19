@@ -447,16 +447,17 @@ def _job_to_status(job: dict[str, Any]) -> MediaIngestJobStatus:
         job_id = int(id_value)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"Invalid job id {id_value!r} in job: {job!r}") from exc
+    timestamps = {}
+    for field in ("created_at", "started_at", "completed_at", "cancelled_at"):
+        value = job.get(field)
+        timestamps[field] = value.isoformat() if isinstance(value, datetime) else value
     return MediaIngestJobStatus(
+        **timestamps,
         id=job_id,
         uuid=job.get("uuid"),
         status=job.get("status"),
         job_type=job.get("job_type"),
         owner_user_id=job.get("owner_user_id"),
-        created_at=job.get("created_at"),
-        started_at=job.get("started_at"),
-        completed_at=job.get("completed_at"),
-        cancelled_at=job.get("cancelled_at"),
         cancellation_reason=job.get("cancellation_reason"),
         progress_percent=job.get("progress_percent"),
         progress_message=job.get("progress_message"),

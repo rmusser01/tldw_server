@@ -253,3 +253,35 @@ async def test_unknown_registration_code_role_rolls_back_user_and_code_use(tmp_p
     assert user_count == 0
     assert times_used == 0
     assert membership_count == 0
+
+
+@pytest.mark.asyncio
+async def test_registration_hash_keeps_event_loop_responsive(tmp_path, monkeypatch) -> None:
+    """The real service must not block loop progress while its hash runs."""
+    import asyncio
+    import threading
+
+    service, _db_path = _make_service(tmp_path)
+    original_hash = service.password_service.hash_password
+    loop = asyncio.get_running_loop()
+    released = threading.Event()
+    release_observed = []
+
+    def controlled_hash(value):
+        loop.call_soon_threadsafe(released.set)
+        release_observed.append(released.wait(timeout=1))
+        return original_hash(value)
+
+    monkeypatch.setattr(service.password_service, "hash_password", controlled_hash)
+    try:
+        payload = await service.register_user(
+            username="responsive-registration",
+            email="responsive-registration@example.com",
+            password="Strong!Pass9",  # nosec B106 - Synthetic existing unit-fixture input.
+        )
+    finally:
+        released.set()
+    # The controlled hash can observe loop progress only when it runs off-loop.
+    assert release_observed == [True]  # nosec B101
+    assert payload["role"] == "user"  # nosec B101 - The off-loop registration still grants the configured role.
+    assert _role_memberships(_db_path, "responsive-registration") == ["user"]  # nosec B101 - Verify the real committed membership, not only the timing probe.
