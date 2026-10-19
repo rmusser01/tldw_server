@@ -631,6 +631,34 @@ describe("Playground thread search integration", () => {
     })
   })
 
+  // AX-09 (#3122): closing in-thread search must hand focus back to where the
+  // user was, instead of dropping it on <body>.
+  it.each(["Escape", "Close button"])(
+    "returns focus to the previously focused control after closing thread search with %s",
+    async (closeWith) => {
+      render(<Playground />)
+      const trigger = screen.getByTestId("playground-shortcuts-help-trigger")
+      trigger.focus()
+
+      fireEvent.keyDown(trigger, { key: "f", ctrlKey: true })
+      const input = screen.getByPlaceholderText(
+        "Search messages in this conversation"
+      )
+      await waitFor(() => expect(input).toHaveFocus())
+
+      if (closeWith === "Escape") {
+        fireEvent.keyDown(input, { key: "Escape" })
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: "Close" }))
+      }
+
+      expect(
+        screen.queryByPlaceholderText("Search messages in this conversation")
+      ).not.toBeInTheDocument()
+      await waitFor(() => expect(trigger).toHaveFocus())
+    }
+  )
+
   it("opens the single shortcut reference from the chat header and closes back to its trigger", async () => {
     useTutorialStore.getState().closeHelpModal()
     render(

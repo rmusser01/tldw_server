@@ -179,6 +179,7 @@ import type { Character } from "@/types/character";
 import { useKeepInterruptedHistoryTurns } from "@/hooks/chat/useKeepInterruptedHistoryTurns";
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
 import { isEditableTarget } from "@/utils/editable-target"
+import { useFocusReturn } from "./hooks/useFocusReturn";
 
 const readSidepanelChatWebUiHandoffFromLocation = () => {
   if (typeof window === "undefined") return null;
@@ -693,6 +694,17 @@ const PlaygroundContent = () => {
     "idle" | "dragging" | "error"
   >("idle");
   const [threadSearchOpen, setThreadSearchOpen] = React.useState(false);
+  const focusComposer = React.useCallback(() => {
+    window.dispatchEvent(new CustomEvent("tldw:focus-composer"));
+  }, []);
+  const {
+    rememberFocus: rememberThreadSearchOpener,
+    restoreFocus: restoreThreadSearchOpener,
+  } = useFocusReturn(focusComposer);
+  const closeThreadSearch = React.useCallback(() => {
+    setThreadSearchOpen(false);
+    restoreThreadSearchOpener();
+  }, [restoreThreadSearchOpener]);
   const [threadSearchQuery, setThreadSearchQuery] = React.useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState("");
   const [threadSearchActiveIndex, setThreadSearchActiveIndex] =
@@ -2381,6 +2393,7 @@ const PlaygroundContent = () => {
         event.key.toLowerCase() === "f"
       ) {
         event.preventDefault();
+        if (!threadSearchOpen) rememberThreadSearchOpener();
         setThreadSearchOpen(true);
         requestAnimationFrame(() => {
           threadSearchInputRef.current?.focus();
@@ -2390,7 +2403,7 @@ const PlaygroundContent = () => {
       }
       if (threadSearchOpen && event.key === "Escape") {
         event.preventDefault();
-        setThreadSearchOpen(false);
+        closeThreadSearch();
         return;
       }
 
@@ -2428,7 +2441,9 @@ const PlaygroundContent = () => {
     activeArtifact,
     artifactsOpen,
     closeArtifacts,
+    closeThreadSearch,
     markArtifactsRead,
+    rememberThreadSearchOpener,
     setArtifactsOpen,
     threadSearchOpen,
   ]);
@@ -3973,7 +3988,7 @@ const PlaygroundContent = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setThreadSearchOpen(false)}
+                    onClick={closeThreadSearch}
                     title={t("common:close", "Close") as string}
                     className="inline-flex items-center rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text hover:bg-surface2"
                   >

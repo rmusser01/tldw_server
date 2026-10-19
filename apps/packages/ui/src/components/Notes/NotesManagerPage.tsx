@@ -120,6 +120,7 @@ import {
   resolveNotesGraphFocusNoteId,
 } from './notes-manager-utils'
 import { isEditableTarget } from "@/utils/editable-target"
+import { useLatchedFlag } from "./hooks/useLatchedFlag"
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
 
@@ -901,6 +902,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     kw.keywordMergeDraft != null ||
     imp.importModalOpen ||
     shortcutHelpOpen
+  const deferredOverlaysMounted = useLatchedFlag(hasDeferredOverlayOpen)
 
   // ---- Remaining logic that stays in the component ----
 
@@ -2964,7 +2966,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         }}
       />
       <input ref={imp.importInputRef} type="file" multiple accept=".json,.md,.markdown,.txt,application/json,text/markdown,text/plain" className="hidden" data-testid="notes-import-input" onChange={(event) => { void imp.handleImportInputChange(event) }} />
-      {hasDeferredOverlayOpen && (
+      {deferredOverlaysMounted && (
         <React.Suspense fallback={null}>
           <LazyNotesManagerOverlays
             kw={kw}

@@ -1,7 +1,8 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { ConfigProvider } from "antd"
 import NotesManagerPage from "../NotesManagerPage"
 
 const {
@@ -174,6 +175,12 @@ const renderPage = () => {
 }
 
 describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
+  // The dialogs live in a lazily loaded overlay host; warm its chunk so the
+  // first dialog lookup does not race the default findBy timeout.
+  beforeAll(async () => {
+    await import("../NotesManagerOverlays")
+  }, 60_000)
+
   beforeEach(() => {
     vi.clearAllMocks()
     mockConfirmDanger.mockResolvedValue(true)
@@ -210,7 +217,7 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
 
     fireEvent.click(screen.getByTestId("notes-shortcuts-help-button"))
 
-    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(await screen.findByRole("dialog", {}, { timeout: 10_000 })).toBeInTheDocument()
     expect(await screen.findByTestId("notes-shortcuts-modal")).toHaveTextContent(
       "Ctrl/Cmd + S"
     )
@@ -229,7 +236,7 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
 
     fireEvent.keyDown(window, { key: "?", shiftKey: true })
 
-    expect(await screen.findByRole("dialog")).toBeInTheDocument()
+    expect(await screen.findByRole("dialog", {}, { timeout: 10_000 })).toBeInTheDocument()
     expect(await screen.findByTestId("notes-shortcuts-modal")).toBeInTheDocument()
   })
 
@@ -307,5 +314,40 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
       expect(mockStorageRemove).toHaveBeenCalledWith("notes-tutorial-shown")
     })
     expect(mockStartTutorial).toHaveBeenCalledWith("notes-basics", opener)
+  })
+  // AX-09 (#3122): closing the shortcuts dialog must return focus to the
+  // control that opened it, not drop it on <body>.
+  it("returns focus to the shortcuts help button after the dialog closes", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } }
+    })
+    // Without motion the dialog closes in the same pass, as it does once the
+    // browser's close animation ends.
+    render(
+      <QueryClientProvider client={queryClient}>
+        <ConfigProvider theme={{ token: { motion: false } }}>
+          <NotesManagerPage />
+        </ConfigProvider>
+      </QueryClientProvider>
+    )
+
+    const opener = screen.getByTestId("notes-shortcuts-help-button")
+    opener.focus()
+    fireEvent.click(opener)
+
+    const dialog = await screen.findByRole("dialog", {}, { timeout: 10_000 })
+    await screen.findByTestId("notes-shortcuts-modal")
+    // A keyboard user is inside the dialog when they close it.
+    const closeButton = within(dialog).getByRole("button", { name: /close/i })
+    closeButton.focus()
+    expect(closeButton).toHaveFocus()
+    fireEvent.click(closeButton)
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("notes-shortcuts-modal")).not.toBeInTheDocument()
+    })
+    await waitFor(() => {
+      expect(opener).toHaveFocus()
+    })
   })
 })
