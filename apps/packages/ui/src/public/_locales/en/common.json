@@ -2062,5 +2062,8 @@
   "modelSelect": {
     "saveFailed": "This model is selected for this tab. Your preference could not be saved.",
     "retrySave": "Retry saving model"
+  },
+  "table_label": {
+    "message": "Table"
   }
 }

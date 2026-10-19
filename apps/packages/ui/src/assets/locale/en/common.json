@@ -83,7 +83,8 @@
   "copyToClipboard": "Copy to clipboard",
   "table": {
     "copyCsv": "Copy as CSV",
-    "downloadCsv": "Download CSV"
+    "downloadCsv": "Download CSV",
+    "label": "Table"
   },
   "webSearch": "Searching the web",
   "regenerate": "Regenerate",
