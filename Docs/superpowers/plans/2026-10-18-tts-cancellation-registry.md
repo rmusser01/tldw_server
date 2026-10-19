@@ -1342,7 +1342,7 @@ Expected: `6 failed, 22 passed`:
 
 A request that names the loading provider (`get_adapter` called directly, not through these four) still joins its initialization (TASK-13857 AC1).
 
-No per-provider task table is needed: the shielded task keeps holding the base registry's per-provider `asyncio.Lock` (`Infrastructure/provider_registry.py:520-521`), so later callers queue behind it and then read the cache. `asyncio.shield` also marks a finished inner task's exception retrieved when its outer caller was cancelled, so nothing is logged as never retrieved. The `except _TTS_REGISTRY_ADAPTER_EXCEPTIONS` branch keeps `_schedule_retry` for real failures (ADR-011).
+No per-provider task table is needed: the shielded task keeps holding the base registry's per-provider `asyncio.Lock` (`Infrastructure/provider_registry.py:520-521`), so later callers queue behind it and then read the cache. (The clean-session review later added one: `TTSAdapterRegistry._initializations` holds the one in-flight task per provider, so a still-loading provider no longer adds a task per poll, and the listings skip a load that has already run the bound; see #3272's Review section.) `asyncio.shield` does not retrieve a late inner exception: once its outer caller is cancelled, CPython 3.12 removes the callback that would, so asyncio logs "Task exception was never retrieved". The task's own done-callback must call `task.exception()`. The `except _TTS_REGISTRY_ADAPTER_EXCEPTIONS` branch keeps `_schedule_retry` for real failures (ADR-011).
 
 - [ ] **Step 6: Run the tests**
 

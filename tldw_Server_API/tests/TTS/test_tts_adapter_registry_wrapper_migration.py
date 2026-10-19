@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import threading
 from typing import Any
 from unittest.mock import AsyncMock
@@ -162,6 +163,38 @@ class _SlowLoadAdapter(_MockAdapterV1):
         if not await asyncio.to_thread(type(self).release.wait, 5):
             raise RuntimeError("the test never released the slow load")
         return True
+
+
+class _UncaughtLoadError(BaseException):
+    """Not an Exception, so get_adapter_async's handler lets it out of the initialization task."""
+
+
+class _UncaughtFailureLoadAdapter(_MockAdapterV1):
+    """Its load fails, once the test releases it, with an error no registry layer catches."""
+
+    release: asyncio.Event | None = None
+
+    async def initialize(self) -> bool:
+        await type(self).release.wait()
+        raise _UncaughtLoadError
+
+
+def _slow_load_registry(monkeypatch, *, listing_timeout: float) -> TTSAdapterRegistry:
+    """A registry whose only provider, mock, loads on a worker thread until the test sets _SlowLoadAdapter.release."""
+    registry = TTSAdapterRegistry(
+        config={"mock_enabled": True, "provider_priority": ["mock"], "adapter_failure_retry_seconds": 300},
+        include_defaults=False,
+    )
+    _SlowLoadAdapter.loads = 0
+    _SlowLoadAdapter.release = threading.Event()
+    registry.register_adapter(TTSProvider.MOCK, _SlowLoadAdapter)
+
+    async def _get_resource_manager() -> _NonCriticalResourceManager:
+        return _NonCriticalResourceManager()
+
+    monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
+    monkeypatch.setattr(adapter_registry, "_CAPABILITY_LISTING_TIMEOUT_SECONDS", listing_timeout)
+    return registry
 
 
 class _CloseTrackingAdapter(_MockAdapterV1):
@@ -571,6 +604,129 @@ async def test_registry_best_adapter_skips_a_provider_that_is_still_loading(monk
     assert isinstance(adapter, _MockAdapterV1) and not isinstance(adapter, _SlowLoadAdapter)
     assert isinstance(await registry.get_adapter(TTSProvider.MOCK), _SlowLoadAdapter)
     assert _SlowLoadAdapter.loads == 1
+
+
+@pytest.mark.asyncio
+async def test_registry_repeated_listings_during_a_slow_load_share_one_initialization(monkeypatch) -> None:
+    """Polling GET /audio/health during a model load must not leave a pending task per poll. (Review M2)"""
+    registry = _slow_load_registry(monkeypatch, listing_timeout=0.05)
+    tasks_before = len(asyncio.all_tasks())
+    try:
+        for _ in range(10):
+            # GET /audio/health lists both ways.
+            await registry.get_all_capabilities()
+            await registry.list_capabilities()
+        pending = len(asyncio.all_tasks()) - tasks_before
+    finally:
+        _SlowLoadAdapter.release.set()
+
+    assert pending == 1
+    assert isinstance(await registry.get_adapter(TTSProvider.MOCK), _SlowLoadAdapter)
+    assert _SlowLoadAdapter.loads == 1
+
+
+@pytest.mark.asyncio
+async def test_registry_request_after_a_listing_timeout_joins_the_running_load(monkeypatch) -> None:
+    """A request that names the loading provider joins the load a listing started, unbounded. (TASK-13857 AC1)"""
+    registry = _slow_load_registry(monkeypatch, listing_timeout=0.05)
+    tasks_before = len(asyncio.all_tasks())
+    try:
+        await registry.get_all_capabilities()  # starts the load, then stops waiting for it
+        request = asyncio.create_task(registry.get_adapter(TTSProvider.MOCK))
+        await asyncio.sleep(0.1)  # past the listing bound: a request is not bounded
+        pending = len(asyncio.all_tasks()) - tasks_before  # the request and the one load it shares
+    finally:
+        _SlowLoadAdapter.release.set()
+    adapter = await asyncio.wait_for(request, 5)
+
+    assert pending == 2
+    assert isinstance(adapter, _SlowLoadAdapter)
+    assert _SlowLoadAdapter.loads == 1
+
+
+@pytest.mark.asyncio
+async def test_registry_listings_skip_at_once_a_load_that_outlasted_the_bound(monkeypatch) -> None:
+    """Only the first poll during a slow load waits the bound; later listings skip the provider at once. (Review M1)"""
+    registry = _slow_load_registry(monkeypatch, listing_timeout=0.5)
+    try:
+        assert TTSProvider.MOCK not in await registry.get_all_capabilities()  # waits the bound, once
+        # Each later listing returns well inside one bound instead of waiting it out again.
+        capabilities = await asyncio.wait_for(registry.get_all_capabilities(), timeout=0.25)
+        envelopes = await asyncio.wait_for(registry.list_capabilities(), timeout=0.25)
+        best = await asyncio.wait_for(registry.find_adapter_for_requirements(language="en"), timeout=0.25)
+        status = registry._base.get_status("mock")
+    finally:
+        _SlowLoadAdapter.release.set()
+
+    assert TTSProvider.MOCK not in capabilities
+    assert envelopes == [{"provider": "mock", "availability": "enabled", "capabilities": None}]
+    assert best is None
+    assert status == RegistryProviderStatus.ENABLED
+    assert isinstance(await registry.get_adapter(TTSProvider.MOCK), _SlowLoadAdapter)
+    assert _SlowLoadAdapter.loads == 1
+
+
+@pytest.mark.asyncio
+async def test_registry_request_after_an_unload_does_not_join_the_superseded_load(monkeypatch) -> None:
+    """Unloading a provider mid-load supersedes that load; a later request loads afresh instead of joining it."""
+    registry = TTSAdapterRegistry(config={"mock_enabled": True}, include_defaults=False)
+    _BlockingAdapter.started = asyncio.Event()
+    _BlockingAdapter.release = asyncio.Event()
+    _BlockingAdapter.instances = []
+    registry.register_adapter(TTSProvider.MOCK, _BlockingAdapter)
+
+    async def _get_resource_manager() -> _NonCriticalResourceManager:
+        return _NonCriticalResourceManager()
+
+    monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
+    first = asyncio.create_task(registry.get_adapter(TTSProvider.MOCK))
+    await _BlockingAdapter.started.wait()
+    await registry.unload_provider(TTSProvider.MOCK)
+    second = asyncio.create_task(registry.get_adapter(TTSProvider.MOCK))
+    _BlockingAdapter.release.set()
+    superseded, adapter = await asyncio.wait_for(asyncio.gather(first, second), 5)
+
+    assert superseded is None
+    assert adapter is _BlockingAdapter.instances[1]
+
+
+@pytest.mark.asyncio
+async def test_registry_loads_a_new_adapter_after_close_all(monkeypatch) -> None:
+    """A finished initialization leaves the in-flight table, so the adapter close_all closed is not served again."""
+    registry = TTSAdapterRegistry(config={"mock_enabled": True}, include_defaults=False)
+    registry.register_adapter(TTSProvider.MOCK, _MockAdapterV1)
+
+    async def _get_resource_manager() -> _NonCriticalResourceManager:
+        return _NonCriticalResourceManager()
+
+    monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
+    closed = await registry.get_adapter(TTSProvider.MOCK)
+    await registry.close_all()
+    adapter = await registry.get_adapter(TTSProvider.MOCK)
+
+    assert isinstance(adapter, _MockAdapterV1)
+    assert adapter is not closed
+
+
+@pytest.mark.asyncio
+async def test_registry_retrieves_the_error_of_an_initialization_nobody_awaits(monkeypatch, caplog) -> None:
+    """asyncio.shield drops a late inner error once its caller is cancelled; the registry must retrieve it. (Review M3)"""
+    registry = TTSAdapterRegistry(config={"mock_enabled": True}, include_defaults=False)
+    _UncaughtFailureLoadAdapter.release = asyncio.Event()
+    registry.register_adapter(TTSProvider.MOCK, _UncaughtFailureLoadAdapter)
+
+    async def _get_resource_manager() -> _NonCriticalResourceManager:
+        return _NonCriticalResourceManager()
+
+    monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(registry.get_adapter(TTSProvider.MOCK), 0.05)
+    _UncaughtFailureLoadAdapter.release.set()
+    for _ in range(5):  # let the initialization fail and run its done-callbacks
+        await asyncio.sleep(0)
+    gc.collect()  # asyncio logs an unretrieved task error when the task is collected
+
+    assert "Task exception was never retrieved" not in caplog.text
 
 
 @pytest.mark.asyncio

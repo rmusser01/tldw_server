@@ -54,12 +54,9 @@ _TTS_REGISTRY_ADAPTER_EXCEPTIONS: tuple[type[BaseException], ...] = (
 ) + _TTS_REGISTRY_NONCRITICAL_EXCEPTIONS
 
 # How long a caller that only wants some ready provider (the capability listings behind GET /audio/health
-# and /audio/providers, failover and best-adapter selection) waits for one provider's adapter.
+# and /audio/providers, failover and best-adapter selection) waits for one provider's adapter. The
+# registry's own listings measure it from the start of the provider's load, not from their own call.
 _CAPABILITY_LISTING_TIMEOUT_SECONDS = 5.0
-
-# Strong references to shielded initializations: the loop holds tasks weakly, and once a caller is
-# cancelled nothing else points at the task that is still loading a model.
-_PENDING_INITIALIZATIONS: set[asyncio.Future] = set()
 
 _AUTHORITATIVE_TTS_CREDENTIAL_KEYS = frozenset(
     {
@@ -447,6 +444,10 @@ class TTSAdapterRegistry:
             0,
         )
         self._initialized_providers: set[str] = set()
+        # The one in-flight get_adapter_async task per provider (and registration generation), with
+        # its loop start time. It is also the strong reference the loop does not keep: once every
+        # caller has been cancelled, nothing else points at a task that is still loading a model.
+        self._initializations: dict[tuple[str, int], tuple[asyncio.Future, float]] = {}
 
         def _extract_retry_seconds(raw_cfg: Any) -> Optional[float]:
             if raw_cfg is None:
@@ -662,12 +663,16 @@ class TTSAdapterRegistry:
             )
         # Shielded: a caller that stops waiting (the capability listing's timeout, a client
         # disconnect) must not cancel the initialization. An adapter loading its model on a worker
-        # thread cannot be stopped, and the next caller would load it again; instead the next
-        # caller waits on the base registry's per-provider lock and then shares the adapter.
-        initialization = asyncio.ensure_future(self._base.get_adapter_async(provider_key))
-        _PENDING_INITIALIZATIONS.add(initialization)
-        initialization.add_done_callback(_PENDING_INITIALIZATIONS.discard)
-        adapter = await asyncio.shield(initialization)
+        # thread cannot be stopped, and the next caller would load it again; instead every caller
+        # joins the provider's one in-flight task. The generation in the key lets a caller after a
+        # re-registration or unload start afresh rather than join a load that will be discarded.
+        key = (provider_key, self._adapter_generations.get(provider_key, 0))
+        in_flight = self._initializations.get(key)
+        if in_flight is None:
+            task = asyncio.ensure_future(self._base.get_adapter_async(provider_key))
+            in_flight = self._initializations[key] = (task, asyncio.get_running_loop().time())
+            task.add_done_callback(lambda done: self._initialization_done(key, done))
+        adapter = await asyncio.shield(in_flight[0])
         if adapter is None:
             return None
         if adapter.status == ProviderStatus.AVAILABLE:
@@ -682,6 +687,29 @@ class TTSAdapterRegistry:
         )
         self._schedule_retry(provider_key)
         return None
+
+    def _initialization_done(self, key: tuple[str, int], task: asyncio.Future) -> None:
+        self._initializations.pop(key, None)
+        if not task.cancelled():
+            # Retrieve it: shield stops forwarding a late error once its caller has been cancelled,
+            # and asyncio would log "Task exception was never retrieved".
+            task.exception()
+
+    async def _get_adapter_if_ready(self, provider: Union[TTSProvider, str]) -> Optional[TTSAdapter]:
+        """get_adapter for callers that only want a provider that is ready now (the listings, best-adapter selection).
+
+        Waits for a provider's load only until that load has run _CAPABILITY_LISTING_TIMEOUT_SECONDS,
+        so a slow load costs the first poll at most that and every later poll nothing. Raises
+        asyncio.TimeoutError while the load runs; the load itself is neither cancelled nor failed.
+        """
+        provider_key = self.resolve_provider_key(provider)
+        in_flight = self._initializations.get((provider_key, self._adapter_generations.get(provider_key, 0)))
+        timeout = _CAPABILITY_LISTING_TIMEOUT_SECONDS
+        if in_flight is not None and not in_flight[0].done():
+            timeout -= asyncio.get_running_loop().time() - in_flight[1]
+            if timeout <= 0:
+                raise asyncio.TimeoutError
+        return await asyncio.wait_for(self.get_adapter(provider), timeout=timeout)
 
     async def create_adapter_with_overrides(
         self,
@@ -1034,18 +1062,14 @@ class TTSAdapterRegistry:
                 if status == RegistryProviderStatus.FAILED:
                     continue
 
-                # Try to get adapter with a timeout to avoid hanging
-                adapter = await asyncio.wait_for(
-                    self.get_adapter(provider_key),
-                    timeout=_CAPABILITY_LISTING_TIMEOUT_SECONDS,
-                )
+                adapter = await self._get_adapter_if_ready(provider_key)
                 if adapter:
                     caps = adapter.capabilities
                     if caps:
                         capabilities[result_key] = caps
             except asyncio.TimeoutError:
                 # Still initializing: get_adapter shields the load from this timeout, so it is
-                # neither restarted nor marked failed, and the next caller waits for it.
+                # neither restarted nor marked failed, and a request that names it joins it.
                 logger.info("Capabilities for {} are not ready; its adapter is still initializing", provider_key)
             except _TTS_REGISTRY_ADAPTER_EXCEPTIONS as e:
                 logger.debug(
@@ -1075,10 +1099,7 @@ class TTSAdapterRegistry:
             if status == RegistryProviderStatus.ENABLED:
                 try:
                     provider_enum = self.resolve_provider(provider_name)
-                    adapter = await asyncio.wait_for(
-                        self.get_adapter(provider_enum or provider_name),
-                        timeout=_CAPABILITY_LISTING_TIMEOUT_SECONDS,
-                    )
+                    adapter = await self._get_adapter_if_ready(provider_enum or provider_name)
                 except asyncio.TimeoutError:
                     adapter = None  # still initializing; get_adapter shields the load
                 except _TTS_REGISTRY_ADAPTER_EXCEPTIONS as exc:
@@ -1138,10 +1159,7 @@ class TTSAdapterRegistry:
         """
         for provider in self._get_provider_priority():
             try:
-                adapter = await asyncio.wait_for(
-                    self.get_adapter(provider),
-                    timeout=_CAPABILITY_LISTING_TIMEOUT_SECONDS,
-                )
+                adapter = await self._get_adapter_if_ready(provider)
             except asyncio.TimeoutError:
                 continue  # still initializing: pick a provider that is ready now, without marking it failed
             if not adapter or not adapter.capabilities:
