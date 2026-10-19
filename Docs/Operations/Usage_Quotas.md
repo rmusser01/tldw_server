@@ -77,6 +77,9 @@ Days and months are calendar UTC. With the switch on and the key unset, nothing 
 | `limits.chatbooks_exports_per_day` | Chatbook exports per day | `export_jobs` rows since 00:00 UTC | HTTP 429 `Daily export limit (N) reached. Try again tomorrow.` |
 | `limits.chatbooks_imports_per_day` | Chatbook imports per day | `import_jobs` rows since 00:00 UTC | HTTP 429 `Daily import limit (N) reached. Try again tomorrow.` |
 | `limits.chatbooks_concurrent_jobs` | Chatbook export and import jobs active at once | Active chatbook job rows | HTTP 429 `Maximum concurrent jobs (N) reached...` |
+| `limits.media_concurrent_jobs` | Media ingest requests running at once: `/media/add`, including its research-discovery handoff. Queued ingest jobs (`/media/ingest/jobs`) and `/media/process-*` are not counted | One lease per running request (see "Concurrency limits" below) | HTTP 429 `Media ingestion concurrency limit reached.`, with `RateLimit-*`, `X-RateLimit-*` and `Retry-After` headers |
+| `limits.audio_concurrent_streams` | Audio streaming sessions open at once: `/audio/stream/transcribe`, `/audio/chat/stream`, `/audio/stream/tts`, `/audio/stream/tts/realtime`, the realtime speech sockets, and `POST /audio/chat` | The same leases | Refused when the stream starts. `/audio/stream/transcribe`: an error frame `Concurrent streams limit reached (N)`, then close code 1000. `/audio/chat/stream`, `/audio/stream/tts` and `/audio/stream/tts/realtime`: the same message in an error frame, then close code 4003 (1008 with `AUDIO_WS_QUOTA_CLOSE_1008`). The realtime speech sockets: close code 4003 before the socket is accepted, with no error frame. `POST /audio/chat`: HTTP 429 with the same message |
+| `limits.audio_concurrent_transcriptions` | Direct transcriptions running at once (`/audio/transcriptions`, `/audio/translations`) | The same leases | HTTP 429 `Concurrent transcription limit reached (N)`, with `RateLimit-*`, `X-RateLimit-*` and `Retry-After` headers |
 
 What `limits.llm_tokens_per_month`, `limits.llm_cost_per_day_usd` and `limits.llm_cost_per_month_usd` count:
 
@@ -108,6 +111,18 @@ What `limits.llm_tokens_per_month`, `limits.llm_cost_per_day_usd` and `limits.ll
 - **What the check costs.** With quotas off, nothing. With quotas on and no LLM limit for the user, nothing once the user's limits are cached (for a minute). With a limit set, the counters are read for each call that a request boundary did not already admit, so a job that makes hundreds of calls makes hundreds of small indexed reads. While the user's limits cannot be read (the AuthNZ database is down), every call tries again and logs a warning.
 - **The profile reports it.** `GET /api/v1/users/me/profile?sections=quotas` has an `llm` block with tokens used this month, spend today and this month, and each limit that is set.
 
+### Concurrency limits
+
+`limits.media_concurrent_jobs`, `limits.audio_concurrent_streams` and `limits.audio_concurrent_transcriptions` count requests running at once, not usage over time.
+
+- Each admitted request holds one lease until it ends: on success, on error, when the client disconnects, and when the server shuts down gracefully. A refused request holds nothing.
+- Leases live in the Resource Governor's lease store, chosen by `RG_BACKEND`. On `memory` (the default) a limit holds per worker process, so with N workers a user can run up to N times the limit. On `redis` it is exact across workers.
+- `RG_ENABLED=false` does not turn these limits off; `USAGE_QUOTAS_ENABLED` does (ADR-076).
+- A lease nobody releases, for example when a worker is killed mid-request, expires within 2 minutes. A crash can hold one of the user's slots for up to that long.
+- `Retry-After` on a refusal is when the oldest held lease would expire if it stopped renewing, up to 2 minutes. A slot usually frees sooner, when one of the user's requests finishes, so a client may retry earlier.
+- Lowering a limit does not stop running requests. New ones are refused until the user is below the new limit.
+- If Redis is unreachable when a worker's lease store first connects, that worker counts on its own for the life of the process, as on `memory`. If Redis drops later, requests are admitted, a warning is logged, and leases the worker could not release expire within 2 minutes.
+
 Two other `limits.*` entries in the catalog are not part of this scheme:
 
 - `limits.evaluations_per_minute` is listed in `user_profile_catalog.yaml` but nothing enforces it.
@@ -121,7 +136,6 @@ These are unchanged by the switch and have no `limits.*` key:
 
 - **Per-file caps**: `[Media-Processing] max_*_file_size_mb`, the 100 MB chatbook file cap, character-chat count caps.
 - **Per-minute request rates**: the Resource Governor, and module limiters such as evaluations per minute.
-- **Synchronous concurrency**: media ingest requests, audio streams and direct transcription have no per-user cap.
 - **Other limits that were already off by default**: the `JOBS_QUOTA_*` limits, the embeddings and ingest per-tenant limits, chat token daily caps, and the Prompt Studio limits.
 - **Admin storage pools** keep their shared-pool meaning (see above).
 - **Billing-plan limits** run only on the hosted product. They need a billing repository wired into the subscription service (nothing in this repository wires one) and the switch on. With a repository wired and the switch off, startup logs a warning once that plan limits are not enforced.
@@ -145,7 +159,7 @@ These are unchanged by the switch and have no `limits.*` key:
 | Where | What it reports |
 |---|---|
 | `GET /api/v1/users/storage` | `storage_quota_mb`, used MB, available and percentage |
-| `GET /api/v1/audio/stream/limits` | Daily and monthly minute limits, `used_today_minutes`, `used_month_minutes`, `remaining_minutes` and `remaining_month_minutes` (used figures come from the ledger). `active_streams` is `null` because per-user stream concurrency is not tracked |
+| `GET /api/v1/audio/stream/limits` | Daily and monthly minute limits, `used_today_minutes`, `used_month_minutes`, `remaining_minutes` and `remaining_month_minutes` (used figures come from the ledger). `limits.concurrent_streams` is the `limits.audio_concurrent_streams` value. `active_streams` stays `null` and `can_start_stream` stays `true`: open streams are not counted, and a stream over the limit is refused when it starts |
 | `GET /api/v1/evaluations/rate-limits` | The resolved `limits.evaluations_per_day` and `limits.evaluation_tokens_per_day`, with usage and remaining. The daily `X-RateLimit-Daily-*` headers on evaluation responses are omitted when the cap is unlimited |
 | `GET /api/v1/audio/jobs/admin/owner/{id}/processing` | An owner's processing count and concurrent-jobs limit (admin) |
 | Profile `quotas` section and `limits.*` config | Storage, audio (daily and monthly), evaluations and Prompt Studio quotas, and, when set, the `limits.*` values (unset keys are omitted from `effective_config`) |
