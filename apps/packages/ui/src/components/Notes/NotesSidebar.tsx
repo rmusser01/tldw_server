@@ -5,6 +5,7 @@ import {
   Network as NetworkIcon,
   Plus as PlusIcon,
   Search as SearchIcon,
+  X as CloseIcon,
 } from 'lucide-react'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
@@ -25,6 +26,10 @@ import {
 import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NotesRecentOpenedEntry } from '@/services/settings/ui-settings'
 import { CAPTURED_NOTE_KEYWORD } from '@/services/notes-capture'
+import {
+  NOTES_SEARCH_INPUT_ATTR,
+  useNotesOffCanvasList,
+} from './hooks/useNotesOffCanvasList'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -300,6 +305,12 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   onOpenHealth,
 }) => {
   const { t } = useTranslation(['option', 'common'])
+  const offCanvas = useNotesOffCanvasList({
+    isMobileViewport,
+    mobileSidebarOpen,
+    sidebarCollapsed,
+    setMobileSidebarOpen,
+  })
   const renderHelpButton = React.useCallback(
     (label: string) => (
       <button
@@ -370,13 +381,18 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
 
   return (
       <aside
+        ref={offCanvas.asideRef}
         id={NOTES_LIST_REGION_ID}
         tabIndex={-1}
-        role="region"
+        role={offCanvas.isModal ? 'dialog' : 'region'}
+        aria-modal={offCanvas.isModal || undefined}
+        aria-hidden={offCanvas.hidden || undefined}
         aria-label={t('option:notesSearch.notesListRegionLabel', {
           defaultValue: 'Notes list'
         })}
         data-testid="notes-list-region"
+        data-notes-list-dialog={offCanvas.isModal || undefined}
+        onKeyDown={offCanvas.handleKeyDown}
         className={
           isMobileViewport
             ? `absolute left-0 top-0 z-40 h-full w-[min(92vw,420px)] max-w-full transform border-r border-border bg-surface shadow-xl transition-transform duration-300 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-focus ${
@@ -413,22 +429,37 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   {headerCountLabel}
                 </span>
               </div>
-              <Tooltip
-                title={t('option:notesSearch.newTooltip', {
-                  defaultValue: 'Create a new note'
-                })}
-              >
-                <Button
-                  type="text"
-                  shape="circle"
-                  onClick={() => void handleNewNote()}
-                  className="flex items-center justify-center"
-                  icon={(<PlusIcon className="w-4 h-4" />)}
-                  aria-label={t('option:notesSearch.new', {
-                    defaultValue: 'New note'
+              <div className="flex items-center gap-1">
+                <Tooltip
+                  title={t('option:notesSearch.newTooltip', {
+                    defaultValue: 'Create a new note'
                   })}
-                />
-              </Tooltip>
+                >
+                  <Button
+                    type="text"
+                    shape="circle"
+                    onClick={() => void handleNewNote()}
+                    className="flex items-center justify-center"
+                    icon={(<PlusIcon className="w-4 h-4" />)}
+                    aria-label={t('option:notesSearch.new', {
+                      defaultValue: 'New note'
+                    })}
+                  />
+                </Tooltip>
+                {isMobileViewport && (
+                  <Button
+                    type="text"
+                    shape="circle"
+                    onClick={() => setMobileSidebarOpen(false)}
+                    className="flex items-center justify-center"
+                    icon={(<CloseIcon className="w-4 h-4" aria-hidden="true" />)}
+                    aria-label={t('option:notesSearch.closeMobileSidebar', {
+                      defaultValue: 'Close notes list'
+                    })}
+                    data-testid="notes-mobile-sidebar-close"
+                  />
+                )}
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -762,6 +793,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                           setPage(1)
                         }}
                         ref={searchInputRef}
+                        {...{ [NOTES_SEARCH_INPUT_ATTR]: '' }}
                       />
                     </div>
                     <Select

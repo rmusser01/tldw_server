@@ -46,6 +46,7 @@ import type { NotesTitleSuggestStrategy } from '@/services/settings/ui-settings'
 import type { NotesSaveIssue } from './hooks/useNotesEditorState'
 import {
   NOTES_EDITOR_REGION_ID,
+  NOTES_LIST_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
   NOTES_WYSIWYG_INPUT_ENABLED,
   NOTE_TEMPLATES,
@@ -111,6 +112,7 @@ export interface NotesEditorPaneProps {
   // Layout
   isMobileViewport: boolean
   setMobileSidebarOpen: (open: boolean) => void
+  mobileSidebarOpen?: boolean
 
   // Selection / identity
   selectedId: string | number | null
@@ -334,6 +336,7 @@ export const NotesEditorEmptyState: React.FC<{
 const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   isMobileViewport,
   setMobileSidebarOpen,
+  mobileSidebarOpen = false,
   selectedId,
   showEmptyState,
   title,
@@ -662,6 +665,8 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
           <Button
             size="large"
             onClick={() => setMobileSidebarOpen(true)}
+            aria-expanded={mobileSidebarOpen}
+            aria-controls={NOTES_LIST_REGION_ID}
             data-testid="notes-mobile-open-list-button"
             className="min-h-[44px]"
           >

@@ -6359,6 +6359,9 @@
   "notesSearch_offlineSaveUnavailable": {
     "message": "Offline saving is unavailable until your account and local storage are confirmed. Your changes remain unsaved."
   },
+  "notesSearch_closeMobileSidebar": {
+    "message": "Close notes list"
+  },
   "quickIngest_wizard_results_batchAccounting": {
     "message": "{{added}} added · {{excluded}} excluded/skipped · {{succeeded}} succeeded ({{saved}} saved) · {{failed}} failed · {{cancelled}} cancelled"
   },
