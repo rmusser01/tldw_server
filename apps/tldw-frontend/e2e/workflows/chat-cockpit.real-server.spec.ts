@@ -3365,9 +3365,10 @@ test.describe('/chat cockpit real-server parity', () => {
     const assistantMessages = page
       .getByRole('log', { name: /chat messages/i })
       .locator("article[aria-label*='Assistant message']");
+    type CanonicalMessages = { messages: Array<Record<string, unknown>> };
     if ((await assistantMessages.count()) === 0) {
       // Stopping before the first token correctly removes the empty assistant
-      // stub. Complete another turn so the history gate has a response to gate.
+      // stub. Reload the source and complete a turn only if no reply settled.
       await expect(regenerateControl).toBeDisabled();
       await expect(
         runtimeInspector.getByText('Regenerate becomes available after an assistant response.')
@@ -3409,19 +3410,60 @@ test.describe('/chat cockpit real-server parity', () => {
       } finally {
         page.removeListener('request', observeAutomaticTurn);
       }
-      const followUpCompletion = waitForChatCompletionAttempt(page, 90_000);
-      await page.getByTestId('chat-input').fill('Reply with one short sentence to verify the saved-history regeneration gate.');
-      await page.getByRole('button', { name: /send message/i }).click();
-      const followUpResponse = await followUpCompletion;
-      expect(followUpResponse.status()).toBeLessThan(400);
-      await assertProviderQualifiedPayload(page, followUpResponse);
-      await waitForStreamComplete(page, 60_000);
+      const recovered = await apiGet<CanonicalMessages>(request,
+        `/api/v1/chats/${originalChatId}/messages?include_metadata=true&render_placeholders=false`);
+      expect(recovered.status).toBe(200);
+      if (recovered.body.messages.some(row => row.sender === 'assistant')) {
+        await expect(assistantMessages.last()).toBeVisible();
+      } else {
+        const followUpCompletion = waitForChatCompletionAttempt(page, 90_000);
+        await page.getByTestId('chat-input').fill('Reply with one short sentence to verify the saved-history regeneration gate.');
+        await page.getByRole('button', { name: /send message/i }).click();
+        const followUpResponse = await followUpCompletion;
+        expect(followUpResponse.status()).toBeLessThan(400);
+        await assertProviderQualifiedPayload(page, followUpResponse);
+        await waitForStreamComplete(page, 60_000);
+      }
     }
     await expect(assistantMessages.last()).toBeVisible();
-    await expect(regenerateControl).toBeDisabled({ timeout: 30_000 });
-    await expect(runtimeInspector.getByText('Regeneration is unavailable for selected history.')).toBeVisible();
+    await expect(regenerateControl).toBeEnabled({ timeout: 30_000 });
+    await expect(runtimeInspector.getByText('Regeneration is unavailable for selected history.')).toHaveCount(0);
+
+    const chatId = await waitForPersistedServerChatId(page);
+    const messagesPath = `/api/v1/chats/${chatId}/messages?include_metadata=true&render_placeholders=false`;
+    const before = await apiGet<CanonicalMessages>(request, messagesPath);
+    expect(before.status).toBe(200);
+    const originalMessages = before.body.messages;
+    const originalIds = new Set(originalMessages.map(row => row.id));
+    const unsentDraft = 'Keep this unsent question while regenerating the selected reply.';
+    await page.getByTestId('chat-input').fill(unsentDraft);
+    const regenerationAttempt = waitForChatCompletionAttempt(page, 90_000);
+    await regenerateControl.click();
+    const regenerationResponse = await regenerationAttempt;
+    expect(regenerationResponse.status()).toBeLessThan(400);
+    await assertProviderQualifiedPayload(page, regenerationResponse);
+    const regeneration = regenerationResponse.request().postDataJSON();
+    const sourceId = regeneration.metadata?.tldw_regenerate_from_message_id;
+    const sourceReply = originalMessages.find(row => row.id === sourceId);
+    expect(sourceReply?.sender).toBe('assistant');
+    expect(originalMessages.find(row => row.id === sourceReply?.parent_message_id)?.sender).toBe('user');
+    expect(regeneration).toMatchObject({
+      save_to_db: true,
+      tldw_history_branch: true,
+      tldw_history_selection_v1: { conversation_id: chatId, cursor: { kind: 'after_message', message_id: sourceId } },
+    });
+    await waitForStreamComplete(page, 60_000);
+    await expect(page.getByTestId('chat-input')).toHaveValue(unsentDraft);
+    const after = await apiGet<CanonicalMessages>(request, messagesPath);
+    expect(after.status).toBe(200);
+    const saved = after.body.messages;
+    expect(saved.filter(row => originalIds.has(row.id))).toEqual(originalMessages);
+    expect(saved.filter(row => !originalIds.has(row.id))).toEqual([
+      expect.objectContaining({ sender: 'assistant', parent_message_id: sourceReply?.parent_message_id,
+        content: expect.stringMatching(/\S/) }),
+    ]);
     await page.screenshot({
-      path: testInfo.outputPath('chat-cockpit-regenerate-selected-history-gated.png'),
+      path: testInfo.outputPath('chat-cockpit-regenerate-selected-history.png'),
       fullPage: true,
     });
   });
