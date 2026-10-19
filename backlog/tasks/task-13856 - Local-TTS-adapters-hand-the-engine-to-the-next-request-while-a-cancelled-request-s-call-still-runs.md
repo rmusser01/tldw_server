@@ -2,7 +2,7 @@
 id: TASK-13856
 title: Local TTS adapters hand the engine to the next request while a cancelled request's
   call still runs
-status: To Do
+status: In Progress
 labels:
 - tts
 - bug
