@@ -59,6 +59,7 @@ Base path: `/api/v1/audio`
 ## Quotas & Fairness
 
 - Per-user concurrent job cap enforced both pre- and post-acquisition.
+- The Jobs submit quotas (`JOBS_QUOTA_SUBMITS_PER_MIN*`, `JOBS_QUOTA_MAX_QUEUED*`) apply to `/jobs/submit` only; a stage hand-off is never refused by them. Each stage is still a job of the submitting user, so a stage queued in the last 60 seconds counts toward that user's per-minute quota, and a pipeline waiting between stages counts as one queued job.
 - Daily minutes quota is enforced by HTTP/WS paths (streaming + file) and recorded in `audio_usage_daily`.
 
 ## Notes
