@@ -877,5 +877,9 @@
   "firstRun": {
     "headline": "Finish setup to start chatting",
     "description": "Finish setup in Options to connect to your tldw server, then return here to chat."
+  },
+  "modelParams": {
+    "default": "Default",
+    "resetToDefault": "Reset {{label}} to default"
   }
 }
