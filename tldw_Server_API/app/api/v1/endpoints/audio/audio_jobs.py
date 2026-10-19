@@ -22,15 +22,20 @@ try:
     from pydantic import model_validator  # type: ignore
 except ImportError:  # pragma: no cover - fallback for older environments
     model_validator = None  # type: ignore
-import contextlib
 
 from loguru import logger
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_auth_principal, get_request_user, RequirePermission, RequireRole, User
+
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
+    RequirePermission,
+    RequireRole,
+    User,
+    get_auth_principal,
+    get_request_user,
+)
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_cursor_pagination_meta
 from tldw_Server_API.app.api.v1.schemas.pagination import CursorPaginationMeta
-
 from tldw_Server_API.app.core.AuthNZ.permissions import SYSTEM_MAINTENANCE
-from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
+from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.DB_Management.backends.base import (
     DatabaseError as BackendDatabaseError,
@@ -50,7 +55,7 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     get_user_tier,
     set_user_tier,
 )
-from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_PERMISSIONS
+from tldw_Server_API.app.core.Utils.base64url import decode_opaque_cursor_segment
 
 router = APIRouter()
 

@@ -1,13 +1,13 @@
+import asyncio
 import os
 import shutil
-import asyncio
 import sqlite3
 import tempfile
 from types import SimpleNamespace
-import numpy as np
-import soundfile as sf
-import pytest
 
+import numpy as np
+import pytest
+import soundfile as sf
 
 pytestmark = pytest.mark.smoke
 
@@ -225,8 +225,8 @@ async def test_audio_worker_download_error_does_not_crash_worker(monkeypatch, tm
     monkeypatch.setattr(worker, "increment_jobs_started", _fake_increment_jobs_started, raising=True)
     monkeypatch.setattr(worker, "finish_job", _fake_finish_job, raising=True)
 
-    from tldw_Server_API.app.core.exceptions import DownloadError
     import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files as audio_files
+    from tldw_Server_API.app.core.exceptions import DownloadError
 
     def _fake_download_audio_file(*args, **kwargs):
         raise DownloadError("Download failed with status 404")
