@@ -27,7 +27,7 @@ from ..tts_exceptions import (
     TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
-from ..utils import parse_bool
+from ..utils import hold_tts_engine, parse_bool
 
 #
 # Local Imports
@@ -295,14 +295,14 @@ class LuxTTSAdapter(TTSAdapter):
         return_smooth = parse_bool(extras.get("return_smooth"), default=self.return_smooth)
 
         try:
-            async with self._engine_lock:
-                encode_dict = await asyncio.to_thread(
+            async with hold_tts_engine(self._engine_lock) as run:
+                encode_dict = await run(
                     self._engine.encode_prompt,  # type: ignore[union-attr]
                     voice_path,
                     duration=prompt_duration,
                     rms=prompt_rms,
                 )
-                wav = await asyncio.to_thread(
+                wav = await run(
                     self._engine.generate_speech,  # type: ignore[union-attr]
                     request.text,
                     encode_dict,

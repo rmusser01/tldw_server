@@ -23,6 +23,7 @@ from ..tts_exceptions import (
     TTSVoiceNotFoundError,
 )
 from ..tts_validation import validate_tts_request
+from ..utils import hold_tts_engine
 
 #
 # Local Imports
@@ -319,8 +320,8 @@ class Supertonic2OnnxAdapter(TTSAdapter):
             ) from exc
 
         try:
-            async with self._engine_lock:
-                wav, duration = await asyncio.to_thread(
+            async with hold_tts_engine(self._engine_lock) as run:
+                wav, duration = await run(
                     self._engine, request.text, language, style, total_step, speed
                 )
         except Exception as exc:

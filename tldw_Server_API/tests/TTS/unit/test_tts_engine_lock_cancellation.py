@@ -9,13 +9,16 @@ site is checked with a plain task cancel and with an anyio scope.
 from __future__ import annotations
 
 import asyncio
+import sys
 import threading
+import types
 from collections.abc import Awaitable, Callable
 
 import anyio
 import numpy as np
 import pytest
 
+from tldw_Server_API.app.core.TTS.adapters import supertonic2_adapter, supertonic_adapter
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, ProviderStatus, TTSRequest
 
 pytestmark = pytest.mark.unit
@@ -135,5 +138,166 @@ async def test_pocket_tts_stream_keeps_the_engine_until_its_call_returns(via_any
     async def call():
         response = await adapter.generate(_pocket_request(stream=True))
         return [chunk async for chunk in response.audio_stream]
+
+    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+
+
+def _luxtts_adapter(gate: _Gate):
+    from tldw_Server_API.app.core.TTS.adapters.luxtts_adapter import LuxTTSAdapter
+
+    class _Engine:
+        def encode_prompt(self, prompt_audio, duration=5, rms=0.001):
+            return {"prompt_tokens": [1]}
+
+        def generate_speech(self, text, encode_dict, **_kwargs):
+            # The lock spans encode_prompt and generate_speech, so this is the holder's last call.
+            gate.enter("generate_speech")
+            return np.zeros((1, 3200), dtype=np.float32)
+
+    adapter = LuxTTSAdapter({"validate_reference": False, "convert_reference": False})
+    adapter._initialized = True
+    adapter._status = ProviderStatus.AVAILABLE
+    adapter._engine = _Engine()
+    return adapter
+
+
+@pytest.mark.asyncio
+@CANCEL_MODES
+async def test_luxtts_keeps_the_engine_until_its_call_returns(via_anyio_scope):
+    gate = _Gate()
+    adapter = _luxtts_adapter(gate)
+
+    async def call():
+        return await adapter.generate(
+            TTSRequest(text="hello", format=AudioFormat.PCM, voice_reference=_WAV_HEADER, stream=False)
+        )
+
+    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+
+
+def _supertonic_adapter(monkeypatch, tmp_path, gate: _Gate, *, version: int):
+    onnx_dir = tmp_path / "onnx"
+    onnx_dir.mkdir()
+    voices_dir = tmp_path / "voices"
+    voices_dir.mkdir()
+    (voices_dir / "M1.json").write_text("{}")
+
+    def _engine(*_args):
+        gate.enter("synthesize")
+        return np.zeros((1, 2400), dtype=np.float32), np.array([0.1])
+
+    vendor = types.SimpleNamespace(
+        load_text_to_speech=lambda _onnx_dir, _use_gpu=False: _engine,
+        load_voice_style=lambda _paths, _verbose=False: {"style": "dummy"},
+    )
+    if version == 1:
+        adapter_cls = supertonic_adapter.SupertonicOnnxAdapter
+        module_name, voice = "tldw_Server_API.app.core.TTS.vendors.supertonic", "supertonic_m1"
+    else:
+        adapter_cls = supertonic2_adapter.Supertonic2OnnxAdapter
+        module_name, voice = "tldw_Server_API.app.core.TTS.vendors.supertonic2", "supertonic2_m1"
+    monkeypatch.setitem(sys.modules, module_name, vendor)
+    adapter = adapter_cls(
+        {
+            "model_path": str(onnx_dir),
+            "extra_params": {
+                "voice_styles_dir": str(voices_dir),
+                "default_voice": voice,
+                "voice_files": {voice: "M1.json"},
+            },
+        }
+    )
+    return adapter, voice
+
+
+@pytest.mark.asyncio
+@CANCEL_MODES
+@pytest.mark.parametrize("version", [1, 2], ids=["supertonic", "supertonic2"])
+async def test_supertonic_keeps_the_engine_until_its_call_returns(monkeypatch, tmp_path, version, via_anyio_scope):
+    gate = _Gate()
+    adapter, voice = _supertonic_adapter(monkeypatch, tmp_path, gate, version=version)
+
+    async def call():
+        # WAV, not PCM: Supertonic accepts only MP3 and WAV, and MP3 needs PyAV.
+        return await adapter.generate(TTSRequest(text="hello", voice=voice, format=AudioFormat.WAV, stream=False))
+
+    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+
+
+def _omnivoice_runtime(monkeypatch, tmp_path, gate: _Gate, *, gate_load: bool):
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_runtime import OmniVoiceRuntime
+
+    class _OmniVoice:
+        @classmethod
+        def from_pretrained(cls, _model_path, **_kwargs):
+            if gate_load:
+                gate.enter("load")
+            return cls()
+
+        def generate(self, **_kwargs):
+            if not gate_load:
+                gate.enter("generate")
+            return np.zeros(2400, dtype=np.float32)
+
+    monkeypatch.setitem(sys.modules, "omnivoice", types.SimpleNamespace(OmniVoice=_OmniVoice))
+    (tmp_path / "model").mkdir()
+    return OmniVoiceRuntime({"model_path": str(tmp_path / "model")})
+
+
+@pytest.mark.asyncio
+@CANCEL_MODES
+async def test_omnivoice_runtime_synthesis_keeps_the_model_until_its_call_returns(monkeypatch, tmp_path, via_anyio_scope):
+    from tldw_Server_API.app.core.TTS.adapters.omnivoice_sidecar_protocol import OmniVoiceSynthesizeRequest
+
+    gate = _Gate()
+    runtime = _omnivoice_runtime(monkeypatch, tmp_path, gate, gate_load=False)
+
+    async def call():
+        return await runtime.synthesize(OmniVoiceSynthesizeRequest(text="hello", mode="auto", language_id="en"))
+
+    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+
+
+def _vibevoice_adapter(monkeypatch, gate: _Gate):
+    import contextlib
+
+    from tldw_Server_API.app.core.TTS.adapters import vibevoice_adapter as vibevoice_mod
+
+    class _Tensor:
+        def cpu(self):
+            return self
+
+        def numpy(self):
+            return np.zeros(2400, dtype=np.float32)
+
+    class _Model:
+        def generate(self, **_kwargs):
+            gate.enter("generate")
+            return types.SimpleNamespace(speech_outputs=[_Tensor()])
+
+    class _Processor:
+        tokenizer = object()
+
+        def __call__(self, **_kwargs):
+            return {}
+
+    fake_torch = types.SimpleNamespace(no_grad=contextlib.nullcontext, is_tensor=lambda _value: False)
+    monkeypatch.setattr(vibevoice_mod, "_get_torch", lambda **_kwargs: fake_torch)
+    adapter = vibevoice_mod.VibeVoiceAdapter({"device": "cpu"})
+    adapter.model = _Model()
+    adapter.processor = _Processor()
+    return adapter
+
+
+@pytest.mark.asyncio
+@CANCEL_MODES
+async def test_vibevoice_keeps_the_model_until_its_call_returns(monkeypatch, via_anyio_scope):
+    """A cancelled generate must also keep a variant reload from freeing the model under the running thread."""
+    gate = _Gate()
+    adapter = _vibevoice_adapter(monkeypatch, gate)
+
+    async def call():
+        request = TTSRequest(text="Speaker 1: hello", format=AudioFormat.PCM, stream=True)
+        return [chunk async for chunk in adapter._stream_audio_vibevoice(request, "speaker_1", 1)]
 
     await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
