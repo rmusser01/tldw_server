@@ -156,6 +156,7 @@
   "artifactsCopy": "Copy",
   "artifactsDownload": "Download",
   "artifactsRun": "Run",
+  "artifactsActions": "Artifact actions",
   "copyShort": "Copy",
   "branchShort": "Branch",
   "infoShort": "Info",
