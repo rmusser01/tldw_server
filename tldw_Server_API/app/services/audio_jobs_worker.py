@@ -106,7 +106,7 @@ async def hand_off(
     The next stage is queued first, so a failed hand-off fails this stage instead of completing it with nothing
     after it. The key makes a re-run stage reuse the next stage it already queued, which also makes a repeated
     enqueue safe. The next stage continues this job, so it is exempt from the per-user fair-share limit and the
-    submit quotas. If this stage was cancelled while it ran, the stage just queued is cancelled too, so the
+    submit quotas, and it keeps the pipeline's batch_group. If this stage was cancelled while it ran, the stage just queued is cancelled too, so the
     pipeline stops here.
     """
     next_queue = _next_stage_queue(next_type)
@@ -118,6 +118,7 @@ async def hand_off(
                 job_type=next_type,
                 payload=payload,
                 owner_user_id=str(job.get("owner_user_id")),
+                batch_group=job.get("batch_group"),
                 priority=5,
                 idempotency_key=f"audio-stage:{job['id']}:{next_type}",
                 fair_share_exempt=True,

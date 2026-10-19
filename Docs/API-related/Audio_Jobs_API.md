@@ -21,6 +21,12 @@ Base path: `/api/v1/audio`
   - Path: `job_id` (int)
   - Response: Job row fields (`id, job_type, status, priority, retry_count, ...`).
 
+- DELETE `/jobs/{job_id}` - Cancel a submitted job's pipeline (owner or admin)
+  - Path: `job_id` (int): the id `/jobs/submit` returned, or any stage's id.
+  - Cancels every stage of that pipeline that is queued or running, including a stage queued while the request runs. A running stage finishes its current step; the stage it queues is cancelled, so nothing after it runs.
+  - Response: `{ job_id, cancelled }`, the number of stages cancelled. 400 when no stage is left to cancel; 403 and 404 as for GET. Only audio pipeline stages are handled: another audio job, such as a long-form TTS job, gets 404.
+  - A pipeline submitted before this endpoint existed has no pipeline id, so only the job named is cancelled.
+
 - GET `/jobs/admin/list` - List jobs (admin)
   - Query: `status` (optional), `owner_user_id` (optional), `limit` (1-200)
   - Response: `{ jobs: [...] }`
@@ -36,7 +42,7 @@ Base path: `/api/v1/audio`
 ## Worker
 
 - Service: runs the pipeline stages `audio_download → audio_convert → audio_transcribe → audio_chunk → audio_analyze → audio_store`. Chunking and analysis are each optional: `audio_chunk` runs when `perform_chunking` is true, and `audio_analyze` when `perform_analysis` is true, whether or not chunking is on.
-- Each stage runs as its own job in the `audio` domain; the submit response carries only the first stage's id.
+- Each stage runs as its own job in the `audio` domain; the submit response carries only the first stage's id. All stages of one pipeline share a `batch_group` (`audio-pipeline:<id>`), which `DELETE /jobs/{job_id}` uses to cancel the rest of the pipeline.
 - Every stage, transcription included, runs in this worker on the `default` queue, unless `AUDIO_JOBS_GPU_TRANSCRIBE` sends transcription to the GPU worker (below). A stage that cannot queue the next one fails with `error_code` `next_stage_enqueue_failed` instead of completing with nothing after it. A refusal (a payload over `JOBS_MAX_JSON_BYTES` or not JSON, a queue or job type the Jobs allowlists refuse, a `JOBS_SECRET_REJECT` match) fails it at once, without running the stage again. Any other error is retried twice, 1 and 2 seconds apart, without running the stage again; if it still fails, the stage is retried as a whole, and the same failure twice in a row quarantines the job (`JOBS_QUARANTINE_THRESHOLD`).
 - Each stage's payload carries the transcript once: `text`, `segments` with their timestamps, and `chunks` when chunking is on. `normalized_stt` keeps the STT artifact's other fields (`language`, `diarization`, `usage`, `metadata`). At the default `JOBS_MAX_JSON_BYTES` (1 MiB) that fits about 4 hours of speech with chunking, the default, and about 6 hours without. A longer recording fails at the hand-off that exceeds the cap, with `next_stage_enqueue_failed` and the sizes in the error; raise `JOBS_MAX_JSON_BYTES` for longer recordings. The `audio_store` stage stores the payload as its result; a result over the cap fails that stage with `error_code` `result_too_large`.
 - Analysis failures never lose the transcript. When analysis fails for good, the transcript goes on to `audio_store` with `analysis_error: {"code": ..., "message": ...}` in the payload and no `analysis`, and the `audio_analyze` stage job completes with the same `analysis_error` as its `result`.

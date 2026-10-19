@@ -1655,3 +1655,97 @@ async def test_cancelling_a_running_stage_stops_the_stages_after_it(pipeline_wor
     )
     assert [j["status"] for j in _jobs_of(jm, "audio_transcribe")] == ["cancelled"]
     assert [j["status"] for j in _jobs_of(jm, "audio_store")] == ["cancelled"]
+
+
+@pytest.mark.unit
+async def test_cancel_endpoint_cancels_the_rest_of_the_pipeline(monkeypatch, tmp_path):
+    from fastapi import HTTPException
+
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_jobs
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager(db_path=tmp_path / "jobs_cancel.db")
+    owner = User(id=7, username="owner", email="owner@example.com", role="user", is_active=True)
+    stranger = User(id=8, username="stranger", email="stranger@example.com", role="user", is_active=True)
+    no_claims = SimpleNamespace(roles=[], permissions=[])
+    submitted = await audio_jobs.submit_audio_job(
+        req=audio_jobs.SubmitAudioJobRequest(url="https://example.com/a.mp3", model="whisper-1"),
+        current_user=owner, jm=jm, request=None,
+    )
+    # The first stage runs and hands over to the next one, as the worker would.
+    first = jm.acquire_next_job(domain="audio", queue="default", lease_seconds=60, worker_id="w")
+    assert first["id"] == submitted.id
+    assert await worker.hand_off(jm, first, "audio_convert", {"local_path": "/tmp/a.mp3"}, worker_id="w") is None
+
+    with pytest.raises(HTTPException) as refused:
+        await audio_jobs.cancel_audio_job(job_id=submitted.id, current_user=stranger, jm=jm, principal=no_claims)
+    assert refused.value.status_code == 403
+
+    result = await audio_jobs.cancel_audio_job(job_id=submitted.id, current_user=owner, jm=jm, principal=no_claims)
+    assert result.cancelled == 1
+    statuses = {j["job_type"]: j["status"] for j in jm.list_jobs(domain="audio", owner_user_id="7")}
+    assert statuses == {"audio_download": "completed", "audio_convert": "cancelled"}
+
+    with pytest.raises(HTTPException) as finished:
+        await audio_jobs.cancel_audio_job(job_id=submitted.id, current_user=owner, jm=jm, principal=no_claims)
+    assert finished.value.status_code == 400
+
+
+@pytest.mark.unit
+async def test_cancel_endpoint_cancels_a_stage_queued_while_it_cancels(monkeypatch, tmp_path):
+    import threading
+
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_jobs
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager(db_path=tmp_path / "jobs_cancel_race.db")
+    owner = User(id=7, username="owner", email="owner@example.com", role="user", is_active=True)
+    submitted = await audio_jobs.submit_audio_job(
+        req=audio_jobs.SubmitAudioJobRequest(url="https://example.com/a.mp3", model="whisper-1"),
+        current_user=owner, jm=jm, request=None,
+    )
+    first = jm.acquire_next_job(domain="audio", queue="default", lease_seconds=60, worker_id="w")
+    list_jobs = jm.list_jobs
+
+    def _list_then_the_worker_hands_off(**kwargs):
+        stages = list_jobs(**kwargs)
+        if (jm.get_job(int(first["id"])) or {}).get("status") == "processing":
+            # The worker finishes the first stage right after the route listed it as running.
+            hand_off = worker.hand_off(jm, first, "audio_convert", {"local_path": "/tmp/a.mp3"}, worker_id="w")
+            runner = threading.Thread(target=asyncio.run, args=(hand_off,))
+            runner.start()
+            runner.join()
+        return stages
+
+    monkeypatch.setattr(jm, "list_jobs", _list_then_the_worker_hands_off)
+    result = await audio_jobs.cancel_audio_job(
+        job_id=submitted.id, current_user=owner, jm=jm, principal=SimpleNamespace(roles=[], permissions=[])
+    )
+    assert result.cancelled == 1
+    statuses = {j["job_type"]: j["status"] for j in list_jobs(domain="audio", owner_user_id="7")}
+    assert statuses == {"audio_download": "completed", "audio_convert": "cancelled"}
+
+
+@pytest.mark.unit
+async def test_cancel_endpoint_does_not_handle_other_audio_jobs(tmp_path):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_jobs
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager(db_path=tmp_path / "jobs_cancel_tts.db")
+    owner = User(id=7, username="owner", email="owner@example.com", role="user", is_active=True)
+    tts_id = int(jm.create_job(
+        domain="audio", queue="default", job_type="tts_longform", payload={"text": "hi"}, owner_user_id="7"
+    )["id"])
+    with pytest.raises(HTTPException) as refused:
+        await audio_jobs.cancel_audio_job(
+            job_id=tts_id, current_user=owner, jm=jm, principal=SimpleNamespace(roles=[], permissions=[])
+        )
+    assert refused.value.status_code == 404
+    assert (jm.get_job(tts_id) or {}).get("status") == "queued"
