@@ -21,6 +21,9 @@ class _CaptureLogger:
     def debug(self, message, *args, **kwargs):
         self.records.append(("debug", message, args, kwargs))
 
+    def warning(self, message, *args, **kwargs):
+        self.records.append(("warning", message, args, kwargs))
+
     def error(self, message, *args, **kwargs):
         self.records.append(("error", message, args, kwargs))
 
@@ -1085,3 +1088,83 @@ async def test_a_transient_hand_off_failure_is_retried(pipeline_worker, monkeypa
     assert int(job.get("retry_count") or 0) >= 1
     assert job.get("status") != "completed"
     assert job.get("error_code") == "next_stage_enqueue_failed"
+
+
+# --- the stage after transcription (TASK-13845) ---
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("chunking", "analysis", "expected"),
+    [(False, True, "audio_analyze"), (False, False, "audio_store"), (True, True, "audio_chunk"), (True, False, "audio_chunk")],
+)
+def test_stage_after_transcription(chunking, analysis, expected):
+    from tldw_Server_API.app.services.audio_jobs_worker import stage_after_transcription
+
+    assert stage_after_transcription({"perform_chunking": chunking, "perform_analysis": analysis}) == expected
+
+
+@pytest.mark.unit
+async def test_audio_pipeline_without_chunking_still_analyzes(pipeline_worker):
+    worker, jm, stt_calls = pipeline_worker
+    jm.create_job(
+        domain="audio", queue="default", job_type="audio_convert",
+        payload={"local_path": "/tmp/p.mp3", "model": "whisper-1", "perform_chunking": False,
+                 "perform_analysis": True, "api_name": None},
+        owner_user_id="7",
+    )
+    await _run_worker_until(worker, lambda: bool(_jobs_of(jm, "audio_store")))
+    assert [j["status"] for j in _jobs_of(jm, "audio_analyze")] == ["completed"]
+    assert _jobs_of(jm, "audio_store")[0]["payload"]["analysis_skipped"] == "no api_name"
+
+
+@pytest.mark.unit
+async def test_audio_gpu_worker_hands_over_to_analysis_without_chunking(monkeypatch, tmp_path):
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs_gpu_analysis.db"))
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_AUDIO", "transcribe")
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.05")
+
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+    import tldw_Server_API.app.services.audio_transcribe_gpu_worker as gpu_worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    async def _yes(user_id: int):
+        return True, ""
+
+    async def _noop(user_id: int):
+        return None
+
+    monkeypatch.setattr(gpu_worker, "can_start_job", _yes)
+    monkeypatch.setattr(gpu_worker, "increment_jobs_started", _noop)
+    monkeypatch.setattr(gpu_worker, "finish_job", _noop)
+    monkeypatch.setattr(atlib, "run_stt_job_via_registry", lambda *a, **k: {"text": "hello gpu", "segments": []})
+
+    jm = JobManager()
+    jm.create_job(
+        domain="audio", queue="transcribe", job_type="audio_transcribe",
+        payload={"wav_path": str(tmp_path / "gpu.wav"), "model": "whisper-1",
+                 "perform_chunking": False, "perform_analysis": True},
+        owner_user_id="1",
+    )
+    stop = asyncio.Event()
+    task = asyncio.create_task(gpu_worker.run_audio_transcribe_gpu_worker(stop))
+    try:
+        for _ in range(50):
+            await asyncio.sleep(0.05)
+            if jm.list_jobs(domain="audio", queue="default", owner_user_id="1"):
+                break
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=2.0)
+    assert [j["job_type"] for j in jm.list_jobs(domain="audio", queue="default", owner_user_id="1")] == ["audio_analyze"]
+
+
+@pytest.mark.unit
+async def test_audio_analyze_skip_is_logged(analyze_worker, monkeypatch):
+    worker, jm, adapter = analyze_worker
+    capture = _CaptureLogger()
+    monkeypatch.setattr(worker, "logger", capture)
+    job_id = _analyze_job(jm, "hello transcript", api_name=None)
+    await _run_worker_until(worker, lambda: bool(jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7")))
+    info_lines = [message.format(*args) if args else message for level, message, args, _ in capture.records if level == "info"]
+    assert f"Audio job {job_id}: analysis skipped, no api_name" in info_lines

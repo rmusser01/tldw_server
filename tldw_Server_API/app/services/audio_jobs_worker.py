@@ -41,6 +41,13 @@ def _next_stage_queue(next_type: str) -> str:
     return "transcribe" if next_type == "audio_transcribe" and gpu else "default"
 
 
+def stage_after_transcription(payload: dict[str, Any]) -> str:
+    """The stage after audio_transcribe: chunking first if asked, then analysis if asked, then store."""
+    if payload.get("perform_chunking"):
+        return "audio_chunk"
+    return "audio_analyze" if payload.get("perform_analysis") else "audio_store"
+
+
 async def _handle_audio_transcribe_stage(payload: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
     """
     Handle the `audio_transcribe` stage for a single job payload.
@@ -95,8 +102,7 @@ async def _handle_audio_transcribe_stage(payload: dict[str, Any]) -> tuple[dict[
     # existing consumers that rely only on 'text' and 'segments'.
     updated_payload["normalized_stt"] = artifact
 
-    next_type: str | None = "audio_chunk" if payload.get("perform_chunking") else "audio_store"
-    return updated_payload, next_type
+    return updated_payload, stage_after_transcription(payload)
 
 
 async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None:
@@ -377,6 +383,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                     if not api_name or api_name.lower() == "none":
                         # No provider named: skip analysis, as /media/process-audios does.
                         updated_payload["analysis_skipped"] = "no api_name"
+                        logger.info("Audio job {}: analysis skipped, no api_name", job["id"])
                     elif not text.strip():
                         raise _StageFailure(
                             "empty transcript: nothing to analyze", failure_code="empty_transcript", retryable=False

@@ -15,6 +15,7 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     finish_job,
     increment_jobs_started,
 )
+from tldw_Server_API.app.services.audio_jobs_worker import stage_after_transcription
 
 DOMAIN = "audio"
 
@@ -121,11 +122,10 @@ async def run_audio_transcribe_gpu_worker(stop_event: asyncio.Event | None = Non
 
             # Complete and enqueue next stage
             jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(job.get("lease_id")))
-            next_type: str | None = "audio_chunk" if payload.get("perform_chunking") else "audio_store"
             jm.create_job(
                 domain=DOMAIN,
                 queue="default",
-                job_type=next_type,
+                job_type=stage_after_transcription(payload),
                 payload=updated_payload,
                 owner_user_id=str(owner),
                 priority=5,

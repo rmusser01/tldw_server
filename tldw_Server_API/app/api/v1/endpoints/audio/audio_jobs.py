@@ -204,8 +204,16 @@ class SubmitAudioJobRequest(BaseModel):
         description="Optional hotwords to guide transcription (CSV/JSON string or list). Primarily used by VibeVoice-ASR.",
     )
     perform_chunking: bool = Field(True, description="Whether to chunk the transcript after STT")
-    perform_analysis: bool = Field(False, description="Whether to run LLM analysis after chunking")
-    api_name: str | None = Field(None, description="LLM provider key for analysis stage")
+    perform_analysis: bool = Field(
+        False, description="Whether to run LLM analysis on the transcript (after chunking, when chunking is on)"
+    )
+    api_name: str | None = Field(
+        None,
+        description=(
+            "Provider for the analysis stage. Without it, analysis is skipped even when perform_analysis is true, "
+            "and the job records analysis_skipped."
+        ),
+    )
 
     if model_validator is not None:
         @model_validator(mode="before")
