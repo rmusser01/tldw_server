@@ -38,6 +38,7 @@ import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText"
 import { chatDraftAddressKey, conversationDraftKey } from "@/utils/chat-draft-address"
 import { decodeSidepanelChatWebUiHandoff } from "@/services/tldw/sidepanel-chat-webui-handoff"
+import { PRO_SIDEBAR_COLLAPSED_STORAGE_KEY } from "@/components/Sidepanel/Chat/sidepanel-sidebar-layout"
 
 const io = vi.hoisted(() => ({
   noop: () => {},
@@ -560,7 +561,7 @@ const installSidebarViewport = (initialNarrow: boolean) => {
     get matches() {
       return narrow
     },
-    media: "(max-width: 400px)",
+    media: "(max-width: 639px)",
     onchange: null,
     addEventListener: (_type: string, listener: () => void) =>
       listeners.add(listener),
@@ -575,6 +576,39 @@ const installSidebarViewport = (initialNarrow: boolean) => {
     setNarrow: (value: boolean) =>
       act(() => {
         narrow = value
+        listeners.forEach((listener) => listener())
+      })
+  }
+}
+
+// Evaluates width media queries the way a browser does, so a test states the
+// panel width instead of which query the route happens to use.
+const installSidebarViewportWidth = (initialWidth: number) => {
+  let width = initialWidth
+  const listeners = new Set<() => void>()
+  const matches = (query: string) => {
+    const max = /max-width:\s*(\d+)px/.exec(query)
+    const min = /min-width:\s*(\d+)px/.exec(query)
+    return (!max || width <= Number(max[1])) && (!min || width >= Number(min[1]))
+  }
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    get matches() {
+      return matches(query)
+    },
+    media: query,
+    onchange: null,
+    addEventListener: (_type: string, listener: () => void) =>
+      listeners.add(listener),
+    removeEventListener: (_type: string, listener: () => void) =>
+      listeners.delete(listener),
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => true
+  }))
+  return {
+    setWidth: (value: number) =>
+      act(() => {
+        width = value
         listeners.forEach((listener) => listener())
       })
   }
@@ -725,6 +759,7 @@ describe.each([
 ] as const)("%s sidepanel snapshot ownership", (_name, Route) => {
   beforeEach(() => {
     vi.unstubAllGlobals()
+    localStorage.removeItem(PRO_SIDEBAR_COLLAPSED_STORAGE_KEY)
     vi.spyOn(window, "open").mockReset().mockImplementation(() => ({}) as Window)
     io.user = "alice"
     io.uiMode = "pro"
@@ -1256,6 +1291,49 @@ describe.each([
     page.rerender(<Route />)
     expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
     expect(screen.getByText("alice first")).toBeVisible()
+  })
+
+  it("docks the Pro chat list only when the panel is at least 640px wide (XS-04)", async () => {
+    const viewport = installSidebarViewportWidth(520)
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    // A 288px dock would crush a 520px panel, so the list stays closed and
+    // opens as an overlay on demand.
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    const toggle = screen.getByRole("button", { name: "Toggle conversation sidebar" })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(toggle)
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "overlay")
+    fireEvent.click(screen.getByRole("button", { name: "Collapse conversation sidebar" }))
+    await waitFor(() => expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument())
+    viewport.setWidth(800)
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "docked")
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("remembers a collapsed Pro chat list when the panel reopens (XS-04)", async () => {
+    installSidebarViewportWidth(800)
+    io.data.set(storedKey("alice"), tabsState())
+    const first = render(<Route />)
+    await screen.findByText("alice first")
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "docked")
+    fireEvent.click(screen.getByRole("button", { name: "Collapse conversation sidebar" }))
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    first.unmount()
+
+    const second = render(<Route />)
+    await screen.findByText("alice first")
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    const toggle = screen.getByRole("button", { name: "Toggle conversation sidebar" })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(toggle)
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "docked")
+    second.unmount()
+
+    render(<Route />)
+    await screen.findByText("alice first")
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "docked")
   })
 
   if (_name === "shared")

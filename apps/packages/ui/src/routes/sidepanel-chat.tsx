@@ -67,6 +67,11 @@ import { SidepanelHeaderSimple } from '~/components/Sidepanel/Chat/SidepanelHead
 import { ConnectionBanner } from '~/components/Sidepanel/Chat/ConnectionBanner';
 import { ServerChatFreshnessNotice } from '~/components/Sidepanel/Chat/ServerChatFreshnessNotice';
 import {
+  SIDEPANEL_UNDOCKED_SIDEBAR_MEDIA_QUERY,
+  readProSidebarCollapsed,
+  writeProSidebarCollapsed,
+} from '~/components/Sidepanel/Chat/sidepanel-sidebar-layout';
+import {
   readTabConversationTitle,
   renameTabConversation,
 } from '~/components/Sidepanel/Chat/tab-conversation-actions';
@@ -699,18 +704,19 @@ const SidepanelChatContent = ({
   const uiMode = useUiModeStore((state) => state.mode)
   const [isNarrow, setIsNarrow] = React.useState(
     () =>
-      typeof window !== 'undefined' && Boolean(window.matchMedia?.('(max-width: 400px)').matches)
+      typeof window !== 'undefined' &&
+      Boolean(window.matchMedia?.(SIDEPANEL_UNDOCKED_SIDEBAR_MEDIA_QUERY).matches)
   );
   const isDockedSidebar = uiMode === 'pro' && !isNarrow;
-  const [sidebarVisibility, publishSidebarVisibility] = React.useState({
-    open: isDockedSidebar,
+  const [sidebarVisibility, publishSidebarVisibility] = React.useState(() => ({
+    open: isDockedSidebar && !readProSidebarCollapsed(),
     revision: 0,
-  });
+  }));
   const sidebarOpen = sidebarVisibility.open;
   const sidebarPresented = React.useRef(false);
   const sidebarOpening = React.useRef({
     revision: 0,
-    open: isDockedSidebar,
+    open: sidebarVisibility.open,
     initiator: null as HTMLElement | null,
   });
   const sidebarReturnFocus = React.useRef<null | {
@@ -755,6 +761,7 @@ const SidepanelChatContent = ({
       }
       opening.revision = revision;
       opening.open = next;
+      if (isDockedSidebar) writeProSidebarCollapsed(!next);
       publishSidebarVisibility({ open: next, revision });
     },
     [owner, isDockedSidebar]
@@ -768,7 +775,9 @@ const SidepanelChatContent = ({
     []
   );
   React.useEffect(() => {
-    setSidebarOpen(isDockedSidebar);
+    setSidebarOpen(
+      isDockedSidebar && (sidebarOpening.current.open || !readProSidebarCollapsed())
+    );
   }, [isDockedSidebar, setSidebarOpen]);
 
   const { checkOnce } = useConnectionActions();
@@ -1464,7 +1473,7 @@ const SidepanelChatContent = ({
 
   React.useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return
-    const media = window.matchMedia("(max-width: 400px)")
+    const media = window.matchMedia(SIDEPANEL_UNDOCKED_SIDEBAR_MEDIA_QUERY)
     const update = () => setIsNarrow(media.matches)
     update()
     media.addEventListener("change", update)
