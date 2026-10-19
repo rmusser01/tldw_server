@@ -972,8 +972,11 @@ def _analysis_failure_code(jm, job_id: int) -> str | None:
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("make_error", "code"),
-    [(lambda errors: errors.ChatBadRequestError(provider="openai"), "request_rejected")],
-    ids=["rejected-request"],
+    [
+        (lambda errors: errors.ChatBadRequestError(provider="openai"), "request_rejected"),
+        (lambda errors: errors.ChatRateLimitError(provider="openai", quota_exhausted=True), "provider_quota_exhausted"),
+    ],
+    ids=["rejected-request", "spent-quota"],
 )
 async def test_audio_analyze_failure_a_retry_cannot_fix_is_not_retried(analyze_worker, make_error, code):
     from tldw_Server_API.app.core import exceptions

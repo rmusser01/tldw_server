@@ -431,9 +431,10 @@ def _openai_upstream_replies(status: int, body: dict[str, Any]):
         (413, {"type": "invalid_request_error"}, "request_rejected"),
         (408, {"type": "timeout"}, "provider_failure"),
         (429, {"type": "requests", "code": "rate_limit_exceeded"}, "rate_limit"),
+        (429, {"type": "insufficient_quota", "code": "insufficient_quota"}, "provider_quota_exhausted"),
         (500, {"type": "server_error"}, "provider_failure"),
     ],
-    ids=["unknown-model", "context-overflow", "too-large", "timed-out", "rate-limit", "server-error"],
+    ids=["unknown-model", "context-overflow", "too-large", "timed-out", "rate-limit", "spent-quota", "server-error"],
 )
 def test_upstream_reply_reaches_the_summary_code_through_the_openai_adapter(
     monkeypatch, status, error, expected_code

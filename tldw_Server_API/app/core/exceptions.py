@@ -923,13 +923,19 @@ class ChatBadRequestError(ChatAPIError):
 
 
 class ChatRateLimitError(ChatAPIError):
-    """Raised when a chat provider rate-limits a request."""
+    """Raised when a chat provider rate-limits a request.
+
+    ``quota_exhausted`` is True when the provider said the account's billing quota is spent
+    (OpenAI ``insufficient_quota``), so waiting will not help. It is a bool, never upstream text.
+    """
 
     def __init__(
         self,
         message: str = "Rate limit exceeded with the chat provider.",
         provider: str | None = None,
+        quota_exhausted: bool = False,
     ) -> None:
+        self.quota_exhausted = quota_exhausted is True
         super().__init__(message, status_code=429, provider=provider)
 
 

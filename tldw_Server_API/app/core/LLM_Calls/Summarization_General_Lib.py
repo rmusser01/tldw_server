@@ -118,6 +118,7 @@ _SUMMARY_ERROR_CODES = frozenset(
         "authentication",
         "configuration",
         "rate_limit",
+        "provider_quota_exhausted",
         "request_rejected",
         "provider_failure",
     }
@@ -152,7 +153,7 @@ def _summary_error_code(exc: BaseException, adapter: Any = None) -> str:
     if isinstance(exc, ChatConfigurationError):
         return "configuration"
     if isinstance(exc, ChatRateLimitError):
-        return "rate_limit"
+        return "provider_quota_exhausted" if exc.quota_exhausted is True else "rate_limit"
     if isinstance(exc, ChatBadRequestError):
         # 408 (OpenRouter timeout) and 498 (Groq flex capacity) are transient 4xx replies.
         if getattr(exc, "upstream_status_code", None) in {408, 498}:
