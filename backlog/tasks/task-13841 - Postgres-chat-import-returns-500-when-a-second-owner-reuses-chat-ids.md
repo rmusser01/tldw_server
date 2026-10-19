@@ -29,6 +29,7 @@ RED (dev e1f7770953, re-checked on 9ddc9d83f4): target 1 failed (postgres), 1 pa
 AC #1 amended (Review M4): its old text said a second owner reusing the first owner's ids gets 201 on Postgres, which is false by design. PostgreSQL ids share one key space, so reused chat or message ids get 409 (lines 782-791); the 201 is the second owner's import with ids of its own (line 798), and the first owner's chat and message stay untouched (lines 804-808). Removed with --remove-ac 1 and re-added with that wording; it is now AC #2, and the old AC #2 is now #1.
 ADR: not needed; a test-only change that creates no durable policy (Docs/ADR/README.md). Governing: ADR-005 (Bandit on the touched paths), ADR-059 (backlog-py), ADR-004 (the owner's Change summary on the AI-authored PR).
 Follow-up: TASK-13859, for legacy thread-local checkouts (thread exit, long-lived threads), close_all_connections() closing a psycopg pool before its queued reset (MCP modules call it per call), the WebSocket /chat/stream persistence path, and the 30 other test apps without the middleware.
+The follow-up first filed as TASK-13859 is TASK-13861: open PR #3271 took 13859 first.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
