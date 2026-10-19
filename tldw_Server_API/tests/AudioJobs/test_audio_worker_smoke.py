@@ -1618,3 +1618,17 @@ async def test_audio_gpu_worker_fails_a_stage_whose_hand_off_is_refused(monkeypa
     # Before: the stage completed first, so it read completed with nothing after it.
     assert (job.get("status"), job.get("retry_count"), job.get("error_code")) == ("failed", 0, "next_stage_enqueue_failed")
     assert len(stt_calls) == 1
+
+
+@pytest.mark.unit
+async def test_audio_store_with_a_result_over_the_cap_fails_instead_of_staying_processing(pipeline_worker, monkeypatch):
+    import json
+
+    worker, jm, stt_calls = pipeline_worker
+    payload = {"text": "x" * 5000, "model": "whisper-1"}
+    # The payload fits; the stored result ({"payload": ...}) is 13 bytes larger and does not.
+    monkeypatch.setenv("JOBS_MAX_JSON_BYTES", str(len(json.dumps(payload)) + 5))
+    job_id = int(jm.create_job(domain="audio", queue="default", job_type="audio_store", payload=payload, owner_user_id="7")["id"])
+    await _run_worker_until(worker, lambda: (jm.get_job(job_id) or {}).get("status") in {"completed", "failed"}, seconds=2)
+    job = jm.get_job(job_id) or {}
+    assert (job.get("status"), job.get("retry_count"), job.get("error_code")) == ("failed", 0, "result_too_large")

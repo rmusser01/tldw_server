@@ -556,7 +556,14 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                     ok = False
                     msg_err = str(failure)
             elif ok:
-                jm.complete_job(int(job["id"]), result={"payload": updated_payload}, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
+                try:
+                    jm.complete_job(int(job["id"]), result={"payload": updated_payload}, worker_id=worker_id, lease_id=str(job.get("lease_id")), completion_token=str(job.get("lease_id")))
+                except ValueError as e:
+                    # A result over JOBS_MAX_JSON_BYTES is refused the same way every time: fail the job
+                    # instead of leaving it processing until its lease expires.
+                    ok = False
+                    msg_err = str(e)
+                    failure = _StageFailure(msg_err, failure_code="result_too_large", retryable=False)
             if not ok:
                 # An error that says it is not retryable (a _StageFailure, for one) fails the job now.
                 jm.fail_job(
