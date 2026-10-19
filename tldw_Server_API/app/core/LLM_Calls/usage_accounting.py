@@ -61,7 +61,7 @@ def _plan_call() -> _CallPlan | None:
 
 
 def _approx_tokens(char_count: int) -> int:
-    """Four characters per token, the estimate the chat endpoint already uses."""
+    """The completion-side 4 chars/token estimate (rounded down)."""
     return max(1, char_count // 4) if char_count > 0 else 0
 
 

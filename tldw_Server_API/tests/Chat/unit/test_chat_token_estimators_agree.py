@@ -7,6 +7,7 @@ estimate row (usage_accounting) size a prompt with one estimate:
 pattern, four characters per token rounded up).
 """
 
+import base64
 import json
 
 import pytest
@@ -14,7 +15,7 @@ import pytest
 from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
 from tldw_Server_API.app.api.v1.schemas import chat_validators
 from tldw_Server_API.app.core.Chat import chat_service
-from tldw_Server_API.app.core.Chat.prompt_cost_envelope import estimate_segment_tokens
+from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope, estimate_segment_tokens
 from tldw_Server_API.app.core.LLM_Calls import usage_accounting
 
 _IMAGE = "data:image/png;base64," + "A" * 4000
@@ -76,6 +77,14 @@ def test_a_wrapped_base64_image_is_still_left_out(line_break):
     wrapped = "data:image/png;base64," + ("A" * 76 + line_break) * 50
     body = json.dumps({"messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": wrapped}}]}]})
     assert chat_service.estimate_tokens_from_json(body) < 100
+
+
+@pytest.mark.unit
+def test_a_wrapped_base64_image_is_left_out_of_the_guardrail_envelope():
+    # An image-only message has no text part, so the envelope sizes its canonical JSON (review I1).
+    url = "data:image/png;base64," + base64.encodebytes(b"\x89PNG" * 5000).decode()
+    messages = [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": url}}]}]
+    assert build_prompt_cost_envelope(messages).total_estimated_tokens < 100
 
 
 @pytest.mark.unit

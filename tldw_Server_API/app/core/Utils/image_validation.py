@@ -210,7 +210,7 @@ DATA_URI_PATTERN = re.compile(r'^data:([^;]+);base64,(.+)$')
 # to the end of the text for every ``data:image`` with no comma after it, which is quadratic on
 # crafted input. The payload run is possessive (``++``): it never gives characters back, so
 # image bulk is scanned at about one character per step.
-DATA_URI_REDACT_RE = re.compile(r'((?i:data:image/[^,"\s]{0,128};base64,))(?:[A-Za-z0-9+/=]++|\\[rn])+')
+DATA_URI_REDACT_RE = re.compile(r'((?i:data:image/[^,"\s]{0,128};base64,))(?:[A-Za-z0-9+/=]++|\\[rn]|[\r\n])+')
 
 #######################################################################################################################
 #

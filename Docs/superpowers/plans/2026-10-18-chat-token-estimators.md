@@ -28,7 +28,7 @@ Independent review and dry run (2026-10-18): 1 Blocker, 1 Important, 9 Minor; al
 - No touched file is listed in `Helper_Scripts/ci/scope_predicate_baseline.txt`. No touched doc is mirrored under `Docs/Published`: `refresh_docs_published.sh` copies `Docs/Architecture.md`, not `Docs/Architecture/`, and does not copy `Docs/Product/` or `Docs/superpowers/`. So no baseline regeneration and no docs refresh are needed.
 - The lint ratchets that name `chat.py` and `chat_service.py` (`test_private_coercion_ratchet.py`, `test_core_to_api_import_boundary.py`, `test_no_inline_sse_frames.py`) passed on the prototype: 9 passed. The deleted helpers are not coercers.
 - dev enforces `tldw_Server_API/tests/CI/test_test_quality_ratchet.py` since #3243: new tests must not be status-only or tautological. Task 4 Step 1 runs it in the final sweep. On the prototype it passes, and `Helper_Scripts/ci/test_quality_triage.py` flags none of the six touched test files; none is in `test_quality_baseline.txt`.
-- ADR-004: no Change-summary waiver covers TASK-13843. Ask the owner for the PR's Change summary before merging. Ask D1 and D2 together before execution, and say in the same message that the PR will need that Change summary (Review I1).
+- ADR-004: Change summary: waived (the owner's 2026-09-22 waiver, confirmed for burn-down PRs on 2026-10-18; recorded in the PR body).
 
 ## Decisions for the owner
 
@@ -109,6 +109,7 @@ These inputs redact differently. The old scanner is origin/dev's `prompt_cost_en
 | Header longer than 128 characters | differs (old redacts it) | differs |
 | `data:image,<run>`, `data:image/png,<run>` | same | differs (counted) |
 | Base64 payload followed by `-`, `_` or another non-base64 character, including a markdown-embedded image: `![x](data:image/png;base64,iVBOR…==) caption` redacts to `…<omitted>) caption`, where the old scanner and Task 1 give `…<omitted> caption` (Review M5) | same | differs (the run stops there) |
+| A line-wrapped base64 image (`base64.encodebytes`: raw `\n` or `\r\n` in a string) | differs (old keeps lines after the first) | differs (now redacted whole, so its fingerprint changes) |
 | `data:ımage` (dotless i; `re.IGNORECASE` folds it to `i`) | differs (now redacted) | differs |
 
 ### Another plan edits `usage_accounting.py` (Review M6)
@@ -1123,6 +1124,6 @@ The body names D2, `usage_accounting`'s rows, the bulk guard, the markdown-image
 - [ ] **Step 5: Review and merge**
 
 1. Run `/superpowers:requesting-code-review` in a clean subagent, with this plan and the PR diff, and address its findings before merging.
-2. Ask the owner for the Change summary (ADR-004).
+2. Change summary: waived (the owner's 2026-09-22 waiver, confirmed for burn-down PRs on 2026-10-18; recorded in the PR body).
 3. Merge through the serial queue (the owner's `pr_queue.sh`), one PR at a time; MERGE_QUEUE is unset. Editing the PR body re-runs the required license status, so wait for it before merging.
 4. Confirm the PR is MERGED before deleting the branch.
