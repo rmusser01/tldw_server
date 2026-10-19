@@ -903,11 +903,11 @@ def _break_provider(code: str, adapter, monkeypatch) -> None:
         monkeypatch.setattr(summarization, "get_registry", lambda: SimpleNamespace(get_adapter=lambda _provider: None))
 
 
-def _exhaust_retries(jm, job_id: int) -> int:
-    """Put the job on its last attempt (retry_count == max_retries); returns max_retries."""
+def _exhaust_retries(jm, job_id: int, before: int = 0) -> int:
+    """Put the job on its last attempt (retry_count == max_retries - before); returns max_retries."""
     connection = sqlite3.connect(jm.db_path)
     try:
-        connection.execute("UPDATE jobs SET retry_count = max_retries WHERE id = ?", (job_id,))
+        connection.execute("UPDATE jobs SET retry_count = max_retries - ? WHERE id = ?", (before, job_id))
         connection.commit()
         return int(connection.execute("SELECT max_retries FROM jobs WHERE id = ?", (job_id,)).fetchone()[0])
     finally:
@@ -946,7 +946,23 @@ async def test_audio_analyze_rate_limited_on_the_last_attempt_keeps_the_transcri
     assert payload["text"] == "hello transcript"
     assert payload["analysis_error"]["code"] == "rate_limit"
     assert "analysis" not in payload
-    assert (jm.get_job(job_id) or {}).get("status") == "completed"
+    job = jm.get_job(job_id) or {}
+    assert job.get("status") == "completed"
+    assert job["result"]["analysis_error"]["code"] == "rate_limit"
+
+
+@pytest.mark.unit
+async def test_audio_analyze_rate_limited_one_attempt_before_the_last_is_retried(analyze_worker):
+    from tldw_Server_API.app.core.exceptions import ChatRateLimitError
+
+    worker, jm, adapter = analyze_worker
+    adapter.error = ChatRateLimitError(provider="openai")
+    job_id = _analyze_job(jm, "hello transcript")
+    max_retries = _exhaust_retries(jm, job_id, before=1)
+    await _run_worker_until(worker, lambda: _settled(jm, job_id, retries=max_retries))
+    job = jm.get_job(job_id) or {}
+    assert (job.get("status"), job.get("retry_count"), job.get("error_code")) == ("queued", max_retries, "rate_limit")
+    assert _stored(jm) == []
 
 
 @pytest.mark.unit

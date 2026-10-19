@@ -8196,7 +8196,9 @@ class JobManager:
         ``quarantine=False`` exempts this failure from the poison-message quarantine
         (JOBS_QUARANTINE_THRESHOLD identical failures in a row), for failures that are
         expected to repeat, such as a provider rate limit. Retries still stop at
-        ``max_retries``, and the job then fails.
+        ``max_retries``, and the job then fails. The failure still advances the failure
+        streak, so a later ``fail_job`` with the default ``quarantine=True`` and the same
+        ``error_code`` may quarantine the job at once.
         """
         # Strong exactly-once finalize (optional): require a completion_token when enabled
         if (
