@@ -18,10 +18,8 @@ import type {
   NotebookFilterOption,
   ExportProgressState,
 } from './notes-manager-types'
-import {
-  NOTES_LIST_REGION_ID,
-  MIN_SIDEBAR_HEIGHT,
-} from './notes-manager-utils'
+import { NOTES_LIST_REGION_ID } from './notes-manager-utils'
+import { useHasContentBelow } from './hooks/useHasContentBelow'
 import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NotesRecentOpenedEntry } from '@/services/settings/ui-settings'
 import { CAPTURED_NOTE_KEYWORD } from '@/services/notes-capture'
@@ -40,7 +38,6 @@ export interface NotesSidebarProps {
   isMobileViewport: boolean
   mobileSidebarOpen: boolean
   sidebarCollapsed: boolean
-  sidebarHeight: number
 
   // List state
   listMode: 'active' | 'trash'
@@ -178,7 +175,6 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   isMobileViewport,
   mobileSidebarOpen,
   sidebarCollapsed,
-  sidebarHeight,
 
   // List state
   listMode,
@@ -300,6 +296,13 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   onOpenHealth,
 }) => {
   const { t } = useTranslation(['option', 'common'])
+  const controlsRef = React.useRef<HTMLDivElement>(null)
+  const controlsHaveMoreBelow = useHasContentBelow(controlsRef)
+  const showMoreControls = React.useCallback(() => {
+    const controls = controlsRef.current
+    if (!controls) return
+    controls.scrollTop += Math.max(1, Math.floor(controls.clientHeight * 0.8))
+  }, [])
   const renderHelpButton = React.useCallback(
     (label: string) => (
       <button
@@ -382,15 +385,11 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
             ? `absolute left-0 top-0 z-40 h-full w-[min(92vw,420px)] max-w-full transform border-r border-border bg-surface shadow-xl transition-transform duration-300 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-focus ${
                 mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
               }`
-            : `flex-shrink-0 transition-all duration-300 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-focus ${
+            : `h-full min-h-0 flex-shrink-0 transition-all duration-300 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-focus ${
                 sidebarCollapsed ? 'w-0 overflow-hidden' : 'w-[300px] lg:w-[340px] xl:w-[380px]'
               }`
         }
-        style={
-          isMobileViewport
-            ? { minHeight: '100%', height: '100%' }
-            : { minHeight: `${MIN_SIDEBAR_HEIGHT}px`, height: `${sidebarHeight}px` }
-        }
+        style={isMobileViewport ? { minHeight: '100%', height: '100%' } : undefined}
       >
         <div
           className={`flex h-full flex-col overflow-hidden border border-border bg-surface ${
@@ -399,6 +398,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
         >
           {/* Toolbar Section */}
           <div
+            ref={controlsRef}
             className="min-h-0 flex-shrink overflow-y-auto border-b border-border p-4 bg-surface"
             style={{ maxHeight: '50%' }}
             data-testid="notes-sidebar-controls"
@@ -1008,6 +1008,27 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 </Typography.Text>
               )}
             </div>
+            {controlsHaveMoreBelow && (
+              // Zero-height sticky anchor: the cue overlays the bottom of the
+              // controls instead of adding height to them (NO-01).
+              <div
+                className="pointer-events-none sticky bottom-0 -mx-4 h-0"
+                data-testid="notes-sidebar-controls-more"
+              >
+                <div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-surface via-surface/90 to-transparent pb-1 pt-6">
+                  <Button
+                    size="small"
+                    type="link"
+                    className="pointer-events-auto text-xs"
+                    onClick={showMoreControls}
+                  >
+                    {t('option:notesSearch.controlsMoreBelow', {
+                      defaultValue: 'More filters below'
+                    })}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Notes List Section */}

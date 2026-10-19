@@ -82,11 +82,9 @@ import {
   normalizeGraphNoteId,
   getNotesGraphEdgeLabel,
   parseSourceNodeId,
-  MIN_SIDEBAR_HEIGHT,
   NOTES_LIST_REGION_ID,
   NOTES_EDITOR_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
-  calculateSidebarHeight,
   NOTE_TEMPLATES,
   toSortableTimestamp,
   toNoteVersion,
@@ -246,7 +244,6 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   const [shortcutHelpOpen, setShortcutHelpOpen] = React.useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
   const desktopSidebarCollapsedRef = React.useRef(false)
-  const [sidebarHeight, setSidebarHeight] = React.useState(calculateSidebarHeight())
   const [conversationLabelById, setConversationLabelById] = React.useState<Record<string, string>>({})
   const conversationLabelByIdRef = React.useRef<Record<string, string>>({})
   conversationLabelByIdRef.current = conversationLabelById
@@ -2482,14 +2479,6 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     return () => { cancelled = true }
   }, [list.data, ed, isOnline, list.listMode, pendingNoteId, sourceNoteId])
 
-  // Sidebar layout
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return
-    const handleResize = () => setSidebarHeight(calculateSidebarHeight())
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
-
   React.useEffect(() => {
     if (!isMobileViewport) desktopSidebarCollapsedRef.current = sidebarCollapsed
   }, [isMobileViewport, sidebarCollapsed])
@@ -2651,7 +2640,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   )
 
   return (
-    <div className="relative flex h-full w-full bg-bg p-2 sm:p-4 mt-16">
+    <div className="relative flex h-full min-h-0 w-full flex-1 bg-bg p-2 sm:p-4" data-testid="notes-page-frame">
       {LeaveGuard ? <LeaveGuard when={ed.leaveGuard.when} onLeave={ed.leaveGuard.onLeave} /> : null}
       <a href={`#${NOTES_LIST_REGION_ID}`} onClick={handleSkipLinkActivate(NOTES_LIST_REGION_ID)} className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:border focus:border-border focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-text focus:shadow">
         {t('option:notesSearch.skipToNotesList', { defaultValue: 'Skip to notes list' })}
@@ -2669,7 +2658,6 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         isMobileViewport={isMobileViewport}
         mobileSidebarOpen={mobileSidebarOpen}
         sidebarCollapsed={sidebarCollapsed}
-        sidebarHeight={sidebarHeight}
         listMode={list.listMode}
         listViewMode={list.listViewMode}
         page={list.page}
@@ -2767,8 +2755,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       {!isMobileViewport && (
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="relative w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors motion-reduce:transition-none rounded-r-lg"
-          style={{ minHeight: `${MIN_SIDEBAR_HEIGHT}px`, height: `${sidebarHeight}px` }}
+          className="relative h-full w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors motion-reduce:transition-none rounded-r-lg"
           aria-label={sidebarCollapsed ? t('option:notesSearch.expandSidebar', { defaultValue: 'Expand sidebar' }) : t('option:notesSearch.collapseSidebar', { defaultValue: 'Collapse sidebar' })}
           data-testid="notes-desktop-sidebar-toggle"
         >
