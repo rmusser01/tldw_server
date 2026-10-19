@@ -12,6 +12,8 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
+
 FINGERPRINT_VERSION = "prompt-v1"
 
 _KNOWN_PART_TYPES = frozenset(
@@ -179,25 +181,8 @@ def _canonical_json(value: Any) -> str:
 
 
 def _sanitize_data_uris(text: str) -> str:
-    lowered = text.lower()
-    output: list[str] = []
-    index = 0
-    while True:
-        start = lowered.find("data:image", index)
-        if start == -1:
-            output.append(text[index:])
-            break
-        comma = text.find(",", start)
-        if comma == -1:
-            output.append(text[index:])
-            break
-        output.append(text[index : comma + 1])
-        output.append("<omitted>")
-        end = comma + 1
-        while end < len(text) and not text[end].isspace() and text[end] not in "\"'":
-            end += 1
-        index = end
-    return "".join(output)
+    """Redact data:image payloads: the chat path's one redactor, for fingerprints and estimates."""
+    return DATA_URI_REDACT_RE.sub(r"\1<omitted>", text)
 
 
 def _normalize_message(message: Mapping[str, Any]) -> dict[str, Any]:

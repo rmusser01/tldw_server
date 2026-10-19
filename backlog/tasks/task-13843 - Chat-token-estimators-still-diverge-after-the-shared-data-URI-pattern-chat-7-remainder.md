@@ -2,7 +2,7 @@
 id: TASK-13843
 title: Chat token estimators still diverge after the shared data-URI pattern (chat-7
   remainder)
-status: To Do
+status: In Progress
 labels:
 - chat
 - tokens
@@ -25,6 +25,7 @@ PR #3247 (TASK-13560) gave the chat path one bounded data-URI redaction pattern 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-10-18-chat-token-estimators.md. Owner decisions (approved 2026-10-18 with the plan): D1 (AC4 redaction) = option B, count data:image text unless it is a real base64 image, using the possessive pattern; D2 = round up, (n+3)//4, never below 1 for a request. The owner's approval of the plan covers chat-7's owner-only chat.py sites. ADR assessment: no ADR needed (ADR-064 and ADR-067 are related and unchanged; the estimator rule is a reversible heuristic recorded in the plan and docstrings). The committed plan is the design note chat-7 asks for.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
