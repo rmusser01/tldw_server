@@ -2,7 +2,7 @@
 id: TASK-13857
 title: TTS capability listing cancels slow local model loads and marks the provider
   failed
-status: To Do
+status: In Progress
 labels:
 - tts
 - bug

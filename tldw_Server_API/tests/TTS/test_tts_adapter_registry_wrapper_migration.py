@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from typing import Any
+from unittest.mock import AsyncMock
 
+import anyio
 import pytest
 
+from tldw_Server_API.app.core.Infrastructure.provider_registry import (
+    ProviderStatus as RegistryProviderStatus,
+)
 from tldw_Server_API.app.core.TTS import adapter_registry
 from tldw_Server_API.app.core.TTS.adapter_registry import TTSAdapterRegistry, TTSProvider
 from tldw_Server_API.app.core.TTS.adapters.base import (
@@ -16,6 +22,7 @@ from tldw_Server_API.app.core.TTS.adapters.base import (
     TTSResponse,
 )
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError
+from tldw_Server_API.app.core.TTS.tts_service_v2 import TTSServiceV2
 
 pytestmark = pytest.mark.unit
 
@@ -142,6 +149,18 @@ class _BlockingAdapter(_MockAdapterV1):
         self.close_calls += 1
         self.closed = True
         await super().close()
+
+
+class _SlowLoadAdapter(_MockAdapterV1):
+    """Loads its model on a worker thread, as luxtts, index_tts and pocket_tts do, for as long as the test says."""
+
+    loads = 0
+    release: threading.Event | None = None
+
+    async def initialize(self) -> bool:
+        type(self).loads += 1
+        assert await asyncio.to_thread(type(self).release.wait, 5)
+        return True
 
 
 class _CloseTrackingAdapter(_MockAdapterV1):
@@ -397,7 +416,8 @@ async def test_registry_closes_adapter_and_reraises_initialization_cancellation(
         return _NonCriticalResourceManager()
 
     monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
-    task = asyncio.create_task(registry.get_adapter(TTSProvider.MOCK))
+    # get_adapter shields initialization from its callers; loop shutdown still cancels it.
+    task = asyncio.create_task(registry._initialize_adapter(TTSProvider.MOCK))
     await _CancelledInitializationAdapter.started.wait()
     task.cancel()
 
@@ -408,6 +428,179 @@ async def test_registry_closes_adapter_and_reraises_initialization_cancellation(
     assert _CancelledInitializationAdapter.instances[0].close_calls == 1
     assert registry._adapters == {}
     assert registry._base.get_cached_adapters() == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "via_anyio_scope",
+    [False, True],
+    # Starlette cancels a disconnected request through an anyio cancel scope.
+    ids=["task-cancel", "anyio-scope"],
+)
+async def test_registry_cancelled_caller_leaves_the_initialization_to_the_next_caller(
+    monkeypatch,
+    via_anyio_scope,
+) -> None:
+    """A client disconnect during a first request's model load must not restart the load for the next request."""
+    registry = TTSAdapterRegistry(config={"mock_enabled": True}, include_defaults=False)
+    _BlockingAdapter.started = asyncio.Event()
+    _BlockingAdapter.release = asyncio.Event()
+    _BlockingAdapter.instances = []
+    registry.register_adapter(TTSProvider.MOCK, _BlockingAdapter)
+
+    async def _get_resource_manager() -> _NonCriticalResourceManager:
+        return _NonCriticalResourceManager()
+
+    monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
+    scopes: list[anyio.CancelScope] = []
+
+    async def _request() -> None:
+        if not via_anyio_scope:
+            await registry.get_adapter(TTSProvider.MOCK)
+            return
+        with anyio.CancelScope() as scope:
+            scopes.append(scope)
+            await registry.get_adapter(TTSProvider.MOCK)
+
+    first = asyncio.create_task(_request())
+    await _BlockingAdapter.started.wait()
+    if via_anyio_scope:
+        scopes[0].cancel()
+        await first
+    else:
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+    second = asyncio.create_task(registry.get_adapter(TTSProvider.MOCK))
+    await asyncio.sleep(0.05)
+    _BlockingAdapter.release.set()
+    adapter = await asyncio.wait_for(second, 5)  # bounded: a regression fails instead of hanging (Review M1)
+
+    assert len(_BlockingAdapter.instances) == 1
+    assert adapter is _BlockingAdapter.instances[0]
+    assert adapter.close_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_registry_capability_timeout_neither_restarts_nor_fails_a_slow_load(monkeypatch) -> None:
+    """GET /audio/health lists capabilities with a timeout; a slow model load must outlive it unharmed."""
+    registry = TTSAdapterRegistry(
+        config={"mock_enabled": True, "adapter_failure_retry_seconds": 300},
+        include_defaults=False,
+    )
+    _SlowLoadAdapter.loads = 0
+    _SlowLoadAdapter.release = threading.Event()
+    registry.register_adapter(TTSProvider.MOCK, _SlowLoadAdapter)
+
+    async def _get_resource_manager() -> _NonCriticalResourceManager:
+        return _NonCriticalResourceManager()
+
+    monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
+    monkeypatch.setattr(adapter_registry, "_CAPABILITY_LISTING_TIMEOUT_SECONDS", 0.05)
+    try:
+        assert TTSProvider.MOCK not in await registry.get_all_capabilities()
+        assert registry._base.get_status("mock") == RegistryProviderStatus.ENABLED
+        # A second poll while the load still runs joins it rather than starting another.
+        assert TTSProvider.MOCK not in await registry.get_all_capabilities()
+    finally:
+        _SlowLoadAdapter.release.set()
+    adapter = await registry.get_adapter(TTSProvider.MOCK)
+
+    assert isinstance(adapter, _SlowLoadAdapter)
+    assert _SlowLoadAdapter.loads == 1
+    assert TTSProvider.MOCK in await registry.get_all_capabilities()
+
+
+@pytest.mark.asyncio
+async def test_registry_list_capabilities_does_not_wait_out_a_slow_load(monkeypatch) -> None:
+    """GET /audio/health calls list_capabilities after get_all_capabilities; neither may wait out a load. (Review I1)"""
+    registry = TTSAdapterRegistry(
+        config={"mock_enabled": True, "adapter_failure_retry_seconds": 300},
+        include_defaults=False,
+    )
+    _SlowLoadAdapter.loads = 0
+    _SlowLoadAdapter.release = threading.Event()
+    registry.register_adapter(TTSProvider.MOCK, _SlowLoadAdapter)
+
+    async def _get_resource_manager() -> _NonCriticalResourceManager:
+        return _NonCriticalResourceManager()
+
+    monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
+    monkeypatch.setattr(adapter_registry, "_CAPABILITY_LISTING_TIMEOUT_SECONDS", 0.05)
+    try:
+        await registry.get_all_capabilities()
+        envelopes = await asyncio.wait_for(registry.list_capabilities(), timeout=1.0)
+    finally:
+        _SlowLoadAdapter.release.set()
+
+    assert envelopes == [{"provider": "mock", "availability": "enabled", "capabilities": None}]
+    assert isinstance(await registry.get_adapter(TTSProvider.MOCK), _SlowLoadAdapter)
+    assert _SlowLoadAdapter.loads == 1
+
+
+@pytest.mark.asyncio
+async def test_registry_best_adapter_skips_a_provider_that_is_still_loading(monkeypatch) -> None:
+    """Failover picks a provider that is ready now; it does not wait out another provider's model load."""
+    registry = TTSAdapterRegistry(
+        config={
+            "mock_enabled": True,
+            "kokoro_enabled": True,
+            "provider_priority": ["mock", "kokoro"],
+            "adapter_failure_retry_seconds": 300,
+        },
+        include_defaults=False,
+    )
+    _SlowLoadAdapter.loads = 0
+    _SlowLoadAdapter.release = threading.Event()
+    registry.register_adapter(TTSProvider.MOCK, _SlowLoadAdapter)
+    registry.register_adapter(TTSProvider.KOKORO, _MockAdapterV1)
+
+    async def _get_resource_manager() -> _NonCriticalResourceManager:
+        return _NonCriticalResourceManager()
+
+    monkeypatch.setattr(adapter_registry, "get_resource_manager", _get_resource_manager)
+    monkeypatch.setattr(adapter_registry, "_CAPABILITY_LISTING_TIMEOUT_SECONDS", 0.05)
+    try:
+        adapter = await asyncio.wait_for(registry.find_adapter_for_requirements(language="en"), timeout=1.0)
+        # Skipped, not failed: a request that names the loading provider still joins its initialization.
+        assert registry._base.get_status("mock") == RegistryProviderStatus.ENABLED
+    finally:
+        _SlowLoadAdapter.release.set()
+
+    assert isinstance(adapter, _MockAdapterV1) and not isinstance(adapter, _SlowLoadAdapter)
+    assert isinstance(await registry.get_adapter(TTSProvider.MOCK), _SlowLoadAdapter)
+    assert _SlowLoadAdapter.loads == 1
+
+
+@pytest.mark.asyncio
+async def test_service_fallback_skips_a_provider_that_is_still_loading(monkeypatch) -> None:
+    """TTSServiceV2 failover walks the providers itself; a still-loading one is skipped, not waited on."""
+    ready = _MockAdapterV1({})
+    ready.validate_request = AsyncMock(return_value=(True, None))
+
+    class _Registry:
+        _adapter_specs = {TTSProvider.OPENAI: object(), TTSProvider.ELEVENLABS: object()}
+
+        async def get_adapter(self, provider):
+            if provider == TTSProvider.OPENAI:
+                await asyncio.Event().wait()  # a model load that has not returned
+            return ready
+
+    class _Factory:
+        registry = _Registry()
+
+        async def get_best_adapter(self, *_, **__):
+            return None
+
+    monkeypatch.setattr(adapter_registry, "_CAPABILITY_LISTING_TIMEOUT_SECONDS", 0.05)
+    service = TTSServiceV2(_Factory())
+
+    adapter = await asyncio.wait_for(
+        service._get_fallback_adapter(TTSRequest(text="hello", format=AudioFormat.MP3)),
+        timeout=1.0,
+    )
+
+    assert adapter is ready
 
 
 @pytest.mark.asyncio
