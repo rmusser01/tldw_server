@@ -177,10 +177,10 @@ def test_rebuild_all_media_uses_override_helper_for_sqlite_admin_override(monkey
 
     class _FakeService:
         def __init__(self) -> None:
-            self.submissions: list[tuple[int, str]] = []
+            self.submissions: list[tuple[int, str, object]] = []
 
-        def submit(self, *, media_id: int, db_path: str) -> None:
-            self.submissions.append((media_id, db_path))
+        def submit(self, *, media_id: int, db_path: str, owner_user_id: object = None) -> None:
+            self.submissions.append((media_id, db_path, owner_user_id))
 
     helper_calls: list[int] = []
 
@@ -211,7 +211,7 @@ def test_rebuild_all_media_uses_override_helper_for_sqlite_admin_override(monkey
     )
 
     assert result == {"status": "accepted", "enqueued": 2, "policy": "all"}
-    assert svc.submissions == [(5, "/tmp/user-7.db"), (8, "/tmp/user-7.db")]
+    assert svc.submissions == [(5, "/tmp/user-7.db", "7"), (8, "/tmp/user-7.db", "7")]
     assert helper_calls == [7]
 
 

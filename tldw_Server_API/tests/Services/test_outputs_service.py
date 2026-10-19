@@ -222,9 +222,33 @@ def test_summarize_single_article_sends_the_text_with_a_custom_prompt_that_has_n
 
 
 @pytest.mark.unit
-def test_summarize_single_article_falls_back_when_analyze_returns_an_error(adapter: _Adapter) -> None:
-    adapter.reply = ""  # analyze() returns "Error: Provider returned no usable analysis..."
-    assert outputs_service._summarize_single_article("Cedar article body.", **_LLM) == "Cedar article body."
+def test_summarize_single_article_returns_nothing_when_the_provider_fails(adapter: _Adapter) -> None:
+    # An excerpt of the article would render as if the model wrote it (TASK-13642).
+    adapter.reply = ""  # no usable analysis: a provider failure
+    assert outputs_service._summarize_single_article("Cedar article body.", **_LLM) == ""
+
+
+@pytest.mark.unit
+async def test_summarize_items_for_output_leaves_no_summary_when_the_provider_fails(adapter: _Adapter) -> None:
+    adapter.reply = ""
+    items = await outputs_service.summarize_items_for_output([{"id": 1, "content": "Cedar article body."}], **_LLM)
+    assert items[0]["llm_summary"] == ""
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("api_name", ["", "None"])
+def test_summarize_single_article_without_a_provider_returns_nothing(adapter: _Adapter, api_name: str) -> None:
+    # analyze() answers a missing provider with an "Error:" string, which is not a summary.
+    assert outputs_service._summarize_single_article("Cedar article body.", api_name=api_name) == ""
+    assert adapter.requests == []
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("helper", ["_summarize_single_article", "_summarize_text_block"])
+def test_a_summary_that_starts_with_error_is_still_the_summary(adapter: _Adapter, helper: str) -> None:
+    # Provider failures raise (raise_on_error), so a reply is the model's text, whatever it starts with.
+    adapter.reply = "Error: budgets ran out, the article says, so the bridge work stopped."
+    assert getattr(outputs_service, helper)("Cedar article body.", **_LLM) == adapter.reply
 
 
 @pytest.mark.unit

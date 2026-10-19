@@ -18,19 +18,11 @@ def _merge_routes_disable(existing: str | None) -> str:
     return ",".join(parts)
 
 
-@pytest.fixture(scope="session", autouse=True)
-def _claims_suite_minimal_app_env():
-    original = {
-        "MINIMAL_TEST_APP": os.environ.get("MINIMAL_TEST_APP"),
-        "ROUTES_DISABLE": os.environ.get("ROUTES_DISABLE"),
-    }
-    os.environ["MINIMAL_TEST_APP"] = "1"
-    os.environ["ROUTES_DISABLE"] = _merge_routes_disable(original["ROUTES_DISABLE"])
-    try:
-        yield
-    finally:
-        for key, value in original.items():
-            if value is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = value
+@pytest.fixture(autouse=True)
+def _claims_suite_minimal_app_env(monkeypatch):
+    """Minimal app with the media and audio routes off, for each Claims test only.
+
+    Session scope kept these settings for every later test on the same worker (TASK-13840).
+    """
+    monkeypatch.setenv("MINIMAL_TEST_APP", "1")
+    monkeypatch.setenv("ROUTES_DISABLE", _merge_routes_disable(os.environ.get("ROUTES_DISABLE")))
