@@ -1190,7 +1190,7 @@ async def test_a_hand_off_that_keeps_failing_retries_the_stage(pipeline_worker, 
     from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     worker, jm, stt_calls = pipeline_worker
-    monkeypatch.setattr(worker, "_ENQUEUE_RETRY_DELAYS", (0.0, 0.0), raising=False)
+    monkeypatch.setattr(worker, "_ENQUEUE_RETRY_DELAYS", (0.0, 0.0), raising=True)
     original_create = JobManager.create_job
 
     def _flaky_create(self, **kwargs):
@@ -1558,7 +1558,7 @@ async def test_a_transient_enqueue_error_is_retried_without_running_the_stage_ag
     from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     worker, jm, stt_calls = pipeline_worker
-    monkeypatch.setattr(worker, "_ENQUEUE_RETRY_DELAYS", (0.0, 0.0), raising=False)
+    monkeypatch.setattr(worker, "_ENQUEUE_RETRY_DELAYS", (0.0, 0.0), raising=True)
     logger_capture = _CaptureLogger()
     monkeypatch.setattr(worker, "logger", logger_capture)
     original_create = JobManager.create_job
@@ -1576,6 +1576,53 @@ async def test_a_transient_enqueue_error_is_retried_without_running_the_stage_ag
     assert [(j["status"], j["retry_count"]) for j in _jobs_of(jm, "audio_transcribe")] == [("completed", 0)]
     assert len(stt_calls) == 1
     # The log names the error type only: a backend error can carry host and user names.
+    rendered_logs = _render_log_records(logger_capture.records)
+    assert "RuntimeError" in rendered_logs
+    assert "db.internal" not in rendered_logs
+
+
+@pytest.mark.unit
+async def test_a_transient_complete_error_after_the_hand_off_is_retried_in_place(pipeline_worker, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    worker, jm, stt_calls = pipeline_worker
+    monkeypatch.setattr(worker, "_ENQUEUE_RETRY_DELAYS", (0.0, 0.0), raising=True)
+    original_complete = JobManager.complete_job
+    failed_once = []
+
+    def _flaky_complete(self, job_id, **kwargs):
+        if (self.get_job(job_id) or {}).get("job_type") == "audio_transcribe" and not failed_once:
+            failed_once.append(True)
+            raise RuntimeError("database is locked")
+        return original_complete(self, job_id, **kwargs)
+
+    monkeypatch.setattr(JobManager, "complete_job", _flaky_complete)
+    _convert_job(jm)
+    await _run_worker_until(worker, lambda: _store_completed(jm))
+    # Before: the error escaped hand_off and left the stage processing, to be run again once its lease ran out.
+    assert [(j["status"], j["retry_count"]) for j in _jobs_of(jm, "audio_transcribe")] == [("completed", 0)]
+    assert len(stt_calls) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("broken", ["get_job", "cancel_job"])
+async def test_an_error_checking_for_a_cancel_after_the_hand_off_is_logged_not_raised(monkeypatch, broken):
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+
+    def _fails(*args, **kwargs):
+        raise RuntimeError("connection to server at db.internal (10.0.0.5) failed")
+
+    jm = SimpleNamespace(
+        create_job=lambda **kwargs: {"id": 2},
+        complete_job=lambda *args, **kwargs: False,  # the stage was cancelled while it ran
+        get_job=lambda job_id: {"status": "cancelled"},
+        cancel_job=lambda *args, **kwargs: True,
+    )
+    setattr(jm, broken, _fails)
+    logger_capture = _CaptureLogger()
+    monkeypatch.setattr(worker, "logger", logger_capture)
+    job = {"id": 1, "owner_user_id": "7", "lease_id": "lease"}
+    assert await worker.hand_off(jm, job, "audio_store", {}, worker_id="w") is None
     rendered_logs = _render_log_records(logger_capture.records)
     assert "RuntimeError" in rendered_logs
     assert "db.internal" not in rendered_logs
@@ -1717,7 +1764,8 @@ async def test_cancelling_a_running_stage_stops_the_stages_after_it(pipeline_wor
 
 
 @pytest.mark.unit
-async def test_cancel_endpoint_cancels_the_rest_of_the_pipeline(monkeypatch, tmp_path):
+@pytest.mark.parametrize("canceller", ["owner", "admin"])
+async def test_cancel_endpoint_cancels_the_rest_of_the_pipeline(monkeypatch, tmp_path, canceller):
     from fastapi import HTTPException
 
     import tldw_Server_API.app.services.audio_jobs_worker as worker
@@ -1729,6 +1777,8 @@ async def test_cancel_endpoint_cancels_the_rest_of_the_pipeline(monkeypatch, tmp
     owner = User(id=7, username="owner", email="owner@example.com", role="user", is_active=True)
     stranger = User(id=8, username="stranger", email="stranger@example.com", role="user", is_active=True)
     no_claims = SimpleNamespace(roles=[], permissions=[])
+    # An admin who does not own the pipeline may cancel it too.
+    user, principal = (owner, no_claims) if canceller == "owner" else (stranger, SimpleNamespace(roles=["admin"], permissions=[]))
     submitted = await audio_jobs.submit_audio_job(
         req=audio_jobs.SubmitAudioJobRequest(url="https://example.com/a.mp3", model="whisper-1"),
         current_user=owner, jm=jm, request=None,
@@ -1742,13 +1792,13 @@ async def test_cancel_endpoint_cancels_the_rest_of_the_pipeline(monkeypatch, tmp
         await audio_jobs.cancel_audio_job(job_id=submitted.id, current_user=stranger, jm=jm, principal=no_claims)
     assert refused.value.status_code == 403
 
-    result = await audio_jobs.cancel_audio_job(job_id=submitted.id, current_user=owner, jm=jm, principal=no_claims)
+    result = await audio_jobs.cancel_audio_job(job_id=submitted.id, current_user=user, jm=jm, principal=principal)
     assert result.cancelled == 1
     statuses = {j["job_type"]: j["status"] for j in jm.list_jobs(domain="audio", owner_user_id="7")}
     assert statuses == {"audio_download": "completed", "audio_convert": "cancelled"}
 
     with pytest.raises(HTTPException) as finished:
-        await audio_jobs.cancel_audio_job(job_id=submitted.id, current_user=owner, jm=jm, principal=no_claims)
+        await audio_jobs.cancel_audio_job(job_id=submitted.id, current_user=user, jm=jm, principal=principal)
     assert finished.value.status_code == 400
 
 

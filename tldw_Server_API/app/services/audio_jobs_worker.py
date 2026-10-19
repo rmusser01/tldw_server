@@ -120,8 +120,11 @@ async def hand_off(
     The next stage is queued first, so a failed hand-off fails this stage instead of completing it with nothing
     after it. The key makes a re-run stage reuse the next stage it already queued, which also makes a repeated
     enqueue safe. The next stage continues this job, so it is exempt from the per-user fair-share limit and the
-    submit quotas, and it keeps the pipeline's batch_group. If this stage was cancelled while it ran, the stage just queued is cancelled too, so the
-    pipeline stops here.
+    submit quotas, and it keeps the pipeline's batch_group. If this stage was cancelled while it ran, the stage
+    just queued is cancelled too, so the pipeline stops here.
+
+    Once the next stage is queued, a transient error completing this one is retried in place, and an error
+    checking for a cancel is logged, so neither runs this stage again.
     """
     next_queue = _next_stage_queue(next_type)
     for delay in (*_ENQUEUE_RETRY_DELAYS, None):
@@ -155,9 +158,23 @@ async def hand_off(
                 )
             await asyncio.sleep(delay)
     lease_id = str(job.get("lease_id"))
-    if not jm.complete_job(int(job["id"]), result=result, worker_id=worker_id, lease_id=lease_id, completion_token=lease_id):
-        if (jm.get_job(int(job["id"])) or {}).get("status") == "cancelled":
-            jm.cancel_job(int(next_job["id"]), reason="pipeline_cancelled")
+    for delay in (*_ENQUEUE_RETRY_DELAYS, None):
+        try:
+            completed = jm.complete_job(
+                int(job["id"]), result=result, worker_id=worker_id, lease_id=lease_id, completion_token=lease_id
+            )
+            break
+        except Exception as e:  # noqa: BLE001 - the completion token makes a repeated complete safe
+            logger.warning("Audio job {}: could not complete it ({})", job["id"], type(e).__name__)
+            if delay is None:
+                raise
+            await asyncio.sleep(delay)
+    if not completed:
+        try:
+            if (jm.get_job(int(job["id"])) or {}).get("status") == "cancelled":
+                jm.cancel_job(int(next_job["id"]), reason="pipeline_cancelled")
+        except Exception as e:  # noqa: BLE001 - this stage is over; raising would only run it again
+            logger.warning("Audio job {}: could not check for a cancel ({})", job["id"], type(e).__name__)
     return None
 
 
