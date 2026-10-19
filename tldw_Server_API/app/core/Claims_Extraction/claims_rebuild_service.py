@@ -23,6 +23,7 @@ from tldw_Server_API.app.core.Claims_Extraction.monitoring import (
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 
 _CLAIMS_REBUILD_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     AssertionError,
@@ -253,13 +254,20 @@ class ClaimsRebuildService:
                     queue_size=self._queue.qsize(),
                 )
                 self._persist_health()
-            except _CLAIMS_REBUILD_NONCRITICAL_EXCEPTIONS as e:
-                logger.error(f"Claims rebuild failed for media_id={task.media_id}: {e}")
+            # A quota refusal fails this task only; uncaught, it would end the worker thread.
+            except (*_CLAIMS_REBUILD_NONCRITICAL_EXCEPTIONS, LLMQuotaExceededError) as e:
+                if isinstance(e, LLMQuotaExceededError):
+                    # The owner's limit, not a fault: a warning, and no quota details in the shared health row.
+                    error = "llm_quota_exceeded"
+                    logger.warning(f"Claims rebuild refused for media_id={task.media_id}: {error}")
+                else:
+                    error = str(e)
+                    logger.error(f"Claims rebuild failed for media_id={task.media_id}: {e}")
                 with self._stats_lock:
                     self._stats["failed"] += 1
                 self._last_failure = {
                     "media_id": task.media_id,
-                    "error": str(e),
+                    "error": error,
                     "timestamp": time.time(),
                 }
                 record_claims_rebuild_metrics(
