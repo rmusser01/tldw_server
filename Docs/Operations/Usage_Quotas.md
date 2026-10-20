@@ -122,7 +122,7 @@ What `limits.llm_tokens_per_month`, `limits.llm_cost_per_day_usd` and `limits.ll
 - A lease nobody releases, for example when a worker is killed mid-request, expires within 2 minutes. A crash can hold one of the user's slots for up to that long.
 - `Retry-After` on a refusal is when the oldest held lease would expire if it stopped renewing, up to 2 minutes. A slot usually frees sooner, when one of the user's requests finishes, so a client may retry earlier.
 - Lowering a limit does not stop running requests. New ones are refused until the user is below the new limit.
-- If Redis is unreachable when a worker's lease store first connects, that worker counts on its own for the life of the process, as on `memory`. If Redis drops later, requests are admitted, a warning is logged, and leases the worker could not release expire within 2 minutes.
+- If Redis is unreachable when a worker's lease store first connects, that worker counts on its own for the life of the process, as on `memory`. If Redis drops later, or rejects writes (a read-only replica, or out of memory), the worker counts on its own until Redis recovers, and a warning is logged (ADR-078). It does not see leases taken before the drop, a lease released during the outage frees its slot at once, and leases the worker could not release in Redis expire within 2 minutes. After a Redis restart, leases are counted as before.
 
 Two other `limits.*` entries in the catalog are not part of this scheme:
 
