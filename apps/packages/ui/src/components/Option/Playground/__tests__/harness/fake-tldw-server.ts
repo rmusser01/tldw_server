@@ -328,7 +328,13 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
     if (body?.save_to_db !== true) return null
     const existing = body.conversation_id ? chats.get(String(body.conversation_id)) : undefined
     const selection = body.tldw_history_selection_v1
-    const regenerateId = body.metadata?.tldw_regenerate_from_message_id
+    // Native Continue (CM-01) reuses the saved admission exactly like Regenerate,
+    // and saves the original reply plus the continuation as the new alternative.
+    const continueId = body.metadata?.tldw_continue_from_message_id
+    const regenerateId = continueId !== undefined && body.metadata?.tldw_regenerate_from_message_id === undefined
+      ? continueId : body.metadata?.tldw_regenerate_from_message_id
+    const refusal = continueId !== undefined ? "unsupported_history_continuation" : "unsupported_history_regeneration"
+    let prefix = ""
     let chat: FakeChat, user: FakeChatMessage, admission: HistoryAdmissionV1 | undefined
     if (edited) {
       chat = edited.chat
@@ -339,8 +345,9 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
     } else if (regenerateId !== undefined) {
       if (!existing || typeof regenerateId !== "string" || body.tldw_history_branch !== true ||
           selection?.version !== 1 || selection.purpose !== "send" || selection.interpretation?.kind !== "parent_graph_v1" ||
-          selection.cursor?.kind !== "after_message" || selection.cursor.message_id !== regenerateId)
-        throw new Error("unsupported_history_regeneration")
+          selection.cursor?.kind !== "after_message" || selection.cursor.message_id !== regenerateId ||
+          (continueId !== undefined && body.metadata?.tldw_regenerate_from_message_id !== undefined))
+        throw new Error(refusal)
       chat = existing
       const target = chat.messages.find(row => row.id === regenerateId)
       const input = chat.messages.find(row => row.id === target?.parent_message_id)
@@ -355,8 +362,9 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
           selectionDigest(selection) !== selection.selection_digest || historyDigest(context) !== selection.request_context_digest ||
           canonicalHistoryJson(body.messages.filter((row: JsonBody) => row.role === "user")) !==
             canonicalHistoryJson([{ role: "user", content: input.content }]))
-        throw new Error("unsupported_history_regeneration")
+        throw new Error(refusal)
       user = input
+      if (continueId !== undefined) prefix = target.content
     } else {
       chat = existing ?? createChat("Chat", { source: "chat-completions" })
       const lastUser = [...(body.messages ?? [])].reverse().find((m: JsonBody) => m?.role === "user")
@@ -371,7 +379,7 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
         inputAdmissions.set(user.id, admission)
       }
     }
-    const assistant = appendMessage(chat, { role: "assistant", content: reply, parent_message_id: user.id })
+    const assistant = appendMessage(chat, { role: "assistant", content: prefix + reply, parent_message_id: user.id })
     return { conversationId: chat.id, assistantId: assistant.id, admission }
   }
 
@@ -440,7 +448,10 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
     const model = body?.model ?? FAKE_MODEL
     let persisted: Awaited<ReturnType<typeof persistCompletionTurn>>
     try { persisted = persistCompletionTurn(body, reply, edited, canonical) }
-    catch (error) { return edited ? editRefusal(error) : json({ detail: { code: "unsupported_history_regeneration" } }, 409) }
+    catch (error) {
+      return edited ? editRefusal(error) : json({ detail: { code: body?.metadata?.tldw_continue_from_message_id !== undefined
+        ? "unsupported_history_continuation" : "unsupported_history_regeneration" } }, 409)
+    }
     if (!body?.stream) {
       return json({
         ...(persisted ? { tldw_conversation_id: persisted.conversationId, tldw_message_id: persisted.assistantId,

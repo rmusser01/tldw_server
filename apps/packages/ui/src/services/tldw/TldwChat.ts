@@ -228,7 +228,8 @@ const buildRequestMessages = (
   messages: ChatMessage[],
   options: TldwChatOptions
 ): ChatMessage[] => {
-  const sanitizedMessages = sanitizeMessages(messages, Boolean(options.regenerateFromMessageId))
+  const savedReplyAction = Boolean(options.regenerateFromMessageId || options.continueFromMessageId)
+  const sanitizedMessages = sanitizeMessages(messages, savedReplyAction)
   const systemPrompt = normalizeSystemPrompt(options.systemPrompt)
   let withSystemPrompt: ChatMessage[]
   if (systemPrompt) {
@@ -248,12 +249,14 @@ const buildRequestMessages = (
     withSystemPrompt = sanitizedMessages
   }
 
-  if (options.regenerateFromMessageId) {
-    // Saved regeneration uses canonical server history. Sending the local
+  if (savedReplyAction) {
+    // Saved regeneration and continuation use canonical server history. Sending the local
     // prefix again would turn response variants into new persisted turns.
     const originalUser = withSystemPrompt.at(-1)
     if (originalUser?.role !== "user") {
-      throw new Error("Reload the saved user turn before regenerating its reply.")
+      throw new Error(options.continueFromMessageId
+        ? "Reload the saved user turn before continuing its reply."
+        : "Reload the saved user turn before regenerating its reply.")
     }
     withSystemPrompt = [...withSystemPrompt.filter(message => message.role === "system"), originalUser]
   }
@@ -308,10 +311,12 @@ export const prepareChatCompletionRequest = (
             }
           : {}),
         save_to_db: options.saveToDb,
-        ...(options.retryFailedTurn || options.clientMessageId || options.regenerateFromMessageId ? { metadata: {
+        ...(options.retryFailedTurn || options.clientMessageId || options.regenerateFromMessageId ||
+          options.continueFromMessageId ? { metadata: {
           ...(options.retryFailedTurn ? { tldw_retry_failed_turn: true } : {}),
           ...(options.clientMessageId ? { tldw_client_message_id: options.clientMessageId } : {}),
-          ...(options.regenerateFromMessageId ? { tldw_regenerate_from_message_id: options.regenerateFromMessageId } : {})
+          ...(options.regenerateFromMessageId ? { tldw_regenerate_from_message_id: options.regenerateFromMessageId } : {}),
+          ...(options.continueFromMessageId ? { tldw_continue_from_message_id: options.continueFromMessageId } : {})
         } } : {}),
         conversation_id: options.conversationId,
         history_message_limit: options.historyMessageLimit,
@@ -352,6 +357,8 @@ export interface TldwChatOptions {
   retryFailedTurn?: boolean
   clientMessageId?: string
   regenerateFromMessageId?: string
+  /** Native Continue (CM-01): extend this saved reply as a new server-settled alternative. */
+  continueFromMessageId?: string
   conversationId?: string
   historyMessageLimit?: number
   historyMessageOrder?: string

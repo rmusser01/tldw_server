@@ -352,3 +352,57 @@ describe("native admitted regeneration through the actual Playground", { timeout
     } finally { hold.resolve(); await waitForChatIdle() }
   })
 })
+
+const savedAssistantRow = () =>
+  screen.getAllByTestId("chat-message").filter(row => row.getAttribute("data-role") === "assistant").at(-1)!
+
+const clickContinue = async (view: Awaited<ReturnType<typeof renderPlayground>>) => {
+  await view.user.click(within(savedAssistantRow()).getByRole("button", { name: "More actions" }))
+  await view.user.click(await screen.findByRole("button", { name: "Continue Response" }, HARNESS_WAIT))
+}
+
+describe("native admitted continuation through the actual Playground", { timeout: 60_000 }, () => {
+  beforeEach(async () => { await resetPlaygroundHarness() })
+
+  it("CM-01 continues a saved reply as one longer saved alternative and keeps the original", async () => {
+    const { view, chat } = await renderWithAdmittedExchange()
+    const original = structuredClone(chat.messages)
+    const priorCompletions = view.server.completionRequests().length
+    view.server.planCompletion({ reply: " and the rest of it." })
+    await view.user.type(view.composer, "UNSENT NEXT QUESTION")
+    await withUnhandledRejectionsRecorded(async () => {
+      await clickContinue(view)
+      await waitFor(() => expect(view.server.completionRequests()).toHaveLength(priorCompletions + 1), HARNESS_WAIT)
+      await waitForChatIdle()
+      expect(visibleNotifications().join(" ")).not.toMatch(/unsupported_history|invalid_history/)
+      await waitFor(() => expect(savedAssistantRow()).toHaveTextContent("Saved answer and the rest of it."), HARNESS_WAIT)
+      expect(chat.messages.filter(row => original.some(old => old.id === row.id))).toEqual(original)
+      const alternative = chat.messages.filter(row => !original.some(old => old.id === row.id))
+      expect(alternative).toEqual([expect.objectContaining({
+        role: "assistant", content: "Saved answer and the rest of it.", parent_message_id: original[0].id })])
+      const request = view.server.completionRequests().at(-1)!.body!
+      expect(request).toMatchObject({ save_to_db: true, tldw_history_branch: true,
+        metadata: { tldw_continue_from_message_id: original[1].id },
+        tldw_history_selection_v1: { cursor: { kind: "after_message", message_id: original[1].id } } })
+      expect(request.metadata).not.toHaveProperty("tldw_regenerate_from_message_id")
+      expect(view.server.find("POST", new RegExp(`/chats/${chat.id}/messages$`)).filter(row => row.body?.role === "user")).toHaveLength(1)
+      expect(view.composer).toHaveValue("UNSENT NEXT QUESTION")
+      // The original reply stays available as the other version of this answer.
+      expect(within(savedAssistantRow()).getByTestId("variant-count-label")).toHaveTextContent("2 of 2")
+    })
+  })
+
+  it("CM-01 explains a refused Continue in plain words and keeps the saved reply", async () => {
+    const view = await renderWithSavedChat()
+    await withUnhandledRejectionsRecorded(async () => {
+      await clickContinue(view)
+      await waitFor(() => expect(visibleNotifications().length).toBeGreaterThan(0), HARNESS_WAIT)
+      const notices = visibleNotifications().join(" ")
+      expect(notices).not.toMatch(/unsupported_history|invalid_history/)
+      expect(notices).toMatch(/continue/i)
+      expect(notices).toContain("original exchange and draft are kept")
+      expect(view.server.chats.get("saved-chat")!.messages.map(row => row.content)).toEqual(["Saved question", "Saved answer"])
+      expect(screen.getByText("Saved answer")).toBeInTheDocument()
+    })
+  })
+})
