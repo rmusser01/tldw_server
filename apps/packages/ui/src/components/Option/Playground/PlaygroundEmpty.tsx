@@ -17,6 +17,7 @@ import { requestQuickIngestOpen } from "@/utils/quick-ingest-open";
 import { useIsConnected } from "@/hooks/useConnectionState";
 import { requestSettingsNavigation } from "@/utils/settings-return";
 import { EmptyState } from "@/components/ui/feedback";
+import { FEATURE_FLAGS, useFeatureFlag } from "@/hooks/useFeatureFlags";
 
 const actionButtonFocusClassName =
   "focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-bg";
@@ -28,6 +29,8 @@ export const PlaygroundEmpty = () => {
   const { open: openHelpModal } = useHelpModal();
   const navigate = useNavigate();
   const [modesExpanded, setModesExpanded] = React.useState(false);
+  // Compare stays hidden until it is verified (owner decision D4).
+  const [compareEnabled] = useFeatureFlag(FEATURE_FLAGS.COMPARE_MODE);
 
   const dispatchStarter = React.useCallback(
     (mode: "general" | "compare" | "character" | "rag", prompt?: string) => {
@@ -130,8 +133,8 @@ export const PlaygroundEmpty = () => {
         ),
         action: handleOpenDeepResearch,
       },
-    ],
-    [dispatchStarter, handleOpenDeepResearch, t],
+    ].filter((starter) => compareEnabled || starter.key !== "compare"),
+    [compareEnabled, dispatchStarter, handleOpenDeepResearch, t],
   );
 
   const description = demoEnabled

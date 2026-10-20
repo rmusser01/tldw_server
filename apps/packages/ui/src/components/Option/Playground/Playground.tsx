@@ -2394,7 +2394,9 @@ const PlaygroundContent = () => {
         return;
       }
 
-      const action = resolvePlaygroundShortcutAction(event);
+      const action = resolvePlaygroundShortcutAction(event, {
+        compareAvailable: compareFeatureEnabled,
+      });
       if (!action) return;
       if (editableTarget) return;
       event.preventDefault();
@@ -2428,6 +2430,7 @@ const PlaygroundContent = () => {
     activeArtifact,
     artifactsOpen,
     closeArtifacts,
+    compareFeatureEnabled,
     markArtifactsRead,
     setArtifactsOpen,
     threadSearchOpen,
