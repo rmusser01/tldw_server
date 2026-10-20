@@ -2,7 +2,7 @@ import { SidePanelBody } from "@/components/Sidepanel/Chat/body"
 import { PlaygroundChat } from "@/components/Option/Playground/PlaygroundChat"
 // @vitest-environment jsdom
 import React from "react"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PlaygroundMessage } from "../Message"
@@ -508,6 +508,68 @@ describe("PlaygroundMessage error recovery integration", () => {
 
     await user.click(screen.getByRole("button", { name: "Continue from partial" }))
     expect(onContinue).toHaveBeenCalledTimes(1)
+  })
+
+  it("CM-03 marks a reply cut off at the output limit and offers Continue and Retry", async () => {
+    const user = userEvent.setup()
+    const onRegenerate = vi.fn()
+    const onContinue = vi.fn()
+
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        onRegenerate={onRegenerate}
+        onContinue={onContinue}
+        generationInfo={{ finish_reason: "length" }}
+      />
+    )
+
+    const status = screen.getByRole("status", { name: "Output limit reached" })
+    expect(status).toHaveTextContent("this reply may be cut off")
+    expect(screen.queryByRole("button", { name: "Try provider fallback" })).not.toBeInTheDocument()
+
+    await user.click(within(status).getByRole("button", { name: "Continue from partial" }))
+    expect(onContinue).toHaveBeenCalledTimes(1)
+    await user.click(within(status).getByRole("button", { name: "Retry same model" }))
+    expect(onRegenerate).toHaveBeenCalledTimes(1)
+  })
+
+  it("CM-03 keeps the output-limit marker on an older reply but offers its actions only on the last one", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        currentMessageIndex={0}
+        totalMessages={3}
+        generationInfo={{ finish_reason: "length" }}
+      />
+    )
+
+    expect(screen.getByRole("status", { name: "Output limit reached" })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Continue from partial" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Retry same model" })).not.toBeInTheDocument()
+  })
+
+  it("CM-03 disables Continue and Retry with the reason when the reply cannot be regenerated", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        regenerateDisabledReason="This saved reply can't be regenerated here."
+        generationInfo={{ finish_reason: "length" }}
+      />
+    )
+
+    const status = screen.getByRole("status", { name: "Output limit reached" })
+    expect(within(status).getByRole("button", { name: "Retry same model" })).toBeDisabled()
+    expect(within(status).getByRole("button", { name: "Continue from partial" })).toBeDisabled()
+  })
+
+  it.each([
+    ["a complete reply", { isBot: true, generationInfo: { finish_reason: "stop" } }],
+    ["a user message", { isBot: false, role: "user" as const, generationInfo: { finish_reason: "length" } }],
+    ["a saved reply with its own status", { generationInfo: { finish_reason: "length" }, metadataExtra: { generation_status: "complete" } }]
+  ])("CM-03 does not mark %s as cut off", (_label, props) => {
+    render(<PlaygroundMessage {...baseProps} {...props} />)
+    expect(screen.queryByText("Output limit reached")).not.toBeInTheDocument()
   })
 
   it("renders recovery for completed assistant turns with no visible text", async () => {

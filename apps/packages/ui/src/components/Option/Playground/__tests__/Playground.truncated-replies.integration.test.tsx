@@ -108,4 +108,32 @@ describe("Playground cut-off replies (CM-03)", { timeout: 90_000 }, () => {
     expect(within(lastReply()).queryByText("Interrupted")).toBeNull()
   })
 
+  it("CM-03: a reply that hit the output limit is marked incomplete and offers Continue and Retry", async () => {
+    const server = createFakeTldwServer()
+    server.planCompletion({ chunks: ["Here is the first part of a long answer that was cut off mid-"], finishReason: "length" })
+    server.planCompletion({ reply: " sentence, and the rest." })
+    const view = await renderPlayground({ server })
+
+    await sendInTemporaryChat(view, "Explain everything")
+
+    const notice = await within(lastReply()).findByRole("status", { name: "Output limit reached" }, HARNESS_WAIT)
+    expect(notice).toHaveTextContent(/output limit/i)
+    expect(within(notice).getByRole("button", { name: "Retry same model" })).toBeEnabled()
+    const continueButton = within(notice).getByRole("button", { name: "Continue from partial" })
+
+    await view.user.click(continueButton)
+    await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)
+    await waitForChatIdle()
+    // Continue sends the conversation with the cut-off reply last.
+    expect(completionMessages(server.completionRequests()[1])).toEqual([
+      { role: "user", content: "Explain everything" },
+      { role: "assistant", content: "Here is the first part of a long answer that was cut off mid-" }
+    ])
+    await waitFor(
+      () => expect(lastReply()).toHaveTextContent("Here is the first part of a long answer that was cut off mid- sentence, and the rest."),
+      HARNESS_WAIT
+    )
+    // The continued reply finished normally, so it is no longer marked incomplete.
+    expect(within(lastReply()).queryByRole("status", { name: "Output limit reached" })).toBeNull()
+  })
 })

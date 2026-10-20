@@ -77,6 +77,7 @@ import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { KnownServicePromptId } from "@/services/tldw/domains/service-prompts"
 import { createServicePromptScopeChangedError, isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { decodeChatErrorPayload } from "@/utils/chat-error-message"
+import { isOutputLimitFinishReason, markOutputLimitedReply } from "@/utils/output-limit-reply"
 
 const STREAMING_UPDATE_INTERVAL_MS = 80
 const EMPTY_RESPONSE_ERROR_MESSAGE = "No response text was returned."
@@ -1121,6 +1122,15 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
             "Stream transport interrupted; partial response saved."
         }
       : generationInfo
+    // CM-03: the model stopped at its output limit, so the reply is cut off.
+    // The view marks it; a native reply's metadata is settled by the server.
+    const outputLimited =
+      !streamTransportInterrupted && isOutputLimitFinishReason(modelClient.finishReason)
+    const viewGenerationInfo = outputLimited
+      ? markOutputLimitedReply(finalGenerationInfo)
+      : finalGenerationInfo
+    const savedGenerationInfo =
+      historyTurn?.owner.kind === "native" ? finalGenerationInfo : viewGenerationInfo
     const dynamicUIEnvelope =
       params.dynamicUIRequest?.renderer === "openui"
         ? buildDynamicUIEnvelope("openui", fullText)
@@ -1136,7 +1146,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
                 message: fullText,
                 serverMessageId: modelClient.serverMessageId,
                 sources,
-                generationInfo: finalGenerationInfo,
+                generationInfo: viewGenerationInfo,
                 toolCalls,
                 reasoning_time_taken: timetaken,
                 ...(assistantMetadataExtra
@@ -1241,7 +1251,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       assistantParentMessageId: resolvedAssistantParentMessageId ?? null,
       documents,
       isContinue: mode.isContinue,
-      generationInfo: finalGenerationInfo as any,
+      generationInfo: savedGenerationInfo as any,
       prompt_content: promptContent,
       prompt_id: promptId,
       reasoning_time_taken: timetaken,
