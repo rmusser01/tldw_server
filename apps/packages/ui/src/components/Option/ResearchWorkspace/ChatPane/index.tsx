@@ -11,7 +11,6 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import {
   AlertCircle,
-  ChevronDown,
   FileText,
   Send,
   MessageSquarePlus,
@@ -46,6 +45,7 @@ import type { Message } from "@/store/option"
 import type { WorkspaceCapabilitiesResponse } from "@/services/tldw/domains/workspace-api"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
+import { ScrollToLatestButton } from "@/components/Common/ScrollToLatestButton"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { useModelSelector } from "@/hooks/playground"
 import { useConnectionStore } from "@/store/connection"
@@ -1699,8 +1699,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   )
 
   // Smart scroll for chat messages
-  const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
-    useSmartScroll(messages, streaming, 120)
+  const {
+    containerRef,
+    isAutoScrollToBottom,
+    autoScrollToBottom,
+    hasUnseenMessages
+  } = useSmartScroll(messages, streaming, 120)
 
   const sourceScopeSources = useSelectedSourceScopeSources()
   const queryableSelectedSources = React.useMemo(
@@ -3733,24 +3737,12 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
         {/* Horizontally scrollable source tags */}
         {!isAutoScrollToBottom && hasMessages && (
-          <div className="pointer-events-none absolute bottom-24 left-0 right-0 flex justify-center">
-            <button
-              onClick={() => autoScrollToBottom()}
-              aria-label={t(
-                "playground:composer.scrollToLatest",
-                "Scroll to latest messages"
-              )}
-              title={
-                t(
-                  "playground:composer.scrollToLatest",
-                  "Scroll to latest messages"
-                ) as string
-              }
-              className="pointer-events-auto rounded-full border border-border bg-surface p-2 text-text-subtle shadow-card transition-colors hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-            >
-              <ChevronDown className="size-4 text-text-subtle" aria-hidden="true" />
-            </button>
-          </div>
+          <ScrollToLatestButton
+            onClick={() => autoScrollToBottom()}
+            replyInProgress={streaming}
+            hasUnseenMessages={hasUnseenMessages}
+            className="absolute bottom-24 right-4"
+          />
         )}
       </div>
 

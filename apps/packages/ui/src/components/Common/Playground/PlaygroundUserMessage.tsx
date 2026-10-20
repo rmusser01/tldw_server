@@ -28,6 +28,7 @@ import type { MessageMetadataExtra } from "@/store/option/types"
 import { EDIT_MESSAGE_EVENT } from "@/utils/timeline-actions"
 import { Badge, type BadgeVariant } from "@/components/ui/primitives"
 import { CHAT_MESSAGE_OPACITY_ALPHA } from "@/services/settings/chat-opacity-css-vars"
+import { USER_TURN_TINT_STYLE, userBubbleWidthClass } from "./turn-presentation"
 
 const ACTION_BUTTON_CLASS =
   "flex items-center justify-center rounded-full border border-border bg-surface2 text-text-muted hover:bg-surface hover:text-text transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-focus min-w-[44px] min-h-[44px]"
@@ -218,7 +219,8 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
   const messageBubbleStyle = isSystemMessage
     ? undefined
     : ({
-        backgroundColor: `rgb(var(--color-surface2) / ${CHAT_MESSAGE_OPACITY_ALPHA})`
+        backgroundColor: `rgb(var(--color-surface2) / ${CHAT_MESSAGE_OPACITY_ALPHA})`,
+        ...USER_TURN_TINT_STYLE
       } as React.CSSProperties)
 
   const actionControls = (
@@ -397,7 +399,7 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
         <div
           dir="auto"
           data-is-not-editable={!editMode}
-          className={`message-bubble ${bubbleToneClass} shadow-sm rounded-3xl prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 border max-w-[calc(100%-1.75rem)] px-4 py-3 rounded-br-lg ${userTextClass} ${
+          className={`message-bubble ${bubbleToneClass} shadow-sm rounded-3xl prose max-w-none dark:prose-invert break-words min-h-7 prose-p:opacity-95 prose-strong:opacity-100 border ${userBubbleWidthClass(isProMode)} px-4 py-3 rounded-br-lg ${userTextClass} ${
             props.message_type && !editMode ? "italic" : ""
           }`}
           style={messageBubbleStyle}>

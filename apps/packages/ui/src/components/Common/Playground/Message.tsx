@@ -26,6 +26,7 @@ import {
 } from "@/utils/chat-error-message"
 import { useStorage } from "@plasmohq/storage/hook"
 import { PlaygroundUserMessageBubble } from "./PlaygroundUserMessage"
+import { resolveAssistantDisplayName, USER_TURN_TINT_STYLE } from "./turn-presentation"
 import { DocumentProcessingTurn } from "./DocumentProcessingTurn"
 import { copyToClipboard } from "@/utils/clipboard"
 import { ChatDocuments } from "@/models/ChatTypes"
@@ -1057,7 +1058,7 @@ const PlaygroundMessageImpl = (props: Props) => {
   const resolvedModelName =
     shouldUseCharacterIdentity && props.characterIdentity?.name
       ? props.characterIdentity.name
-      : props.modelName || props.name
+      : resolveAssistantDisplayName(props.modelName || props.name, savedGeneration?.model)
   const resolvedUserPersonaImage = React.useMemo(() => {
     const raw =
       typeof userPersonaImage === "string" ? userPersonaImage.trim() : ""
@@ -2168,7 +2169,8 @@ const PlaygroundMessageImpl = (props: Props) => {
     : ({
         backgroundColor: `rgb(var(${
           props.isBot ? "--color-surface" : "--color-surface2"
-        }) / ${CHAT_MESSAGE_OPACITY_ALPHA})`
+        }) / ${CHAT_MESSAGE_OPACITY_ALPHA})`,
+        ...(props.isBot ? null : USER_TURN_TINT_STYLE)
       } as React.CSSProperties)
   const chatCharacterImageOpacityStyle = {
     opacity: CHAT_CHARACTER_IMAGE_OPACITY_ALPHA

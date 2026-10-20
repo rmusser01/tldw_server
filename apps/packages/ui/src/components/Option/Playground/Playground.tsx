@@ -80,9 +80,9 @@ import {
 import { hasCurrentServerChatSelection, usePlaygroundSessionStore } from "@/store/playground-session";
 import { getDesignSystemState } from "@/design-system";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
+import { ScrollToLatestButton } from "@/components/Common/ScrollToLatestButton";
 import { useComposerDockHeight } from "@/hooks/useComposerDockHeight";
 import {
-  ChevronDown,
   Keyboard,
   Maximize2,
   Minimize2,
@@ -684,10 +684,15 @@ const PlaygroundContent = () => {
     },
     [],
   );
-  const { containerRef, isAutoScrollToBottom, autoScrollToBottom, pauseAutoScroll } =
-    useSmartScroll(messages, streaming, 120, {
-      bottomOffsetPx: composerBottomOffsetPx,
-    });
+  const {
+    containerRef,
+    isAutoScrollToBottom,
+    autoScrollToBottom,
+    pauseAutoScroll,
+    hasUnseenMessages,
+  } = useSmartScroll(messages, streaming, 120, {
+    bottomOffsetPx: composerBottomOffsetPx,
+  });
 
   const [dropState, setDropState] = React.useState<
     "idle" | "dragging" | "error"
@@ -4064,28 +4069,13 @@ const PlaygroundContent = () => {
                   </span>
                 </div>
               ) : null}
-              {!isAutoScrollToBottom && (
-                <div className="pointer-events-none absolute -top-12 left-0 right-0 flex justify-center">
-                  <button
-                    onClick={() => autoScrollToBottom()}
-                    aria-label={t(
-                      "playground:composer.scrollToLatest",
-                      "Scroll to latest messages",
-                    )}
-                    title={
-                      t(
-                        "playground:composer.scrollToLatest",
-                        "Scroll to latest messages",
-                      ) as string
-                    }
-                    className="pointer-events-auto rounded-full border border-border bg-surface p-2.5 text-text-subtle shadow-md transition-all duration-200 animate-in fade-in zoom-in-95 hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                  >
-                    <ChevronDown
-                      className="size-4 text-text-subtle"
-                      aria-hidden="true"
-                    />
-                  </button>
-                </div>
+              {!isAutoScrollToBottom && messages.length > 0 && (
+                <ScrollToLatestButton
+                  onClick={() => autoScrollToBottom()}
+                  replyInProgress={streaming}
+                  hasUnseenMessages={hasUnseenMessages}
+                  className="absolute -top-12 right-4"
+                />
               )}
               <div className="min-h-0 overflow-y-auto overscroll-contain">
                 <PlaygroundForm

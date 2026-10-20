@@ -1493,10 +1493,10 @@ export const PlaygroundChat = ({
                 onSwipePrev={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleVariantSwipe(message.id, "prev")}
                 onSwipeNext={historySelection && (!historySelection.view || historySelection.status === "loading") ? undefined : () => handleVariantSwipe(message.id, "next")}
                 messageSteeringMode={messageSteeringMode}
-                onMessageSteeringModeChange={setMessageSteeringMode}
+                onMessageSteeringModeChange={characterIdentityEnabled ? setMessageSteeringMode : undefined}
                 messageSteeringForceNarrate={messageSteeringForceNarrate}
-                onMessageSteeringForceNarrateChange={setMessageSteeringForceNarrate}
-                onClearMessageSteering={clearMessageSteering}
+                onMessageSteeringForceNarrateChange={characterIdentityEnabled ? setMessageSteeringForceNarrate : undefined}
+                onClearMessageSteering={characterIdentityEnabled ? clearMessageSteering : undefined}
                 hideEditAndRegenerate={isImageGenerationAssistantEvent}
                 hideContinue={isImageGenerationAssistantEvent}
               />

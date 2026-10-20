@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { PlaygroundUserMessageBubble } from "../PlaygroundUserMessage"
 
@@ -50,9 +50,11 @@ vi.mock("@/utils/chat-style", () => ({
   buildChatTextClass: () => ""
 }))
 
+const uiMode = vi.hoisted(() => ({ value: "standard" }))
+
 vi.mock("@/store/ui-mode", () => ({
   useUiModeStore: (selector: (state: { mode: string }) => unknown) =>
-    selector({ mode: "standard" })
+    selector({ mode: uiMode.value })
 }))
 
 vi.mock("@/store/option", () => ({
@@ -141,5 +143,36 @@ describe("Playground user message design-system badges", () => {
 
     expect(screen.getByText("Processing documents")).toBeInTheDocument()
     expect(screen.getByText("scan.pdf")).toBeInTheDocument()
+  })
+})
+
+// CM-10 (#3101): user turns must read apart from replies, not as a second
+// card of the same colour and width.
+describe("Playground user message turn styling", () => {
+  afterEach(() => {
+    uiMode.value = "standard"
+  })
+
+  const bubble = () =>
+    screen.getByText("Review this research plan.").closest(".message-bubble") as HTMLElement
+
+  it("tints the user bubble with the primary colour", () => {
+    renderUserMessage({ messageId: "message-4" })
+
+    expect(bubble().style.backgroundImage).toContain("--color-primary")
+  })
+
+  it("caps the user bubble at three quarters of the row in casual mode", () => {
+    uiMode.value = "casual"
+    renderUserMessage({ messageId: "message-5" })
+
+    expect(bubble().className).toMatch(/(^|\s)sm:max-w-\[75%\](\s|$)/)
+  })
+
+  it("keeps the wider bubble in Pro mode", () => {
+    uiMode.value = "pro"
+    renderUserMessage({ messageId: "message-6" })
+
+    expect(bubble().className).not.toContain("max-w-[75%]")
   })
 })
