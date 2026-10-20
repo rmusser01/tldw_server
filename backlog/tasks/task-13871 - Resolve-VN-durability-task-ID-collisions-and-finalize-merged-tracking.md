@@ -1,7 +1,7 @@
 ---
 id: TASK-13871
 title: Resolve VN durability task-ID collisions and finalize merged tracking
-status: In Progress
+status: Done
 labels:
 - vn-assets
 - docs
@@ -11,7 +11,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Recreate only the four VN-owned records from PR #3207 under fresh IDs using backlog-py, because their previously allocated IDs now belong to unrelated current-dev work. Update current VN dependencies and documentation associations, preserve original histories and verified PR3016 closeout, and drive PR3207 through current review/CI to normal merge. Historical manual-exception and pending-gate notes below describe earlier attempts, not this recreation method or current state.
+Resolve the four VN-owned task identity collisions from PR #3207 through canonical backlog-py recreation, preserve original metadata and historical evidence, update current VN references, and retain verified PR3016 closeout. PR #3207 is now normally merged after current-head requesting-code-review, the retained requester Change summary and all seven required statuses. All earlier phase, allocation and pending-gate text below is historical; the final summary records current completion.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -19,7 +19,7 @@ Recreate only the four VN-owned records from PR #3207 under fresh IDs using back
 - [x] #1 Three VN records have unique unused IDs and matching filenames; unrelated colliding records are byte-identical to dev.
 - [x] #2 Current VN task dependencies and design associations use the new IDs; historical narrative references remain intact with explicit old-to-new mappings.
 - [x] #3 Merged PR3016 review tracking is finalized through official Backlog operations with accurate merge evidence and all earlier notes preserved.
-- [ ] #4 Owned documentation checks and independent review pass; publish the scoped follow-up without runtime changes or applying PR3060 summary waiver.
+- [x] #4 Owned documentation checks and independent review pass; publish the scoped follow-up without runtime changes or applying PR3060 summary waiver.
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -64,20 +64,23 @@ TASK-13526 is Done with all six AC and DoD entries checked using retained PR3016
 2026-10-20 local recreation checks pass: four fresh canonical identities, all original DESCRIPTION/PLAN/IMPLEMENTATION_NOTES/FINAL_SUMMARY content and checklist text retained, all completed states preserved except AC4 deliberately reopened until current review completes, both current dependencies target TASK-13873, and no ADR bytes changed. Current summary separates implemented record/reference work from genuinely pending independent review, publication, current-base CI and normal merge. Historical compressed prose remains verbatim; current labels read Stage 3, Task 68 / Stage 4 / Task 82, and finding 4202779147. Original comments discussion_r4202912326 and discussion_r4202912330 are addressed by accurate present-tense status and readable current prose. No fresh runtime/Bandit or product qualification is claimed.
 Independent requesting-code-review of 3ca1ff055be3c75a7fa844a02b5d8ba925baa2be..33d9036a9b904152ec2429a04bde1763513d5193 found no Critical/Important issues and one Minor current-summary ambiguity. Verified and corrected the remaining generic fresh-checks pending item to explicitly mean future post-rebase/current-base requalification. Preservation/scope checks passed independently. New exact-head final review and hosted qualification remain pending; AC4 stays unchecked until publication/review evidence exists.
 2026-10-20 current-base qualification: clean nine-patch rebase onto dev 454974e812f8faf8532c931f3f7c8e0bf8d9445c completed at 03c9d451fc919570430250bd4663932fbee83ffe. Final range-diff marks all nine prior patches unchanged. Fresh other-open-PR inventory still leaves TASK-13871 through TASK-13874 unused. All original metadata/section/checklist content is preserved; 15 unrelated colliding original/interim/current records are byte-identical to dev, and the authored range changes no ADR bytes. Both dependencies and four current document associations use the fresh IDs. PR3016 verified merge remains a dev ancestor. Applicable pre-commit and diff checks pass; canonical task-format ratchet 4 passed (6 existing warnings). The preservation audit scopes ADRs to the authored current-base diff and excludes exactly the three intended owned filename migrations from the unrelated-record comparison. Earlier final pre-rebase requesting-code-review approved 078b32be68 with no findings after the verified minor summary correction. Final rebased-head review, protected publication, hosted exact-head/current-base CI and normal merge remain pending; AC4 stays open conservatively while current publication/review finishes.
+Previous current description retained as historical checkpoint:
+Recreate only the four VN-owned records from PR #3207 under fresh IDs using backlog-py, because their previously allocated IDs now belong to unrelated current-dev work. Update current VN dependencies and documentation associations, preserve original histories and verified PR3016 closeout, and drive PR3207 through current review/CI to normal merge. Historical manual-exception and pending-gate notes below describe earlier attempts, not this recreation method or current state.
+2026-10-20 completion: PR #3207 merged normally at 2026-10-20T16:15:10Z as 2e6ceab9fb97c5712533be670504a81a24525489 from independently approved 1938258c37dee1ed776fa8fea02e80ed4a4a1e70 on current dev 454974e812f8faf8532c931f3f7c8e0bf8d9445c. All seven required statuses were SUCCESS, no failed checks or unresolved threads remained, queue unset and the human Change summary was retained verbatim. The two verified tracking findings were resolved after publication. No administrator bypass or branch deletion. Local verification preserves every original metadata/section/checklist body, all fifteen unrelated colliders, both dependencies, four current associations and ADR bytes; four canonical-format tests and applicable hooks/diff pass. This is documentation-only qualification, without fresh product tests or Python/Bandit claims. All current plan stages are complete; the full prior plan is retained as historical evidence, rather than deleting another session’s plan. The task-only closeout joins the final batch documentation PR.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-The VN tracking correction is implemented under TASK-13871 (cleanup), TASK-13872 (snapshots), TASK-13873 (replay-safe publication), and TASK-13874 (verified PR3016 closeout). Recreated records preserve original metadata and historical section/checklist content; current dependencies and document associations point to the fresh IDs. All fifteen unrelated colliding records and authored ADR bytes are unchanged. Fresh allocation/preservation checks, the current-dev nine-patch rebase, applicable hooks, and four canonical-format tests are complete. Final rebased-head requesting-code-review, protected publication, all seven exact-head/current-base hosted gates, and verified normal merge remain pending. This cleanup stays In Progress; TASK-13874 retains the already verified Done PR3016 state. The requester-provided Change summary is retained verbatim; no PR3060 waiver is applied.
+PR #3207 merged normally as 2e6ceab9fb97c5712533be670504a81a24525489 from reviewed 1938258c37dee1ed776fa8fea02e80ed4a4a1e70 after all seven exact-head/current-base required gates passed. TASK-13871/13872/13873/13874 now identify cleanup, input snapshots, replay-safe publication and verified PR3016 closeout respectively. Both current dependencies and four document associations use these IDs; original metadata, historical sections, fifteen unrelated colliding records and all ADR bytes remain preserved. Four canonical-format tests, applicable hooks, preservation assertions and independent requesting-code-review passed. Both tracking findings are resolved; the requester-provided Change summary is retained. No runtime behavior or architecture decision changed.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
