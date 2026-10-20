@@ -84,8 +84,14 @@ export type CompletionPlan = {
   chunks?: string[]
   pauseAfterChunks?: number
   resume?: Promise<void>
-  /** After resuming: finish normally (default) or drop the connection. */
-  end?: "finish" | "drop"
+  /**
+   * How the stream ends: finish normally (default), drop the connection after
+   * resuming, or close the body after the deltas with no final chunk and no
+   * `[DONE]` (a connection that ended mid-reply, CM-03).
+   */
+  end?: "finish" | "drop" | "eof"
+  /** The final chunk's `finish_reason` (default "stop"); "length" models a cut-off reply. */
+  finishReason?: string
 }
 
 type Deferred = { promise: Promise<void>; resolve: () => void }
@@ -498,13 +504,17 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
             )
           }
           if (plan.pauseAfterChunks === deltas.length) await pause()
+          if (plan.end === "eof") {
+            controller.close()
+            return
+          }
           controller.enqueue(
             chunk({
               id: "chatcmpl-harness",
               object: "chat.completion.chunk",
               model,
               ...(persisted ? { tldw_conversation_id: persisted.conversationId, tldw_message_id: persisted.assistantId } : {}),
-              choices: [{ index: 0, delta: {}, finish_reason: "stop" }]
+              choices: [{ index: 0, delta: {}, finish_reason: plan.finishReason ?? "stop" }]
             })
           )
           controller.enqueue(encoder.encode("data: [DONE]\n\n"))

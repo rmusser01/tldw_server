@@ -484,6 +484,8 @@ export const chatRagMethods = {
       abortSignal: options?.signal,
       onDispatch: options?.onDispatch,
       streamIdleTimeoutMs: options?.streamIdleTimeoutMs,
+      // The server always ends a completion with [DONE]; without it the reply was cut off (CM-03).
+      expectDoneSentinel: true,
       ...(scopeFields.servicePromptConfig
         ? { servicePromptConfig: scopeFields.servicePromptConfig }
         : {})
