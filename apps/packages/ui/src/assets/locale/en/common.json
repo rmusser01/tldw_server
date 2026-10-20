@@ -37,6 +37,11 @@
     "group": {
       "default": "Default",
       "local": "Local"
+    },
+    "readiness": {
+      "notChecked": "Not checked",
+      "working": "Working",
+      "unreachable": "Unreachable"
     }
   },
   "save": "Save",

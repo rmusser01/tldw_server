@@ -10,7 +10,14 @@ import { getProviderDisplayName } from "@/utils/provider-registry"
 import { ProviderIcons } from "./ProviderIcon"
 import { IconButton } from "./IconButton"
 import { useStoreChatModelSettings } from "@/store/model"
-import { getCanonicalModelKey, resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils"
+import {
+  getCanonicalModelKey,
+  getModelId,
+  getModelProvider,
+  resolveModelSelectorSelection
+} from "@/hooks/playground/modelSelectorUtils"
+import { useChatModelReadinessState } from "@/hooks/chat/useChatModelReadinessState"
+import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import {
   formatChatModelLabel,
   formatChatProviderName,
@@ -348,6 +355,29 @@ const ModelSelectBase = (
       provider: selectedSelection.provider
     })
   }, [selectedModelValue, selectedSelection.model, selectedSelection.provider])
+  // The selected model's own status, as on the full chat page (XS-02, CC-01).
+  const selectedModelReadiness = useChatModelReadinessState({
+    model: selectedSelection.model as Record<string, unknown> | null,
+    provider: selectedSelection.model
+      ? getModelProvider(selectedSelection.model)
+      : selectedSelection.provider,
+    modelId: selectedSelection.model
+      ? getModelId(selectedSelection.model)
+      : selectedModelValue
+        ? parseProviderQualifiedModelSelection(selectedModelValue).modelId
+        : null
+  })
+  const selectedModelReadinessLabel =
+    selectedModelReadiness === "unreachable"
+      ? t("modelSelect.readiness.unreachable", "Unreachable")
+      : selectedModelReadiness === "working"
+        ? t("modelSelect.readiness.working", "Working")
+        : selectedModelReadiness === "not_checked"
+          ? t("modelSelect.readiness.notChecked", "Not checked")
+          : null
+  const selectedModelSummary = selectedModelLabel
+    ? [selectedModelLabel, selectedModelReadinessLabel].filter(Boolean).join(". ")
+    : null
 
   const saveFeedback = <SelectedModelSaveFeedback failed={selectedModelSaveFailed} onRetry={retrySelectedModelSave} />
   // Keep the failed-write owner mounted when a valid selection hides the trigger.
@@ -446,15 +476,15 @@ const ModelSelectBase = (
           trigger={["click"]}>
           <Tooltip
             title={
-              selectedModelLabel
-                ? `${t("modelSelect.tooltip", "Changes model for next message")}: ${selectedModelLabel}`
+              selectedModelSummary
+                ? `${t("modelSelect.tooltip", "Changes model for next message")}: ${selectedModelSummary}`
                 : t("modelSelect.tooltip", "Changes model for next message")
             }>
             <IconButton
               ref={triggerRef}
               ariaLabel={
-                selectedModelLabel
-                  ? `${t("modelSelect.label", "Model")}: ${selectedModelLabel}. ${t("modelSelect.change", "Change model")}`
+                selectedModelSummary
+                  ? `${t("modelSelect.label", "Model")}: ${selectedModelSummary}. ${t("modelSelect.change", "Change model")}`
                   : (t("selectAModel") as string)
               }
               hasPopup="menu"
@@ -462,9 +492,25 @@ const ModelSelectBase = (
               className="min-w-0 max-w-full px-2 text-text-muted">
               <LucideBrain className={`${iconClassName} shrink-0`} />
               {showSelectedName && selectedModelDisplay ? (
-                <span className="ml-1.5 min-w-0 max-w-[200px] truncate text-xs font-medium text-text">
-                  {selectedModelDisplay}
-                </span>
+                <>
+                  <span className="ml-1.5 min-w-0 max-w-[200px] truncate text-xs font-medium text-text">
+                    {selectedModelDisplay}
+                  </span>
+                  {selectedModelReadiness ? (
+                    <span
+                      aria-hidden="true"
+                      data-testid="chat-model-readiness"
+                      data-model-readiness={selectedModelReadiness}
+                      className={`ml-1.5 inline-block size-1.5 shrink-0 rounded-full ${
+                        selectedModelReadiness === "unreachable"
+                          ? "bg-warn"
+                          : selectedModelReadiness === "working"
+                            ? "bg-success"
+                            : "bg-text-muted"
+                      }`}
+                    />
+                  ) : null}
+                </>
               ) : showSelectedName ? (
                 <span className="ml-1.5 text-xs font-medium text-text">
                   {t("modelSelect.choose", "Choose model")}
