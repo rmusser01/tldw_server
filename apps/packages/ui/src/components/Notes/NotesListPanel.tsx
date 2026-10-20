@@ -182,6 +182,9 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   const { t } = useTranslation(['option', 'settings'])
   const isTrashView = listMode === 'trash'
   const hasNotes = Array.isArray(notes) && notes.length > 0
+  // A refresh keeps the rows on screen so the scroll position survives; only
+  // a list with nothing to show yet gets the loading state (NS-04).
+  const isRefreshingRows = isFetching && hasNotes
   const hasListError = hasError
   const bulkSelectedIdSet = React.useMemo(
     () => new Set((bulkSelectedIds || []).map((id) => String(id))),
@@ -478,7 +481,12 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
 
       {/* Content area */}
       <div className="min-h-0 flex-1 overflow-auto p-4" data-testid="notes-results-scroll">
-      {isFetching ? (
+      {isRefreshingRows && (
+        <div className="sticky top-0 z-10 h-0" aria-hidden="true" data-testid="notes-list-refreshing">
+          <div className="h-0.5 w-full animate-pulse rounded-full bg-primary/60" />
+        </div>
+      )}
+      {isFetching && !hasNotes ? (
         <div
           className="flex items-center justify-center gap-2 py-10 text-sm text-text-muted"
           role="status"
@@ -516,6 +524,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
             className="divide-y divide-border"
             role="list"
             data-notes-list
+            aria-busy={isRefreshingRows || undefined}
             aria-label={t('option:notesSearch.notesListAriaLabel', {
               defaultValue: 'Notes'
             })}

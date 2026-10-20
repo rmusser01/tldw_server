@@ -101,6 +101,7 @@ import { notesAuthoritySetting } from '../notes-authority-storage'
 import { useNotesAuthorityState } from './useNotesAuthorityState'
 import { createNotesGraphAuthorityScope } from './useNotesGraphAuthorityScope'
 import type { NoteRenamedEvent } from './useNotesWikilinkRename'
+import { useNotesListSaveRefresh } from './useNotesListSaveRefresh'
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
 type NotesOwnedRequestOptions = {
@@ -228,6 +229,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setKeywordSuggestionSelection,
     editorDisabled,
   } = deps
+  const syncSavedNoteToList = useNotesListSaveRefresh(deps.queryClient, refetch)
   const callerCapabilities = useCallerCapabilities()
   const callerCapabilitiesRef = React.useRef(callerCapabilities)
   callerCapabilitiesRef.current = callerCapabilities
@@ -1855,8 +1857,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           }
           result = true
           if (trigger === 'leave') return true
-          await refetch()
-          if (!isCurrent()) return (result = false)
+          // Update the row in place; the list refreshes in the background (NS-04).
+          syncSavedNoteToList(noteId, updated, { title: snapshot.title, content: snapshot.content, keywords: snapshot.editorKeywords })
           if (updatedVersion == null) {
             try {
               const latest = await request({
@@ -1966,6 +1968,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       refetch,
       refreshTaskStateForNote,
       remoteVersionInfo,
+      syncSavedNoteToList,
       setDirtyFlag,
       setMonitoringNotice,
       setOfflineDraftQueue,

@@ -262,6 +262,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         params.append('tokens', v)
       }
     })
+    // `items` is all the list reads; skip the duplicate arrays (NS-04).
+    params.set('legacy_aliases', 'false')
 
     const abs = await bgRequest<any>({
       path: `/api/v1/notes/search/?${params.toString()}` as any,
@@ -336,6 +338,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       params.set('include_keywords', 'true')
       params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
       params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
+      params.set('legacy_aliases', 'false')
       const res = await bgRequest<any>({
         path: `/api/v1/notes/trash?${params.toString()}` as any,
         method: 'GET' as any
@@ -401,6 +404,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     params.set('include_keywords', 'true')
     params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
     params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
+    params.set('legacy_aliases', 'false')
     const res = await bgRequest<any>({
       path: `/api/v1/notes/?${params.toString()}` as `/${string}`,
       method: 'GET' as any

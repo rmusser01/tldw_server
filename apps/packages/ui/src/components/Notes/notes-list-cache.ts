@@ -1,0 +1,93 @@
+import type { QueryClient } from '@tanstack/react-query'
+import type { NoteListItem } from './notes-manager-types'
+
+/** Query-key prefix shared by every notes list query (see useNotesListManagement). */
+export const NOTES_LIST_QUERY_KEY_PREFIX = ['notes'] as const
+
+type SavedNoteResponse = {
+  title?: unknown
+  content?: unknown
+  version?: unknown
+  last_modified?: unknown
+  updated_at?: unknown
+  keywords?: unknown
+} | null | undefined
+
+type SavedNoteFallback = {
+  title?: string
+  content?: string
+  keywords?: string[]
+}
+
+const asNonEmptyString = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim().length > 0 ? value : undefined
+
+const toKeywordList = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) return undefined
+  const keywords = value
+    .map((entry) => {
+      if (typeof entry === 'string') return entry
+      if (entry && typeof entry === 'object') {
+        const record = entry as { keyword?: unknown; name?: unknown }
+        return asNonEmptyString(record.keyword) ?? asNonEmptyString(record.name)
+      }
+      return undefined
+    })
+    .filter((entry): entry is string => Boolean(entry && entry.trim()))
+  return keywords
+}
+
+/**
+ * Patch the saved note's row in every cached notes list (NS-04).
+ *
+ * Saving used to await a full list refetch, which blanked the list behind a
+ * spinner and reset its scroll position. The PUT response already carries the
+ * new title, content, version and timestamp, so the row is updated in place
+ * and the list is refreshed quietly in the background.
+ *
+ * Returns the number of cached lists that contained the note.
+ */
+export const patchSavedNoteInListCache = (
+  queryClient: QueryClient,
+  noteId: string | number,
+  saved: SavedNoteResponse,
+  fallback: SavedNoteFallback = {}
+): number => {
+  const targetId = String(noteId)
+  const title = asNonEmptyString(saved?.title) ?? asNonEmptyString(fallback.title)
+  const content =
+    typeof saved?.content === 'string' ? saved.content : fallback.content
+  const updatedAt =
+    asNonEmptyString(saved?.last_modified) ?? asNonEmptyString(saved?.updated_at)
+  const version =
+    typeof saved?.version === 'number' && Number.isFinite(saved.version)
+      ? saved.version
+      : undefined
+  const keywords = toKeywordList(saved?.keywords) ?? fallback.keywords
+
+  let patchedLists = 0
+  queryClient.setQueriesData<unknown>(
+    { queryKey: [...NOTES_LIST_QUERY_KEY_PREFIX] },
+    (current) => {
+      if (!Array.isArray(current)) return current
+      let changed = false
+      const next = current.map((row) => {
+        if (!row || typeof row !== 'object' || String((row as NoteListItem).id) !== targetId) {
+          return row
+        }
+        changed = true
+        const patched: NoteListItem = { ...(row as NoteListItem) }
+        if (title !== undefined) patched.title = title
+        if (content !== undefined) patched.content = content
+        if (updatedAt !== undefined) patched.updated_at = updatedAt
+        if (version !== undefined) patched.version = version
+        if (keywords !== undefined) patched.keywords = keywords
+        return patched
+      })
+      if (!changed) return current
+      patchedLists += 1
+      return next
+    }
+  )
+  return patchedLists
+}

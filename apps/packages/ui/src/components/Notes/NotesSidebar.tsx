@@ -1151,7 +1151,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       defaultValue: 'Create or select a collection to start.'
                     })}
                   </div>
-                ) : isFetching ? (
+                ) : isFetching && visibleNotes.length === 0 ? (
                   <div className="mb-3 inline-flex items-center gap-2 text-xs text-text-muted">
                     <Spin size="small" />
                     <span>
