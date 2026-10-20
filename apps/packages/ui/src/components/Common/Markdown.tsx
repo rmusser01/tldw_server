@@ -34,6 +34,14 @@ import {
 const RICH_TEXT_ELEMENT_STYLE_CLASS =
   "[&_em]:[color:var(--rt-italic-color)] [&_em]:[font-family:var(--rt-italic-font)] [&_strong]:[color:var(--rt-bold-color)] [&_strong]:[font-family:var(--rt-bold-font)] [&_blockquote]:[color:var(--rt-quote-text-color)] [&_blockquote]:[font-family:var(--rt-quote-font)] [&_blockquote]:[border-left-color:var(--rt-quote-border-color)] [&_blockquote]:[background-color:var(--rt-quote-bg-color)] [&_blockquote]:border-l-4 [&_blockquote]:rounded-md [&_blockquote]:px-3 [&_blockquote]:py-2"
 
+/**
+ * Inline code reads as code: a monospace pill. `not-prose` opts it out of
+ * Tailwind Typography's `.prose code` styles, which add literal backticks
+ * before and after the text and make it bold.
+ */
+const INLINE_CODE_CLASSES =
+  "not-prose rounded bg-surface2 px-1 py-0.5 font-mono text-[0.9em] font-normal"
+
 const MANAGED_ASSET_MARKER = "flashcard-asset://"
 // Plugin arrays are module-level constants: react-markdown memoizes its
 // unified processor on these identities, so inline arrays rebuilt the
@@ -523,7 +531,10 @@ export function Markdown({
             )
           },
           code({ className, children, ...props }) {
-            const mergedClassName = className ? `${className} font-semibold` : "font-semibold"
+            // Inline code (fenced blocks are handled by `pre` above).
+            const mergedClassName = className
+              ? `${className} ${INLINE_CODE_CLASSES}`
+              : INLINE_CODE_CLASSES
             return (
               <code className={mergedClassName} {...props}>
                 {children}
