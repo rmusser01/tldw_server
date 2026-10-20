@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from uuid import UUID
 
-from .contracts import ExpiredLeasePolicy, is_admin_webhook_delivery_queue
+from .contracts import CreateJobCommand, ExpiredLeasePolicy, is_admin_webhook_delivery_queue
 
 _CODE = re.compile(r"[a-z][a-z0-9_.-]{0,63}", re.ASCII)
 _DIGEST = re.compile(r"[0-9a-f]{64}", re.ASCII)
@@ -57,6 +57,25 @@ class WorkflowOutcome(str, Enum):
     REJECTED = "rejected"
     UNAVAILABLE = "unavailable"
     EXHAUSTED = "exhausted"
+
+
+class WorkflowFenceError(RuntimeError):
+    """A closed rejection of transaction or live-root authority."""
+
+    def __init__(self, outcome: WorkflowOutcome) -> None:
+        self.outcome = outcome
+        super().__init__(outcome.value)
+
+
+@dataclass(frozen=True)
+class WorkflowAdmissionInputs:
+    """Policy-prepared admission facts, without a connection or commit."""
+
+    job: CreateJobCommand
+    max_queued_quota: int
+    submits_per_minute_quota: int
+    counters_enabled: bool
+    outbox_enabled: bool
 
 
 def _code(value: object) -> None:
