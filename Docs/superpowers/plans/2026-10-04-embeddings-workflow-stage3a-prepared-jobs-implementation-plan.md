@@ -311,7 +311,7 @@ Release atomically marks the exact receipt released and returns its proof; repea
 **Goal:** Bound no-progress cycles even before handler start while preserving provider retry accounting.
 **Success Criteria:** Acquire/sweep close one episode once; fifth no-progress episode fails through Jobs; new semantic proof resets once.
 **Tests:** All acquisition modes, fractional expiry, race/restart, progress replay, cancellation.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 4: Acquisition Episodes And Semantic Progress
 
@@ -328,7 +328,7 @@ recover_workflow_expiry_in_transaction(connection: Any, *, backend: str,
 
 Put these SQL leaves in DB_Management backend modules, expose dispatch through `jobs_workflow_store.py`. They never begin, commit, or await; the existing Jobs acquire/recovery transaction owns the lifetime. A null/absent enrollment marker returns immediately without touching support tables. Marker `1` requires valid schema and exact support/control authority; missing/corrupt support must roll back acquisition, not fall through to legacy retry-consuming behavior. Current epoch increases atomically at acquisition, with a digest of the lease and a fresh progress flag; last closed epoch prevents duplicate episode charging.
 
-- [ ] **Step 1: Write failing expiry/progress tests.** Support adds `expire_current_lease(fractional=False)`, `recover(via)`, `no_progress_count()`, `failure_reason()`, `restart()`, `close_empty_episode()`, and `progress(proof_key, kind, facts_fingerprint)`; `close_empty_episode` acquires once and applies a continue intent. `recover` calls public acquisition or `integrity_sweep`, not a hand-built replacement reclaimer.
+- [x] **Step 1: Write failing expiry/progress tests.** Support adds `expire_current_lease(fractional=False)`, `recover(via)`, `no_progress_count()`, `failure_reason()`, `restart()`, `close_empty_episode()`, and `progress(proof_key, kind, facts_fingerprint)`; `close_empty_episode` acquires once and applies a continue intent. `recover` calls public acquisition or `integrity_sweep`, not a hand-built replacement reclaimer.
 
 ```python
 @pytest.mark.parametrize("via", ["acquire", "sweep"])
@@ -368,8 +368,8 @@ def test_progress_proof_resets_only_once_across_restart(workflow_case):
 
 Define `recover("acquire")` to finish the expired episode through acquisition's recovery path without leaving a second untracked lease in this loop: return/store the lease acquired by that call and have the next `acquire()` consume it once. For sweep, `acquire()` gets a fresh lease normally. Add `test_acquire_and_sweep_race_charge_same_epoch_once`, `test_fractional_deadline_is_not_expired_early`, `test_same_progress_key_changed_facts_conflicts`, `test_late_proof_from_prior_epoch_cannot_reset_current_count`, `test_cancel_wins_over_expiry_terminal_disposition`, `test_schema_loss_blocks_enrolled_acquire`, and `test_legacy_and_admin_webhook_expiry_behavior_unchanged`. Assert once-only episode/event, unchanged before-expiry state, conflict/no reset, cancellation preserved, no lease publication, and existing retry budgets respectively. Parameterize both `single_update` modes on each backend. No provider mock should be invoked in any test.
 
-- [ ] **Step 2: Run red tests:** `source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_expiry_progress.py -m 'not pg_jobs'`.
-- [ ] **Step 3: Implement the episode algorithm.** On each enrolled acquisition, record epoch/lease digest in the same transaction that publishes processing state. On continue or locked expiry, close that epoch once: if new semantic progress was committed in it, retain/reset zero; otherwise increment the independent no-progress count. On the pinned limit, apply non-retryable Jobs failure with `no_progress_exhausted` and retained proof rather than queuing again. Provider retries/streaks remain untouched by expiry/no-progress accounting; existing provider-origin retry effects still use Jobs quarantine policy. Terminal/cancelled roots take precedence. Expiry maintenance authority is the locked exact old lease plus DB expiry, not a fabricated worker lease.
+- [x] **Step 2: Run red tests:** `source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_expiry_progress.py -m 'not pg_jobs'`.
+- [x] **Step 3: Implement the episode algorithm.** On each enrolled acquisition, record epoch/lease digest in the same transaction that publishes processing state. On continue or locked expiry, close that epoch once: if new semantic progress was committed in it, retain/reset zero; otherwise increment the independent no-progress count. On the pinned limit, apply non-retryable Jobs failure with `no_progress_exhausted` and retained proof rather than queuing again. Provider retries/streaks remain untouched by expiry/no-progress accounting; existing provider-origin retry effects still use Jobs quarantine policy. Terminal/cancelled roots take precedence. Expiry maintenance authority is the locked exact old lease plus DB expiry, not a fabricated worker lease.
 
 Use a separate deterministic failure key, SHA-256 of the versioned tuple `(jobs_workflow_no_progress_v1, root_uuid, acquisition_epoch)`, when exhaustion stops a continuation. Return `EXHAUSTED` without applying that continuation; never store a fail action under the continuation's existing key. Expiry-triggered failure uses the same exact episode identity, so competing reclaim paths converge on one failure receipt/event.
 
@@ -377,15 +377,15 @@ Only a new, transaction-fenced root-binding/output/cursor/accounting/sink-lifecy
 
 Dispatch from the existing `_recover_expired_processing_jobs` path used by acquisition and integrity sweep, not a new loop/service. Lock Jobs before support; set explicit per-root owner scope for enrolled recovery while preserving the surrounding caller context. Do not scan owner-hidden support under an admin bypass. Bound recovery pages with existing Jobs recovery batch controls and preserve domain/queue/type filters. A support error stops enrolled recovery with typed unavailable evidence; it never changes legacy root behavior.
 
-- [ ] **Step 4: Run green tests** with the Step 2 command and `-m pg_jobs`, plus both existing lease-reclaim-budget suites and WorkerSDK prepared tests.
-- [ ] **Step 5: Commit:** `git commit -m "feat(jobs): bound retry-neutral workflow recovery episodes"` after staging exact Task 4 files.
+- [x] **Step 4: Run green tests** with the Step 2 command and `-m pg_jobs`, plus both existing lease-reclaim-budget suites and WorkerSDK prepared tests.
+- [x] **Step 5: Commit:** `git commit -m "feat(jobs): bound retry-neutral workflow recovery episodes"` after staging exact Task 4 files.
 
 ## Stage 5: Backend, Security, And Compatibility Certification
 
 **Goal:** Certify this capability independently before any Embeddings repository/runner uses it.
 **Success Criteria:** Both backend matrices pass; owner/role/transaction tests prove fail-closed isolation; legacy and startup behavior remain unchanged; no new Bandit finding.
 **Tests:** Real transaction races, RLS roles, model sequences, privacy, dormant imports.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 5: Certification And Internal Documentation
 
