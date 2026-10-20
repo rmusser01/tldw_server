@@ -68,7 +68,6 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
 from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
 from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
 from tldw_Server_API.app.core.Utils.image_validation import (
-    DATA_URI_REDACT_RE,
     get_max_base64_bytes,
     validate_image_url,
 )
@@ -4068,7 +4067,7 @@ async def create_chat_completion(
 
             if rg_ready:
                 # Estimate tokens for rate limiting (heuristic).
-                estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json))
+                estimated_tokens = estimate_tokens_from_json(request_json)
                 try:
                     # Derive policy_id from middleware route_map when present.
                     policy_id = str(
@@ -4183,7 +4182,7 @@ async def create_chat_completion(
                 active_count = await _increment_active_request(user_id)
                 try:
                     # Estimate tokens for rate limiting (heuristic).
-                    estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json))
+                    estimated_tokens = estimate_tokens_from_json(request_json)
 
                     # In TEST_MODE, avoid cross-test flakiness by scoping limiter to this request
                     # when no explicit conversation_id is provided. This prevents cumulative
@@ -4294,7 +4293,7 @@ async def create_chat_completion(
             # check below: both need the same estimate for this request body.
             try:
                 _estimated_request_tokens = (
-                    estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json)) if request_json else 1000
+                    estimate_tokens_from_json(request_json) if request_json else 1000
                 )
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                 _estimated_request_tokens = 1000
@@ -5189,7 +5188,7 @@ async def create_chat_completion(
                 if admission_queue is not None:
                     try:
                         # Estimate tokens for queue gating (sanitize base64 payloads)
-                        est_tokens_for_queue = _estimate_tokens_for_queue(request_json)
+                        est_tokens_for_queue = estimate_tokens_from_json(request_json)
                         # Use user_id for per-client fairness; HIGH priority for streaming
                         priority = RequestPriority.HIGH if bool(request_data.stream) else RequestPriority.NORMAL
                         # Use request_id generated for this call
@@ -6320,18 +6319,6 @@ async def get_chat_queue_activity(
         return {"enabled": True, "error": "Queue activity unavailable"}
 
 
-def _sanitize_json_for_rate_limit(request_json: str) -> str:
-    """Redact base64 image payloads to avoid inflating token estimates.
-
-    Replaces data:image...;base64,<payload> with a small placeholder so that
-    token estimation reflects text size, not binary data.
-    """
-    try:
-        return DATA_URI_REDACT_RE.sub(r"\1<omitted>", request_json)
-    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-        return request_json
-
-
 def _build_streaming_commit_cb(
     rg_handle_id: str | None,
     request: Request | None,
@@ -6407,15 +6394,6 @@ def _build_streaming_commit_cb(
         return _durable_and_rg()
 
     return _commit
-
-
-def _estimate_tokens_for_queue(request_json: str) -> int:
-    """Estimate tokens for queue admission, ignoring base64 payload bulk."""
-    try:
-        sanitized = _sanitize_json_for_rate_limit(request_json)
-        return max(1, len(sanitized) // 4)
-    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-        return 1
 
 
 def _coerce_datetime(value: Any) -> datetime | None:

@@ -118,6 +118,27 @@ def scope_pairs(policy: Mapping[str, Any], entity_scope: str, entity_value: str)
     return pairs
 
 
+def lease_limits(
+    policy: Mapping[str, Any],
+    category: str,
+    request_cfg: Mapping[str, Any],
+    entity_scope: str,
+    entity_value: str,
+) -> tuple[int, int, list[tuple[str, str]]]:
+    """Return ``(limit, ttl_sec, buckets)`` for a streams/jobs reservation.
+
+    A request that carries its own ``max_concurrent`` (a per-user usage quota,
+    TASK-13435) uses that limit and its own ``ttl_sec``, and charges only the
+    caller's bucket: the limit is that caller's, not the policy's. Otherwise the
+    policy's category block decides, as before. A limit of 0 is unbounded.
+    """
+    own = request_cfg.get("max_concurrent")
+    if own is not None:
+        return int(own), int(request_cfg.get("ttl_sec") or 60), [(entity_scope, entity_value)]
+    cfg = policy.get(category) or {}
+    return int(cfg.get("max_concurrent") or 0), int(cfg.get("ttl_sec") or 60), scope_pairs(policy, entity_scope, entity_value)
+
+
 def clamp_token_units(
     policy: Mapping[str, Any],
     categories: Mapping[str, Mapping[str, int]],

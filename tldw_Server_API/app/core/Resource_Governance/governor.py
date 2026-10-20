@@ -29,7 +29,14 @@ from loguru import logger
 
 from .daily_caps import check_daily_cap, consume_daily_cap
 from .metrics_rg import _labels, ensure_rg_metrics_registered, rg_metrics_entity_label_enabled
-from .policy_eval import clamp_token_units, effective_policy, log_lookup_failure, requests_window, scope_pairs
+from .policy_eval import (
+    clamp_token_units,
+    effective_policy,
+    lease_limits,
+    log_lookup_failure,
+    requests_window,
+    scope_pairs,
+)
 from .tenant import hash_entity
 
 try:
@@ -404,14 +411,11 @@ class MemoryResourceGovernor(ResourceGovernor):
         entity_value: str,
         units: int,
         now: float,
+        request_cfg: dict[str, Any],
     ) -> tuple[bool, int, dict[str, Any]]:
-        cfg = self._category_limits(policy, category)
-        limit = int(cfg.get("max_concurrent") or 0)
-        ttl_sec = int(cfg.get("ttl_sec") or 60)
+        limit, ttl_sec, scope_keys = lease_limits(policy, category, request_cfg, entity_scope, entity_value)
         if limit <= 0:
             return True, 0, {"limit": 0, "remaining": 10**9, "unbounded": True}
-
-        scope_keys = scope_pairs(policy, entity_scope, entity_value)
 
         remainings = []
         retry_after_candidates = []
@@ -513,6 +517,7 @@ class MemoryResourceGovernor(ResourceGovernor):
                     entity_value=entity_value,
                     units=units,
                     now=now,
+                    request_cfg=cfg,
                 )
             else:
                 # Minutes and other ledgers are not enforced in memory; allow by default here
@@ -662,11 +667,9 @@ class MemoryResourceGovernor(ResourceGovernor):
                     _ = b.consume(units, now)
 
             elif category in ("streams", "jobs"):
-                cfgc = self._category_limits(pol, category)
-                limit = int(cfgc.get("max_concurrent") or 0)
-                ttl_sec = int(cfgc.get("ttl_sec") or 60)
+                limit, ttl_sec, lease_scopes = lease_limits(pol, category, cfg, entity_scope, entity_value)
                 # Acquire for global and entity scopes (when configured)
-                for sc, ev in scope_pairs(pol, entity_scope, entity_value):
+                for sc, ev in lease_scopes:
                     if limit <= 0:
                         continue
                     m = self._get_lease_map(policy_id, category, sc, ev)

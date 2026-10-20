@@ -21,7 +21,14 @@ from tldw_Server_API.app.core.testing import env_flag_enabled, is_test_mode
 from .daily_caps import check_daily_cap, consume_daily_cap
 from .governor import _EVICT_BATCH, _EVICT_INTERVAL_SEC, MemoryResourceGovernor, ResourceGovernor, RGDecision, RGRequest
 from .metrics_rg import _labels, ensure_rg_metrics_registered, rg_metrics_entity_label_enabled
-from .policy_eval import clamp_token_units, effective_policy, log_lookup_failure, requests_window, scope_pairs
+from .policy_eval import (
+    clamp_token_units,
+    effective_policy,
+    lease_limits,
+    log_lookup_failure,
+    requests_window,
+    scope_pairs,
+)
 from .tenant import hash_entity
 
 TimeSource = Callable[[], float]
@@ -1090,8 +1097,7 @@ class RedisResourceGovernor(ResourceGovernor):
                         **(daily_details or {}),
                     }
                 elif category in ("streams", "jobs"):
-                    limit = int((pol.get(category) or {}).get("max_concurrent") or 0)
-                    ttl_sec = int((pol.get(category) or {}).get("ttl_sec") or 60)
+                    limit, ttl_sec, scope_keys = lease_limits(pol, category, cfg, entity_scope, entity_value)
                     cat_fail = self._effective_fail_mode(pol, category)
                     if limit <= 0:
                         # Missing max_concurrent is unbounded; mirror memory's semantics (spec §4).
@@ -1104,8 +1110,6 @@ class RedisResourceGovernor(ResourceGovernor):
                             "unbounded": True,
                         }
                     else:
-                        scope_keys = self._scope_pairs(pol, entity_scope, entity_value)
-
                         remainings: list[int] = []
                         retry_after_candidates: list[int] = []
                         for sc, ev in scope_keys:
@@ -1843,14 +1847,12 @@ class RedisResourceGovernor(ResourceGovernor):
                 units = int((cfg or {}).get("units") or 0)
                 if units <= 0:
                     continue
-                limit = int((pol.get(category) or {}).get("max_concurrent") or 0)
-                ttl_sec = int((pol.get(category) or {}).get("ttl_sec") or 60)
+                # Named "pairs", not "scope_pairs": that name would shadow the
+                # policy_eval.scope_pairs import for the rest of this function.
+                limit, ttl_sec, pairs = lease_limits(pol, category, cfg or {}, entity_scope, entity_value)
                 if limit <= 0:
                     # Missing max_concurrent is unbounded; mirror memory's semantics (spec §4).
                     continue
-                # Named "pairs", not "scope_pairs": that name would shadow the
-                # policy_eval.scope_pairs import for the rest of this function.
-                pairs = self._scope_pairs(pol, entity_scope, entity_value)
 
                 planned: dict[tuple[str, str], list[str]] = {}
                 for sc, ev in pairs:
@@ -1957,12 +1959,13 @@ class RedisResourceGovernor(ResourceGovernor):
                     await self._zrem_members(key=key, members=mems)
             per_category = dict((dec.details or {}).get("categories") or {})
             failed = concurrency_failed_category or "streams"
+            failed_limit, failed_ttl, _pairs = lease_limits(pol, failed, req.categories.get(failed) or {}, entity_scope, entity_value)
             failed_info = dict(per_category.get(failed) or {})
             failed_info.update({
                 "allowed": False,
-                "limit": int((pol.get(failed) or {}).get("max_concurrent") or 0),
-                "retry_after": int(denial_retry_after or (pol.get(failed) or {}).get("ttl_sec") or 1),
-                "ttl_sec": int((pol.get(failed) or {}).get("ttl_sec") or 60),
+                "limit": failed_limit,
+                "retry_after": int(denial_retry_after or failed_ttl or 1),
+                "ttl_sec": failed_ttl,
             })
             per_category[failed] = failed_info
             denial_decision = RGDecision(
@@ -2146,7 +2149,8 @@ class RedisResourceGovernor(ResourceGovernor):
             # regardless of what was persisted in the handle's categories map.
             for category in ("streams", "jobs"):
                 try:
-                    if not (pol.get(category) or {}):
+                    # A request-limited lease (TASK-13435) has no policy block; its members say it exists.
+                    if not (pol.get(category) or members.get(category)):
                         continue
                 except _RG_NONCRITICAL_EXCEPTIONS:
                     continue
@@ -2402,7 +2406,10 @@ class RedisResourceGovernor(ResourceGovernor):
             now = self._time()
             for category in cats:
                 if category in ("streams", "jobs"):
-                    for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
+                    # Refresh only the buckets the reservation charged: a request-limited
+                    # lease (TASK-13435) charged the caller's bucket, never `global`.
+                    charged = [tuple(scope_key.split(":", 1)) for scope_key in (members.get(category) or {})]
+                    for sc, ev in charged or self._scope_pairs(pol, entity_scope, entity_value):
                         key = self._keys.lease(policy_id, category, sc, ev)
                         scope_key = f"{sc}:{ev}"
                         members_list: list[str] = []
