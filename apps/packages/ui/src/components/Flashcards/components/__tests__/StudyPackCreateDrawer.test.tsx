@@ -137,7 +137,8 @@ describe("StudyPackCreateDrawer", () => {
     })
     fireEvent.click(screen.getByRole("button", { name: "Add source" }))
 
-    expect(screen.getByText("media · 42")).toBeInTheDocument()
+    // An untitled manual source is named by its type and ID.
+    expect(screen.getByTestId("study-pack-source-0")).toHaveTextContent("Media 42")
     expect(screen.getByRole("button", { name: "Create study pack" })).toBeEnabled()
   })
 
@@ -179,8 +180,8 @@ describe("StudyPackCreateDrawer", () => {
     render(<StudyPackCreateDrawer open onClose={onClose} initialIntent={intent} />)
 
     expect(screen.getByDisplayValue("Networks")).toBeInTheDocument()
-    expect(screen.getByText("media · 42")).toBeInTheDocument()
     expect(screen.getByText("Lecture 5")).toBeInTheDocument()
+    expect(screen.getByTestId("study-pack-source-0")).toHaveTextContent("Media")
 
     fireEvent.click(screen.getByRole("button", { name: "Create study pack" }))
 
@@ -224,6 +225,36 @@ describe("StudyPackCreateDrawer", () => {
       expect(messageSpies.error).toHaveBeenCalledWith("Study pack generation failed.")
     })
     expect(navigateMock).not.toHaveBeenCalled()
+  })
+
+  it("names a source from Notes by its title and type and tucks the ID entry under Advanced (NE-08)", () => {
+    const noteId = "cc02b050-2725-4d05-9793-f7070ac43150"
+    render(
+      <StudyPackCreateDrawer
+        open
+        onClose={vi.fn()}
+        initialIntent={{
+          title: "My first note",
+          sourceItems: [{ sourceType: "note", sourceId: noteId, sourceTitle: "My first note" }]
+        }}
+      />
+    )
+
+    const row = screen.getByTestId("study-pack-source-0")
+    expect(row).toHaveTextContent("My first note")
+    expect(row).toHaveTextContent("Note")
+    // The raw ID is noise when the source already has a title.
+    expect(row).not.toHaveTextContent(noteId)
+
+    const advanced = screen.getByRole("button", { name: "Add a source by ID" })
+    expect(advanced).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByLabelText("Source ID (advanced/manual)")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("study-pack-source-id-guidance")).not.toBeInTheDocument()
+
+    fireEvent.click(advanced)
+    expect(advanced).toHaveAttribute("aria-expanded", "true")
+    expect(screen.getByLabelText("Source ID (advanced/manual)")).toBeInTheDocument()
+    expect(screen.getByTestId("study-pack-source-id-guidance")).toBeInTheDocument()
   })
 
   it("labels source IDs as an advanced manual reference with supported source guidance", () => {

@@ -1739,6 +1739,7 @@
     "studyPackJobRunning": "Creating your study pack.",
     "studyPackJobStatusUnavailable": "Unable to check study pack progress. Checking again shortly.",
     "studyPackResultUnavailable": "Study pack completed, but its review deck is unavailable.",
+    "studyPackManualSourceToggle": "Add a source by ID",
     "review": "Review",
     "cards": "Cards",
     "manageCardCount": "{count, plural, one {# card} other {# cards}}",
