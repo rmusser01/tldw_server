@@ -599,6 +599,41 @@ def test_a_custom_provider_without_a_base_url_is_a_configuration_error(monkeypat
     assert exc_info.value.code == "configuration"
 
 
+def _local_upstream_replies(monkeypatch, status: int) -> None:
+    """Give every local adapter a configured endpoint whose every request gets ``status``."""
+    _configured_local_endpoint(monkeypatch)
+
+    def _reply(**kwargs):
+        return httpx.Response(status, request=httpx.Request("POST", kwargs["url"]), json={"error": {"message": SECRET}})
+
+    monkeypatch.setattr(local_mod._LocalAdapterBase, "http_fetcher", staticmethod(_reply))
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("provider", ["ollama", "kobold"])
+@pytest.mark.parametrize(
+    ("status", "expected_code"),
+    [
+        (401, "authentication"),
+        (403, "authentication"),
+        (429, "rate_limit"),
+        (408, "provider_failure"),
+        (404, "request_rejected"),
+        (400, "request_rejected"),
+        (500, "provider_failure"),
+    ],
+    ids=["unauthorized", "forbidden", "rate-limit", "timed-out", "unpulled-model", "bad-request", "server-error"],
+)
+def test_a_local_provider_reply_reaches_the_summary_code(monkeypatch, provider, status, expected_code):
+    _local_upstream_replies(monkeypatch, status)
+
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        sgl.analyze(provider, "hello", None, api_key="key", model_override="m", raise_on_error=True)
+
+    assert exc_info.value.code == expected_code
+    assert SECRET not in repr(exc_info.value)
+
+
 @pytest.mark.unit
 def test_dispatch_failure_is_typed_for_runtime_callers(monkeypatch):
     class BrokenRegistry:
