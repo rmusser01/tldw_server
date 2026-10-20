@@ -93,6 +93,28 @@ async def test_a_lost_rate_script_falls_back_once_then_reloads(real_redis, rg_un
     assert gov._multi_lua_sha not in (None, _LOST_SHA)
 
 
+@pytest.mark.parametrize("via", ["reserve", "peek"])
+async def test_a_lost_window_estimate_script_reloads_after_one_failure(real_redis, rg_unique_ns, via) -> None:
+    """A full window's reset estimate falls back to the whole window once, then loads its script again (TASK-13859)."""
+    now = [1000.0]
+    gov = RedisResourceGovernor(policy_loader=_Policy("fallback_memory", tokens={"per_min": 2}), ns=rg_unique_ns, time_source=lambda: now[0])
+    if not await gov._is_real_redis():
+        pytest.skip("Redis client is not real; using in-memory stub")
+    req = RGRequest(entity="user:42", categories={"tokens": {"units": 1}}, tags={"policy_id": "tokens.test"})
+    await gov.reserve(req)
+    await gov.reserve(req)  # the window is full until 1060
+    gov._tokens_lua_sha = _LOST_SHA
+    now[0] = 1030.0
+
+    async def reset_estimate() -> int:
+        if via == "peek":
+            return (await gov.peek_with_policy("user:42", ["tokens"], "tokens.test"))["tokens"]["reset"]
+        decision, _ = await gov.reserve(req)
+        return decision.retry_after
+
+    assert [await reset_estimate(), await reset_estimate()] == [60, 30]
+
+
 def _rejecting(error: Exception):
     """A Redis command that fails with ``error``, as a replica (READONLY) or a full server (OOM) answers a write."""
 

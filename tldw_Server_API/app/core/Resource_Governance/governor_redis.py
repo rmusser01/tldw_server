@@ -641,8 +641,9 @@ class RedisResourceGovernor(ResourceGovernor):
                     except _RG_NONCRITICAL_EXCEPTIONS:
                         ra = window
             except _RG_NONCRITICAL_EXCEPTIONS:
-                # Fallback to conservative window
+                # Fallback to conservative window; a lost script (NOSCRIPT after a restart) loads again next time
                 ra = window
+                self._tokens_lua_sha = None
             return False, int(ra), count
         except _RG_NONCRITICAL_EXCEPTIONS as exc:
             log_redis_failure(self._keys.ns, exc)
@@ -2532,6 +2533,7 @@ class RedisResourceGovernor(ResourceGovernor):
                             resets.append(window)
                     except _RG_NONCRITICAL_EXCEPTIONS:
                         resets.append(window)
+                        self._tokens_lua_sha = None  # a lost script (NOSCRIPT after a restart) loads again next time
                 else:
                     resets.append(0)
                 remainings.append(min(limit, max(0, limit_m - current_cnt) * quantum))
