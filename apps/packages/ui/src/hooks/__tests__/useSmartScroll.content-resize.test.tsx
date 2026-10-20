@@ -11,10 +11,12 @@ import { useSmartScroll } from "../useSmartScroll"
 type ResizeCallback = () => void
 
 const observers: { callback: ResizeCallback; targets: Element[] }[] = []
+let observerCount = 0
 
 class FakeResizeObserver {
   private entry: { callback: ResizeCallback; targets: Element[] }
   constructor(callback: ResizeCallback) {
+    observerCount += 1
     this.entry = { callback, targets: [] }
     observers.push(this.entry)
   }
@@ -35,8 +37,9 @@ const notifyResize = () => {
   })
 }
 
-const Transcript = ({ pin }: { pin: boolean }) => {
-  const { containerRef } = useSmartScroll([{ id: "m-1" }], false, 100, {
+const Transcript = ({ pin, tokens = 0 }: { pin: boolean; tokens?: number }) => {
+  // A new array on every render, like a streamed reply's message list.
+  const { containerRef } = useSmartScroll([{ id: "m-1", tokens }], tokens > 0, 100, {
     pinOnContentResize: pin
   })
   return (
@@ -69,6 +72,7 @@ const measure = (element: HTMLElement, initial: { scrollHeight: number; clientHe
 describe("useSmartScroll content growth", () => {
   beforeEach(() => {
     observers.length = 0
+    observerCount = 0
     vi.stubGlobal("ResizeObserver", FakeResizeObserver)
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
       callback(0)
@@ -114,5 +118,40 @@ describe("useSmartScroll content growth", () => {
     notifyResize()
 
     expect(box.scrollTop).toBe(600)
+  })
+
+  it("does not snap back when the reader had already left the bottom before the growth", () => {
+    render(<Transcript pin />)
+    const scroller = screen.getByTestId("scroller")
+    const box = measure(scroller, { scrollHeight: 1000, clientHeight: 400, scrollTop: 600 })
+    notifyResize()
+    // A short upward scroll made while a programmatic scroll was settling is
+    // ignored by the scroll handler, so auto-follow is still on.
+    box.scrollTop = 300
+
+    box.scrollHeight = 1300
+    notifyResize()
+
+    expect(box.scrollTop).toBe(300)
+  })
+
+  it("keeps one content observer while a reply streams", () => {
+    const { rerender } = render(<Transcript pin />)
+    measure(screen.getByTestId("scroller"), { scrollHeight: 1000, clientHeight: 400, scrollTop: 600 })
+    for (let tokens = 1; tokens <= 5; tokens += 1) {
+      rerender(<Transcript pin tokens={tokens} />)
+    }
+    expect(observerCount).toBe(1)
+  })
+
+  it("watches transcript content that renders after mount", async () => {
+    render(<Transcript pin />)
+    const scroller = screen.getByTestId("scroller")
+    const late = document.createElement("div")
+    await act(async () => {
+      scroller.appendChild(late)
+      await Promise.resolve()
+    })
+    expect(observers[0].targets).toContain(late)
   })
 })
