@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { ConfigProvider } from "antd"
+import userEvent from "@testing-library/user-event"
 import NotesManagerPage from "../NotesManagerPage"
 
 const {
@@ -349,5 +350,26 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
     await waitFor(() => {
       expect(opener).toHaveFocus()
     })
+  })
+
+  // AX-09 (#3122): Tab from the dialog's last control must wrap to its first
+  // control. The dialog is the last thing in the document, so the browser
+  // otherwise moves focus to <body> for one Tab stop.
+  it("keeps Tab inside the shortcuts dialog at both ends", async () => {
+    const user = userEvent.setup()
+    renderPage()
+
+    fireEvent.click(screen.getByTestId("notes-shortcuts-help-button"))
+    const dialog = await screen.findByRole("dialog", {}, { timeout: 10_000 })
+    await screen.findByTestId("notes-shortcuts-modal")
+    const closeButton = within(dialog).getByRole("button", { name: /close/i })
+    const restartButton = within(dialog).getByRole("button", { name: "Restart tutorial" })
+
+    restartButton.focus()
+    await user.tab()
+    expect(closeButton).toHaveFocus()
+
+    await user.tab({ shift: true })
+    expect(restartButton).toHaveFocus()
   })
 })
