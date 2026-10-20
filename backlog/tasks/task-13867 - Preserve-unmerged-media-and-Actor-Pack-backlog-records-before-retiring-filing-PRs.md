@@ -39,7 +39,7 @@ Independent requesting-code-review of 2b925562e585fe1703219dd4af5eac29fafbce09..
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-The three requested records are preserved locally as TASK-13868 (media provider/translation), TASK-13869 (undeclared media fields), and TASK-13870 (Actor Pack design). All remain To Do. Historical evidence and references are retained and qualified; current wording addresses the original filing findings. Documentation checks and independent review pass. This tracking task stays In Progress until the replacement PR lands, dev is verified, and #2783/#2810 close with links.
+The three requested records are preserved locally as TASK-13868 (media provider/translation), TASK-13869 (undeclared media fields), and TASK-13870 (Actor Pack design). All remain To Do. Historical evidence and references are retained and qualified; current wording addresses the original filing findings. The initial preservation-only documentation checks and independent review passed. Fresh independent review and checks of the combined final documentation scope, including verified implementation-task closeouts, remain pending. This tracking task stays In Progress until the replacement PR lands, dev is verified, and #2783/#2810 close with links.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
