@@ -63,6 +63,26 @@ describe("patchSavedNoteInListCache (NS-04)", () => {
       updated_at: "2026-10-01T10:00:00.000Z"
     })
   })
+
+  it("leaves lists cached for another server or account alone, even when note ids match", () => {
+    const queryClient = new QueryClient()
+    const thisServer = ["notes", "active", "authority", "server-a::user-1", "generation", 1]
+    const otherServer = ["notes", "active", "authority", "server-b::user-1", "generation", 1]
+    queryClient.setQueryData(thisServer, rows())
+    queryClient.setQueryData(otherServer, rows())
+
+    const patched = patchSavedNoteInListCache(
+      queryClient,
+      "n1",
+      { title: "Saved on server A" },
+      {},
+      { authorityScope: "server-a::user-1" }
+    )
+
+    expect(patched).toBe(1)
+    expect(queryClient.getQueryData<NoteListItem[]>(thisServer)?.[0].title).toBe("Saved on server A")
+    expect(queryClient.getQueryData<NoteListItem[]>(otherServer)?.[0].title).toBe("Old title")
+  })
 })
 
 describe("useNotesListSaveRefresh (NS-04)", () => {

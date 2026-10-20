@@ -1860,7 +1860,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           result = true
           if (trigger === 'leave') return true
           // Update the row in place; the list refreshes in the background (NS-04).
-          syncSavedNoteToList(noteId, updated, { title: snapshot.title, content: snapshot.content, keywords: snapshot.editorKeywords })
+          syncSavedNoteToList(noteId, updated, { title: snapshot.title, content: snapshot.content, keywords: snapshot.editorKeywords }, { authorityScope: requestAuthorityScope })
           if (updatedVersion == null) {
             try {
               const latest = await request({

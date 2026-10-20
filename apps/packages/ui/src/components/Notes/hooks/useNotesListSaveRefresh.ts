@@ -7,6 +7,7 @@ export const NOTES_LIST_REFRESH_DELAY_MS = 1500
 
 type SavedNote = Parameters<typeof patchSavedNoteInListCache>[2]
 type SavedNoteFallback = Parameters<typeof patchSavedNoteInListCache>[3]
+type PatchOptions = Parameters<typeof patchSavedNoteInListCache>[4]
 
 /**
  * Keep the notes list in step with a saved note without reloading it (NS-04).
@@ -20,7 +21,12 @@ export function useNotesListSaveRefresh(
   queryClient: QueryClient,
   refetch: () => Promise<unknown>,
   delayMs: number = NOTES_LIST_REFRESH_DELAY_MS
-): (noteId: string | number, saved: SavedNote, fallback?: SavedNoteFallback) => void {
+): (
+  noteId: string | number,
+  saved: SavedNote,
+  fallback?: SavedNoteFallback,
+  options?: PatchOptions
+) => void {
   const refetchRef = React.useRef(refetch)
   refetchRef.current = refetch
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -34,8 +40,8 @@ export function useNotesListSaveRefresh(
   )
 
   return React.useCallback(
-    (noteId, saved, fallback) => {
-      patchSavedNoteInListCache(queryClient, noteId, saved, fallback)
+    (noteId, saved, fallback, options) => {
+      patchSavedNoteInListCache(queryClient, noteId, saved, fallback, options)
       if (timerRef.current != null) clearTimeout(timerRef.current)
       timerRef.current = setTimeout(() => {
         timerRef.current = null

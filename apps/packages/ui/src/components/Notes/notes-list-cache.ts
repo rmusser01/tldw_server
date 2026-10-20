@@ -19,6 +19,26 @@ type SavedNoteFallback = {
   keywords?: string[]
 }
 
+type PatchSavedNoteOptions = {
+  /**
+   * The server and account the note was saved to. When set, only lists cached
+   * for that scope are patched: note ids repeat across servers, so another
+   * server's cached list may hold an unrelated note with the same id.
+   */
+  authorityScope?: string | null
+}
+
+const AUTHORITY_KEY_SEGMENT = 'authority'
+
+const isListForScope = (
+  queryKey: readonly unknown[],
+  authorityScope: string | null | undefined
+): boolean => {
+  if (authorityScope === undefined) return true
+  const index = queryKey.indexOf(AUTHORITY_KEY_SEGMENT)
+  return index >= 0 && queryKey[index + 1] === authorityScope
+}
+
 const asNonEmptyString = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim().length > 0 ? value : undefined
 
@@ -38,7 +58,8 @@ const toKeywordList = (value: unknown): string[] | undefined => {
 }
 
 /**
- * Patch the saved note's row in every cached notes list (NS-04).
+ * Patch the saved note's row in every cached notes list for the note's
+ * server and account (NS-04).
  *
  * Saving used to await a full list refetch, which blanked the list behind a
  * spinner and reset its scroll position. The PUT response already carries the
@@ -51,7 +72,8 @@ export const patchSavedNoteInListCache = (
   queryClient: QueryClient,
   noteId: string | number,
   saved: SavedNoteResponse,
-  fallback: SavedNoteFallback = {}
+  fallback: SavedNoteFallback = {},
+  options: PatchSavedNoteOptions = {}
 ): number => {
   const targetId = String(noteId)
   const title = asNonEmptyString(saved?.title) ?? asNonEmptyString(fallback.title)
@@ -67,7 +89,10 @@ export const patchSavedNoteInListCache = (
 
   let patchedLists = 0
   queryClient.setQueriesData<unknown>(
-    { queryKey: [...NOTES_LIST_QUERY_KEY_PREFIX] },
+    {
+      queryKey: [...NOTES_LIST_QUERY_KEY_PREFIX],
+      predicate: (query) => isListForScope(query.queryKey, options.authorityScope)
+    },
     (current) => {
       if (!Array.isArray(current)) return current
       let changed = false
