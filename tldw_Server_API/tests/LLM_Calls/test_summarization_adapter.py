@@ -2,6 +2,7 @@ import asyncio
 import inspect
 from typing import Any
 
+import httpx
 import pytest
 
 import tldw_Server_API.app.core.LLM_Calls.providers.moonshot_adapter as moonshot_mod
@@ -15,6 +16,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAuthenticationError,
+    ChatBadRequestError,
     ChatConfigurationError,
     ChatProviderError,
     ChatRateLimitError,
@@ -47,6 +49,10 @@ class _Adapter:
         self.lines = lines
         self.error = error
         self.requests = []
+
+    def _use_native_http(self) -> bool:
+        # The kill-switch is on, so a RuntimeError from this adapter is not a configuration error.
+        return True
 
     def chat(self, request, timeout=None):
         self.requests.append((request, timeout))
@@ -381,6 +387,7 @@ def test_typed_chat_provider_error_is_sanitized(monkeypatch):
         (ChatRateLimitError(message=SECRET, provider="openai"), "rate_limit"),
         (ChatProviderError(message=SECRET, status_code=403, provider="openai"), "authentication"),
         (ChatProviderError(message=SECRET, status_code=429, provider="openai"), "rate_limit"),
+        (ChatBadRequestError(message=SECRET, provider="openai"), "request_rejected"),
     ],
 )
 def test_chat_error_taxonomy_is_preserved_without_upstream_details(
@@ -411,6 +418,70 @@ def test_chat_error_taxonomy_is_preserved_without_upstream_details(
     assert exc_info.value.__cause__ is None
     assert SECRET not in str(exc_info.value)
     assert SECRET not in repr(exc_info.value)
+
+
+def _openai_upstream_replies(status: int, body: dict[str, Any]):
+    """An OpenAI adapter HTTP client factory whose every request gets ``status`` and JSON ``body``."""
+    transport = httpx.MockTransport(lambda _request: httpx.Response(status, json=body))
+    return lambda *_args, **_kwargs: httpx.Client(transport=transport)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("status", "error", "expected_code"),
+    [
+        (404, {"type": "invalid_request_error", "code": "model_not_found"}, "request_rejected"),
+        (400, {"type": "invalid_request_error", "code": "context_length_exceeded"}, "request_rejected"),
+        (413, {"type": "invalid_request_error"}, "request_rejected"),
+        (408, {"type": "timeout"}, "provider_failure"),
+        (498, {"type": "capacity_exceeded"}, "provider_failure"),
+        (429, {"type": "requests", "code": "rate_limit_exceeded"}, "rate_limit"),
+        (429, {"type": "insufficient_quota", "code": "insufficient_quota"}, "provider_quota_exhausted"),
+        (429, {"type": "insufficient_quota"}, "provider_quota_exhausted"),
+        (429, {"code": "insufficient_quota"}, "provider_quota_exhausted"),
+        (500, {"type": "server_error"}, "provider_failure"),
+    ],
+    ids=[
+        "unknown-model",
+        "context-overflow",
+        "too-large",
+        "timed-out",
+        "flex-capacity",
+        "rate-limit",
+        "spent-quota",
+        "spent-quota-type-only",
+        "spent-quota-code-only",
+        "server-error",
+    ],
+)
+def test_upstream_reply_reaches_the_summary_code_through_the_openai_adapter(
+    monkeypatch, status, error, expected_code
+):
+    monkeypatch.setattr(
+        openai_mod, "http_client_factory", _openai_upstream_replies(status, {"error": {"message": SECRET, **error}})
+    )
+
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        sgl.analyze("openai", "hello", None, api_key="key", model_override="gpt-test", raise_on_error=True)
+
+    assert exc_info.value.code == expected_code
+    assert SECRET not in str(exc_info.value)
+    assert SECRET not in repr(exc_info.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("streaming", [False, True], ids=["chat", "stream"])
+def test_a_disabled_native_http_adapter_is_a_configuration_error(monkeypatch, streaming):
+    monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_OPENAI", "0")
+
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        result = sgl.analyze(
+            "openai", "hello", None, api_key="key", model_override="gpt-test", streaming=streaming, raise_on_error=True
+        )
+        if streaming:
+            list(result)
+
+    assert exc_info.value.code == "configuration"
 
 
 @pytest.mark.unit

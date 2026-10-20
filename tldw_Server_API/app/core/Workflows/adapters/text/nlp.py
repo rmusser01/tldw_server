@@ -17,6 +17,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.LLM_Calls.tokenizer_resolver import (
     resolve_tiktoken_encoding_or_default,
 )
@@ -121,6 +122,8 @@ Text:
 
         return {"keywords": keywords, "scored_keywords": scored_keywords, "method": "llm"}
 
+    except LLMQuotaExceededError:
+        raise
     except Exception:
         logger.exception("Keyword extract error")
         return {"keywords": [], "scored_keywords": [], "error": "keyword_extract_error"}
@@ -197,6 +200,8 @@ Text: {text[:3000]}"""
                 return {"sentiment": "negative", "score": -0.7, "confidence": 0.6}
             return {"sentiment": "neutral", "score": 0.0, "confidence": 0.5}
 
+    except LLMQuotaExceededError:
+        raise
     except Exception:
         logger.exception("Sentiment analyze error")
         return {"sentiment": "neutral", "score": 0.0, "confidence": 0.0, "error": "sentiment_analyze_error"}
@@ -337,6 +342,8 @@ Text:
         topics = [{"label": line.strip(), "keywords": []} for line in result_text.split("\n") if line.strip()]
         return {"topics": topics[:num_topics]}
 
+    except LLMQuotaExceededError:
+        raise
     except Exception:
         logger.exception("Topic model error")
         return {"topics": [], "error": "topic_model_error"}
@@ -437,6 +444,8 @@ Example:
             "text_length": len(text),
         }
 
+    except LLMQuotaExceededError:
+        raise
     except Exception:
         logger.exception("Entity extract adapter error")
         return {"error": "entity_extract_error", "entities": {}, "total_count": 0}

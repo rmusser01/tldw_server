@@ -58,7 +58,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
 from tldw_Server_API.app.core.Chat.bounded_daemon import await_owned_worker
 from tldw_Server_API.app.core.Chat.streaming_utils import sanitized_provider_stream_exception
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import DatabaseError, PromptStudioDatabase
-from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import provider_auth_is_resolved
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.LLM_Calls.provider_metadata import provider_requires_api_key
@@ -990,6 +990,14 @@ async def run_evaluation_async(
                     evaluation_id,
                 )
         raise
+    except LLMQuotaExceededError:
+        # EvaluationManager has marked the record failed with llm_quota_exceeded.
+        get_ps_logger(
+            request_id=request_id,
+            ps_component="evaluation_bg",
+            ps_job_kind="evaluations",
+            traceparent=traceparent,
+        ).info("PS evaluation.async.refused evaluation_id={}", evaluation_id)
     except (ByokResolutionError, *_PROMPT_STUDIO_EVAL_NONCRITICAL_EXCEPTIONS) as e:
         safe_error = sanitized_provider_stream_exception(e)
         get_ps_logger(

@@ -15,6 +15,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.http_client import afetch, create_async_client
 from tldw_Server_API.app.core.testing import is_test_mode
 from tldw_Server_API.app.core.Workflows.adapters._common import _extract_openai_content
@@ -198,6 +199,8 @@ Return JSON only."""
 
         return {"parsed": {}, "raw_text": result_text}
 
+    except LLMQuotaExceededError:
+        raise
     except Exception:
         logger.error("Reference parse error")
         return {"parsed": {}, "error": "Reference parsing failed"}
@@ -356,6 +359,8 @@ async def run_literature_review_adapter(config: dict[str, Any], context: dict[st
         review = _extract_openai_content(response) or ""
         return {"review": review, "text": review, "paper_count": len(papers), "style": style}
 
+    except LLMQuotaExceededError:
+        raise
     except Exception:
         logger.error("Literature review error")
         return {"review": "", "error": "Literature review generation failed"}

@@ -122,3 +122,18 @@ def test_run_routes_accept_evals_manage_permission() -> None:
             params={"question": "2+2?"},
         )
         assert evaluate_resp.status_code == 200, evaluate_resp.text
+
+
+def test_run_route_refuses_an_over_quota_user_before_any_work(monkeypatch) -> None:
+    """The standalone run route checks the LLM quota before it looks up the benchmark (TASK-13638)."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    refuse_llm_work(monkeypatch)
+    app = _make_app()
+    _override_user(app, [EVALS_MANAGE])
+
+    with TestClient(app) as client:
+        response = client.post("/api/v1/benchmarks/does-not-exist/run", json={})
+
+    assert_llm_quota_402(response)
+    assert response.json()["detail"]["error"] == "limit_exceeded"
