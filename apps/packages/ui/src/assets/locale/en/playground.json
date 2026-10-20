@@ -747,7 +747,10 @@
     "previewAfterApplying": "After applying",
     "sceneDetails": "Scene details",
     "placeholderWithMentions": "Type a message... (/ commands, @ mentions)",
-    "placeholderCommands": "Type a message... (/ for commands)"
+    "placeholderCommands": "Type a message... (/ for commands)",
+    "connectingNotice": "Connecting to your tldw server…",
+    "providerStatusConnecting": "Connecting…",
+    "connectionPendingSend": "Still connecting to your tldw server. Your draft has not been sent."
   },
   "tour": {
     "modelTitle": "Choose a Model",

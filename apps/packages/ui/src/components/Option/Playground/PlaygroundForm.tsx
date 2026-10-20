@@ -228,6 +228,7 @@ import { isFreshChatSelectionPending } from "~/hooks/chat/fresh-chat-selection";
 import { useMessageOption } from "~/hooks/useMessageOption";
 import { useTabMentions } from "~/hooks/useTabMentions";
 import { composerMentionsAvailable, composerPlaceholder } from "./composer-placeholder";
+import { isAwaitingFirstConnectionCheck, notifySendNeedsConnection } from "./composer-connection";
 import { useWebUI } from "~/store/webui";
 
 import { AttachedResearchContextChip } from "./AttachedResearchContextChip";
@@ -899,6 +900,7 @@ export const PlaygroundForm = ({
     shouldEnableOptionalResource(state, "audio-health"),
   );
   const isConnectionReady = isConnected && phase === ConnectionPhase.CONNECTED;
+  const connectionPending = isAwaitingFirstConnectionCheck(connectionState);
   const needsConnectionSetup = ["unconfigured", "configuring_url", "configuring_auth"].includes(connectionUxState);
   const { capabilities, loading: capsLoading } = useServerCapabilities();
   const {
@@ -2438,6 +2440,7 @@ export const PlaygroundForm = ({
   }, [selectedCharacter?.name, t]);
   const connectionStatusLabel = React.useMemo(() => {
     if (!isConnectionReady) {
+      if (connectionPending) return t("playground:composer.providerStatusConnecting", "Connecting\u2026");
       return t("playground:composer.providerStatusOffline", "Offline");
     }
     if (connectionUxState === "connected_degraded") {
@@ -2447,7 +2450,7 @@ export const PlaygroundForm = ({
       );
     }
     return t("playground:composer.providerStatusHealthy", "Healthy");
-  }, [connectionUxState, isConnectionReady, t]);
+  }, [connectionPending, connectionUxState, isConnectionReady, t]);
   const isSessionDegraded = React.useMemo(
     () => !isConnectionReady || connectionUxState === "connected_degraded",
     [connectionUxState, isConnectionReady],
@@ -5154,7 +5157,10 @@ export const PlaygroundForm = ({
     }
 
     if (!isConnectionReady) {
-      if (handleChatInputKeyDown({ e, sendWhenEnter, typing, isSending: false })) e.preventDefault();
+      if (handleChatInputKeyDown({ e, sendWhenEnter, typing, isSending: false })) {
+        e.preventDefault();
+        notifySendNeedsConnection(notificationApi, t, connectionPending);
+      }
       return;
     }
 
@@ -7294,6 +7300,7 @@ export const PlaygroundForm = ({
                               currentChatModelSettings.jsonMode,
                             )}
                             isConnectionReady={isConnectionReady}
+                            connectionPending={connectionPending}
                             showDisconnectedNotice={!(needsConnectionSetup && connectionSetupInTimeline)}
                             connectionUxState={connectionUxState}
                             isProMode={isProMode}

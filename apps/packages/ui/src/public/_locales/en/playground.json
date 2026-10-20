@@ -4600,5 +4600,14 @@
   },
   "composer_placeholderCommands": {
     "message": "Type a message... (/ for commands)"
+  },
+  "composer_connectingNotice": {
+    "message": "Connecting to your tldw server…"
+  },
+  "composer_providerStatusConnecting": {
+    "message": "Connecting…"
+  },
+  "composer_connectionPendingSend": {
+    "message": "Still connecting to your tldw server. Your draft has not been sent."
   }
 }
