@@ -2108,5 +2108,14 @@
   },
   "firstRun_description": {
     "message": "Finish setup in Options to connect to your tldw server, then return here to chat."
+  },
+  "chatWithPage_on": {
+    "message": "Chat with current page is on"
+  },
+  "chatWithPage_off": {
+    "message": "Chat with current page is off"
+  },
+  "chatWithPage_onDescription": {
+    "message": "Your next messages are answered using the page open in this tab."
   }
 }

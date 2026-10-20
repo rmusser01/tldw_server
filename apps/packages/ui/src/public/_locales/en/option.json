@@ -6430,5 +6430,11 @@
   },
   "assistant_trackedModelsLoading": {
     "message": "Loading models before tracked chat selection. Wait for discovery to finish, or retry in the model picker."
+  },
+  "notesSearch_shortcutFocusSearchDescription": {
+    "message": "Focus the search input."
+  },
+  "notesSearch_shortcutCommandPaletteDescription": {
+    "message": "Open the command palette."
   }
 }

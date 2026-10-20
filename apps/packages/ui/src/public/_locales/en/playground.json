@@ -4592,7 +4592,28 @@
   "characterRail_pageLabel": {
     "message": "Page"
   },
-  "composer_advancedPreferenceUnavailable": {
-    "message": "Display preference unavailable. Advanced controls still work for this visit."
+  "composer_persistence_serverNotLoadedPill": {
+    "message": "Not loaded"
+  },
+  "composer_persistence_serverNotLoaded": {
+    "message": "This conversation couldn't be loaded. Your messages are safe on the server."
+  },
+  "serverChatLoadFailure_title": {
+    "message": "Couldn't load this conversation."
+  },
+  "serverChatLoadFailure_body": {
+    "message": "Your messages are safe on the server."
+  },
+  "serverChatLoadFailure_retry": {
+    "message": "Retry"
+  },
+  "serverChatLoadFailure_openAnother": {
+    "message": "Open another chat"
+  },
+  "serverChatLoadFailure_details": {
+    "message": "Technical details"
+  },
+  "serverChatLoadFailure_toastBody": {
+    "message": "Your messages are safe on the server. Reopen the chat to try again."
   }
 }
