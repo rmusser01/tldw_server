@@ -1802,7 +1802,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   type="secondary"
                   className="block text-[11px] mt-1 text-text-muted"
                 >
-                  {notesEditorSupportHint(t, editorInputMode, showEmptyState)}
+                  {notesEditorSupportHint(t, editorInputMode, showEmptyState, editorDisabled)}
                 </Typography.Text>
               </div>
               <div className="flex min-h-0 flex-col">
@@ -1937,7 +1937,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 type="secondary"
                 className="block text-[11px] mt-1 text-text-muted"
               >
-                {notesEditorSupportHint(t, editorInputMode, showEmptyState)}
+                {notesEditorSupportHint(t, editorInputMode, showEmptyState, editorDisabled)}
               </Typography.Text>
             </div>
           )}

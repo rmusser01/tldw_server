@@ -12,8 +12,16 @@ import type { NotesInputMode } from './notes-manager-types'
 export const notesEditorSupportHint = (
   t: TFunction | ((key: string, options?: Record<string, unknown>) => string),
   inputMode: NotesInputMode,
-  isPristineDraft: boolean
+  isPristineDraft: boolean,
+  readOnly = false
 ): string => {
+  // A read-only editor (the server has no notes support) must not invite
+  // typing and saving.
+  if (readOnly) {
+    return t('option:notesSearch.editorReadOnlyHint', {
+      defaultValue: "This server can't save notes, so the editor is read-only."
+    })
+  }
   if (isPristineDraft) {
     return t('option:notesSearch.editorDraftHint', {
       defaultValue:
