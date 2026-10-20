@@ -345,6 +345,7 @@ export function ChatSidebar({
         >
           <button
             aria-label={t("common:chatSidebar.expand", "Expand sidebar")}
+            aria-expanded={false}
             data-testid="chat-sidebar-toggle"
             onClick={onToggleCollapse}
             className={cn(
@@ -507,6 +508,7 @@ export function ChatSidebar({
           >
             <button
               aria-label={t("common:chatSidebar.collapse", "Collapse sidebar")}
+              aria-expanded={true}
               data-testid="chat-sidebar-toggle"
               onClick={onToggleCollapse}
               className={cn(

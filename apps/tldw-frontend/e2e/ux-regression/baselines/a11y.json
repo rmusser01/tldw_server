@@ -11,15 +11,6 @@
       "note": "Token-level contrast: selected 'Notes' and 'List' view buttons, 'Edit' and 'Markdown' mode buttons, 'Create note', the 'Search tips' link and the 'Filter by tag' / 'Tags' placeholders."
     },
     {
-      "state": "notes-empty",
-      "rule": "target-size",
-      "impact": "serious",
-      "nodes": 1,
-      "reviewIds": ["AX-16"],
-      "issue": 3124,
-      "note": "The 'Tags help' icon button in the notes sidebar is below 24x24 px."
-    },
-    {
       "state": "notes-populated",
       "rule": "color-contrast",
       "impact": "serious",
@@ -29,15 +20,6 @@
       "note": "Same eight nodes as the empty library; list rows add none."
     },
     {
-      "state": "notes-populated",
-      "rule": "target-size",
-      "impact": "serious",
-      "nodes": 1,
-      "reviewIds": ["AX-16"],
-      "issue": 3124,
-      "note": "The 'Tags help' icon button. The row checkbox and pin pass through axe's spacing exception."
-    },
-    {
       "state": "notes-editor",
       "rule": "color-contrast",
       "impact": "serious",
@@ -45,15 +27,6 @@
       "reviewIds": ["AX-07"],
       "issue": 3124,
       "note": "The empty-library nodes, with 'Create study pack' in place of 'Create note'. 'Save' no longer fails: it is primary only while there are unsaved edits (#3164). Scanned after the editor finishes loading; earlier, its disabled toolbar is skipped and the count varies."
-    },
-    {
-      "state": "notes-editor",
-      "rule": "target-size",
-      "impact": "serious",
-      "nodes": 1,
-      "reviewIds": ["AX-16"],
-      "issue": 3124,
-      "note": "The 'Tags help' icon button."
     }
   ]
 }

@@ -89,6 +89,23 @@ describe("ChatHeader shortcut toggle", () => {
     )
   })
 
+  // AX-15 (#3124): the sidebar toggle only flipped its label.
+  it.each([
+    [false, "true", "Collapse sidebar"],
+    [true, "false", "Expand sidebar"]
+  ] as const)(
+    "exposes the sidebar state with aria-expanded (collapsed=%s)",
+    (sidebarCollapsed, expanded, name) => {
+      render(<ChatHeader {...createProps({ sidebarCollapsed })} />)
+
+      expect(screen.getByTestId("chat-header-sidebar-toggle")).toHaveAttribute(
+        "aria-expanded",
+        expanded
+      )
+      expect(screen.getByTestId("chat-header-sidebar-toggle")).toHaveAccessibleName(name)
+    }
+  )
+
   it("shows signpost button with 'Hide pages' when expanded and requests collapse", () => {
     const props = createProps({ shortcutsExpanded: true })
     render(<ChatHeader {...props} />)

@@ -6,10 +6,10 @@ import {
   Plus as PlusIcon,
   Search as SearchIcon,
 } from 'lucide-react'
-import { QuestionCircleOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import NotesListPanel from '@/components/Notes/NotesListPanel'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
+import NotesSectionHelpButton from '@/components/Notes/NotesSectionHelpButton'
 import type { NoteListItem } from '@/components/Notes/notes-manager-types'
 import type {
   NotesSortOption,
@@ -302,13 +302,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   const { t } = useTranslation(['option', 'common'])
   const renderHelpButton = React.useCallback(
     (label: string) => (
-      <button
-        type="button"
-        className="inline-flex items-center rounded-sm text-text-muted transition-colors hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-        aria-label={label}
-      >
-        <QuestionCircleOutlined className="text-[11px]" />
-      </button>
+      <NotesSectionHelpButton label={label} />
     ),
     []
   )
@@ -457,6 +451,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   <Button
                     size="small"
                     type={listMode === 'active' ? 'primary' : 'default'}
+                    aria-pressed={listMode === 'active'}
                     onClick={() => {
                       void switchListMode('active')
                     }}
@@ -469,6 +464,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   <Button
                     size="small"
                     type={listMode === 'trash' ? 'primary' : 'default'}
+                    aria-pressed={listMode === 'trash'}
                     onClick={() => {
                       void switchListMode('trash')
                     }}
@@ -483,6 +479,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   <Button
                     size="small"
                     type={listViewMode === 'list' ? 'primary' : 'default'}
+                    aria-pressed={listViewMode === 'list'}
                     onClick={() => switchViewMode('list')}
                     disabled={listMode !== 'active'}
                     data-testid="notes-view-mode-list"
@@ -494,6 +491,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   <Button
                     size="small"
                     type={listViewMode === 'timeline' ? 'primary' : 'default'}
+                    aria-pressed={listViewMode === 'timeline'}
                     onClick={() => switchViewMode('timeline')}
                     disabled={listMode !== 'active'}
                     data-testid="notes-view-mode-timeline"
@@ -505,6 +503,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   <Button
                     size="small"
                     type={listViewMode === 'inbox' ? 'primary' : 'default'}
+                    aria-pressed={listViewMode === 'inbox'}
                     onClick={() => switchViewMode('inbox')}
                     disabled={listMode !== 'active'}
                     data-testid="notes-view-mode-inbox"
@@ -516,6 +515,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   <Button
                     size="small"
                     type={listViewMode === 'moodboard' ? 'primary' : 'default'}
+                    aria-pressed={listViewMode === 'moodboard'}
                     onClick={() => {
                       switchViewMode('moodboard')
                     }}
@@ -529,6 +529,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   <Button
                     size="small"
                     type={listViewMode === 'graph' ? 'primary' : 'default'}
+                    aria-pressed={listViewMode === 'graph'}
                     onClick={() => switchViewMode('graph')}
                     disabled={listMode !== 'active'}
                     icon={<NetworkIcon size={14} aria-hidden="true" />}

@@ -14,12 +14,12 @@ import {
   Code2 as CodeIcon,
   Paperclip as PaperclipIcon
 } from 'lucide-react'
-import { QuestionCircleOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from '@/design-system'
 import NotesEditorHeader from '@/components/Notes/NotesEditorHeader'
 import NotesStudioView from '@/components/Notes/NotesStudioView'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
+import NotesSectionHelpButton from '@/components/Notes/NotesSectionHelpButton'
 import TaskChecklistPreview from '@/components/Notes/TaskChecklistPreview'
 import type { TaskChecklistTogglePayload } from '@/components/Notes/TaskChecklistPreview'
 import TaskActivityNotice from '@/components/Notes/TaskActivityNotice'
@@ -46,6 +46,7 @@ import type { NotesTitleSuggestStrategy } from '@/services/settings/ui-settings'
 import type { NotesSaveIssue } from './hooks/useNotesEditorState'
 import {
   NOTES_EDITOR_REGION_ID,
+  NOTES_LIST_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
   NOTES_WYSIWYG_INPUT_ENABLED,
   NOTE_TEMPLATES,
@@ -111,6 +112,8 @@ export interface NotesEditorPaneProps {
   // Layout
   isMobileViewport: boolean
   setMobileSidebarOpen: (open: boolean) => void
+  /** Whether the mobile notes list is open, for the Browse notes toggle. */
+  mobileSidebarOpen?: boolean
 
   // Selection / identity
   selectedId: string | number | null
@@ -334,6 +337,7 @@ export const NotesEditorEmptyState: React.FC<{
 const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   isMobileViewport,
   setMobileSidebarOpen,
+  mobileSidebarOpen = false,
   selectedId,
   showEmptyState,
   title,
@@ -578,13 +582,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
 
   const renderHelpButton = React.useCallback(
     (label: string) => (
-      <button
-        type="button"
-        className="inline-flex items-center rounded-sm text-text-muted transition-colors hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-        aria-label={label}
-      >
-        <QuestionCircleOutlined className="text-[11px]" />
-      </button>
+      <NotesSectionHelpButton label={label} />
     ),
     []
   )
@@ -662,6 +660,8 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
           <Button
             size="large"
             onClick={() => setMobileSidebarOpen(true)}
+            aria-expanded={mobileSidebarOpen}
+            aria-controls={NOTES_LIST_REGION_ID}
             data-testid="notes-mobile-open-list-button"
             className="min-h-[44px]"
           >
@@ -1441,6 +1441,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 <Button
                   size="small"
                   type={editorInputMode === 'markdown' ? 'primary' : 'text'}
+                  aria-pressed={editorInputMode === 'markdown'}
                   onClick={() => handleEditorInputModeChange('markdown')}
                   disabled={editorDisabled}
                   data-testid="notes-input-mode-markdown"
@@ -1452,6 +1453,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 <Button
                   size="small"
                   type={editorInputMode === 'wysiwyg' ? 'primary' : 'text'}
+                  aria-pressed={editorInputMode === 'wysiwyg'}
                   onClick={() => handleEditorInputModeChange('wysiwyg')}
                   disabled={editorDisabled}
                   data-testid="notes-input-mode-wysiwyg"

@@ -11,6 +11,9 @@ const LazyNotesListPanelEmptyStates = React.lazy(() => import('./NotesListPanelE
 const MAX_TITLE_LENGTH = 80
 const MAX_PREVIEW_LENGTH = 140
 const RECENT_EDIT_WINDOW_MS = 24 * 60 * 60 * 1000
+/** Row checkbox and pin targets: 24x24 px, 44x44 px on touch screens (WCAG 2.5.8, AX-16). */
+const ROW_CONTROL_TARGET_CLASS =
+  'inline-flex min-h-6 min-w-6 shrink-0 items-center justify-center [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11'
 
 const truncateText = (value?: string | null, max?: number) => {
   if (!value) return ''
@@ -518,20 +521,23 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                   >
                 {!isTrashView && (
                   <div className="flex items-start gap-2">
-                    <input
-                      type="checkbox"
-                      checked={isBulkSelected}
-                      aria-label={t('option:notesSearch.bulkSelectAria', {
-                        defaultValue: 'Select note {{title}} for bulk actions',
-                        title: item.title || `Note ${item.id}`
-                      })}
-                      data-testid={`notes-select-checkbox-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`}
-                      onChange={() => {}}
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        onToggleBulkSelection?.(item.id, !isBulkSelected, event.shiftKey)
-                      }}
-                    />
+                    {/* The label is the 24px (44px on touch) hit area for the 16px checkbox (AX-16). */}
+                    <label className={`${ROW_CONTROL_TARGET_CLASS} cursor-pointer`}>
+                      <input
+                        type="checkbox"
+                        checked={isBulkSelected}
+                        aria-label={t('option:notesSearch.bulkSelectAria', {
+                          defaultValue: 'Select note {{title}} for bulk actions',
+                          title: item.title || `Note ${item.id}`
+                        })}
+                        data-testid={`notes-select-checkbox-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`}
+                        onChange={() => {}}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          onToggleBulkSelection?.(item.id, !isBulkSelected, event.shiftKey)
+                        }}
+                      />
+                    </label>
                     <button
                       type="button"
                       aria-label={
@@ -545,7 +551,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                               title: item.title || `Note ${item.id}`
                             })
                       }
-                      className="mt-0.5 inline-flex h-6 w-6 items-center justify-center rounded text-text-muted hover:bg-surface2 hover:text-text"
+                      className={`${ROW_CONTROL_TARGET_CLASS} rounded text-text-muted hover:bg-surface2 hover:text-text`}
                       data-testid={`notes-pin-toggle-${itemIdText.replace(/[^a-z0-9_-]/gi, '_')}`}
                       onClick={(event) => {
                         event.stopPropagation()

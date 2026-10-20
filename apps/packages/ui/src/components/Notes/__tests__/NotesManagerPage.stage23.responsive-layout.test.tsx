@@ -251,6 +251,52 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
     }
   })
 
+  // AX-15 (#3124): the list toggles must say whether the list is shown and
+  // which region they control, not only flip a chevron.
+  it("tells assistive technology whether the notes list is shown", async () => {
+    const { rerender } = renderPage()
+
+    const desktopToggle = screen.getByTestId("notes-desktop-sidebar-toggle")
+    expect(desktopToggle).toHaveAttribute("aria-controls", "notes-list-region")
+    expect(desktopToggle).toHaveAttribute("aria-expanded", "true")
+
+    fireEvent.click(desktopToggle)
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-desktop-sidebar-toggle")).toHaveAttribute(
+        "aria-expanded",
+        "false"
+      )
+    })
+
+    setViewportWidth(375)
+    rerender(
+      <QueryClientProvider
+        client={
+          new QueryClient({
+            defaultOptions: {
+              queries: { retry: false },
+              mutations: { retry: false }
+            }
+          })
+        }
+      >
+        <NotesManagerPage />
+      </QueryClientProvider>
+    )
+
+    const browse = await screen.findByTestId("notes-mobile-open-list-button")
+    expect(browse).toHaveAttribute("aria-controls", "notes-list-region")
+    expect(browse).toHaveAttribute("aria-expanded", "false")
+
+    fireEvent.click(browse)
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-mobile-open-list-button")).toHaveAttribute(
+        "aria-expanded",
+        "true"
+      )
+    })
+  })
+
   it("restores desktop sidebar collapse state after returning from mobile", async () => {
     const { rerender } = renderPage()
     const listRegion = screen.getByTestId("notes-list-region")

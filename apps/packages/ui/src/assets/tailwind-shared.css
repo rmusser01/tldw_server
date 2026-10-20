@@ -1323,3 +1323,18 @@ body {
       0 12px 28px -18px rgba(var(--color-warn), 0.36);
   }
 }
+
+/* ===== Accessibility: forced colours (AX-15, #3124) =====
+   Windows High Contrast and other forced-colour modes replace fills, so a
+   selected toggle that differs only by background looks like its neighbours.
+   Outline the selected state in a system colour that survives. */
+@media (forced-colors: active) {
+  [aria-pressed="true"],
+  [role="radio"][aria-checked="true"],
+  [role="tab"][aria-selected="true"],
+  .ant-pagination-item-active,
+  .ant-segmented-item-selected {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+}
