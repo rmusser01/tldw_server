@@ -1360,8 +1360,11 @@ a[href]:focus-visible:not([class*="focus:"]):not([class*="focus-visible:"]) {
 /* ===== Accessibility: reduced motion (AX-19, #3124) =====
    Honour the OS "reduce motion" setting everywhere: stop looping and
    decorative animations (shake, pulse, bounce, spinners), make transitions
-   effectively instant and turn off CSS smooth scrolling. Scripted scrolls use
-   smoothScrollBehavior() from utils/reduced-motion. */
+   effectively instant and turn off CSS smooth scrolling. This overrides the
+   app's own animation setting too, including "subtle". A behaviour passed
+   from script still wins over CSS, so scripted scrolls must use
+   smoothScrollBehavior() from utils/reduced-motion; the files that do not
+   yet are listed in utils/__tests__/smooth-scroll.guard.test.ts. */
 @media (prefers-reduced-motion: reduce) {
   :root {
     --duration-base: 0ms;
