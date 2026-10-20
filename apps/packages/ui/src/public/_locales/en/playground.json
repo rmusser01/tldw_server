@@ -4594,5 +4594,11 @@
   },
   "composer_advancedPreferenceUnavailable": {
     "message": "Display preference unavailable. Advanced controls still work for this visit."
+  },
+  "savedReplyActions_loading": {
+    "message": "This saved chat is still loading. Try again in a moment."
+  },
+  "savedReplyActions_regenerateUnavailable": {
+    "message": "This saved reply can't be regenerated here. Use New Branch to try again from this point."
   }
 }

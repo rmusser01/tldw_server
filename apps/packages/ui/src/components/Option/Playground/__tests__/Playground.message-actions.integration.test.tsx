@@ -406,3 +406,42 @@ describe("native admitted continuation through the actual Playground", { timeout
     })
   })
 })
+
+const moreActions = async (view: Awaited<ReturnType<typeof renderPlayground>>) => {
+  await view.user.click(within(savedAssistantRow()).getByRole("button", { name: "More actions" }))
+}
+
+describe("saved-reply action availability (CM-01)", { timeout: 60_000 }, () => {
+  beforeEach(async () => { await resetPlaygroundHarness() })
+
+  it("CM-01 keeps the rail Regenerate available on a saved reply that can be regenerated", async () => {
+    const { view } = await renderWithAdmittedExchange()
+    const rail = screen.getByTestId("playground-runtime-inspector")
+    const regenerate = within(rail).getByRole("button", { name: "Regenerate last response", hidden: true })
+    expect(regenerate).toBeEnabled()
+    expect(rail).not.toHaveTextContent(/unavailable for selected history/i)
+    const before = view.server.completionRequests().length
+    view.server.planCompletion({ reply: "Rail alternative" })
+    await view.user.click(regenerate)
+    await waitFor(() => expect(view.server.completionRequests()).toHaveLength(before + 1), HARNESS_WAIT)
+    await waitForChatIdle()
+    expect(view.server.completionRequests().at(-1)!.body).toMatchObject({ metadata: { tldw_regenerate_from_message_id: expect.any(String) } })
+  })
+
+  it("CM-01 disables Regenerate with a plain reason and offers no Continue when the saved reply has no question", async () => {
+    const server = createFakeTldwServer()
+    server.seedChat({ id: "greeting-chat", title: "Greeting only", turns: [{ role: "assistant", content: "Hello from the saved greeting" }] })
+    const view = await renderPlayground({ server, extras: <SidebarServerChatButton chatId="greeting-chat" title="Greeting only" /> })
+    await openSavedServerChat(view, { title: "Greeting only", lastMessage: "Hello from the saved greeting" })
+    const regenerate = within(savedAssistantRow()).getByRole("button", { name: "Regenerate" })
+    expect(regenerate).toBeDisabled()
+    expect(regenerate).toHaveAttribute("title", expect.stringMatching(/can't be regenerated here.*New Branch/))
+    await moreActions(view)
+    expect(screen.queryByRole("button", { name: "Continue Response" })).toBeNull()
+    expect(screen.getByRole("button", { name: "New Branch" })).toBeInTheDocument()
+    const rail = screen.getByTestId("playground-runtime-inspector")
+    expect(within(rail).getByRole("button", { name: "Regenerate last response", hidden: true })).toBeDisabled()
+    expect(rail).toHaveTextContent(/can't be regenerated here/)
+    expect(server.completionRequests()).toHaveLength(0)
+  })
+})

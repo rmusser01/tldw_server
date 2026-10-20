@@ -1620,7 +1620,7 @@ describe("Playground cockpit controls", () => {
     );
   });
 
-  it("disables cockpit regenerate when a saved conversation has selected history", async () => {
+  it("disables cockpit regenerate when a saved conversation's reply cannot be regenerated", async () => {
     messageOptionState.value.streaming = false;
     messageOptionState.value.temporaryChat = false;
     const selection = renderHook(() => useHistorySelection());
@@ -1642,7 +1642,8 @@ describe("Playground cockpit controls", () => {
     expect(
       within(inspector).getByRole("button", { name: "Regenerate last response" }),
     ).toBeDisabled();
-    expect(within(inspector).getByText(/selected history/i)).toBeInTheDocument();
+    // CM-01: only a saved reply the server cannot regenerate disables it, with a plain reason.
+    expect(within(inspector).getByText(/can't be regenerated here.*New Branch/i)).toBeInTheDocument();
     expect(messageOptionState.value.regenerateLastMessage).not.toHaveBeenCalled();
   });
 

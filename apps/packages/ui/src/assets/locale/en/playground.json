@@ -1698,5 +1698,9 @@
   },
   "shortcuts": {
     "openKeyboardHelp": "Open keyboard shortcuts (?)"
+  },
+  "savedReplyActions": {
+    "loading": "This saved chat is still loading. Try again in a moment.",
+    "regenerateUnavailable": "This saved reply can't be regenerated here. Use New Branch to try again from this point."
   }
 }
