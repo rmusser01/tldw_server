@@ -1,7 +1,10 @@
 """Real acquisition episodes, retry-neutral expiry, and durable semantic proofs."""
 
+import base64
 import hashlib
 import json
+import secrets
+from asyncio import CancelledError
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from dataclasses import replace
@@ -18,6 +21,7 @@ from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
     WorkflowProgress,
     WorkflowProgressKind,
 )
+from tldw_Server_API.app.core.Security.crypto import decrypt_json_blob
 
 
 @pytest.fixture(autouse=True, params=[False, True], ids=["two-step", "single-update"])
@@ -27,6 +31,200 @@ def acquisition_mode(request, monkeypatch):
     monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
     return request.param
+
+
+@pytest.fixture
+def workflow_encryption(monkeypatch):
+    monkeypatch.setenv("JOBS_ENCRYPT_EMBEDDINGS", "true")
+    monkeypatch.setenv("WORKFLOWS_ARTIFACT_ENC_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
+    monkeypatch.delenv("JOBS_CRYPTO_SECONDARY_KEY", raising=False)
+
+
+def _admit_encrypted(case):
+    assert case.admit().outcome is WorkflowOutcome.APPLIED
+    stored = case.job_row()["payload"]
+    envelope = json.loads(stored) if isinstance(stored, str) else stored
+    assert envelope["_encrypted"]["_enc"] == "aesgcm:v1"
+    assert case.root.reference_id not in json.dumps(envelope)
+    assert decrypt_json_blob(envelope["_encrypted"]) == {"workflow_id": case.root.reference_id}
+    assert case.capability.lookup(case.root).outcome is WorkflowOutcome.ACTIVE
+    return stored
+
+
+def _seed_expired_encrypted_episode(case):
+    """Isolate recovery RED even when the separate public acquisition is broken."""
+    lease = "00000000-0000-4000-8000-000000000003"
+    digest = hashlib.sha256(
+        json.dumps(["jobs_workflow_lease_v1", "worker-a", lease], separators=(",", ":")).encode()
+    ).hexdigest()
+    with case.connection() as conn:
+        case.execute(
+            conn,
+            "UPDATE jobs SET status='processing',worker_id='worker-a',lease_id=?,leased_until='2020-01-01 00:00:00' WHERE uuid=?",
+            (lease, case.root.job_uuid),
+        )
+        case.execute(
+            conn,
+            "UPDATE job_workflow_roots SET current_epoch=1,lease_digest=? WHERE job_uuid=?",
+            (digest, case.root.job_uuid),
+        )
+        conn.execute("UPDATE job_counters SET ready_count=0,processing_count=1")
+        conn.commit()
+
+
+def _encrypted_snapshot(case):
+    with case.connection() as conn:
+        durable = tuple(
+            tuple(tuple(row) for row in conn.execute(statement))
+            for statement in (
+                "SELECT * FROM job_counters",
+                "SELECT * FROM job_events ORDER BY id",
+                "SELECT * FROM workflow_effect_domain",
+            )
+        )
+    return case.job_row(), case.serialized_support(), durable
+
+
+@pytest.mark.parametrize("via", ["acquire", "sweep"])
+def test_encrypted_root_public_acquire_recovery_and_terminal(workflow_case, workflow_encryption, via):
+    case = workflow_case
+    stored = _admit_encrypted(case)
+    root = case.root
+    assert case.admit().outcome is WorkflowOutcome.ALREADY_APPLIED
+    assert case.root == root
+    assert case.admit(max_retries=2).outcome is WorkflowOutcome.CONFLICT
+    assert case.capability.lookup(replace(root, owner_user_id="other-owner")).outcome in {
+        WorkflowOutcome.MISSING,
+        WorkflowOutcome.CONFLICT,
+    }
+    for episode in range(1, 6):
+        assert case.acquire() is not None
+        assert case.support_row()["current_epoch"] == episode
+        case.expire_current_lease(fractional=True)
+        case.recover(via)
+        assert case.no_progress_count() == episode
+        assert case.retry_count() == 0
+        assert case.job_row()["failure_streak_count"] in (None, 0)
+        assert case.job_row()["payload"] == stored
+    assert case.status() == "failed"
+    assert case.failure_reason() == "no_progress_exhausted"
+    assert case.support_row()["last_closed_epoch"] == 5
+    before = case.observe()
+    assert case.acquire(replace_current=False) is None
+    case.recover("sweep")
+    assert case.observe() == before
+    assert case.job_row()["payload"] == stored
+
+
+@pytest.mark.parametrize("via", ["acquire", "sweep"])
+def test_encrypted_expired_root_public_recovery(workflow_case, workflow_encryption, via):
+    case = workflow_case
+    stored = _admit_encrypted(case)
+    _seed_expired_encrypted_episode(case)
+    case.recover(via)
+    assert case.no_progress_count() == 1
+    assert case.retry_count() == 0
+    assert case.support_row()["last_closed_epoch"] == 1
+    assert case.acquire() is not None
+    assert case.support_row()["current_epoch"] == 2
+    assert case.job_row()["payload"] == stored
+
+
+@pytest.mark.parametrize("operation", ["acquire", "reacquire", "sweep"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "tampered",
+        "wrong-reference",
+        "extra-field",
+        "missing-key",
+        "wrong-key",
+        "decrypt-failure",
+        "oversized",
+        "owner",
+        "controls",
+    ],
+)
+def test_encrypted_authority_failure_is_atomic(workflow_case, workflow_encryption, monkeypatch, operation, failure):
+    case = workflow_case
+    _admit_encrypted(case)
+    case.install_effect_guard()
+    if operation != "acquire":
+        _seed_expired_encrypted_episode(case)
+    if failure in {"tampered", "oversized", "wrong-reference", "extra-field"}:
+        stored = case.job_row()["payload"]
+        envelope = json.loads(stored) if isinstance(stored, str) else stored
+        if failure in {"wrong-reference", "extra-field"}:
+            payload = {"workflow_id": "00000000-0000-4000-8000-000000000099"}
+            if failure == "extra-field":
+                payload = {"workflow_id": case.root.reference_id, "extra": "not-authorized"}
+            envelope = case.manager._maybe_encrypt_json(payload, "embeddings")
+            assert decrypt_json_blob(envelope["_encrypted"]) == payload
+        else:
+            envelope["_encrypted"]["ct"] = "AAAA" if failure == "tampered" else "A" * 8192
+        with case.connection() as conn:
+            case.execute(conn, "UPDATE jobs SET payload=? WHERE uuid=?", (json.dumps(envelope), case.root.job_uuid))
+            conn.commit()
+    elif failure == "missing-key":
+        monkeypatch.delenv("WORKFLOWS_ARTIFACT_ENC_KEY")
+    elif failure == "wrong-key":
+        monkeypatch.setenv("WORKFLOWS_ARTIFACT_ENC_KEY", base64.b64encode(secrets.token_bytes(32)).decode())
+    elif failure == "decrypt-failure":
+        monkeypatch.setattr("tldw_Server_API.app.core.Jobs.manager.decrypt_json_blob", lambda _: None)
+    else:
+        with case.connection() as conn:
+            statement = (
+                "UPDATE jobs SET owner_user_id='other-owner' WHERE uuid=?"
+                if failure == "owner"
+                else "UPDATE jobs SET max_retries=2 WHERE uuid=?"
+            )
+            case.execute(conn, statement, (case.root.job_uuid,))
+            conn.commit()
+    observed = []
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.manager.emit_job_event", lambda *a, **kw: observed.append(a))
+    monkeypatch.setattr("tldw_Server_API.app.core.Jobs.manager.observe_queue_latency", lambda *a: observed.append(a))
+    if failure == "oversized":
+
+        def forbidden_decoder(*args, **kwargs):
+            raise AssertionError("oversized envelope reached decryption")
+
+        monkeypatch.setattr(case.manager, "_maybe_decrypt_json", forbidden_decoder)
+    before = _encrypted_snapshot(case)
+    with pytest.raises(WorkflowFenceError) as error:
+        if operation == "sweep":
+            case.recover("sweep")
+        else:
+            # No owner filter: a changed owner must still fail exact enrollment,
+            # rather than merely making the candidate invisible to selection.
+            case.manager.acquire_next_job(
+                domain="embeddings", queue="workflow", worker_id="worker-a", lease_seconds=120
+            )
+    assert error.value.outcome is WorkflowOutcome.UNAVAILABLE
+    assert _encrypted_snapshot(case) == before
+    assert observed == []
+
+
+@pytest.mark.parametrize("operation", ["acquire", "reacquire", "sweep"])
+@pytest.mark.parametrize("error_type", [RuntimeError, CancelledError])
+def test_encrypted_decoder_programming_and_cancellation_errors_propagate(
+    workflow_case, workflow_encryption, monkeypatch, operation, error_type
+):
+    case = workflow_case
+    _admit_encrypted(case)
+    case.install_effect_guard()
+    if operation != "acquire":
+        _seed_expired_encrypted_episode(case)
+    error = error_type("decoder sentinel")
+
+    def broken_decoder(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(case.manager, "_maybe_decrypt_json", broken_decoder)
+    before = _encrypted_snapshot(case)
+    with pytest.raises(error_type) as caught:
+        case.recover("sweep") if operation == "sweep" else case.acquire(replace_current=False)
+    assert caught.value is error
+    assert _encrypted_snapshot(case) == before
 
 
 @pytest.mark.parametrize("via", ["acquire", "sweep"])
@@ -138,9 +336,14 @@ def test_late_proof_from_prior_epoch_cannot_reset_current_count(workflow_case):
     assert case.no_progress_count() == 1
 
 
-def test_acquire_and_sweep_race_charge_same_epoch_once(workflow_case):
+@pytest.mark.parametrize("encrypted", [False, True])
+def test_acquire_and_sweep_race_charge_same_epoch_once(workflow_case, encrypted, request):
     case = workflow_case
-    case.admit()
+    if encrypted:
+        request.getfixturevalue("workflow_encryption")
+        stored = _admit_encrypted(case)
+    else:
+        case.admit()
     case.acquire()
     case.expire_current_lease()
     barrier = Barrier(2)
@@ -153,6 +356,8 @@ def test_acquire_and_sweep_race_charge_same_epoch_once(workflow_case):
         list(pool.map(recover, ["acquire", "sweep"]))
     assert case.no_progress_count() == 1
     assert case.retry_count() == 0
+    if encrypted:
+        assert case.job_row()["payload"] == stored
     with case.connection() as conn:
         assert (
             case.execute(

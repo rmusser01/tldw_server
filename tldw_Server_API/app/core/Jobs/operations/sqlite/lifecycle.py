@@ -422,6 +422,7 @@ def acquire_job(
     command: AcquireJobCommand,
     counters_enabled: bool,
     now: datetime,
+    decode_payload: Callable[..., Any] | None = None,
 ) -> LifecycleResult:
     """Atomically acquire the next eligible SQLite job."""
 
@@ -528,7 +529,9 @@ def acquire_job(
             record_workflow_acquisition_in_transaction,
         )
 
-        record_workflow_acquisition_in_transaction(conn, backend="sqlite", acquired=acquired)
+        record_workflow_acquisition_in_transaction(
+            conn, backend="sqlite", acquired=acquired, decode_payload=decode_payload
+        )
         if counters_enabled:
             _bump_acquired_counters(conn, acquired=acquired)
         return LifecycleResult.applied(row=acquired)
