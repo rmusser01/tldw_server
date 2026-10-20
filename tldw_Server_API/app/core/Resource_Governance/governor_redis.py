@@ -1687,9 +1687,20 @@ class RedisResourceGovernor(ResourceGovernor):
                         ok_all = True
                         for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
-                            ok, ra, cnt = await self._allow_requests_sliding_check_only(
-                                key=key, limit=limit_m, window=window, units=units_m, now=now, fail_mode=self._effective_fail_mode(pol, category)
-                            )
+                            try:
+                                ok, ra, cnt = await self._allow_requests_sliding_check_only(
+                                    key=key, limit=limit_m, window=window, units=units_m, now=now, fail_mode=self._effective_fail_mode(pol, category)
+                                )
+                            except _FallbackToMemory:
+                                if self._stub_delegate is None:  # no memory governor to count it: deny for the window
+                                    ok, ra, cnt = False, window, 0
+                                else:
+                                    # Redis dropped after check() passed: the worker's memory governor counts the
+                                    # request, as at check(). Nothing has been added to Redis yet.
+                                    dec_f, handle_f = await self._stub_delegate.reserve(daily_req, op_id=op_id)
+                                    if handle_f:
+                                        self._fallback_handles.add(handle_f)
+                                    return dec_f, handle_f
                             counts.append(int(cnt))
                             if not ok:
                                 ok_all = False
@@ -1768,7 +1779,7 @@ class RedisResourceGovernor(ResourceGovernor):
                                 except _RG_NONCRITICAL_EXCEPTIONS:
                                     # Redis cannot count or take the write (OOM, READONLY): the fail mode, as in check().
                                     if cat_fail == "fail_open":
-                                        continue
+                                        break  # admitted uncounted; retrying each remaining unit only repeats the failure
                                     add_failed = True
                                     fallback_to_memory = cat_fail == "fallback_memory"
                                     denial_retry_after = max(denial_retry_after, int(window))

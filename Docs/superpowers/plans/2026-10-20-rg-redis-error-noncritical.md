@@ -217,8 +217,8 @@ First measured on `origin/dev` `a6719bf24f`; the fold was re-measured on `454974
      - The re-reviewer measured 4 admitted against a limit of 2 on two workers.
      - Each reserve also loads the script and fails it again for as long as the condition lasts.
      - Task 5 logs it, because the probe still answers; `test_redis_rejecting_writes_is_logged` covers 4 cases.
-   - **Rates:** after a restart, the request falls back to the Python windows once, then reloads. While Redis rejects writes, the window is not written to Redis (OOM), or the read fails and the fail mode applies (READONLY); either way, Task 5 logs it.
-   - **Retry estimates:** `_tokens_lua_sha` is not reset; a failing `evalsha` there only sets a denial's `Retry-After` to the full window.
+   - **Rates:** after a restart, the request falls back to the Python windows once, then reloads. While Redis rejects writes (OOM or READONLY), the failed write or read gets the fail mode, as while Redis is unreachable; either way, Task 5 logs it. *(Updated in review of PR #3288: before that fold, a rejected OOM write was swallowed and no fail mode applied.)*
+   - **Retry estimates:** a failing `evalsha` sets a denial's `Retry-After` to the full window once, and `_tokens_lua_sha` is cleared so the next estimate reloads the script. *(Updated in review of PR #3288.)*
    - Covered by `test_a_lost_lease_script_falls_back_to_counting_in_python` (3 modes) and `test_a_lost_rate_script_falls_back_once_then_reloads`.
 2. **Leases on the other side of an outage.**
    - During the outage, a worker counting on its own does not see leases taken before Redis dropped.
@@ -234,10 +234,10 @@ First measured on `origin/dev` `a6719bf24f`; the fold was re-measured on `454974
      - a quota acquire: 1 on dev; with the plan, 2 or 8;
      - a shielded release: 0 on dev; with the plan, 3.
    - **Refused connections** fail in about 10 ms, so this is harmless.
-   - **Black-holed connections** are not: `redis_factory` sets no `socket_connect_timeout`, so each call waits for the OS connect timeout.
+   - **Black-holed connections** are not: redis-py 8.1's `from_url` waits 5 s per call, so a governed request takes about 30-70 s. *(Updated in review of PR #3288: not the OS connect timeout, as first written; see TASK-13882.)*
    - Task 6 files a follow-up for a connect timeout, or a short circuit breaker, on the RG client. No test.
 5. **A Redis error that still escapes `reserve`.**
-   - The real-Redis add loop calls `_purge_and_count` unguarded at L1739. It is reached only when Redis passed the probe and then failed before the add.
+   - The real-Redis add loop called `_purge_and_count` unguarded at L1739. *(Updated in review of PR #3288: a read-only Redis reached it on every request, not only in a race; the line is deleted. A Redis that drops between `check()` and the add now gets the fail mode in `reserve`, so nothing escapes.)*
    - The middleware turns that error into its fail-mode answer (Task 2): 503 under `fail_closed`, otherwise the request passes through. `concurrency_quota` already admits on it.
    - `test_middleware_fail_closed_on_reserve_error_when_policy_requires_it[redis]` pins the 503 for a `RedisError` from `reserve`. No test reproduces the race itself.
 

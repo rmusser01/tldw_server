@@ -1,6 +1,9 @@
 """On real Redis a request's own max_concurrent holds across workers (TASK-13435)."""
 
 import pytest
+import redis.asyncio as aioredis
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
 from redis.exceptions import OutOfMemoryError, ReadOnlyError
 
 from tldw_Server_API.app.core.Resource_Governance import RedisResourceGovernor, RGRequest
@@ -200,3 +203,24 @@ async def test_redis_rejecting_writes_follows_the_fail_mode(real_redis, rg_uniqu
     admitted, min_retry_after = _WHILE_REJECTING_WRITES[(fail_mode, category)]
     assert [d.allowed for d in decisions] == admitted
     assert all(d.retry_after >= min_retry_after for d in decisions if not d.allowed)
+
+
+@pytest.mark.parametrize("fail_mode, admitted", [("fail_open", True), ("fallback_memory", True), ("fail_closed", False)])
+@pytest.mark.parametrize(("category", "limits"), [("requests", {"rpm": 5}), ("tokens", {"per_min": 5})], ids=["requests", "tokens"])
+async def test_redis_dropping_after_the_check_gets_the_fail_mode(real_redis, rg_unique_ns, monkeypatch, category, limits, fail_mode, admitted) -> None:
+    """Redis drops between check() and the rate add: reserve applies the fail mode and never raises (TASK-13859)."""
+    gov = RedisResourceGovernor(policy_loader=_Policy(fail_mode, **{category: limits}), ns=rg_unique_ns)
+    if not await gov._is_real_redis():
+        pytest.skip("Redis client is not real; using in-memory stub")
+    check = gov.check
+
+    async def check_then_drop(req: RGRequest):
+        decision = await check(req)
+        # Redis goes away now. Nothing listens on port 1, and retries are off, so each command fails at once.
+        gov._client = aioredis.Redis(host="127.0.0.1", port=1, socket_connect_timeout=0.2, retry=Retry(NoBackoff(), 0))
+        return decision
+
+    monkeypatch.setattr(gov, "check", check_then_drop)
+    decision, handle = await gov.reserve(RGRequest(entity="user:42", categories={category: {"units": 1}}, tags={"policy_id": "drop.test"}))
+
+    assert (decision.allowed, handle is not None) == (admitted, admitted)
