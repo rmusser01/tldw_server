@@ -9,6 +9,7 @@ import type { ServerChatSaveStatus } from "@/store/server-chat-save-status"
  * - "serverFailed": a server chat whose latest write was not acknowledged;
  * - "serverUnconfirmed": latest turn or cold history evidence is unresolved;
  * - "server": acknowledged write or current owned history/journal evidence.
+ * - "serverNotLoaded": a server chat whose messages failed to load (CS-06).
  *
  * Server connectivity is deliberately not an input: being connected does not
  * mean a chat has been saved there.
@@ -19,7 +20,8 @@ export const CHAT_PERSISTENCE_KINDS = [
   "serverSaving",
   "serverFailed",
   "serverUnconfirmed",
-  "server"
+  "server",
+  "serverNotLoaded"
 ] as const
 
 export type ChatPersistenceKind = (typeof CHAT_PERSISTENCE_KINDS)[number]
@@ -39,16 +41,21 @@ type Translate = (key: string, defaultValue?: any) => unknown
 export const resolveChatPersistenceKind = ({
   temporaryChat,
   serverChatId,
-  serverSaveStatus
+  serverSaveStatus,
+  serverChatNotLoaded = false
 }: {
   temporaryChat: boolean
   serverChatId: string | null | undefined
   serverSaveStatus: ServerChatSaveStatus
+  /** The chat's messages failed to load and none are shown. */
+  serverChatNotLoaded?: boolean
 }): ChatPersistenceKind => {
   if (temporaryChat) return "temporary"
   if (typeof serverChatId !== "string" || serverChatId.trim().length === 0) {
     return "local"
   }
+  // A chat that could not be opened must not read "Saved" (CS-06).
+  if (serverChatNotLoaded) return "serverNotLoaded"
   if (serverSaveStatus === "saving") return "serverSaving"
   if (serverSaveStatus === "failed") return "serverFailed"
   if (serverSaveStatus === "unknown" || serverSaveStatus === "unconfirmed") return "serverUnconfirmed"
@@ -96,6 +103,15 @@ export const getChatPersistenceCopy = (
       return {
         pill: translate(t, "serverUnconfirmedPill", "Save status unconfirmed"),
         description: translate(t, "serverUnconfirmed", "This chat is linked to server history. Review retained outcomes and reload history to confirm the latest turn before sending again.")
+      }
+    case "serverNotLoaded":
+      return {
+        pill: translate(t, "serverNotLoadedPill", "Not loaded"),
+        description: translate(
+          t,
+          "serverNotLoaded",
+          "This conversation couldn't be loaded. Your messages are safe on the server."
+        )
       }
     case "server":
       return {

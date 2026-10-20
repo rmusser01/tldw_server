@@ -297,6 +297,19 @@ describe("ChatHeader shortcut toggle", () => {
     expect(badge.className).toContain(persistenceKind === "server" ? "bg-success/10" : "bg-warn/10")
   })
 
+  it("says a server chat that failed to load is not loaded, instead of saved (CS-06)", () => {
+    render(
+      <ChatHeader
+        {...createProps({ temporaryChat: false, persistenceKind: "serverNotLoaded" })}
+      />
+    )
+
+    const badge = screen.getByTestId("chat-header-persistence-badge")
+    expect(badge).toHaveTextContent("Not loaded")
+    expect(badge).not.toHaveTextContent("Saved")
+    expect(badge.className).toContain("bg-warn/10")
+  })
+
   it("labels a chat whose server write was acknowledged as saved on server", () => {
     render(
       <ChatHeader

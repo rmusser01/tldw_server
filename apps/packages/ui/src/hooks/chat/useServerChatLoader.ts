@@ -7,6 +7,7 @@ import React from "react"
 import { formatToMessage } from "@/db/dexie/helpers"
 import { shallow } from "zustand/shallow"
 import type { TFunction } from "i18next"
+import { notifyServerChatLoadFailure } from "@/hooks/chat/server-chat-load-failure-notice"
 import { useChatBaseState } from "@/hooks/chat/useChatBaseState"
 import { useStoreMessageOption } from "@/store/option"
 import type { Message } from "@/store/option"
@@ -40,7 +41,7 @@ import {
 import { isTrackedCharacterChatSource } from "@/utils/character-chat-session"
 
 type NotificationApi = {
-  error: (payload: { message: string; description?: string }) => void
+  error: (payload: { message: string; description?: string; key?: string }) => void
 }
 
 type UseServerChatLoaderOptions = {
@@ -1301,11 +1302,10 @@ export const useServerChatLoader = ({
                   "Failed to load server chat. Check your connection and try again."
               })
             setServerChatLoadState("failed")
+            // Kept as the panel's technical detail, not shown as the message.
             setServerChatLoadError(description)
-            notification.error({
-              message: t("error", { defaultValue: "Error" }),
-              description
-            })
+            notifyServerChatLoadFailure({ notification, t,
+              messagesShown: useStoreMessageOption.getState().messages.length })
           }
         } finally {
           if (useStoreMessageOption.getState().serverChatId === serverChatId) setIsLoading(false)
