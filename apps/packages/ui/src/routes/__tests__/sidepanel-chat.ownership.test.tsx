@@ -51,6 +51,8 @@ const io = vi.hoisted(() => ({
   captureNative: false,
   useComposer: false,
   useRecovery: false,
+  turnRecoveries: [] as unknown[],
+  nativeMessages: [] as { id: string; role: string; content: string }[],
   write: vi.fn(),
   physicalTabId: 7 as number | null,
   controller: null as HistorySelectionController | null,
@@ -161,13 +163,13 @@ vi.mock("@/db/dexie/history-selection", async original => ({
   saveHistoryBookmark: async (scope: HistoryBookmarkScope, view: HistoryViewSelectionV1) => {
     io.data.set(`bookmark:${JSON.stringify([scope.profile_id, scope.client_session_id, view.owner_key, view.conversation_id])}`, { ...scope, view })
   },
-  loadHistoryTurnRecoveries: async () => []
+  loadHistoryTurnRecoveries: async () => io.turnRecoveries
 }))
 vi.mock("@/services/chat-history-selection", async original => ({
   ...await original<typeof import("@/services/chat-history-selection")>(),
   captureHistorySnapshot: async (owner: HistoryOwnerV1, incoming: HistoryCaptureRequestV1["view"], purpose: string) => {
     if (owner.kind === "unavailable" || (owner.kind === "native" && (!io.captureNative || owner.conversation_id === "failed"))) throw new Error("unsupported_history_capability")
-    const cached = owner.kind === "native" ? { historyInfo: { id: owner.conversation_id }, messages: [] } : await io.local(owner.conversation_id)
+    const cached = owner.kind === "native" ? { historyInfo: { id: owner.conversation_id }, messages: io.nativeMessages } : await io.local(owner.conversation_id)
     if (!cached || cached.historyInfo.id !== owner.conversation_id) throw new Error("missing_conversation")
     const view = { ...incoming, owner_key: owner.owner_key || `native:${owner.conversation_id}` }
     const rows = cached.messages.map((row: { id: string; role: string }) => ({ id: row.id, revision: "1", role: row.role, parent_id: null, settled: true }))
@@ -734,6 +736,8 @@ describe.each([
     io.captureNative = false
     io.useComposer = false
     io.useRecovery = false
+    io.turnRecoveries = []
+    io.nativeMessages = []
     io.write.mockReset().mockImplementation(async (key, value) => { io.data.set(key, value) })
     io.physicalTabId = 7
     sessionStorage.clear()
@@ -2208,6 +2212,55 @@ describe.each([
     expect(
       within(screen.getByRole("log")).getByText("TEMP PRIVATE REPLY")
     ).toBeInTheDocument()
+  })
+
+  it.each([
+    { kind: "local", outcome: "failed" },
+    { kind: "native", outcome: "stopped" }
+  ] as const)("CC-02/CM-02 (#3107): a $outcome send in a saved $kind chat stays in the transcript, not a review card", async ({ kind, outcome }) => {
+    io.captureNative = kind === "native"
+    const saved = tabsState()
+    const ownerHash = chatDraftOwnerKey({ config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" })
+    const ownerKey = kind === "local" ? "local-profile" : "native:saved-B"
+    Object.assign(saved.snapshotsById["alice-two"], kind === "local"
+      ? { historyId: "saved-B", chatDraftHandle: { ownerHash, address: { kind: "local", id: "saved-B", profileId: "profile" } } }
+      : { historyId: null, serverChatId: "saved-B", chatDraftHandle: { ownerHash,
+          address: { kind: "native", id: "saved-B", ownerKey, scope: { type: "global" } } } })
+    io.data.set(storedKey("alice"), saved)
+    const question = { id: "question", role: "user", content: "Why did it stop?" }
+    io.local.mockResolvedValue({ historyInfo: { id: "saved-B", local_owner_key: "local-profile" }, messages: [question] })
+    io.nativeMessages = [question]
+    // The question was saved. The provider then failed before any reply
+    // arrived, or the user stopped a server-settled reply part way.
+    io.turnRecoveries = [{
+      scope: { profile_id: "profile", client_session_id: "session" },
+      turn: {
+        operation_id: "ended-send", owner_key: ownerKey, conversation_id: "saved-B",
+        origin_view: { owner_key: ownerKey, conversation_id: "saved-B", cursor: { kind: "empty" } },
+        selection_digest: "digest", request_context_digest: "context", created_at: 1,
+        input_text: "Why did it stop?", input_images: [], state: "accepted_unsent",
+        input_id: "question", assistant_id: "ended-reply",
+        admission: { version: 1, owner_key: ownerKey, conversation_id: "saved-B", input_message_id: "question",
+          input_message_revision: "1", selection_digest: "digest" },
+        ...(outcome === "failed"
+          ? { result_text: "", outcome: "interrupted", interruption_reason: "The chat service provider is currently unavailable.",
+              failure: { status: 502, code: "provider_unavailable", message: "The chat service provider is currently unavailable.",
+                provider: "custom-openai-api", model: "local-uat-chat" } }
+          : { result_text: "Partial answer", outcome: "stopped", persistence: "server" })
+      }
+    }]
+    render(<Route />)
+    await screen.findByText("alice first", {}, { timeout: 5_000 })
+    fireEvent.click(await screen.findByRole("button", { name: "alice two" }, { timeout: 5_000 }))
+    await waitFor(() => expect(io.controller?.getCurrent().status).toBe("ready"))
+
+    await waitFor(() => expect(useStoreMessageOption.getState().messages.map(message => message.id)).toEqual(["question", "ended-reply"]))
+    const reply = useStoreMessageOption.getState().messages[1]
+    if (outcome === "failed") expect(reply.message).toContain("Couldn't reach Custom OpenAI API (local-uat-chat)")
+    else expect(reply).toMatchObject({ message: "Partial answer", generationInfo: { interrupted: true, stopped: true } })
+    // Shown once, in the transcript: the review panel does not repeat it.
+    await waitFor(() => expect(screen.queryByText("Couldn't reach Custom OpenAI API (local-uat-chat)")).not.toBeInTheDocument())
+    expect(screen.queryByText("Turn needs review")).not.toBeInTheDocument()
   })
 
   it.each(["local", "native"])("loads the exact qualified %s handle and its retained composer text", async kind => {

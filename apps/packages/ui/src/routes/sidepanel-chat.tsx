@@ -10,6 +10,7 @@ import { requestSettingsNavigation } from "@/utils/settings-return"
 import { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { HistorySelectionContext, useHistorySelection, useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import { SidepanelSendGateContext, type SidepanelSendGate } from "@/hooks/chat/sidepanel-send-gate"
+import { useKeepInterruptedHistoryTurns } from "@/hooks/chat/useKeepInterruptedHistoryTurns"
 import type { HistorySelectionCaptureV1 } from "@/types/history-selection"
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
 import { formatSelectedHistory } from "@/db/dexie/helpers"
@@ -646,6 +647,13 @@ const SidepanelChatContent = ({
     webSearch,
     setWebSearch
   } = useMessage()
+  // A stopped, cut-off or failed reply stays in the transcript, as on /chat;
+  // the review panel leaves out the turns shown there (CC-02, CM-02).
+  const hideKeptHistoryTurn = useKeepInterruptedHistoryTurns({
+    selection: historySelection,
+    messages,
+    setMessages
+  })
   const [selectedCharacter] =
     useSelectedCharacter<Character | null>(null)
   const [selectedAssistant] = useSelectedAssistant(null)
@@ -3275,7 +3283,7 @@ const SidepanelChatContent = ({
                 </div>
               ) : null}
               <div className={historySelection.status === "idle" || freshnessNotice ? undefined : "pt-12"}>
-                <HistorySelectionReview selection={historySelection} onExpand={expandSelectedHistory} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
+                <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} onExpand={expandSelectedHistory} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
               </div>
               <SidePanelBody
                 scrollParentRef={containerRef}
