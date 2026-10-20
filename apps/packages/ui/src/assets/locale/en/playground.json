@@ -745,7 +745,17 @@
     "previewChanges": "Preview changes",
     "previewCurrent": "Current",
     "previewAfterApplying": "After applying",
-    "sceneDetails": "Scene details"
+    "sceneDetails": "Scene details",
+    "modelReadiness": {
+      "notChecked": "Not checked",
+      "notCheckedTitle": "This model has not answered yet. Send a message to check it.",
+      "working": "Working",
+      "workingTitle": "This model answered recently.",
+      "unreachable": "Unreachable",
+      "unreachableTitle": "The last request to this model failed. Its provider may not be running. Choose another model.",
+      "switchTo": "Switch to {{model}}",
+      "tooltip": "Model status"
+    }
   },
   "tour": {
     "modelTitle": "Choose a Model",

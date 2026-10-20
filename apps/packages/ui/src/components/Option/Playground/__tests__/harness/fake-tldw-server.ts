@@ -54,6 +54,8 @@ export type FakeProvider = {
   name: string
   displayName?: string
   models: string[]
+  /** The server's provider health report entry (/llm/providers `health`). */
+  health?: Record<string, unknown>
 }
 
 /** The provider catalog served by /llm/providers and /llm/models/metadata. */
@@ -538,6 +540,7 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
           is_configured: true,
           configured: true,
           default_model: provider.models[0],
+          ...(provider.health ? { health: provider.health } : {}),
           models: provider.models,
           models_info: provider.models.map((model) => ({
             id: model,

@@ -129,6 +129,8 @@ const mapTldwModelToUi = (model: any) => ({
       : undefined,
   chat_provider:
     typeof model.chatProvider === "string" ? model.chatProvider : undefined,
+  provider_health:
+    typeof model.providerHealth === "string" ? model.providerHealth : undefined,
   details: {
     provider: model.provider,
     capabilities: model.capabilities,

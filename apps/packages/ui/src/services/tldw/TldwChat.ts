@@ -17,6 +17,23 @@ import { normalizeChatToolsForRequest } from "@/utils/chat-tools"
 import type { ServicePromptRequestScope } from "./domains/service-prompts"
 import { isRequestConfigScopeChangedError } from "./service-prompt-scope-error"
 import { CHAT_STARTUP_TIMEOUT_DEFAULT_MS, ChatStreamTimeoutError } from "./chat-timeouts"
+import {
+  isChatModelUnreachableError,
+  recordChatModelSendOutcome
+} from "@/utils/chat-model-readiness"
+
+/** Feed the model chip's readiness with how a chat request ended (CC-01). */
+const recordModelOutcome = (
+  request: Pick<ChatCompletionRequest, "api_provider" | "model"> | null,
+  error?: unknown
+) => {
+  if (!request) return
+  if (error === undefined) {
+    recordChatModelSendOutcome(request.api_provider, request.model, "working")
+  } else if (isChatModelUnreachableError(error)) {
+    recordChatModelSendOutcome(request.api_provider, request.model, "unreachable")
+  }
+}
 
 const normalizeProvider = (value?: string): string =>
   String(value || "").trim().toLowerCase()
@@ -430,6 +447,7 @@ export class TldwChatService {
     options: TldwChatOptions,
     onResponse?: (response: unknown) => void
   ): Promise<string> {
+    let outcomeRequest: ChatCompletionRequest | null = null
     try {
       await tldwClient.initialize()
       const normalizedTools =
@@ -499,12 +517,14 @@ export class TldwChatService {
         metadata: options.chatDebugMetadata
       })
 
+      outcomeRequest = request
       const response = await tldwClient.createChatCompletion(request, {
         debugMetadata: options.chatDebugMetadata,
         signal: options.signal,
         requestScope: options.requestScope,
         scope: options.scope,
       });
+      recordModelOutcome(request)
       const data = await response.json().catch(() => null);
       if (onResponse) {
         onResponse(data)
@@ -518,6 +538,7 @@ export class TldwChatService {
       if (isAbortLikeError(error) || isRequestConfigScopeChangedError(error)) {
         throw error
       }
+      recordModelOutcome(outcomeRequest, error)
       console.error('Chat completion failed:', error)
       throw new Error('Chat completion failed', { cause: error })
     }
@@ -563,6 +584,7 @@ export class TldwChatService {
       }
     }
 
+    let outcomeRequest: ChatCompletionRequest | null = null
     try {
       await tldwClient.initialize()
       const cfg = (await tldwClient.getConfig().catch(() => null)) as
@@ -576,6 +598,7 @@ export class TldwChatService {
       const request =
         options.preparedRequest ??
         prepareChatCompletionRequest(messages, options)
+      outcomeRequest = request
       captureChatRequestDebugSnapshot({
         endpoint: "/api/v1/chat/completions",
         method: "POST",
@@ -611,6 +634,7 @@ export class TldwChatService {
       let idleTimer: ReturnType<typeof setTimeout> | null = null
       let startupTimer: ReturnType<typeof setTimeout> | null = null
       let sawVisibleProgress = false
+      let streamErrorFrame: unknown = undefined
       let timeoutReason: "startup" | "idle" | null = null
 
       const clearIdleTimer = () => {
@@ -654,6 +678,8 @@ export class TldwChatService {
               sawVisibleProgress = true
               clearStartupTimer()
               resetIdleTimer()
+            } else if (chunk && typeof chunk === "object" && "error" in chunk) {
+              streamErrorFrame = chunk
             }
 
             // Check if stream was cancelled
@@ -700,11 +726,14 @@ export class TldwChatService {
         if (controller?.signal.aborted) {
           throw createAbortError()
         }
+        if (sawVisibleProgress) recordModelOutcome(request)
+        else if (streamErrorFrame !== undefined) recordModelOutcome(request, streamErrorFrame)
       } finally {
         clearIdleTimer()
         clearStartupTimer()
       }
     } catch (error) {
+      if (!isAbortLikeError(error)) recordModelOutcome(outcomeRequest, error)
       console.warn('Stream completion failed:', readErrorMessage(error))
       if (isRequestConfigScopeChangedError(error)) throw error
       if (error instanceof ChatStreamTimeoutError) throw error

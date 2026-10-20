@@ -891,6 +891,8 @@ export interface TldwModel {
   readiness_reason_code?: string
   readiness_message?: string
   chat_provider?: string
+  /** Server-observed provider reachability: "working", "unreachable" or "unknown". */
+  provider_health?: string
   catalog_only?: boolean
   modalities?: {
     input?: string[]
