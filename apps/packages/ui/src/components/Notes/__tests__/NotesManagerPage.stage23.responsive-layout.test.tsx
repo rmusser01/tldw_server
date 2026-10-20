@@ -297,6 +297,22 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
     })
   })
 
+  // AX-15 (#3124): the app sidebar's toggle is also called "Expand sidebar",
+  // so the notes toggle names the notes sidebar to stay distinct.
+  it("names the notes sidebar toggle apart from the app sidebar toggle", async () => {
+    renderPage()
+
+    const desktopToggle = screen.getByTestId("notes-desktop-sidebar-toggle")
+    expect(desktopToggle).toHaveAccessibleName("Collapse notes sidebar")
+
+    fireEvent.click(desktopToggle)
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-desktop-sidebar-toggle")).toHaveAccessibleName(
+        "Expand notes sidebar"
+      )
+    })
+  })
+
   it("restores desktop sidebar collapse state after returning from mobile", async () => {
     const { rerender } = renderPage()
     const listRegion = screen.getByTestId("notes-list-region")

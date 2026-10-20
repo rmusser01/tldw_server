@@ -2771,7 +2771,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           className="relative w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors motion-reduce:transition-none rounded-r-lg"
           style={{ minHeight: `${MIN_SIDEBAR_HEIGHT}px`, height: `${sidebarHeight}px` }}
-          aria-label={sidebarCollapsed ? t('option:notesSearch.expandSidebar', { defaultValue: 'Expand sidebar' }) : t('option:notesSearch.collapseSidebar', { defaultValue: 'Collapse sidebar' })}
+          aria-label={sidebarCollapsed ? t('option:notesSearch.expandSidebar', { defaultValue: 'Expand notes sidebar' }) : t('option:notesSearch.collapseSidebar', { defaultValue: 'Collapse notes sidebar' })}
           aria-expanded={!sidebarCollapsed}
           aria-controls={NOTES_LIST_REGION_ID}
           data-testid="notes-desktop-sidebar-toggle"
