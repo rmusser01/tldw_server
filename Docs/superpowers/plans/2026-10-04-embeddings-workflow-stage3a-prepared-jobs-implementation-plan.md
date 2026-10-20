@@ -40,7 +40,7 @@
 
 Planning used checkout `1077b51a45` and compared relevant Jobs boundaries with local `origin/dev` at `75ab224081bf140ef52017c1a9b0a04f6878d488`. No rebase or runtime change occurred while writing this plan.
 
-- [x] Use an isolated execution checkout based on then-current `dev`, carrying only this workstream's reviewed docs/tasks. Rebased onto `df7c290fbf` on 2026-10-20; shared checkout untouched. Current instructions use backlog-py.
+- [x] Use an isolated execution checkout based on then-current `dev`, carrying only this workstream's reviewed docs/tasks. Rebased onto `454974e812` on 2026-10-20 (first parent `df7c290fbf`, the initially observed tip); shared checkout untouched. Current instructions use backlog-py.
 - [x] Recheck task IDs and ADR numbering against current `dev` and open PR inventories; preserve accepted ADRs and the archived design history. Fresh tasks TASK-13900/13901/13902; ADR-060 remains available.
 - [x] Confirm `JobManager.complete_job` and WorkerSDK preserve the newer `expected_uuid` completion fence. Current-dev code retained; completion baseline included below.
 - [x] Search for concurrent neutral-capability work before creating files. No matching implementation on current dev; open Jobs changes #2862/#2738 are unrelated.
@@ -393,7 +393,7 @@ Dispatch from the existing `_recover_expired_processing_jobs` path used by acqui
 
 **Interfaces:** Consume Tasks 1-4 only. Extend Task 1's runtime-role fixture; add test-support `runtime_role_flags() -> tuple[bool, bool]`, `set_owner(str | None)`, `force_rls_setup_failure()`, `direct_support_crud(owner, verb)`, `serialized_support() -> str`, `complete_for_owner(owner)`, `visible_receipt_count()`, and `visible_root_count()`. Do not introduce database/container fixtures. Grant only required Jobs/support table/sequence privileges, not `BYPASSRLS`, blanket schema DDL, or domain-owner access. State-machine observation is a test-only `WorkflowObservation(root_uuid, retry_count, no_progress_count, effect_fingerprints, status)` snapshot from the store case, never a new production telemetry API.
 
-- [ ] **Step 1: Write security and dormancy tests.**
+- [x] **Step 1: Write security and dormancy tests.**
 
 ```python
 def test_rls_setup_failure_never_continues_as_admin(workflow_pg_case):
@@ -418,7 +418,7 @@ def test_normal_startup_does_not_install_support(tmp_path):
 
 Also assert denied cross-owner select/insert/update/delete/release, FK owner mismatch, FORCE RLS flags on both owned support tables, owner reset after rollback, unsupported version rejection, compressed archive bounds, and no secret sentinel in durable receipts/logs. Test facts over 4 KiB and malformed timestamp/digest/UUID before backend materialization. Confirm constructor/import never schedules a worker or starts a reconciler and legacy `find_job_by_identity`/prepared origins continue rejecting noncanonical Admin Webhook calls.
 
-- [ ] **Step 2: Add property-based real-store sequences.** `test_workflow_capability_properties.py` defines a Hypothesis `RuleBasedStateMachine` whose rules are admit/replay/acquire/renew/expire/continue/retry/cancel/complete/progress/release/archive/restart. The model tracks exact root, controls, current lease/epoch, progress-proof identities, no-progress count, retry count, terminal state, and receipts. After each rule assert:
+- [x] **Step 2: Add property-based real-store sequences.** `test_workflow_capability_properties.py` defines a Hypothesis `RuleBasedStateMachine` whose rules are admit/replay/acquire/renew/expire/continue/retry/cancel/complete/progress/release/archive/restart. The model tracks exact root, controls, current lease/epoch, progress-proof identities, no-progress count, retry count, terminal state, and receipts. After each rule assert:
 
 ```python
 assert observed.root_uuid == model.root_uuid
@@ -430,7 +430,7 @@ assert not model.terminal or observed.status == model.terminal_status
 
 Use bounded examples and the existing CI Hypothesis profile. Include changed-fact and stale-lease rejection commands, not just valid paths. Match SQLite and PostgreSQL outcomes with the same traces; concurrent barrier tests additionally cover effects versus cancel/prune and acquire versus sweep.
 
-- [ ] **Step 3: Run the complete matrix.** Commands below are execution gates, not assertions that this planning turn implemented or passed the new tests.
+- [x] **Step 3: Run the complete matrix.** Commands below are execution gates, not assertions that this planning turn implemented or passed the new tests.
 
 ```bash
 source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_*.py tldw_Server_API/tests/Jobs/property/test_workflow_capability_properties.py -m 'not pg_jobs'
@@ -446,7 +446,7 @@ Expected: all selected tests pass, PostgreSQL runtime roles are actually non-byp
 source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py tldw_Server_API/tests/Embeddings/test_embeddings_jobs_adapter.py tldw_Server_API/tests/Embeddings/test_embeddings_redis_worker.py tldw_Server_API/tests/Embeddings/test_media_embeddings_storage_scope.py
 ```
 
-- [ ] **Step 4: Run changed-scope quality/security and CI membership checks.**
+- [x] **Step 4: Run changed-scope quality/security and CI membership checks.**
 
 ```bash
 source .venv/bin/activate && python -m ruff check tldw_Server_API/app/core/Jobs/operations/workflow_contracts.py tldw_Server_API/app/core/Jobs/workflow_capability.py tldw_Server_API/app/core/DB_Management/jobs_workflow*.py tldw_Server_API/tests/Jobs/workflow_test_support.py tldw_Server_API/tests/Jobs/test_workflow_*.py tldw_Server_API/tests/Jobs/property/test_workflow_capability_properties.py
