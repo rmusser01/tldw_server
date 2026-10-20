@@ -52,6 +52,7 @@ const io = vi.hoisted(() => ({
   captureNative: false,
   useComposer: false,
   useRecovery: false,
+  stickyChatInput: undefined as boolean | undefined,
   write: vi.fn(),
   physicalTabId: 7 as number | null,
   controller: null as HistorySelectionController | null,
@@ -237,8 +238,10 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 vi.mock("@/hooks/useSetting", () => ({ useSetting: () => [100] }))
 const storageWrite = vi.hoisted(() => async () => {})
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (_key: unknown, fallback: unknown) => [
-    fallback,
+  useStorage: (key: unknown, fallback: unknown) => [
+    key === "stickyChatInput" && io.stickyChatInput !== undefined
+      ? io.stickyChatInput
+      : fallback,
     storageWrite,
     { isLoading: false }
   ]
@@ -769,6 +772,7 @@ describe.each([
     io.captureNative = false
     io.useComposer = false
     io.useRecovery = false
+    io.stickyChatInput = undefined
     io.write.mockReset().mockImplementation(async (key, value) => { io.data.set(key, value) })
     io.physicalTabId = 7
     sessionStorage.clear()
@@ -1334,6 +1338,29 @@ describe.each([
     render(<Route />)
     await screen.findByText("alice first")
     expect(screen.getByTestId("chat-scroll-latest")).toBeInTheDocument()
+  })
+
+  it("keeps 'Scroll to latest' above an unpinned composer (XS-09)", async () => {
+    io.useComposer = true
+    io.stickyChatInput = false
+    const measure = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const height = this.dataset.testid === "sidepanel-composer-dock" ? 300 : 0
+        return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: height, width: 0, height, toJSON: () => ({}) } as DOMRect
+      })
+    try {
+      io.data.set(storedKey("alice"), tabsState())
+      render(<Route />)
+      await screen.findByText("alice first")
+      await screen.findByRole("textbox", { name: "Composer draft" })
+      // The pill sits 24px above the measured composer, not at a fixed 8rem.
+      await waitFor(() =>
+        expect(screen.getByTestId("chat-scroll-latest").parentElement).toHaveStyle({ bottom: "324px" })
+      )
+    } finally {
+      measure.mockRestore()
+    }
   })
 
   it("remembers a collapsed Pro chat list when the panel reopens (XS-04)", async () => {

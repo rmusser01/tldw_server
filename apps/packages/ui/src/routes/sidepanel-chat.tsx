@@ -71,6 +71,7 @@ import {
   readProSidebarCollapsed,
   writeProSidebarCollapsed,
 } from '~/components/Sidepanel/Chat/sidepanel-sidebar-layout';
+import { sidepanelScrollToLatestBottom } from '~/components/Sidepanel/Chat/sidepanel-scroll-latest';
 import {
   readTabConversationTitle,
   renameTabConversation,
@@ -863,13 +864,10 @@ const SidepanelChatContent = ({
     () => messages.reduce((count, item) => count + (item?.isBot ? 0 : 1), 0),
     [messages]
   )
-  const scrollToLatestBottom = React.useMemo(() => {
-    if (!stickyChatInput) return "8rem"
-    const baseOffset = composerHeight
-      ? composerHeight + 24
-      : DEFAULT_COMPOSER_HEIGHT
-    return `${Math.max(baseOffset, 128)}px`
-  }, [composerHeight, stickyChatInput])
+  const scrollToLatestBottom = sidepanelScrollToLatestBottom(
+    composerHeight,
+    DEFAULT_COMPOSER_HEIGHT
+  )
 
   const clearNoteCapture = React.useCallback(() => {
     const capture = noteCaptureRef.current
@@ -3296,7 +3294,10 @@ const SidepanelChatContent = ({
               </>
             )}
             {!isRestoringChat && !stickyChatInput && (
-              <div className="w-full min-w-0 pt-4 pb-6">
+              <div
+                ref={composerDockRef}
+                data-testid="sidepanel-composer-dock"
+                className="w-full min-w-0 pt-4 pb-6">
                 <SidepanelForm
                   key={activeTabId || "sidepanel-chat"}
                   dropedFile={dropedFile}
@@ -3331,6 +3332,7 @@ const SidepanelChatContent = ({
           {!isRestoringChat && stickyChatInput && (
             <div
               ref={composerDockRef}
+              data-testid="sidepanel-composer-dock"
               className="absolute bottom-0 left-0 right-0 z-10 max-h-[60%] min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain"
               style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
             >
