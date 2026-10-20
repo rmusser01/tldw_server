@@ -171,6 +171,89 @@ def jobs_pg_dsn(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch)
     return dsn
 
 
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.pg_jobs)])
+def uninstalled_workflow_case(request, tmp_path, monkeypatch, _workflow_pg_case_factory):
+    """Ordinary Jobs only; PostgreSQL lifecycle belongs to jobs_pg_dsn."""
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.tests.Jobs.workflow_test_support import WorkflowCase
+
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_EMBEDDINGS", "workflow")
+    if request.param == "sqlite":
+        return WorkflowCase.from_manager(JobManager(db_path=tmp_path / "workflow.db", backend="sqlite"))
+    return _workflow_pg_case_factory()
+
+
+@pytest.fixture
+def workflow_case(uninstalled_workflow_case):
+    """Install support explicitly before capability behavior tests."""
+    uninstalled_workflow_case.install()
+    return uninstalled_workflow_case
+
+
+@pytest.fixture
+def _workflow_pg_case_factory(request, monkeypatch):
+    """Privileged installer and a distinct non-bypassing runtime login."""
+    import secrets
+    from urllib.parse import quote, urlparse, urlunparse
+
+    import psycopg
+    from psycopg import sql
+
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.tests.Jobs.workflow_test_support import WorkflowCase
+
+    created = []
+
+    def make_case():
+        dsn = request.getfixturevalue("jobs_pg_dsn")
+        monkeypatch.setenv("JOBS_ALLOWED_QUEUES_EMBEDDINGS", "workflow")
+        installer = JobManager(backend="postgres", db_url=dsn)
+        role = "jobs_workflow_" + secrets.token_hex(8)
+        password = secrets.token_hex(32)
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            conn.execute(
+                sql.SQL("CREATE ROLE {} LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD {}").format(
+                    sql.Identifier(role), sql.Literal(password)
+                )
+            )
+            created.append((dsn, role))
+            conn.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role)))
+            conn.execute(
+                sql.SQL("GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO {}").format(
+                    sql.Identifier(role)
+                )
+            )
+            conn.execute(
+                sql.SQL("GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO {}").format(sql.Identifier(role))
+            )
+        monkeypatch.setenv("JOBS_PG_SKIP_SCHEMA_INIT", "true")
+        monkeypatch.setenv("JOBS_PG_RLS_ENABLE", "true")
+        monkeypatch.delenv("JOBS_PG_RLS_ROLE", raising=False)
+        parsed = urlparse(dsn)
+        authority = f"{quote(role)}:{quote(password)}@{parsed.hostname}:{parsed.port or 5432}"
+        runtime_dsn = urlunparse(parsed._replace(netloc=authority))
+        case = WorkflowCase.from_manager(JobManager(backend="postgres", db_url=runtime_dsn))
+        case.installer = installer
+        return case
+
+    try:
+        yield make_case
+    finally:
+        JobManager.clear_rls_context()
+        for dsn, role in created:
+            with psycopg.connect(dsn, autocommit=True) as conn:
+                conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
+                conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+
+
+@pytest.fixture
+def workflow_pg_case(_workflow_pg_case_factory):
+    """Request just the installed PostgreSQL variant without a second matrix."""
+    case = _workflow_pg_case_factory()
+    case.install()
+    return case
+
+
 @pytest.fixture(autouse=True)
 def _pg_jobs_db_url(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
     """Bind pg_jobs to the opted-in shared lifecycle or the historical route."""
