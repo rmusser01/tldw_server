@@ -8,9 +8,11 @@ import { classNames } from "@/libs/class-name"
  * One sampling parameter in the side panel's Pro "Model Parameters" list
  * (XS-16).
  *
- * An unset value is not sent, so the provider's own default applies. The
- * field says "Default" and shows a muted slider until the user moves it, and
- * a set value can be reset back to the provider default.
+ * An unset value reads "Default (x)", where x is what the request sends for
+ * it, and the muted slider rests at x until the user moves it. When the
+ * request sends nothing for the parameter (no defaultValue) it reads
+ * "Default". A value set for this model can be reset; a value that only comes
+ * from the all-models settings reads "x (all models)" and has no reset here.
  */
 type ModelParamSliderFieldProps = {
   label: string
@@ -21,8 +23,12 @@ type ModelParamSliderFieldProps = {
   step: number
   /** Decimal places for the readout and slider tooltip. */
   precision: number
-  /** Where the muted slider rests while the value is unset. */
+  /** Where the muted slider rests while the value is unset and nothing is sent. */
   restingValue: number
+  /** What the request sends while the value is unset, if anything. */
+  defaultValue?: number
+  /** False when the value only comes from the all-models settings. */
+  isSetHere?: boolean
   onChange: (value: number) => void
   onReset: () => void
 }
@@ -36,12 +42,27 @@ export const ModelParamSliderField = ({
   step,
   precision,
   restingValue,
+  defaultValue,
+  isSetHere = true,
   onChange,
   onReset
 }: ModelParamSliderFieldProps) => {
   const { t } = useTranslation(["sidepanel"])
   const isSet = typeof value === "number" && Number.isFinite(value)
-  const defaultLabel = t("sidepanel:modelParams.default", "Default")
+  const isInherited = isSet && !isSetHere
+  const defaultLabel =
+    typeof defaultValue === "number"
+      ? t("sidepanel:modelParams.defaultWithValue", "Default ({{value}})", {
+          value: defaultValue
+        })
+      : t("sidepanel:modelParams.default", "Default")
+  const readout = !isSet
+    ? defaultLabel
+    : isInherited
+      ? t("sidepanel:modelParams.allModelsValue", "{{value}} (all models)", {
+          value
+        })
+      : String(value)
   return (
     <div className="space-y-1" data-param-field>
       <div className="flex items-center justify-between gap-2">
@@ -52,12 +73,22 @@ export const ModelParamSliderField = ({
           <span
             className={classNames(
               "text-xs tabular-nums",
-              isSet ? "text-text-subtle" : "text-text-muted italic"
+              isSet && !isInherited
+                ? "text-text-subtle"
+                : "text-text-muted italic"
             )}
+            title={
+              isInherited
+                ? t(
+                    "sidepanel:modelParams.allModelsHint",
+                    "Set for all models. Move the slider to change it for this model only."
+                  )
+                : undefined
+            }
           >
-            {isSet ? value : defaultLabel}
+            {readout}
           </span>
-          {isSet && (
+          {isSet && !isInherited && (
             <button
               type="button"
               onClick={onReset}
@@ -82,9 +113,9 @@ export const ModelParamSliderField = ({
         min={min}
         max={max}
         step={step}
-        value={isSet ? value : restingValue}
+        value={isSet ? value : defaultValue ?? restingValue}
         onChange={(next) => onChange(next)}
-        className={classNames("my-0", !isSet && "opacity-50")}
+        className={classNames("my-0", (!isSet || isInherited) && "opacity-50")}
         aria-label={label}
         ariaValueTextFormatterForHandle={(next) =>
           isSet && typeof next === "number" ? next.toFixed(precision) : defaultLabel

@@ -13,6 +13,10 @@ import { useStoreChatModelSettings } from "@/store/model"
 import { useUiModeStore } from "@/store/ui-mode"
 import { LlamaCppAdvancedControls } from "@/components/Common/Settings/LlamaCppAdvancedControls"
 import { ModelParamSliderField } from "./ModelParamField"
+import {
+  useInheritedSamplingDefaults,
+  useIsSamplingSetHere
+} from "./useInheritedSamplingDefaults"
 
 const { TextArea } = Input
 
@@ -76,10 +80,14 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
   )
   const topK = useStoreChatModelSettings((s) => s.topK)
   const updateSetting = useStoreChatModelSettings((s) => s.updateSetting)
-  // Unset parameters are omitted from the request, so the provider default applies.
+  // Resetting clears this model's value. An unset Temperature, Top P or
+  // penalty is then sent as `inherited` (saved defaults, else ChatTldw's
+  // fallback), and an unset Min P is not sent at all.
   const resetSetting = (
     key: "temperature" | "topP" | "frequencyPenalty" | "presencePenalty" | "minP"
   ) => updateSetting(key, undefined)
+  const inherited = useInheritedSamplingDefaults()
+  const isSetHere = useIsSamplingSetHere()
   const minP = useStoreChatModelSettings((s) => s.minP)
   const setMinP = useStoreChatModelSettings((s) => s.setMinP)
 
@@ -282,6 +290,8 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
             precision={1}
             restingValue={1}
             onChange={(value) => setTemperature(value)}
+            defaultValue={inherited.temperature}
+            isSetHere={isSetHere("temperature")}
             onReset={() => resetSetting("temperature")}
           />
           <ModelParamSliderField
@@ -297,6 +307,8 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
             precision={2}
             restingValue={1}
             onChange={(value) => setTopP(value)}
+            defaultValue={inherited.topP}
+            isSetHere={isSetHere("topP")}
             onReset={() => resetSetting("topP")}
           />
           <ModelParamSliderField
@@ -312,6 +324,8 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
             precision={1}
             restingValue={0}
             onChange={(value) => setFrequencyPenalty(value)}
+            defaultValue={inherited.frequencyPenalty}
+            isSetHere={isSetHere("frequencyPenalty")}
             onReset={() => resetSetting("frequencyPenalty")}
           />
           <ModelParamSliderField
@@ -327,6 +341,8 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
             precision={1}
             restingValue={0}
             onChange={(value) => setPresencePenalty(value)}
+            defaultValue={inherited.presencePenalty}
+            isSetHere={isSetHere("presencePenalty")}
             onReset={() => resetSetting("presencePenalty")}
           />
 
@@ -366,6 +382,7 @@ const ModelParamsPanelBase: React.FC<ModelParamsPanelProps> = ({
             precision={2}
             restingValue={0}
             onChange={(value) => setMinP(value)}
+            isSetHere={isSetHere("minP")}
             onReset={() => resetSetting("minP")}
           />
 

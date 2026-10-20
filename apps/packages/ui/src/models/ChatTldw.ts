@@ -26,6 +26,7 @@ import {
   beginServerChatWrite,
   type ServerChatWriteOutcome
 } from "@/store/server-chat-save-status"
+import { CHAT_REQUEST_SAMPLING_FALLBACKS } from "./chat-sampling-defaults"
 
 export interface ChatTldwOptions {
   model: string
@@ -106,11 +107,15 @@ export class ChatTldw {
     // Normalize model id: drop internal prefix like "tldw:" so server receives provider/model
     this.model = String(options.model || "").replace(/^tldw:/, "")
     this.routing = options.routing
-    this.temperature = options.temperature ?? 0.7
+    this.temperature =
+      options.temperature ?? CHAT_REQUEST_SAMPLING_FALLBACKS.temperature
     this.maxTokens = options.maxTokens
-    this.topP = options.topP ?? 1
-    this.frequencyPenalty = options.frequencyPenalty ?? 0
-    this.presencePenalty = options.presencePenalty ?? 0
+    this.topP = options.topP ?? CHAT_REQUEST_SAMPLING_FALLBACKS.topP
+    this.frequencyPenalty =
+      options.frequencyPenalty ??
+      CHAT_REQUEST_SAMPLING_FALLBACKS.frequencyPenalty
+    this.presencePenalty =
+      options.presencePenalty ?? CHAT_REQUEST_SAMPLING_FALLBACKS.presencePenalty
     this.systemPrompt = options.systemPrompt
     this.streaming = options.streaming ?? false
     this.reasoningEffort = options.reasoningEffort
