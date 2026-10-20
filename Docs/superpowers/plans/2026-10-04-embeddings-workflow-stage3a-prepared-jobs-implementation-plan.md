@@ -76,7 +76,7 @@ No Embeddings production module, endpoint, worker registration, application life
 **Goal:** Validate capability facts and install an inert, owner-scoped support schema.
 **Success Criteria:** Invalid identities/facts reject before I/O; repeat migration is safe; readiness rejects incomplete or insecure schema without repair.
 **Tests:** Contract boundary/property cases, fresh/repeat/rollback migration, dormancy.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 1: Contracts, Store Protocol, And Schema
 
@@ -125,7 +125,7 @@ inspect_workflow_support_in_transaction(connection: Any, *, backend: str) -> Wor
 
 Migration functions are in `jobs_workflow_migrations.py`; they do not commit or open another connection. `install_workflow_support` explicitly owns the transaction. Backend implementations remain SQL-only leaves. No default schema installation call is added to `JobManager`.
 
-- [ ] **Step 1: Write contract and migration tests.** Test support produces `WorkflowCase(manager, capability, command)` with `from_manager(manager)`, `install()`, `table_names()`, and `support_version()` methods; backend fixtures use temporary SQLite or `jobs_pg_dsn`, never a bespoke Postgres cluster. `uninstalled_workflow_case` creates only the ordinary Jobs schema; `workflow_case` explicitly installs support before behavior tests. Both are parameterized by backend, marking PostgreSQL cases `pg_jobs`; `workflow_pg_case` requests the installed PostgreSQL variant. Its installer uses the privileged fixture connection, while its capability manager uses a non-superuser/non-BYPASSRLS role provisioned in that same per-test database with the existing Jobs RLS test pattern. Test-only configuration permits queue `workflow` through `JOBS_ALLOWED_QUEUES_EMBEDDINGS`, and restores it via monkeypatch. The 600-second rollback test sets the trusted lease cap to at least 600; the insufficient-cap test sets it below 300. Use deterministic UUIDv4 literals and the exact tests:
+- [x] **Step 1: Write contract and migration tests.** Test support produces `WorkflowCase(manager, capability, command)` with `from_manager(manager)`, `install()`, `table_names()`, and `support_version()` methods; backend fixtures use temporary SQLite or `jobs_pg_dsn`, never a bespoke Postgres cluster. `uninstalled_workflow_case` creates only the ordinary Jobs schema; `workflow_case` explicitly installs support before behavior tests. Both are parameterized by backend, marking PostgreSQL cases `pg_jobs`; `workflow_pg_case` requests the installed PostgreSQL variant. Its installer uses the privileged fixture connection, while its capability manager uses a non-superuser/non-BYPASSRLS role provisioned in that same per-test database with the existing Jobs RLS test pattern. Test-only configuration permits queue `workflow` through `JOBS_ALLOWED_QUEUES_EMBEDDINGS`, and restores it via monkeypatch. The 600-second rollback test sets the trusted lease cap to at least 600; the insufficient-cap test sets it below 300. Use deterministic UUIDv4 literals and the exact tests:
 
 ```python
 def test_controls_reject_retry_consuming_expiry():
@@ -156,25 +156,25 @@ Define `ROOT_REFERENCE = "00000000-0000-4000-8000-000000000001"` in test support
 
 `bounded_workflow_json` checks raw byte size before UTF-8/JSON decoding and returns parsed data for subsequent closed-schema validation, never execution authority. Its byte-boundary test uses `b"{}" + b" " * 4094` versus `b"{}" + b" " * 4095`; the first parses as an empty object and the second raises `ValueError`. Malformed/nested/unknown receipt facts must still be rejected by the typed receipt decoder, including bounded parse errors without logging source data.
 
-- [ ] **Step 2: Run red tests.**
+- [x] **Step 2: Run red tests.**
 
 Run: `source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_contracts.py tldw_Server_API/tests/Jobs/test_workflow_schema.py -m 'not pg_jobs'`
 
 Expected: imports/new behavior fail, not an unrelated dependency failure. Record the red evidence.
 
-- [ ] **Step 3: Implement the stated contracts and version-1 migration.** Add three Jobs-owned support tables: `job_workflow_schema` (singleton version), `job_workflow_roots` (immutable owner/scope/key/payload/control snapshot, root UUID/hint, current acquisition epoch/lease digest/progress flag, last closed epoch, no-progress count), and `job_workflow_effect_receipts` (owner/root/effect key, action or progress-proof purpose, fingerprint, bounded facts, result, release marker). Unique admission identity is owner/scope/idempotency key; root UUID is unique; receipt uniqueness is owner/root/key with composite owner/root FK to the support root, never to active `jobs`. Progress and action keys share a namespace: conflicting purpose/facts is conflict. Add an explicit-install-only nullable `workflow_capability_version` column to active `jobs`; only capability admissions write `1`. Legacy rows stay null.
+- [x] **Step 3: Implement the stated contracts and version-1 migration.** Add three Jobs-owned support tables: `job_workflow_schema` (singleton version), `job_workflow_roots` (immutable owner/scope/key/payload/control snapshot, root UUID/hint, current acquisition epoch/lease digest/progress flag, last closed epoch, no-progress count), and `job_workflow_effect_receipts` (owner/root/effect key, action or progress-proof purpose, fingerprint, bounded facts, result, release marker). Unique admission identity is owner/scope/idempotency key; root UUID is unique; receipt uniqueness is owner/root/key with composite owner/root FK to the support root, never to active `jobs`. Progress and action keys share a namespace: conflicting purpose/facts is conflict. Add an explicit-install-only nullable `workflow_capability_version` column to active `jobs`; only capability admissions write `1`. Legacy rows stay null.
 
 Enable foreign keys for SQLite. PostgreSQL forces owner RLS on roots and receipts with no `app.is_admin` bypass; schema version is readable readiness metadata only. Persist encoded bytes as bounded canonical text; check nonnegative counters, 1-5 no-progress limit, purpose/action vocabularies, UUID/digest shape, and owner/field byte bounds. Bound each root to 32,768 action receipts plus 32,768 progress receipts; action releases retain their slot/fingerprint, not another receipt row. This Jobs support bound is separate from the spec's six domain-table row limits. Admission must reject unsupported shape; runtime never adds columns or repairs constraints.
 
-- [ ] **Step 4: Run green contract/schema tests** with the Step 2 command, then with `-m pg_jobs` for backend migration/security parity. Only the existing fixture may skip PostgreSQL; record incomplete certification if it does.
-- [ ] **Step 5: Commit** contracts/schema/fixtures/tests only: `git commit -m "feat(jobs): define inert workflow capability schema"`. Stage the exact Task 1 file list, not the whole checkout.
+- [x] **Step 4: Run green contract/schema tests** with the Step 2 command, then with `-m pg_jobs` for backend migration/security parity. Only the existing fixture may skip PostgreSQL; record incomplete certification if it does.
+- [x] **Step 5: Commit** contracts/schema/fixtures/tests only: `git commit -m "feat(jobs): define inert workflow capability schema"`. Stage the exact Task 1 file list, not the whole checkout.
 
 ## Stage 2: Exact Admission And Enlisted Live Fences
 
 **Goal:** Create one exact root/control authority and validate its live lease inside a caller-enlisted transaction.
 **Success Criteria:** Concurrent creates converge; conflicting or missing authority never recreates work; domain rollback rolls back capability mutations.
 **Tests:** Replay, controls, queue-policy changes, identity reuse, cancellation and expiry races.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 2: Admission, Lookup, And Transaction Lifetime
 
