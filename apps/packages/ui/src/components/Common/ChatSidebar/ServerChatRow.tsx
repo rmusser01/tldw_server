@@ -204,33 +204,20 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
   ]
   const menuItems = isTrashView ? trashMenuItems : activeMenuItems
 
-  const renderSourceInfo = () => {
-    if (chat.parent_conversation_id) {
-      return (
-        <Tooltip
-          title={t("common:serverChatForkedTooltip", {
-            chatId: String(chat.parent_conversation_id).slice(0, 8),
-            defaultValue: "Forked from chat {{chatId}}"
-          })}>
-          <span className="inline-flex items-center gap-1">
-            <GitBranch className="size-3" />
-            <span>
-              {t("common:serverChatForkedLabel", {
-                defaultValue: "Forked chat"
-              })}
-            </span>
-          </span>
-        </Tooltip>
-      )
-    }
-    return (
-      <span>
-        {t("common:serverChatSourceLabel", {
-          defaultValue: "Server"
-        })}
-      </span>
-    )
-  }
+  // A topic that repeats the title adds nothing to the row (CS-08).
+  const topicLabel =
+    chat.topic_label &&
+    String(chat.topic_label).trim().toLowerCase() !==
+      String(chat.title ?? "").trim().toLowerCase()
+      ? String(chat.topic_label)
+      : null
+  const forkedLabel = chat.parent_conversation_id
+    ? t("common:serverChatForkedLabel", { defaultValue: "Forked chat" })
+    : null
+  // Row actions appear on hover or keyboard focus where the pointer can hover;
+  // the open chat, a pinned chat and an open menu keep them in view.
+  const actionsAlwaysVisible =
+    isActive || isPinned || openMenuFor === chat.id
 
   const handleRowClick = React.useCallback(() => {
     if (disabled || (selectionMode && readOnly)) return
@@ -244,7 +231,7 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
   return (
     <div
       className={cn(
-        "flex py-2 px-2 items-center gap-3 relative rounded-md truncate group transition-opacity duration-300 ease-in-out border",
+        "flex py-1.5 px-2 items-center gap-2 relative rounded-md truncate group transition-opacity duration-300 ease-in-out border",
         isActive
           ? "bg-surface2 border-border-strong text-text"
           : "bg-surface text-text border-border hover:bg-surface2",
@@ -279,33 +266,56 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
             {chat.match_snippet}
           </span>
         )}
-        <div className="flex flex-wrap items-center gap-2 text-xs text-text-subtle mt-1">
-          <ChatStateBadge state={chat.state} />
+        <div
+          data-testid="server-chat-row-meta"
+          className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[11px] text-text-subtle">
+          <ChatStateBadge state={chat.state} t={t} />
           {lastModifiedLabel && (
-            <span
-              className="text-[11px] text-text-subtle"
-              title={lastModifiedTitle}>
-              {t("common:updated", { defaultValue: "Updated" })}{" "}
-              {lastModifiedLabel}
-            </span>
+            <>
+              {" "}
+              <span className="shrink-0" title={lastModifiedTitle}>
+                {lastModifiedLabel}
+              </span>
+            </>
           )}
-          {chat.topic_label && (
-            <span
-              className="truncate max-w-[12rem]"
-              title={String(chat.topic_label)}>
-              {String(chat.topic_label)}
-            </span>
+          {topicLabel && (
+            <>
+              {" "}
+              <span className="truncate" title={topicLabel}>
+                {topicLabel}
+              </span>
+            </>
+          )}
+          {forkedLabel && (
+            <>
+              {" "}
+              <Tooltip
+                title={t("common:serverChatForkedTooltip", {
+                  chatId: String(chat.parent_conversation_id).slice(0, 8),
+                  defaultValue: "Forked from chat {{chatId}}"
+                })}>
+                <span
+                  role="img"
+                  aria-label={forkedLabel}
+                  className="inline-flex shrink-0 items-center">
+                  <GitBranch aria-hidden="true" className="size-3" />
+                </span>
+              </Tooltip>
+            </>
           )}
         </div>
         {showReference && (
           <span className="text-xs text-text-subtle">{reference}</span>
         )}
-        <span className="flex items-center gap-1 text-xs text-text-subtle">
-          {renderSourceInfo()}
-        </span>
       </button>
       {!selectionMode && !readOnly && (
-        <div className="flex flex-col items-center gap-1">
+        <div
+          data-testid="server-chat-row-actions"
+          className={cn(
+            "flex items-center gap-0.5 transition-opacity",
+            !actionsAlwaysVisible &&
+              "[@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-focus-within:opacity-100"
+          )}>
           {!isTrashView && (
             <Tooltip title={isPinned ? t("common:unpin") : t("common:pin")}>
               <button

@@ -627,7 +627,24 @@
     "foldersEmpty": "No folders yet. Create a folder to organize your chats.",
     "folderCreated": "Folder created successfully",
     "deletedDeviceCopyRetained": "Removed from server history. A cached copy remains on this device because it could not be removed.",
-    "navigation": "Navigation"
+    "navigation": "Navigation",
+    "state": {
+      "inProgress": "In progress",
+      "resolved": "Resolved",
+      "backlog": "Backlog",
+      "nonViable": "Not viable"
+    },
+    "groups": {
+      "today": "Today",
+      "thisWeek": "This week",
+      "older": "Older"
+    },
+    "movedToTrash": "Moved to Trash",
+    "undoTrash": "Undo",
+    "viewTrash": "View Trash",
+    "permanentlyDeleted": "Chat permanently deleted.",
+    "noSearchMatches": "No chats match “{{query}}”",
+    "clearSearch": "Clear search"
   },
   "knowledgeSidebar": {
     "title": "Knowledge history"
