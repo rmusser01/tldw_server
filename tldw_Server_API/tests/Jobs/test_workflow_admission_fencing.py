@@ -210,8 +210,16 @@ def test_fences_are_transaction_bound_and_unforgeable(workflow_case):
         first.ensure_horizon(fence, 300)
 
 
-@pytest.mark.parametrize("ending", ["COMMIT TRANSACTION", "/* end */ COMMIT;", "ROLLBACK TRANSACTION"])
-def test_post_commit_fence_cannot_enter_another_native_transaction(workflow_case, ending):
+_NATIVE_TRANSACTION_ENDINGS = [
+    prefix + ending
+    for prefix in ("", "/* end */ ", "; ", "; /* leading */ ; -- transaction end\n")
+    for ending in ("COMMIT TRANSACTION", "END TRANSACTION", "ROLLBACK TRANSACTION")
+] + ["connection.commit", "connection.rollback"]
+
+
+@pytest.mark.parametrize("ending", _NATIVE_TRANSACTION_ENDINGS)
+@pytest.mark.parametrize("check", ["ensure_horizon", "final_validation"])
+def test_post_commit_fence_cannot_enter_another_native_transaction(workflow_case, ending, check):
     case = workflow_case
     case.admit()
     lease = case.acquire()
@@ -219,9 +227,19 @@ def test_post_commit_fence_cannot_enter_another_native_transaction(workflow_case
         with case.capability.transaction("owner-a") as tx:
             fence = tx.lock_live_root(case.root, lease)
             connection = tx.connection
-            connection.execute(ending)
+            if ending == "connection.commit":
+                connection.commit()
+            elif ending == "connection.rollback":
+                connection.rollback()
+            else:
+                connection.execute(ending)
+            if case.manager.backend == "sqlite":
+                assert not connection.in_transaction
             connection.execute("BEGIN")
-            tx.ensure_horizon(fence, 300)
+            if check == "ensure_horizon":
+                tx.ensure_horizon(fence, 300)
+            else:
+                tx.validate_fences()
             pytest.fail("a committed fence cannot authorize another transaction")
 
 

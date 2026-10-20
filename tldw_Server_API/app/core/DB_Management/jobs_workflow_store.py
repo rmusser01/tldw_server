@@ -5,13 +5,12 @@ from __future__ import annotations
 import base64
 import json
 import os
+import sqlite3
 import zlib
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Protocol
 from uuid import uuid4
-
-import sqlglot
 
 from tldw_Server_API.app.core.Jobs.operations.contracts import AdmissionResult, ExpiredLeasePolicy
 from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
@@ -142,12 +141,18 @@ class LiveWorkflowTransaction:
         self._fences: dict[WorkflowFence, tuple[WorkflowRoot, WorkflowLease]] = {}
         self.admission_event: AdmissionResult | None = None
         if self.backend == "sqlite":
-            connection.set_trace_callback(self._trace_transaction_end)
+            connection.set_authorizer(self._authorize_sqlite_operation)
 
-    def _trace_transaction_end(self, statement: str) -> None:
-        tokens = [token.text.upper() for token in sqlglot.tokenize(statement, read="sqlite")]
-        if tokens and (tokens[0] in {"COMMIT", "END"} or (tokens[0] == "ROLLBACK" and "TO" not in tokens)):
+    def _authorize_sqlite_operation(
+        self, action: int, _name: str | None, _value: str | None, _database: str | None, _source: str | None
+    ) -> int:
+        # Installed after BEGIN: any later full transaction control invalidates
+        # this lifetime, even a replacement BEGIN after an automatic rollback.
+        # Authorization is conservative (before execution); savepoint operations
+        # have their own SQLITE_SAVEPOINT code and do not release the root locks.
+        if action == sqlite3.SQLITE_TRANSACTION:
             self.active = False
+        return sqlite3.SQLITE_OK
 
     @property
     def backend(self) -> str:
