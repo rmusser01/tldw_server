@@ -56,7 +56,8 @@ export const useServerChatRouteSync = () => {
       // chose not to discard), so the address goes back to naming that chat.
     }
     const current = useStoreMessageOption.getState()
-    const activeChatId = current.temporaryChat ? null : current.serverChatId
+    // No saved chat open (null or not yet set) means the address names none.
+    const activeChatId = current.temporaryChat ? null : current.serverChatId ?? null
     if (activeChatId === routeChatId) return
     // A navigation that names this chat is on its way; let it land.
     if (isServerChatNavigationPending(activeChatId)) return
