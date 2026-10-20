@@ -144,7 +144,12 @@ def test_unsuppressed_observer_failure_keeps_committed_state(completion_manager,
 
 @pytest.mark.parametrize("stored_uuid", [None, "", "  NONcanonical-UUID  "])
 @pytest.mark.parametrize("matching", [True, False], ids=["matching", "stale"])
-def test_completion_identity_short_circuits_result_work(completion_manager, monkeypatch, stored_uuid, matching):
+@pytest.mark.parametrize(
+    "result_kind,serialization_error", [("valid", None), ("object", TypeError), ("circular", ValueError)]
+)
+def test_completion_identity_short_circuits_result_work(
+    completion_manager, monkeypatch, stored_uuid, matching, result_kind, serialization_error
+):
     """Terminal identity/replay classification must precede encryption/final encoding."""
     manager = completion_manager
     job = seed_job(manager)
@@ -158,16 +163,37 @@ def test_completion_identity_short_circuits_result_work(completion_manager, monk
     transforms: list[Any] = []
     serializations: list[Any] = []
     calls: list[str] = []
-    result = {"ignored": True}
+    serialization_errors: list[type[Exception]] = []
+    result = {"ignored": object() if result_kind == "object" else True}
+    if result_kind == "circular":
+        result["self"] = result
     original_dumps = manager_module.json.dumps
+    if serialization_error is not None:
+        # This same payload would fail final encoding if the early exit moved.
+        with pytest.raises(serialization_error):
+            original_dumps(result)
 
     def serialize(value, *args, **kwargs):
         serializations.append(value)
-        return original_dumps(value, *args, **kwargs)
+        try:
+            return original_dumps(value, *args, **kwargs)
+        except (TypeError, ValueError) as error:
+            serialization_errors.append(type(error))
+            raise
 
     monkeypatch.setattr(manager_module.json, "dumps", serialize)
     monkeypatch.setattr(manager, "_maybe_encrypt_json", lambda *args: transforms.append(args))
     record_completion_observers(manager, monkeypatch, calls)
+    monkeypatch.setattr(manager_module, "_parse_dt", lambda *args: calls.append("prepare_duration"))
+    monkeypatch.setattr(manager_module, "_run_post_commit_side_effects", lambda *args: calls.append("dispatch"))
+    original_getattribute = JobManager.__getattribute__
+
+    def lookup(self, name):
+        if self is manager and name in {"_update_gauges", "_stage_completion_sla_breach"}:
+            calls.append(f"prepare:{name}")
+        return original_getattribute(self, name)
+
+    monkeypatch.setattr(JobManager, "__getattribute__", lookup)
     expected = (stored_uuid or "") if matching else "stale-identity"
     completion_value = completion_arguments(job)["completion_token"]
     assert (
@@ -175,13 +201,19 @@ def test_completion_identity_short_circuits_result_work(completion_manager, monk
         is matching
     )
     assert transforms == []
-    assert serializations == [result]  # Size preflight only, no final encoding.
+    assert len(serializations) == 1 and serializations[0] is result  # Size probe only, no final encoding.
+    assert serialization_errors == ([] if serialization_error is None else [serialization_error])
     assert calls == []
     assert durable_state(reader, job["id"]) == before
 
 
 @pytest.mark.parametrize("state", ["missing", "stale", "failed", "cancelled", "quarantined", "completed-no-token"])
-def test_completion_early_exit_never_prepares_result(completion_manager, monkeypatch, state):
+@pytest.mark.parametrize(
+    "result_kind,serialization_error", [("valid", None), ("object", TypeError), ("circular", ValueError)]
+)
+def test_completion_early_exit_never_prepares_result(
+    completion_manager, monkeypatch, state, result_kind, serialization_error
+):
     """Misses and other terminal states do not touch result transformation or observers."""
     manager = completion_manager
     job = seed_job(manager)
@@ -202,19 +234,41 @@ def test_completion_early_exit_never_prepares_result(completion_manager, monkeyp
     transforms: list[Any] = []
     serializations: list[Any] = []
     calls: list[str] = []
-    result = {"ignored": True}
+    serialization_errors: list[type[Exception]] = []
+    result = {"ignored": object() if result_kind == "object" else True}
+    if result_kind == "circular":
+        result["self"] = result
     original_dumps = manager_module.json.dumps
+    if serialization_error is not None:
+        # This same payload would fail final encoding if the early exit moved.
+        with pytest.raises(serialization_error):
+            original_dumps(result)
 
     def serialize(value, *args, **kwargs):
         serializations.append(value)
-        return original_dumps(value, *args, **kwargs)
+        try:
+            return original_dumps(value, *args, **kwargs)
+        except (TypeError, ValueError) as error:
+            serialization_errors.append(type(error))
+            raise
 
     monkeypatch.setattr(manager_module.json, "dumps", serialize)
     monkeypatch.setattr(manager, "_maybe_encrypt_json", lambda *args: transforms.append(args))
     record_completion_observers(manager, monkeypatch, calls)
+    monkeypatch.setattr(manager_module, "_parse_dt", lambda *args: calls.append("prepare_duration"))
+    monkeypatch.setattr(manager_module, "_run_post_commit_side_effects", lambda *args: calls.append("dispatch"))
+    original_getattribute = JobManager.__getattribute__
+
+    def lookup(self, name):
+        if self is manager and name in {"_update_gauges", "_stage_completion_sla_breach"}:
+            calls.append(f"prepare:{name}")
+        return original_getattribute(self, name)
+
+    monkeypatch.setattr(JobManager, "__getattribute__", lookup)
     assert manager.complete_job(job_id, result=result, **arguments) is False
     assert transforms == []
-    assert serializations == [result]
+    assert len(serializations) == 1 and serializations[0] is result
+    assert serialization_errors == ([] if serialization_error is None else [serialization_error])
     assert calls == []
     assert durable_state(reader, job["id"]) == before
 
