@@ -1658,9 +1658,10 @@ class RedisResourceGovernor(ResourceGovernor):
                                 pass
                             add_failed = True
         except _RG_NONCRITICAL_EXCEPTIONS:
-            # fall through to Python fallback
+            # fall through to Python fallback; a lost script (NOSCRIPT after a restart) loads again next time
             used_lua = False
             self._last_used_multi_lua = False
+            self._multi_lua_sha = None
         if not used_lua:
             if await self._is_stub_client():
                 # Pre-check across all scopes/categories
@@ -1891,12 +1892,9 @@ class RedisResourceGovernor(ResourceGovernor):
                                     denial_retry_after = max(denial_retry_after, int(ttl_sec or 1))
                                 break
                     except _RG_NONCRITICAL_EXCEPTIONS:
-                        if self._effective_fail_mode(pol, category) == "fail_open":
-                            continue
-                        concurrency_failed = True
-                        concurrency_failed_category = category
-                        denial_retry_after = max(denial_retry_after, int(ttl_sec or 1))
-                        break
+                        # Redis answered the probe but not the script (NOSCRIPT after a restart, OOM,
+                        # READONLY): load it again next time, and count leases in the Python path below.
+                        self._concurrency_lua_sha = None
 
                 if not used_concurrency_lua:
                     active_by_scope: dict[tuple[str, str], int] = {}
