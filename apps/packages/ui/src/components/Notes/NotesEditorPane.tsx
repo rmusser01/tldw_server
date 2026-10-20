@@ -57,6 +57,7 @@ import {
 } from './notes-manager-utils'
 import { NOTES_TITLE_SUGGEST_STRATEGY_SETTING } from '@/services/settings/ui-settings'
 import { setSetting } from '@/services/settings/registry'
+import NotesServerUnavailableBanner from './NotesServerUnavailableBanner'
 
 // Headings and lists need the typography styles to be visible: Tailwind's
 // preflight resets <h2> to body text and removes list bullets. Matches the
@@ -122,6 +123,8 @@ export interface NotesEditorPaneProps {
   editorDisabled: boolean
   isDirty: boolean
   isOnline: boolean
+  /** The notes list cannot reach the server; edits fall back to this device (NL-16). */
+  notesServerUnavailable?: boolean
   loadingDetail: boolean
   saving: boolean
 
@@ -343,6 +346,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   content,
   editorDisabled,
   isDirty,
+  notesServerUnavailable = false,
   isOnline,
   loadingDetail,
   saving,
@@ -749,6 +753,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         studioBadgeLabel={studioBadgeLabel}
       />
       <div className="flex-1 flex flex-col px-4 py-3 overflow-auto" data-testid="notes-editor-body">
+        {notesServerUnavailable && <NotesServerUnavailableBanner />}
         {showEmptyState && !loadingDetail && (
           <NotesEditorEmptyState
             disabled={editorDisabled}

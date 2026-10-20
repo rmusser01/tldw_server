@@ -1534,7 +1534,12 @@
     "closeMobileSidebar": "Close notes list",
     "listRowKeyboardHint": "Press Enter to open. Use the arrow keys to move between notes, X to select, and P to pin.",
     "tagFilterNoMatch": "No tag named \"{{query}}\"",
-    "tagFilterNoTags": "No tags yet"
+    "tagFilterNoTags": "No tags yet",
+    "headerLoading": "Loading…",
+    "loadErrorUnreachable": "Could not reach the notes server.",
+    "loadErrorDetails": "Details",
+    "serverUnavailableTitle": "Notes server unavailable",
+    "serverUnavailableDescription": "You can keep writing. Your edits are kept on this device and saved when the server is back."
   },
   "tts": {
     "playground": "TTS Playground"

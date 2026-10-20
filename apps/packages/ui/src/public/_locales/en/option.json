@@ -6442,5 +6442,20 @@
   },
   "notesSearch_tagFilterNoTags": {
     "message": "No tags yet"
+  },
+  "notesSearch_headerLoading": {
+    "message": "Loading…"
+  },
+  "notesSearch_loadErrorUnreachable": {
+    "message": "Could not reach the notes server."
+  },
+  "notesSearch_loadErrorDetails": {
+    "message": "Details"
+  },
+  "notesSearch_serverUnavailableTitle": {
+    "message": "Notes server unavailable"
+  },
+  "notesSearch_serverUnavailableDescription": {
+    "message": "You can keep writing. Your edits are kept on this device and saved when the server is back."
   }
 }

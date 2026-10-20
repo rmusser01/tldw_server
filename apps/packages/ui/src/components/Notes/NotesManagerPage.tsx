@@ -122,6 +122,7 @@ import { isEditableTarget } from "@/utils/editable-target"
 import { useNotesKeyboardNavigation } from "@/components/Notes/hooks/useNotesKeyboardNavigation"
 import { focusActiveNotesListRow } from "@/components/Notes/notes-list-keyboard"
 import { buildNotesTimelineSections } from "@/components/Notes/notes-timeline"
+import { isNotesServerUnavailableError } from "@/components/Notes/notes-list-error"
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
 
@@ -2790,6 +2791,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         editorDisabled={editorDisabled || ed.loadingSelection}
         isDirty={ed.isDirty}
         isOnline={isOnline}
+        notesServerUnavailable={list.isError && isNotesServerUnavailableError(list.error)}
         loadingDetail={ed.loadingDetail}
         saving={ed.saving}
         backlinkConversationId={ed.backlinkConversationId}

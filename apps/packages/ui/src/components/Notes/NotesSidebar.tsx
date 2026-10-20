@@ -12,6 +12,7 @@ import { useTranslation } from 'react-i18next'
 import NotesListPanel from '@/components/Notes/NotesListPanel'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
 import NotesTagFilterSelect from '@/components/Notes/NotesTagFilterSelect'
+import NotesListErrorMessage from '@/components/Notes/NotesListErrorMessage'
 import type { NoteListItem } from '@/components/Notes/notes-manager-types'
 import type {
   NotesSortOption,
@@ -335,10 +336,16 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
     keywordTokens.length +
     (selectedNotebookId != null ? 1 : 0) +
     (queryInput.trim() ? 1 : 0)
+  // With no rows yet, "0 total" would be wrong while the first page loads (NL-16).
+  const isLoadingFirstRows = isFetching && filteredCount === 0
   const headerCountLabel = hasListError
     ? t('option:notesSearch.headerRefreshFailed', {
         defaultValue: 'Refresh failed'
       })
+    : isLoadingFirstRows
+      ? t('option:notesSearch.headerLoading', {
+          defaultValue: 'Loading…'
+        })
     : hasActiveFilters
       ? t('option:notesSearch.headerCount', {
           defaultValue: '{{visible}} of {{total}}',
@@ -373,10 +380,12 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
         })}
       </div>
       <div className="mt-1 text-text-muted">
-        {listErrorMessage ||
-          t('option:notesSearch.listErrorFallback', {
+        <NotesListErrorMessage
+          message={listErrorMessage}
+          fallback={t('option:notesSearch.listErrorFallback', {
             defaultValue: 'The notes list is unavailable right now.'
           })}
+        />
       </div>
       <Button size="small" className="mt-3" onClick={retryList}>
         {t('common:retry', { defaultValue: 'Retry' })}
@@ -430,7 +439,10 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 <div className="text-xs uppercase tracking-[0.16em] text-text-muted">
                   {t('option:notesSearch.headerLabel', { defaultValue: 'Notes' })}
                 </div>
-                <span className="ml-2 text-xs uppercase tracking-[0.16em] text-text-subtle">
+                <span
+                  className="ml-2 text-xs uppercase tracking-[0.16em] text-text-subtle"
+                  data-testid="notes-header-count"
+                >
                   {headerCountLabel}
                 </span>
               </div>

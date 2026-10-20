@@ -487,18 +487,25 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
         </div>
       )}
       {isFetching && !hasNotes ? (
-        <div
-          className="flex items-center justify-center gap-2 py-10 text-sm text-text-muted"
-          role="status"
-          aria-live="polite"
-          data-testid="notes-list-loading"
-        >
-          <Spin />
-          <span>
-            {t('option:notesSearch.loadingNotes', {
-              defaultValue: 'Loading notes...'
-            })}
-          </span>
+        <div role="status" aria-live="polite" data-testid="notes-list-loading">
+          <div className="flex items-center gap-2 pb-2 text-xs text-text-muted">
+            <Spin size="small" />
+            <span>
+              {t('option:notesSearch.loadingNotes', {
+                defaultValue: 'Loading notes...'
+              })}
+            </span>
+          </div>
+          {/* Placeholder rows hold the list's shape while the first page loads (NL-16). */}
+          <div className="divide-y divide-border" aria-hidden="true">
+            {Array.from({ length: 5 }, (_, index) => (
+              <div key={index} className="space-y-2 py-3" data-testid="notes-list-skeleton-row">
+                <div className="h-3.5 w-2/3 animate-pulse rounded bg-surface2" />
+                <div className="h-3 w-full animate-pulse rounded bg-surface2" />
+                <div className="h-2.5 w-1/3 animate-pulse rounded bg-surface2" />
+              </div>
+            ))}
+          </div>
         </div>
       ) : !isOnline ? (
         demoEnabled ? (
