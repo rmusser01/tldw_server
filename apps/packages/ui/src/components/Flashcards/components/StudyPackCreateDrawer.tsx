@@ -64,6 +64,7 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
   // Typing a raw ID is the fallback. Hide it when the drawer opens with
   // sources already chosen elsewhere (NE-08).
   const [manualEntryOpen, setManualEntryOpen] = React.useState(true)
+  const manualSourceId = React.useId()
 
   const jobQuery = useStudyPackJobQuery(jobId, {
     enabled: open && jobId != null
@@ -286,7 +287,7 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
             type="button"
             className="mb-2 inline-flex items-center gap-1 text-sm text-text-muted hover:text-text"
             aria-expanded={manualEntryOpen}
-            aria-controls="study-pack-manual-source"
+            aria-controls={manualSourceId}
             onClick={() => setManualEntryOpen((current) => !current)}
             data-testid="study-pack-manual-source-toggle"
           >
@@ -299,50 +300,52 @@ export const StudyPackCreateDrawer: React.FC<StudyPackCreateDrawerProps> = ({
               defaultValue: "Add a source by ID"
             })}
           </button>
-          {manualEntryOpen ? (
-            <div id="study-pack-manual-source">
-              <Space.Compact className="w-full">
-                <Select
-                  aria-label="Source Type"
-                  value={sourceType}
-                  onChange={(value) => setSourceType(value)}
-                  options={sourceTypeOptions}
-                  className="min-w-[120px]"
-                />
-                <Input
-                  aria-label={t("option:flashcards.studyPackSourceIdAdvancedLabel", {
-                    defaultValue: "Source ID (advanced/manual)"
+          <div id={manualSourceId} hidden={!manualEntryOpen}>
+            {manualEntryOpen ? (
+              <>
+                <Space.Compact className="w-full">
+                  <Select
+                    aria-label="Source Type"
+                    value={sourceType}
+                    onChange={(value) => setSourceType(value)}
+                    options={sourceTypeOptions}
+                    className="min-w-[120px]"
+                  />
+                  <Input
+                    aria-label={t("option:flashcards.studyPackSourceIdAdvancedLabel", {
+                      defaultValue: "Source ID (advanced/manual)"
+                    })}
+                    value={sourceId}
+                    onChange={(event) => setSourceId(event.target.value)}
+                    placeholder={t("option:flashcards.studyPackSourceIdAdvancedPlaceholder", {
+                      defaultValue: "Source ID (advanced/manual)"
+                    })}
+                  />
+                  <Input
+                    aria-label="Source Title"
+                    value={sourceTitle}
+                    onChange={(event) => setSourceTitle(event.target.value)}
+                    placeholder={t("option:flashcards.studyPackSourceTitlePlaceholder", {
+                      defaultValue: "Optional title"
+                    })}
+                  />
+                  <Button onClick={handleAddSource}>
+                    {t("common:add", { defaultValue: "Add source" })}
+                  </Button>
+                </Space.Compact>
+                <Text
+                  type="secondary"
+                  className="mt-2 block text-xs"
+                  data-testid="study-pack-source-id-guidance"
+                >
+                  {t("option:flashcards.studyPackSourceIdGuidance", {
+                    defaultValue:
+                      "Advanced/manual source reference. Choose Media, Note, or Message, then paste the item ID from that source."
                   })}
-                  value={sourceId}
-                  onChange={(event) => setSourceId(event.target.value)}
-                  placeholder={t("option:flashcards.studyPackSourceIdAdvancedPlaceholder", {
-                    defaultValue: "Source ID (advanced/manual)"
-                  })}
-                />
-                <Input
-                  aria-label="Source Title"
-                  value={sourceTitle}
-                  onChange={(event) => setSourceTitle(event.target.value)}
-                  placeholder={t("option:flashcards.studyPackSourceTitlePlaceholder", {
-                    defaultValue: "Optional title"
-                  })}
-                />
-                <Button onClick={handleAddSource}>
-                  {t("common:add", { defaultValue: "Add source" })}
-                </Button>
-              </Space.Compact>
-              <Text
-                type="secondary"
-                className="mt-2 block text-xs"
-                data-testid="study-pack-source-id-guidance"
-              >
-                {t("option:flashcards.studyPackSourceIdGuidance", {
-                  defaultValue:
-                    "Advanced/manual source reference. Choose Media, Note, or Message, then paste the item ID from that source."
-                })}
-              </Text>
-            </div>
-          ) : null}
+                </Text>
+              </>
+            ) : null}
+          </div>
 
           <div className="mt-3 space-y-2">
             {sourceItems.length === 0 ? (

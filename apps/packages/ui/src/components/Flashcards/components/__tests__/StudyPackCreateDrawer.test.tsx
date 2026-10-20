@@ -248,6 +248,12 @@ describe("StudyPackCreateDrawer", () => {
 
     const advanced = screen.getByRole("button", { name: "Add a source by ID" })
     expect(advanced).toHaveAttribute("aria-expanded", "false")
+    // aria-controls must name an element that exists while collapsed.
+    const controlledId = advanced.getAttribute("aria-controls")
+    expect(controlledId).toBeTruthy()
+    const controlled = document.getElementById(controlledId!)
+    expect(controlled).not.toBeNull()
+    expect(controlled).not.toBeVisible()
     expect(screen.queryByLabelText("Source ID (advanced/manual)")).not.toBeInTheDocument()
     expect(screen.queryByTestId("study-pack-source-id-guidance")).not.toBeInTheDocument()
 
