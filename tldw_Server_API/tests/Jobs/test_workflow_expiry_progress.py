@@ -3,12 +3,14 @@
 import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from threading import Barrier
 
 import pytest
 
+from tldw_Server_API.app.core.Jobs.operations.contracts import AcquireJobCommand, OperationOutcome
 from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
     WorkflowAction,
     WorkflowFenceError,
@@ -24,6 +26,7 @@ def acquisition_mode(request, monkeypatch):
         monkeypatch.setenv(f"JOBS_{backend}_SINGLE_UPDATE_ACQUIRE", str(request.param))
     monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "true")
     monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "true")
+    return request.param
 
 
 @pytest.mark.parametrize("via", ["acquire", "sweep"])
@@ -356,6 +359,152 @@ def test_legacy_schedule_clock_behavior_is_preserved(uninstalled_workflow_case, 
     assert (row is not None) == eligible
     if row is not None:
         assert row.get("workflow_capability_version") is None
+
+
+@pytest.mark.parametrize("mixed_existing", [False, True], ids=["empty-quota", "mixed-inflight"])
+def test_concurrent_enrolled_acquire_enforces_inflight_quota_with_clock_skew(
+    workflow_case, monkeypatch, mixed_existing
+):
+    case = workflow_case
+    limit = 3 if mixed_existing else 1
+    if mixed_existing:
+        case.admit()
+        assert case.acquire() is not None
+        with case.connection() as conn:
+            case.insert(
+                conn,
+                "jobs",
+                {
+                    "uuid": "00000000-0000-4000-8000-000000000012",
+                    "owner_user_id": "owner-a",
+                    "domain": "embeddings",
+                    "queue": "workflow",
+                    "job_type": "legacy",
+                    "payload": "{}",
+                    "status": "processing",
+                    "worker_id": "legacy-worker",
+                    "lease_id": "legacy-lease",
+                    "leased_until": "2200-01-01 00:00:00+00:00",
+                },
+            )
+            conn.commit()
+    candidates = [case.admit_new_reference().root for _ in range(2)]
+    assert all(root is not None for root in candidates)
+    monkeypatch.setenv("JOBS_QUOTA_MAX_INFLIGHT", str(limit))
+    assert case.manager._quota_get("JOBS_QUOTA_MAX_INFLIGHT", "embeddings", "owner-a") == limit
+    monkeypatch.setattr(case.manager._clock, "now_utc", lambda: datetime(2100, 1, 1, tzinfo=timezone.utc))
+    passed_prechecks = []
+    barrier = Barrier(2, timeout=30)
+    recover = case.manager._recover_expired_processing_jobs
+
+    def recover_then_synchronize(**scope):
+        result = recover(**scope)
+        # Public acquisition reaches this only after its actual outer quota
+        # check; neither caller can begin its acquiring transaction yet.
+        passed_prechecks.append(barrier.wait())
+        return result
+
+    monkeypatch.setattr(case.manager, "_recover_expired_processing_jobs", recover_then_synchronize)
+
+    def acquire(number):
+        return case.manager.acquire_next_job(
+            domain="embeddings",
+            queue="workflow",
+            owner_user_id="owner-a",
+            job_type="embedding_workflow",
+            lease_seconds=120,
+            worker_id=f"quota-worker-{number}",
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(acquire, range(2)))
+    assert sorted(passed_prechecks) == [0, 1]
+    with case.connection() as conn:
+        count_sql = (
+            "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND status='processing' AND leased_until>clock_timestamp()"
+            if case.manager.backend == "postgres"
+            else "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND status='processing' AND JULIANDAY(leased_until)>JULIANDAY('now')"
+        )
+        live_count = case.execute(conn, count_sql, ("embeddings", "owner-a")).fetchone()[0]
+        epochs = sorted(
+            case.execute(
+                conn, "SELECT current_epoch FROM job_workflow_roots WHERE job_uuid=?", (root.job_uuid,)
+            ).fetchone()[0]
+            for root in candidates
+        )
+    assert (sum(row is not None for row in results), live_count, epochs) == (1, limit, [0, 1])
+
+
+@pytest.mark.parametrize("installed", [False, True], ids=["uninstalled", "null-marker-no-support"])
+@pytest.mark.parametrize("ahead", [True, False], ids=["ahead", "behind"])
+def test_atomic_legacy_inflight_quota_preserves_clock_and_schema_behavior(
+    uninstalled_workflow_case, acquisition_mode, installed, ahead
+):
+    from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import workflow_store
+    from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import acquire_job as pg_acquire
+    from tldw_Server_API.app.core.Jobs.operations.sqlite.lifecycle import acquire_job as sqlite_acquire
+
+    case = uninstalled_workflow_case
+    if installed:
+        case.install()
+    with case.connection() as conn:
+        if installed:
+            conn.execute("DROP TABLE job_workflow_effect_receipts")
+            conn.execute("DROP TABLE job_workflow_roots")
+            conn.execute("DROP TABLE job_workflow_schema")
+        now = workflow_store(case.manager.backend).database_now(conn)
+        deadline = now + timedelta(minutes=10 if ahead else -10)
+        if case.manager.backend == "sqlite":
+            deadline = deadline.strftime("%Y-%m-%d %H:%M:%S.%f")
+        for number, status, job_type in [(13, "processing", "legacy"), (14, "queued", "embedding_workflow")]:
+            case.insert(
+                conn,
+                "jobs",
+                {
+                    "uuid": f"00000000-0000-4000-8000-{number:012d}",
+                    "owner_user_id": "owner-a",
+                    "domain": "embeddings",
+                    "queue": "workflow",
+                    "job_type": job_type,
+                    "payload": "{}",
+                    "status": status,
+                    "leased_until": deadline if status == "processing" else None,
+                },
+            )
+        conn.commit()
+    command = AcquireJobCommand(
+        domain="embeddings",
+        queue="workflow",
+        owner_user_id="owner-a",
+        job_type="embedding_workflow",
+        lease_seconds=120,
+        worker_id="legacy-quota-worker",
+        lease_id="legacy-quota-lease",
+        max_inflight_quota=1,
+        single_update=acquisition_mode,
+    )
+    statements = []
+    with closing(case.manager._connect()) as conn:
+        kwargs = {
+            "command": command,
+            "counters_enabled": False,
+            "now": datetime(2100 if ahead else 2000, 1, 1, tzinfo=timezone.utc),
+        }
+        if case.manager.backend == "postgres":
+            result = pg_acquire(conn, case.manager._pg_cursor, **kwargs)
+        else:
+            conn.set_trace_callback(statements.append)
+            result = sqlite_acquire(conn, **kwargs)
+    expected = not ahead if case.manager.backend == "postgres" else ahead
+    assert (result.outcome is OperationOutcome.APPLIED) == expected
+    if case.manager.backend == "sqlite":
+        quota_sql = [statement for statement in statements if statement.startswith("SELECT COUNT(*) FROM jobs")]
+        assert len(quota_sql) == 1
+        if not installed:
+            assert "leased_until > DATETIME(" in quota_sql[0]
+            assert "workflow_capability_version" not in quota_sql[0]
+        assert all("job_workflow_" not in statement for statement in statements)
+    assert not {"job_workflow_roots", "job_workflow_schema", "job_workflow_effect_receipts"} & case.table_names()
 
 
 @pytest.mark.parametrize("via", ["acquire", "sweep"])
