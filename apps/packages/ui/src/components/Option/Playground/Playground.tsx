@@ -144,7 +144,11 @@ import {
 import {
   collectThreadSearchMatches,
   getWrappedMatchIndex,
+  revealThreadSearchMark,
+  threadSearchHighlightQuery,
 } from "./playground-thread-search";
+import { focusComposer } from "@/hooks/useComposerFocus";
+import { formatShortcut, getPlatformModifier } from "@/hooks/useKeyboardShortcuts";
 import {
   RESEARCH_RETURN_RUN_ID_PARAM,
   SETTINGS_HISTORY_ID_PARAM,
@@ -399,6 +403,7 @@ const PlaygroundContent = () => {
   const artifactsEdgeExpandRef = React.useRef<HTMLButtonElement>(null);
   const pendingArtifactsPanelFocusRef = React.useRef(false);
   const threadSearchInputRef = React.useRef<HTMLInputElement>(null);
+  const threadSearchReturnFocusRef = React.useRef<HTMLElement | null>(null);
   const { ref: composerDockRef, height: composerDockHeight } =
     useComposerDockHeight()
 
@@ -2372,6 +2377,36 @@ const PlaygroundContent = () => {
     });
   }, [artifactsOpen]);
 
+  const openThreadSearch = React.useCallback(() => {
+    const active = document.activeElement;
+    if (
+      active instanceof HTMLElement &&
+      active !== document.body &&
+      active !== threadSearchInputRef.current
+    ) {
+      threadSearchReturnFocusRef.current = active;
+    }
+    setThreadSearchOpen(true);
+    requestAnimationFrame(() => {
+      threadSearchInputRef.current?.focus();
+      threadSearchInputRef.current?.select();
+    });
+  }, []);
+
+  // Closing hands focus back to where the user was, or to the composer.
+  const closeThreadSearch = React.useCallback(() => {
+    const returnTarget = threadSearchReturnFocusRef.current;
+    threadSearchReturnFocusRef.current = null;
+    setThreadSearchOpen(false);
+    requestAnimationFrame(() => {
+      if (returnTarget?.isConnected) {
+        returnTarget.focus();
+        return;
+      }
+      focusComposer();
+    });
+  }, []);
+
   React.useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -2384,16 +2419,12 @@ const PlaygroundContent = () => {
         event.key.toLowerCase() === "f"
       ) {
         event.preventDefault();
-        setThreadSearchOpen(true);
-        requestAnimationFrame(() => {
-          threadSearchInputRef.current?.focus();
-          threadSearchInputRef.current?.select();
-        });
+        openThreadSearch();
         return;
       }
       if (threadSearchOpen && event.key === "Escape") {
         event.preventDefault();
-        setThreadSearchOpen(false);
+        closeThreadSearch();
         return;
       }
 
@@ -2431,7 +2462,9 @@ const PlaygroundContent = () => {
     activeArtifact,
     artifactsOpen,
     closeArtifacts,
+    closeThreadSearch,
     markArtifactsRead,
+    openThreadSearch,
     setArtifactsOpen,
     threadSearchOpen,
   ]);
@@ -2457,6 +2490,18 @@ const PlaygroundContent = () => {
     };
   }, []);
 
+  const scrollToThreadSearchMatch = React.useCallback(
+    async (messageIndex: number) => {
+      if (!(await scrollToMessageIndex(messageIndex))) return;
+      revealThreadSearchMark(
+        containerRef.current,
+        messageIndex,
+        messages.length > 100 ? "auto" : "smooth",
+      );
+    },
+    [containerRef, messages.length, scrollToMessageIndex],
+  );
+
   React.useEffect(() => {
     if (!threadSearchOpen) return;
     if (threadSearchMatches.length === 0) {
@@ -2469,12 +2514,12 @@ const PlaygroundContent = () => {
       const messageIndex = threadSearchMatches[bounded];
       if (typeof messageIndex === "number") {
         requestAnimationFrame(() => {
-          scrollToMessageIndex(messageIndex);
+          void scrollToThreadSearchMatch(messageIndex);
         });
       }
       return bounded;
     });
-  }, [scrollToMessageIndex, threadSearchMatches, threadSearchOpen]);
+  }, [scrollToThreadSearchMatch, threadSearchMatches, threadSearchOpen]);
 
   const stepThreadSearchMatch = React.useCallback(
     (direction: 1 | -1) => {
@@ -2488,13 +2533,13 @@ const PlaygroundContent = () => {
         const messageIndex = threadSearchMatches[next];
         if (typeof messageIndex === "number") {
           requestAnimationFrame(() => {
-            scrollToMessageIndex(messageIndex);
+            void scrollToThreadSearchMatch(messageIndex);
           });
         }
         return next;
       });
     },
-    [scrollToMessageIndex, threadSearchMatches],
+    [scrollToThreadSearchMatch, threadSearchMatches],
   );
 
   const contextFileCount = Array.isArray(contextFiles)
@@ -3806,6 +3851,21 @@ const PlaygroundContent = () => {
                   </button>
                   <button
                     type="button"
+                    data-testid="playground-thread-search-trigger"
+                    onClick={threadSearchOpen ? closeThreadSearch : openThreadSearch}
+                    aria-label={t("playground:search.open", "Search this conversation") as string}
+                    aria-expanded={threadSearchOpen}
+                    title={
+                      t("playground:search.openWithShortcut", "Search this conversation ({{shortcut}})", {
+                        shortcut: formatShortcut({ key: "f", modifiers: [getPlatformModifier()] }),
+                      } as any) as string
+                    }
+                    className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"
+                  >
+                    <Search className="h-3 w-3" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
                     data-testid="playground-shortcuts-help-trigger"
                     onClick={() => window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal"))}
                     aria-label={t("common:shortcuts.showKeyboardShortcuts", "Show keyboard shortcuts")}
@@ -3976,7 +4036,7 @@ const PlaygroundContent = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setThreadSearchOpen(false)}
+                    onClick={closeThreadSearch}
                     title={t("common:close", "Close") as string}
                     className="inline-flex items-center rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text hover:bg-surface2"
                   >
@@ -4026,7 +4086,7 @@ const PlaygroundContent = () => {
                     scrollParentRef={containerRef}
                     navigationRef={chatTimelineRef}
                     showStarterDeck={showStarterDeck}
-                    searchQuery={threadSearchQuery.trim()}
+                    searchQuery={threadSearchHighlightQuery(threadSearchOpen, threadSearchQuery)}
                     matchedMessageIndices={threadSearchMatchSet}
                     activeSearchMessageIndex={threadSearchActiveMessageIndex}
                     onAttachResearchContext={handleAttachResearchContext}

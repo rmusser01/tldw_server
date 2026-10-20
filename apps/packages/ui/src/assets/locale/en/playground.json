@@ -1708,5 +1708,12 @@
     "openAnother": "Open another chat",
     "details": "Technical details",
     "toastBody": "Your messages are safe on the server. Reopen the chat to try again."
+  },
+  "search": {
+    "open": "Search this conversation",
+    "openWithShortcut": "Search this conversation ({{shortcut}})",
+    "placeholder": "Search messages in this conversation",
+    "matchCount": "{{current}} / {{total}}",
+    "noMatches": "No matches"
   }
 }

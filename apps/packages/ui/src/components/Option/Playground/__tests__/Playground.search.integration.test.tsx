@@ -619,9 +619,10 @@ describe("Playground thread search integration", () => {
 
     fireEvent.change(input, { target: { value: "beta" } })
 
+    // CS-11: the typed text is highlighted as one phrase.
     expect(screen.getByTestId("playground-chat")).toHaveAttribute(
       "data-search-query",
-      "beta"
+      '"beta"'
     )
     await waitFor(() => {
       expect(screen.getByTestId("playground-chat")).toHaveAttribute(

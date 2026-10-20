@@ -4615,5 +4615,20 @@
   },
   "serverChatLoadFailure_toastBody": {
     "message": "Your messages are safe on the server. Reopen the chat to try again."
+  },
+  "search_open": {
+    "message": "Search this conversation"
+  },
+  "search_openWithShortcut": {
+    "message": "Search this conversation ({{shortcut}})"
+  },
+  "search_placeholder": {
+    "message": "Search messages in this conversation"
+  },
+  "search_matchCount": {
+    "message": "{{current}} / {{total}}"
+  },
+  "search_noMatches": {
+    "message": "No matches"
   }
 }
