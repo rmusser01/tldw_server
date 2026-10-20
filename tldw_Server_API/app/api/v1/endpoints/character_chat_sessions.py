@@ -8494,13 +8494,30 @@ async def delete_chat_session(
 
                 # Rows Sync never saw (the chat predates the profile, or a message was saved
                 # by a path that publishes nothing) are deleted directly, as without a
-                # profile. They were never in the log, so there is nothing to retract there
-                # (#3181). Published rows are tombstoned as before: every message first,
-                # then the chat.
+                # profile (#3181), and then published by id, so a device that kept a copy
+                # outside Sync deletes it too (Q8). Published rows are tombstoned as before.
+                # Either way every message goes first, then the chat.
                 message_versions = {
                     str(message["id"]): message.get("version", 1) for message in child_messages if message.get("id")
                 }
                 chat_object = ("chat.conversation", chat_id)
+                owner = str(current_user.id)
+
+                def message_tombstone_payload(message_id: str) -> dict[str, object]:
+                    return {
+                        "id": message_id,
+                        "deleted": True,
+                        "conversation_id": chat_id,
+                        "client_id": owner,
+                        "owner_user_id": owner,
+                    }
+
+                chat_tombstone_payload: dict[str, object] = {
+                    "id": chat_id,
+                    "deleted": True,
+                    "client_id": owner,
+                    "owner_user_id": owner,
+                }
 
                 def delete_messages_directly(unpublished: Sequence[tuple[str, str]]) -> None:
                     # The chat is in the list when it is unpublished too. It goes last, below.
@@ -8520,27 +8537,33 @@ async def delete_chat_session(
                 published = await run_in_threadpool(
                     delete_unenrolled_server_origin_objects,
                     sync_service,
-                    user_id=str(current_user.id),
+                    user_id=owner,
                     objects=[*(("chat.message", message_id) for message_id in message_versions), chat_object],
                     delete=delete_messages_directly,
+                    # The chat is not deleted by this call, so only its messages are published here.
+                    tombstones=[
+                        AppliedServerOriginObject(
+                            domain="chat.message",
+                            operation="tombstone",
+                            object_id=message_id,
+                            parent_id=chat_id,
+                            payload=message_tombstone_payload(message_id),
+                        )
+                        for message_id in message_versions
+                    ],
+                    source="server_api",
                 )
                 for domain, message_id in published:
                     if domain != "chat.message":
                         continue
                     capture_server_origin_mutation(
                         sync_service,
-                        user_id=str(current_user.id),
+                        user_id=owner,
                         domain="chat.message",
                         operation="tombstone",
                         object_id=message_id,
                         parent_id=chat_id,
-                        payload={
-                            "id": message_id,
-                            "deleted": True,
-                            "conversation_id": chat_id,
-                            "client_id": str(current_user.id),
-                            "owner_user_id": str(current_user.id),
-                        },
+                        payload=message_tombstone_payload(message_id),
                         source="server_api",
                     )
                 chat_is_published = chat_object in published
@@ -8551,24 +8574,28 @@ async def delete_chat_session(
                         await run_in_threadpool(
                             delete_unenrolled_server_origin_objects,
                             sync_service,
-                            user_id=str(current_user.id),
+                            user_id=owner,
                             objects=[chat_object],
                             delete=delete_chat_directly,
+                            tombstones=[
+                                AppliedServerOriginObject(
+                                    domain="chat.conversation",
+                                    operation="tombstone",
+                                    object_id=chat_id,
+                                    payload=chat_tombstone_payload,
+                                )
+                            ],
+                            source="server_api",
                         )
                     )
                 if chat_is_published:
                     capture_server_origin_mutation(
                         sync_service,
-                        user_id=str(current_user.id),
+                        user_id=owner,
                         domain="chat.conversation",
                         operation="tombstone",
                         object_id=chat_id,
-                        payload={
-                            "id": chat_id,
-                            "deleted": True,
-                            "client_id": str(current_user.id),
-                            "owner_user_id": str(current_user.id),
-                        },
+                        payload=chat_tombstone_payload,
                         source="server_api",
                     )
             except (ConflictError, CharactersRAGDBError):

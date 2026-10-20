@@ -6,8 +6,9 @@ message the server does not have, and
 ``test_sync_v2_satisfied_tombstone_objects.py`` the same for a chat and a note
 (§5.4, Q7). Here they run once with the owner's database on PostgreSQL and once
 with the Sync store on PostgreSQL, because they take the dataset projection
-fence, settle a conflict inside a savepoint, and delete owner rows inside that
-fence. The tests skip when no PostgreSQL server is reachable.
+fence, settle a conflict inside a savepoint, delete owner rows inside that
+fence, and publish the id-only tombstone of a direct delete in the same Sync
+transaction (§5.2, Q8). The tests skip when no PostgreSQL server is reachable.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.tests.Sync.test_sync_v2_native_history_capture import (
     USER,
     _active_profile,
+    _block_dataset,
     _client,
     _dataset_id,
     _log,
@@ -131,17 +133,17 @@ def test_postgres_message_sync_never_saw_is_deleted_directly_and_writes_continue
 
     assert deleted.status_code == 204, deleted.text
     assert _is_deleted(chacha_db, LEGACY_QUESTION) and not _is_deleted(chacha_db, LEGACY_ANSWER)
-    assert _log(sync_service) == []
-    assert not _has_sync_history(sync_service, "chat.message", LEGACY_QUESTION)
+    assert _log(sync_service) == [("chat.message", "tombstone", LEGACY_QUESTION, "applied")]
+    assert _state(sync_service, LEGACY_QUESTION).deleted is True
     chat_id, message_id = _published_chat(client)
-    assert _log(sync_service) == [
+    assert _log(sync_service)[1:] == [
         ("chat.conversation", "upsert", chat_id, "applied"),
         ("chat.message", "append", message_id, "applied"),
     ]
     assert _blocker(sync_service) is None
 
 
-def test_postgres_chat_sync_never_saw_is_deleted_without_any_envelope(
+def test_postgres_chat_sync_never_saw_is_deleted_and_published_by_id(
     stack: tuple[TestClient, CharactersRAGDB, SyncV2Service],
 ) -> None:
     client, chacha_db, sync_service = stack
@@ -152,8 +154,28 @@ def test_postgres_chat_sync_never_saw_is_deleted_without_any_envelope(
     assert deleted.status_code == 204, deleted.text
     assert chacha_db.get_conversation_by_id(LEGACY_CHAT) is None
     assert _is_deleted(chacha_db, LEGACY_QUESTION) and _is_deleted(chacha_db, LEGACY_ANSWER)
-    assert _log(sync_service) == []
+    assert _log(sync_service) == [
+        ("chat.message", "tombstone", LEGACY_QUESTION, "applied"),
+        ("chat.message", "tombstone", LEGACY_ANSWER, "applied"),
+        ("chat.conversation", "tombstone", LEGACY_CHAT, "applied"),
+    ]
     assert sync_service.store.list_conflicts(_dataset_id(sync_service)) == []
+
+
+def test_postgres_a_blocked_dataset_still_takes_a_direct_delete_and_publishes_nothing(
+    stack: tuple[TestClient, CharactersRAGDB, SyncV2Service],
+) -> None:
+    client, chacha_db, sync_service = stack
+    _legacy_chat(chacha_db, messages=(LEGACY_QUESTION,))
+    _block_dataset(sync_service)
+    before = _log(sync_service)
+
+    deleted = _delete_message(client, chacha_db, LEGACY_QUESTION)
+
+    assert deleted.status_code == 204, deleted.text
+    assert _is_deleted(chacha_db, LEGACY_QUESTION)
+    assert _log(sync_service) == before
+    assert not _has_sync_history(sync_service, "chat.message", LEGACY_QUESTION)
 
 
 def test_postgres_chat_with_both_kinds_of_row_tombstones_only_the_published_ones(
@@ -167,12 +189,13 @@ def test_postgres_chat_with_both_kinds_of_row_tombstones_only_the_published_ones
 
     assert deleted.status_code == 204, deleted.text
     assert _log(sync_service)[2:] == [
+        ("chat.message", "tombstone", "unpublished-save", "applied"),
         ("chat.message", "tombstone", published_id, "applied"),
         ("chat.conversation", "tombstone", chat_id, "applied"),
     ]
     assert _is_deleted(chacha_db, published_id) and _is_deleted(chacha_db, "unpublished-save")
     assert chacha_db.get_conversation_by_id(chat_id) is None
-    assert not _has_sync_history(sync_service, "chat.message", "unpublished-save")
+    assert _state(sync_service, "unpublished-save").deleted is True
     assert sync_service.store.list_conflicts(_dataset_id(sync_service)) == []
 
 
