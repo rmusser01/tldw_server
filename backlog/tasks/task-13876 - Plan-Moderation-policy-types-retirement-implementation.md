@@ -1,4 +1,41 @@
 ---
+id: TASK-13876
+title: Plan Moderation policy_types retirement implementation
+status: Done
+labels:
+- Moderation
+- planning
+- refactor
+- TDD
+dependencies:
+- TASK-13875
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Write the executable implementation plan for the approved Moderation policy_types() retirement design. The plan must use TDD, preserve import-isolation and runtime namespace contracts, keep production changes to PolicyCompiler and PolicyEvaluator, and run compilation before focused and downstream verification.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 The plan maps every approved design requirement to exact production and test files.
+- [x] #2 The plan defines a verified red/green cycle for legacy subclass hooks no longer controlling model selection.
+- [x] #3 The plan replaces hook-based clean-process import checks with representative compiler/evaluator operations.
+- [x] #4 The plan specifies compilation-first focused, downstream, quality, security, source-audit, and current-dev gates with exact commands.
+- [x] #5 The implementation plan is self-reviewed, committed, and ready for user review.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-10-20 current identity: TASK-13435 -> TASK-13876; pinned source PR #3176 at a20c5e0f386893758d9b079a2b1be1adbaa2b89e. Original IDs now belong to unrelated Jobs/quota/evaluation records on dev, which must remain unchanged. Fresh global published maximum was TASK-13870; our already-created VN records reserve TASK-13871 through TASK-13874, so this work uses TASK-13875 through TASK-13877. Created/edited only through backlog-py; no manual identity edit.
+
+ADR required: no. Searched Docs/ADR/README.md and existing ADRs; no moderation-specific ADR governs this internal cleanup. Neutral Moderation/models.py ownership was already implemented by PR #2929. This change removes the obsolete import-cycle workaround without changing that ownership, supported ModerationService/public HTTP contracts, persistence or security policy. The intentional removal of undocumented direct hook calls/subclass model substitution is explicitly retained in the approved design and PR compatibility notes. ADR-002 and ADR-059 govern tracking recreation; no accepted rationale is rewritten.
+
+Original frontmatter (historical identity/metadata):
+```yaml
+---
 id: TASK-13435
 title: Plan Moderation policy_types retirement implementation
 status: Done
@@ -22,25 +59,10 @@ modified_files:
 - Docs/superpowers/plans/2026-10-03-moderation-policy-types-retirement-implementation-plan.md
 updated_date: 2026-10-03 21:51
 ---
+```
 
-## Description
+Historical implementation notes (verbatim):
 
-<!-- SECTION:DESCRIPTION:BEGIN -->
-Write the executable implementation plan for the approved Moderation policy_types() retirement design. The plan must use TDD, preserve import-isolation and runtime namespace contracts, keep production changes to PolicyCompiler and PolicyEvaluator, and run compilation before focused and downstream verification.
-<!-- SECTION:DESCRIPTION:END -->
-
-## Acceptance Criteria
-<!-- AC:BEGIN -->
-- [x] #1 The plan maps every approved design requirement to exact production and test files.
-- [x] #2 The plan defines a verified red/green cycle for legacy subclass hooks no longer controlling model selection.
-- [x] #3 The plan replaces hook-based clean-process import checks with representative compiler/evaluator operations.
-- [x] #4 The plan specifies compilation-first focused, downstream, quality, security, source-audit, and current-dev gates with exact commands.
-- [x] #5 The implementation plan is self-reviewed, committed, and ready for user review.
-<!-- AC:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Plan self-review found that removing PolicyEvaluator.policy_types() leaves the evaluator's private _ModerationPolicy import unused. Ruff confirms F401 for that import pattern. The approved design was clarified to retain the evaluator aliases used by runtime operations (_PatternRule and _ModerationEvaluationResult) while removing the now-unused evaluator-only _ModerationPolicy import; TYPE_CHECKING annotations remain unchanged.
 Self-review completed against the approved design: all production/test requirements map to exact files and steps; the red fixtures now fail through canonical-type assertions rather than incidental exceptions; placeholder scan returned no hits; type and test names are consistent across red/green commands; compilation, focused/downstream, Ruff, Black, Bandit, source-audit, and current-dev gates are explicit. Bandit is not applicable to this planning-only task because it changes documentation and Backlog records, not runtime code.
 Implementation plan and follow-on task committed in bbc91ed1b0 (docs(moderation): plan policy type hook retirement). The plan is ready for execution review.

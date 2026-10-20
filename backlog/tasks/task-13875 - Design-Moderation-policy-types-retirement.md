@@ -1,4 +1,39 @@
 ---
+id: TASK-13875
+title: Design Moderation policy_types retirement
+status: Done
+labels:
+- Moderation
+- design
+- refactor
+- compatibility
+---
+
+## Description
+
+<!-- SECTION:DESCRIPTION:BEGIN -->
+Design the next structural Moderation refactor slice: retire PolicyCompiler.policy_types() and PolicyEvaluator.policy_types(), bind compiler/evaluator behavior directly to canonical models, preserve service imports and moderation semantics, explicitly accept the undocumented subclass model-substitution break, and retain import-isolation coverage without private-layout tests.
+<!-- SECTION:DESCRIPTION:END -->
+
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [x] #1 Current policy_types() production, test, documentation, and history usage is documented.
+- [x] #2 The design defines the exact compatibility break and preserves all public ModerationService and model import contracts.
+- [x] #3 Compiler/evaluator canonical-type wiring, runtime namespace behavior, and import-isolation replacements are specified.
+- [x] #4 Compilation-first, focused, downstream, lint, security, and mergeability verification gates are specified.
+- [x] #5 The approved design is committed in Docs/superpowers/specs.
+<!-- AC:END -->
+
+## Implementation Notes
+
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-10-20 current identity: TASK-13421 -> TASK-13875; pinned source PR #3176 at a20c5e0f386893758d9b079a2b1be1adbaa2b89e. Original IDs now belong to unrelated Jobs/quota/evaluation records on dev, which must remain unchanged. Fresh global published maximum was TASK-13870; our already-created VN records reserve TASK-13871 through TASK-13874, so this work uses TASK-13875 through TASK-13877. Created/edited only through backlog-py; no manual identity edit.
+
+ADR required: no. Searched Docs/ADR/README.md and existing ADRs; no moderation-specific ADR governs this internal cleanup. Neutral Moderation/models.py ownership was already implemented by PR #2929. This change removes the obsolete import-cycle workaround without changing that ownership, supported ModerationService/public HTTP contracts, persistence or security policy. The intentional removal of undocumented direct hook calls/subclass model substitution is explicitly retained in the approved design and PR compatibility notes. ADR-002 and ADR-059 govern tracking recreation; no accepted rationale is rewritten.
+
+Original frontmatter (historical identity/metadata):
+```yaml
+---
 id: TASK-13421
 title: Design Moderation policy_types retirement
 status: Done
@@ -21,25 +56,10 @@ modified_files:
 - backlog/tasks/task-13421 - Design-Moderation-policy-types-retirement.md
 updated_date: 2026-10-03 21:40
 ---
+```
 
-## Description
+Historical implementation notes (verbatim):
 
-<!-- SECTION:DESCRIPTION:BEGIN -->
-Design the next structural Moderation refactor slice: retire PolicyCompiler.policy_types() and PolicyEvaluator.policy_types(), bind compiler/evaluator behavior directly to canonical models, preserve service imports and moderation semantics, explicitly accept the undocumented subclass model-substitution break, and retain import-isolation coverage without private-layout tests.
-<!-- SECTION:DESCRIPTION:END -->
-
-## Acceptance Criteria
-<!-- AC:BEGIN -->
-- [x] #1 Current policy_types() production, test, documentation, and history usage is documented.
-- [x] #2 The design defines the exact compatibility break and preserves all public ModerationService and model import contracts.
-- [x] #3 Compiler/evaluator canonical-type wiring, runtime namespace behavior, and import-isolation replacements are specified.
-- [x] #4 Compilation-first, focused, downstream, lint, security, and mergeability verification gates are specified.
-- [x] #5 The approved design is committed in Docs/superpowers/specs.
-<!-- AC:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Audit completed on current origin/dev 86e287fee7. policy_types() exists only in PolicyCompiler/PolicyEvaluator internal production calls; no endpoint, service caller, public documentation, or integration caller uses it. Hook-specific tests preserve descriptors, tuple/cache identity, clean-process service isolation, and subclass model substitution. The approved design retires direct calls and subclass substitution, preserves canonical model/service imports, replaces hook-based import tests with representative operations, and avoids private-layout assertions. Focused baseline: 119 passed, 250 warnings across compiler, evaluator, model characterization, canonical-model, and import suites.
 Design specification self-review completed: no TBD/TODO placeholders, unresolved ambiguity, or cross-scope implementation dependency remains. The review added an explicit TDD red/green proof for ignoring legacy subclass hooks, exact implementation file scope, representative clean-process import-isolation operations, and a ban on private-layout tests. git diff --cached --check passed before commit. Design commit: 18659bd296. Bandit is not applicable because this task changes documentation and its Backlog record only.
 Written-spec review identified five corrections before implementation planning: reconcile the source-audit gate with the intentional legacy-hook regression fixtures; narrow behavior-preservation language to supported ModerationService/runtime callers; declare private runtime-alias rebinding outside compatibility because removing the evaluator cache changes that monkeypatch behavior; describe rollback as one-PR rather than one-commit; and keep the task open until the amended written spec is approved.

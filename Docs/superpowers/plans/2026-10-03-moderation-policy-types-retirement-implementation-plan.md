@@ -1,3 +1,35 @@
+# Moderation hook retirement: current qualification plan
+
+**Tracking:** design TASK-13875, historical implementation plan TASK-13876, resumed implementation/merge TASK-13877. Former IDs TASK-13421/13435/13436 now identify unrelated current-dev work.
+
+**Goal:** Qualify and land the already implemented PR #3176 hook retirement without expanding runtime scope.
+
+**Design:** Docs/superpowers/specs/2026-10-02-moderation-policy-types-retirement-design.md. Supported service/model/import contracts remain unchanged. Direct policy_types calls, subclass model substitution through that hook and evaluator tuple-cache identity remain intentionally unsupported. External callers cannot be exhaustively audited from this repository.
+
+**ADR check:** ADR required: no. Searched Docs/ADR/README.md and existing ADRs; no moderation-specific ADR governs this internal cleanup. Neutral Moderation/models.py ownership was already implemented by PR #2929. This change removes the obsolete import-cycle workaround without changing that ownership, supported ModerationService/public HTTP contracts, persistence or security policy. The intentional removal of undocumented direct hook calls/subclass model substitution is explicitly retained in the approved design and PR compatibility notes. ADR-002 and ADR-059 govern tracking recreation; no accepted rationale is rewritten.
+
+## Stage 1: Preserve tracking and audit scope
+**Goal:** Recreate the three owned records through backlog-py and preserve historical requirements, metadata, notes and dependency order.
+**Success criteria:** TASK-13876 depends on TASK-13875 and TASK-13877 on TASK-13876; unrelated tasks and all ADR bytes remain unchanged. Audit every production caller of policy_types before any runtime fix.
+**Tests:** Canonical task/metadata/section/checklist preservation assertions, dependency checks, current repository caller search and diff scope.
+**Status:** Complete
+
+## Stage 2: Requalify behavior and independent review
+**Goal:** Prove unchanged supported moderation behavior and detect restoration of the retired hooks.
+**Success criteria:** Compilation, all moderation unit tests, Guardian/Chat/Audio downstream cases and Workflow moderation adapters pass. Ruff/Black and scoped Bandit have no new findings. requesting-code-review approves the exact authored diff; no Qodo request.
+**Tests:** Existing test_moderation*.py suite; Guardian/test_supervised_policy.py; Chat_NEW/integration/test_moderation.py; Audio/test_audio_transcription_retention_and_redaction.py selected redaction case; Workflows/adapters/test_llm_adapters.py -k moderation. Run inverse legacy-hook tests against baseline compiler/evaluator in this isolated worktree and restore exact PR bytes in finally, then rerun normally. Scan the two changed production modules with Bandit and changed tests excluding B101 only.
+**Status:** In Progress
+
+## Stage 3: Resolve CI and land
+**Goal:** Merge normally after the preceding authorized PRs land.
+**Success criteria:** Rebase only at the front of the serial sequence; keep requester-provided Change summary verbatim. Investigate any failures using logs and current source before scoped fixes, rerun affected tests, and refresh independent review. All seven required statuses pass on current-base exact head before normal merge.
+**Tests:** Required-context set, current dev ancestry, leased remote publication and merge verification. Old full-suite privilege/VN/email failures are historical leads, not proof of current failures.
+**Status:** Not Started
+
+## Historical implementation plan (2026-10-03)
+
+The full original plan below is retained as historical implementation evidence. Its task IDs, workstation paths, MCP task-editor commands, branch/base assumptions and unchecked step boxes describe that earlier plan. Current qualification uses the project venv and backlog-py under ADR-059; it does not execute stale MCP editing instructions. The approved runtime design remains unchanged.
+
 # Moderation Policy Type Hook Retirement Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

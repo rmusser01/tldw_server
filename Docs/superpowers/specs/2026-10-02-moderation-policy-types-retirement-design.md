@@ -1,9 +1,13 @@
 # Moderation `policy_types()` Retirement Design
 
-**Backlog task:** TASK-13421
+**Backlog task:** TASK-13875 (formerly TASK-13421)
 **Date:** 2026-10-02
 **Status:** Approved for written-spec review
 **Predecessor:** TASK-13112, merged by PR #2929
+
+## Current ADR assessment (2026-10-20)
+
+ADR required: no. Searched Docs/ADR/README.md and existing ADRs; no moderation-specific ADR governs this internal cleanup. Neutral Moderation/models.py ownership was already implemented by PR #2929. This change removes the obsolete import-cycle workaround without changing that ownership, supported ModerationService/public HTTP contracts, persistence or security policy. The intentional removal of undocumented direct hook calls/subclass model substitution is explicitly retained in the approved design and PR compatibility notes. ADR-002 and ADR-059 govern tracking recreation; no accepted rationale is rewritten.
 
 ## Purpose
 
