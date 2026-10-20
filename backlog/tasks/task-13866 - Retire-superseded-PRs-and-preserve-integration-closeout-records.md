@@ -1,7 +1,7 @@
 ---
 id: TASK-13866
 title: Retire superseded PRs and preserve integration closeout records
-status: In Progress
+status: Done
 labels:
 - documentation
 - maintenance
@@ -17,7 +17,7 @@ Retire PRs #2956, #2966 and #3043 after verifying current dev retains their usef
 <!-- AC:BEGIN -->
 - [x] #1 Preserve unique PyPI publication task and UAT publication notes with canonical backlog-py records
 - [x] #2 Record why the retired CI checker is redundant with existing tested contracts
-- [ ] #3 Qualify and independently review PR3197 against current dev
+- [x] #3 Qualify and independently review PR3197 against current dev
 - [x] #4 Restore current-dev CI shard coverage for the newly merged reused-transcript quota regression
 <!-- AC:END -->
 
@@ -30,19 +30,21 @@ Fresh connected contract run: 111 passed, 1 failed. Root cause is current-dev ci
 Verification: expected shard assignment failed first, then all 112 connected CI/task/PyPI/license/required-workflow contract tests passed after adding the test path to all five matrices. Ruff and syntax pass. Bandit 1.9.3 on touched Python test with assertion-only B101 excluded: zero findings. Black --check reports pre-existing formatting drift; formatting comparison proves the single added expected path introduces no formatting drift. git diff --check clean. Independent retirement review approves preservation/closures; final combined review and current-head CI remain pending.
 Independent final review caught a preservation omission: backlog-py task create did not apply the provided final-summary option. Restored the original nonempty TASK-13257 final summary through task edit; completion checklist now matches the preserved record.
 2026-10-19 requalification: all seven required statuses passed on 9c19676e3b, but dev advanced through PR3280 before merge and strict enforcement rejected the stale base. Rebased only PR3197 onto 0b4f1d1bb83f3b8fb382910bf752417b707113bb without conflicts; range-diff preserves both reviewed patches exactly. Fresh connected contracts on that base pass112/112. The new head must pass current-base hosted qualification before merge; no bypass or weakened gate.
+2026-10-20 completion: PR3197 merged normally at 06:49:49Z as 6a2cb72577f19662d334f97d7e78445c5139f40b after all seven required contexts passed on reviewed head6014780224 against dev0b4f1d1bb8. Independent requesting-code-review approval reaffirmed with no findings. Requester explicitly waived the human-written Change summary gate for this cleanup batch. PRs3228,2772,2956,2966,3043 are confirmed closed; useful history is retained. Legacy report-only matrix was still pending at merge; no failing check was reported. PR3185 implementation and integration are tracked separately by TASK-13451.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Retired five obsolete PRs with verified supersession, preserving unique PyPI/UAT provenance and recording the redundant CI checker rationale. Merged PR3197 with native-owner closeout records and the existing quota-regression CI shard routing repair. All112 local connected contracts, scoped security checks, independent review, and all seven current-base required hosted gates passed. No new architecture decision; broader legacy matrix was not awaited.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
