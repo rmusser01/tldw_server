@@ -502,6 +502,74 @@ class NoteStore:
             logger.error("Database error tombstoning synced note ID {}.", normalized_note_id, exc_info=True)
             raise
 
+    def tombstone_unsynced_note_from_sync(
+        self,
+        *,
+        note_id: str,
+        sync_client_id: str,
+        object_revision: int,
+        object_hash: str,
+        conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+    ) -> str:
+        """Make a note the Sync dataset holds no state for absent, and report what that took.
+
+        A device can tombstone a note this server never received through Sync.
+        The end state it asks for is "gone", so there is nothing to conflict
+        with: either no row carries the id, or the row is a copy kept outside
+        Sync, which the delete now reaches too, with everything an ordinary Sync
+        delete does to it (provenance, clipper sidecars, graph and Studio state).
+
+        Only a note owned by ``sync_client_id`` is looked at. The lookup is by
+        id, and on PostgreSQL one database holds every owner's notes; with no
+        Sync state to tie the id to this owner, the note's owner is the only
+        thing that does.
+
+        Args:
+            note_id: The note id the tombstone names.
+            sync_client_id: The projection's client id: the owner whose notes are
+                searched, and the id stamped on a deleted row.
+            object_revision: The tombstone's revision, stored as the row version.
+            object_hash: The tombstone's payload hash.
+            conn: The caller's transaction, if any.
+
+        Returns:
+            ``"absent"`` when this owner has no note with the id and nothing
+            changed, or ``"deleted"`` when the note is now (or already was)
+            soft-deleted.
+        """
+
+        normalized_note_id = str(note_id).strip()
+        if not normalized_note_id:
+            raise InputError("note_id cannot be empty.")  # noqa: TRY003
+        if object_revision < 1:
+            raise InputError("object_revision must be greater than zero.")  # noqa: TRY003
+
+        owner = str(sync_client_id)
+        lock_suffix = " FOR UPDATE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+
+        def _execute(transaction_conn: sqlite3.Connection | BackendConnectionWrapper) -> str:
+            row = transaction_conn.execute(
+                "SELECT deleted FROM notes WHERE id = ? AND client_id = ?" + lock_suffix,  # nosec B608
+                (normalized_note_id, owner),
+            ).fetchone()
+            if row is None:
+                return "absent"
+            if bool(row["deleted"]):
+                return "deleted"
+            self.tombstone_note_from_sync(
+                note_id=normalized_note_id,
+                sync_client_id=owner,
+                object_revision=object_revision,
+                object_hash=object_hash,
+                conn=transaction_conn,
+            )
+            return "deleted"
+
+        if conn is None:
+            with self._db.transaction() as transaction_conn:
+                return _execute(transaction_conn)
+        return _execute(conn)
+
     # ------------------------------------------------------------------
     # Note retrieval
     # ------------------------------------------------------------------

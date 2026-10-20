@@ -20,6 +20,7 @@ from ..models import (
 from ..store import SyncV2Store
 from .base import MaterializationResult
 from .guarded_product_mutation import GuardedProductMutation
+from .satisfied_tombstone import satisfied_result, unheld_tombstone_outcome
 
 _INGESTION_EXPECTED_VERSION_KEY = "notes_ingestion_expected_product_version"
 _SERVER_ORIGIN_DEVICE_ID = "server-origin"
@@ -125,6 +126,10 @@ class NotesMaterializer:
                     message=_safe_error_message(exc),
                 )
             return MaterializationResult(status="applied")
+        if envelope.operation == "tombstone" and current_state is None:
+            return self._apply_unheld_tombstone(
+                envelope, object_id=object_id, server_cursor=envelope.server_cursor, store=store
+            )
 
         conflict = self._detect_conflict(envelope, current_state)
         if conflict is not None:
@@ -177,6 +182,78 @@ class NotesMaterializer:
             )
 
         return MaterializationResult(status="applied")
+
+    def _apply_unheld_tombstone(
+        self,
+        envelope: SyncEnvelope,
+        *,
+        object_id: str,
+        server_cursor: int,
+        store: SyncV2Store,
+    ) -> MaterializationResult:
+        """Apply a tombstone of a note the dataset holds no state for as already satisfied (§5.4).
+
+        The note is gone for this dataset, which is all the tombstone asks for.
+        It is recorded as tombstoned and a copy the owner kept outside Sync is
+        soft-deleted, with what an ordinary Sync delete does to a note. A base,
+        if the tombstone names one, refers to history that never reached a
+        projection here, so it changes nothing. A note that other Sync history
+        holds is a conflict.
+        """
+
+        object_revision = self._next_object_revision(envelope, None)
+        object_hash = envelope.payload_hash or ""
+        try:
+            outcome = unheld_tombstone_outcome(
+                store,
+                envelope,
+                delete_copy=lambda: self.note_db.tombstone_unsynced_note_from_sync(
+                    note_id=object_id,
+                    sync_client_id=_projection_client_id(self.note_db),
+                    object_revision=object_revision,
+                    object_hash=object_hash,
+                ),
+            )
+            if outcome == "foreign":
+                conflict = _conflict_result(reason="missing_server_object", envelope=envelope, current_state=None)
+                store.mark_envelope_apply_status(
+                    server_cursor,
+                    apply_status="conflict",
+                    apply_error_code="whole_object_conflict",
+                    apply_error_message=conflict.message,
+                )
+                return conflict
+            store.upsert_object_state(
+                SyncObjectState(
+                    dataset_id=envelope.dataset_id,
+                    domain=envelope.domain,
+                    object_id=object_id,
+                    object_revision=object_revision,
+                    object_hash=object_hash,
+                    latest_server_cursor=server_cursor,
+                    deleted=True,
+                )
+            )
+            store.mark_envelope_apply_status(server_cursor, apply_status="applied")
+        except Exception as exc:  # noqa: BLE001 - projection failures are persisted for replay
+            logger.warning(
+                "Failed to apply notes.note tombstone {} for object {} without Sync state: {}",
+                envelope.client_envelope_id,
+                envelope.object_id,
+                type(exc).__name__,
+            )
+            store.mark_envelope_apply_status(
+                server_cursor,
+                apply_status="failed",
+                apply_error_code="notes_projection_failed",
+                apply_error_message=_safe_error_message(exc),
+            )
+            return MaterializationResult(
+                status="failed",
+                error_code="notes_projection_failed",
+                message=_safe_error_message(exc),
+            )
+        return satisfied_result(envelope)
 
     def project_product(self, envelope: SyncEnvelope, *, object_revision: int, conn: Any | None) -> None:
         """Project core bytes using the caller transaction when a sidecar is paired."""

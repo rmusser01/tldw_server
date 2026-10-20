@@ -1,24 +1,28 @@
 """Deletes of chat rows Sync v2 never saw, with PostgreSQL on either side (#3181).
 
 ``test_sync_v2_unenrolled_delete.py`` covers the server's delete routes on
-SQLite, and ``test_sync_v2_satisfied_tombstone.py`` a device's tombstone of a
-message the server does not have. Here both run once with the owner's chat
-database on PostgreSQL and once with the Sync store on PostgreSQL, because they
-take the dataset projection fence, settle a conflict inside a savepoint, and
-delete owner rows inside that fence. The tests skip when no PostgreSQL server is
-reachable.
+SQLite, ``test_sync_v2_satisfied_tombstone.py`` a device's tombstone of a
+message the server does not have, and
+``test_sync_v2_satisfied_tombstone_objects.py`` the same for a chat and a note
+(§5.4, Q7). Here they run once with the owner's database on PostgreSQL and once
+with the Sync store on PostgreSQL, because they take the dataset projection
+fence, settle a conflict inside a savepoint, and delete owner rows inside that
+fence. The tests skip when no PostgreSQL server is reachable.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.Sync_DB import SyncDatabase
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
@@ -37,6 +41,24 @@ from tldw_Server_API.tests.Sync.test_sync_v2_satisfied_tombstone import (
     _push_tombstone,
     _state,
     _strand_device_tombstone,
+)
+from tldw_Server_API.tests.Sync.test_sync_v2_satisfied_tombstone_objects import (
+    OBJECT_DOMAINS,
+    _copy_outside_sync,
+    _row,
+    _service,
+)
+from tldw_Server_API.tests.Sync.test_sync_v2_satisfied_tombstone_objects import (
+    _is_deleted as _object_is_deleted,
+)
+from tldw_Server_API.tests.Sync.test_sync_v2_satisfied_tombstone_objects import (
+    _push_tombstone as _push_object_tombstone,
+)
+from tldw_Server_API.tests.Sync.test_sync_v2_satisfied_tombstone_objects import (
+    _state as _object_state,
+)
+from tldw_Server_API.tests.Sync.test_sync_v2_satisfied_tombstone_objects import (
+    _strand as _strand_object_tombstone,
 )
 from tldw_Server_API.tests.Sync.test_sync_v2_unenrolled_delete import (
     LEGACY_ANSWER,
@@ -284,4 +306,186 @@ def test_postgres_device_tombstone_never_reaches_another_owners_message(
         for database in (first_projection, first, second):
             database.close_connection()
         for backend in backends:
+            backend.get_pool().close_all()
+
+
+# ---------------------------------------------------------------------------
+# A device's tombstone of a chat or a note the server does not have (Q7)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(params=["chat_database_on_postgres", "sync_store_on_postgres"])
+def object_stack(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    pg_database_config: DatabaseConfig,
+) -> Iterator[tuple[CharactersRAGDB, SyncV2Service]]:
+    """The chat and notes projection, one of the two databases on PostgreSQL."""
+    backends = []
+
+    def postgres_backend():
+        backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        backends.append(backend)
+        return backend
+
+    if request.param == "chat_database_on_postgres":
+        chacha_db = CharactersRAGDB(db_path=":memory:", client_id=USER, backend=postgres_backend())
+        projection_db = CharactersRAGDB(db_path=":memory:", client_id=USER, backend=postgres_backend())
+        sync_database = SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db")
+    else:
+        chacha_db = CharactersRAGDB(db_path=str(tmp_path / "ChaChaNotes.db"), client_id=USER)
+        projection_db = CharactersRAGDB(db_path=chacha_db.db_path_str, client_id=USER)
+        sync_database = SyncDatabase(backend=postgres_backend())
+    try:
+        yield chacha_db, _service(sync_database, projection_db)
+    finally:
+        for database in (projection_db, chacha_db):
+            database.close_all_connections()
+        for backend in backends:
+            backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize("domain", OBJECT_DOMAINS)
+def test_postgres_device_tombstone_of_an_unknown_object_is_applied_and_its_copy_deleted(
+    object_stack: tuple[CharactersRAGDB, SyncV2Service],
+    domain: str,
+) -> None:
+    chacha_db, sync_service = object_stack
+    _copy_outside_sync(chacha_db, domain, "kept-outside-sync")
+
+    absent = _push_object_tombstone(sync_service, domain)
+    copy = _push_object_tombstone(sync_service, domain, "kept-outside-sync")
+
+    for pushed in (absent, copy):
+        assert pushed.conflicts == [] and pushed.rejected == []
+        assert [item.apply_status for item in pushed.accepted] == ["applied"]
+    assert _row(chacha_db, domain) is None
+    assert _object_is_deleted(chacha_db, domain, "kept-outside-sync")
+    assert _object_state(sync_service, domain).deleted is True
+    assert _object_state(sync_service, domain, "kept-outside-sync").deleted is True
+    assert sync_service.store.get_unresolved_materialization_conflict(_dataset_id(sync_service)) is None
+
+
+@pytest.mark.parametrize("domain", OBJECT_DOMAINS)
+def test_postgres_stranded_object_tombstone_recovers_on_the_next_push(
+    object_stack: tuple[CharactersRAGDB, SyncV2Service],
+    domain: str,
+) -> None:
+    chacha_db, sync_service = object_stack
+    _copy_outside_sync(chacha_db, domain)
+    stranded = _strand_object_tombstone(sync_service, domain, with_base=True)
+
+    again = _push_object_tombstone(sync_service, domain, "something-else")
+
+    assert again.conflicts == []
+    assert sync_service.store.get_envelope_by_server_cursor(stranded.server_cursor).apply_status == "applied"
+    assert _object_is_deleted(chacha_db, domain)
+    assert sync_service.store.get_unresolved_materialization_conflict(_dataset_id(sync_service)) is None
+
+
+@pytest.mark.parametrize("domain", OBJECT_DOMAINS)
+def test_postgres_object_tombstone_never_reaches_another_owners_row(
+    tmp_path: Path,
+    pg_database_config: DatabaseConfig,
+    domain: str,
+) -> None:
+    """One database holds both owners' rows, and the documented role bypasses row-level security."""
+    backends = [DatabaseBackendFactory.create_backend(pg_database_config) for _ in range(3)]
+    first = CharactersRAGDB(db_path=":memory:", client_id=USER, backend=backends[0])
+    first_projection = CharactersRAGDB(db_path=":memory:", client_id=USER, backend=backends[1])
+    second = CharactersRAGDB(db_path=":memory:", client_id="user-2", backend=backends[2])
+    try:
+        if domain == "chat.conversation":
+            second.add_conversation({"id": "theirs", "character_id": None, "title": "Theirs", "client_id": "user-2"})
+        else:
+            second.add_note(title="Theirs", content="not yours to delete", note_id="theirs")
+        sync_service = _service(SyncDatabase(sqlite_path=tmp_path / "Sync_v2.db"), first_projection)
+
+        pushed = _push_object_tombstone(sync_service, domain, "theirs")
+
+        assert pushed.conflicts == []
+        assert [item.apply_status for item in pushed.accepted] == ["applied"]
+        assert not _object_is_deleted(second, domain, "theirs")
+        assert _object_state(sync_service, domain, "theirs").deleted is True
+    finally:
+        for database in (first_projection, first, second):
+            database.close_connection()
+        for backend in backends:
+            backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize("domain", OBJECT_DOMAINS)
+def test_postgres_object_tombstone_under_forced_row_level_security(
+    pg_database_config: DatabaseConfig,
+    domain: str,
+) -> None:
+    """The store methods behind the rule, run as a role that does not bypass row-level security.
+
+    The owner's copy kept outside Sync is deleted, and the other owner's row with
+    the same table is neither seen nor changed: the forced tenant policy and the
+    owner filter agree. Before the rule, these methods did not exist.
+    """
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    owner = CharactersRAGDB(db_path=":memory:", client_id=USER, backend=backend)
+    other = CharactersRAGDB(db_path=":memory:", client_id="user-2", backend=backend)
+    role = backend.escape_identifier(f"sync_tombstone_rls_{uuid4().hex[:12]}")
+    role_created = False
+
+    @contextmanager
+    def restricted(database: CharactersRAGDB) -> Iterator[None]:
+        with chacha_operation(independent=True), database.transaction() as conn:
+            conn.execute(f"SET LOCAL ROLE {role}")
+            flags = dict(
+                conn.execute("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user").fetchone()
+            )
+            assert flags == {"rolsuper": False, "rolbypassrls": False}
+            table = "conversations" if domain == "chat.conversation" else "notes"
+            policy = dict(
+                conn.execute(
+                    "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = ?", (table,)
+                ).fetchone()
+            )
+            assert policy == {"relrowsecurity": True, "relforcerowsecurity": True}
+            yield
+
+    def tombstone(object_id: str) -> str:
+        if domain == "chat.conversation":
+            return owner.tombstone_unsynced_conversation_from_sync(
+                conversation_id=object_id, sync_client_id=USER, object_revision=1, object_hash="sha256:gone"
+            )
+        return owner.tombstone_unsynced_note_from_sync(
+            note_id=object_id, sync_client_id=USER, object_revision=1, object_hash="sha256:gone"
+        )
+
+    try:
+        _copy_outside_sync(owner, domain, "mine")
+        if domain == "chat.conversation":
+            other.add_conversation({"id": "theirs", "character_id": None, "title": "Theirs", "client_id": "user-2"})
+        else:
+            other.add_note(title="Theirs", content="not yours to delete", note_id="theirs")
+        with backend.transaction() as conn:
+            backend.execute(f"CREATE ROLE {role} NOLOGIN NOSUPERUSER NOBYPASSRLS", connection=conn)
+            backend.execute(f"GRANT USAGE ON SCHEMA public TO {role}", connection=conn)
+            backend.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {role}", connection=conn)
+            backend.execute(f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {role}", connection=conn)
+            backend.execute(f"GRANT {role} TO CURRENT_USER", connection=conn)
+        role_created = True
+
+        with restricted(owner):
+            assert _row(owner, domain, "theirs") is None  # the policy hides the other owner's row
+            assert tombstone("mine") == "deleted"
+            assert tombstone("theirs") == "absent"
+            assert tombstone("mine") == "deleted"  # a replay changes nothing
+
+        assert _object_is_deleted(owner, domain, "mine")
+        assert not _object_is_deleted(other, domain, "theirs")
+    finally:
+        try:
+            if role_created:
+                with backend.transaction() as conn:
+                    backend.execute(f"DROP OWNED BY {role}", connection=conn)
+                    backend.execute(f"DROP ROLE {role}", connection=conn)
+        finally:
+            for database in (owner, other):
+                database.close_connection()
             backend.get_pool().close_all()
