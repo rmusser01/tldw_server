@@ -520,3 +520,33 @@ async def test_kokoro_onnx_load_ignores_init_timeout_sec(monkeypatch, tmp_path):
     finally:
         gate.release.set()
     assert await asyncio.wait_for(load, 5) is True
+
+
+@pytest.mark.asyncio
+async def test_kokoro_load_timeout_error_is_not_reported_as_the_bound(monkeypatch, tmp_path):
+    """A TimeoutError raised by the load itself (a hub download, say) propagates; only the bound's expiry returns False."""
+    adapter = _kokoro_adapter(monkeypatch, tmp_path, _Gate(), backend="pytorch", init_timeout_sec=30.0)
+
+    class _TimingOutKModel:
+        def __init__(self, **_kwargs):
+            raise TimeoutError("hub download timed out")
+
+    monkeypatch.setattr(sys.modules["kokoro.model"], "KModel", _TimingOutKModel)
+    with pytest.raises(TimeoutError, match="hub download"):
+        await asyncio.wait_for(adapter._ensure_model_loaded(), 5)
+
+
+@pytest.mark.asyncio
+async def test_kokoro_close_releases_the_pytorch_model(monkeypatch, tmp_path):
+    """close() drops the PyTorch model and pipelines, so the next ensure_initialized() loads the model again."""
+    gate = _Gate()
+    gate.release.set()
+    adapter = _kokoro_adapter(monkeypatch, tmp_path, gate, backend="pytorch")
+    assert await adapter.ensure_initialized()
+    adapter.kokoro_pt_pipelines["a"] = object()
+
+    await adapter.close()
+
+    assert (adapter.kokoro_pt_model, adapter.kokoro_pt_pipelines) == (None, {})
+    assert await adapter.ensure_initialized()
+    assert gate.started == ["load", "load"]

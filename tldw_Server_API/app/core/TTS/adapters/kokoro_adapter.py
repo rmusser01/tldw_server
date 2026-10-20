@@ -354,23 +354,25 @@ class KokoroAdapter(TTSAdapter):
         return self.kokoro_pt_model is not None or self.model_pt is not None
 
     async def _ensure_model_loaded(self) -> bool:
-        """Load the model once; with init_timeout_sec (PyTorch only), a caller waits at most that long.
+        """Load the model once, keeping _model_lock until the load thread returns.
 
-        The wait includes queueing behind another caller's load. hold_tts_engine keeps _model_lock
-        with a load thread until it returns, even after its caller left, so no second load starts beside it.
+        init_timeout_sec (PyTorch only) bounds each caller's wait on the model load, including queueing
+        on _model_lock; queueing on ensure_initialized's _init_lock is not bounded. hold_tts_engine keeps
+        _model_lock with a load thread until it returns, even after its caller left, so no second load
+        starts beside it.
         """
         if self._model_is_loaded():
             return True
         bound = None if self.use_onnx else (self.init_timeout_sec or None)
         try:
-            async with asyncio.timeout(bound), hold_tts_engine(self._model_lock) as run:
+            async with asyncio.timeout(bound) as deadline, hold_tts_engine(self._model_lock) as run:
                 if self._model_is_loaded():
                     return True
                 if self.use_onnx:
                     return await self._load_onnx_model(run)
                 return await self._load_pytorch_model(run)
         except TimeoutError:
-            if bound is None:
+            if not deadline.expired():
                 raise  # raised by the load itself, not by the bound
             logger.error(f"{self.provider_name}: Model load timed out after {bound}s")
             return False
@@ -1649,6 +1651,9 @@ class KokoroAdapter(TTSAdapter):
             if self.model_pt:
                 self.model_pt = None
                 logger.debug(f"{self.provider_name}: PyTorch model cleared")
+            # initialize() reuses a loaded model, so a closed adapter must not keep its KModel.
+            self.kokoro_pt_model = None
+            self.kokoro_pt_pipelines = {}
 
             if self.tokenizer:
                 self.tokenizer = None
