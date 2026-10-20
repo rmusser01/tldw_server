@@ -161,6 +161,7 @@ import {
 } from "./mobile-composer-layout";
 import { buildPersonaGardenRoute } from "@/utils/persona-garden-route";
 import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
+import { smoothScrollBehavior } from "@/utils/reduced-motion";
 import {
   CHARACTER_CHAT_MODE_INTENT_EVENT,
   CHAT_ROUTE_REPLACEMENT_EVENT,
@@ -2151,7 +2152,7 @@ const PlaygroundContent = () => {
         `[data-message-id="${messageId}"], [data-server-message-id="${messageId}"]`,
       );
       if (!target) return false;
-      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : "smooth" });
+      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : smoothScrollBehavior() });
       return true;
     },
     [containerRef, findMessageIndex, historySelection, messages.length, pauseAutoScroll],
@@ -2168,7 +2169,7 @@ const PlaygroundContent = () => {
         `[data-testid="chat-message"][data-index="${index}"]`,
       );
       if (!target) return false;
-      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : "smooth" });
+      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : smoothScrollBehavior() });
       return true;
     },
     [containerRef, historySelection, messages.length, pauseAutoScroll],

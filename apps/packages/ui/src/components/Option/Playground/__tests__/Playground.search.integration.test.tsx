@@ -3,6 +3,7 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render as renderComponent, renderHook, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { mockReducedMotion } from "@/test-utils/reducedMotion"
 
 import { useSimpleForm } from "@/hooks/useSimpleForm"
 import { useSidepanelChatHandoffImport } from "../hooks/useSidepanelChatHandoffImport"
@@ -587,6 +588,7 @@ describe("Playground thread search integration", () => {
     target.dataset.index = "1"
     const scroll = vi.fn()
     target.scrollIntoView = scroll
+    const restoreMatchMedia = mockReducedMotion(false)
     const page = render(<Playground />)
     try {
       smartScrollState.value.containerRef.current!.append(target)
@@ -595,7 +597,30 @@ describe("Playground thread search integration", () => {
       await waitFor(() => expect(scroll).toHaveBeenCalledWith({block: "center", behavior: count > 100 ? "auto" : "smooth"}))
     } finally {
       page.unmount()
+      restoreMatchMedia()
       messageOptionState.value.messages = previous
+    }
+  })
+
+  // AX-19 (#3124): search jumps smooth-scrolled even when the OS asks for
+  // reduced motion.
+  it("jumps to a search result without smooth scrolling under reduced motion", async () => {
+    const restoreMatchMedia = mockReducedMotion(true)
+    timelineReveal.current = vi.fn(async () => true)
+    const target = document.createElement("div")
+    target.dataset.testid = "chat-message"
+    target.dataset.index = "1"
+    const scroll = vi.fn()
+    target.scrollIntoView = scroll
+    const page = render(<Playground />)
+    try {
+      smartScrollState.value.containerRef.current!.append(target)
+      fireEvent.keyDown(window, { key: "f", ctrlKey: true })
+      fireEvent.change(screen.getByPlaceholderText("Search messages in this conversation"), {target: {value: "beta"}})
+      await waitFor(() => expect(scroll).toHaveBeenCalledWith({block: "center", behavior: "auto"}))
+    } finally {
+      page.unmount()
+      restoreMatchMedia()
     }
   })
 

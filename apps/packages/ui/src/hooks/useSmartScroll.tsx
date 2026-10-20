@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import { smoothScrollBehavior } from "@/utils/reduced-motion";
 
 type SmartScrollOptions = {
   bottomOffsetPx?: number;
@@ -55,7 +56,7 @@ export const useSmartScroll = (
 
     container.scrollTo({
       top: container.scrollHeight,
-      behavior: smooth ? "smooth" : "auto",
+      behavior: smooth ? smoothScrollBehavior() : "auto",
     });
 
     setTimeout(
