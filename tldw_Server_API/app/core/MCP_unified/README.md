@@ -74,6 +74,10 @@ backend changes behavior: the call returns the sanitized
 denials keep their existing response, and tools without the flag keep their
 compatibility behavior.
 
+When a module's LLM call is refused because the calling user is over an LLM
+quota, the call returns the `llm_quota_exceeded` tool error. It is one user's
+limit, not a module fault, so the module circuit breaker does not count it.
+
 ### Idempotency Partitioning And Retention
 
 For an effectful call with an idempotency key, replay ownership is partitioned

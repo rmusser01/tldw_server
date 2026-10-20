@@ -375,6 +375,36 @@ entries:
     sensitivity: internal
     ui: number
 
+  - key: limits.media_concurrent_jobs
+    label: Media Concurrent Ingests
+    description: Media ingest requests (/media/add) running at once. Queued ingest jobs (/media/ingest/jobs) and /media/process-* are not counted.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.audio_concurrent_streams
+    label: Audio Concurrent Streams
+    description: Audio streaming sessions (transcription, TTS, voice chat, realtime) open at once.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
+  - key: limits.audio_concurrent_transcriptions
+    label: Audio Concurrent Transcriptions
+    description: Direct transcription and translation requests running at once.
+    type: integer
+    minimum: 0
+    default: null
+    editable_by: [platform_admin]
+    sensitivity: internal
+    ui: number
+
   - key: identity.role
     label: Role
     description: Global role assignment for the user.

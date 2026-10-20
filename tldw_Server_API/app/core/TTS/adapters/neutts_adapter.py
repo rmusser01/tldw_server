@@ -75,24 +75,10 @@ class NeuTTSAdapter(TTSAdapter):
     async def initialize(self) -> bool:
         """Initialize NeuTTS Air engine and dependencies."""
         try:
-            # Lazy import of vendored engine to avoid global import failures
-            from tldw_Server_API.app.core.TTS.vendors.neuttsair.neutts import NeuTTSAir as _NeuTTSAir
-
-            # Create engine instance
             logger.info(
                 f"NeuTTS: loading backbone={self.backbone_repo} codec={self.codec_repo}"
             )
-            # Respect auto_download toggle from provider config (default True)
-            auto_download = parse_bool(self.config.get("auto_download", True), default=True)
-            # ponytail: loads on the loop, once per process. On a worker thread the registry's 5 s
-            # capability-listing timeout would cancel a slow load and mark NeuTTS failed (TASK-13857).
-            self._engine = _NeuTTSAir(
-                backbone_repo=self.backbone_repo,
-                backbone_device=self.backbone_device,
-                codec_repo=self.codec_repo,
-                codec_device=self.codec_device,
-                auto_download=auto_download,
-            )
+            self._engine = await run_tts_blocking_call(self._load_engine)
             try:
                 from ..tts_resource_manager import get_resource_manager
                 resource_manager = await get_resource_manager()
@@ -147,6 +133,20 @@ class NeuTTSAdapter(TTSAdapter):
                 provider=self.provider_name,
                 details={"error": str(e)},
             ) from e
+
+    def _load_engine(self) -> Any:
+        """Import the vendored NeuTTS engine and load its model; blocks, so it runs on a worker thread."""
+        # Lazy import of vendored engine to avoid global import failures
+        from tldw_Server_API.app.core.TTS.vendors.neuttsair.neutts import NeuTTSAir
+
+        return NeuTTSAir(
+            backbone_repo=self.backbone_repo,
+            backbone_device=self.backbone_device,
+            codec_repo=self.codec_repo,
+            codec_device=self.codec_device,
+            # Respect auto_download toggle from provider config (default True)
+            auto_download=parse_bool(self.config.get("auto_download", True), default=True),
+        )
 
     async def get_capabilities(self) -> TTSCapabilities:
         return TTSCapabilities(

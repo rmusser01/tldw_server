@@ -13,17 +13,13 @@ describe("web api client shared transport policy (source contract)", () => {
     "utf8"
   )
 
-  it("derives timeouts through the shared policy with the web default seeding requestTimeoutMs", () => {
-    expect(source).toContain(
-      "deriveRequestTimeout("
-    )
-    expect(source).toMatch(
-      /requestTimeoutMs:\s*api\.defaults\.timeout/
-    )
-    // The bare fixed-timeout read must not creep back.
-    expect(source).not.toMatch(
-      /const timeout = config\.timeout \?\? api\.defaults\.timeout;/
-    )
+  it("delegates the transport to the shared raw mode (Stage B2) with the web default seeding requestTimeoutMs", () => {
+    expect(source).toContain("tldwRequestRaw(")
+    expect(source).toMatch(/requestTimeoutMs:\s*api\.defaults\.timeout/)
+    expect(source).toContain("preResolvedUrl: true")
+    // The web's own fetch/abort machinery must not creep back.
+    expect(source).not.toContain("await fetch(requestUrl")
+    expect(source).not.toMatch(/const timeout = config\.timeout \?\? api\.defaults\.timeout;/)
   })
 
   it("parses Retry-After with the shared parser and converts ms back to the web's seconds semantics", () => {

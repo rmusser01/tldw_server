@@ -109,6 +109,8 @@ With no user, a call is not checked and not recorded.
   - The four audio routes and the two realtime routes do, in their shared helper `_audio_ws_authenticate` (`Audio/streaming_service.py`). The realtime routes reach it through `Audio/Realtime/auth.py`.
   - The voice assistant socket reaches an LLM only through a workflow run, which the workflow engine covers.
   - The other sockets (ACP, prompt studio, persona, meetings, sandbox, watchlists, workflows) make no chat LLM call and are left alone.
+- **MCP tool calls:** MCP authentication sets no content scope, so the tool runtime sets the user from the call's `RequestContext` around `module.execute_tool` (`MCP_unified/tool_execution/runtime.py`). It uses `llm_call_context`, not `llm_call_root`, so a tool that an admitted `/chat/completions` request runs keeps the request's `prechecked` mark. It also clears `records_itself`: the chat pipeline's own row covers only its model call, so the tool's calls are recorded (ADR-075).
+- **The in-process claims rebuild:** each `ClaimsRebuildTask` carries its owner, and the worker runs it under `llm_call_root(owner)`. A quota refusal fails that task and the worker goes on.
 
 **Places that lose context today, and their fix:**
 - **The bounded daemon pools.** `BoundedDaemonPool.start` (`Chat/bounded_daemon.py:121-150`) starts raw threads. It is the one entry point for the sync adapter pool, the stream pool and the cleanup pool. It carries the LLM call state into the thread: the resolved user and the context fields. It does not copy the whole context, because other context variables, such as the provider-error privacy scope, are not passed to these threads today, and copying everything would change that.
@@ -151,6 +153,7 @@ The wrapper records with `log_llm_usage`, passing the context's user, `operation
 
 - **Non-streaming:** tokens come from the response's `usage` block, through the existing `normalize_llm_usage`. With no usage block, it records the existing estimate and marks the row `estimated`.
 - **Streaming:** tokens come from a usage chunk when the provider sends one. Otherwise it records the estimate `chat_service` uses today (`estimate_source="stream_estimate"`).
+- **No adapter:** the Messages API native path (Anthropic, llama.cpp) posts to the provider itself, so no provider method runs. It records through the same functions, `record_direct_response` and `accounted_direct_stream` (ADR-075). An Anthropic stream's input tokens come from `message_start` and its output count from the last `message_delta`. An Anthropic-shaped usage block counts `cache_creation_input_tokens` and `cache_read_input_tokens` as prompt tokens, because its `input_tokens` is only the uncached remainder.
 
 **The existing recorders stay.** They pass fields the base class can't know: the conversation id, the request's IP and user agent, `choice_count`, the router's scope. Each one's model call runs inside `llm_call_context(records_itself=True)`, so the wrapper skips it:
 - the `/chat/completions` pipeline (`execute_streaming_call` and `_execute_non_stream_call_impl`);
@@ -232,7 +235,7 @@ Simple search (`/rag/simple`) no longer generates an answer it then discarded, s
 
 #### 4b. At the call
 
-Background jobs, workflow runs, WebSocket sessions and any HTTP endpoint that is not in the table have no boundary check. For those the call itself is refused with `LLMQuotaExceededError`. MCP tool calls carry no user, so they are neither recorded nor checked (§1).
+Background jobs, workflow runs, WebSocket sessions and any HTTP endpoint that is not in the table have no boundary check. For those the call itself is refused with `LLMQuotaExceededError`. An MCP tool call is checked for the user its call names (§1). A refusal becomes the tool error `llm_quota_exceeded`, which the MCP module circuit breaker does not count.
 
 | Where | Why |
 |---|---|
@@ -258,7 +261,7 @@ Rules:
   - With quotas off, nothing: `usage_quotas_enabled()` is read in the calling thread and the check returns.
   - With quotas on and no LLM limit for the user: nothing, once the user's limits are cached. `quota_resolver` gains a synchronous read of its cache for this. A cold or expired cache entry costs one hand-off to the accounting loop (§5) and the resolver's queries, once per user per minute.
   - With a limit set: one hand-off and the counter queries, for each call. A sync caller waits at most 2 seconds for the answer, then fails open with a warning.
-- **Sync LLM calls made on the server loop's own thread cannot be checked** (§5). PR 2b moved seven code paths off the loop with `asyncio.to_thread`: `/translate`, web search aggregation (`WebSearch_APIs.aggregate_results`, the live `/research/websearch` path; the legacy `WebSearch/Web_Search.py` has no caller in the app), the article extractor, enhanced web scraping, web content ingestion, the web scraping service, and the Explainer job. The RAG custom metric named in an earlier draft makes no provider call: its `analyze` call is missing an argument and falls back to a heuristic (TASK-13635).
+- **Sync LLM calls made on the server loop's own thread cannot be checked** (§5). PR 2b moved seven code paths off the loop with `asyncio.to_thread`: `/translate`, web search aggregation (`WebSearch_APIs.aggregate_results`, the live `/research/websearch` path; the legacy `WebSearch/Web_Search.py` has no caller in the app), the article extractor, enhanced web scraping, web content ingestion, the web scraping service, and the Explainer job. The RAG custom completeness metric named in an earlier draft is deleted: nothing called it, and its `analyze` call could not reach a provider (TASK-13635).
 
 ### 5. Accounting runs on one event loop
 
@@ -477,3 +480,7 @@ Revision of 2026-10-13, while planning PR 2b:
 - **Evaluation runs** join the §4a table: their samples run in a task the request starts.
 - **Jobs** do not retry a refusal; a workflow `llm` step is retried once by the engine's default policy and refused again without a provider call.
 - **Roots** are never admitted by the request that started them.
+
+Revision of 2026-10-18, TASK-13585 and TASK-13610:
+
+- **MCP tool calls and the in-process claims rebuild** are recorded and checked (§1, §4b). The Messages API native path is recorded (§3). It needs no check at the call: `require_llm_quota` admits it first, so its calls run `prechecked`.

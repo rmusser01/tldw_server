@@ -163,7 +163,8 @@ Audio Studio job payloads are sanitized before persistence. Client requests must
   - `JOBS_AUDIT_DB_PATH`: Optional override for the audit SQLite DB storing job events (`Databases/jobs_audit.db` by default).
   - `JOBS_AUDIT_RETENTION_DAYS`, `JOBS_AUDIT_BUFFER_SIZE`, `JOBS_AUDIT_FLUSH_SECONDS`: Tune retention and buffering for the audit bridge.
 - Poison quarantine (optional):
-  - `JOBS_QUARANTINE_THRESHOLD` (default 3): On repeated retryable failures with the same `error_code`, the job transitions to `quarantined` instead of re-queuing.
+  - `JOBS_QUARANTINE_THRESHOLD` (default 2): On repeated retryable failures with the same `error_code`, the job transitions to `quarantined` instead of re-queuing.
+  - A worker passes `fail_job(..., quarantine=False)` for a failure that is expected to repeat, such as a provider rate limit: that failure never quarantines the job. Retries still stop at `max_retries`, and the job then fails. The failure still counts toward the failure streak, so a later `fail_job` with the default `quarantine=True` and the same `error_code` may quarantine the job at once.
 - Integrity sweeper (optional):
   - `JOBS_INTEGRITY_SWEEP_ENABLED` (default false), `JOBS_INTEGRITY_SWEEP_INTERVAL_SEC` (default 60), `JOBS_INTEGRITY_SWEEP_FIX` (default false).
   - Periodically flags (and optionally fixes) impossible states like leases on non-processing jobs and expired processing leases.
@@ -494,7 +495,7 @@ jm.fail_job(job["id"], error="boom", retryable=True, worker_id=worker_id, lease_
 
 ### Quarantine Triage (Admin Runbook)
 
-- When jobs repeatedly fail with the same `error_code`, they transition to `quarantined` after `JOBS_QUARANTINE_THRESHOLD` retryable failures. Quarantine prevents automatic re-queueing to stop hot loops.
+- When jobs repeatedly fail with the same `error_code`, they transition to `quarantined` after `JOBS_QUARANTINE_THRESHOLD` (default 2) retryable failures. Quarantine prevents automatic re-queueing to stop hot loops. Failures a worker reports with `fail_job(..., quarantine=False)` (the audio analysis stage's rate limits, for one) never quarantine; they retry until `max_retries`, but still count toward the failure streak (a later quarantinable failure with the same code may quarantine at once).
 - Triage steps:
   - Inspect top failure codes and affected domains/queues in logs and metrics (`jobs.failures_by_code_total`).
   - Use `GET /api/v1/jobs/stats` to see `quarantined` counts by domain/queue/job_type.

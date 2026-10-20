@@ -3,8 +3,12 @@ import { dispatchAuthCredentialsChanged } from '@web/lib/auth-events';
 import { getApiBearer, getApiKey, getSessionAccessToken, hasEnvApiAuth } from '@web/lib/authStorage';
 import { buildApiBaseUrl, resolvePublicApiOrigin } from '@web/lib/api-base';
 import { captureSessionIdFromHeaders, getOrCreateSessionId, SESSION_HEADER_NAME } from '@web/lib/session';
-import { isExplicitRequestCancellation } from '@/services/request-events';
-import { deriveRequestTimeout, parseRetryAfter } from '@/services/tldw/request-core';
+import {
+  parseRetryAfter,
+  tldwRequestRaw,
+  type TldwCredentialContext,
+  type TldwCredentialResolution,
+} from '@/services/tldw/request-core';
 import type { ApiErrorResponse, ApiRequestConfig, ApiRequestConfigWithMetadata } from '@web/types/common';
 import { asVNGenerationRejectionCode, VN_GENERATION_REJECTION_MESSAGES, type VNGenerationRejectionCode } from '@web/lib/api/vnGenerationErrors';
 
@@ -281,45 +285,6 @@ function serializeBody(data: unknown, headers: Headers): BodyInit | undefined {
   return JSON.stringify(data);
 }
 
-function applyBrowserHeaders(headers: Headers, method: RequestMethod): void {
-  if (typeof window === 'undefined') {
-    return;
-  }
-
-  const sessionId = getOrCreateSessionId();
-  if (sessionId && !headers.has(SESSION_HEADER_NAME)) {
-    headers.set(SESSION_HEADER_NAME, sessionId);
-  }
-
-  // Bearer token (multi-user JWT auth)
-  const token = getSessionAccessToken();
-  if (token && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${token}`);
-  }
-
-  // Static API auth options via env or localStorage
-  // Prefer explicit API bearer if provided (for chat module API_BEARER)
-  const apiBearer = getApiBearer();
-  if (apiBearer && !headers.has('Authorization')) {
-    headers.set('Authorization', `Bearer ${apiBearer}`);
-  }
-
-  // X-API-KEY (single-user mode convenience)
-  const xApiKey = getApiKey();
-  if (xApiKey && !headers.has('X-API-KEY')) {
-    headers.set('X-API-KEY', xApiKey);
-  }
-
-  // CSRF token for modifying requests when not using X-API-KEY auth
-  const needsCsrf = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && !xApiKey;
-  if (needsCsrf && !headers.has('X-CSRF-Token')) {
-    const csrf = getCookie('csrf_token');
-    if (csrf) {
-      headers.set('X-CSRF-Token', csrf);
-    }
-  }
-}
-
 function resolveCredentials(config: ApiRequestConfig): RequestCredentials {
   const withCredentials =
     config.withCredentials !== undefined
@@ -329,55 +294,6 @@ function resolveCredentials(config: ApiRequestConfig): RequestCredentials {
         : api.defaults.withCredentials;
 
   return withCredentials ? 'include' : 'omit';
-}
-
-function createAbortSignal(config: ApiRequestConfig, requestUrl: string): {
-  signal?: AbortSignal;
-  cleanup: () => void;
-  didTimeout: () => boolean;
-} {
-  // Shared timeout policy (TASK-13526 transport Stage A): per-path floors
-  // and overrides match the extension; the web 30s default seeds
-  // requestTimeoutMs so generic paths keep today's behavior.
-  const timeout = deriveRequestTimeout(
-    { requestTimeoutMs: api.defaults.timeout },
-    requestUrl as Parameters<typeof deriveRequestTimeout>[1],
-    config.timeout
-  );
-  const callerSignal = config.signal;
-  const controller = new AbortController();
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  let timedOut = false;
-
-  const abortFromCaller = () => controller.abort();
-
-  if (callerSignal) {
-    if (callerSignal.aborted) {
-      controller.abort();
-    } else {
-      callerSignal.addEventListener('abort', abortFromCaller, { once: true });
-    }
-  }
-
-  if (timeout && timeout > 0) {
-    timeoutId = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, timeout);
-  }
-
-  return {
-    signal: controller.signal,
-    cleanup: () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-      if (callerSignal) {
-        callerSignal.removeEventListener('abort', abortFromCaller);
-      }
-    },
-    didTimeout: () => timedOut,
-  };
 }
 
 async function parseResponseBody<T>(response: Response, responseType?: ApiRequestConfig['responseType']): Promise<T> {
@@ -535,14 +451,14 @@ function createRequestCancellationError(): Error & { code: "REQUEST_ABORTED" } {
 }
 
 function handleUnauthorized(
-  requestHeaders: Headers | undefined,
+  requestHeaders: Record<string, string> | undefined,
   sessionTokenAtStart: string | null
 ): void {
   if (typeof window === 'undefined') {
     return;
   }
 
-  const authorization = requestHeaders?.get('Authorization')?.trim() || '';
+  const authorization = String(requestHeaders?.['Authorization'] || '').trim();
   const requestToken = authorization.toLowerCase().startsWith('bearer ')
     ? authorization.slice(7).trim()
     : null;
@@ -573,6 +489,97 @@ function handleUnauthorized(
   }
 }
 
+
+/**
+ * TASK-13526 transport Stage B2: the web shell's runtime adapter for the
+ * shared raw transport. Config makes plan resolution a passthrough for the
+ * web's pre-built URL (advanced deployments send an absolute same-origin-
+ * for-the-configured-server URL; quickstart sends a same-origin relative
+ * URL which the plan resolves identically). Credentials come from the web's
+ * authStorage domain via the Stage-B credential strategy.
+ */
+const webTransportRuntimeFor = (baseURL: string | undefined) => ({
+  getConfig: async () => {
+    let serverUrl: string | undefined;
+    if (baseURL && /^https?:/i.test(baseURL)) {
+      try {
+        serverUrl = new URL(baseURL).origin;
+      } catch {
+        serverUrl = undefined;
+      }
+    }
+    return {
+      serverUrl,
+      requestTimeoutMs: api.defaults.timeout,
+    };
+  },
+  resolveCredentials: (context: TldwCredentialContext): TldwCredentialResolution => {
+    if (typeof window === 'undefined') {
+      return { headers: {} };
+    }
+    // Mirrors the retired applyBrowserHeaders precedence exactly: caller
+    // headers arrive in context.existingHeaders; storage credentials only
+    // fill absent slots (Authorization) per the previous `!headers.has`
+    // checks, X-API-KEY follows the previous unconditional-set behavior.
+    const existing = context.existingHeaders;
+    const existingHas = (name: string) =>
+      Object.keys(existing).some(
+        (key) => key.toLowerCase() === name.toLowerCase()
+      );
+    // The shared transport strips auth-slot headers before applying this
+    // strategy, so caller-provided values must be carried back explicitly.
+    const existingValue = (name: string) =>
+      Object.entries(existing).find(
+        ([key]) => key.toLowerCase() === name.toLowerCase()
+      )?.[1];
+    const headers: Record<string, string> = {};
+    const existingAuthorization = existingValue('authorization');
+    if (existingAuthorization) {
+      headers['Authorization'] = existingAuthorization;
+    }
+    const existingApiKey = existingValue('x-api-key');
+    if (existingApiKey) {
+      headers['X-API-KEY'] = existingApiKey;
+    }
+    const existingCsrf = existingValue('x-csrf-token');
+    if (existingCsrf) {
+      headers['X-CSRF-Token'] = existingCsrf;
+    }
+    const existingSession = existingValue(SESSION_HEADER_NAME.toLowerCase());
+    if (existingSession) {
+      headers[SESSION_HEADER_NAME] = existingSession;
+    }
+    const sessionId = getOrCreateSessionId();
+    if (sessionId && !existingHas(SESSION_HEADER_NAME)) {
+      headers[SESSION_HEADER_NAME] = sessionId;
+    }
+    const token = getSessionAccessToken();
+    if (token && !existingHas('authorization')) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const apiBearer = getApiBearer();
+    if (apiBearer && !existingHas('authorization') && !headers['Authorization']) {
+      headers['Authorization'] = `Bearer ${apiBearer}`;
+    }
+    const xApiKey = getApiKey();
+    if (xApiKey && !existingHas('x-api-key')) {
+      headers['X-API-KEY'] = xApiKey;
+    }
+    const methodUp = context.method.toUpperCase();
+    const needsCsrf = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(methodUp) && !xApiKey;
+    if (needsCsrf && !context.shouldSkipAuth) {
+      const match = document.cookie.match(
+        new RegExp('(?:^|; )csrf_token=([^;]*)')
+      );
+      const csrf = match ? decodeURIComponent(match[1]) : null;
+      if (csrf && !existingHas('x-csrf-token')) {
+        headers['X-CSRF-Token'] = csrf;
+      }
+    }
+    return { headers };
+  },
+});
+
 async function request<T = unknown>(
   method: RequestMethod,
   url: string,
@@ -590,42 +597,41 @@ async function request<T = unknown>(
   const sessionTokenAtStart =
     typeof window !== 'undefined' ? getSessionAccessToken() : null;
 
-  applyBrowserHeaders(headers, method);
-
   const requestConfig = buildRequestHistoryConfig(method, url, baseURL, headers, data, metadata);
-  const abort = createAbortSignal(config, requestUrl);
 
-  let response: Response;
-  try {
-    response = await fetch(requestUrl, {
+  // Shared raw transport (TASK-13526 Stage B2): plan/auth/timeout/fetch
+  // mechanics live in packages/ui's request-core; the web policy layer
+  // (history, session capture, 401 logout, CSRF messaging, error
+  // sanitization) stays below.
+  const raw = await tldwRequestRaw(
+    {
+      path: requestUrl as Parameters<typeof tldwRequestRaw>[0]['path'],
       method,
-      headers,
+      headers: headersToRecord(headers),
       body,
+      timeoutMs: config.timeout,
+      abortSignal: config.signal,
       credentials: resolveCredentials(config),
-      signal: abort.signal,
-    });
-  } catch (error) {
-    abort.cleanup();
-    const timedOut = abort.didTimeout();
-    if (
-      !timedOut &&
-      (config.signal?.aborted || isExplicitRequestCancellation(error))
-    ) {
+      preResolvedUrl: true,
+    },
+    webTransportRuntimeFor(baseURL),
+  );
+
+  if (raw.ok !== true) {
+    if (raw.kind === 'aborted' || (config.signal?.aborted && raw.kind !== 'timeout')) {
       throw createRequestCancellationError();
     }
     const message =
-      error instanceof DOMException && error.name === 'AbortError'
-        ? timedOut
-          ? 'Request timed out'
-          : 'Request aborted'
-        : error instanceof Error
-          ? error.message
-          : 'Network Error';
+      raw.kind === 'timeout' ? 'Request timed out' : raw.error || 'Network Error';
     recordFailure(requestConfig, { errorMessage: message });
-    throw new ApiError(message, { detail: message });
+    throw new ApiError(message, {
+      detail: message,
+      ...(raw.status !== undefined ? { status: raw.status } : {}),
+    });
   }
+  const response = raw.response;
+  const requestHeadersRecord = raw.context.headers;
 
-  abort.cleanup();
   captureSessionIdFromHeaders(headersToRecord(response.headers));
 
   if (!response.ok) {
@@ -640,7 +646,7 @@ async function request<T = unknown>(
       response.status === 401 &&
       !isCompleteProviderAuthenticationError(errorBody, errorCode)
     ) {
-      handleUnauthorized(headers, sessionTokenAtStart);
+      handleUnauthorized(requestHeadersRecord, sessionTokenAtStart);
     }
     if (
       response.status === 403 &&

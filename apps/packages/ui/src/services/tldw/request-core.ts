@@ -75,6 +75,14 @@ export type TldwRequestPayload = {
   abortSignal?: AbortSignal;
   responseType?: "json" | "text" | "arrayBuffer";
   maxResponseBytes?: number;
+  /** Fetch credentials mode for raw transport callers (web cookie sessions). */
+  credentials?: RequestCredentials;
+  /**
+   * Stage B2: the caller already resolved this URL (web shell joins its own
+   * baseURL + params). Skips transport re-joining; absolute-URL guards still
+   * apply.
+   */
+  preResolvedUrl?: boolean;
   recipePersistence?: RecipePersistenceRequestPolicy;
 };
 
@@ -378,7 +386,9 @@ export const resolveTldwRequestPlan = async (
     typeof normalizedPath === "string" && /^https?:/i.test(normalizedPath);
   const absolutePath = isAbsolute ? String(normalizedPath) : "";
   const transport =
-    !isAbsolute && typeof normalizedPath === "string"
+    !isAbsolute &&
+    typeof normalizedPath === "string" &&
+    !payload.preResolvedUrl
       ? resolveBrowserRequestTransport({
           config: cfg,
           path: String(normalizedPath),
@@ -436,7 +446,9 @@ export const resolveTldwRequestPlan = async (
   }
   let url = isAbsolute
     ? normalizedPath
-    : transport?.url || String(normalizedPath);
+    : payload.preResolvedUrl
+      ? String(normalizedPath)
+      : transport?.url || String(normalizedPath);
   if (!isAbsolute && transport?.kind === "same-origin" && pageOrigin) {
     try {
       // Browsers interpret //host and /\host as cross-origin URLs, even
@@ -503,6 +515,266 @@ export const resolveTldwRequestPlan = async (
     },
   };
 };
+
+/**
+ * Stage B2 (ADR-065 / TASK-13526): raw-response transport for callers that
+ * own response policy (the web shell's lib/api.ts). Shares the exact plan
+ * resolution and auth application performTldwRequest uses — including the
+ * optional runtime credential strategy — but hands back the untouched
+ * Response instead of parsing it. Recipe persistence is not supported here
+ * (its dispatch envelope belongs to the parsed tldwRequest path).
+ */
+export type TldwRawRequestFailure = {
+  ok: false
+  kind: "guard" | "timeout" | "aborted" | "network"
+  status?: number
+  error: string
+}
+
+export type TldwRawRequestResult =
+  | {
+      ok: true
+      response: Response
+      context: {
+        url: string
+        method: string
+        headers: Record<string, string>
+        timeoutMs: number
+        requestStartedAt: number
+      }
+    }
+  | TldwRawRequestFailure
+
+/**
+ * Stage B2: shared auth application for performTldwRequest and
+ * tldwRequestRaw. Mutates `h` in place (stripping stale auth headers first)
+ * per the runtime's credential strategy or the default tldwConfig-driven
+ * resolution. Returns a failure envelope when credentials are required but
+ * unavailable.
+ */
+const applyTldwAuthHeaders = (
+  h: Record<string, string>,
+  context: {
+    cfg: TldwConfigLike
+    method: string
+    cookieSession: boolean
+    hostedMode: boolean
+    shouldSkipAuth: boolean
+    runtimeApiKey: string
+  },
+  runtime: TldwRequestRuntime,
+): { status: number; error: string } | null => {
+  const { cfg, method, cookieSession, hostedMode, shouldSkipAuth, runtimeApiKey } =
+    context
+  const stripAuthHeaders = (csrfToo: boolean) => {
+    for (const k of Object.keys(h)) {
+      const kl = k.toLowerCase()
+      if (
+        kl === "x-api-key" ||
+        kl === "authorization" ||
+        (csrfToo && kl === "x-csrf-token")
+      ) {
+        delete h[k]
+      }
+    }
+  }
+
+  if (runtime.resolveCredentials) {
+    const resolution = runtime.resolveCredentials({
+      cfg,
+      method,
+      isUnsafeMethod: isUnsafeMethod(method),
+      cookieSession,
+      hostedMode,
+      shouldSkipAuth,
+      runtimeApiKey,
+      existingHeaders: h,
+    })
+    if ("error" in resolution) {
+      return resolution.error
+    }
+    stripAuthHeaders(true)
+    Object.assign(h, resolution.headers)
+    return null
+  }
+
+  if (cookieSession) {
+    stripAuthHeaders(true)
+    if (!shouldSkipAuth && isUnsafeMethod(method)) {
+      const csrfToken = readBrowserCookie("csrf_token")
+      if (csrfToken) h["X-CSRF-Token"] = csrfToken
+    }
+    return null
+  }
+
+  if (shouldSkipAuth) {
+    return null
+  }
+
+  stripAuthHeaders(false)
+  if (!hostedMode) {
+    if (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey)) {
+      h["X-API-KEY"] = runtimeApiKey
+    } else if (cfg?.authMode === "single-user") {
+      const key = (cfg?.apiKey || "").trim()
+      if (!key) {
+        return {
+          status: 401,
+          error:
+            "Add or update your API key in Settings -> tldw server, then try again.",
+        }
+      }
+      if (isPlaceholderApiKey(key)) {
+        return {
+          status: 401,
+          error:
+            "tldw server API key is still set to a placeholder value. Replace it with your real API key in Settings -> tldw server before continuing.",
+        }
+      }
+      h["X-API-KEY"] = key
+    } else if (cfg?.authMode === "multi-user") {
+      const token = (cfg?.accessToken || "").trim()
+      if (token) h["Authorization"] = `Bearer ${token}`
+      else {
+        return {
+          status: 401,
+          error: "Not authenticated. Please login under Settings > tldw.",
+        }
+      }
+    }
+  }
+  if (cfg?.orgId) {
+    h["X-TLDW-Org-Id"] = String(cfg.orgId)
+  }
+  return null
+}
+
+export const tldwRequestRaw = async (
+  payload: TldwRequestPayload,
+  runtime: TldwRequestRuntime,
+): Promise<TldwRawRequestResult> => {
+  if (payload.recipePersistence) {
+    throw new Error(
+      "tldwRequestRaw does not support recipePersistence; use tldwRequest.",
+    )
+  }
+
+  const planResult = await resolveTldwRequestPlan(payload, runtime)
+  if (planResult.ok !== true) {
+    return {
+      ok: false,
+      kind: "guard",
+      status: planResult.status,
+      error: planResult.error,
+    }
+  }
+  const {
+    method,
+    body,
+    abortSignal,
+    overrideTimeoutMs,
+    cfg,
+    fetchFn,
+    normalizedPath,
+    hostedMode,
+    cookieSession,
+    url,
+    headers: h,
+    isBinaryBody,
+    shouldSkipAuth,
+  } = planResult.plan
+
+  const runtimeApiKey =
+    runtime.useRuntimeAuthOverride === false
+      ? ""
+      : String(getRuntimeSingleUserApiKeyOverride() || "").trim()
+  const authFailure = applyTldwAuthHeaders(
+    h,
+    { cfg, method, cookieSession, hostedMode, shouldSkipAuth, runtimeApiKey },
+    runtime,
+  )
+  if (authFailure) {
+    return {
+      ok: false,
+      kind: "guard",
+      status: authFailure.status,
+      error: authFailure.error,
+    }
+  }
+
+  const timeoutMs = deriveRequestTimeout(
+    cfg,
+    (normalizedPath ?? "") as Parameters<typeof deriveRequestTimeout>[1],
+    Number(overrideTimeoutMs),
+  )
+  const controller = new AbortController()
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
+  const onAbort = () => {
+    try {
+      controller.abort()
+    } catch {}
+  }
+  try {
+    if (abortSignal?.aborted) {
+      // A pre-aborted caller signal must fail fast: a fetch dispatched with
+      // an already-aborted signal never delivers an abort event to callers
+      // that only listen for it (the web client's contract).
+      return { ok: false, kind: "aborted", error: "Request aborted" }
+    }
+    timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    if (abortSignal) {
+      abortSignal.addEventListener("abort", onAbort, { once: true })
+    }
+
+    const resolvedBody =
+      body == null
+        ? undefined
+        : typeof body === "string" || isBinaryBody(body)
+          ? body
+          : JSON.stringify(body)
+
+    const response = await fetchFn(url, {
+      redirect: "error",
+      method,
+      headers: h,
+      body: resolvedBody,
+      signal: controller.signal,
+      ...(payload.credentials ? { credentials: payload.credentials } : {}),
+    })
+    return {
+      ok: true,
+      response,
+      context: {
+        url,
+        method,
+        headers: { ...h },
+        timeoutMs,
+        requestStartedAt: Date.now(),
+      },
+    }
+  } catch (error) {
+    const timedOut =
+      abortSignal?.aborted !== true &&
+      error instanceof DOMException &&
+      error.name === "AbortError"
+    if (abortSignal?.aborted === true) {
+      return { ok: false, kind: "aborted", error: "Request aborted" }
+    }
+    if (timedOut) {
+      return { ok: false, kind: "timeout", error: "Request timed out" }
+    }
+    return {
+      ok: false,
+      kind: "network",
+      error: formatErrorMessage(error, "Network Error"),
+    }
+  } finally {
+    if (timeoutId !== null) {
+      clearTimeout(timeoutId)
+    }
+    abortSignal?.removeEventListener("abort", onAbort)
+  }
+}
 
 const performTldwRequest = async (
   payload: TldwRequestPayload,
@@ -610,96 +882,14 @@ const performTldwRequest = async (
         };
       }
     }
-  } else if (runtime.resolveCredentials) {
-    // Stage B credential strategy (ADR-065): the runtime owns auth headers.
-    const resolution = runtime.resolveCredentials({
-      cfg,
-      method,
-      isUnsafeMethod: isUnsafeMethod(method),
-      cookieSession,
-      hostedMode,
-      shouldSkipAuth,
-      runtimeApiKey,
-      existingHeaders: h,
-    });
-    if ("error" in resolution) {
-      return { ok: false, status: resolution.error.status, error: resolution.error.error };
-    }
-    for (const k of Object.keys(h)) {
-      const kl = k.toLowerCase();
-      if (
-        kl === "x-api-key" ||
-        kl === "authorization" ||
-        kl === "x-csrf-token"
-      ) {
-        delete h[k];
-      }
-    }
-    Object.assign(h, resolution.headers);
-  } else if (cookieSession) {
-    for (const k of Object.keys(h)) {
-      const kl = k.toLowerCase();
-      if (
-        kl === "x-api-key" ||
-        kl === "authorization" ||
-        kl === "x-csrf-token"
-      ) {
-        delete h[k];
-      }
-    }
-    if (!shouldSkipAuth && isUnsafeMethod(method)) {
-      const csrfToken = readBrowserCookie("csrf_token");
-      if (csrfToken) h["X-CSRF-Token"] = csrfToken;
-    }
-  } else if (!shouldSkipAuth) {
-    for (const k of Object.keys(h)) {
-      const kl = k.toLowerCase();
-      if (kl === "x-api-key" || kl === "authorization") delete h[k];
-    }
-    if (!hostedMode) {
-      if (runtimeApiKey && !isPlaceholderApiKey(runtimeApiKey)) {
-        h["X-API-KEY"] = runtimeApiKey;
-      } else if (cfg?.authMode === "single-user") {
-        const key = (cfg?.apiKey || "").trim();
-        if (!key) {
-          if (runtimeApiKey && isPlaceholderApiKey(runtimeApiKey)) {
-            return {
-              ok: false,
-              status: 401,
-              error:
-                "tldw server API key is still set to a placeholder value. Replace it with your real API key in Settings -> tldw server before continuing.",
-            };
-          }
-          return {
-            ok: false,
-            status: 401,
-            error:
-              "Add or update your API key in Settings -> tldw server, then try again.",
-          };
-        }
-        if (isPlaceholderApiKey(key)) {
-          return {
-            ok: false,
-            status: 401,
-            error:
-              "tldw server API key is still set to a placeholder value. Replace it with your real API key in Settings -> tldw server before continuing.",
-          };
-        }
-        h["X-API-KEY"] = key;
-      } else if (cfg?.authMode === "multi-user") {
-        const token = (cfg?.accessToken || "").trim();
-        if (token) h["Authorization"] = `Bearer ${token}`;
-        else {
-          return {
-            ok: false,
-            status: 401,
-            error: "Not authenticated. Please login under Settings > tldw.",
-          };
-        }
-      }
-    }
-    if (cfg?.orgId) {
-      h["X-TLDW-Org-Id"] = String(cfg.orgId);
+  } else {
+    const authFailure = applyTldwAuthHeaders(
+      h,
+      { cfg, method, cookieSession, hostedMode, shouldSkipAuth, runtimeApiKey },
+      runtime,
+    );
+    if (authFailure) {
+      return { ok: false, status: authFailure.status, error: authFailure.error };
     }
   }
 

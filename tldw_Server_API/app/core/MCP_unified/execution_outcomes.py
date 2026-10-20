@@ -40,6 +40,11 @@ class ExpectedToolFailureReason(Enum):
         "A required tool dependency is temporarily unavailable.",
         BreakerAction.RECORD_FAILURE,
     )
+    LLM_QUOTA_EXCEEDED = (
+        "llm_quota_exceeded",
+        "The LLM usage limit for this account has been reached.",
+        BreakerAction.IGNORE,
+    )
 
     @property
     def reason_code(self) -> str:
