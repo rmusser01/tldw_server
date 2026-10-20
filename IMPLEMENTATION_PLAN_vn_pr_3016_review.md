@@ -1,9 +1,13 @@
 # VN PR 3016 Review And Merge
 
-Task: TASK-13526 (formerly TASK-13369; interim TASK-13518). Parent [#3016](https://github.com/rmusser01/tldw_server/pull/3016);
+Task: TASK-13874 (formerly TASK-13369; interim TASK-13518 and TASK-13526). Parent [#3016](https://github.com/rmusser01/tldw_server/pull/3016);
 stacked follow-up [#3067](https://github.com/rmusser01/tldw_server/pull/3067).
 Designs: Docs/Design/2026-09-25-vn-pr-3016-review.md and
 Docs/Design/2026-10-02-vn-pr-3067-review-tests.md.
+
+## Current tracking (2026-10-20)
+
+Current tracking is TASK-13874; earlier allocations TASK-13369, TASK-13518 and TASK-13526 remain historical attributions. PR3016 is merged as 1e06e03b587310ec023f3810c4480ea4e69b05f5; PR3067 is closed as superseded. Every checkpoint below, including its then-current tracking, approval and pending-gate wording, is historical. This notice changes no past evidence.
 
 ## Tracking Closeout (2026-10-06)
 

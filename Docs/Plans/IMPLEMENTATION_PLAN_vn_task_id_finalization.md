@@ -1,3 +1,31 @@
+# VN task-ID finalization: current qualification plan
+
+Backlog: TASK-13871. Current mapping: cleanup TASK-13523 -> TASK-13871; snapshots TASK-13356 -> TASK-13516 -> TASK-13524 -> TASK-13872; publication TASK-13358 -> TASK-13517 -> TASK-13525 -> TASK-13873; PR3016 review TASK-13369 -> TASK-13518 -> TASK-13526 -> TASK-13874.
+
+ADR required: no. ADR-002 and ADR-059 govern tracking; this documentation-only correction accepts no architecture or workflow policy. Current task recreation and metadata edits use backlog-py. Historical exception notes below are retained evidence, not authority for manual editing now.
+
+## Stage 1: Recreate current identities
+**Goal:** Four globally unused canonical VN records, original section content and metadata preserved.
+**Success criteria:** Only owned records move; two dependencies and four current document associations point to the new records. Historical checkpoint wording remains intact.
+**Tests:** Compare pinned originals against replacement sections, check canonical formatting, ID uniqueness, dependencies, and unrelated-record/ADR byte preservation.
+**Status:** Complete
+
+## Stage 2: Review and publish
+**Goal:** Address the two outstanding documentation comments and qualify this exact change.
+**Success criteria:** AC4 remains unchecked until the new review/checks actually complete. The final summary lists completed steps and genuinely pending gates accurately; current prose uses readable spacing. Independent requesting-code-review passes, with no Qodo request.
+**Tests:** Applicable pre-commit, git diff --check, deterministic preservation checks and exact-head reviewer assessment.
+**Status:** In Progress
+
+## Stage 3: Land normally
+**Goal:** Merge PR3207 with the retained human Change summary after all required gates.
+**Success criteria:** Rebase only when at the front of the serial merge sequence; protect publication with the full expected remote head. Require all seven exact-head/current-base statuses and settled reviews before normal merge.
+**Tests:** Verify queue mode, current dev ancestry, remote head, required statuses and merge result.
+**Status:** Not Started
+
+## Historical plan (2026-10-06)
+
+Every ID, approval, allocation, gate state and instruction below is a historical checkpoint. The current qualification plan above governs this resumed work. Original text is retained verbatim, including the old then-current scope and pending claims.
+
 # VN Task-ID Finalization Implementation Plan
 
 Backlog: TASK-13523 (formerly TASK-13515). Requester approved the scoped manual task-ID exception on

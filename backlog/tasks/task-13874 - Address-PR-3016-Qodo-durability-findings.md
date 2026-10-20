@@ -1,19 +1,11 @@
 ---
-id: TASK-13526
+id: TASK-13874
 title: Address PR 3016 Qodo durability findings
 status: Done
-assignee: []
-created_date: 2026-09-26 00:52
-updated_date: 2026-10-06 16:15
 labels:
 - vn-assets
 - review
 - durability
-dependencies: []
-references:
-- https://github.com/rmusser01/tldw_server/pull/3016
-- https://github.com/rmusser01/tldw_server/issues/2021
-priority: high
 ---
 
 ## Description
@@ -32,15 +24,34 @@ Rebase PR 3016 onto dev; address all verified Qodo and independent-review VN gen
 - [x] #6 PR checks and human summary gate pass before merge.
 <!-- AC:END -->
 
-## Implementation Plan
-
-<!-- SECTION:PLAN:BEGIN -->
-IMPLEMENTATION_PLAN_vn_pr_3016_review.md
-<!-- SECTION:PLAN:END -->
-
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-10-20 current identity: TASK-13526 -> TASK-13874; source PR #3207 at cfb3b7af881301cef2e77d88f7f3581f195ec1ab. Fresh dev/open-PR inventory maximum was TASK-13870; allocate only TASK-13871 through TASK-13874. Records are recreated through backlog-py, with original metadata and all historical section content retained below. Unrelated current-dev records, including ADR-069 attribution, must remain byte-identical. Governing ADR-002 and ADR-059; ADR required: no, this changes only tracking.
+
+Original frontmatter (historical identity/metadata):
+```yaml
+---
+id: TASK-13526
+title: Address PR 3016 Qodo durability findings
+status: Done
+assignee: []
+created_date: 2026-09-26 00:52
+updated_date: 2026-10-06 16:15
+labels:
+- vn-assets
+- review
+- durability
+dependencies: []
+references:
+- https://github.com/rmusser01/tldw_server/pull/3016
+- https://github.com/rmusser01/tldw_server/issues/2021
+priority: high
+---
+```
+
+Historical implementation notes (retained verbatim):
+
 Resumed after disk capacity was restored. Confirmed PR 3016 remains open and latest dev has four newer commits. Original eight Qodo threads remain outstanding. Independent review exposed missing-byte/quota accounting recovery and stale claim/publication windows; assigned non-overlapping Storage/AuthNZ and VN worker/DB implementers. Added and observed four new fencing regressions fail before implementation. Frontend verification underway; latest dev fetched; requester-provided Change summary preserved.
 
 Frontend verification: 37 VN asset Vitest tests passed; TypeScript tsc --noEmit passed; scoped ESLint passed; 4 Chromium VN asset smoke tests passed in 58.7s (desktop/mobile and reload recovery). Temporary worktree UI dependency symlink removed after verification. Backend worker/storage fixes and independent re-review still underway.
@@ -445,7 +456,26 @@ Task81 normal4file commit f1f063f5e30f9b93061c75352f1db92e1b4bb29f/tree48091e8da
 CodeRabbit PR3207 finding 4202448522 was verified on published head ce72891c0d066e132e4f584f11235dee561c1e1d: all six Definition of Done items were unchecked despite the independently verified PR3016 completion. Reconciled all six applicable entries through the official Backlog CLI. The six acceptance criteria, merged PR3016 evidence, retained implementation notes, current documentation links, final summary and documented limitations support completion. Historical production Bandit and product verification results remain recorded in their original notes; this task-ID/checklist correction changes documentation only, so no fresh Python security scan or product tests are applicable or claimed. No runtime, environment, CI or unrelated task changes were made.
 2026-10-06 requester-approved second identity migration: original VN TASK-13369, interim TASK-13518, now TASK-13526. A concurrent performance-program allocation reused the interim ID. Only this VN-owned identity/filename and current references move; every earlier historical section and note is retained verbatim. Fresh global inventory reserved this ID above existing maximum13522; unrelated performance records remain untouched. The approval explicitly covers this narrow manual identity exception; this note is added through official backlog-py. PR3207 normal exact-head review/CI gates remain required; no runtime or fresh product-test/Bandit claim.
 PR3207 independent rebased-head review found the interim TASK-13518 final-summary paragraph still presented as current. Verified the finding; add the current TASK-13526 mapping and explicitly label the entire earlier finalization checkpoint as historical, retaining every original summary sentence verbatim. Official backlog-py only; no runtime change or fresh product-test claim.
+
+Original implementation-plan section (historical):
+IMPLEMENTATION_PLAN_vn_pr_3016_review.md
+
+Original final-summary section (historical):
+Current tracking is TASK-13526, formerly TASK-13369 and interim TASK-13518. The requester-approved second identity correction preserves all historical notes and unrelated records. Current VN documentation associations use TASK-13526; PR3207 review and CI qualification are separate from the verified PR3016 completion.
+
+Historical finalization checkpoint (retained verbatim):
+
+PR3016 merged normally on 2026-10-06T20:57:17Z as 1e06e03b587310ec023f3810c4480ea4e69b05f5, from reviewed head a6250c853bbb875686a3fc793de4c8749cf41868. The merged PR has all seven required gates successful, all 102 review threads resolved, and the requester-provided Change summary retained. PR3067 was closed as superseded, not merged again.
+
+This VN record is now uniquely TASK-13518, formerly TASK-13369. The requester-approved identity-only exception preserves every earlier implementation note and both unrelated colliding records. Current VN associations use the new identity. Finalization is performed through official Backlog editing; no new runtime or environment changes and no fresh product-test or security-scan claims are made.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Current PR3016 review tracking: TASK-13874 (previously TASK-13369, TASK-13518, TASK-13526). PR3016 merged as 1e06e03b587310ec023f3810c4480ea4e69b05f5; all six original AC and DoD entries retain their verified completed state. The full previous final summary is preserved in historical notes. This filing cleanup does not repeat or claim fresh runtime qualification.
+<!-- SECTION:FINAL_SUMMARY:END -->
+
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [x] #1 Acceptance criteria completed
@@ -455,15 +485,3 @@ PR3207 independent rebased-head review found the interim TASK-13518 final-summar
 - [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
-
-## Final Summary
-
-<!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Current tracking is TASK-13526, formerly TASK-13369 and interim TASK-13518. The requester-approved second identity correction preserves all historical notes and unrelated records. Current VN documentation associations use TASK-13526; PR3207 review and CI qualification are separate from the verified PR3016 completion.
-
-Historical finalization checkpoint (retained verbatim):
-
-PR3016 merged normally on 2026-10-06T20:57:17Z as 1e06e03b587310ec023f3810c4480ea4e69b05f5, from reviewed head a6250c853bbb875686a3fc793de4c8749cf41868. The merged PR has all seven required gates successful, all 102 review threads resolved, and the requester-provided Change summary retained. PR3067 was closed as superseded, not merged again.
-
-This VN record is now uniquely TASK-13518, formerly TASK-13369. The requester-approved identity-only exception preserves every earlier implementation note and both unrelated colliding records. Current VN associations use the new identity. Finalization is performed through official Backlog editing; no new runtime or environment changes and no fresh product-test or security-scan claims are made.
-<!-- SECTION:FINAL_SUMMARY:END -->

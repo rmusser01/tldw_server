@@ -1,19 +1,10 @@
 ---
-id: TASK-13524
+id: TASK-13872
 title: Snapshot VN asset generation inputs at batch creation
 status: Done
-assignee: []
-created_date: '2026-09-25 16:20'
-updated_date: '2026-09-25 16:35'
 labels:
-  - vn-assets
-  - backend
-dependencies: []
-references:
-  - 'https://github.com/rmusser01/tldw_server/issues/2021'
-documentation:
-  - Docs/Design/2026-09-25-vn-generation-durability.md
-priority: high
+- vn-assets
+- backend
 ---
 
 ## Description
@@ -30,18 +21,40 @@ Complete the recipe-snapshot portion of issue #2021. Freeze effective per-varian
 - [x] #4 Focused tests cover mutation after enqueue, replay, ownership, and migration.
 <!-- AC:END -->
 
-## Implementation Plan
-
-<!-- SECTION:PLAN:BEGIN -->
-Stages 1-2 of IMPLEMENTATION_PLAN_vn_generation_durability.md
-<!-- SECTION:PLAN:END -->
-
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-10-20 current identity: TASK-13524 -> TASK-13872; source PR #3207 at cfb3b7af881301cef2e77d88f7f3581f195ec1ab. Fresh dev/open-PR inventory maximum was TASK-13870; allocate only TASK-13871 through TASK-13874. Records are recreated through backlog-py, with original metadata and all historical section content retained below. Unrelated current-dev records, including ADR-069 attribution, must remain byte-identical. Governing ADR-002 and ADR-059; ADR required: no, this changes only tracking.
+
+Original frontmatter (historical identity/metadata):
+```yaml
+---
+id: TASK-13524
+title: Snapshot VN asset generation inputs at batch creation
+status: Done
+assignee: []
+created_date: '2026-09-25 16:20'
+updated_date: '2026-09-25 16:35'
+labels:
+  - vn-assets
+  - backend
+dependencies: []
+references:
+  - 'https://github.com/rmusser01/tldw_server/issues/2021'
+documentation:
+  - Docs/Design/2026-09-25-vn-generation-durability.md
+priority: high
+---
+```
+
+Historical implementation notes (retained verbatim):
+
 41 focused VN repository/generation tests passed; scoped Ruff E,F,I passed; Bandit on three touched production modules reported zero findings; git diff --check passed. Existing BLE001 lint findings in preexisting broad exception handlers remain.
 2026-10-06: requester-approved scoped identity migration changed the VN snapshot record from TASK-13356 to TASK-13516 and its matching filename because TASK-13356 also identifies unrelated ADR work. Historical sections remain intact; the unrelated ADR record is unchanged. Migration is tracked by TASK-13515.
 2026-10-06 requester-approved second identity migration: original VN TASK-13356, interim TASK-13516, now TASK-13524. A concurrent performance-program allocation reused the interim ID. Only this VN-owned identity/filename and current references move; every earlier historical section and note is retained verbatim. Fresh global inventory reserved this ID above existing maximum13522; unrelated performance records remain untouched. The approval explicitly covers this narrow manual identity exception; this note is added through official backlog-py. PR3207 normal exact-head review/CI gates remain required; no runtime or fresh product-test/Bandit claim.
+
+Original implementation-plan section (historical):
+Stages 1-2 of IMPLEMENTATION_PLAN_vn_generation_durability.md
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

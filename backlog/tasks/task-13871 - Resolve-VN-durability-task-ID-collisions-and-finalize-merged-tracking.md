@@ -1,5 +1,5 @@
 ---
-id: TASK-13523
+id: TASK-13871
 title: Resolve VN durability task-ID collisions and finalize merged tracking
 status: In Progress
 labels:
@@ -11,7 +11,7 @@ labels:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-Requester-approved narrow manual exception: renumber only the VN-owned TASK-13356, TASK-13358 and TASK-13369 files and update current VN references while preserving historical sections and every unrelated colliding task. Finalize the already merged PR3016 record through official Backlog operations after its identity is unique. Publish a separate documentation-only PR; the Change summary waiver applies only to PR3060.
+Recreate only the four VN-owned records from PR #3207 under fresh IDs using backlog-py, because their previously allocated IDs now belong to unrelated current-dev work. Update current VN dependencies and documentation associations, preserve original histories and verified PR3016 closeout, and drive PR3207 through current review/CI to normal merge. Historical manual-exception and pending-gate notes below describe earlier attempts, not this recreation method or current state.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
@@ -19,12 +19,29 @@ Requester-approved narrow manual exception: renumber only the VN-owned TASK-1335
 - [x] #1 Three VN records have unique unused IDs and matching filenames; unrelated colliding records are byte-identical to dev.
 - [x] #2 Current VN task dependencies and design associations use the new IDs; historical narrative references remain intact with explicit old-to-new mappings.
 - [x] #3 Merged PR3016 review tracking is finalized through official Backlog operations with accurate merge evidence and all earlier notes preserved.
-- [x] #4 Owned documentation checks and independent review pass; publish the scoped follow-up without runtime changes or applying PR3060 summary waiver.
+- [ ] #4 Owned documentation checks and independent review pass; publish the scoped follow-up without runtime changes or applying PR3060 summary waiver.
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+2026-10-20 current identity: TASK-13523 -> TASK-13871; source PR #3207 at cfb3b7af881301cef2e77d88f7f3581f195ec1ab. Fresh dev/open-PR inventory maximum was TASK-13870; allocate only TASK-13871 through TASK-13874. Records are recreated through backlog-py, with original metadata and all historical section content retained below. Unrelated current-dev records, including ADR-069 attribution, must remain byte-identical. Governing ADR-002 and ADR-059; ADR required: no, this changes only tracking.
+
+Original frontmatter (historical identity/metadata):
+```yaml
+---
+id: TASK-13523
+title: Resolve VN durability task-ID collisions and finalize merged tracking
+status: In Progress
+labels:
+- vn-assets
+- docs
+- tracking
+---
+```
+
+Historical implementation notes (retained verbatim):
+
 2026-10-06: requester approved the previously requested scoped manual task-ID migration exception. Existing official MCP/CLI task-edit interfaces do not support changing an existing ID. Inventory of 136 registered worktrees and 347175 task paths found maximum root ID 13514; reserved tracking TASK-13515 and migration IDs TASK-13516/TASK-13517/TASK-13518. PR3060 remains on its separate published branch at 0f8bd6c922bbf1f6066390969c596c48c8c3b780 with current-head hosted reviews/CI pending. Implementation plan: Docs/Plans/IMPLEMENTATION_PLAN_vn_task_id_finalization.md.
 2026-10-06 local migration verified: TASK-13356/TASK-13358/TASK-13369 VN records are now TASK-13516/TASK-13517/TASK-13518. Both VN dependencies and four current design/plan associations use the new IDs. Structured verification proves every original historical section/note is preserved and all four unrelated colliding records remain byte-identical to dev; the new IDs are unused in the other 135 registered worktrees. TASK-13518 is finalized Done through official Backlog editing after verified PR3016 merge, seven required gates, and 102 resolved threads. Scoped format/diff checks pass. Independent review, publication, requester-owned Change summary for the new PR, and new-head CI remain pending; TASK-13515 stays In Progress.
 2026-10-06 publication: the verified migration was normally pushed first as f0ccbc66d2fcc8a3e2795704c130811180a144b3 and published as https://github.com/rmusser01/tldw_server/pull/3207 against dev 1047ce10ecc191f78b0bee7e1b8ad19780c68015. Independent read-only reviewer Nash found no concrete issue in the full immutable migration diff and separately verified historical preservation and the unchanged unrelated records. Scoped structured checks, canonical task formatting, applicable pre-commit hooks and diff checks pass; code-only hooks were skipped, not passes. The new PR has no runtime changes, no automatic merge, and no summary waiver. Requester-written Change summary and final-head hosted reviews/CI remain required. Task and plan Stage3 remain In Progress until verified normal merge. PR3060 stays separate: exact 0f8 CodeRabbit full review finished with both source/covered commit IDs and no actionable finding; six required gates pass, container gate is pending, Qodo manual request is unacknowledged and its current-head qualification is incomplete. One bounded properly formatted retry has been requested from the requester; do not repeat without that decision.
@@ -36,14 +53,21 @@ The requester explicitly authorized setting Qodo aside for now and requested an 
 2026-10-06 requester approved the narrow manual identity exception for all four owned VN records and explicitly requested rebase onto latest dev. Fresh inventory:137 registered worktrees,355654 task paths,highest root ID13522; reserve TASK-13523 cleanup, TASK-13524 snapshots, TASK-13525 replay-safe publication, TASK-13526 PR3016 review. Current identities13515/13516/13517/13518 become those four IDs; preserve every historical note and unrelated performance record. Only identity/frontmatter and matching filename moves use the approved manual exception; all subsequent task metadata/notes/checklists use official backlog-py. Latest fetched dev and owned remote are7ba48f251ec47a1e0bb680f49f9b7d86ec2b988d and03d59483ade43fcf7462344bc10faa8066ef4907. ADR check: ADR required:no; ADR paths:Docs/ADR/002-backlog-md-task-tracking.md and Docs/ADR/059-backlog-py-task-editor-cutover.md. This is a one-off requester-approved identity correction under the existing workflow, not a new repository policy or architecture rule.
 2026-10-06 current mapping: cleanup13515->13523; snapshots13356->13516->13524; publication13358->13517->13525; PR3016 review13369->13518->13526. Updated only current dependency/association metadata; all earlier narratives retain their historical IDs. The top-level PR3016 Tracking Closeout now labels retained live/current/pending checkpoint text as historical, addressing CodeRabbit4202779147 without rewriting Task68/Stage4/Task82 approvals or stages. Official edits preserve all original notes and one final-summary END marker. Verify the full changed scope, new allocation and completed rebase before protected publication; current-head reviews/CI and verified normal merge remain pending.
 Requester-approved latest-dev rebase completed with exit 0 and FINAL range-diff preserves all six patches unchanged, published as b1cc8f081671e4e675460f75efe1086af39b3cf5 against live dev3ca1ff055be3c75a7fa844a02b5d8ba925baa2be with full expected old03d lease. Fresh allocation/history/scope/hooks/diff checks pass; only eleven owned documentation/tracking paths differ from dev. Independent whole-diff review found one remaining interim ID presented as current in TASK-13526 final summary. Official Backlog correction labels the prior summary as historical and adds current TASK-13526 while preserving every prior sentence. Own plan records completed publication. Fresh corrected-head reviews, exact-head CI and verified normal merge remain pending; Qodo remains aside by requester authorization. No runtime, environment, product-test or new Bandit claim.
+
+Original description (historical):
+Requester-approved narrow manual exception: renumber only the VN-owned TASK-13356, TASK-13358 and TASK-13369 files and update current VN references while preserving historical sections and every unrelated colliding task. Finalize the already merged PR3016 record through official Backlog operations after its identity is unique. Publish a separate documentation-only PR; the Change summary waiver applies only to PR3060.
+
+Original final-summary section (historical):
+The scoped VN tracking cleanup is implemented for PR3207. Current owned identities are TASK-13523 for this cleanup, TASK-13524 for snapshots, TASK-13525 for replay-safe publication, and TASK-13526 for the PR3016 review. The interim TASK-13515 through TASK-13518 allocations collided with concurrently committed unrelated performance work; the requester explicitly approved moving only our four records and current references. All original and interim identity notes are retained, and unrelated records are untouched.
+
+TASK-13526 is Done with all six AC and DoD entries checked using retained PR3016 verified merge evidence. The historical PR3016 plan has an explicit current-tracking/merged-state notice; all dated checkpoint text is preserved. ADR required:no; this follows existing ADR-002/ADR-059 and creates no new architecture or workflow policy. The requester-written PR3207 Change summary stays verbatim, and Qodo remains set aside as authorized. Documentation-only verification and fresh unique allocation, latest-dev rebase/protected publication, complete changed-head independent/CodeRabbit reviews, successful live required CI and verified normal merge remain required before this cleanup is Done. No product code, environment, dependency, CI, billing or provider configuration changes or fresh product-test/Bandit claim.
+2026-10-20 local recreation checks pass: four fresh canonical identities, all original DESCRIPTION/PLAN/IMPLEMENTATION_NOTES/FINAL_SUMMARY content and checklist text retained, all completed states preserved except AC4 deliberately reopened until current review completes, both current dependencies target TASK-13873, and no ADR bytes changed. Current summary separates implemented record/reference work from genuinely pending independent review, publication, current-base CI and normal merge. Historical compressed prose remains verbatim; current labels read Stage 3, Task 68 / Stage 4 / Task 82, and finding 4202779147. Original comments discussion_r4202912326 and discussion_r4202912330 are addressed by accurate present-tense status and readable current prose. No fresh runtime/Bandit or product qualification is claimed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-The scoped VN tracking cleanup is implemented for PR3207. Current owned identities are TASK-13523 for this cleanup, TASK-13524 for snapshots, TASK-13525 for replay-safe publication, and TASK-13526 for the PR3016 review. The interim TASK-13515 through TASK-13518 allocations collided with concurrently committed unrelated performance work; the requester explicitly approved moving only our four records and current references. All original and interim identity notes are retained, and unrelated records are untouched.
-
-TASK-13526 is Done with all six AC and DoD entries checked using retained PR3016 verified merge evidence. The historical PR3016 plan has an explicit current-tracking/merged-state notice; all dated checkpoint text is preserved. ADR required:no; this follows existing ADR-002/ADR-059 and creates no new architecture or workflow policy. The requester-written PR3207 Change summary stays verbatim, and Qodo remains set aside as authorized. Documentation-only verification and fresh unique allocation, latest-dev rebase/protected publication, complete changed-head independent/CodeRabbit reviews, successful live required CI and verified normal merge remain required before this cleanup is Done. No product code, environment, dependency, CI, billing or provider configuration changes or fresh product-test/Bandit claim.
+Current cleanup tracking is TASK-13871; VN snapshots TASK-13872, replay-safe publication TASK-13873, and verified PR3016 closeout TASK-13874. Previous 13523 through 13526 allocations collided again on current dev. Their original sections and prior migrations are retained as historical evidence. Recreated records and current-reference updates are implemented locally; fresh checks, requesting-code-review, protected publication, exact-head/current-base CI and verified normal merge remain pending. This task stays In Progress; completed steps will be recorded only after verification.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done

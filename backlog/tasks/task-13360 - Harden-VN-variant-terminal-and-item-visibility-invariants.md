@@ -10,7 +10,7 @@ labels:
 - backend
 - review
 dependencies:
-- TASK-13525
+- TASK-13873
 references:
 - https://github.com/rmusser01/tldw_server/issues/2021
 - https://github.com/rmusser01/tldw_server/pull/3016
