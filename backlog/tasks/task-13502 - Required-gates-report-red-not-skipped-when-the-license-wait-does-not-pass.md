@@ -29,6 +29,7 @@ Fix: security-required, coverage-required, e2e-required, frontend-required and c
 Unchanged: the pull_request path with a passing license wait, and the workflow_run path (admission declined still skips).
 
 Tests: truth table over every (event, admission, license wait, changes, cancelled) row now expects 'license' red for all gates; per-gate refusal pins; contract pins in test_license_first_workflow_contracts.py (LICENSE_RED_GATES) and test_required_workflow_contracts.py. Removing the red arm from any one gate fails 2-4 tests. tests/CI + concurrency policy: 768 passed, 0 failed. actionlint clean.
+2026-10-19 TASK-13866 retirement of superseded PR #3043: merged #3201 (94854ca3db) implements the six-gate fail-closed behavior. Current test_license_first_workflow_contracts.py and test_required_workflow_contracts.py pin all six gates, negative conditions and the first-step exit 1; truth-table and mutation tests retain regression coverage. Do not salvage the old regex checker: independent read-only review reproduced false acceptance of both an echo-only refusal and an impossible positive AND negative gate condition. The reviewed old branch remains retained for provenance; no workflow behavior changed during retirement.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
