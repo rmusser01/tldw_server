@@ -514,8 +514,10 @@ def _custom_openai_egress_blocked(monkeypatch, reason_code: str) -> None:
         ("host_denied", "configuration"),
         ("origin_mismatch", "configuration"),
         ("dns_unresolved", "provider_failure"),
+        ("dns_changed", "provider_failure"),
+        ("tls_pin_error", "provider_failure"),
     ],
-    ids=["host-denied", "origin-mismatch", "dns-unresolved"],
+    ids=["host-denied", "origin-mismatch", "dns-unresolved", "dns-changed", "tls-pin-error"],
 )
 def test_an_egress_blocked_endpoint_gets_a_summary_code(monkeypatch, reason_code, expected_code, streaming):
     _custom_openai_egress_blocked(monkeypatch, reason_code)

@@ -113,6 +113,7 @@ _SUMMARIZATION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
 # provider_failure). They are caught only to type them for raise_on_error callers; the other
 # callers still get the exception itself.
 _SUMMARY_PASSTHROUGH_EXCEPTIONS = (EgressPolicyError, NetworkError)
+_TRANSIENT_EGRESS_REASONS = frozenset({"dns_unresolved", "dns_changed", "tls_pin_error"})
 _SUMMARY_ADAPTER_EXCEPTIONS = (ChatAPIError, *_SUMMARY_PASSTHROUGH_EXCEPTIONS) + _SUMMARIZATION_NONCRITICAL_EXCEPTIONS
 
 _SUMMARY_ERROR_CODES = frozenset(
@@ -155,9 +156,10 @@ def _native_http_disabled(adapter: Any) -> bool:
 def _summary_error_code(exc: BaseException, adapter: Any = None) -> str:
     """Map chat adapter failures to a bounded, detail-free summary taxonomy."""
     if isinstance(exc, EgressPolicyError):
-        # As chat_service._map_provider_egress_error: a host that did not resolve may resolve on a
-        # retry; an endpoint the outbound policy blocks stays blocked until the configuration changes.
-        return "provider_failure" if exc.reason_code == "dns_unresolved" else "configuration"
+        # A host that did not resolve, a resolution that changed mid-request and a connect failure
+        # during TLS-pin verification can pass on a retry, which re-runs the whole policy check. An
+        # endpoint the outbound policy blocks stays blocked until the configuration changes.
+        return "provider_failure" if exc.reason_code in _TRANSIENT_EGRESS_REASONS else "configuration"
     if isinstance(exc, ChatAuthenticationError):
         return "authentication"
     if isinstance(exc, ChatConfigurationError):

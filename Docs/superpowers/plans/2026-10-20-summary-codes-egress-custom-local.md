@@ -11,6 +11,8 @@ Review folded in (2026-10-20). The independent review and dry run found 0 Blocke
 
 Every RED, GREEN and sweep count below was re-measured after the fold, on origin/dev `e521605198`, with every non-loopback connect and DNS lookup blocked.
 
+Changed after the PR's clean review (#3289, 2026-10-20; review M1): `dns_changed` and `tls_pin_error` join `dns_unresolved` as `provider_failure` (retried), where this plan first mapped them to `configuration`. Both can be one-off failures, and each retry re-runs the whole policy check, so a rebinding attempt still fails as `address_forbidden` and a real pin mismatch as `tls_pin_mismatch`. The prose mapping below is updated. The Task 1 code and RED/GREEN counts are kept as executed; the follow-up commit adds the two reasons to `test_an_egress_blocked_endpoint_gets_a_summary_code` (4 cases, RED `assert 'configuration' == 'provider_failure'`, then GREEN).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Summary failures that read as the wrong code, or as no code at all, get the right `SummaryProviderError` code:
@@ -23,7 +25,7 @@ No new summary code is added.
 
 **Architecture:**
 - AC1, egress. `EgressPolicyError` joins `_SUMMARY_ADAPTER_EXCEPTIONS` (`core/LLM_Calls/Summarization_General_Lib.py`).
-  - `_summary_error_code` maps it the way `chat_service._map_provider_egress_error` already does for chat: `dns_unresolved` becomes `provider_failure` (retried), and every other reason becomes the existing `configuration` code (not retried).
+  - `_summary_error_code` maps it the way `chat_service._map_provider_egress_error` already does for chat: `dns_unresolved` becomes `provider_failure` (retried), and every other reason becomes the existing `configuration` code (not retried). After the clean review, `dns_changed` and `tls_pin_error` are `provider_failure` too (chat still maps them as configuration).
   - A transport `NetworkError` joins it. It falls through to `provider_failure`, so the audio stage retries it and, on the last attempt, stores the transcript with `analysis_error` (review M5).
   - With `raise_on_error=False` the two handlers re-raise either exception itself, so those callers see what they see today.
 - AC2, custom endpoints. The two bare `RuntimeError`s for a missing base URL in `custom_openai_adapter.py` (lines 158 and 211) become `ChatConfigurationError`. That is the class the same adapter already raises at line 195 for the same condition when a credential handle is bound, so the summary maps it to `configuration` with no summary change.
@@ -69,8 +71,8 @@ How each happens on dev:
   - Kobold's handler (`local_adapters.py:1097`) catches only `_LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS` (`:81-102`), which has no `NetworkError`. So a kobold server that is down escapes `analyze` untyped, and the audio worker loses the transcript the same way as for an egress block.
   - The fix types it at the summary layer, not by widening `_LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS`. That tuple guards 53 handlers in `local_adapters.py`, most of them parameter coercion, and widening it would also change what kobold raises to chat callers.
 - Every egress reason code, and the summary code it now maps to (`_summary_error_code`; the same split chat makes in `chat_service._map_provider_egress_error`):
-  - `provider_failure` (retried): `dns_unresolved`. That also covers a DNS resolver timeout and resolver-slot exhaustion, because `Security/egress.py:355-490` returns no addresses for them, which reads as "could not be resolved".
-  - `configuration` (not retried): `invalid_url`, `unsupported_scheme`, `userinfo_not_allowed`, `port_not_allowed`, `host_denied`, `origin_mismatch`, `address_forbidden`, `address_invalid`, `dns_changed`, `tls_pin_error`, `tls_pin_missing`, `tls_pin_mismatch`, and a reason of `None`. `None` comes from a refused proxy (`http_client.py:1895`, `:1900`) and from the curl transport checks (`:1627-1644`).
+  - `provider_failure` (retried): `dns_unresolved`, `dns_changed` and `tls_pin_error` (the last two since the clean review). `dns_unresolved` also covers a DNS resolver timeout and resolver-slot exhaustion, because `Security/egress.py:355-490` returns no addresses for them, which reads as "could not be resolved".
+  - `configuration` (not retried): `invalid_url`, `unsupported_scheme`, `userinfo_not_allowed`, `port_not_allowed`, `host_denied`, `origin_mismatch`, `address_forbidden`, `address_invalid`, `tls_pin_missing`, `tls_pin_mismatch`, and a reason of `None`. `None` comes from a refused proxy (`http_client.py:1895`, `:1900`) and from the curl transport checks (`:1627-1644`).
 - `custom_openai_adapter.py:158` (`_resolve_base`) and `:211` (`_resolve_transport_context`) raise `RuntimeError("<name> requires an explicit [configured] base URL")`. `_summary_error_code` has no branch for it, so it reads `provider_failure`, and the audio worker retries it.
   - Line 211 is the path a summary takes: the request has no credential handle and no `_endpoint_provenance`.
   - Line 158 is reached only without a credential handle and with `_endpoint_provenance` set to `byok` or `request_override`. Only `_resolve_base`'s unit tests reach it.
@@ -131,7 +133,7 @@ None. Four choices are settled by existing behaviour:
 - **Local 4xx keep their chat response.** Typing a local 401 as `ChatAuthenticationError`, and a local 429 as `ChatRateLimitError`, at the adapter would change what chat users see. The chat side of that is filed as a follow-up in Task 4, not decided here.
 - **An evaluation against an egress-blocked or unreachable provider now fails instead of scoring 0 (review M2).**
   - What changes: the response-quality and RAG evaluators re-raise `SummaryProviderError`, so the request now fails with 503 `provider_configuration_invalid`, or with 502 `provider_unavailable` for `dns_unresolved` or a server that is down. Before, `except Exception` scored the metric 0.0. `eval_runner`'s async runs record the sample as an error instead of 0.0 metrics (see the reader audit).
-  - Why it is already settled: both evaluators re-raised `SummaryProviderError` before TASK-13844 (`response_quality_evaluator.py` 237, 302, 364, 429, 498 and 561; `rag_evaluator.py` 363, 385 and 424). A missing API key and a switched-off adapter already fail the request the same way.
+  - Why it is already settled: it follows the evaluators' existing rule of re-raising `SummaryProviderError`, which they did before TASK-13844 too. It restores no earlier outcome: an egress block, or a kobold server that is down, scored 0.0 before TASK-13844 as well. The existing re-raises are at `response_quality_evaluator.py` 237, 302, 364, 429, 498 and 561, and `rag_evaluator.py` 363, 385 and 424. A missing API key and a switched-off adapter already fail the request the same way.
   - No test or doc pins a 0.0 score for these failures. `test_rag_evaluator.py:422` and `test_evaluation_manager.py:535` pin 0.0 for a mocked `RuntimeError` or `Exception`, which this change does not touch.
 
 ## ADR assessment
@@ -210,10 +212,10 @@ These are the input classes and failure modes the tests below do not exercise:
    - Not affected: `Moderation/semantic_matcher.py:149` also catches `RuntimeError`, but it hard-codes `openai`.
    - Each new behaviour is what the same caller already does for a credentialed `ChatConfigurationError` (`custom_openai_adapter.py:195`), or for any other `ChatAPIError`.
    - What is not tested: the Workflows, FVA, audio-briefing, messaging and web-search paths. Only the Setup category and `perform_chat_api_call` are pinned. Task 4's sweep runs every test file that names `custom-openai-api` or the custom adapter.
-2. **Egress reason codes that may be transient besides `dns_unresolved` (review M3; the full mapping is under "What dev does today").** Both read `configuration` and are not retried. Chat maps both the same way.
+2. **Egress reason codes that may be transient besides `dns_unresolved` (review M3; the full mapping is under "What dev does today").** Since the PR's clean review (M1), both read `provider_failure` and are retried; chat still maps both as configuration.
    - `dns_changed` (`Security/egress.py:816-822`): the DNS answer changed between the policy check and the request.
    - `tls_pin_error` (`http_client.py:2495-2525`): it wraps any connect failure or timeout during certificate-pin verification. It applies only to hosts with configured pins.
-   - The cost: a DNS-rotation race, or a pinned host that times out, loses that job's analysis, though the transcript is kept.
+   - The cost, as first planned: a DNS-rotation race, or a pinned host that times out, lost that job's analysis, though the transcript is kept. Retrying them removes that cost; a persistent case costs the retry backoff and then keeps the transcript.
 3. **Streamed local summaries.**
    - What happens: a local adapter's stream turns any upstream failure into an in-band SSE error frame (`local_adapters.py:494-506`). The summary maps that frame to `provider_failure`, whatever the status.
    - Why it is not changed: no `raise_on_error` caller streams. TASK-13844's plan lists the same gap for in-stream SSE errors.
@@ -240,7 +242,7 @@ These are the input classes and failure modes the tests below do not exercise:
 
 **Interfaces:**
 - Produces: `_SUMMARY_PASSTHROUGH_EXCEPTIONS = (EgressPolicyError, NetworkError)`, which `_SUMMARY_ADAPTER_EXCEPTIONS` now contains.
-- Produces: `_summary_error_code(exc, adapter=None) -> str` maps an `EgressPolicyError` to `"configuration"`, or to `"provider_failure"` when `exc.reason_code == "dns_unresolved"`. A `NetworkError` falls through to `"provider_failure"`.
+- Produces: `_summary_error_code(exc, adapter=None) -> str` maps an `EgressPolicyError` to `"configuration"`, or to `"provider_failure"` when `exc.reason_code` is `"dns_unresolved"` (and, since the clean review, `"dns_changed"` or `"tls_pin_error"`). A `NetworkError` falls through to `"provider_failure"`.
 - Produces, in `test_summarization_adapter.py`:
   - the module aliases `custom_openai_mod` (Task 2 uses it) and `local_mod`;
   - the imports `TrustedProviderEndpoint` and `ConfiguredEndpointScope`;
