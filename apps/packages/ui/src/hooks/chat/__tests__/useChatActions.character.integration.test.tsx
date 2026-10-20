@@ -1213,7 +1213,7 @@ describe("useChatActions character integration", () => {
       } }), { status: 200, headers: { "content-type": "text/event-stream" } })
     }))
     const { result } = renderHook(() => {
-      const [messages, setMessages] = React.useState<Message[]>([{ id: "greeting", isBot: true, message: "Welcome", role: "assistant", messageType: "character:greeting", serverMessageId: "greeting-server", sources: [] }])
+      const [messages, setMessages] = React.useState<Message[]>([{ id: "greeting", name: "Assistant", isBot: true, message: "Welcome", role: "assistant", messageType: "character:greeting", serverMessageId: "greeting-server", sources: [] }])
       const [history, setHistory] = React.useState<ChatHistory>([{ role: "assistant", content: "Welcome", messageType: "character:greeting" }])
       const actions = useChatActions({ ...createHookOptions(), messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0])
       return { ...actions, messages, history }
