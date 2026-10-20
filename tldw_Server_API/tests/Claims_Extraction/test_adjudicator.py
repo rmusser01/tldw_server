@@ -5,6 +5,9 @@ These tests verify the evidence weighing and status determination logic
 for the FVA pipeline's adjudicator component.
 """
 
+import asyncio
+import threading
+
 import pytest
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -18,6 +21,9 @@ from tldw_Server_API.app.core.Claims_Extraction.adjudicator import (
     AdjudicationResult,
     create_adjudicator,
 )
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+from tldw_Server_API.app.core.Usage import llm_accounting, llm_quota_gate, quota_resolver
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 
 # Import types
 try:
@@ -683,3 +689,59 @@ class TestCreateAdjudicator:
         adjudicator = create_adjudicator(llm_analyze_fn=mock_llm)
 
         assert adjudicator.llm_analyze_fn == mock_llm
+
+
+def _refusal() -> LLMQuotaExceededError:
+    return LLMQuotaExceededError(
+        category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+    )
+
+
+class TestClaimAdjudicatorLLMQuota:
+    """The adjudicator's LLM call is quota-checked, and a refusal is not an assessment (TASK-13862)."""
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_llm_call_runs_off_the_loop_where_the_quota_check_runs(self, monkeypatch):
+        """On the loop's own thread the check at the call is skipped (LLM usage accounting design section 5)."""
+        decided_for: list[int] = []
+
+        async def _admit(user_id, requested_tokens=1):
+            decided_for.append(user_id)
+            return None
+
+        monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
+        quota_resolver.invalidate_all()
+        monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", _admit)
+        monkeypatch.setattr(llm_accounting, "_accounting_loop", asyncio.get_running_loop())
+        loop_thread = threading.get_ident()
+        seen: list[tuple[bool, bool]] = []
+
+        def _analyze(*_args, **_kwargs):
+            # (off the loop thread, checked) for the call the provider layer would make here
+            seen.append((threading.get_ident() != loop_thread, llm_quota_gate.check_llm_call_sync()))
+            return '{"stance": "CONTRADICTS", "confidence": 0.8}'
+
+        adjudicator = ClaimAdjudicator(llm_analyze_fn=_analyze)
+        with llm_call_context(user_id=7):
+            stance, confidence = await adjudicator._llm_assess("claim", "evidence")
+
+        assert (stance, confidence) == (EvidenceStance.CONTRADICTS, 0.8)
+        assert seen == [(True, True)]
+        assert decided_for == [7]  # the request's user crossed into the worker thread
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_a_quota_refusal_is_not_a_neutral_assessment(self):
+        """On dev the refusal became NEUTRAL 0.5, and the claim kept its verdict."""
+        adjudicator = ClaimAdjudicator(llm_analyze_fn=AsyncMock(side_effect=_refusal()))
+        claim = MockClaim(id="1", text="The sky is green.")
+
+        with pytest.raises(LLMQuotaExceededError) as refused:
+            await adjudicator.adjudicate(
+                claim=claim,
+                supporting_docs=[Document(id="1", content="The sky is blue.", metadata={}, score=0.8)],
+                contradicting_docs=[],
+                original_verification=MockClaimVerification(claim=claim),
+            )
+        assert refused.value.detail["category"] == "llm_tokens_month"

@@ -1,7 +1,7 @@
 ---
 id: TASK-13862
 title: FVA adjudicator calls the sync analyze on the event loop
-status: To Do
+status: In Progress
 labels:
 - quotas
 - claims
@@ -23,6 +23,7 @@ ClaimAdjudicator._call_llm (Claims_Extraction/adjudicator.py, near lines 291-325
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-10-20-fva-adjudicator-off-loop.md. The adjudicator's two analyze calls go through claims_engine._run_bounded_claims_analyze (the pool the verifier uses); a refusal is re-raised before the broad clauses in _llm_assess, _assess_documents and FVAPipeline.process_claim. Measured: POST /claims/verify/fva, the only app caller, answers 500 to every request (three constructor calls that cannot succeed: ClaimsJobContext(job_id=...), MultiDatabaseRetriever(media_db=db) without db_paths, RetrievalConfig(top_k=...)); owner Decision 1.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
