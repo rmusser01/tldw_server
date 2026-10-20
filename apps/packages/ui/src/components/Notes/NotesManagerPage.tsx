@@ -88,7 +88,6 @@ import {
   NOTES_SHORTCUTS_SUMMARY_ID,
   calculateSidebarHeight,
   NOTE_TEMPLATES,
-  toSortableTimestamp,
   toNoteVersion,
   extractKeywords,
   normalizeTagList,
@@ -122,6 +121,7 @@ import {
 import { isEditableTarget } from "@/utils/editable-target"
 import { useNotesKeyboardNavigation } from "@/components/Notes/hooks/useNotesKeyboardNavigation"
 import { focusActiveNotesListRow } from "@/components/Notes/notes-list-keyboard"
+import { buildNotesTimelineSections } from "@/components/Notes/notes-timeline"
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
 
@@ -2380,35 +2380,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   // Timeline sections
   const timelineSections = React.useMemo(() => {
     if (list.listMode !== 'active') return [] as Array<{ key: string; label: string; notes: NoteListItem[] }>
-    const bucketMap = new Map<string, NoteListItem[]>()
-    for (const note of visibleNotes) {
-      const rawTimestamp = toSortableTimestamp(note.updated_at)
-      if (rawTimestamp <= 0) {
-        const fallback = bucketMap.get('unknown') || []
-        fallback.push(note)
-        bucketMap.set('unknown', fallback)
-        continue
-      }
-      const parsed = new Date(rawTimestamp)
-      const key = `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, '0')}`
-      const bucket = bucketMap.get(key) || []
-      bucket.push(note)
-      bucketMap.set(key, bucket)
-    }
-    const orderedKeys = Array.from(bucketMap.keys()).sort((a, b) => {
-      if (a === 'unknown') return 1
-      if (b === 'unknown') return -1
-      return b.localeCompare(a)
-    })
-    return orderedKeys.map((key) => {
-      const notesForKey = bucketMap.get(key) || []
-      notesForKey.sort((a, b) => toSortableTimestamp(b.updated_at) - toSortableTimestamp(a.updated_at))
-      if (key === 'unknown') return { key, label: t('option:notesSearch.timelineUnknownDate', { defaultValue: 'Unknown date' }), notes: notesForKey }
-      const monthLabel = `${key}-01T00:00:00.000Z`
-      const parsed = new Date(monthLabel)
-      const label = Number.isNaN(parsed.getTime()) ? key : parsed.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-      return { key, label, notes: notesForKey }
-    })
+    return buildNotesTimelineSections(visibleNotes, { unknownLabel: t('option:notesSearch.timelineUnknownDate', { defaultValue: 'Unknown date' }) })
   }, [list.listMode, visibleNotes, t])
 
   // Search tips
