@@ -54,9 +54,9 @@ Bandit and runtime tests are inapplicable: no Python or runtime files change. Cr
 **Goal:** Preserve the records durably before closing #2783 and #2810.
 **Success criteria:** All seven required statuses pass on current-base head, a normal merge lands, dev contains the replacement records, and both old PRs close with replacement links.
 **Tests:** Read required statuses and merge/base identity; verify replacement blobs on freshly fetched dev; verify source PR states.
-**Status:** Not Started.
+**Status:** In Progress.
 
-- [ ] Collect the task-only closeouts for #3061, #3207 and #3176 after verifying their normal merges, retaining prior phase evidence.
+- [x] Collect the task-only closeouts for #3061, #3207 and #3176 after verifying their normal merges, retaining prior phase evidence.
 - [ ] Publish the replacement PR and satisfy normal required gates.
 - [ ] Merge and verify all three records on dev.
 - [ ] Close the two source PRs only after that verification, retaining branches and linking replacements.
