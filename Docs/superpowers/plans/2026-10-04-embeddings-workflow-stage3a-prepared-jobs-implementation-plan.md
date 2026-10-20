@@ -385,7 +385,7 @@ Dispatch from the existing `_recover_expired_processing_jobs` path used by acqui
 **Goal:** Certify this capability independently before any Embeddings repository/runner uses it.
 **Success Criteria:** Both backend matrices pass; owner/role/transaction tests prove fail-closed isolation; legacy and startup behavior remain unchanged; no new Bandit finding.
 **Tests:** Real transaction races, RLS roles, model sequences, privacy, dormant imports.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 5: Certification And Internal Documentation
 
@@ -459,7 +459,7 @@ Include the modified manager/lifecycle/conftest files in Ruff and formatter veri
 
 Run the existing guard with `source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/CI/test_required_workflow_contracts.py`; all assertions must pass. Use `python -m ruff format --check` on the new modules/test files listed in the Ruff command, and add the modified legacy files to lint/compile verification while preserving their established formatting.
 
-- [ ] **Step 5: Document, review, and commit.** Write the internal doc with actual API examples, explicit migration invocation, owner/lease/proof semantics, independent budgets, dormant rollback (stop callers; preserve proof/support obligations; no destructive down migration), and deferred support/domain cleanup. Update this plan's stage statuses and the implementation Backlog task incrementally. Request a whole-branch review against the approved spec and address validated findings before integration. Stage exact verified Task 5 files and `git commit -m "test(jobs): certify prepared workflow recovery contracts"`. PR creation/merge is a later explicit instruction; any materially AI-authored PR requires the requester's own Change summary.
+- [x] **Step 5: Document, review, and commit.** Write the internal doc with actual API examples, explicit migration invocation, owner/lease/proof semantics, independent budgets, dormant rollback (stop callers; preserve proof/support obligations; no destructive down migration), and deferred support/domain cleanup. Update this plan's stage statuses and the implementation Backlog task incrementally. Request a whole-branch review against the approved spec and address validated findings before integration. Stage exact verified Task 5 files and `git commit -m "test(jobs): certify prepared workflow recovery contracts"`. PR creation/merge is a later explicit instruction; any materially AI-authored PR requires the requester's own Change summary.
 
 ## Coverage And Next Units
 
@@ -482,3 +482,13 @@ The follow-on repository receives the transaction/fence/receipt APIs, not access
 ## Plan Review Gate
 
 Requester reviewed the committed plan and selected subagent-driven execution (option 1) on 2026-10-20. Runtime implementation proceeds under TASK-13900 with task-scoped reviews and final verification; stage statuses above record actual progress.
+
+## Execution Completion
+
+All five tasks, their independent reviews, the whole-branch review, and its single grouped fix/scoped re-review are complete. The final review exposed encrypted roots being rejected during acquisition/recovery; `ef0d5faa16` reuses bounded strict decryption before exact authority comparison. Red/green regressions cover both databases, both acquisition modes, shared recovery, authenticated mismatches, key failures, bounds, and rollback.
+
+Final post-fix certification: 1,666 selected tests passed with no skips, including 894 workflow/property cases (468 SQLite, 426 PostgreSQL), 409 compatibility, 100 lifecycle/RLS, 48 inline, 155 endpoint/media, and 60 CI contracts. Scoped line coverage is 95.39%. Controller independent encrypted regressions: 148 passed, 156 deselected, no skips. Strict workflow/lifecycle Bandit has zero findings/errors; shard coverage has zero new uncovered files. Applicable configured pre-commit hooks pass.
+
+Existing manager B608, three conftest I001 findings, legacy formatter drift, and incompletely attributed warnings remain explicit baseline limitations. Full-project collection is blocked by unrelated missing `httpx2`; this is not a full-repository-green claim. TASK-13900 retains verification, review disposition, and all three controller rulings with their costs before scratch cleanup. Accepted ADR-060 remains governing; no new architectural rule was introduced. Stages 3B/3C/3D, current-dev integration, PR/push/merge, production credentials, activation, and the mandatory human-written Change summary remain separate later work.
+
+Per AGENTS.md, retire only this completed execution plan after committing its complete record; retain the approved spec, ADR, internal guide, task history, branch, and worktree.
