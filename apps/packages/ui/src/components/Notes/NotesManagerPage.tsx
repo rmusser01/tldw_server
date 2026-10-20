@@ -38,6 +38,7 @@ import { promptBulkAddTags } from "@/components/Notes/NotesBulkAddTagsPrompt"
 import NotesSidebar from "@/components/Notes/NotesSidebar"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { createNotesGraphAuthorityScope, useNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
+import { useNotesFormattingKeyDown } from "@/components/Notes/hooks/useNotesFormattingKeys"
 import {
   useNotesKeywords,
   useNotesListManagement,
@@ -1984,6 +1985,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     event.preventDefault()
     handleWysiwygInput(event)
   }, [editorDisabled, handleWysiwygInput])
+  const handleMarkdownEditorKeyDown = useNotesFormattingKeyDown(wl.handleEditorKeyDown, applyMarkdownToolbarAction)
 
   const handleWysiwygPaste = React.useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
     if (editorDisabled) return
@@ -2945,7 +2947,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         handleWysiwygKeyDown={handleWysiwygKeyDown}
         handleWysiwygPaste={handleWysiwygPaste}
         handleEditorChange={handleEditorChange}
-        handleEditorKeyDown={wl.handleEditorKeyDown}
+        handleEditorKeyDown={handleMarkdownEditorKeyDown}
         handleEditorSelectionUpdate={handleEditorSelectionUpdate}
         applyWikilinkSuggestion={wl.applyWikilinkSuggestion}
       />

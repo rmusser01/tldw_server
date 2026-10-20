@@ -219,6 +219,26 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
     )
   })
 
+  it("documents the search key that works on Notes, not the command palette's Ctrl/Cmd+K (XP-07)", async () => {
+    renderPage()
+
+    fireEvent.click(screen.getByTestId("notes-shortcuts-help-button"))
+    const sheet = await screen.findByTestId("notes-shortcuts-modal")
+
+    const searchRow = Array.from(sheet.querySelectorAll("div")).find(
+      (row) =>
+        row.childElementCount === 1 &&
+        row.textContent?.includes("Focus the search input.")
+    )
+    expect(searchRow?.querySelector("strong")?.textContent).toBe("/")
+    const paletteRow = Array.from(sheet.querySelectorAll("div")).find(
+      (row) =>
+        row.childElementCount === 1 &&
+        row.querySelector("strong")?.textContent === "Ctrl/Cmd + K"
+    )
+    expect(paletteRow).toHaveTextContent("Open the command palette.")
+  })
+
   it("ignores '?' while typing in the editor and opens help from global context", async () => {
     renderPage()
 

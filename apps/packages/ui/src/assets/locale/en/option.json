@@ -1530,7 +1530,9 @@
       "notes_graph_suggestions_disabled": "Graph suggestions are disabled.",
       "notes_graph_suggestions_worker_unavailable": "The suggestion worker is unavailable.",
       "notes_graph_sync_not_ready": "Suggestion decisions are unavailable for this Notes dataset."
-    }
+    },
+    "shortcutFocusSearchDescription": "Focus the search input.",
+    "shortcutCommandPaletteDescription": "Open the command palette."
   },
   "tts": {
     "playground": "TTS Playground"
