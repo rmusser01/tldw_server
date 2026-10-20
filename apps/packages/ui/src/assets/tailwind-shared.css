@@ -557,7 +557,8 @@ body {
 .ant-select-focused .ant-select-selector,
 .ant-picker-focused {
   border-color: rgb(var(--color-primary)) !important;
-  box-shadow: 0 0 0 2px rgb(var(--color-focus) / 0.4) !important;
+  /* Opaque so the halo itself reaches 3:1 against the surface (AX-08). */
+  box-shadow: 0 0 0 2px rgb(var(--color-focus)) !important;
 }
 
 .ant-form-item-has-error .ant-form-item-explain,
@@ -765,12 +766,13 @@ body {
 }
 
 .focus-ring.ant-switch:focus-visible {
-  box-shadow: 0 0 0 3px rgb(var(--color-focus) / 0.35);
+  /* A surface gap keeps the ring distinct from a checked switch's fill. */
+  box-shadow: 0 0 0 2px rgb(var(--color-surface)), 0 0 0 4px rgb(var(--color-focus));
 }
 
 .focus-ring.ant-select-focused .ant-select-selector,
 .focus-ring .ant-select-selector:focus-visible {
-  box-shadow: 0 0 0 3px rgb(var(--color-focus) / 0.35) !important;
+  box-shadow: 0 0 0 2px rgb(var(--color-focus)) !important;
   border-color: rgb(var(--color-focus)) !important;
   border-radius: 8px !important;
 }
