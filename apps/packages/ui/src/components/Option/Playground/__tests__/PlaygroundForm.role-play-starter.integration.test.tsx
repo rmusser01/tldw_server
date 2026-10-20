@@ -2318,8 +2318,6 @@ describe("PlaygroundForm role-play starter", () => {
     modelCatalogQueryOptions.loading = true
     const view = render(<PlaygroundForm droppedFiles={[]} />)
     try {
-    // Something to send, so only the catalog load holds Send back (CC-02).
-    fireEvent.change(screen.getByTestId("composer-textarea"), { target: { value: "Hello" } })
     const sends = within(view.container).getAllByRole("button", { name: "Send message", exact: true })
     for (const send of sends) {
       expect(send).toBeDisabled()
@@ -2327,7 +2325,8 @@ describe("PlaygroundForm role-play starter", () => {
     }
     modelCatalogQueryOptions.loading = false
     view.rerender(<PlaygroundForm droppedFiles={[]} />)
-    for (const send of sends) expect(send).toBeEnabled()
+    // Settled: only the empty composer still holds Send back (CC-02).
+    for (const send of sends) expect(send).toHaveAttribute("title", "Type a message to send.")
     } finally { view.unmount() }
   })
   it.each(["image", "saved character"] as const)("keeps %s Send independent of the ordinary catalog load", kind => {
@@ -2342,9 +2341,9 @@ describe("PlaygroundForm role-play starter", () => {
     modelCatalogQueryOptions.loading = true
     const view = render(<PlaygroundForm droppedFiles={[]} />)
     try {
-      // Something to send, so only the catalog load could hold Send back (CC-02).
-      fireEvent.change(screen.getByTestId("composer-textarea"), { target: { value: "Hello" } })
-      for (const send of within(view.container).getAllByRole("button", { name: "Send message", exact: true })) expect(send).toBeEnabled()
+      // Not held back by the catalog load: only the empty composer disables Send (CC-02).
+      for (const send of within(view.container).getAllByRole("button", { name: "Send message", exact: true }))
+        expect(send).toHaveAttribute("title", "Type a message to send.")
     } finally { view.unmount() }
   })
 
