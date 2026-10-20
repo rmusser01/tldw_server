@@ -101,10 +101,11 @@ export function useNotesKeywords(deps: UseNotesKeywordsDeps) {
       out.push(text)
     }
     base.forEach(add)
-    keywordTokens.forEach(add)
+    // Active filter tokens are not merged in: a token that is not a real tag
+    // must not turn up in Browse tags or its "Recently used" list (NL-08).
     notebookKeywordTokens.forEach(add)
     return out
-  }, [allKeywords, keywordOptions, keywordTokens, notebookKeywordTokens])
+  }, [allKeywords, keywordOptions, notebookKeywordTokens])
 
   const rememberRecentKeywords = React.useCallback((keywords: string[]) => {
     const nextKeywords = keywords

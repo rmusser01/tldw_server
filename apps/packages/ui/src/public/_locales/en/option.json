@@ -6436,5 +6436,11 @@
   },
   "assistant_trackedModelsLoading": {
     "message": "Loading models before tracked chat selection. Wait for discovery to finish, or retry in the model picker."
+  },
+  "notesSearch_tagFilterNoMatch": {
+    "message": "No tag named \"{{query}}\""
+  },
+  "notesSearch_tagFilterNoTags": {
+    "message": "No tags yet"
   }
 }

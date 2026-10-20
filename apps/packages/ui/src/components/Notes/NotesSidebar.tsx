@@ -11,6 +11,7 @@ import { QuestionCircleOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import NotesListPanel from '@/components/Notes/NotesListPanel'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
+import NotesTagFilterSelect from '@/components/Notes/NotesTagFilterSelect'
 import type { NoteListItem } from '@/components/Notes/notes-manager-types'
 import type {
   NotesSortOption,
@@ -912,26 +913,17 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                         </Button>
                       </Popover>
                     </div>
-                    <Select
-                      mode="tags"
-                      allowClear
-                      placeholder={t('option:notesSearch.keywordsPlaceholder', {
-                        defaultValue: 'Filter by tag'
-                      })}
-                      aria-label={t('option:notesSearch.keywordFilterAriaLabel', {
-                        defaultValue: 'Filter by tag'
-                      })}
-                      className="w-full"
+                    <NotesTagFilterSelect
                       value={keywordTokens}
-                      onSearch={handleKeywordFilterSearch}
-                      onChange={handleKeywordFilterChange}
-                      options={keywordOptions.map((keyword) => ({
-                        label: renderKeywordLabelWithFrequency(keyword, {
+                      options={keywordOptions}
+                      renderOptionLabel={(keyword) =>
+                        renderKeywordLabelWithFrequency(keyword, {
                           includeCount: true,
                           testIdPrefix: 'notes-keyword-filter-option-label'
-                        }),
-                        value: keyword
-                      }))}
+                        })
+                      }
+                      onSearch={handleKeywordFilterSearch}
+                      onChange={handleKeywordFilterChange}
                     />
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex items-center gap-1">
