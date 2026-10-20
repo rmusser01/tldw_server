@@ -184,3 +184,26 @@ async def test_renew_while_redis_is_down_keeps_the_lease(fail_mode, monkeypatch)
     second, _ = await rg.reserve(req)
 
     assert first.allowed and not second.allowed
+
+
+@pytest.mark.asyncio
+async def test_a_redis_outage_is_logged_as_a_warning_once_a_minute(monkeypatch):
+    from loguru import logger
+
+    from tldw_Server_API.app.core.Resource_Governance import policy_eval
+
+    monkeypatch.setattr(policy_eval, "_last_redis_warning", {}, raising=False)  # no warning sent yet
+    rg = _governor({"requests": {"rpm": 5}, "scopes": ["user"], "fail_mode": "fail_open"}, ns="rg_down_warn")
+    rg._client = _redis_down_client()
+    req = RGRequest(entity="user:x", categories={"requests": {"units": 1}}, tags={"policy_id": "p"})
+    seen = []
+    sink = logger.add(lambda m: seen.append(m.record["message"]), level="WARNING")
+    try:
+        await rg.reserve(req)
+        await rg.reserve(req)
+    finally:
+        logger.remove(sink)
+
+    assert [m for m in seen if "Redis" in m] == [
+        "Resource Governor Redis backend 'rg_down_warn' is failing (ConnectionError); this worker enforces its limits on its own until it recovers"
+    ]

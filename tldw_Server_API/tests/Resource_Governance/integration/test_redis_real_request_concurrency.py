@@ -1,6 +1,7 @@
 """On real Redis a request's own max_concurrent holds across workers (TASK-13435)."""
 
 import pytest
+from redis.exceptions import OutOfMemoryError, ReadOnlyError
 
 from tldw_Server_API.app.core.Resource_Governance import RedisResourceGovernor, RGRequest
 
@@ -90,3 +91,57 @@ async def test_a_lost_rate_script_falls_back_once_then_reloads(real_redis, rg_un
 
     assert [first.allowed, second.allowed, third.allowed] == [True, True, True]
     assert gov._multi_lua_sha not in (None, _LOST_SHA)
+
+
+def _rejecting(error: Exception):
+    """A Redis command that fails with ``error``, as a replica (READONLY) or a full server (OOM) answers a write."""
+
+    async def _command(*_args, **_kwargs):
+        raise error
+
+    return _command
+
+
+# Redis still answers the probe (ZCARD) but rejects writes. A replica (READONLY) rejects every write; a full
+# server (OOM) rejects the commands that grow memory, scripts included, but still trims windows and leases.
+_READ_ONLY = (ReadOnlyError("You can't write against a read only replica."), ("evalsha", "zadd", "zremrangebyscore", "set", "hset", "expire", "delete"))
+_OUT_OF_MEMORY = (OutOfMemoryError("command not allowed when used memory > 'maxmemory'."), ("evalsha", "zadd", "set", "hset"))
+
+
+@pytest.mark.parametrize(
+    ("fail_mode", "body", "categories", "fault"),
+    [
+        ("fallback_memory", {}, {"jobs": {"units": 1, "max_concurrent": 2, "ttl_sec": 60}}, _READ_ONLY),
+        ("fail_closed", {}, {"jobs": {"units": 1, "max_concurrent": 2, "ttl_sec": 60}}, _OUT_OF_MEMORY),
+        ("fail_closed", {"requests": {"rpm": 5}}, {"requests": {"units": 1}}, _READ_ONLY),
+        ("fail_open", {"requests": {"rpm": 5}}, {"requests": {"units": 1}}, _OUT_OF_MEMORY),
+    ],
+    ids=["lease-readonly", "lease-oom", "rate-readonly", "rate-oom"],
+)
+async def test_redis_rejecting_writes_is_logged(real_redis, rg_unique_ns, monkeypatch, fail_mode, body, categories, fault) -> None:
+    """A Redis that answers reads but rejects writes makes each worker count on its own; that is logged (TASK-13859)."""
+    from loguru import logger
+
+    from tldw_Server_API.app.core.Resource_Governance import policy_eval
+
+    gov = RedisResourceGovernor(policy_loader=_Policy(fail_mode, **body), ns=rg_unique_ns)
+    if not await gov._is_real_redis():
+        pytest.skip("Redis client is not real; using in-memory stub")
+    monkeypatch.setattr(policy_eval, "_last_redis_warning", {}, raising=False)  # no warning sent yet
+    error, commands = fault
+    client = await gov._client_get()
+    for command in commands:
+        monkeypatch.setattr(client, command, _rejecting(error))
+    req = RGRequest(entity="user:42", categories=categories, tags={"policy_id": "write.test"})
+    seen = []
+    sink = logger.add(lambda m: seen.append(m.record["message"]), level="WARNING")
+    try:
+        await gov.reserve(req)
+        await gov.reserve(req)
+    finally:
+        logger.remove(sink)
+
+    assert [m for m in seen if "Redis backend" in m] == [
+        f"Resource Governor Redis backend {rg_unique_ns!r} is failing ({type(error).__name__}); "
+        "this worker enforces its limits on its own until it recovers"
+    ]

@@ -26,6 +26,7 @@ from .policy_eval import (
     effective_policy,
     lease_limits,
     log_lookup_failure,
+    log_redis_failure,
     requests_window,
     scope_pairs,
 )
@@ -577,8 +578,9 @@ class RedisResourceGovernor(ResourceGovernor):
         try:
             await client.zadd(key, dict.fromkeys(members, now))
             await client.expire(key, _window_ttl(window))
-        except _RG_NONCRITICAL_EXCEPTIONS:
+        except _RG_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("RG window add/expire failed for key={}", key, exc_info=True)
+            log_redis_failure(self._keys.ns, exc)  # the window lives only in this worker's acceptance tracker
 
     async def _zrem_members(self, *, key: str, members: list[str]) -> None:
         client = await self._client_get()
@@ -640,7 +642,8 @@ class RedisResourceGovernor(ResourceGovernor):
                 # Fallback to conservative window
                 ra = window
             return False, int(ra), count
-        except _RG_NONCRITICAL_EXCEPTIONS:
+        except _RG_NONCRITICAL_EXCEPTIONS as exc:
+            log_redis_failure(self._keys.ns, exc)
             if fail_mode == "fallback_memory":
                 raise _FallbackToMemory from None
             if fail_mode == "fail_open":
@@ -1132,6 +1135,7 @@ class RedisResourceGovernor(ResourceGovernor):
                                 await client.zremrangebyscore(key, float("-inf"), now)
                                 active_real = int(await client.zcard(key))
                             except _RG_NONCRITICAL_EXCEPTIONS as exc:
+                                log_redis_failure(self._keys.ns, exc)
                                 if cat_fail == "fallback_memory":
                                     raise _FallbackToMemory from exc
                                 active_real = 0
@@ -1937,8 +1941,9 @@ class RedisResourceGovernor(ResourceGovernor):
                             bucket[mem] = float(expires_at)
                         try:
                             await client.zadd(key, {mem: float(expires_at) for mem in members})
-                        except _RG_NONCRITICAL_EXCEPTIONS:
-                            pass
+                        except _RG_NONCRITICAL_EXCEPTIONS as exc:
+                            # Redis rejects the write (OOM, READONLY): only this worker counts the lease.
+                            log_redis_failure(self._keys.ns, exc)
 
                 expires_at = now + max(1, int(ttl_sec))
                 for (sc, ev), members in planned.items():
