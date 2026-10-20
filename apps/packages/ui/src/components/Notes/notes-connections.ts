@@ -11,20 +11,37 @@ const authorityOf = (requestKey: string | undefined): string | null => {
   }
 }
 
+/** The user's last open/closed choice for Connections, and for which account. */
+export type ConnectionsMemory = {
+  current: { authority: string | null; open: boolean } | null
+}
+
+/**
+ * Page-level memory for useConnectionsDisclosure. The Notes page owns it so
+ * the choice outlives the editor pane, which unmounts while the Graph view
+ * is showing.
+ */
+export const useConnectionsMemory = (): ConnectionsMemory =>
+  React.useRef<ConnectionsMemory['current']>(null)
+
 /**
  * Keeps the on-demand Connections section open across note switches in the
  * same account (NE-10). Connections load only on request, so the section
  * used to fold up on every switch. If the user left it open, the next note
- * opens it too and requests that note's connections. The choice lives for
- * this page visit only and is forgotten when the account changes, so
- * coming back to an account asks again.
+ * opens it too and requests that note's connections. With `memory` from
+ * useConnectionsMemory the choice lasts while the Notes page is open
+ * (including visits to the Graph view); without it, while this pane is
+ * mounted. It is forgotten when the account changes, so coming back to an
+ * account asks again.
  */
 export const useConnectionsDisclosure = (
   requestKey: string | undefined,
-  onRequestNeighbors: (() => void) | undefined
+  onRequestNeighbors: (() => void) | undefined,
+  memory?: ConnectionsMemory
 ) => {
   const authority = authorityOf(requestKey)
-  const rememberedRef = React.useRef<{ authority: string | null; open: boolean } | null>(null)
+  const ownMemory = React.useRef<ConnectionsMemory['current']>(null)
+  const rememberedRef = memory ?? ownMemory
   const onRequestRef = React.useRef(onRequestNeighbors)
   onRequestRef.current = onRequestNeighbors
 

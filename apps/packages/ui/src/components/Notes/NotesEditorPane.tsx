@@ -45,7 +45,7 @@ import type { NoteStudioState, NotesStudioPaperSize } from './notes-studio-types
 import type { NotesTitleSuggestStrategy } from '@/services/settings/ui-settings'
 import type { NotesSaveIssue } from './hooks/useNotesEditorState'
 import { notesEditorSupportHint } from './notes-editor-hints'
-import { useConnectionsDisclosure } from './notes-connections'
+import { useConnectionsDisclosure, type ConnectionsMemory } from './notes-connections'
 import {
   NOTES_EDITOR_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
@@ -139,6 +139,8 @@ export interface NotesEditorPaneProps {
   noteNeighborsState?: 'not_loaded' | 'loading' | 'success' | 'error'
   noteNeighborsRequestKey?: string
   onRequestNeighbors?: () => void
+  /** Page-owned open/closed choice for Connections (NE-10). */
+  connectionsMemory?: ConnectionsMemory
   onRetryNeighbors?: () => void
 
   // Pinning
@@ -356,6 +358,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   noteNeighborsState,
   noteNeighborsRequestKey,
   onRequestNeighbors,
+  connectionsMemory,
   onRetryNeighbors,
   selectedNotePinned,
   editorMode,
@@ -609,7 +612,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   // NE-10: Related leaves out manual links (they have their own list), and
   // Connections stays open across notes.
   const relatedNotes = noteRelations.related
-  const connectionsDisclosure = useConnectionsDisclosure(noteNeighborsRequestKey, onRequestNeighbors)
+  const connectionsDisclosure = useConnectionsDisclosure(noteNeighborsRequestKey, onRequestNeighbors, connectionsMemory)
 
   const renderRelationMeta = (
     relationLabel?: string,

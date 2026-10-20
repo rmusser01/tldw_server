@@ -118,6 +118,7 @@ import {
   resolveNotesGraphFocusNoteId,
 } from './notes-manager-utils'
 import { isEditableTarget } from "@/utils/editable-target"
+import { useConnectionsMemory } from './notes-connections'
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
 
@@ -529,6 +530,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     setNeighborsIntent({ owner: noteNeighborsOwner, requested: false, denied: false })
   }
   const noteNeighborsRequested = neighborsIntent.owner === noteNeighborsOwner && neighborsIntent.requested
+  const connectionsMemory = useConnectionsMemory()
   const {
     data: requestedNoteNeighborsData,
     error: noteNeighborsFailure,
@@ -2806,6 +2808,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         noteNeighborsState={noteNeighborsState}
         noteNeighborsRequestKey={noteNeighborsOwner}
         onRequestNeighbors={() => setNeighborsIntent((current) => ({ ...current, requested: true }))}
+        connectionsMemory={connectionsMemory}
         onRetryNeighbors={noteNeighborsUnavailable ? undefined : () => {
           void refetchNoteNeighbors()
         }}

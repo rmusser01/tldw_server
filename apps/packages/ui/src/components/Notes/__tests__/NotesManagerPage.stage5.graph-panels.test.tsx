@@ -183,6 +183,11 @@ vi.mock('@/components/Notes/NotesListPanel', () => ({
   default: () => <div data-testid='notes-list-panel' />
 }))
 
+// The Graph view replaces the editor pane; a stub is enough to unmount it.
+vi.mock('@/components/Notes/NotesGraphWorkspace', () => ({
+  default: () => <div data-testid='notes-graph-workspace' />
+}))
+
 const renderPage = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -643,6 +648,56 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
     })
     const backlinksList = await screen.findByTestId('notes-backlinks-list')
     expect(within(backlinksList).getByRole('button', { name: 'Graph seed note' })).toBeInTheDocument()
+  })
+
+  it('keeps Connections open after a visit to the Graph view (NE-10)', async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || '')
+      const method = String(request.method || 'GET').toUpperCase()
+      if (path.startsWith('/api/v1/notes/?')) {
+        return { items: [], pagination: { total_items: 0, total_pages: 1 } }
+      }
+      if (path === '/api/v1/notes/' && method === 'POST') {
+        return { id: 'note-a', version: 1, last_modified: '2026-02-18T10:00:00.000Z' }
+      }
+      if (path === '/api/v1/notes/note-a' && method === 'GET') {
+        return {
+          id: 'note-a',
+          title: 'Graph seed note',
+          content: 'Seed content',
+          metadata: { keywords: [] },
+          version: 1,
+          last_modified: '2026-02-18T10:00:00.000Z'
+        }
+      }
+      if (path.startsWith('/api/v1/notes/note-a/neighbors')) {
+        return {
+          nodes: [
+            { id: 'note-a', type: 'note', label: 'Graph seed note' },
+            { id: 'note-b', type: 'note', label: 'Linked note' }
+          ],
+          edges: [{ id: 'e1', source: 'note-a', target: 'note-b', type: 'wikilink', directed: true }]
+        }
+      }
+      return {}
+    })
+
+    renderPage()
+    // Opens Connections on the saved note.
+    await seedAndSaveNote()
+    await screen.findByTestId('notes-related-list')
+
+    fireEvent.click(screen.getByTestId('notes-view-mode-graph'))
+    await screen.findByTestId('notes-graph-workspace')
+    fireEvent.click(screen.getByTestId('notes-view-mode-list'))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('notes-section-connections-toggle')).toHaveAttribute(
+        'aria-expanded',
+        'true'
+      )
+    })
+    expect(await screen.findByTestId('notes-related-list')).toHaveTextContent('Linked note')
   })
 
   it('shows loading and empty states for relation panels', async () => {

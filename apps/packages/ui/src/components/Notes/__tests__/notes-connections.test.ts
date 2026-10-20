@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import { useConnectionsDisclosure } from "../notes-connections"
+import { useConnectionsDisclosure, type ConnectionsMemory } from "../notes-connections"
 
 const key = (authority: string, noteId: string) => JSON.stringify([authority, noteId])
 
@@ -45,6 +45,20 @@ describe("useConnectionsDisclosure (NE-10)", () => {
     rerender({ requestKey: key("alice", "n2") })
     expect(result.current.initiallyOpen).toBe(false)
     expect(onRequest).not.toHaveBeenCalled()
+  })
+
+  it("keeps the choice in page memory when the pane remounts", () => {
+    const onRequest = vi.fn()
+    const memory: ConnectionsMemory = { current: null }
+    const first = renderHook(() => useConnectionsDisclosure(key("alice", "n1"), onRequest, memory))
+    act(() => first.result.current.onOpenChange(true))
+    // The Graph view unmounts the editor pane.
+    first.unmount()
+    onRequest.mockClear()
+
+    const second = renderHook(() => useConnectionsDisclosure(key("alice", "n1"), onRequest, memory))
+    expect(second.result.current.initiallyOpen).toBe(true)
+    expect(onRequest).toHaveBeenCalledTimes(1)
   })
 
   it("forgets the choice when the account changes", () => {
