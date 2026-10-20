@@ -111,7 +111,8 @@ Registered under `StepTypeRegistry`:
 - `delay`: Pause the workflow for a fixed time (milliseconds). Useful for demos, backoffs or pacing.
 - `log`: Log a templated message at the chosen level (`debug|info|warning|error`). Helps with debugging and audit trails.
 - `branch`: Evaluate a boolean condition and optionally jump to a target step id (`true_next` / `false_next`).
-- `map`: Fan-out over a list and apply a nested step with optional concurrency; returns a list of `results`.
+- `map`: Fan-out over a list and apply a nested step with optional concurrency; returns a list of `results`. If an item's step raises, the other items are cancelled and the map step fails with that error.
+- `parallel`: Run a list of sub-steps (`steps: [{type, config}]`) together, up to `max_concurrency` at a time (default 5); returns `{ results, count, errors }`, with `results` in step order. A sub-step that raises an adapter-level error (`AdapterError`, `ValueError`, `RuntimeError`, `OSError`, `TimeoutError` and similar) gets `{"error": "parallel_step_error"}` in its slot and does not fail the step; with `fail_fast` the error is also listed in `errors`. Any other sub-step error fails the step when `fail_fast` is set, and is recorded the same way when it is not. An LLM quota refusal always fails the step. When the step fails, its other sub-steps, running or queued, are cancelled first.
 
 See `adapters.py` for configuration keys and behavior of each step.
 

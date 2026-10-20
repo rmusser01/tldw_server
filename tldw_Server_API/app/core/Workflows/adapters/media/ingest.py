@@ -349,7 +349,12 @@ async def run_media_ingest_adapter(config: dict[str, Any], context: dict[str, An
                         context["heartbeat"]()
                 except _MEDIA_INGEST_NONCRITICAL_EXCEPTIONS:
                     pass
-                await asyncio.sleep(0.25)
+                try:
+                    await asyncio.sleep(0.25)
+                except asyncio.CancelledError:
+                    # A cancelled step (a map or parallel sibling failed, or the step timed out) stops the download.
+                    await asyncio.to_thread(terminate_process, task)
+                    raise
                 # Check if any file downloaded
                 if any(step_dir.glob("*.*")):
                     exited = True
