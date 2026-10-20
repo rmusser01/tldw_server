@@ -271,7 +271,7 @@ Added only per-test classification marks in the helper boundary module: alias id
 **Goal:** Prove the foundation is independently reviewable/revertible without routing completion.
 **Success Criteria:** All applicable gates pass on the candidate head; scoped source/SQL/dependency review finds no behavior change; any unrelated failure has an evidence-backed disposition, not a weakened test.
 **Tests:** Full non-PG Jobs, required real PG completion/lifecycle/admin/parity/RLS, opt-in outbox/SSE, touched-scope quality/security, Docs, and hosted gates.
-**Status:** In Progress (final-fix local qualification complete; scoped controller re-review, hosted gates and human Change summary pending)
+**Status:** In Progress (local qualification and independent reviews complete; separately authorized integration, hosted gates and human Change summary pending)
 
 **Interfaces:** Consume the modules/tests from Stages 1-3. Produce verification artifacts, an accurate task/plan record and a foundation-only PR when separately authorized; do not produce backend operation implementations.
 
@@ -360,7 +360,17 @@ Fresh touched-scope quality/security/equivalence: Ruff 10 paths, Black 8 new pat
 
 All three Docs boundary/drift scripts pass; full Docs above and strict `python -B -m mkdocs build --strict -f Docs/mkdocs.yml --site-dir /tmp/task13878_finalfix_mkdocs_site` pass, build 8.65s. Canonical/published ADR/index bytes match and all generated Docs are unchanged, so no new refresh is required; prior deterministic-refresh evidence remains valid and preserved. Same upstream Material banner/INFO link notices, no MkDocs WARNING/ERROR records. Canonical TASK-13878 format check passes. Exact Docs commands/exits: `/tmp/task13878_finalfix_docs_runs.json`.
 
-**F1/F2 local qualification: COMPLETE.** Foundation/Stage4/TASK-13878 remain **In Progress** for the controller's one scoped re-review and existing separately authorized integration gates. Hosted/exact-head/required/Jobs/merge-queue gates **NOT RUN/UNKNOWN**, human Change summary **NOT PROVIDED**. No hosted or merge-ready claim. Detailed implementation/self-review/qualification report: `.superpowers/sdd/2026-10-20-jobs-completion-foundation-implementation-plan/final-fix-report.md`. No installs, nested agents, rebase, push, PR or merge.
+**F1/F2 local qualification and scoped re-review: COMPLETE.** Foundation/Stage4/TASK-13878 remain **In Progress** only for separately authorized integration gates. Hosted/exact-head/required/Jobs/merge-queue gates **NOT RUN/UNKNOWN**, human Change summary **NOT PROVIDED**. No hosted or merge-ready claim. No installs, nested implementer agents, rebase, push, PR or merge.
+
+## Controller Handoff
+
+Independent task reviews approved all four local stages. Whole-branch review of current dev `e521605198dd311b94d2c63416bf07db3e5e7a0a` through `64bef52f5ce3f6544b925362d3fea9c6946bee19` found only F1 (failed-preflight early-exit coverage) and F2 (helper markers). Both were validated, corrected in `d98b9ae0e90d63f8ac7c3414bff3cdf87ba3d3dd`, and accepted by a fresh scoped re-review with no residual findings or new breakage. Production remains identical to qualified source `0f2b649cb8688abd7132d8fad7ec7dd293baaf9b`; backend routing was not introduced.
+
+Final local evidence is the final-fix table above: full non-PG 1560 passed with the two inherited skips tracked by TASK-13879; required real PG 255 passed with no skips; SSE/outbox 5 passed; Docs 212 passed; static, strict docs and semantic security-delta checks passed. The initial default-autoload failure, supported CI-style invocation, inherited warnings/findings and unavailable whole-repository httpx2 collection remain disclosed, not silently converted into success.
+
+Controller accepts all eleven explicitly declined review boundaries: excluded future routing/lifecycle/caller/history work, characterized ordinary behavior/SLA lifetime, separately tracked fixture correction, unchanged plugin/dependency environment, present-driver-specific test scope, whole-repository/deployment/security audit limits, and genuinely pending hosted/human/PR gates. No new stop-condition defect was found. Preserve this approved plan while conditional integration remains unfinished; do not remove another agent's plan.
+
+The plan-specific ignored SDD evidence is archived at `/tmp/task13878-sdd-evidence-d98b9ae0.tar.gz` before removing only that completed execution scratch directory. Durable decisions, exact commands/results and separate follow-up remain in this plan and TASK-13878/TASK-13879. Branch/worktree stay intact for the human's integration choice; no push, PR creation, local/shared merge or backend routing is inferred.
 
 ## Plan Review and Execution Gate
 
