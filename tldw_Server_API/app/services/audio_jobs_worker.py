@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import os
 import tempfile
+from datetime import datetime, timezone
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -45,6 +46,53 @@ class _StageFailure(RuntimeError):
         self.retryable = retryable
         self.backoff_seconds = backoff_seconds
         self.quarantine = quarantine
+
+
+def start_lease_renewal(jm: JobManager, job: dict[str, Any], *, worker_id: str, lease_seconds: int) -> asyncio.Task:
+    """Renew the job's lease every half lease while its stage runs, so no other worker runs the stage again.
+
+    The caller stops it with ``stop_lease_renewal`` when the stage ends. It stops by itself once a renewal is
+    refused: the lease was lost, or the job was cancelled. A backend error (a locked database, a dropped
+    connection) is logged and the next renewal is tried, so one error does not let a long stage's lease expire.
+
+    It renews the lease acquisition granted: ``lease_seconds`` capped at JOBS_LEASE_MAX_SECONDS, as
+    ``acquire_next_job`` caps it, or, for 0 (an adaptive lease, whose length acquisition chose), the time left
+    on the job's ``leased_until``.
+    """
+    job_id = int(job["id"])
+    lease_id = str(job.get("lease_id"))
+    if lease_seconds > 0:
+        lease = max(1, min(lease_seconds, int(os.getenv("JOBS_LEASE_MAX_SECONDS", "3600") or "3600")))
+    else:
+        leased_until = datetime.fromisoformat(str(job["leased_until"]))
+        if leased_until.tzinfo is None:  # SQLite stores UTC without an offset
+            leased_until = leased_until.replace(tzinfo=timezone.utc)
+        # ponytail: Postgres sets leased_until by its own clock; a skew near half the lease would need the
+        # granted length returned by acquire_next_job instead.
+        lease = max(1, int((leased_until - datetime.now(timezone.utc)).total_seconds()))
+
+    async def _renew() -> None:
+        while True:
+            await asyncio.sleep(max(1, lease // 2))
+            try:
+                if not jm.renew_job_lease(job_id, seconds=lease, worker_id=worker_id, lease_id=lease_id):
+                    return
+            except Exception as e:  # noqa: BLE001 - a backend error must not end renewal; the next one may pass
+                logger.warning("Audio job {}: lease renewal failed ({}); trying again", job_id, type(e).__name__)
+
+    return asyncio.create_task(_renew())
+
+
+async def stop_lease_renewal(task: asyncio.Task | None) -> None:
+    """Stop a renewal started by ``start_lease_renewal``; a no-op for None.
+
+    ``asyncio.wait`` does not raise the renewal's own cancellation, so a cancellation of the caller that
+    arrives while it waits still propagates.
+    """
+    if task is None:
+        return
+    task.cancel()
+    await asyncio.wait({task})
 
 
 def _next_stage_queue(next_type: str) -> str:
@@ -142,6 +190,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
         # initialized before any `continue` to avoid leaking previous values.
         owner: str | None = None
         acquired_slot = False
+        renewal: asyncio.Task | None = None
         try:
             lease_seconds = int(os.getenv("JOBS_LEASE_SECONDS", "120") or "120")
             # Optional strict owner-aware acquisition: try to pick an owner under cap
@@ -335,6 +384,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
             else:
                 acquired_slot = True
 
+            renewal = start_lease_renewal(jm, job, worker_id=worker_id, lease_seconds=lease_seconds)
             payload: dict[str, Any] = job.get("payload") or {}
             jtype = str(job.get("job_type") or "").lower()
             next_type: str | None = None
@@ -470,6 +520,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
                         priority=5,
                         idempotency_key=f"audio-stage:{job['id']}:{next_type}",
                         fair_share_exempt=True,
+                        quota_exempt=True,
                     )
                 except Exception as e:  # noqa: BLE001 - any failure to queue the next stage fails this one
                     ok = False
@@ -512,6 +563,7 @@ async def run_audio_jobs_worker(stop_event: asyncio.Event | None = None) -> None
         except Exception as e:
             logger.error(f"Audio worker loop error: {e}")
         finally:
+            await stop_lease_renewal(renewal)
             try:
                 if acquired_slot and owner is not None:
                     await finish_job(int(owner))  # type: ignore[arg-type]

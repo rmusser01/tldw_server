@@ -15,7 +15,11 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     finish_job,
     increment_jobs_started,
 )
-from tldw_Server_API.app.services.audio_jobs_worker import stage_after_transcription
+from tldw_Server_API.app.services.audio_jobs_worker import (
+    stage_after_transcription,
+    start_lease_renewal,
+    stop_lease_renewal,
+)
 
 DOMAIN = "audio"
 
@@ -95,6 +99,7 @@ async def run_audio_transcribe_gpu_worker(stop_event: asyncio.Event | None = Non
         job = None
         owner = None
         acquired_slot = False
+        renewal: asyncio.Task | None = None
         try:
             job = jm.acquire_next_job(domain=DOMAIN, queue="transcribe", lease_seconds=lease_seconds, worker_id=worker_id)
             if not job:
@@ -117,6 +122,7 @@ async def run_audio_transcribe_gpu_worker(stop_event: asyncio.Event | None = Non
             with contextlib.suppress(Exception):
                 await increment_jobs_started(int(owner))
 
+            renewal = start_lease_renewal(jm, job, worker_id=worker_id, lease_seconds=lease_seconds)
             payload: dict[str, Any] = job.get("payload") or {}
             updated_payload = await _handle_gpu_audio_transcribe_stage(payload)
 
@@ -129,6 +135,7 @@ async def run_audio_transcribe_gpu_worker(stop_event: asyncio.Event | None = Non
                 payload=updated_payload,
                 owner_user_id=str(owner),
                 priority=5,
+                quota_exempt=True,
             )
 
         except Exception as e:
@@ -139,6 +146,7 @@ async def run_audio_transcribe_gpu_worker(stop_event: asyncio.Event | None = Non
                 logger.debug("Audio GPU worker failed to mark job as failed")
             logger.error("Audio GPU worker error")
         finally:
+            await stop_lease_renewal(renewal)
             try:
                 if acquired_slot and owner is not None:
                     await finish_job(int(owner))
