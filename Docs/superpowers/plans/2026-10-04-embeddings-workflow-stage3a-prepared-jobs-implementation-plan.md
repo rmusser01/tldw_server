@@ -244,7 +244,7 @@ The facade opens one connection, begins once, establishes exact transaction-loca
 **Goal:** Apply transitions once, retain proof after later transitions/archive/prune, and release proof recoverably.
 **Success Criteria:** Old applied effects replay without mutation; unapplied effects need current authority plus domain revalidation; changed facts fail closed.
 **Tests:** Lost acknowledgement, retry accounting, terminal races, archive compression, release/replay.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 3: Logical Effects, Proof Lookup, And Release
 
@@ -263,7 +263,7 @@ WorkflowTransaction.release_effect(root: WorkflowRoot, effect: WorkflowEffect) -
 
 Domain revalidation occurs after the Jobs lock and before `apply_effect` on the same transaction. The verified guard must equal the immutable intent's guard; neither digest alone nor a stale token proves domain validity. The caller aborts if its locked domain CAS no longer supports the intent. Jobs does not query domain tables. No-lease reconciliation may only read/release existing exact receipts; it cannot apply an unapplied transition. The domain caller decides supersession of obsolete domain intents; Jobs returns terminal/stale/conflict/missing evidence, never applies a different action under the key.
 
-- [ ] **Step 1: Write failing receipt tests.** Support adds `apply(effect, lease, verified_guard=None)`, `effect(key, action, reason=None)`, `archive_root(compressed=False)`, `prune_root_history()`, `status()`, `receipt_count()`, `retry_count()`, `effect_receipt(root, key)`, and explicit synthetic guard CAS.
+- [x] **Step 1: Write failing receipt tests.** Support adds `apply(effect, lease, verified_guard=None)`, `effect(key, action, reason=None)`, `archive_root(compressed=False)`, `prune_root_history()`, `status()`, `receipt_count()`, `retry_count()`, `effect_receipt(root, key)`, and explicit synthetic guard CAS.
 
 ```python
 def test_earlier_effect_survives_later_transition_and_archive(workflow_case):
@@ -298,20 +298,20 @@ def test_pruned_history_does_not_erase_unreleased_proof(workflow_case):
 
 Add `test_effect_insert_failure_rolls_back_status_counter_and_event`, `test_new_lease_delivers_same_intent_after_locked_guard_revalidation`, `test_stale_domain_guard_aborts_without_receipt`, `test_same_key_changed_facts_conflict_even_after_release`, `test_release_lost_ack_replays_without_reapplying`, `test_terminal_or_reused_uuid_cannot_receive_unapplied_effect`, and `test_receipt_capacity_exhaustion_precedes_transition`. Assert complete rollback, unchanged key/fingerprint, zero receipt after failed CAS, fixed conflict, absorbing release marker, terminal/replacement untouched, and zero transition at one-over capacity.
 
-- [ ] **Step 2: Run red tests:** `source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_effect_receipts.py -m 'not pg_jobs'`.
-- [ ] **Step 3: Implement the interfaces.** Receipt lookup by owner/root/key and fingerprint precedes lease validation only for already-applied exact effects. Unapplied effects lock/revalidate the exact live root and fenced domain facts. Apply lifecycle mutation, durable counters/event, and receipt in one transaction. Continue clears the lease and queues at the original scheduled instant without retry/streak increments. Retry charges once and honors max retries/quarantine; complete/fail/cancel are terminal and clear authority. Use existing Jobs transition/counter/event semantics; do not call a committing legacy prepared operation or bypass a current UUID fence.
+- [x] **Step 2: Run red tests:** `source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_effect_receipts.py -m 'not pg_jobs'`.
+- [x] **Step 3: Implement the interfaces.** Receipt lookup by owner/root/key and fingerprint precedes lease validation only for already-applied exact effects. Unapplied effects lock/revalidate the exact live root and fenced domain facts. Apply lifecycle mutation, durable counters/event, and receipt in one transaction. Continue clears the lease and queues at the original scheduled instant without retry/streak increments. Retry charges once and honors max retries/quarantine; complete/fail/cancel are terminal and clear authority. Use existing Jobs transition/counter/event semantics; do not call a committing legacy prepared operation or bypass a current UUID fence.
 
 Release atomically marks the exact receipt released and returns its proof; repeat release is acknowledgement-neutral. Keep a compact immutable key/fingerprint/outcome tombstone for the support-root lifetime so delayed duplicate delivery cannot reapply after release. Unreleased proof and minimal root support survive ordinary Jobs active/archive pruning. A missing root is not missing receipt authority. No support-root deletion is exposed in this unit: eventual owner-scoped domain retention release belongs to Stage 3B/3D after every delivery horizon is proven closed. Capacity exhaustion leaves existing obligations inspectable and rejects new effects before any transition.
 
-- [ ] **Step 4: Run green tests** with the Step 2 command and `-m pg_jobs`; run existing prepared-disposition/terminal-result/prune tests. Verify no new observer replay: only the first applied effect emits post-commit best-effort metrics, using immutable UUID-bound facts, never a later `get_job(id)` result.
-- [ ] **Step 5: Commit:** `git commit -m "feat(jobs): retain workflow disposition receipts across recovery"` after staging exact Task 3 files.
+- [x] **Step 4: Run green tests** with the Step 2 command and `-m pg_jobs`; run existing prepared-disposition/terminal-result/prune tests. Verify no new observer replay: only the first applied effect emits post-commit best-effort metrics, using immutable UUID-bound facts, never a later `get_job(id)` result.
+- [x] **Step 5: Commit:** `git commit -m "feat(jobs): retain workflow disposition receipts across recovery"` after staging exact Task 3 files.
 
 ## Stage 4: Bounded Retry-Neutral Acquisition Recovery
 
 **Goal:** Bound no-progress cycles even before handler start while preserving provider retry accounting.
 **Success Criteria:** Acquire/sweep close one episode once; fifth no-progress episode fails through Jobs; new semantic proof resets once.
 **Tests:** All acquisition modes, fractional expiry, race/restart, progress replay, cancellation.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 4: Acquisition Episodes And Semantic Progress
 
