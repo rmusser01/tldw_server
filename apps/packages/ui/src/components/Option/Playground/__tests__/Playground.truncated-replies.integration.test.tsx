@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Cut-off replies on /chat (#3104 follow-up, UX G06: CM-03).
+ * Cut-off replies on /chat (#3104 follow-up, UX G06: CM-03, and Continue: CM-01).
  *
  * A reply that ends because the model hit its output limit
  * (`finish_reason: "length"`), or because the connection closed before the
@@ -9,11 +9,13 @@
  * real Playground through the integration harness.
  */
 import {
+  completionMessages,
   createFakeTldwServer,
   HARNESS_WAIT,
   renderPlayground,
   resetPlaygroundHarness,
   screen,
+  visibleNotifications,
   waitFor,
   waitForChatIdle,
   within,
@@ -77,4 +79,33 @@ describe("Playground cut-off replies (CM-03)", { timeout: 90_000 }, () => {
     expect(within(lastReply()).queryByRole("status", { name: "Output limit reached" })).toBeNull()
     expect(within(lastReply()).queryByText("Interrupted")).toBeNull()
   })
+  it("CM-01: Continue on a cut-off reply in a temporary chat sends the conversation and finishes the reply", async () => {
+    const server = createFakeTldwServer()
+    server.planCompletion({ chunks: ["Here is the first part", " of a long answer"], end: "eof" })
+    server.planCompletion({ reply: " and the rest of it." })
+    const view = await renderPlayground({ server })
+
+    await sendInTemporaryChat(view, "Explain everything")
+    const marker = await within(lastReply()).findByText("Interrupted", { selector: "[data-interruption-label]" }, HARNESS_WAIT)
+    const notice = marker.closest("[role='status']") as HTMLElement
+
+    await view.user.click(within(notice).getByRole("button", { name: "Continue from partial" }))
+    await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)
+    await waitForChatIdle()
+
+    // The conversation goes out with the cut-off reply last, so the model picks
+    // up where it stopped. It used to go out empty and fail with
+    // "Stream completion failed".
+    expect(completionMessages(server.completionRequests()[1])).toEqual([
+      { role: "user", content: "Explain everything" },
+      { role: "assistant", content: "Here is the first part of a long answer" }
+    ])
+    expect(visibleNotifications()).toEqual([])
+    await waitFor(
+      () => expect(lastReply()).toHaveTextContent("Here is the first part of a long answer and the rest of it."),
+      HARNESS_WAIT
+    )
+    expect(within(lastReply()).queryByText("Interrupted")).toBeNull()
+  })
+
 })
