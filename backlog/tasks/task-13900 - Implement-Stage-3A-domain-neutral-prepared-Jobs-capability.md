@@ -12,7 +12,7 @@ Execute the approved Stage 3A plan using subagent-driven development. Plan: Docs
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Immutable validated contracts and explicit secure schema on SQLite and PostgreSQL
+- [x] #1 Immutable validated contracts and explicit secure schema on SQLite and PostgreSQL
 - [ ] #2 Exact atomic admission, replay, and enlisted live fencing
 - [ ] #3 Retained effect proofs across transition, archive, and pruning
 - [ ] #4 Bounded retry-neutral acquisition episodes and semantic progress
@@ -24,6 +24,8 @@ Execute the approved Stage 3A plan using subagent-driven development. Plan: Docs
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-10-20: Requester selected subagent-driven execution (option 1). Isolated design branch rebased onto origin/dev df7c290fbf; current dev completion fences preserved. Open PR inventory max task ID 13870; no neutral workflow capability on dev. Relevant open PRs #2862 and #2738 do not implement this capability. Rebase encountered canonical task-note and ADR index conflicts; retaining upstream accepted ADRs and canonicalizing workstream tracking. Historical TASK-13450/13451 collide with unrelated dev records and must not be used for new mutations.
 Preflight verification correction: the initial 9 PostgreSQL skips came from the RUN_JOBS CI gate, not fixture unavailability. With RUN_JOBS=1 and local fixture access, all9 PostgreSQL completion atomicity cases passed (15 deselected,30 warnings,3.92s). Existing SQLite admission/idempotency/prepared-disposition/reclaim/prune and WorkerSDK suites:273 passed,772 warnings,16.11s. Required-workflow and task-format ratchet:64 passed,140 warnings,9.08s. Fixture server is available; new support RLS/schema certification remains mandatory.
+Task1 implementation commit ae3e133251:124 contract/schema cases passed across SQLite/PostgreSQL with no backend skips and95% scoped coverage;440 compatibility cases,60 workflow CI guards passed. New production Bandit zero findings/errors; new-file Ruff/format clean. Existing conftest3 import warnings preserved. Independent task review pending. Full repo collection attempted but stopped at unrelated Workspaces import of absent httpx2 after70416 collected items; no dependency changes or full-suite-green claim.
+Task1 review complete after fix3c3b007ae6: independent reviewer reproduced SQLite NUL suffix constraint bypass;20 red direct-insert failures added, fixed byte-bound/NUL-safe checks. Green120 SQLite+58 PostgreSQL=178 cases, zero backend skips; strict Bandit0/0 and new-file lint/format/compile clear. Scoped re-review confirmed addressed, no new findings. Task1 complete; proceeding to Task2 exact admission/enlisted fences. No production runtime credentials or activation claim; runtime-role enforcement is required in Tasks2/5.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
