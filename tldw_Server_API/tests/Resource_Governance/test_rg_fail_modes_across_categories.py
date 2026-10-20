@@ -128,3 +128,59 @@ async def test_peek_reports_unknown_headroom_when_redis_raises_connection_error(
 
     # Ingress headers and the character rate limiter's usage stats read this; it must not raise.
     assert await rg.peek_with_policy("user:x", ["requests"], "p") == {"requests": {"remaining": None, "reset": None}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_mode", ["fail_open", "fail_closed", "fallback_memory"])
+async def test_a_lease_committed_while_redis_is_down_frees_its_slot(fail_mode, monkeypatch):
+    # The RG conftest's test-only lease purge would drop the in-process lease for us; production never runs it.
+    monkeypatch.delenv("RG_TEST_PURGE_LEASES_BEFORE_RESERVE")
+    rg = _governor({"jobs": {"max_concurrent": 1, "ttl_sec": 60}, "scopes": ["user"], "fail_mode": fail_mode}, ns=f"rg_down_free_{fail_mode}")
+    rg._client = InMemoryAsyncRedis()
+    req = RGRequest(entity="user:x", categories={"jobs": {"units": 1}}, tags={"policy_id": "p"})
+    _decision, handle = await rg.reserve(req)
+
+    rg._client = _redis_down_client()
+    await rg.commit(handle)
+    decision, again = await rg.reserve(req)
+
+    assert decision.allowed and again
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_mode", ["fail_open", "fail_closed", "fallback_memory"])
+async def test_leases_count_per_worker_while_redis_is_down(fail_mode, monkeypatch):
+    # The RG conftest's test-only lease purge drops the in-process leases once Redis is down; production never runs it.
+    monkeypatch.delenv("RG_TEST_PURGE_LEASES_BEFORE_RESERVE")
+    rg = _governor({"jobs": {"max_concurrent": 1, "ttl_sec": 60}, "scopes": ["user"], "fail_mode": fail_mode}, ns=f"rg_down_count_{fail_mode}")
+    rg._client = _redis_down_client()
+    req = RGRequest(entity="user:x", categories={"jobs": {"units": 1}}, tags={"policy_id": "p"})
+
+    first, handle = await rg.reserve(req)
+    second, _ = await rg.reserve(req)
+    await rg.commit(handle)
+    third, _ = await rg.reserve(req)
+
+    assert [first.allowed, second.allowed, third.allowed] == [True, False, True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_mode", ["fail_open", "fail_closed", "fallback_memory"])
+async def test_renew_while_redis_is_down_keeps_the_lease(fail_mode, monkeypatch):
+    monkeypatch.delenv("RG_TEST_PURGE_LEASES_BEFORE_RESERVE")
+    now = [1000.0]
+    rg = _governor(
+        {"jobs": {"max_concurrent": 1, "ttl_sec": 60}, "scopes": ["user"], "fail_mode": fail_mode},
+        ns=f"rg_down_renew_{fail_mode}",
+        time_source=lambda: now[0],
+    )
+    rg._client = _redis_down_client()
+    req = RGRequest(entity="user:x", categories={"jobs": {"units": 1}}, tags={"policy_id": "p"})
+    first, handle = await rg.reserve(req)  # the lease runs to 1060
+
+    now[0] = 1050.0
+    await rg.renew(handle, 60)  # now to 1110
+    now[0] = 1070.0
+    second, _ = await rg.reserve(req)
+
+    assert first.allowed and not second.allowed

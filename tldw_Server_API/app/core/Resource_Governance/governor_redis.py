@@ -2134,7 +2134,11 @@ class RedisResourceGovernor(ResourceGovernor):
                         return
         try:
             hkey = self._keys.handle(handle_id)
-            data = await client.hgetall(hkey)
+            try:
+                data = await client.hgetall(hkey)
+            except _RG_NONCRITICAL_EXCEPTIONS:
+                # Redis is down: release from this process's copy, or the lease blocks its slot until TTL.
+                data = None
             if not data:
                 data = self._local_handles.get(handle_id) or {}
                 if not data:
@@ -2399,14 +2403,19 @@ class RedisResourceGovernor(ResourceGovernor):
         client = await self._client_get()
         try:
             hkey = self._keys.handle(handle_id)
-            data = await client.hgetall(hkey)
+            try:
+                data = await client.hgetall(hkey)
+            except _RG_NONCRITICAL_EXCEPTIONS:
+                # Redis is down: renew this process's copy, or the lease lapses after its TTL while still held.
+                data = self._local_handles.get(handle_id)
             if not data:
                 return
             policy_id = data.get("policy_id") or "default"
             entity = data.get("entity") or ""
             entity_scope, entity_value = self._parse_entity(entity)
             pol = self._get_policy(policy_id)
-            cats = json.loads(data.get("categories") or "{}")
+            cats_raw = data.get("categories")
+            cats = json.loads(cats_raw or "{}") if isinstance(cats_raw, str) else dict(cats_raw or {})
             members_raw = data.get("members")
             try:
                 members = json.loads(members_raw or "{}") if isinstance(members_raw, str) else (members_raw or {})
