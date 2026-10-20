@@ -1,7 +1,7 @@
 ---
 id: TASK-13451
 title: Honor approved cookie transport before multi-user model token gating
-status: In Progress
+status: Done
 ---
 
 ## Description
@@ -30,20 +30,21 @@ Qodo finding 6dbb452e-9278-4ba3-afb1-c4a3ff3598a2 / inline comment 4179450707 co
 Qodo follow-up verification: 65/65 focused native model-service tests passed, including three new actual-helper cases with no approval substitution. Broader native matrix passed 128/128 tests across seven suites. Scoped ESLint remains 0 errors/1 unchanged warning; TypeScript comparison remains 9 baseline/9 current diagnostics, none introduced. git diff --check passed. Production SHA256 remains 99cd70edc8ba5a8d6d1bbe3d7acce61a79f6a6502c9dadc64a09ca66bf663a47 and source-only +2/-1 patch is unchanged. PR scope and test names now explicitly distinguish generic approved-transport consumer behavior from native single-user-only approval. Resolving the exact Qodo thread with this scope correction and verified actual-helper evidence, not claiming new native multi-user support.
 2026-10-19 requester authorized PR3185 completion including review and CI. Original head65/65 focused tests pass. Preparing an isolated current-dev integration candidate while PR3197 qualifies; no remote refresh until this PR is next in merge order. Independent requesting-code-review of original patch found no actionable findings, but current-dev cache schema5, authorization scopes, cookie principal identity and cooldown metadata require regression fixture updates. Scope remains admission ordering and tests; no new ADR or native multi-user cookie support.
 Current-dev integration verification: original head65/65 focused; unadapted integration80passed2failed because forced refresh now writes cooldown metadata. Updated only new fixtures to schema5/authorization scope, real profile identity, and exact allowed cooldown writes (no catalog persistence). Adapted service82/82 and seven connected suites135/135 pass. Removing only production correction reproduces8failed74passed; restored correction82/82 passes. Scoped ESLint0errors/1pre-existing unused inputMods warning. Scoped TypeScript baseline/candidate40 identical diagnostics after normalizing shifted line numbers; no new diagnostics and no clean full-workspace typecheck claim. Bandit invoked from project venv on touched scope; TypeScript semantic security is outside its coverage. No ADR required; existing authorization and cache policy preserved. Cleanup-batch human Change summary waiver explicitly granted by requester in originating chat on2026-10-19.
+2026-10-20 publication qualification: rebased the independently approved5998522fbc candidate onto dev6a2cb72577 after PR3197 merged. Range-diff preserves the implementation patch exactly; no conflict resolutions. Fresh focused native model tests82/82 and canonical task contracts4/4 pass on this base. Prior seven-suite connected run135/135, eight red regression failures without the production correction, scoped lint and identical40 baseline/candidate TypeScript diagnostics remain applicable because the frontend patch and tooling are unchanged. Implementation and local verification are complete; normal PR3185 integration still requires all seven exact-head hosted gates at publication. No bypass or clean full-workspace typecheck claim. Added TASK13866 final cleanup record in the same completion batch.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Generic model-client cookie approval precedence correction only; not new native multi-user cookie authentication. Protected-profile authorization and non-persistent isolated cookie caches remain unchanged. Initial red/green: 54 baseline passed, 8 new red failures, 62 green. Qodo scope correction adds real-helper native acceptance/rejection coverage: 65 focused and 128 broader passed. Public PR3185 remains pending required checks and normal integration.
+Completed the minimal generic model-client cookie approval precedence correction, preserving native single-user-only approval, protected-profile authorization, and isolated non-persistent cookie catalogs. Native actual-helper and consumer-contract regression coverage is explicit. Current-base focused82/82 and task-format4/4 pass; seven connected suites135/135 pass and removing the correction reproduces eight failures. Scoped lint has no errors and TypeScript introduces no diagnostics over40 baseline findings. Independent requesting-code-review approved the implementation; hosted checks and integration are tracked by PR3185. The requester waived the cleanup-batch human Change summary gate. TypeScript semantic security remains outside Bandit coverage.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
