@@ -52,7 +52,11 @@ describe("sidepanel chat narrow layout contract", () => {
 
   it("keeps the header brand on one line and shows only the logo below 380px (XS-14)", () => {
     expect(headerSource).toContain(
-      'className="ml-2 whitespace-nowrap text-sm font-medium max-[379px]:hidden"',
+      'className="ml-2 min-w-0 truncate text-sm font-medium max-[379px]:hidden"',
+    )
+    // The brand truncates instead of pushing into the right-hand controls.
+    expect(headerSource).toContain(
+      '${activeTitle ? "hidden sm:flex" : "flex"} min-w-0 items-center text-text',
     )
   })
 

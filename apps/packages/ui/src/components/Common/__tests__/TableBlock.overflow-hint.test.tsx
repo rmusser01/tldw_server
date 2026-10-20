@@ -9,7 +9,10 @@ import { TableBlock } from "../TableBlock"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string) => fallback ?? _key
+    t: (_key: string, fallback?: string, options?: Record<string, unknown>) =>
+      String(fallback ?? _key).replace(/\{\{(\w+)\}\}/g, (_match, name) =>
+        String(options?.[name] ?? "")
+      )
   })
 }))
 
@@ -58,7 +61,50 @@ describe("TableBlock horizontal overflow hint (XS-14)", () => {
     render(<Table />)
     expect(screen.getByText("Scroll for more columns →")).toBeInTheDocument()
     expect(screen.getByTestId("table-scroll-fade")).toBeInTheDocument()
-    expect(screen.getByRole("region", { name: "Table" })).toHaveAttribute("tabindex", "0")
+    const region = screen.getByRole("region", { name: "Table: Option" })
+    expect(region).toHaveAttribute("tabindex", "0")
+    expect(region).toHaveClass("focus-visible:ring-2")
+  })
+
+  it("names each wide table by its caption when it has one", () => {
+    box.scrollWidth = 600
+    box.clientWidth = 320
+    render(
+      <TableBlock>
+        <table>
+          <caption>Pricing plans</caption>
+          <thead>
+            <tr>
+              <th>Plan</th>
+              <th>Price</th>
+            </tr>
+          </thead>
+        </table>
+      </TableBlock>
+    )
+    expect(screen.getByRole("region", { name: "Table: Pricing plans" })).toBeInTheDocument()
+  })
+
+  it("keeps one size watcher while the reply re-renders the table", () => {
+    let created = 0
+    class CountingResizeObserver {
+      constructor() {
+        created += 1
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", CountingResizeObserver)
+    try {
+      box.scrollWidth = 600
+      box.clientWidth = 320
+      const { rerender } = render(<Table />)
+      for (let i = 0; i < 4; i += 1) rerender(<Table />)
+      expect(created).toBe(1)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it("hides the hint once the reader scrolls to the last column", () => {

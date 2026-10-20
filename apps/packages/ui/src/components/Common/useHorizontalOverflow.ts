@@ -27,10 +27,13 @@ const measure = (element: HTMLElement | null): HorizontalOverflow => {
   }
 }
 
+/**
+ * The box's own size, its direct children and any table inside it are
+ * watched, plus later DOM changes inside it, so the measurement stays current
+ * without being rebuilt on every render of streamed content.
+ */
 export const useHorizontalOverflow = (
-  ref: React.RefObject<HTMLElement>,
-  /** Re-measure when this changes, for example the rendered content. */
-  contentKey?: unknown
+  ref: React.RefObject<HTMLElement>
 ): HorizontalOverflow => {
   const [state, setState] = React.useState<HorizontalOverflow>(NONE)
 
@@ -48,17 +51,66 @@ export const useHorizontalOverflow = (
     }
     update()
     element.addEventListener("scroll", update, { passive: true })
-    let observer: ResizeObserver | null = null
-    if (typeof ResizeObserver !== "undefined") {
-      observer = new ResizeObserver(update)
-      observer.observe(element)
-      Array.from(element.children).forEach((child) => observer?.observe(child))
+
+    const watched = new Set<Element>()
+    const resizeObserver =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update)
+    const watch = (target: Element) => {
+      if (!resizeObserver || watched.has(target)) return
+      watched.add(target)
+      resizeObserver.observe(target)
     }
+    const watchContent = () => {
+      Array.from(element.children).forEach(watch)
+      element.querySelectorAll("table").forEach(watch)
+    }
+    watch(element)
+    watchContent()
+
+    const mutationObserver =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(() => {
+            watchContent()
+            update()
+          })
+    mutationObserver?.observe(element, { childList: true, subtree: true })
+
     return () => {
       element.removeEventListener("scroll", update)
-      observer?.disconnect()
+      mutationObserver?.disconnect()
+      resizeObserver?.disconnect()
     }
-  }, [ref, contentKey])
+  }, [ref])
 
   return state
+}
+
+const MAX_TABLE_NAME_LENGTH = 60
+
+const readTableName = (element: HTMLElement | null): string | null => {
+  const source =
+    element?.querySelector("caption") ?? element?.querySelector("th")
+  const text = source?.textContent?.replace(/\s+/g, " ").trim()
+  if (!text) return null
+  return text.length > MAX_TABLE_NAME_LENGTH
+    ? `${text.slice(0, MAX_TABLE_NAME_LENGTH - 1)}…`
+    : text
+}
+
+/**
+ * A short name for a scrollable table, from its caption or else its first
+ * header cell (XS-14), so several wide tables in one reply are not all
+ * announced as the same "Table" region. Read only while `active`.
+ */
+export const useTableName = (
+  ref: React.RefObject<HTMLElement>,
+  active: boolean
+): string | null => {
+  const [name, setName] = React.useState<string | null>(null)
+  React.useLayoutEffect(() => {
+    if (!active) return
+    setName(readTableName(ref.current))
+  }, [active, ref])
+  return name
 }

@@ -11,7 +11,7 @@ import { useTranslation } from "react-i18next"
 import { IconButton } from "./IconButton"
 import { useArtifactsStore, type ArtifactTableData } from "@/store/artifacts"
 import { useUiModeStore } from "@/store/ui-mode"
-import { useHorizontalOverflow } from "./useHorizontalOverflow"
+import { useHorizontalOverflow, useTableName } from "./useHorizontalOverflow"
 
 interface TableProps {
   children: React.ReactNode
@@ -28,10 +28,8 @@ export const TableBlock: FC<TableProps> = ({ children }) => {
   const { t } = useTranslation("common")
   const ref = useRef<HTMLDivElement>(null)
   const scrollRegionRef = useRef<HTMLDivElement>(null)
-  const { overflows, hasMoreRight } = useHorizontalOverflow(
-    scrollRegionRef,
-    children
-  )
+  const { overflows, hasMoreRight } = useHorizontalOverflow(scrollRegionRef)
+  const tableName = useTableName(scrollRegionRef, overflows)
   const { openArtifact, isPinned } = useArtifactsStore()
   const uiMode = useUiModeStore((state) => state.mode)
   const isProMode = uiMode === "pro"
@@ -265,9 +263,17 @@ export const TableBlock: FC<TableProps> = ({ children }) => {
           <div
             ref={scrollRegionRef}
             data-testid="table-scroll-region"
-            className="overflow-x-auto"
+            className="overflow-x-auto rounded-b-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus"
             role={overflows ? "region" : undefined}
-            aria-label={overflows ? t("table.regionLabel", "Table") : undefined}
+            aria-label={
+              overflows
+                ? tableName
+                  ? t("table.regionLabelNamed", "Table: {{name}}", {
+                      name: tableName
+                    })
+                  : t("table.regionLabel", "Table")
+                : undefined
+            }
             tabIndex={overflows ? 0 : undefined}
           >
             <div
