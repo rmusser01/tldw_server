@@ -3414,15 +3414,15 @@ export const SidepanelForm = ({
 
   const shouldQueuePrimaryAction = isSending && isConnectionReady
   const primaryActionLabel = shouldQueuePrimaryAction
-    ? t("common:queue", "Queue")
+    ? t("playground:composer.queue.sendNext", "Send next")
     : t("common:send", "Send")
   const primaryActionTitle = personaSubmitDisabledReason ?? (!isConnectionReady
     ? t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") as string
     : shouldQueuePrimaryAction
-      ? t("playground:composer.queue.primaryWhileBusy", "Queue this request to run after the current response.") as string
+      ? t("playground:composer.queue.sendNextTitle", "Send this message after the current reply finishes.") as string
       : sendButtonTitle)
   const primaryActionAriaLabel = shouldQueuePrimaryAction
-    ? (t("playground:composer.queue.primaryAria", "Queue request") as string)
+    ? (t("playground:composer.queue.sendNextAria", "Send next, after the current reply") as string)
     : (t("playground:composer.submitAria", "Send message") as string)
   const v5DocumentProcessingFacet = React.useMemo(() => {
     if (contextFiles.length === 0) return null

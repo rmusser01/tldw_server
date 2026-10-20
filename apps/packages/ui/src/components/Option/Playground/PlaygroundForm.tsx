@@ -244,6 +244,7 @@ import {
   PlaygroundChatErrorBanner,
   usePlaygroundChatErrorBanner,
 } from "./PlaygroundChatErrorBanner";
+import { isComposerDraftEmpty } from "./composer-send-readiness";
 import { PlaygroundKnowledgeSection } from "./PlaygroundKnowledgeSection";
 import { PlaygroundMcpControl } from "./PlaygroundMcpControl";
 import { PlaygroundModelCatalogControls } from "./PlaygroundModelCatalogControls";
@@ -6062,6 +6063,15 @@ export const PlaygroundForm = ({
       onSubmitForm={handleComposerSend}
       characterChatSendBlocker={characterChatSendBlocker}
       submitDisabledReason={personaSubmitDisabledReason ?? modelCatalogSubmitDisabledReason}
+      isDraftEmpty={isComposerDraftEmpty({
+        message: form.values.message,
+        image: form.values.image,
+        documentCount: selectedDocuments.length,
+        fileCount: uploadedFiles.length,
+        hasImportedContext: Boolean(importedSidepanelContext),
+        pinnedResultCount: ragPinnedResults?.length ?? 0,
+        fileRetrievalEnabled: Boolean(fileRetrievalEnabled),
+      })}
       sendMenuOpen={sendMenuOpen}
       onSendMenuChange={handleSendMenuChange}
       t={t}

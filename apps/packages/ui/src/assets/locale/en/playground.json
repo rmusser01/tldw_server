@@ -541,6 +541,13 @@
     "collapsedMessageLabel": "[{lines, plural, one {# line} other {# lines}}/{chars, plural, one {# char} other {# chars}} in message]",
     "openModelSettings": "Open current chat settings",
     "stopStreaming": "Stop streaming response",
+    "stop": "Stop",
+    "nothingToSend": "Type a message to send.",
+    "queue": {
+      "sendNext": "Send next",
+      "sendNextTitle": "Send this message after the current reply finishes.",
+      "sendNextAria": "Send next, after the current reply"
+    },
     "connectionPlaceholder": "Connect to your tldw server in Settings to send messages and view media.",
     "connectNotice": "Connect to your tldw server in Settings to send messages and view media.",
     "connectionChipDisconnected": "Server: Not connected",

@@ -66,10 +66,14 @@ describe("sidepanel queued request contract", () => {
     expect(sidepanelFormSource).toContain(
       "const shouldQueueInsteadOfSend = isSending"
     )
-    expect(sidepanelFormSource).toContain('t("common:queue", "Queue")')
+    // CM-02: the busy-state button says what it does, as in the full page.
     expect(sidepanelFormSource).toContain(
-      't("playground:composer.queue.primaryAria", "Queue request")'
+      't("playground:composer.queue.sendNext", "Send next")'
     )
+    expect(sidepanelFormSource).toContain(
+      't("playground:composer.queue.sendNextAria", "Send next, after the current reply")'
+    )
+    expect(sidepanelFormSource).not.toContain('t("common:queue", "Queue")')
   })
 
   it("disables destructive cancel-and-run for server-backed turns", () => {

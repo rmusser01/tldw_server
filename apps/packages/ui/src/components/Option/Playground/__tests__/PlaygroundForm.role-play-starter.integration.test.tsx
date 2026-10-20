@@ -2318,6 +2318,8 @@ describe("PlaygroundForm role-play starter", () => {
     modelCatalogQueryOptions.loading = true
     const view = render(<PlaygroundForm droppedFiles={[]} />)
     try {
+    // Something to send, so only the catalog load holds Send back (CC-02).
+    fireEvent.change(screen.getByTestId("composer-textarea"), { target: { value: "Hello" } })
     const sends = within(view.container).getAllByRole("button", { name: "Send message", exact: true })
     for (const send of sends) {
       expect(send).toBeDisabled()
@@ -2340,6 +2342,8 @@ describe("PlaygroundForm role-play starter", () => {
     modelCatalogQueryOptions.loading = true
     const view = render(<PlaygroundForm droppedFiles={[]} />)
     try {
+      // Something to send, so only the catalog load could hold Send back (CC-02).
+      fireEvent.change(screen.getByTestId("composer-textarea"), { target: { value: "Hello" } })
       for (const send of within(view.container).getAllByRole("button", { name: "Send message", exact: true })) expect(send).toBeEnabled()
     } finally { view.unmount() }
   })

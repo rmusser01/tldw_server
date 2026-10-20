@@ -195,6 +195,8 @@ export interface PlaygroundSendControlProps {
   onStopListening: () => void
   onSubmitForm: () => void
   submitDisabledReason?: string | null
+  /** Nothing to send yet: Send is disabled until there is (CC-02). */
+  isDraftEmpty?: boolean
   characterChatSendBlocker?: PlaygroundSendBlocker | null
 
   // Send menu
@@ -226,6 +228,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       onSubmitForm,
       characterChatSendBlocker,
       submitDisabledReason,
+      isDraftEmpty,
       sendMenuOpen,
       onSendMenuChange,
       t
@@ -233,6 +236,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
 
     const activeCharacterSendBlocker =
       characterChatSendBlocker?.active === true
+    const nothingToSend = Boolean(isDraftEmpty) && !activeCharacterSendBlocker
     const shouldQueuePrimaryAction = isSending && isConnectionReady
     const primaryActionLabel = activeCharacterSendBlocker
       ? characterChatSendBlocker.actionLabel
@@ -242,7 +246,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
             "Preparing documents"
           )
       : shouldQueuePrimaryAction
-      ? t("common:queue", "Queue")
+      ? t("playground:composer.queue.sendNext", "Send next")
       : sendLabel
     const isMac =
       typeof navigator !== "undefined" &&
@@ -267,7 +271,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
             "Conversation history isn't ready yet. Wait for it to load, or start a new chat."
           ) as string)
       : shouldQueuePrimaryAction
-        ? (t("playground:composer.queue.primaryWhileBusy", "Queue this request to run after the current response.") as string)
+        ? (t("playground:composer.queue.sendNextTitle", "Send this message after the current reply finishes.") as string)
         : sendWhenEnter
           ? (t(
               "playground:composer.submitAriaEnter",
@@ -288,8 +292,8 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
           ) as string)
       : shouldQueuePrimaryAction
         ? (t(
-            "playground:composer.queue.primaryAria",
-            "Queue request"
+            "playground:composer.queue.sendNextAria",
+            "Send next, after the current reply"
           ) as string)
         : (t(
             "playground:composer.submitAria",
@@ -330,13 +334,18 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                 : "submit"
             }
             onClick={handlePrimaryButtonClick}
-            disabled={Boolean(submitDisabledReason) || compareNeedsMoreModels || isPreparingDocuments || isHistorySelectionPending || (!isConnectionReady && !activeCharacterSendBlocker)}
+            disabled={Boolean(submitDisabledReason) || nothingToSend || compareNeedsMoreModels || isPreparingDocuments || isHistorySelectionPending || (!isConnectionReady && !activeCharacterSendBlocker)}
             className={
               isMobileViewport
                 ? "min-h-[44px] min-w-[44px]"
                 : undefined
             }
-            title={submitDisabledReason ?? primaryActionTitle}
+            title={
+              submitDisabledReason ??
+              (nothingToSend && isConnectionReady && !isHistorySelectionPending
+                ? (t("playground:composer.nothingToSend", "Type a message to send.") as string)
+                : primaryActionTitle)
+            }
             aria-label={primaryActionAriaLabel}
           >
             <div
@@ -448,14 +457,17 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
         </Space.Compact>
         {isSending ? (
           <Tooltip title={t("tooltip.stopStreaming") as string}>
+            {/* A visible "Stop" label, not only an icon (CM-02). */}
             <TldwButton
               variant="outline"
               size={isMobileViewport ? "lg" : "md"}
-              iconOnly
               onClick={onStopStreaming}
               ariaLabel={t("tooltip.stopStreaming") as string}
             >
-              <StopCircleIcon className="size-5 sm:size-4" />
+              <span className="inline-flex items-center gap-1.5">
+                <StopCircleIcon className="size-5 sm:size-4" aria-hidden="true" />
+                <span>{t("playground:composer.stop", "Stop")}</span>
+              </span>
             </TldwButton>
           </Tooltip>
         ) : null}

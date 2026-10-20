@@ -4618,5 +4618,20 @@
   },
   "historySelection_roleAssistant": {
     "message": "Assistant"
+  },
+  "composer_stop": {
+    "message": "Stop"
+  },
+  "composer_queue_sendNext": {
+    "message": "Send next"
+  },
+  "composer_queue_sendNextTitle": {
+    "message": "Send this message after the current reply finishes."
+  },
+  "composer_queue_sendNextAria": {
+    "message": "Send next, after the current reply"
+  },
+  "composer_nothingToSend": {
+    "message": "Type a message to send."
   }
 }
