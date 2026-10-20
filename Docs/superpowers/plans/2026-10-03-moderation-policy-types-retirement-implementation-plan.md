@@ -18,13 +18,15 @@
 **Goal:** Prove unchanged supported moderation behavior and detect restoration of the retired hooks.
 **Success criteria:** Compilation, all moderation unit tests, Guardian/Chat/Audio downstream cases and Workflow moderation adapters pass. Ruff/Black and scoped Bandit have no new findings. requesting-code-review approves the exact authored diff; no Qodo request.
 **Tests:** Existing test_moderation*.py suite; Guardian/test_supervised_policy.py; Chat_NEW/integration/test_moderation.py; Audio/test_audio_transcription_retention_and_redaction.py selected redaction case; Workflows/adapters/test_llm_adapters.py -k moderation. Run inverse legacy-hook tests against baseline compiler/evaluator in this isolated worktree and restore exact PR bytes in finally, then rerun normally. Scan the two changed production modules with Bandit and changed tests excluding B101 only.
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage 3: Resolve CI and land
 **Goal:** Merge normally after the preceding authorized PRs land.
 **Success criteria:** Rebase only at the front of the serial sequence; keep requester-provided Change summary verbatim. Investigate any failures using logs and current source before scoped fixes, rerun affected tests, and refresh independent review. All seven required statuses pass on current-base exact head before normal merge.
 **Tests:** Required-context set, current dev ancestry, leased remote publication and merge verification. Old full-suite privilege/VN/email failures are historical leads, not proof of current failures.
-**Status:** Not Started
+**Status:** Complete
+
+Verified normal merge: PR #3176, e521605198dd311b94d2c63416bf07db3e5e7a0a from reviewed 9ceeb6f3cdc9bdb5914983f048cf632b42da8f96 at 2026-10-20T16:44:57Z, after all seven exact-head/current-base required statuses passed. Four report-only shards hit a public PostgreSQL mirror quota before checkout/tests; GitHub refused their single-job retry while the parent workflow runs. No whole-suite pass is claimed. The historical plan below remains intact.
 
 ## Historical implementation plan (2026-10-03)
 
