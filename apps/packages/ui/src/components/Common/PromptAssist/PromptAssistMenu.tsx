@@ -1,4 +1,5 @@
 import { Button } from "@/components/Common/Button"
+import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens"
 import type { PromptImproveModelSelection } from "@/services/prompt-improvement"
 import { Sparkles } from "lucide-react"
 import {
@@ -295,7 +296,8 @@ export function PromptAssistMenu({
         title={t("common:promptAssist.trigger", "Improve prompt")}
         className={
           compact
-            ? "inline-flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-md border border-border bg-surface p-0 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            ? // A ghost icon beside Send (CC-07): 44px for touch, 32px on wider screens.
+              `inline-flex h-11 w-11 min-h-[44px] min-w-[44px] ${COMPOSER_TOOLBAR_TOKENS.iconControl} items-center justify-center ${COMPOSER_TOOLBAR_TOKENS.radius} border border-transparent bg-transparent p-0 text-sm font-medium text-text-muted hover:bg-muted hover:text-text disabled:cursor-not-allowed disabled:opacity-50`
             : "inline-flex min-h-11 items-center gap-2 rounded-md border border-border bg-surface px-3 text-sm font-medium hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
         }
         disabled={disabled}

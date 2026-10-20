@@ -251,6 +251,7 @@ import { PlaygroundMcpControl } from "./PlaygroundMcpControl";
 import { PlaygroundModelCatalogControls } from "./PlaygroundModelCatalogControls";
 import { PlaygroundModeLauncher } from "./PlaygroundModeLauncher";
 import {
+  hasSendableDraft,
   PlaygroundAttachmentButton,
   PlaygroundSendControl,
   type PlaygroundSendBlocker,
@@ -6069,6 +6070,7 @@ export const PlaygroundForm = ({
       onSubmitForm={handleComposerSend}
       characterChatSendBlocker={characterChatSendBlocker}
       submitDisabledReason={personaSubmitDisabledReason ?? modelCatalogSubmitDisabledReason}
+      hasDraftContent={hasSendableDraft({ message: form.values.message, image: form.values.image, attachmentCount: selectedDocuments.length + uploadedFiles.length, hasImportedContext: Boolean(importedSidepanelContext) })}
       sendMenuOpen={sendMenuOpen}
       onSendMenuChange={handleSendMenuChange}
       t={t}

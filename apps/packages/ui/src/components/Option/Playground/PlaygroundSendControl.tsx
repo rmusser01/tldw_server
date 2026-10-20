@@ -14,6 +14,7 @@ import {
   Settings2
 } from "lucide-react"
 import { Button as TldwButton } from "@/components/Common/Button"
+import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens"
 import type { KnowledgeTab } from "@/components/Knowledge"
 
 // ---------------------------------------------------------------------------
@@ -172,6 +173,27 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
 // Send control props
 // ---------------------------------------------------------------------------
 
+/**
+ * Whether the composer holds anything a send would deliver: text, an image,
+ * attached documents or files, or page context handed over from the side
+ * panel. Mirrors the empty-draft check in the submit path.
+ */
+export const hasSendableDraft = ({
+  message,
+  image,
+  attachmentCount = 0,
+  hasImportedContext = false
+}: {
+  message?: string | null
+  image?: string | null
+  attachmentCount?: number
+  hasImportedContext?: boolean
+}): boolean =>
+  Boolean(message?.trim()) ||
+  Boolean(image) ||
+  attachmentCount > 0 ||
+  hasImportedContext
+
 export type PlaygroundSendBlocker = {
   active: boolean
   title: string
@@ -196,6 +218,8 @@ export interface PlaygroundSendControlProps {
   onSubmitForm: () => void
   submitDisabledReason?: string | null
   characterChatSendBlocker?: PlaygroundSendBlocker | null
+  /** False while there is nothing to send; Send is dimmed then (CC-07). */
+  hasDraftContent?: boolean
 
   // Send menu
   sendMenuOpen: boolean
@@ -226,6 +250,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       onSubmitForm,
       characterChatSendBlocker,
       submitDisabledReason,
+      hasDraftContent = true,
       sendMenuOpen,
       onSendMenuChange,
       t
@@ -297,6 +322,13 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
           ) as string)
     const compactMobileBlockerAction =
       isMobileViewport && activeCharacterSendBlocker
+    // Dim (but keep) the plain Send action while the draft is empty.
+    const draftEmpty =
+      !hasDraftContent &&
+      !activeCharacterSendBlocker &&
+      !shouldQueuePrimaryAction &&
+      !isPreparingDocuments
+    const controlSize = isMobileViewport ? "large" : "middle"
     const handlePrimaryButtonClick =
       activeCharacterSendBlocker || shouldQueuePrimaryAction
         ? () => {
@@ -317,13 +349,8 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
           }`}
         >
           <Button
-            size={
-              isMobileViewport
-                ? "large"
-                : isProMode
-                  ? "middle"
-                  : "small"
-            }
+            type="primary"
+            size={controlSize}
             htmlType={
               activeCharacterSendBlocker || shouldQueuePrimaryAction
                 ? "button"
@@ -332,10 +359,11 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
             onClick={handlePrimaryButtonClick}
             disabled={Boolean(submitDisabledReason) || compareNeedsMoreModels || isPreparingDocuments || isHistorySelectionPending || (!isConnectionReady && !activeCharacterSendBlocker)}
             className={
-              isMobileViewport
-                ? "min-h-[44px] min-w-[44px]"
-                : undefined
+              `${isMobileViewport ? "min-h-[44px] min-w-[44px]" : ""} ${
+                draftEmpty ? "opacity-60" : ""
+              }`.trim() || undefined
             }
+            data-draft-empty={draftEmpty ? "true" : undefined}
             title={submitDisabledReason ?? primaryActionTitle}
             aria-label={primaryActionAriaLabel}
           >
@@ -366,13 +394,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                 </svg>
               ) : null}
               {!compactMobileBlockerAction ? (
-                <span
-                  className={
-                    isProMode
-                      ? ""
-                      : "text-[11px] font-semibold uppercase tracking-[0.12em]"
-                  }
-                >
+                <span className={COMPOSER_TOOLBAR_TOKENS.label}>
                   {primaryActionLabel}
                 </span>
               ) : null}
@@ -402,13 +424,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
             }}
           >
             <Button
-              size={
-                isMobileViewport
-                  ? "large"
-                  : isProMode
-                    ? "middle"
-                    : "small"
-              }
+              size={controlSize}
               disabled={compareNeedsMoreModels || isPreparingDocuments}
               className={
                 isMobileViewport
