@@ -163,9 +163,11 @@ Provider retries, no-progress episodes, and receipt capacity are distinct:
   the no-progress budget. Its immutable limit is 1-5 (default 5).
 - A new typed semantic progress proof resets no-progress once. Replaying it,
   including after restart or in another epoch, cannot reset again.
-- The fifth empty epoch fails with `no_progress_exhausted` and its own committed
-  failure proof. A continuation call returns `EXHAUSTED` without acknowledging
-  its original continuation key. This is not a capacity-denial rollback.
+- Reaching the configured no-progress limit (the fifth empty epoch at the
+  default and maximum limit of 5) fails with `no_progress_exhausted` and its own
+  committed failure proof. A continuation call returns `EXHAUSTED` without
+  acknowledging its original continuation key. This is not a capacity-denial
+  rollback.
 - Action and progress proof namespaces each have 32768 slots per root. Keys
   share the root namespace; release never recycles a slot. Capacity denial
   raises `WorkflowFenceError(EXHAUSTED)` and makes the transaction sticky
