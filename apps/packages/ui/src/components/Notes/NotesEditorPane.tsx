@@ -45,6 +45,7 @@ import type { NoteStudioState, NotesStudioPaperSize } from './notes-studio-types
 import type { NotesTitleSuggestStrategy } from '@/services/settings/ui-settings'
 import type { NotesSaveIssue } from './hooks/useNotesEditorState'
 import { notesEditorSupportHint } from './notes-editor-hints'
+import { relatedNotesNotListedElsewhere, useConnectionsDisclosure } from './notes-connections'
 import {
   NOTES_EDITOR_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
@@ -605,6 +606,10 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
     </div>
   )
 
+  // NE-10: list each manual link once and keep Connections open across notes.
+  const relatedNotes = relatedNotesNotListedElsewhere(noteRelations)
+  const connectionsDisclosure = useConnectionsDisclosure(noteNeighborsRequestKey, onRequestNeighbors)
+
   const renderRelationMeta = (
     relationLabel?: string,
     unavailableReason?: string | null
@@ -1098,9 +1103,9 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 )}
               </Tooltip>
             }
-            defaultOpen={!onRequestNeighbors}
+            defaultOpen={!onRequestNeighbors || connectionsDisclosure.initiallyOpen}
             storageKey={onRequestNeighbors ? undefined : "connections"}
-            onOpenChange={(open) => { if (open) onRequestNeighbors?.() }}
+            onOpenChange={connectionsDisclosure.onOpenChange}
             testId="notes-section-connections"
           >
           {noteNeighborsUnavailable ? (
@@ -1290,7 +1295,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     </Button>
                   )}
                 </div>
-              ) : noteRelations.related.length === 0 ? (
+              ) : relatedNotes.length === 0 ? (noteRelations.manualLinks.length > 0 ? null : (
                 <Typography.Text
                   type="secondary"
                   className="block mt-2 text-[12px] text-text-muted"
@@ -1300,9 +1305,9 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     defaultValue: 'No related notes yet.'
                   })}
                 </Typography.Text>
-              ) : (
+              )) : (
                 <div className="mt-2 flex flex-wrap gap-1.5" data-testid="notes-related-list">
-                  {noteRelations.related.map((note) => (
+                  {relatedNotes.map((note) => (
                     <div
                       key={`related-${note.id}`}
                       className="rounded border border-border bg-surface"

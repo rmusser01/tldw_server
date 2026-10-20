@@ -273,16 +273,16 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
     renderPage()
     await seedAndSaveNote()
 
-    const relatedList = await screen.findByTestId('notes-related-list')
+    const manualList = await screen.findByTestId('notes-manual-links-list')
     const backlinksList = await screen.findByTestId('notes-backlinks-list')
-    expect(within(relatedList).getByRole('button', { name: 'Linked note' })).toBeInTheDocument()
+    expect(within(manualList).getByRole('button', { name: 'Linked note' })).toBeInTheDocument()
     expect(within(backlinksList).getByRole('button', { name: 'Referencing note' })).toBeInTheDocument()
 
     const backlinksPanel = screen.getByTestId('notes-backlinks-heading').closest('div')
     expect(backlinksPanel).toHaveTextContent('Referencing note')
     expect(backlinksPanel).not.toHaveTextContent('Linked note')
 
-    fireEvent.click(within(relatedList).getByRole('button', { name: 'Linked note' }))
+    fireEvent.click(within(manualList).getByRole('button', { name: 'Linked note' }))
 
     await waitFor(() => {
       const called = mockBgRequest.mock.calls.some(([request]) => String(request?.path || '') === '/api/v1/notes/note-b')
@@ -341,10 +341,10 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
     renderPage()
     await seedAndSaveNote()
 
-    const relatedList = await screen.findByTestId('notes-related-list')
-    const linkedNoteChip = within(relatedList).getByTestId('notes-related-note-note-b')
+    const linkedNoteChip = await screen.findByTestId('notes-manual-link-e1')
     expect(linkedNoteChip).toHaveTextContent('Linked note')
     expect(linkedNoteChip).toHaveTextContent('Manual link')
+    const relatedList = await screen.findByTestId('notes-related-list')
     expect(relatedList).not.toHaveTextContent('web: media-77')
     expect(relatedList).not.toHaveTextContent('Note source:web:media-77')
 
@@ -398,12 +398,9 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
     renderPage()
     await seedAndSaveNote()
 
-    const relatedChip = await screen.findByTestId('notes-related-note-note-deleted')
-    expect(relatedChip).toHaveTextContent('Archived target')
-    expect(relatedChip).toHaveTextContent(registryLabels.unavailable)
-    expect(within(relatedChip).getByRole('button', { name: /Archived target/i })).toBeDisabled()
-
     const manualLinkChip = await screen.findByTestId('notes-manual-link-e_deleted')
+    // Listed once, as a manual link (NE-10).
+    expect(screen.queryByTestId('notes-related-note-note-deleted')).not.toBeInTheDocument()
     expect(manualLinkChip).toHaveTextContent('Archived target')
     expect(manualLinkChip).toHaveTextContent(registryLabels.unavailable)
     expect(vi.mocked(getDesignSystemState)).toHaveBeenCalledWith('unavailable')
@@ -412,7 +409,7 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
       .find((button) => button.getAttribute('aria-label')?.startsWith('Archived target'))
     expect(manualOpenButton).toBeDisabled()
 
-    fireEvent.click(within(relatedChip).getByRole('button', { name: /Archived target/i }))
+    fireEvent.click(manualOpenButton!)
     await waitFor(() => {
       const openedDeletedTarget = mockBgRequest.mock.calls.some(
         ([request]) => String(request?.path || '') === '/api/v1/notes/note-deleted'
@@ -454,7 +451,7 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
             { id: 'note-a', type: 'note', label: 'Graph seed note' },
             { id: 'note-b', type: 'note', label: 'Linked note' }
           ],
-          edges: [{ id: 'e1', source: 'note-a', target: 'note-b', type: 'manual', directed: false }]
+          edges: [{ id: 'e1', source: 'note-a', target: 'note-b', type: 'wikilink', directed: true }]
         }
       }
       if (path === '/api/v1/notes/note-b' && method === 'GET') {
@@ -489,6 +486,108 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
       )
       expect(putCalled).toBe(true)
     })
+  })
+
+  it('lists a manual link once in Connections (NE-10)', async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || '')
+      const method = String(request.method || 'GET').toUpperCase()
+      if (path.startsWith('/api/v1/notes/?')) {
+        return { items: [], pagination: { total_items: 0, total_pages: 1 } }
+      }
+      if (path === '/api/v1/notes/' && method === 'POST') {
+        return { id: 'note-a', version: 1, last_modified: '2026-02-18T10:00:00.000Z' }
+      }
+      if (path === '/api/v1/notes/note-a' && method === 'GET') {
+        return {
+          id: 'note-a',
+          title: 'Graph seed note',
+          content: 'Seed content',
+          metadata: { keywords: [] },
+          version: 1,
+          last_modified: '2026-02-18T10:00:00.000Z'
+        }
+      }
+      if (path.startsWith('/api/v1/notes/note-a/neighbors')) {
+        return {
+          nodes: [
+            { id: 'note-a', type: 'note', label: 'Graph seed note' },
+            { id: 'note-b', type: 'note', label: 'My first note' }
+          ],
+          edges: [{ id: 'e1', source: 'note-a', target: 'note-b', type: 'manual', directed: false }]
+        }
+      }
+      return {}
+    })
+
+    renderPage()
+    await seedAndSaveNote()
+
+    const panels = await screen.findByTestId('notes-graph-relation-panels')
+    await within(panels).findByTestId('notes-manual-link-e1')
+    expect(within(panels).getAllByRole('button', { name: 'My first note' })).toHaveLength(1)
+    // No "No related notes yet." under a link that is right there.
+    expect(screen.queryByTestId('notes-related-empty')).not.toBeInTheDocument()
+  })
+
+  it('keeps Connections open when opening another note from it (NE-10)', async () => {
+    const noteRecord = (id: string, title: string) => ({
+      id,
+      title,
+      content: `${title} body`,
+      metadata: { keywords: [] },
+      version: 1,
+      last_modified: '2026-02-18T10:00:00.000Z'
+    })
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || '')
+      const method = String(request.method || 'GET').toUpperCase()
+      if (path.startsWith('/api/v1/notes/?')) {
+        return { items: [], pagination: { total_items: 0, total_pages: 1 } }
+      }
+      if (path === '/api/v1/notes/' && method === 'POST') {
+        return { id: 'note-a', version: 1, last_modified: '2026-02-18T10:00:00.000Z' }
+      }
+      if (path === '/api/v1/notes/note-a' && method === 'GET') return noteRecord('note-a', 'Graph seed note')
+      if (path === '/api/v1/notes/note-b' && method === 'GET') return noteRecord('note-b', 'Linked note')
+      if (path.startsWith('/api/v1/notes/note-a/neighbors')) {
+        return {
+          nodes: [
+            { id: 'note-a', type: 'note', label: 'Graph seed note' },
+            { id: 'note-b', type: 'note', label: 'Linked note' }
+          ],
+          edges: [{ id: 'e1', source: 'note-a', target: 'note-b', type: 'wikilink', directed: true }]
+        }
+      }
+      if (path.startsWith('/api/v1/notes/note-b/neighbors')) {
+        return {
+          nodes: [
+            { id: 'note-b', type: 'note', label: 'Linked note' },
+            { id: 'note-a', type: 'note', label: 'Graph seed note' }
+          ],
+          edges: [{ id: 'e1', source: 'note-a', target: 'note-b', type: 'wikilink', directed: true }]
+        }
+      }
+      return {}
+    })
+
+    renderPage()
+    await seedAndSaveNote()
+
+    const relatedList = await screen.findByTestId('notes-related-list')
+    fireEvent.click(within(relatedList).getByRole('button', { name: 'Linked note' }))
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Title')).toHaveValue('Linked note')
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('notes-section-connections-toggle')).toHaveAttribute(
+        'aria-expanded',
+        'true'
+      )
+    })
+    const backlinksList = await screen.findByTestId('notes-backlinks-list')
+    expect(within(backlinksList).getByRole('button', { name: 'Graph seed note' })).toBeInTheDocument()
   })
 
   it('shows loading and empty states for relation panels', async () => {

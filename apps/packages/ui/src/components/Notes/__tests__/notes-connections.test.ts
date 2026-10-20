@@ -1,0 +1,77 @@
+import { act, renderHook } from "@testing-library/react"
+import { describe, expect, it, vi } from "vitest"
+import {
+  relatedNotesNotListedElsewhere,
+  useConnectionsDisclosure
+} from "../notes-connections"
+
+const key = (authority: string, noteId: string) => JSON.stringify([authority, noteId])
+
+describe("relatedNotesNotListedElsewhere (NE-10)", () => {
+  it("drops related notes that are already manual links", () => {
+    const related = [{ id: "b" }, { id: "c" }]
+    expect(
+      relatedNotesNotListedElsewhere({ related, manualLinks: [{ noteId: "b" }] })
+    ).toEqual([{ id: "c" }])
+  })
+})
+
+describe("useConnectionsDisclosure (NE-10)", () => {
+  it("starts closed and requests connections only when opened", () => {
+    const onRequest = vi.fn()
+    const { result } = renderHook(
+      ({ requestKey }) => useConnectionsDisclosure(requestKey, onRequest),
+      { initialProps: { requestKey: key("alice", "n1") } }
+    )
+    expect(result.current.initiallyOpen).toBe(false)
+    expect(onRequest).not.toHaveBeenCalled()
+
+    act(() => result.current.onOpenChange(true))
+    expect(onRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("reopens and loads the next note after the user left it open", () => {
+    const onRequest = vi.fn()
+    const { result, rerender } = renderHook(
+      ({ requestKey }) => useConnectionsDisclosure(requestKey, onRequest),
+      { initialProps: { requestKey: key("alice", "n1") } }
+    )
+    act(() => result.current.onOpenChange(true))
+    onRequest.mockClear()
+
+    rerender({ requestKey: key("alice", "n2") })
+    expect(result.current.initiallyOpen).toBe(true)
+    expect(onRequest).toHaveBeenCalledTimes(1)
+  })
+
+  it("stays closed on the next note after the user closed it", () => {
+    const onRequest = vi.fn()
+    const { result, rerender } = renderHook(
+      ({ requestKey }) => useConnectionsDisclosure(requestKey, onRequest),
+      { initialProps: { requestKey: key("alice", "n1") } }
+    )
+    act(() => result.current.onOpenChange(true))
+    act(() => result.current.onOpenChange(false))
+    onRequest.mockClear()
+
+    rerender({ requestKey: key("alice", "n2") })
+    expect(result.current.initiallyOpen).toBe(false)
+    expect(onRequest).not.toHaveBeenCalled()
+  })
+
+  it("forgets the choice when the account changes", () => {
+    const onRequest = vi.fn()
+    const { result, rerender } = renderHook(
+      ({ requestKey }) => useConnectionsDisclosure(requestKey, onRequest),
+      { initialProps: { requestKey: key("alice", "n1") } }
+    )
+    act(() => result.current.onOpenChange(true))
+    onRequest.mockClear()
+
+    rerender({ requestKey: key("bob", "n1") })
+    expect(result.current.initiallyOpen).toBe(false)
+    rerender({ requestKey: key("alice", "n2") })
+    expect(result.current.initiallyOpen).toBe(false)
+    expect(onRequest).not.toHaveBeenCalled()
+  })
+})
