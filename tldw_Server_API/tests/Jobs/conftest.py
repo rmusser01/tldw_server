@@ -218,14 +218,33 @@ def _workflow_pg_case_factory(request, monkeypatch):
             )
             created.append((dsn, role))
             conn.execute(sql.SQL("GRANT USAGE ON SCHEMA public TO {}").format(sql.Identifier(role)))
+            tables = (
+                "jobs",
+                "jobs_archive",
+                "job_events",
+                "job_counters",
+                "job_queue_controls",
+                "job_dependencies",
+                "job_idempotency_receipts",
+                "job_attachments",
+                "job_sla_policies",
+            )
             conn.execute(
-                sql.SQL("GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO {}").format(
-                    sql.Identifier(role)
+                sql.SQL("GRANT SELECT,INSERT,UPDATE,DELETE ON {} TO {}").format(
+                    sql.SQL(",").join(map(sql.Identifier, tables)), sql.Identifier(role)
                 )
             )
-            conn.execute(
-                sql.SQL("GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO {}").format(sql.Identifier(role))
-            )
+            sequences = conn.execute(
+                "SELECT pg_get_serial_sequence(table_name,column_name) FROM information_schema.columns "
+                "WHERE table_schema='public' AND table_name=ANY(%s) AND column_default LIKE 'nextval%%'",
+                (list(tables),),
+            ).fetchall()
+            for (sequence,) in sequences:
+                conn.execute(
+                    sql.SQL("GRANT USAGE,SELECT ON {} TO {}").format(
+                        sql.Identifier(*sequence.split(".")), sql.Identifier(role)
+                    )
+                )
         monkeypatch.setenv("JOBS_PG_SKIP_SCHEMA_INIT", "true")
         monkeypatch.setenv("JOBS_PG_RLS_ENABLE", "true")
         monkeypatch.delenv("JOBS_PG_RLS_ROLE", raising=False)
@@ -252,6 +271,42 @@ def workflow_pg_case(_workflow_pg_case_factory):
     case = _workflow_pg_case_factory()
     case.install()
     return case
+
+
+@pytest.fixture(params=["sqlite", pytest.param("postgres", marks=pytest.mark.pg_jobs)])
+def workflow_example_factory(request, tmp_path, monkeypatch, _workflow_pg_case_factory):
+    """Fresh state per Hypothesis example; reuse the fixture-owned PG database."""
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.tests.Jobs.workflow_test_support import WorkflowCase
+
+    monkeypatch.setenv("JOBS_ALLOWED_QUEUES_EMBEDDINGS", "workflow")
+    pg_case = None
+    serial = 0
+
+    def fresh_case():
+        nonlocal pg_case, serial
+        serial += 1
+        if request.param == "sqlite":
+            case = WorkflowCase.from_manager(JobManager(db_path=tmp_path / f"example-{serial}.db", backend="sqlite"))
+            case.install()
+            return case
+        if pg_case is None:
+            pg_case = _workflow_pg_case_factory()
+            pg_case.install()
+            pg_case.install_effect_guard()
+        with pg_case.connection() as conn:
+            conn.execute(
+                "TRUNCATE job_workflow_effect_receipts,job_workflow_roots,jobs,jobs_archive,job_events,"
+                "job_counters,job_dependencies,job_idempotency_receipts,job_attachments"
+            )
+            conn.execute("UPDATE workflow_effect_domain SET applications=0")
+            conn.commit()
+        case = WorkflowCase.from_manager(pg_case.manager)
+        case.installer = pg_case.installer
+        case.guard_installed = True
+        return case
+
+    return fresh_case
 
 
 @pytest.fixture(autouse=True)

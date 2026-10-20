@@ -512,8 +512,10 @@ def test_pg_failed_role_setup_cannot_fall_back_to_admin(workflow_pg_case, monkey
     import psycopg
 
     monkeypatch.setenv("JOBS_PG_RLS_ROLE", "workflow_role_does_not_exist")
-    with pytest.raises(psycopg.Error):
+    with pytest.raises(facts.WorkflowFenceError) as error:
         case.admit()
+    assert error.value.outcome is WorkflowOutcome.UNAVAILABLE
+    assert isinstance(error.value.__cause__, psycopg.errors.InvalidParameterValue)
     assert case.job_count() == 0
 
 

@@ -31,6 +31,21 @@ ROOT_REFERENCE = "00000000-0000-4000-8000-000000000001"
 ROOT_UUID = "00000000-0000-4000-8000-000000000002"
 
 
+@dataclass(frozen=True)
+class WorkflowObservation:
+    """Test-only SQL snapshot, not a production telemetry or authority API."""
+
+    root_uuid: str
+    retry_count: int
+    no_progress_count: int
+    effect_fingerprints: dict[str, str]
+    status: str
+    current_epoch: int
+    last_closed_epoch: int
+    progress_flag: int
+    released: dict[str, bool]
+
+
 @dataclass
 class WorkflowCase:
     """An ordinary manager plus an inert capability and privileged installer."""
@@ -43,6 +58,106 @@ class WorkflowCase:
     guard_installed: bool = False
     pending_lease: Any = None
     current_lease: Any = None
+    runtime_connection: Any = None
+
+    def observe(self) -> WorkflowObservation:
+        """Read persisted active/archive state and all proofs independently."""
+        support = self.support_row()
+        row = self.job_row()
+        with self.connection() as conn:
+            if row is None:
+                cursor = self.execute(conn, "SELECT * FROM jobs_archive WHERE uuid=?", (self.root.job_uuid,))
+                row = dict(zip([column[0] for column in cursor.description], cursor.fetchone()))
+            receipts = self.execute(
+                conn,
+                "SELECT effect_key,facts_fingerprint,released FROM job_workflow_effect_receipts WHERE job_uuid=?",
+                (self.root.job_uuid,),
+            ).fetchall()
+        return WorkflowObservation(
+            support["job_uuid"],
+            row["retry_count"] or 0,
+            support["no_progress_count"],
+            {key: fingerprint for key, fingerprint, _ in receipts},
+            row["status"],
+            support["current_epoch"],
+            support["last_closed_epoch"],
+            support["progress_flag"],
+            {key: bool(released) for key, _, released in receipts},
+        )
+
+    def serialized_support(self) -> str:
+        with self.connection() as conn:
+            roots = [tuple(row) for row in conn.execute("SELECT * FROM job_workflow_roots")]
+            receipts = [tuple(row) for row in conn.execute("SELECT * FROM job_workflow_effect_receipts")]
+        return json.dumps([roots, receipts], default=str)
+
+    def runtime_role_flags(self) -> tuple[bool, bool]:
+        with self.connection(runtime=True) as conn:
+            return tuple(
+                conn.execute("SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user").fetchone()
+            )
+
+    @contextmanager
+    def force_rls_setup_failure(self):
+        """Exercise the real SET LOCAL ROLE failure, not a mocked store."""
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {"JOBS_PG_RLS_ROLE": "workflow_ungranted_runtime_role"}):
+            yield
+
+    @contextmanager
+    def reused_runtime_connection(self):
+        with self.connection(runtime=True) as conn:
+            self.runtime_connection = conn
+            try:
+                yield conn
+            finally:
+                self.runtime_connection = None
+
+    def set_owner(self, owner: str | None) -> None:
+        self.runtime_connection.execute("SELECT set_config('app.owner_user_id',%s,true)", (owner or "",))
+
+    def visible_receipt_count(self) -> int:
+        return self.runtime_connection.execute("SELECT COUNT(*) FROM job_workflow_effect_receipts").fetchone()[0]
+
+    def visible_root_count(self) -> int:
+        return self.runtime_connection.execute("SELECT COUNT(*) FROM job_workflow_roots").fetchone()[0]
+
+    def direct_support_crud(self, owner, verb):
+        """Operate directly as the runtime role on both owned support tables."""
+        conn = self.runtime_connection
+        if verb == "insert_root":
+            return self.insert_root(conn, owner_user_id=owner, job_uuid=str(uuid4()), idempotency_key=str(uuid4()))
+        if verb == "insert_receipt":
+            return self.insert(
+                conn,
+                "job_workflow_effect_receipts",
+                self.receipt_values(owner_user_id=owner, job_uuid=self.root.job_uuid, effect_key="f" * 64, slot=2),
+            )
+        statements = {
+            "select": (
+                "SELECT COUNT(*) FROM job_workflow_roots WHERE owner_user_id=?",
+                "SELECT COUNT(*) FROM job_workflow_effect_receipts WHERE owner_user_id=?",
+            ),
+            "update": (
+                "UPDATE job_workflow_roots SET no_progress_count=no_progress_count WHERE owner_user_id=?",
+                "UPDATE job_workflow_effect_receipts SET released=released WHERE owner_user_id=?",
+            ),
+            "delete": (
+                "DELETE FROM job_workflow_effect_receipts WHERE owner_user_id=?",
+                "DELETE FROM job_workflow_roots WHERE owner_user_id=?",
+            ),
+            "release": ("UPDATE job_workflow_effect_receipts SET released=1 WHERE owner_user_id=?",),
+        }
+        cursors = [self.execute(conn, statement, (owner,)) for statement in statements[verb]]
+        return tuple(cursor.fetchone()[0] if verb == "select" else cursor.rowcount for cursor in cursors)
+
+    def complete_for_owner(self, owner):
+        self.command = replace(
+            self.command, owner_user_id=owner, reference_id=str(uuid4()), idempotency_key=str(uuid4())
+        )
+        self.admit()
+        return self.apply(self.effect(uuid4().hex * 2, WorkflowAction.COMPLETE), self.acquire())
 
     def effect(self, key, action, reason=None):
         return WorkflowEffect(

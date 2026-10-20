@@ -39,27 +39,31 @@ _OWNER = "owner_user_id=NULLIF(current_setting('app.owner_user_id',true),'')"
 
 def begin_runtime(connection: Any, owner_user_id: str) -> int:
     """Fail closed on role/setup errors, with transaction-local tenant scope."""
-    from psycopg import IsolationLevel, sql
+    from psycopg import IsolationLevel, errors, sql
 
     # psycopg begins once on the first statement; an explicit BEGIN here
     # would issue a second BEGIN inside its implicit transaction.
-    connection.isolation_level = IsolationLevel.READ_COMMITTED
-    role = os.getenv("JOBS_PG_RLS_ROLE", "").strip()
-    if role:
-        connection.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
-    flags = connection.execute("SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user").fetchone()
-    if flags is None or any(flags):
-        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
-    connection.execute(
-        "SELECT set_config('app.owner_user_id',%s,true),set_config('app.is_admin','false',true),set_config('app.domain_allowlist','',true),set_config('row_security','on',true)",
-        (owner_user_id,),
-    )
-    actual = connection.execute(
-        "SELECT current_setting('app.owner_user_id'),current_setting('app.is_admin'),current_setting('app.domain_allowlist'),current_setting('row_security')"
-    ).fetchone()
-    if actual != (owner_user_id, "false", "", "on"):
-        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
-    return connection.execute("SELECT txid_current()").fetchone()[0]
+    try:
+        connection.isolation_level = IsolationLevel.READ_COMMITTED
+        role = os.getenv("JOBS_PG_RLS_ROLE", "").strip()
+        if role:
+            connection.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
+        flags = connection.execute("SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user").fetchone()
+        if flags is None or any(flags):
+            raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+        connection.execute(
+            "SELECT set_config('app.owner_user_id',%s,true),set_config('app.is_admin','false',true),set_config('app.domain_allowlist','',true),set_config('row_security','on',true)",
+            (owner_user_id,),
+        )
+        actual = connection.execute(
+            "SELECT current_setting('app.owner_user_id'),current_setting('app.is_admin'),current_setting('app.domain_allowlist'),current_setting('row_security')"
+        ).fetchone()
+        if actual != (owner_user_id, "false", "", "on"):
+            raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+        return connection.execute("SELECT txid_current()").fetchone()[0]
+    except (errors.InsufficientPrivilege, errors.InvalidParameterValue) as error:
+        # Keep known setup denials closed without hiding unrelated driver errors.
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE) from error
 
 
 def rows(connection: Any, statement: str, parameters: tuple = ()) -> list[dict]:
