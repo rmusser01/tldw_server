@@ -364,3 +364,26 @@ async def test_non_strict_single_test_preserves_scoreable_error_compatibility(
     assert result["actual"]["error_code"] == "provider_unavailable"
     assert _SENTINEL not in repr(result)
     assert len(db.runs) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("strict", [False, True])
+async def test_single_test_lets_an_llm_quota_refusal_through(monkeypatch: pytest.MonkeyPatch, strict: bool) -> None:
+    """A refusal is neither stored as a run scored 0.0 nor reported as a provider outage (TASK-13638)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    db = _RunnerDb()
+    runner = TestRunner(db)
+
+    def _refused(**_kwargs: Any) -> Any:
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    monkeypatch.setattr(runner, "_call_adapter", _refused, raising=True)
+
+    with pytest.raises(LLMQuotaExceededError):
+        await runner.run_single_test(
+            prompt_id=12, test_case_id=3, model_config=_MODEL_CONFIG, strict_provider_errors=strict
+        )
+    assert db.runs == []

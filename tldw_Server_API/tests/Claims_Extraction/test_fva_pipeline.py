@@ -726,3 +726,21 @@ class TestFVABatchResult:
         assert result.status_changes["verified->contested"] == 1
         assert result.total_time_ms == 500.0
         assert result.budget_exhausted is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_process_batch_does_not_drop_an_llm_quota_refusal():
+    """A refused claim fails the batch; it is not silently left out of the results (TASK-13638)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    verifier = MockVerifier()
+    verifier.verify = AsyncMock(
+        side_effect=LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+    )
+    pipeline = FVAPipeline(MockClaimsEngine(verifier), MockRetriever())
+
+    with pytest.raises(LLMQuotaExceededError):
+        await pipeline.process_batch(claims=[MockClaim(id="1", text="Claim 1")], query="test", documents=[])

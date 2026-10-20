@@ -144,6 +144,11 @@ If your goal is a custom quality test today without backend benchmark registrati
 - Verify auth header type for your mode.
 - Confirm user has permission to read/run evaluations benchmarks.
 
+### 402 LLM quota
+
+- The user is over an LLM limit: `detail.error` is `limit_exceeded`, and `Retry-After` says when to try again. The run is refused before its dataset loads, so nothing is evaluated.
+- An admitted run runs to completion, even if it takes the user past the limit; no item is refused mid-run. The next run is refused.
+
 ### 404 benchmark not found
 
 - Run benchmark list first and use returned `name` exactly.

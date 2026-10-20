@@ -14,7 +14,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
-from tldw_Server_API.app.core.exceptions import AdapterError
+from tldw_Server_API.app.core.exceptions import AdapterError, LLMQuotaExceededError
 from tldw_Server_API.app.core.Metrics import start_async_span as _start_span
 from tldw_Server_API.app.core.testing import is_truthy as _is_truthy
 from tldw_Server_API.app.core.Workflows.adapters._common import (
@@ -410,6 +410,9 @@ async def run_parallel_adapter(config: dict[str, Any], context: dict[str, Any]) 
                     errors.append("parallel_step_error")
 
     tasks = [run_step(i, step) for i, step in enumerate(steps)]
-    await asyncio.gather(*tasks, return_exceptions=not fail_fast)
+    outcomes = await asyncio.gather(*tasks, return_exceptions=not fail_fast)
+    refusal = next((o for o in outcomes if isinstance(o, LLMQuotaExceededError)), None)
+    if refusal is not None:
+        raise refusal  # the user's limit fails the step; it is not dropped as a missing result
 
     return {"results": results, "count": len(results), "errors": errors if errors else None}

@@ -558,3 +558,24 @@ class TestErrorHandling:
         # Verify all writes succeeded
         eval_ids = [r for r in results if isinstance(r, str)]
         assert len(eval_ids) == 10
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_evaluate_custom_metric_lets_an_llm_quota_refusal_through(evaluation_manager):
+    """A refusal is not scored 0.0 (TASK-13638)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    refusal = LLMQuotaExceededError(
+        category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+    )
+    with patch("tldw_Server_API.app.core.Evaluations.evaluation_manager.analyze", side_effect=refusal):
+        with pytest.raises(LLMQuotaExceededError):
+            await evaluation_manager.evaluate_custom_metric(
+                metric_name="accuracy",
+                description="d",
+                evaluation_prompt="Rate {answer}",
+                input_data={"answer": "a"},
+                scoring_criteria={"accuracy": "0-10"},
+                api_name="openai",
+            )

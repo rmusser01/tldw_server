@@ -120,3 +120,23 @@ def test_benchmark_manager_preserves_string_user_scope(monkeypatch):
 
     _ = benchmarks_ep._get_evaluation_manager_for_user(identity)
     assert captured["user_id"] == "tenant-user"
+
+
+def test_benchmark_run_refuses_an_over_quota_user_before_loading_the_dataset(monkeypatch):
+    """Benchmark runs check the LLM quota at the request boundary, as evaluation runs do (TASK-13638)."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
+
+    refuse_llm_work(monkeypatch)
+    loaded = []
+    monkeypatch.setattr(benchmarks_ep, "load_benchmark_dataset", lambda *_a, **_k: loaded.append(True) or [])
+
+    app = _build_app()
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/evaluations/benchmarks/bullshit_benchmark/run",
+            json={"limit": 1, "api_name": "openai", "parallel": 1, "save_results": False},
+        )
+
+    assert_llm_quota_402(response)
+    assert response.json()["detail"]["error"] == "limit_exceeded"
+    assert loaded == []

@@ -22,6 +22,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.Notes.studio_markdown import (
     canonical_studio_sections,
 )
@@ -331,6 +332,8 @@ async def run_flashcard_generate_adapter(config: dict[str, Any], context: dict[s
             if actual_counts != expected_counts:
                 return {"error": "card_plan_mismatch", "flashcards": [], "count": 0}
         return {"flashcards": cleaned_flashcards, "count": len(cleaned_flashcards)}
+    except LLMQuotaExceededError:
+        raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Flashcard generate adapter error")
         return {"error": "flashcard_generate_error", "flashcards": [], "count": 0}
@@ -395,6 +398,8 @@ async def run_quiz_generate_adapter(config: dict[str, Any], context: dict[str, A
         except json.JSONDecodeError:
             questions = []
         return {"questions": questions, "count": len(questions)}
+    except LLMQuotaExceededError:
+        raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Quiz generate adapter error")
         return {"error": "quiz_generate_error", "questions": [], "count": 0}
@@ -448,6 +453,8 @@ async def run_outline_generate_adapter(config: dict[str, Any], context: dict[str
         except json.JSONDecodeError:
             pass
         return {"outline": outline, "outline_text": response_text, "sections": len(outline.get("sections", []))}
+    except LLMQuotaExceededError:
+        raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Outline generate error")
         return {"error": "outline_generate_error", "outline": {}, "outline_text": ""}
@@ -497,6 +504,8 @@ async def run_glossary_extract_adapter(config: dict[str, Any], context: dict[str
         except json.JSONDecodeError:
             glossary = []
         return {"glossary": glossary, "count": len(glossary)}
+    except LLMQuotaExceededError:
+        raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Glossary extract error")
         return {"error": "glossary_extract_error", "glossary": [], "count": 0}
@@ -550,6 +559,8 @@ async def run_mindmap_generate_adapter(config: dict[str, Any], context: dict[str
         except json.JSONDecodeError:
             pass
         return {"mindmap": mindmap, "mermaid": "", "node_count": 0}
+    except LLMQuotaExceededError:
+        raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Mindmap generate error")
         return {"error": "mindmap_generate_error", "mindmap": {}, "mermaid": ""}
@@ -627,6 +638,8 @@ Content:
 
         return {"slides": [], "raw_text": result_text, "error": "json_parse_failed"}
 
+    except LLMQuotaExceededError:
+        raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Slides generate error")
         return {"slides": [], "error": "slides_generate_error"}
@@ -701,6 +714,8 @@ Content:
         report = extract_openai_content(response) or ""
         return {"report": report, "text": report, "title": title, "format": output_format}
 
+    except LLMQuotaExceededError:
+        raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Report generate error")
         return {"report": "", "error": "report_generate_error"}
@@ -786,6 +801,8 @@ Include a header, brief intro, main content sections, and a closing."""
         newsletter = extract_openai_content(response) or ""
         return {"newsletter": newsletter, "text": newsletter, "title": title}
 
+    except LLMQuotaExceededError:
+        raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Newsletter generate error")
         return {"newsletter": "", "error": "newsletter_generate_error"}
@@ -849,6 +866,8 @@ async def run_notes_studio_generate_adapter(config: dict[str, Any], context: dic
         if sanitized_payload is None:
             return {"payload": fallback_payload, "source": "deterministic_fallback"}
         return {"payload": sanitized_payload, "source": "llm"}
+    except LLMQuotaExceededError:
+        raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.warning("Notes Studio generate fallback engaged")
         return {"payload": fallback_payload, "source": "deterministic_fallback", "warning": "notes_studio_generate_warning"}
@@ -958,6 +977,8 @@ Content:
             "model": str(model),
         }
 
+    except LLMQuotaExceededError:
+        raise
     except _GENERATION_NONCRITICAL_EXCEPTIONS:
         logger.exception("Diagram generate error")
         return {"diagram": "", "error": "diagram_generate_error"}

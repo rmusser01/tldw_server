@@ -17,6 +17,7 @@ from ....core.AuthNZ.provider_credential_runtime import (
 )
 from ....core.Chat.Chat_Deps import ChatConfigurationError
 from ....core.Chat.streaming_utils import sanitized_provider_stream_exception
+from ....core.exceptions import LLMQuotaExceededError
 from ....core.LLM_Calls.adapter_utils import (
     ensure_app_config,
     get_adapter_or_raise,
@@ -254,6 +255,17 @@ class EvaluationManager:
                     round(score, 4),
                     passed,
                 )
+            except LLMQuotaExceededError as refusal:
+                # Stop at the user's limit and record it; the remaining cases would be refused too.
+                self.db.update_evaluation(
+                    evaluation_id,
+                    {
+                        "status": "failed",
+                        "completed_at": datetime.utcnow(),
+                        "error_message": f"{refusal.failure_code}: {refusal.detail['message']}",
+                    },
+                )
+                raise
             except Exception as e:
                 safe_error = sanitized_provider_stream_exception(e)
                 _log.error(
