@@ -19,6 +19,7 @@ import {
   resetPlaygroundHarness,
   screen,
   SidebarServerChatButton,
+  simulatePageReload,
   waitFor,
   waitForChatIdle,
   type FakeTldwServer,
@@ -375,6 +376,59 @@ describe("Playground send failures and Stop (#3107)", { timeout: 90_000 }, () =>
     expect(visibleNotifications().join(" ")).not.toMatch(/request_config_scope_changed|stale_selection|Error/)
     expect(transcriptLines()).toEqual(["user: Saved question", "assistant: Saved answer"])
   })
+
+  it.each([
+    {
+      outcome: "stopped",
+      plan: { chunks: ["Partial answer", " not wanted"], pauseAfterChunks: 1 },
+      reply: { role: "assistant", text: "Partial answer", interrupted: true, stopped: true } as Row
+    },
+    {
+      outcome: "failed",
+      plan: providerUnavailable,
+      reply: { role: "assistant", text: expect.stringContaining("Couldn't reach"), interrupted: true } as Row
+    }
+  ])(
+    "CM-02/CC-02 (server-settled): a $outcome reply is still shown once after a reload, never parked for review",
+    async ({ outcome, plan, reply }) => {
+      const server = createFakeTldwServer({ nativeCompletion: true })
+      server.planCompletion(plan)
+      const view = await openSeededChat(server)
+
+      await sendAndAwaitRequest(view, "Question before reload")
+      if (outcome === "stopped") {
+        await waitFor(
+          () => expect(transcript().some((row) => row.text.includes("Partial answer"))).toBe(true),
+          HARNESS_WAIT
+        )
+        await view.user.click(screen.getByRole("button", { name: "Stop Streaming" }))
+      }
+      await waitForChatIdle()
+      const expected = [
+        { role: "user", text: "Saved question" },
+        { role: "assistant", text: "Saved answer" },
+        { role: "user", text: "Question before reload" },
+        reply
+      ]
+      await waitFor(() => expect(transcript()).toEqual(expected), HARNESS_WAIT)
+      // Let the retained record reach local storage before the page goes away.
+      await new Promise((resolve) => setTimeout(resolve, 1_200))
+
+      await simulatePageReload(view)
+      await renderPlayground({
+        server,
+        keepBrowserState: true,
+        extras: <SidebarServerChatButton chatId="saved-chat" title="Saved topic" />
+      })
+
+      await waitFor(() => expect(transcript()).toEqual(expected), HARNESS_WAIT)
+      expect(screen.queryByText("Turn needs review")).not.toBeInTheDocument()
+      // The question was saved once.
+      expect(
+        serverRows(server, "saved-chat").filter((row) => row === "user: Question before reload")
+      ).toHaveLength(1)
+    }
+  )
 
   it("harness: a server-settled saved-chat turn is admitted and settled by the server", async () => {
     const server = createFakeTldwServer({ nativeCompletion: true })
