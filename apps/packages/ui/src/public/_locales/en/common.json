@@ -2066,6 +2066,9 @@
   "table_label": {
     "message": "Table"
   },
+  "table_labelWithColumns": {
+    "message": "Table: {{columns}}"
+  },
   "help_tutorialList": {
     "message": "Tutorial list"
   },

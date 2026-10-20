@@ -9,7 +9,14 @@ import Markdown from "../Markdown"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (key: string, fallback?: string) => fallback || key
+    t: (
+      key: string,
+      fallback?: string | { defaultValue?: string; [name: string]: unknown }
+    ) => {
+      if (typeof fallback === "string") return fallback
+      const template = fallback?.defaultValue ?? key
+      return template.replace(/\{\{(\w+)\}\}/g, (_, name) => String(fallback?.[name] ?? ""))
+    }
   })
 }))
 
@@ -46,9 +53,19 @@ describe("TableBlock table semantics", () => {
   it("puts the table in a labelled scroll region keyboard users can reach", () => {
     render(<Markdown message={GFM_TABLE} />)
 
-    const region = screen.getByRole("region", { name: "Table" })
+    const region = screen.getByRole("region", { name: "Table: Name, Score" })
     expect(region).toHaveAttribute("tabindex", "0")
     expect(within(region).getByRole("table")).toBeInTheDocument()
+  })
+
+  // Several tables in one answer were all landmarks named "Table", which
+  // screen-reader landmark lists cannot tell apart (axe landmark-unique).
+  it("names each table region after its columns so several tables stay distinct", () => {
+    const second = ["| City | Population |", "| --- | --- |", "| Oslo | 700k |"].join("\n")
+    render(<Markdown message={`${GFM_TABLE}\n\nAnd another:\n\n${second}`} />)
+
+    const names = screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"))
+    expect(names).toEqual(["Table: Name, Score", "Table: City, Population"])
   })
 
   it("still copies the table rows as CSV", async () => {

@@ -21,11 +21,31 @@ interface TableData {
   rows: string[][]
 }
 
+/** Header cells named in a table region's label; more are left out. */
+const LABEL_COLUMN_LIMIT = 4
+
+/** The table's first column headers, joined for its region label. */
+function columnSummary(table: HTMLTableElement | null): string {
+  if (!table) return ""
+  const headers = Array.from(table.querySelectorAll("thead th"))
+    .map((cell) => (cell.textContent || "").trim())
+    .filter(Boolean)
+  const shown = headers.slice(0, LABEL_COLUMN_LIMIT).join(", ")
+  return headers.length > LABEL_COLUMN_LIMIT ? `${shown}, …` : shown
+}
+
 export const TableBlock: FC<TableProps> = ({ children }) => {
   const [copyStatus, setCopyStatus] = useState<string>("")
   const [artifactOriginId, setArtifactOriginId] = useState<string | null>(null)
   const { t } = useTranslation("common")
   const ref = useRef<HTMLTableElement>(null)
+  // Several tables in one answer need distinct region names (AX-10), so the
+  // label names the columns once they have rendered.
+  const [columns, setColumns] = useState("")
+  useEffect(() => {
+    const next = columnSummary(ref.current)
+    setColumns((current) => (current === next ? current : next))
+  })
   const { openArtifact, isPinned } = useArtifactsStore()
   const uiMode = useUiModeStore((state) => state.mode)
   const isProMode = uiMode === "pro"
@@ -254,7 +274,14 @@ export const TableBlock: FC<TableProps> = ({ children }) => {
             the focusable region lets keyboard users scroll wide tables. */}
         <div
           role="region"
-          aria-label={t("table.label", "Table")}
+          aria-label={
+            columns
+              ? t("table.labelWithColumns", {
+                  defaultValue: "Table: {{columns}}",
+                  columns
+                })
+              : t("table.label", "Table")
+          }
           tabIndex={0}
           className="overflow-x-auto focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus">
           <div className="prose dark:prose-invert max-w-none">

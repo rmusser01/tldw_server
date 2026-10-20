@@ -84,7 +84,8 @@
   "table": {
     "copyCsv": "Copy as CSV",
     "downloadCsv": "Download CSV",
-    "label": "Table"
+    "label": "Table",
+    "labelWithColumns": "Table: {{columns}}"
   },
   "webSearch": "Searching the web",
   "regenerate": "Regenerate",
