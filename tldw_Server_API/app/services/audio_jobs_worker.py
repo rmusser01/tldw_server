@@ -21,8 +21,9 @@ from tldw_Server_API.app.core.Usage.llm_roots import llm_call_root
 
 DOMAIN = "audio"
 # Analysis failures a retry can fix. The other SummaryProviderError codes (missing model or
-# credentials, bad configuration or authentication, an unknown provider) fail the same way every time,
-# so the transcript is stored at once with the failure in analysis_error.
+# credentials, bad configuration or authentication, an unknown provider, a request the provider
+# rejected, a spent provider quota) fail the same way every time, so the transcript is stored at
+# once with the failure in analysis_error.
 _RETRYABLE_ANALYSIS_CODES = frozenset({"rate_limit", "provider_failure"})
 
 

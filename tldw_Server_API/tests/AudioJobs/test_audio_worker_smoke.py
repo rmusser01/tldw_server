@@ -1075,6 +1075,38 @@ async def test_audio_analyze_provider_failure_still_retries(analyze_worker):
     assert len(adapter.requests) >= 1
 
 
+def _analysis_failure_code(jm, job_id: int) -> str | None:
+    """Where the worker recorded an analysis failure: the job's error_code, or, once a failed
+    analysis keeps the transcript (TASK-13847), the stored payload's analysis_error.code."""
+    job = jm.get_job(job_id) or {}
+    if job.get("error_code"):
+        return job["error_code"]
+    stored = jm.list_jobs(domain="audio", job_type="audio_store", owner_user_id="7")
+    return (stored[0]["payload"].get("analysis_error") or {}).get("code") if stored else None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("make_error", "code"),
+    [
+        (lambda errors: errors.ChatBadRequestError(provider="openai"), "request_rejected"),
+        (lambda errors: errors.ChatRateLimitError(provider="openai", quota_exhausted=True), "provider_quota_exhausted"),
+    ],
+    ids=["rejected-request", "spent-quota"],
+)
+async def test_audio_analyze_failure_a_retry_cannot_fix_is_not_retried(analyze_worker, make_error, code):
+    from tldw_Server_API.app.core import exceptions
+
+    worker, jm, adapter = analyze_worker
+    adapter.error = make_error(exceptions)
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: _analysis_failure_code(jm, job_id) is not None)
+    job = jm.get_job(job_id) or {}
+    assert int(job.get("retry_count") or 0) == 0
+    assert len(adapter.requests) == 1
+    assert _analysis_failure_code(jm, job_id) == code
+
+
 # --- the audio_convert -> audio_transcribe hand-off (TASK-13848) ---
 
 
