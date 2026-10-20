@@ -25,6 +25,7 @@ vi.mock("@/context/demo-mode", () => ({
 
 vi.mock("@/hooks/useConnectionState", () => ({
   useIsConnected: () => true,
+  useConnectionState: () => ({ phase: "connected", isConnected: true }),
 }));
 
 vi.mock("@/store/tutorials", () => ({

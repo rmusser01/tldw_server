@@ -4487,6 +4487,9 @@
   "empty_connectAction": {
     "message": "Connect server"
   },
+  "empty_connectingDescription": {
+    "message": "Connecting to your tldw server. You can start writing your first message below."
+  },
   "composer_advancedCustomization": {
     "message": "Advanced customization"
   },

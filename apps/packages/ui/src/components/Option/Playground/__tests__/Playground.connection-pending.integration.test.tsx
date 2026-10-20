@@ -5,16 +5,20 @@
  * dropped without a word. While that first check runs, the composer now says
  * "Connecting…" and keeps the offline notice back until a check has actually
  * failed. Enter while not connected explains why nothing was sent and keeps
- * the draft (owner decision D7: no send outbox).
+ * the draft (owner decision D7: no send outbox). The empty chat keeps its
+ * normal "Start a new chat" card during that check instead of flashing the
+ * "Connect to start chatting" card and then jumping to the larger one.
  */
 import {
   act,
   createFakeTldwServer,
+  HARNESS_WAIT,
   renderPlayground,
   resetPlaygroundHarness,
   screen,
   visibleNotifications,
-  waitFor
+  waitFor,
+  within
 } from "./harness/playground-harness"
 import { beforeEach, describe, expect, it } from "vitest"
 import { useConnectionStore } from "@/store/connection"
@@ -68,6 +72,30 @@ describe("Playground while the server connection is pending", { timeout: 60_000 
     ).toBeInTheDocument()
     expect(screen.queryByText("Connecting to your tldw server…")).toBeNull()
     expect(screen.getAllByRole("button", { name: /Offline/ }).length).toBeGreaterThan(0)
+  })
+
+  it("keeps the empty chat card instead of asking to connect while the first check runs", async () => {
+    const server = createFakeTldwServer()
+    await renderPlayground({ server })
+    await screen.findByTestId("playground-empty-shell", {}, HARNESS_WAIT)
+
+    await setConnection(FIRST_CHECK_IN_FLIGHT)
+
+    const pendingShell = screen.getByTestId("playground-empty-shell")
+    expect(within(pendingShell).queryByText("Connect to start chatting")).toBeNull()
+    expect(within(pendingShell).queryByRole("button", { name: "Connect server" })).toBeNull()
+    expect(within(pendingShell).getByText("Start a new chat")).toBeInTheDocument()
+    expect(
+      within(pendingShell).getByText(
+        "Connecting to your tldw server. You can start writing your first message below."
+      )
+    ).toBeInTheDocument()
+
+    await setConnection(CHECK_FAILED)
+
+    const failedShell = await screen.findByTestId("playground-empty-shell")
+    expect(within(failedShell).getByText("Connect to start chatting")).toBeInTheDocument()
+    expect(within(failedShell).getByRole("button", { name: "Connect server" })).toBeInTheDocument()
   })
 
   it("explains why Enter did not send while connecting, and keeps the draft", async () => {

@@ -115,7 +115,8 @@
     "takeTour": "Take a quick tour",
     "connectTitle": "Connect to start chatting",
     "connectDescription": "Connect to your tldw server, then choose a model and start chatting.",
-    "connectAction": "Connect server"
+    "connectAction": "Connect server",
+    "connectingDescription": "Connecting to your tldw server. You can start writing your first message below."
   },
   "section": {
     "preset": "Character preset",
