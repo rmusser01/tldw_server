@@ -445,7 +445,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     fireEvent.click(await screen.findByText(/open linked conversation/i))
 
     await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith("/chat")
+      expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=conv-same-tab")
     })
     expect(openSpy).not.toHaveBeenCalled()
     openSpy.mockRestore()
@@ -460,7 +460,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     fireEvent.click(await screen.findByTestId("notes-open-button-note-backlink-1"))
     fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
     fireEvent.click(await screen.findByText(/open linked conversation/i))
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=cedar"))
     expect(atNavigation[0]).toMatchObject({ chat: "cedar", selection: { kind: "character", id: "4", metadata: { selectionMode: "tracked" } } })
     // H1 publishes identity/messages first; metadata admission remains pending at navigation.
     expect(useStoreMessageOption.getState()).toMatchObject({ serverChatId: "cedar", serverChatCharacterId: 4, serverChatVersion: 3, serverChatMetaLoaded: false, temporaryChat: false })
@@ -557,7 +557,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
     fireEvent.click(await screen.findByText(/open linked conversation/i))
     if (kind === "display-error") {
-      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=normal-saved"))
       expect(useStoreMessageOption.getState().messages).toMatchObject([{ serverMessageId: "server-user" }, { serverMessageId: "server-answer" }])
     } else {
       expect(mockNavigate).not.toHaveBeenCalled()
@@ -578,7 +578,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     await waitFor(() => expect(mockListChatMessages).toHaveBeenCalled())
     act(() => useStoreMessageOption.setState({ messages: [{ id: "restored-error", role: "assistant", isBot: true, name: "Assistant", message: '__tldw_error__:{"summary":"Provider failed","hint":"Try again"}' }] }))
     await act(async () => { release([{ id: "saved-answer", role: "assistant", content: "Recovered answer" }]); await Promise.resolve(); await Promise.resolve() })
-    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=normal-saved"))
     expect(useStoreMessageOption.getState().messages).toMatchObject([{ serverMessageId: "saved-answer", message: "Recovered answer" }])
   })
 
@@ -604,7 +604,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
       expect(mockNavigate).not.toHaveBeenCalled()
       expect(mockListChatMessages).not.toHaveBeenCalled()
     } else {
-      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=normal-saved"))
       expect(useStoreMessageOption.getState().serverChatId).toBe("normal-saved")
       expect(chatAuthority.selection).toBeNull()
     }
@@ -647,7 +647,7 @@ describe("NotesManagerPage stage 26 conversation backlink labels", () => {
     try {
       fireEvent.click(await screen.findByTestId("notes-overflow-menu-button"))
       fireEvent.click(await screen.findByText(/open linked conversation/i))
-      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat"))
+      await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith("/chat?chat=cedar"))
       expect(settings).toHaveBeenCalledOnce()
       expect(confirm).toHaveBeenCalledOnce()
       expect(useStoreMessageOption.getState()).toMatchObject({ temporaryChat: false, serverChatId: "cedar", messages: [{ serverMessageId: "saved-a", message: "Destination answer" }] })

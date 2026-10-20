@@ -13,6 +13,7 @@ import { updatePageTitle } from "@/utils/update-page-title"
 import { requestSettingsNavigation } from "@/utils/settings-return"
 import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
 import { resolveServerChatAssistantIdentity } from "@/hooks/chat/useServerChatLoader"
+import { planServerChatNavigation } from "@/hooks/chat/server-chat-route"
 
 const resolveCharacterId = (value: unknown): string | number | null => {
   if (typeof value === "number" && Number.isFinite(value)) {
@@ -96,6 +97,12 @@ export const useSelectServerChat = () => {
       settingsNavigationConfirmed?: true
       temporaryChat?: false
       isCurrent?: () => boolean
+      /**
+       * The chat page's address already names this chat (Back/Forward or a
+       * pasted /chat?chat=<id> link): stay on it and load the chat's details
+       * from the server (XP-05).
+       */
+      fromAddress?: true
     }) => {
       const callerIsCurrent = options?.isCurrent ?? (() => true)
       if (!callerIsCurrent()) return false
@@ -164,10 +171,15 @@ export const useSelectServerChat = () => {
       setServerChatClusterId(chat.cluster_id ?? null)
       setServerChatSource(chat.source ?? null)
       setServerChatExternalRef(chat.external_ref ?? null)
-      setServerChatMetaLoaded(assistantIdentity.assistantKind !== "character")
+      setServerChatMetaLoaded(options?.fromAddress ? false : assistantIdentity.assistantKind !== "character")
       usePlaygroundSessionStore.getState().requestServerChatSelection(chat.id, acceptDraft)
+      if (options?.fromAddress) return true
       updatePageTitle(chat.title)
-      navigate(chatPath)
+      if (chatPath === "/chat") {
+        const target = planServerChatNavigation(chat.id, chatPath)
+        if (target.replace) navigate(target.to, { replace: true })
+        else navigate(target.to)
+      } else navigate(chatPath)
       return true
     },
     [

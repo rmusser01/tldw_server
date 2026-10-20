@@ -78,6 +78,7 @@ import {
   useStoreChatModelSettings,
 } from "@/store/model";
 import { hasCurrentServerChatSelection, usePlaygroundSessionStore } from "@/store/playground-session";
+import { useServerChatRouteSync } from "@/hooks/chat/useServerChatRouteSync";
 import { getDesignSystemState } from "@/design-system";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
 import { useComposerDockHeight } from "@/hooks/useComposerDockHeight";
@@ -463,6 +464,8 @@ const PlaygroundContent = () => {
   const isMobileViewport = useMobile();
   const isDesktopViewport = useDesktop();
   const location = useLocation();
+  // The address names the open saved chat: /chat?chat=<id> (XP-05).
+  useServerChatRouteSync();
   const [retiredRouteLocation, setRetiredRouteLocation] = React.useState<string | null>(null);
   const retiredRouteLocationRef = React.useRef<string | null>(null);
   const routeLocationKey = [location.pathname, location.search, location.hash, location.key].join(
