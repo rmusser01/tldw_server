@@ -1072,11 +1072,12 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             data-playground-toolbar-row="advanced"
             className="mt-2 flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
-              <ParameterPresets compact />
+              <ParameterPresets showLabel />
               {formattingGuideControl}
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <SystemPromptTemplatesButton
+                size="compact"
                 onSelect={onTemplateSelect}
                 systemPrompt={systemPrompt}
                 onSystemPromptChange={setSystemPrompt}
@@ -1102,7 +1103,6 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         data-playground-toolbar-row="primary"
         className="flex flex-wrap items-center gap-2">
         {modeLauncherButton}
-        <ConnectionStatus showLabel={false} className="px-1 py-0.5" />
         {modelSelectButton}
         {promptSelectControl}
         {characterSelectControl}
@@ -1318,7 +1318,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
             {proGenerationPanelHeading}
           </h3>
           <div className="flex flex-wrap items-center gap-2">
-            <ConnectionStatus showLabel={false} className="px-1 py-0.5" />
+            <ConnectionStatus showLabel className="px-1 py-0.5" />
             {mcpControl}
             {modelSelectButton}
           </div>
