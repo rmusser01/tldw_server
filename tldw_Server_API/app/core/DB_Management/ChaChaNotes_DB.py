@@ -8752,13 +8752,35 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 except _CHACHA_NONCRITICAL_EXCEPTIONS:
                     pass
 
+    def _discard_legacy_checkout(self) -> None:
+        """Close this thread's legacy PostgreSQL checkout instead of queuing its return."""
+        conn = getattr(self._local, "conn", None) if self._connection_state() is self._local else None
+        if conn is None:
+            self.close_connection()
+            return
+        backend = self._get_pinned_backend() or self._backend
+        self._local.conn = None
+        self._local.backend_ref = None
+        backend.get_pool().discard_connection(conn)
+
     def close_all_connections(self) -> None:
         """
         Force-close all backend connections managed by this instance.
 
         Primarily used in tests/shutdown to ensure no background SQLite threads remain.
+        On PostgreSQL the shared content pool is never closed here: every user's
+        handle draws from it, and content-backend shutdown owns it.
         """
-        self.close_connection()
+        if self.backend_type == BackendType.POSTGRESQL:
+            if self._uses_shared_content_backend:
+                self.close_connection()
+                return
+            # The caller's pool is closed below. putconn hands a checkout to a pool
+            # worker for its reset, and a pool closed first discards that work, leaving
+            # the connection open and unreset, so close this thread's checkout now.
+            self._discard_legacy_checkout()
+        else:
+            self.close_connection()
 
         if (
             self.backend_type == BackendType.SQLITE
