@@ -53,13 +53,18 @@ def schema_definitions(backend: str) -> dict[str, tuple[dict[str, str], dict[str
     def code(column: str) -> str:
         if pg:
             return f"{column} COLLATE \"C\" ~ '^[a-z][a-z0-9_.-]{{0,63}}$'"
-        return f"length({column}) BETWEEN 1 AND 64 AND {column} GLOB '[a-z]*' AND {column} NOT GLOB '*[^a-z0-9_.-]*'"
+        return (
+            f"typeof({column})='text' AND instr(CAST({column} AS BLOB),X'00')=0 "
+            f"AND length(CAST({column} AS BLOB)) BETWEEN 1 AND 64 "
+            f"AND {column} GLOB '[a-z]*' AND {column} NOT GLOB '*[^a-z0-9_.-]*'"
+        )
 
     def uuid(column: str) -> str:
         if pg:
             return f"{column} COLLATE \"C\" ~ '^[0-9a-f]{{8}}-[0-9a-f]{{4}}-4[0-9a-f]{{3}}-[89ab][0-9a-f]{{3}}-[0-9a-f]{{12}}$'"
         return (
-            f"length({column})=36 AND substr({column},9,1)='-' "
+            f"typeof({column})='text' AND instr(CAST({column} AS BLOB),X'00')=0 "
+            f"AND length(CAST({column} AS BLOB))=36 AND substr({column},9,1)='-' "
             f"AND substr({column},14,1)='-' AND substr({column},19,1)='-' "
             f"AND substr({column},24,1)='-' AND substr({column},15,1)='4' "
             f"AND substr({column},20,1) IN ('8','9','a','b') "
@@ -70,7 +75,10 @@ def schema_definitions(backend: str) -> dict[str, tuple[dict[str, str], dict[str
     def digest(column: str) -> str:
         if pg:
             return f"{column} COLLATE \"C\" ~ '^[0-9a-f]{{64}}$'"
-        return f"length({column})=64 AND {column} NOT GLOB '*[^0-9a-f]*'"
+        return (
+            f"typeof({column})='text' AND instr(CAST({column} AS BLOB),X'00')=0 "
+            f"AND length(CAST({column} AS BLOB))=64 AND {column} NOT GLOB '*[^0-9a-f]*'"
+        )
 
     def number(column: str, expression: str) -> str:
         return expression if pg else f"typeof({column})='integer' AND {expression}"

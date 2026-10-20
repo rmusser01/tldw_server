@@ -104,10 +104,19 @@ def test_admission_rejects_nonexact_facts(field, value):
         replace(command, **{field: value})
 
 
-@pytest.mark.parametrize("code", ["", "a" * 65, "a/b", "A", "\u00e9", "a\n"])
+@pytest.mark.parametrize(
+    "code", ["", "a" * 65, "a/b", "A", "\u00e9", "a\n", "embeddings\x00/invalid", "a" * 64 + "\x00suffix"]
+)
 def test_scope_rejects_nonfixed_codes(code):
     with pytest.raises(ValueError):
         WorkflowScope(code, "workflow", "root")
+
+
+@pytest.mark.parametrize("field", ["job_uuid", "reference_id"])
+def test_root_uuid_rejects_embedded_nul(field):
+    value = root()
+    with pytest.raises(ValueError):
+        replace(value, **{field: getattr(value, field) + "\x00suffix"})
 
 
 def test_policy_rejects_reserved_scope_and_missing_infrastructure_reason():
@@ -150,7 +159,9 @@ def test_effect_rejects_irrelevant_or_missing_facts(action, reason, schedule):
         WorkflowEffect("a" * 64, action, "b" * 64, reason, schedule)
 
 
-@pytest.mark.parametrize("key", ["A" * 64, "a" * 63, "g" * 64, True])
+@pytest.mark.parametrize(
+    "key", ["A" * 64, "a" * 63, "g" * 64, True, "a" * 64 + "\x00suffix", "a" * 32 + "\x00" + "g" * 31]
+)
 def test_keys_and_fingerprints_are_exact(key):
     with pytest.raises(ValueError):
         WorkflowProgress(key, WorkflowProgressKind.CURSOR, "b" * 64)
