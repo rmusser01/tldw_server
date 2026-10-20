@@ -203,8 +203,8 @@ An endpoint asks before it starts LLM work, and answers 402 before it does anyth
 
 **An admitted request runs to completion,** even if it takes the user past a limit. After a passing check, the request's task is marked `prechecked`, so §4b does not refuse it part-way through.
 - **The mark is a plain `ContextVar.set`,** like `bind_llm_call_user`. A `with llm_call_context(...)` block would not work: it resets when the function that opened it returns, which is before the endpoint runs after a dependency, and before a streaming response body runs.
-- **It reaches** the endpoint body, a streaming response body, `BackgroundTasks`, `asyncio.to_thread`, the bounded pools, the default executor and the chat request queue. Work the request schedules with `BackgroundTasks` is admitted with the request.
-- **It does not reach** a task created before the mark, the next request on the same connection, or a job the request enqueues. A job runs under `llm_call_root(owner)` and is checked by §4b when it runs.
+- **It reaches** the endpoint body, a streaming response body, `BackgroundTasks`, `asyncio.to_thread`, the bounded pools, the default executor, the chat request queue, and the scraping queue jobs the request submits (revision of 2026-10-20). Work the request schedules with `BackgroundTasks` is admitted with the request.
+- **It does not reach** a task created before the mark, the next request on the same connection, or a job the request enqueues in the Jobs queue. A job runs under `llm_call_root(owner)` and is checked by §4b when it runs; a media ingest job that asks for analysis checks itself once, when it starts (revision of 2026-10-20).
 - **Why it matters for `/chat/completions`.** Without the mark, §4b could refuse an admitted request inside the chat pipeline. The pipeline would treat that as a provider outage: it records a provider failure, marks the provider unhealthy for every user after three of them, and tries another provider (`chat_service.py`, `provider_manager.record_failure`).
 
 | Entry point | Checks |
@@ -219,13 +219,14 @@ An endpoint asks before it starts LLM work, and answers 402 before it does anyth
 | `/evaluations/batch` | When the evaluation type is `geval`, `rag` or `response_quality`. |
 | Evaluation runs (`POST /evaluations/{eval_id}/runs`) | Always. The run is a task the request starts, so it is admitted with the request; checked at the call, a refused sample would be scored 0.0 and the run would complete. |
 | Benchmark runs (`/evaluations/benchmarks/{name}/run`, `/benchmarks/{name}/run`) | Always. Checked only at the call, every item would be refused and counted as failed, and the run would still complete. |
+| `/media/ingest-web-content`, `/media/process-web-scraping` and `POST /watchlists/outputs` | When the request asks for summaries: analysis with a provider named, `summarize_checkbox`, or `summarize`. Checked only at the call, a refusal discarded the pages or items the request had already fetched. |
 | The six `/media/process-*` endpoints and `/media/add` | When `perform_analysis` is set and an `api_name` is given. |
 
 Simple search (`/rag/simple`) no longer generates an answer it then discarded, so it makes no LLM call and needs no check.
 
 - **A RAG search with answer generation off is not checked here and not marked.** The pipeline's optional LLM stages (query rewriting, expansion, HyDE, LLM reranking, gap analysis, critique, suggestions) are governed by §4b. For a user over quota they degrade as they do for any provider failure, and the response's stage metadata says so. Gap analysis and the agentic planner were the two stages that let a refusal escape; PR 2b made them degrade, and the three convenience handlers (`/rag/simple`, `/rag/advanced`, `/rag/ablate`) pass a 402 through.
-- **An endpoint that enqueues a job has no boundary check:** `/media/ingest-jobs` and evaluation recipe runs. The job is checked by §4b when it runs.
-- **Left to §4b:** these HTTP endpoints are not in the table: `/media/ingest-web-content` with analysis, `/media/process-web-scraping` with summarization, `/media/{id}/insights`, the writing and manuscript analysis endpoints, prompt improvement and Prompt Studio, reading, study suggestions, paper search, chunking, sharing, and `/translate`. So are background jobs (`/media/ingest-jobs`, evaluation recipe runs, audio analysis jobs), workflow runs, WebSocket sessions (audio, realtime) and MCP tools. The operator page names both groups.
+- **An endpoint that enqueues a job has no boundary check:** `/media/ingest/jobs` and evaluation recipe runs. The job is checked when it runs: a media ingest job that asks for analysis once, when it starts; everything else by §4b.
+- **Left to §4b:** these HTTP endpoints are not in the table: `/media/{id}/insights`, the writing and manuscript analysis endpoints, prompt improvement and Prompt Studio, reading, study suggestions, paper search, chunking, sharing, and `/translate`. So are background jobs (evaluation recipe runs, audio analysis jobs, and media ingest jobs that do not ask for analysis), workflow runs, WebSocket sessions (audio, realtime) and MCP tools. The operator page names both groups.
 
 **Why these entry points need a boundary check.** With the error raised only at the call, each would do worse than a 402 before any work:
 - **Streaming RAG** has already sent a 200 when the pipeline runs, so the client would get an error frame.
@@ -236,7 +237,7 @@ Simple search (`/rag/simple`) no longer generates an answer it then discarded, s
 
 #### 4b. At the call
 
-Background jobs, workflow runs, WebSocket sessions and any HTTP endpoint that is not in the table have no boundary check. For those the call itself is refused with `LLMQuotaExceededError`. An MCP tool call is checked for the user its call names (§1). A refusal becomes the tool error `llm_quota_exceeded`, which the MCP module circuit breaker does not count.
+Background jobs, workflow runs, WebSocket sessions and any HTTP endpoint that is not in the table have no boundary check (a media ingest job that asks for analysis checks itself when it starts, revision of 2026-10-20). For those the call itself is refused with `LLMQuotaExceededError`. An MCP tool call is checked for the user its call names (§1). A refusal becomes the tool error `llm_quota_exceeded`, which the MCP module circuit breaker does not count.
 
 | Where | Why |
 |---|---|
@@ -250,7 +251,7 @@ Rules:
   - An HTTP endpoint that lets `HTTPException` through, as most do, returns the 402.
   - One that catches it in a broad tuple reports its own error.
   - A workflow step fails, and the run records the error.
-  - A job fails as its handler decides. A media ingestion job reports the item as failed.
+  - A job fails as its handler decides. A media ingestion job that asks for analysis is checked when it starts instead; refused, it stores the item without analysis.
   - A WebSocket session reports it as it reports any failed reply: `/audio/chat/stream` sends a `provider_unavailable` error for that turn, and the realtime sockets send an `internal_error` and a failed `response.done`. Both stay open.
 - **It must not look like a provider outage to shared machinery:**
   - the Evaluations circuit breaker (`Evaluations/circuit_breaker.py`) does not count it. The breaker is shared by all users per provider and opens after 3 to 5 failures, so one user's refusals would otherwise stop evaluations for everyone for 30 to 60 seconds;
@@ -430,7 +431,7 @@ Five PRs, so recording can be checked before anything new is refused.
 
 ## Risks
 
-- **An admitted request can pass a limit.** The boundary check admits a request when the user is under the limit, and the request then runs to completion. Some requests fan out into many calls: a media batch with chunked analysis, an evaluation batch, a RAG request with every optional stage on. The overshoot is bounded by one request, not one call. An operator who needs a hard ceiling sets the limit with that headroom.
+- **An admitted request can pass a limit.** The boundary check admits a request when the user is under the limit, and the request then runs to completion. Some requests fan out into many calls: a media batch with chunked analysis, an evaluation batch, a RAG request with every optional stage on. The overshoot is bounded by one request, not one call, and by one media ingest job, which is admitted when it starts. An operator who needs a hard ceiling sets the limit with that headroom.
 - **Each checked call costs a query.** With a limit set, §4b reads the counters for every call that was not admitted at a boundary. A job that makes hundreds of calls makes hundreds of small indexed reads.
 - **Fail-open cases.** A sync adapter call made on the event loop's own thread is recorded but not checked; PR 2b moved the known ones off the loop, and the first such call logs a warning. A timed-out check lets the call through. Both are logged.
 - **Lost rows on abandoned streams.** The stream recorder runs when the iterator closes. A process kill mid-stream loses the row, as today.
@@ -490,3 +491,9 @@ Revision of 2026-10-18, TASK-13638:
 
 - **Callers that turned a refusal into degraded output** let it through, or keep their artifact and record the refusal. Benchmark runs join the §4a table.
 - **The workflow engine does not retry a step refused with a 402.** This replaces the 2026-10-13 note that an `llm` step is retried once.
+
+Revision of 2026-10-20, TASK-13864:
+
+- **A media ingest job that asks for analysis is checked once, when it starts,** and then runs `prechecked`, as an admitted request does; the admission ends with the job. Refused, it stores the item without analysis and records `analysis_error.code = "llm_quota_exceeded"` in its result, instead of failing the item; a reused transcript still records `video_lite.summary_error`. Other jobs are still checked at the call (§4b).
+- **The two web scraping endpoints and `POST /watchlists/outputs` join the §4a table.**
+- **Scraping queue jobs run as the request that submitted them.** The web scraping service starts its queue workers lazily, inside a request, and they ran every later job in that request's context. Each job now runs in a copy of its submitter's context, so its LLM calls are recorded and checked for that user and no request's admission reaches another's jobs (§1).
