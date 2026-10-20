@@ -81,7 +81,7 @@ from tldw_Server_API.app.core.testing import (
     is_explicit_pytest_runtime,
     is_test_mode,
 )
-from tldw_Server_API.app.core.Usage import quota_checks
+from tldw_Server_API.app.core.Usage import concurrency_quota, quota_checks
 
 if TYPE_CHECKING:
     from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
@@ -274,6 +274,9 @@ async def _record_media_ingestion_bytes_ledger_entry(
             exc,
         )
         return False
+
+
+MEDIA_CONCURRENT_KEY = "limits.media_concurrent_jobs"
 
 
 async def _enforce_and_record_media_bytes(user_id: Any, total_uploaded_bytes: int) -> None:
@@ -2850,6 +2853,19 @@ async def add_media_orchestrate(
     temp_dir_path: FilePath | None = None
     loop = asyncio.get_running_loop()
 
+    # One of the user's media-ingest slots, held until the finally below (TASK-13435).
+    try:
+        ingest_slot = await concurrency_quota.acquire_slot(
+            getattr(current_user, "id", None), MEDIA_CONCURRENT_KEY, "jobs"
+        )
+    except concurrency_quota.ConcurrencyQuotaExceeded as exc:
+        _emit_ingestion_request_metric(media_type=getattr(form_data, "media_type", None), outcome="error")
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Media ingestion concurrency limit reached.",
+            headers=quota_checks.rate_limit_headers(exc.limit, 0, exc.retry_after) if exc.retry_after else None,
+        ) from exc
+
     try:
         # --- 3. Setup Temporary Directory ---
         with temp_dir_manager as temp_dir:
@@ -3556,6 +3572,8 @@ async def add_media_orchestrate(
             processor="media_add_orchestrate",
             duration_seconds=time.monotonic() - request_started_at,
         )
+        # Last, so the metrics above are recorded whatever the release does (TASK-13435).
+        await ingest_slot.release()
 
 
 async def add_media_persist(

@@ -147,11 +147,10 @@ async def test_e2e_chat_tokens_daily_cap_denies(monkeypatch, tmp_path, rg_backen
     # reserve heuristic used by the chat endpoint.
     from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import ChatCompletionRequest
     from tldw_Server_API.app.core.Chat.chat_service import estimate_tokens_from_json
-    from tldw_Server_API.app.api.v1.endpoints.chat import _sanitize_json_for_rate_limit
 
     req_model = ChatCompletionRequest(**body)
     request_json = json.dumps(req_model.model_dump())
-    est = int(estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json)) or 1)
+    est = int(estimate_tokens_from_json(request_json) or 1)
     completion_budget = int(getattr(req_model, "max_tokens", 0) or 0)
     reserve_units = max(1, int(est) + max(0, int(completion_budget)))
 

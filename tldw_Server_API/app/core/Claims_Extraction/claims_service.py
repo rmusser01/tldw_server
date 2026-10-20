@@ -633,7 +633,7 @@ def _enqueue_claim_rebuild_if_needed(*, media_id: int, db_path: str, owner_user_
                 logger.debug("Claims rebuild Jobs enqueue failed; falling back to legacy queue: {}", exc)
     try:
         svc = get_claims_rebuild_service()
-        svc.submit(media_id=int(media_id), db_path=str(db_path))
+        svc.submit(media_id=int(media_id), db_path=str(db_path), owner_user_id=owner_user_id)
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
         logger.debug("Claims rebuild enqueue failed: {}", exc)
 
@@ -4598,7 +4598,7 @@ def rebuild_claims(
     else:
         db_path = db.db_path_str
     svc = rebuild_service or get_claims_rebuild_service()
-    svc.submit(media_id=media_id, db_path=db_path)
+    svc.submit(media_id=media_id, db_path=db_path, owner_user_id=owner_user_id)
     return {"status": "accepted", "media_id": media_id}
 
 
@@ -4648,7 +4648,7 @@ def rebuild_all_media(
 
         svc = rebuild_service or get_claims_rebuild_service()
         for mid in mids:
-            svc.submit(media_id=mid, db_path=db_path)
+            svc.submit(media_id=mid, db_path=db_path, owner_user_id=owner_user_id)
         return {
             "status": "accepted",
             "enqueued": len(mids),

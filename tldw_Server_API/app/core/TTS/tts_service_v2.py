@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Logging.log_context import new_request_id
 from tldw_Server_API.app.core.Metrics import get_metrics_registry
 from tldw_Server_API.app.core.Metrics.metrics_manager import MetricDefinition, MetricType
 
+from . import adapter_registry
 from .adapter_registry import (
     TTSAdapterFactory,
     TTSAdapterRegistry,
@@ -3737,7 +3738,14 @@ class TTSServiceV2:
                     pass
 
             try:
-                adapter = await factory.registry.get_adapter(provider)
+                adapter = await asyncio.wait_for(
+                    factory.registry.get_adapter(provider),
+                    timeout=adapter_registry._CAPABILITY_LISTING_TIMEOUT_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                # Still initializing (the registry shields the load): fail over to a provider that is ready now.
+                logger.debug("Skipping provider {} - its adapter is still initializing", provider.value)
+                continue
             except TTSProviderNotConfiguredError:
                 logger.debug(f"Skipping provider {provider.value} - no adapter configured")
                 continue

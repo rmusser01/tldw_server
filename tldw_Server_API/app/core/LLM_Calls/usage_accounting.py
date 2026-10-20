@@ -15,10 +15,12 @@ import time
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import suppress
 from dataclasses import dataclass
+from types import SimpleNamespace
 from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Chat.prompt_cost_envelope import estimate_segment_tokens
 from tldw_Server_API.app.core.Usage.llm_accounting import submit_accounting
 from tldw_Server_API.app.core.Usage.llm_call_context import (
     accounted_call,
@@ -27,7 +29,6 @@ from tldw_Server_API.app.core.Usage.llm_call_context import (
     in_accounted_call,
 )
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_async, check_user_sync, user_to_check
-from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
 
 _ACCOUNTED_METHODS = ("chat", "achat", "stream", "astream")
 _MARK = "__llm_accounted__"
@@ -60,12 +61,12 @@ def _plan_call() -> _CallPlan | None:
 
 
 def _approx_tokens(char_count: int) -> int:
-    """Four characters per token, the estimate the chat endpoint already uses."""
+    """The completion-side 4 chars/token estimate (rounded down)."""
     return max(1, char_count // 4) if char_count > 0 else 0
 
 
 def _prompt_estimate(request: Any) -> int:
-    """Estimated prompt tokens: the messages plus the system prompt, with image payloads redacted."""
+    """Estimated prompt tokens: the messages plus the system prompt, by the chat path's estimate."""
     try:
         if not isinstance(request, dict):
             return 1
@@ -73,7 +74,7 @@ def _prompt_estimate(request: Any) -> int:
         system_message = request.get("system_message")
         if isinstance(system_message, str):
             text += system_message
-        return max(1, len(DATA_URI_REDACT_RE.sub(r"\1<omitted>", text)) // 4)
+        return max(1, estimate_segment_tokens(text))
     except Exception:  # noqa: BLE001 - an estimate must never fail a call
         return 1
 
@@ -100,7 +101,11 @@ def _usage_tokens(usage: dict[str, Any]) -> tuple[int, int]:
                 return int(value)
         return 0
 
-    return _first("prompt_tokens", "input_tokens"), _first("completion_tokens", "output_tokens")
+    prompt_tokens = _first("prompt_tokens", "input_tokens")
+    if usage.get("prompt_tokens") is None:
+        # Anthropic-shaped block: input_tokens is only the uncached remainder (Anthropic, llama.cpp /v1/messages).
+        prompt_tokens += _first("cache_creation_input_tokens") + _first("cache_read_input_tokens")
+    return prompt_tokens, _first("completion_tokens", "output_tokens")
 
 
 class _StreamUsage:
@@ -133,8 +138,14 @@ class _StreamUsage:
                 if not isinstance(data, dict):
                     continue
                 usage = data.get("usage")
-                if isinstance(usage, dict) and usage:
-                    self.usage = usage
+                event = data.get("type")
+                if event == "message_start":  # Anthropic Messages: input tokens arrive here, output in message_delta
+                    message = data.get("message")
+                    usage = message.get("usage") if isinstance(message, dict) else None
+                if isinstance(usage, dict):
+                    usage = {key: value for key, value in usage.items() if value is not None}  # null never erases a count
+                    if usage:
+                        self.usage = {**(self.usage or {}), **usage} if event == "message_delta" else usage
                 for choice in data.get("choices") or []:
                     delta = choice.get("delta") if isinstance(choice, dict) else None
                     if not isinstance(delta, dict):
@@ -431,6 +442,26 @@ def _wrap_astream(fn: Callable[..., Any]) -> Callable[..., Any]:
     if inspect.iscoroutinefunction(fn):
         inspect.markcoroutinefunction(astream)
     return astream
+
+
+def record_direct_response(provider: str, request: dict[str, Any], response: Any, started: float) -> None:
+    """Record a successful provider call made without an adapter (the Messages API native path); never raises."""
+    plan = _plan_call()
+    if plan is not None:
+        _record_response(SimpleNamespace(name=provider), plan, request, response, started)
+
+
+def accounted_direct_stream(
+    provider: str, request: dict[str, Any], stream: AsyncIterator[Any], started: float
+) -> AsyncIterator[Any]:
+    """Return ``stream`` wrapped to record once when it ends, or unchanged when nothing is recorded.
+
+    For a provider stream made without an adapter. Each item must hold whole SSE events.
+    """
+    plan = _plan_call()
+    if plan is None:
+        return stream
+    return _accounted_async_stream(SimpleNamespace(name=provider), plan, request, stream, started)
 
 
 _WRAPPERS: dict[str, Callable[[Callable[..., Any]], Callable[..., Any]]] = {

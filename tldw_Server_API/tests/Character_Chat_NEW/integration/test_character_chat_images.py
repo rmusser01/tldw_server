@@ -330,6 +330,7 @@ def test_character_image_reads_leave_event_loop_and_release_operation(
     owners = []
     reads = []
     returned = []
+    republished = []
     original_verify = character_chat_sessions._verify_chat_ownership
     original_read = character_chat_sessions.read_messages_with_images
 
@@ -347,12 +348,41 @@ def test_character_image_reads_leave_event_loop_and_release_operation(
     if character_db.backend_type == BackendType.POSTGRESQL:
         pool = character_db.backend.get_pool()
         original_return = pool.return_connection
+        handback = threading.Condition()
+
+        def settled(raw: Any) -> None:
+            """Record a checkout this request handed back, once the pool has cleaned it up."""
+            with handback:
+                if any(connection is raw for connection in returned):
+                    republished.append((raw, raw.info.transaction_status.name))
+                    handback.notify_all()
 
         def return_connection(raw: Any) -> None:
-            returned.append(raw)
+            with handback:
+                returned.append(raw)
             original_return(raw)
 
         monkeypatch.setattr(pool, "return_connection", return_connection)
+        # Observe each checkout after the pool's own cleanup, just before it is published for reuse.
+        if pool._use_psycopg_pool:
+            # psycopg_pool resets a returned checkout on its own worker, then publishes it.
+            original_publish = pool._pool._add_to_pool
+
+            def publish(raw: Any) -> None:
+                settled(raw)
+                original_publish(raw)
+
+            monkeypatch.setattr(pool._pool, "_add_to_pool", publish)
+        else:
+
+            class ObservedFreeList(list):
+                """The fallback pool rolls back synchronously, then appends the checkout to its free list."""
+
+                def append(self, raw: Any) -> None:
+                    settled(raw)
+                    super().append(raw)
+
+            monkeypatch.setattr(pool, "_free", ObservedFreeList(pool._free))
     monkeypatch.setattr(character_chat_sessions, "_verify_chat_ownership", verify)
     monkeypatch.setattr(character_chat_sessions, "read_messages_with_images", read)
     monkeypatch.setattr(character_chat_sessions, "perform_chat_api_call", lambda **kwargs: {
@@ -375,4 +405,8 @@ def test_character_image_reads_leave_event_loop_and_release_operation(
     if character_db.backend_type == BackendType.POSTGRESQL:
         assert raw is not None
         assert sum(connection is raw for connection in returned) == 1
-        assert raw.info.transaction_status.name == "IDLE"
+        with handback:
+            assert handback.wait_for(lambda: any(item is raw for item, _ in republished), timeout=5.0), (
+                "The pool never put the request's checkout back into service"
+            )
+        assert [status for item, status in republished if item is raw] == ["IDLE"]

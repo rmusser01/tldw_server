@@ -34,6 +34,9 @@ NEW_KEYS = {
     "limits.chatbooks_exports_per_day",
     "limits.chatbooks_imports_per_day",
     "limits.chatbooks_concurrent_jobs",
+    "limits.media_concurrent_jobs",
+    "limits.audio_concurrent_streams",
+    "limits.audio_concurrent_transcriptions",
 }
 
 
