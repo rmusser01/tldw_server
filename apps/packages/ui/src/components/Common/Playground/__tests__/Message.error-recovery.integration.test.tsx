@@ -1899,3 +1899,61 @@ describe("preserved reply before recovery", () => {
     ).toBeNull()
   })
 })
+
+// CM-10 (#3101): a reply reloaded from the server is named after the model
+// that wrote it rather than "Assistant", and user turns are tinted apart
+// from replies.
+describe("PlaygroundMessage turn identity", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    decodeChatErrorPayloadMock.mockReturnValue(null)
+  })
+
+  const primaryTinted = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll<HTMLElement>("[style]")).filter(
+      (element) => element.style.backgroundImage.includes("--color-primary")
+    )
+
+  it("names a reloaded reply after its saved model instead of 'Assistant'", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        metadataExtra={{ model_id: "saved-model", generation_status: "complete" }}
+      />
+    )
+
+    expect(screen.queryByText("Assistant")).not.toBeInTheDocument()
+    expect(screen.getAllByText("saved-model").length).toBeGreaterThan(0)
+  })
+
+  it("keeps a named assistant (character or persona) over the saved model", () => {
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        name="Ada"
+        modelName="Ada"
+        metadataExtra={{ model_id: "saved-model", generation_status: "complete" }}
+      />
+    )
+
+    expect(screen.getByText("Ada")).toBeInTheDocument()
+  })
+
+  it("tints a flat user card but not the reply card", () => {
+    storedPreferences.set("userChatBubble", false)
+    const user = render(
+      <PlaygroundMessage
+        {...baseProps}
+        isBot={false}
+        role="user"
+        name="You"
+        message="User question"
+      />
+    )
+    expect(primaryTinted(user.container)).toHaveLength(1)
+    user.unmount()
+
+    const reply = render(<PlaygroundMessage {...baseProps} />)
+    expect(primaryTinted(reply.container)).toHaveLength(0)
+  })
+})
