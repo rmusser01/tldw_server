@@ -2,12 +2,22 @@
 
 from __future__ import annotations
 
+import json
+import os
+from datetime import datetime
 from typing import Any
 
 import sqlglot
 from sqlglot import exp
 
-from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import WorkflowOutcome
+from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
+    WorkflowAdmissionCommand,
+    WorkflowAdmissionInputs,
+    WorkflowFenceError,
+    WorkflowOutcome,
+    WorkflowPolicy,
+    WorkflowRoot,
+)
 
 from .jobs_workflow_migrations import (
     RECEIPT_IDENTITY_COLUMNS,
@@ -18,6 +28,156 @@ from .jobs_workflow_migrations import (
 )
 
 _OWNER = "owner_user_id=NULLIF(current_setting('app.owner_user_id',true),'')"
+
+
+def begin_runtime(connection: Any, owner_user_id: str) -> int:
+    """Fail closed on role/setup errors, with transaction-local tenant scope."""
+    from psycopg import IsolationLevel, sql
+
+    # psycopg begins once on the first statement; an explicit BEGIN here
+    # would issue a second BEGIN inside its implicit transaction.
+    connection.isolation_level = IsolationLevel.READ_COMMITTED
+    role = os.getenv("JOBS_PG_RLS_ROLE", "").strip()
+    if role:
+        connection.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
+    flags = connection.execute("SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user").fetchone()
+    if flags is None or any(flags):
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+    connection.execute(
+        "SELECT set_config('app.owner_user_id',%s,true),set_config('app.is_admin','false',true),set_config('app.domain_allowlist','',true),set_config('row_security','on',true)",
+        (owner_user_id,),
+    )
+    actual = connection.execute(
+        "SELECT current_setting('app.owner_user_id'),current_setting('app.is_admin'),current_setting('app.domain_allowlist'),current_setting('row_security')"
+    ).fetchone()
+    if actual != (owner_user_id, "false", "", "on"):
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+    return connection.execute("SELECT txid_current()").fetchone()[0]
+
+
+def rows(connection: Any, statement: str, parameters: tuple = ()) -> list[dict]:
+    """Only internal SQL is accepted; values always use driver parameters."""
+    from psycopg.rows import dict_row
+
+    with connection.cursor(row_factory=dict_row) as cursor:
+        cursor.execute(statement.replace("?", "%s"), parameters)
+        return cursor.fetchall() if cursor.description else []
+
+
+def jobs_by_uuid(connection: Any, job_uuid: str, *, lock: bool = False) -> list[dict]:
+    """Lock only UUID-selected Jobs rows, before capability metadata."""
+    statement = (
+        "SELECT * FROM jobs WHERE uuid=? LIMIT 2 FOR UPDATE" if lock else "SELECT * FROM jobs WHERE uuid=? LIMIT 2"
+    )
+    return rows(connection, statement, (job_uuid,))
+
+
+def support_by_uuid(connection: Any, owner: str, job_uuid: str, *, lock: bool = False) -> list[dict]:
+    """Read exact retained authority under forced owner RLS."""
+    statement = (
+        "SELECT * FROM job_workflow_roots WHERE owner_user_id=? AND job_uuid=? FOR UPDATE"
+        if lock
+        else "SELECT * FROM job_workflow_roots WHERE owner_user_id=? AND job_uuid=?"
+    )
+    return rows(connection, statement, (owner, job_uuid))
+
+
+def lock_correlation(connection: Any, manager: Any, command: WorkflowAdmissionCommand, policy: WorkflowPolicy) -> None:
+    """Serialize publication by a stable owner/scope/key transaction lock."""
+    scope = policy.scope
+    key = manager._pg_advisory_key(
+        "workflow-admission-v1",
+        command.owner_user_id,
+        scope.domain,
+        scope.queue,
+        scope.job_type,
+        command.idempotency_key,
+    )
+    connection.execute("SELECT pg_advisory_xact_lock(%s)", (key,))
+
+
+def insert_root(connection: Any, root: WorkflowRoot, policy: WorkflowPolicy) -> None:
+    """Publish root metadata and enrollment without a nested transaction."""
+    rows(
+        connection,
+        "INSERT INTO job_workflow_roots(owner_user_id,job_uuid,job_id_hint,domain,queue,job_type,payload_field,reference_id,idempotency_key,max_retries,quarantine_threshold,expired_lease_policy,no_progress_limit) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            root.owner_user_id,
+            root.job_uuid,
+            root.job_id_hint,
+            root.scope.domain,
+            root.scope.queue,
+            root.scope.job_type,
+            policy.payload_field,
+            root.reference_id,
+            root.idempotency_key,
+            root.controls.max_retries,
+            root.controls.quarantine_threshold,
+            root.controls.expired_lease_policy.value,
+            root.controls.no_progress_limit,
+        ),
+    )
+    connection.execute("UPDATE jobs SET workflow_capability_version=1 WHERE uuid=%s", (root.job_uuid,))
+
+
+def create_root_job(
+    connection: Any, inputs: WorkflowAdmissionInputs, uuid_value: str
+) -> tuple[dict, dict] | bool | None:
+    """Use the ordinary quota, insert, counter and event leaves atomically."""
+    from psycopg.rows import dict_row
+
+    from tldw_Server_API.app.core.Jobs.operations.postgres import admission
+
+    command = inputs.job
+    with connection.cursor(row_factory=dict_row) as cursor:
+        if inputs.max_queued_quota or inputs.submits_per_minute_quota:
+            cursor.execute("SELECT pg_advisory_xact_lock(%s)", (admission._quota_lock_key(command),))
+        now = connection.execute("SELECT clock_timestamp()").fetchone()[0]
+        rejection = admission._quota_rejection(
+            cursor,
+            command=command,
+            now=now,
+            max_queued_quota=inputs.max_queued_quota,
+            submits_per_minute_quota=inputs.submits_per_minute_quota,
+        )
+        if rejection is not None:
+            return None
+        row = admission._insert_job(
+            cursor,
+            command=command,
+            uuid_value=uuid_value,
+            payload_json=json.dumps(command.payload),
+            available_at=None,
+            idempotent_insert=True,
+        )
+        if row is None:
+            return False
+        if inputs.counters_enabled:
+            admission._bump_counters(cursor, command=command, available_at=None)
+        event = admission._insert_created_event(
+            cursor, row=row, idempotent=False, request_id=command.request_id, trace_id=command.trace_id
+        )
+        return row, event
+
+
+def lease_is_live(connection: Any, job_uuid: str) -> bool:
+    """clock_timestamp deliberately does not freeze at transaction start."""
+    return bool(
+        connection.execute(
+            "SELECT 1 FROM jobs WHERE uuid=%s AND leased_until>clock_timestamp()", (job_uuid,)
+        ).fetchone()
+    )
+
+
+def extend_horizon(connection: Any, job_uuid: str, minimum_seconds: int) -> datetime:
+    """Extend an unexpired locked lease, rejecting update-boundary expiry."""
+    row = connection.execute(
+        "UPDATE jobs SET leased_until=GREATEST(leased_until,clock_timestamp()+%s*interval '1 second'),updated_at=clock_timestamp() WHERE uuid=%s AND leased_until>clock_timestamp() RETURNING leased_until",
+        (minimum_seconds, job_uuid),
+    ).fetchone()
+    if row is None:
+        raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
+    return row[0]
 
 
 def _normalized(definition: str) -> exp.Expression:

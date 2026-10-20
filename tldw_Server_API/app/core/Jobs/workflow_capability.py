@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from contextlib import closing
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -10,9 +11,22 @@ from tldw_Server_API.app.core.DB_Management.jobs_workflow_migrations import (
     inspect_workflow_support_in_transaction,
     install_workflow_support_in_transaction,
 )
-from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import workflow_store
+from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
+    LiveWorkflowTransaction,
+    WorkflowTransaction,
+    workflow_store,
+)
 
-from .operations.workflow_contracts import WorkflowOutcome, WorkflowPolicy
+from .operations.workflow_contracts import (
+    WorkflowAdmissionCommand,
+    WorkflowAdmissionResult,
+    WorkflowFenceError,
+    WorkflowLookupResult,
+    WorkflowOutcome,
+    WorkflowPolicy,
+    WorkflowRoot,
+    _text,
+)
 
 if TYPE_CHECKING:
     from .manager import JobManager
@@ -28,6 +42,58 @@ class PreparedWorkflowCapability:
     def __post_init__(self) -> None:
         if type(self.policy) is not WorkflowPolicy:
             raise ValueError("workflow capability requires a trusted policy")
+
+    @contextmanager
+    def transaction(self, owner_user_id: str) -> Iterator[WorkflowTransaction]:
+        """Begin once, establish fail-closed owner scope, commit once, close."""
+        _text(owner_user_id, 512)
+        manager = self.manager
+        variables = (manager._RLS_OWNER_USER_ID, manager._RLS_IS_ADMIN, manager._RLS_DOMAIN_ALLOWLIST)
+        tokens = [variable.set(value) for variable, value in zip(variables, (owner_user_id, False, None))]
+        tx = None
+        transaction_token = None
+        try:
+            with closing(manager._connect()) as connection:
+                try:
+                    store = workflow_store(manager.backend)
+                    transaction_id = store.begin_runtime(connection, owner_user_id)
+                    if store.inspect_support(connection) is not WorkflowOutcome.APPLIED:
+                        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+                    tx = LiveWorkflowTransaction(manager, self.policy, connection, owner_user_id, transaction_id)
+                    transaction_token = manager._WORKFLOW_TRANSACTION.set(tx)
+                    yield tx
+                    tx.validate_fences()
+                    connection.commit()
+                except BaseException:
+                    connection.rollback()
+                    raise
+                finally:
+                    if tx is not None:
+                        tx.active = False
+        finally:
+            if transaction_token is not None:
+                manager._WORKFLOW_TRANSACTION.reset(transaction_token)
+            for variable, token in zip(variables, tokens):
+                variable.reset(token)
+
+    def admit(self, command: WorkflowAdmissionCommand) -> WorkflowAdmissionResult:
+        """Replay exact retained authority before evaluating mutable policy."""
+        if type(command) is not WorkflowAdmissionCommand:
+            raise ValueError("workflow admission requires exact command facts")
+        with self.transaction(command.owner_user_id) as tx:
+            result = tx.admit(command)
+        if tx.admission_event is not None:
+            self.manager._emit_create_side_effects(
+                tx.admission_event, backend=self.manager.backend, idempotency_key=command.idempotency_key
+            )
+        return result
+
+    def lookup(self, root: WorkflowRoot) -> WorkflowLookupResult:
+        """Read UUID authority on one owner-scoped transaction, ignoring ID hints."""
+        if type(root) is not WorkflowRoot:
+            raise ValueError("workflow lookup requires exact root facts")
+        with self.transaction(root.owner_user_id) as tx:
+            return tx.lookup(root)
 
 
 def install_workflow_support(manager: JobManager) -> None:

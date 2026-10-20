@@ -14,7 +14,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from datetime import timezone as _tz
 from pathlib import Path
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from loguru import logger
 
@@ -154,6 +154,10 @@ from .pg_migrations import (
     slides_archive_projection_ready_pg,
 )
 from .tracing import job_span
+
+if TYPE_CHECKING:
+    from .operations.workflow_contracts import WorkflowAdmissionCommand, WorkflowAdmissionInputs, WorkflowPolicy
+    from .workflow_capability import PreparedWorkflowCapability
 
 try:
     import psycopg  # type: ignore
@@ -587,6 +591,7 @@ class JobManager:
     _RLS_IS_ADMIN: ContextVar[bool] = ContextVar("jobs_rls_is_admin", default=False)
     _RLS_DOMAIN_ALLOWLIST: ContextVar[str | None] = ContextVar("jobs_rls_domain_allowlist", default=None)
     _RLS_OWNER_USER_ID: ContextVar[str | None] = ContextVar("jobs_rls_owner_user_id", default=None)
+    _WORKFLOW_TRANSACTION: ContextVar[Any | None] = ContextVar("jobs_workflow_transaction", default=None)
 
     # Test-mode only: remember last acquired job per (domain,queue) to stabilize duplicate acquires
     _LAST_ACQUIRED_TEST: dict[tuple[str, str], dict[str, Any]] = {}
@@ -3494,6 +3499,83 @@ class JobManager:
         with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
             self._assert_invariants(result.job)
         return result
+
+    def workflow_capability(self, policy: WorkflowPolicy) -> PreparedWorkflowCapability:
+        """Construct an inert trusted-policy facade without opening a database."""
+        from .workflow_capability import PreparedWorkflowCapability
+
+        return PreparedWorkflowCapability(self, policy)
+
+    def _prepare_workflow_admission(
+        self, command: WorkflowAdmissionCommand, policy: WorkflowPolicy
+    ) -> WorkflowAdmissionInputs:
+        """Reuse admission policy leaves without inserting or committing work."""
+        from .operations.workflow_contracts import WorkflowAdmissionInputs
+
+        scope = policy.scope
+        expected = {policy.payload_field: command.reference_id}
+        # Validate both logical sides of secret/encryption policy. A reference
+        # root cannot adopt truncation or a policy-rewritten reference.
+        payload = dict(expected)
+        if scope.queue not in self._get_allowed_queues(scope.domain):
+            raise ValueError("workflow queue is not allowed")
+        priority = 5
+        if _fair_share_enabled():
+            scheduler = _get_fair_share()
+            transaction = self._WORKFLOW_TRANSACTION.get()
+            active_count = (
+                transaction.count_active_jobs()
+                if transaction is not None and transaction.manager is self
+                else self._count_active_jobs_for_user(command.owner_user_id)
+            )
+            if not scheduler.can_submit(command.owner_user_id, active_count):
+                raise ValueError("workflow fair-share limit exceeded")
+            priority = min(
+                priority,
+                self._map_fair_share_score_to_priority(
+                    scheduler.calculate_priority(command.owner_user_id, active_count)
+                ),
+            )
+        cleaned, found, _where = self._scan_and_redact_secrets(payload)
+        if found and self._is_truthy(os.getenv("JOBS_SECRET_REJECT", "")):
+            raise ValueError("workflow secret policy rejected payload")
+        payload = cleaned if found else payload
+        if payload != expected:
+            raise ValueError("workflow logical payload changed")
+        payload = self._maybe_encrypt_json(payload, scope.domain)
+        if self._maybe_decrypt_json(payload, fail_on_error=True) != expected:
+            raise ValueError("workflow logical payload changed")
+        if len(json.dumps(payload).encode("utf-8")) > int(os.getenv("JOBS_MAX_JSON_BYTES", "1048576") or "1048576"):
+            raise ValueError("workflow payload exceeds size limit")
+        allowed_types = []
+        for name in ("JOBS_ALLOWED_JOB_TYPES", f"JOBS_ALLOWED_JOB_TYPES_{scope.domain.upper()}"):
+            allowed_types.extend(value.strip() for value in os.getenv(name, "").split(",") if value.strip())
+        if allowed_types and scope.job_type not in allowed_types:
+            raise ValueError("workflow job type is not allowed")
+        job = self._build_create_job_command(
+            domain=scope.domain,
+            queue=scope.queue,
+            job_type=scope.job_type,
+            payload=payload,
+            owner_user_id=command.owner_user_id,
+            project_id=None,
+            batch_group=None,
+            available_at=None,
+            request_id=None,
+            trace_id=None,
+            idempotency_key=command.idempotency_key,
+            priority=priority,
+            max_retries=command.controls.max_retries,
+            expired_lease_policy=command.controls.expired_lease_policy,
+            quarantine_threshold=command.controls.quarantine_threshold,
+        )
+        return WorkflowAdmissionInputs(
+            job,
+            self._quota_get("JOBS_QUOTA_MAX_QUEUED", scope.domain, command.owner_user_id),
+            self._quota_get("JOBS_QUOTA_SUBMITS_PER_MIN", scope.domain, command.owner_user_id),
+            self._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
+            self._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", "")),
+        )
 
     def admit_job(
         self,
