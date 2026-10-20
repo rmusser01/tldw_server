@@ -7,6 +7,7 @@
  * name comes first and the provider's display name second. Raw provider keys
  * and the internal `tldw:` prefix never reach a label.
  */
+import { removeModelSuffix } from "@/db/model-provider-utils"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability"
 import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
@@ -28,7 +29,8 @@ const toText = (value: unknown): string => {
 const stripInternalPrefix = (value: string): string =>
   value.replace(/^tldw:/i, "").trim()
 
-const UNKNOWN_PROVIDERS = new Set(["", "unknown", "other", "default"])
+// "tldw" is the server transport, not a model provider.
+const UNKNOWN_PROVIDERS = new Set(["", "unknown", "other", "default", "tldw"])
 
 /** The display name for a provider key such as `custom_openai_api` or `ollama`. */
 export const formatChatProviderName = (provider: unknown): string => {
@@ -63,12 +65,17 @@ export const getChatModelLabelParts = ({
   const selection = parseProviderQualifiedModelSelection(rawId)
   const nickname = stripInternalPrefix(toText(model?.nickname))
   const modelName = nickname || stripInternalPrefix(selection.modelId) || rawId
-  const providerName = formatChatProviderName(
-    toText(provider) ||
-      toText(model?.provider) ||
-      toText((model?.details as Record<string, unknown> | undefined)?.provider) ||
-      selection.provider
-  )
+  const providerCandidates = [
+    provider,
+    model?.provider,
+    (model?.details as Record<string, unknown> | undefined)?.provider,
+    selection.provider
+  ]
+  let providerName = ""
+  for (const candidate of providerCandidates) {
+    providerName = formatChatProviderName(candidate)
+    if (providerName) break
+  }
   return { modelName, providerName }
 }
 
@@ -79,4 +86,22 @@ export const formatChatModelLabel = (
   const { modelName, providerName } = getChatModelLabelParts(input)
   if (!modelName) return providerName
   return providerName ? `${modelName} (${providerName})` : modelName
+}
+
+const ACCOUNT_MODEL_PATH = /accounts\/[^/]+\/models\//g
+
+/**
+ * The name in an assistant message header. A streaming reply is named after
+ * the selected model key (`custom_openai_api:mock-gpt-4o`), a finished one
+ * after the model; both read as the model name. Character and assistant names
+ * pass through unchanged.
+ */
+export const formatChatMessageAuthorName = (name: unknown): string => {
+  const raw = removeModelSuffix(toText(name).replace(ACCOUNT_MODEL_PATH, ""))
+  const internal = /^tldw:/i.test(raw)
+  const selection = parseProviderQualifiedModelSelection(stripInternalPrefix(raw))
+  if (!internal && !selection.isProviderQualified) return raw
+  return removeModelSuffix(
+    stripInternalPrefix(selection.modelId).replace(ACCOUNT_MODEL_PATH, "")
+  )
 }

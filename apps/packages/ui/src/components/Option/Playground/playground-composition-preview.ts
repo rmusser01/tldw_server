@@ -1,5 +1,6 @@
 import type { ConversationContextComposition } from "@/types/conversation-context";
 import type { ChatModelUsabilityStatus } from "@/utils/chat-model-availability";
+import { formatChatModelLabel } from "@/utils/chat-model-label";
 import type {
   PlaygroundContextSource,
   PlaygroundPromptSummary,
@@ -162,7 +163,18 @@ export const buildPlaygroundCompositionPreviewSummary = ({
   modelUnavailable = false,
   modelUnavailableDetail = null,
 }: PlaygroundCompositionPreviewInput): PlaygroundCompositionPreviewSummary => {
-  const settingsScopeLabel = providerRoute.providerRouteLabel;
+  // Name the model as "model (Provider)" (CC-06); the raw provider:model route
+  // stays out of these labels.
+  const routeModel = providerRoute.providerRouteLabel || providerRoute.selectedModel;
+  const modelDisplayLabel = routeModel
+    ? formatChatModelLabel({
+        modelId: routeModel,
+        provider: providerRoute.selectedProvider,
+      }) || null
+    : null;
+  const settingsScopeLabel = providerRoute.providerRouteLabel
+    ? modelDisplayLabel
+    : null;
   const promptEntry: PlaygroundCompositionPreviewEntry = {
     id: "prompt",
     kind: "prompt",
@@ -195,10 +207,7 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     detail: assistantDetail,
     state: assistantSummary.mode === "none" ? "disabled" : "active",
   };
-  const modelTitle =
-    providerRoute.providerRouteLabel ||
-    providerRoute.selectedModel ||
-    "No model selected";
+  const modelTitle = modelDisplayLabel || "No model selected";
   const modelEntry: PlaygroundCompositionPreviewEntry = {
     id: "model",
     kind: "model",
@@ -207,7 +216,6 @@ export const buildPlaygroundCompositionPreviewSummary = ({
     detail:
       modelUsabilityDetail ||
       (modelUnavailable ? modelUnavailableDetail : null) ||
-      providerRoute.selectedProvider ||
       null,
     state: mapModelUsabilityState(
       modelUsabilityStatus,

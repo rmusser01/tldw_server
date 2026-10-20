@@ -1470,6 +1470,7 @@ export const PlaygroundForm = ({
     providerLabel,
     modelSummaryLabel,
     apiModelLabel,
+    modelLabelParts,
     modelSelectorWarning,
     favoriteModels,
     favoriteModelsIsLoading,
@@ -3464,6 +3465,7 @@ export const PlaygroundForm = ({
     <SelectedModelSaveFeedback failed={selectedModelSaveFailed} onRetry={retrySelectedModelSave} />
     <ChatModelSelectorDropdown
       apiModelLabel={apiModelLabel}
+      modelLabelParts={modelLabelParts}
       catalogControls={modelCatalogControls}
       connectionStatusLabel={connectionStatusLabel}
       connectionStatusWarning={

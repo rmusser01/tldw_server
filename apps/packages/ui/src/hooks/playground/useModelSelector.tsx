@@ -14,6 +14,8 @@ import {
   getCanonicalModelKey,
   getModelId,
   getModelProvider,
+  isConfiguredUsableModel,
+  mergeCatalogModels,
   resolveModelSelectorSelection,
   hasFavoriteModelKey,
   modelMatchesSearch,
@@ -23,6 +25,11 @@ import {
   type ModelSortMode,
   type ModelUsageStats
 } from "./modelSelectorUtils"
+import { formatChatProviderName } from "@/utils/chat-model-label"
+
+// Loaded on demand: the server service pulls in much of the app.
+const loadServerChatModelCatalog = async (): Promise<ModelSelectorDescriptor[]> =>
+  (await import("@/services/tldw-server")).fetchChatModelCatalog()
 
 export type { ModelListScope, ModelSortMode } from "./modelSelectorUtils"
 
@@ -34,6 +41,18 @@ export type UseModelSelectorParams = {
   modelsLoading?: boolean
   modelsError?: boolean
   onRetryModels?: () => void
+  /**
+   * Loads every chat model the server knows, including models whose provider
+   * is not set up, for the picker's "All models" scope (CC-06).
+   */
+  loadCatalogModels?: () => Promise<ModelSelectorDescriptor[]>
+}
+
+export type ModelLabelParts = {
+  /** The model's nickname or id. */
+  modelName: string
+  /** The provider's display name, or "" until a provider is resolved. */
+  providerName: string
 }
 
 export function useModelSelector({
@@ -43,7 +62,8 @@ export function useModelSelector({
   navigate,
   modelsLoading = false,
   modelsError = false,
-  onRetryModels
+  onRetryModels,
+  loadCatalogModels = loadServerChatModelCatalog
 }: UseModelSelectorParams) {
   const { t } = useTranslation(["playground", "common"])
   const apiProvider = useStoreChatModelSettings((state) => state.apiProvider)
@@ -77,6 +97,20 @@ export function useModelSelector({
 
   const modelListScope: ModelListScope =
     storedModelListScope === "catalog" ? "catalog" : "configured"
+  const [catalogModels, setCatalogModels] = React.useState<ModelSelectorDescriptor[]>([])
+  React.useEffect(() => {
+    if (modelListScope !== "catalog") return
+    let current = true
+    void Promise.resolve()
+      .then(() => loadCatalogModels())
+      .then((models) => {
+        if (current) setCatalogModels(Array.isArray(models) ? models : [])
+      })
+      .catch(() => undefined)
+    return () => {
+      current = false
+    }
+  }, [loadCatalogModels, modelListScope])
   const selectedSelection = React.useMemo(
     () => resolveModelSelectorSelection(composerModels, selectedModel, apiProvider, { scope: activeSettingsScope, providerOverride: scopedApiProvider }),
     [composerModels, selectedModel, apiProvider, activeSettingsScope, scopedApiProvider]
@@ -150,9 +184,12 @@ export function useModelSelector({
   }, [modelContextLength, requestedNumCtx])
 
   const resolvedProviderKey = selectedSelection.provider || "custom"
-  const providerLabel = selectedSelection.provider
-    ? tldwModels.getProviderDisplayName(selectedSelection.provider)
-    : t("playground:composer.chooseProvider", "Choose provider")
+  const resolvedProviderName = selectedSelection.provider
+    ? formatChatProviderName(selectedSelection.provider) ||
+      tldwModels.getProviderDisplayName(selectedSelection.provider)
+    : ""
+  const providerLabel =
+    resolvedProviderName || t("playground:composer.chooseProvider", "Choose provider")
 
   const modelSummaryLabel = React.useMemo(() => {
     if (!selectedModel) {
@@ -168,6 +205,7 @@ export function useModelSelector({
     )
   }, [selectedModel, selectedModelMeta, selectedSelection.modelId, t])
 
+  // One format for the selected model (CC-06): "model (Provider)".
   const apiModelLabel = React.useMemo(() => {
     if (!selectedModel) {
       return t(
@@ -175,8 +213,18 @@ export function useModelSelector({
         "Select a model"
       )
     }
-    return `${providerLabel} / ${modelSummaryLabel}`
-  }, [modelSummaryLabel, providerLabel, selectedModel, t])
+    return resolvedProviderName
+      ? `${modelSummaryLabel} (${resolvedProviderName})`
+      : modelSummaryLabel
+  }, [modelSummaryLabel, resolvedProviderName, selectedModel, t])
+
+  const modelLabelParts = React.useMemo<ModelLabelParts | null>(
+    () =>
+      selectedModel
+        ? { modelName: modelSummaryLabel, providerName: resolvedProviderName }
+        : null,
+    [modelSummaryLabel, resolvedProviderName, selectedModel]
+  )
 
   const modelSelectorWarning = !selectedSelection.key || !selectedSelection.provider
 
@@ -233,7 +281,9 @@ export function useModelSelector({
   )
 
   const filteredModels = React.useMemo(() => {
-    const list = (composerModels as any[]) || []
+    const ready = (composerModels as any[]) || []
+    const list =
+      modelListScope === "catalog" ? mergeCatalogModels(ready, catalogModels) : ready
     const scoped = filterModelsForScope(list, modelListScope)
     const q = modelSearchQuery.trim().toLowerCase()
     const searched = q
@@ -247,6 +297,7 @@ export function useModelSelector({
       sortMode: modelSortMode
     })
   }, [
+    catalogModels,
     composerModels,
     favoriteModelSet,
     modelListScope,
@@ -444,11 +495,14 @@ export function useModelSelector({
       return parts.join(" ")
     }
 
-    const buildItem = (model: any) => {
+    // Rows outside a provider group name their provider after the model (CC-06).
+    const buildItem = (model: any, showProvider = false) => {
       const providerRaw = getModelProvider(model)
       const modelId = getModelId(model)
       const modelKey = getCanonicalModelKey(model)
       const modelLabel = model.nickname || modelId
+      const providerName = showProvider ? formatChatProviderName(providerRaw) : ""
+      const notSetUp = !isConfiguredUsableModel(model)
       const isFavorite = isFavoriteModel(model)
       const isRecommended = firstFavoriteModelKey === modelKey
       const favoriteTitle = isFavorite
@@ -513,6 +567,22 @@ export function useModelSelector({
             >
               <ProviderIcons provider={providerRaw} className="h-3 w-3 text-text-subtle" />
               <span className="min-w-0 flex-1 basis-40 truncate" title={modelLabel}>{modelLabel}</span>
+              {providerName ? (
+                <span className="min-w-0 max-w-[8rem] shrink truncate text-[11px] text-text-muted" title={providerName}>
+                  {providerName}
+                </span>
+              ) : null}
+              {notSetUp ? (
+                <span
+                  className="rounded-full border border-border px-1.5 py-0.5 text-[10px] text-text-muted"
+                  title={t(
+                    "playground:composer.modelNotSetUpTitle",
+                    "This model's provider is not set up on your server yet."
+                  )}
+                >
+                  {t("playground:composer.modelNotSetUp", "Not set up")}
+                </span>
+              ) : null}
               {isRecommended && (
                 <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
                   {t("playground:composer.recommended", "Recommended")}
@@ -568,8 +638,10 @@ export function useModelSelector({
       }
     }
 
+    const buildItemWithProvider = (model: any) => buildItem(model, true)
+
     if (modelSortMode === "az") {
-      return models.slice().sort(byLabel).map(buildItem)
+      return models.slice().sort(byLabel).map(buildItemWithProvider)
     }
 
     if (modelSortMode === "favorites") {
@@ -581,10 +653,10 @@ export function useModelSelector({
           type: "group" as const,
           key: "favorites",
           label: t("playground:composer.favorites", "Favorites"),
-          children: favorites.slice().sort(byLabel).map(buildItem)
+          children: favorites.slice().sort(byLabel).map(buildItemWithProvider)
         })
       }
-      items.push(...others.slice().sort(byLabel).map(buildItem))
+      items.push(...others.slice().sort(byLabel).map(buildItemWithProvider))
       return items
     }
 
@@ -606,7 +678,7 @@ export function useModelSelector({
         type: "group" as const,
         key,
         label,
-        children: uniqueModels.map(buildItem)
+        children: uniqueModels.map(buildItemWithProvider)
       })
     }
 
@@ -640,7 +712,7 @@ export function useModelSelector({
       const providerRaw = getModelProvider(model)
       const groupKey = toGroupKey(providerRaw)
       if (!groups.has(groupKey)) groups.set(groupKey, [])
-      groups.get(groupKey)!.push(buildItem(model))
+      groups.get(groupKey)!.push(buildItem(model, false))
     }
 
     const entries = Array.from(groups.entries())
@@ -710,6 +782,7 @@ export function useModelSelector({
     providerLabel,
     modelSummaryLabel,
     apiModelLabel,
+    modelLabelParts,
     modelSelectorWarning,
     favoriteModels,
     favoriteModelsIsLoading: favoriteModelsMeta.isLoading,

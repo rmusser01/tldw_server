@@ -1259,18 +1259,18 @@ const selectConfiguredCockpitModel = async (
   await ensureComposerOptionsVisible(page);
   await page.getByTestId('model-selector').first().click();
 
+  // CC-06: the scope is a two-way "Ready to use | All models" control.
   const scopeToggle = page.getByTestId('model-list-scope-toggle');
   await expect(scopeToggle).toBeVisible();
-  await expect(scopeToggle).toHaveText(/Search all models/);
-  await expect(page.getByText('Usable configured models')).toBeVisible();
+  const readyToUse = scopeToggle.getByRole('radio', { name: 'Ready to use' });
+  const allModels = scopeToggle.getByRole('radio', { name: 'All models' });
+  await expect(readyToUse).toBeChecked();
 
-  await scopeToggle.click();
-  await expect(scopeToggle).toHaveText(/Configured/);
-  await expect(page.getByText('All known models')).toBeVisible();
+  await scopeToggle.getByText('All models', { exact: true }).click();
+  await expect(allModels).toBeChecked();
 
-  await scopeToggle.click();
-  await expect(scopeToggle).toHaveText(/Search all models/);
-  await expect(page.getByText('Usable configured models')).toBeVisible();
+  await scopeToggle.getByText('Ready to use', { exact: true }).click();
+  await expect(readyToUse).toBeChecked();
 
   await page.getByLabel('Search models').fill(selection.model);
 

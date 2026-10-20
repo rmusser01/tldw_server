@@ -7,8 +7,17 @@ import { Link } from "react-router-dom"
 import type { ModelSortMode } from "@/hooks/playground"
 import type { ComposerModelReadiness } from "./hooks/useComposerModelReadiness"
 
+// The search box, not the scope control's radio inputs, takes focus on open.
+const MODEL_SEARCH_INPUT = 'input:not([type="radio"]):not([type="checkbox"])'
+
 type ChatModelSelectorDropdownProps = {
   apiModelLabel: string
+  /**
+   * The selected model's name and provider. When given, the chip shows the
+   * model first and the provider second, truncating the provider before the
+   * model name (CC-06).
+   */
+  modelLabelParts?: { modelName: string; providerName: string } | null
   connectionStatusLabel: string
   connectionStatusWarning?: boolean
   catalogControls?: React.ReactNode
@@ -37,6 +46,7 @@ type ChatModelSelectorDropdownProps = {
 export const ChatModelSelectorDropdown = React.memo(
   function ChatModelSelectorDropdown({
     apiModelLabel,
+    modelLabelParts = null,
     catalogControls,
     connectionStatusLabel,
     connectionStatusWarning = false,
@@ -73,7 +83,7 @@ export const ChatModelSelectorDropdown = React.memo(
         if (!current || !popupRef.current?.isConnected) return
         const active = document.activeElement
         if (active !== openingFocus && active !== document.body) return
-        popupRef.current.querySelector<HTMLInputElement>("input")?.focus()
+        popupRef.current.querySelector<HTMLInputElement>(MODEL_SEARCH_INPUT)?.focus()
       })
       return () => {
         current = false
@@ -142,7 +152,7 @@ export const ChatModelSelectorDropdown = React.memo(
             tabIndex={-1}
             onFocus={(event) => {
               if (event.target === event.currentTarget) {
-                event.currentTarget.querySelector<HTMLInputElement>("input")?.focus()
+                event.currentTarget.querySelector<HTMLInputElement>(MODEL_SEARCH_INPUT)?.focus()
               }
             }}
             onBlur={(event) => {
@@ -270,7 +280,26 @@ export const ChatModelSelectorDropdown = React.memo(
                 statusWarning ? "text-warn" : "text-text-subtle"
               }`}
             />
-            <span className="max-w-[120px] truncate">{apiModelLabel}</span>
+            {modelLabelParts?.modelName ? (
+              <>
+                <span
+                  data-testid="model-selector-model-name"
+                  className="min-w-0 max-w-[160px] truncate font-medium sm:max-w-[260px]"
+                >
+                  {modelLabelParts.modelName}
+                </span>
+                {modelLabelParts.providerName ? (
+                  <span
+                    data-testid="model-selector-provider-name"
+                    className="min-w-0 max-w-[96px] shrink-[4] truncate text-text-muted"
+                  >
+                    {modelLabelParts.providerName}
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <span className="max-w-[120px] truncate">{apiModelLabel}</span>
+            )}
             <span
               data-testid="model-selector-status"
               data-model-readiness={readinessShown ? modelReadiness?.state : undefined}

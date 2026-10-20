@@ -1,5 +1,6 @@
 import { Button } from "@/components/Common/Button"
 import type { PromptImproveModelSelection } from "@/services/prompt-improvement"
+import { formatChatModelLabel } from "@/utils/chat-model-label"
 import { Sparkles } from "lucide-react"
 import {
   type ReactNode,
@@ -196,11 +197,11 @@ export function PromptAssistMenu({
     ? null
     : modelSelection?.selected_model.trim().toLowerCase() === "auto"
       ? t("common:promptAssist.autoModel", "Auto")
-      : `${modelDisplayName || modelSelection?.selected_model.trim()}${
-          modelSelection?.provider_hint
-            ? ` (${modelSelection.provider_hint})`
-            : ""
-        }`
+      : formatChatModelLabel({
+          model: modelDisplayName ? { nickname: modelDisplayName } : null,
+          modelId: modelSelection?.selected_model,
+          provider: modelSelection?.provider_hint
+        })
 
   const recovery = !hasDraft
     ? t(

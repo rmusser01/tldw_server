@@ -3259,6 +3259,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     setModelSortMode,
     resolvedProviderKey,
     apiModelLabel,
+    modelLabelParts,
     modelSelectorWarning,
     favoriteModels,
     favoriteModelsIsLoading,
@@ -3897,6 +3898,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
               {provenanceEnabled && (
                 <ChatModelSelectorDropdown
                   apiModelLabel={apiModelLabel}
+                  modelLabelParts={modelLabelParts}
                   connectionStatusLabel={connectionStatusLabel}
                   connectionStatusWarning={connectionStatusWarning}
                   modelDropdownMenuItems={modelDropdownMenuItems}

@@ -215,10 +215,31 @@ describe("PromptAssistMenu", () => {
 
     await user.click(screen.getByRole("button", { name: "Improve prompt" }))
     expect(
-      screen.getByText("Active model: GPT-5 mini (openai)")
+      screen.getByText("Active model: GPT-5 mini (OpenAI)")
     ).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: /Improve now/ }))
     expect(onImproveNow).toHaveBeenCalledTimes(1)
+  })
+
+  it("CC-06: names the active model like the composer chip, without raw ids", async () => {
+    const user = userEvent.setup()
+    render(
+      <PromptAssistMenu
+        draft="Draft"
+        capability="supported"
+        modelSelection={{
+          selected_model: "tldw:mock-gpt-4o",
+          provider_hint: "custom_openai_api"
+        }}
+        onImproveNow={vi.fn()}
+        onReviewChanges={vi.fn()}
+      />
+    )
+
+    await user.click(screen.getByRole("button", { name: "Improve prompt" }))
+    expect(
+      screen.getByText("Active model: mock-gpt-4o (Custom OpenAI API)")
+    ).toBeInTheDocument()
   })
 
   it("offers model recovery and keeps model actions disabled without a route", async () => {

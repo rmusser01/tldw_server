@@ -56,6 +56,8 @@ export type FakeProvider = {
   models: string[]
   /** The server's provider health report entry (/llm/providers `health`). */
   health?: Record<string, unknown>
+  /** False lists the provider in the catalog without setting it up (default true). */
+  configured?: boolean
 }
 
 /** The provider catalog served by /llm/providers and /llm/models/metadata. */
@@ -522,7 +524,7 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
       return json({
         providers: catalog.providers.map((provider) => ({
           name: provider.name,
-          configured: true,
+          configured: provider.configured !== false,
           requires_api_key: false
         })),
         any_configured: true
@@ -537,8 +539,8 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
           name: provider.name,
           display_name: provider.displayName ?? provider.name,
           type: "openai-compatible",
-          is_configured: true,
-          configured: true,
+          is_configured: provider.configured !== false,
+          configured: provider.configured !== false,
           default_model: provider.models[0],
           ...(provider.health ? { health: provider.health } : {}),
           models: provider.models,
@@ -550,7 +552,7 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
           }))
         })),
         default_provider: catalog.defaultProvider,
-        total_configured: catalog.providers.length
+        total_configured: catalog.providers.filter((provider) => provider.configured !== false).length
       })
     }
     if (path === "/api/v1/llm/models/metadata" || path === "/api/v1/llm/models") {
@@ -563,7 +565,9 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
           modalities: { input: ["text"], output: ["text"] },
           capabilities: ["chat", "streaming"],
           context_window: 8192,
-          is_configured: true
+          is_configured: provider.configured !== false,
+          provider_is_configured: provider.configured !== false,
+          catalog_only: provider.configured === false
         }))
       )
       return json({ models, total: models.length })

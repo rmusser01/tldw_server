@@ -17,6 +17,7 @@ import { useTTS, type TtsClipMeta } from "@/hooks/useTTS"
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference"
 import { tagColors } from "@/utils/color"
 import { removeModelSuffix } from "@/db/dexie/models"
+import { formatChatMessageAuthorName } from "@/utils/chat-model-label"
 import {
   parseReasoning, isReasoningStarted, isReasoningOnlyResponse, MISSING_FINAL_ANSWER_MESSAGE
 } from "@/libs/reasoning"
@@ -2310,12 +2311,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                 ) : (
                   <span className="text-caption font-semibold text-text">
                     {props.isBot
-                      ? removeModelSuffix(
-                          `${resolvedModelName || props?.name}`?.replaceAll(
-                            /accounts\/[^\/]+\/models\//g,
-                            ""
-                          )
-                        )
+                      ? formatChatMessageAuthorName(resolvedModelName || props?.name)
                       : userDisplayName.trim() || t("common:you", "You")}
                   </span>
                 )}
