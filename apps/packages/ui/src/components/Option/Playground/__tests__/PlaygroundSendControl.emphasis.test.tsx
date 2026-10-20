@@ -8,7 +8,8 @@
 import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
-import { PlaygroundSendControl, hasSendableDraft } from "../PlaygroundSendControl"
+import { PlaygroundSendControl } from "../PlaygroundSendControl"
+import { hasSendableDraft } from "../composer-draft-content"
 
 const t = (_key: string, fallback?: string) => fallback ?? _key
 

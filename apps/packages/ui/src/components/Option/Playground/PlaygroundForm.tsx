@@ -229,6 +229,7 @@ import { useMessageOption } from "~/hooks/useMessageOption";
 import { useTabMentions } from "~/hooks/useTabMentions";
 import { composerMentionsAvailable, composerPlaceholder } from "./composer-placeholder";
 import { isAwaitingFirstConnectionCheck, notifySendNeedsConnection } from "./composer-connection";
+import { hasSendableDraft } from "./composer-draft-content";
 import { useWebUI } from "~/store/webui";
 
 import { AttachedResearchContextChip } from "./AttachedResearchContextChip";
@@ -251,7 +252,6 @@ import { PlaygroundMcpControl } from "./PlaygroundMcpControl";
 import { PlaygroundModelCatalogControls } from "./PlaygroundModelCatalogControls";
 import { PlaygroundModeLauncher } from "./PlaygroundModeLauncher";
 import {
-  hasSendableDraft,
   PlaygroundAttachmentButton,
   PlaygroundSendControl,
   type PlaygroundSendBlocker,
