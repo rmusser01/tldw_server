@@ -1,9 +1,10 @@
 # Jobs Completion Extraction Design
 
 Date: 2026-10-04
-Status: Ownership option A approved; review corrections incorporated; revised specification awaiting human review
+Status: Written specification approved 2026-10-20; foundation implementation plan awaiting human review
 Tracking: TASK-13421 (ownership assessment; implementation tasks are separate)
 Baseline: `origin/dev` at `c95e41fc62a07e55fd74052023826c71b2a2c789`
+Planning revalidation: `origin/dev` at `454974e812f8faf8532c931f3f7c8e0bf8d9445c` on 2026-10-20
 
 ## Objective
 
@@ -37,8 +38,15 @@ replaces its extraction proposal, not its historical evidence. In particular:
 
 The requester approved option A on 2026-10-04: completion-specific atomic
 operations and SQL helpers under `DB_Management`, preserving facade-owned
-connection/RLS contexts. Approval of this written specification and a separate
-foundation implementation plan remains required before implementation.
+connection/RLS contexts. The requester approved this revised written specification
+on 2026-10-20. The separate foundation implementation plan still requires human
+review and execution selection before implementation.
+
+At the planning revalidation, all 16 relevant completion, policy, context, and
+shared-helper function ASTs match the original baseline. Incoming admission,
+failure-policy, WorkerSDK usage-accounting, and PostgreSQL fixture changes remain
+intact. The unpublished complementary ADR was renumbered from 060 to 078 because
+other open PRs now use 060; its accepted ownership rationale is unchanged.
 
 ## Scope
 
@@ -367,7 +375,9 @@ be revertible at its own merge point.
 
 ## Next Approval Gate
 
-Human review of this written specification precedes the foundation plan. The
-foundation plan covers PR 1 only; PR 2 gets a separate plan after the foundation
-merges. TASK-13421 remains In Progress until written-design review and assessment
-verification are recorded. No completion implementation is included here.
+Written-specification review is complete. Review the
+[foundation implementation plan](../plans/2026-10-20-jobs-completion-foundation-implementation-plan.md)
+and select execution before implementation. TASK-13871 covers PR 1 only; PR 2
+gets a separate task and plan after the foundation merges. TASK-13421 records the
+completed ownership assessment and written-design approval. No completion
+implementation is included here.

@@ -1,7 +1,7 @@
 ---
 id: TASK-13421
 title: Assess Jobs completion SQL ownership after atomicity fix
-status: In Progress
+status: Done
 created_date: 2026-10-03 01:33
 references:
 - TASK-13215
@@ -10,8 +10,9 @@ documentation:
 - Docs/ADR/058-jobs-completion-row-identity.md
 - Docs/superpowers/specs/2026-09-07-jobs-completion-row-identity-atomicity-design.md
 - Docs/superpowers/specs/2026-10-04-jobs-completion-extraction-design.md
-- Docs/ADR/060-jobs-completion-persistence-boundary.md
-updated_date: 2026-10-04 23:30
+- Docs/ADR/078-jobs-completion-persistence-boundary.md
+- Docs/superpowers/plans/2026-10-20-jobs-completion-foundation-implementation-plan.md
+updated_date: 2026-10-20 16:12
 ---
 
 ## Description
@@ -48,20 +49,21 @@ Written artifacts: Docs/superpowers/specs/2026-10-04-jobs-completion-extraction-
 Written-design verification complete on exact staged tree 7753c0e8e14ca40464ba4eb22ea2a4a130cb394a, committed only in temporary local candidate clone as bc2ef95b2f: 212 Docs tests passed, 438 existing project warnings, no skips/failures, including zero-warning strict MkDocs, using existing /tmp/task13215-mkdocs toolchain without changing shared venv/dependencies. XML /tmp/task13421_docs_candidate.xml. Initial candidate checkout was still running when tree materialization was attempted (index lock); waited for natural checkout completion rather than deleting the active lock, completed the unintended pre-candidate baseline (212 pass; /tmp/task13421_docs_pre_candidate_baseline.xml, not candidate evidence), then materialized/committed the staged tree and reran candidate verification. No source or documentation test failure occurred. Repeat canonical refresh has no unstaged publication changes; public/private boundary, exact ADR/index byte parity, placeholder/self-review scan, task canonical check and staged whitespace pass. Runtime/test/DB source diff versus live c95e41fc is empty. Bandit/Ruff/compile N/A because scope is Markdown/task-only. Actual design-branch commit and final-head Docs rerun follow; human written-spec approval remains pending and no implementation plan/runtime work proceeds yet.
 2026-10-04 human approved the requested written-design review corrections, not runtime implementation. Applying documentation-only clarification: preserve pre-commit callback-reference binding in a facade-local per-attempt registry at the original preparation points and suppression boundaries while returned DB facts remain data-only; add binding replacement/failure characterization requirements. Read-only SQLite probes confirmed commit-time replacement invokes the originally captured gauge callback, and a suppressed gauge-binding ValueError preserves duration/completed metrics but skips tracing while completion/event succeed. Shared-helper caller inventory verified: complete_job/_stage_completion_sla_breach, fail_job terminal/retry/quarantine, reschedule_jobs and retry_now_jobs. The foundation verification matrix will include real PG and SQLite missing-counter/admin branches rather than treating completion-only coverage as sufficient. Current Python Backlog MCP workflow was read and confirms safe Python services (no Node CLI); project is explicitly the isolated worktree and canonical formatting will be checked with backlog-py. Prior actual design head 8f8bf332d1d050e3926c1c01dff14c7268eb6172 passed 212 Docs tests including strict MkDocs at /tmp/task13421_docs_design_head.xml. ADR-060's accepted ownership rationale is unchanged. Revised written-spec approval and a separate foundation task/plan remain prerequisites; no implementation plan, runtime/test changes or new PR yet.
 Approved review corrections incorporated in the written spec only. Facade-local pre-commit observer binding is explicit, with data-only opaque binding identifiers, original callback/argument evaluation and partial-preparation boundaries, original callbacks retained across commit-time replacement, and unchanged post-commit settings reads inside observer bodies. Paired future characterization must cover replacement/binding failure, including duration/completed metric prefix without trace on suppressed gauge-binding failure. Added a current shared-helper verification matrix naming fail_job terminal/retry/quarantine, reschedule_jobs and retry_now_jobs callers; required real PG admin/lifecycle missing-counter and failure coverage supplements completion/finalize/parity/RLS, using existing tests rather than a new provisioner. Fresh revised-tree Docs verification: activated shared venv, RUN_JOBS=1 PYTHONPATH=/tmp/task13215-mkdocs python -m pytest -q tldw_Server_API/tests/Docs --junitxml=/tmp/task13421_docs_binding_revision.xml; 212 passed, 438 existing warnings, no skips/failures, exit 0, including strict MkDocs. Existing toolchain reused without shared dependency changes. Canonical task-format check, referenced test-file existence, whitespace, ADR-060/index exact canonical/published byte parity and source/test/ADR/publication diff checks passed. Self-review found no placeholder, boundary contradiction or scope expansion; clarified that no resampling of prepared facts does not forbid existing observer-internal dynamic reads. Bandit/Ruff/compile N/A: only the spec and this task changed. Human final review of the revised spec remains pending; foundation implementation task/plan follows written approval, and no runtime work or PR was started.
+2026-10-20 closeout: human 'approved' explicitly approves the revised written spec, enabling foundation planning but not execution. Created collision-free TASK-13871 and Docs/superpowers/plans/2026-10-20-jobs-completion-foundation-implementation-plan.md; all four implementation stages remain Not Started. Rebased three unpublished docs commits onto current dev 454974e812f8faf8532c931f3f7c8e0bf8d9445c. Only rebase conflicts were ADR index appends; preserved every incoming row and renumbered our decision to 078 consistently in canonical/public files and spec links. Original accepted ADR body after its title is byte-identical to old 1aeccc94c7; no rationale change or other accepted ADR edits. All 16 completion/policy/context/helper ASTs match old c95e41fc; no runtime/test/config/dependency/CI changes versus live dev. Fresh tests: 86 passed/227 warnings/no skips at /tmp/jobs_completion_plan_baseline_20261020.xml; 212 Docs passed/439 project warnings/no skips including strict MkDocs at /tmp/task13871_plan_docs.xml. Publication refresh produces no tracked changes; canonical/public ADR/index byte parity, task normalization, whitespace and placeholder/conflict scans passed. Full paginated open-PR paths verified identifier maxima 13870/077; GitHub timeout retried only remaining PRs to complete the read-only inventory. The initial conflict-resolution attempt retaining old ADR-060 was rejected by safety review before edits; the accepted alternative renamed our files/links/index row directly to 078. Bandit/Ruff/compile N/A to documentation/tracking-only assessment/planning changes.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-
+Completed the Jobs completion SQL ownership assessment and obtained human approval of the revised written specification on 2026-10-20. The approved boundary is one completion-specific backend operation under DB_Management on the facade's existing connection/RLS executor, retaining lazy facade policy, pre-commit observer binding and post-commit dispatch. ADR-058 still governs locked identity/atomicity; the complementary accepted ownership ADR is now ADR-078, renumbered from unpublished 060 solely to avoid open-PR collisions, with unchanged rationale. The branch was rebased to dev 454974e812; all 16 relevant function ASTs are unchanged from the approved original baseline. Fresh baseline: 86 SQLite/required real PG cases passed without skips; Docs: 212 passed including strict MkDocs; canonical task/publication and whitespace checks passed. Foundation-only plan and implementation tracking move to TASK-13871. No production/test code, backend routing, unrelated caller migration or historical repair was implemented; human review/execution selection of the new foundation plan remains pending.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
