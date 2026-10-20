@@ -444,6 +444,14 @@ describe("sidebar model validation", () => {
     expect(await screen.findByTestId("chat-model-select")).toHaveTextContent("ready-model")
   })
 
+  it("XS-02: an empty model chip is named by its visible 'Choose model' text", async () => {
+    renderHarness(<Harness model="" />)
+    await waitForCatalog()
+    const chip = await screen.findByTestId("chat-model-select")
+    expect(chip).toHaveTextContent("Choose model")
+    expect(chip).toHaveAccessibleName("Choose model")
+  })
+
   it.each(["", "removed-model"])(
     "XS-02: opens the Casual model picker when Send is blocked by the model %j",
     async (model) => {
@@ -452,11 +460,32 @@ describe("sidebar model validation", () => {
       await screen.findByTestId("chat-model-select")
       fireEvent.click(screen.getByText("Send"))
       await screen.findByRole("alert")
-      expect(await screen.findByPlaceholderText("Search models")).toBeInTheDocument()
+      const search = await screen.findByPlaceholderText("Search models")
+      // Keyboard users land in the picker's search, and stay there.
+      await waitFor(() => expect(search).toHaveFocus())
+      await act(() => new Promise((resolve) => setTimeout(resolve, 100)))
+      expect(search).toHaveFocus()
       expect(await screen.findByRole("menuitem", { name: /ready-model/ })).toBeInTheDocument()
       expect(mocks.send).not.toHaveBeenCalled()
     }
   )
+
+  it("XS-02: Escape in the picker's search closes it and returns focus to the model chip", async () => {
+    renderHarness(<Harness model="" />)
+    await waitForCatalog()
+    const chip = await screen.findByTestId("chat-model-select")
+    fireEvent.click(screen.getByText("Send"))
+    const search = await screen.findByPlaceholderText("Search models")
+    await waitFor(() => expect(search).toHaveFocus())
+    fireEvent.keyDown(search, { key: "Escape", code: "Escape", keyCode: 27 })
+    await waitFor(() => expect(chip).toHaveFocus())
+    // The popup starts its close animation (jsdom never finishes it).
+    await waitFor(() =>
+      expect(search.closest(".ant-dropdown")?.className).toMatch(
+        /ant-dropdown-hidden|-leave/
+      )
+    )
+  })
 
   it.each([{ busy: true }])(
     "preserves queued dispatch for %j",

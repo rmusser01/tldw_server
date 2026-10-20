@@ -1,5 +1,13 @@
 import { useChatModelCatalog } from "@/hooks/useChatModelCatalog"
-import { Avatar, Dropdown, Input, Select, Tooltip, type MenuProps } from "antd"
+import {
+  Avatar,
+  Dropdown,
+  Input,
+  Select,
+  Tooltip,
+  type InputRef,
+  type MenuProps
+} from "antd"
 import { LucideBrain, Star } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
@@ -27,7 +35,6 @@ import {
 export type Props = {
   iconClassName?: string
   showSelectedName?: boolean
-  showPicker?: boolean
 }
 
 export type ModelSelectHandle = {
@@ -61,7 +68,7 @@ const LOCAL_PROVIDERS = new Set([
 ])
 
 const ModelSelectBase = (
-  { iconClassName = "size-5", showSelectedName = false, showPicker = true }: Props,
+  { iconClassName = "size-5", showSelectedName = false }: Props,
   ref: React.ForwardedRef<ModelSelectHandle>
 ) => {
   const { t } = useTranslation("common")
@@ -81,12 +88,26 @@ const ModelSelectBase = (
   const [searchQuery, setSearchQuery] = React.useState("")
   const [dropdownOpen, setDropdownOpen] = React.useState(false)
   const triggerRef = React.useRef<HTMLButtonElement | null>(null)
+  const searchInputRef = React.useRef<InputRef | null>(null)
   React.useImperativeHandle(
     ref,
     () => ({
+      // Opens the picker and puts keyboard focus in its search box (XS-02).
+      // The menu renders in a portal, so focus must land inside it: leaving it
+      // on the trigger strands keyboard users outside the list.
       openAndFocus: () => {
         setDropdownOpen(true)
-        window.requestAnimationFrame(() => triggerRef.current?.focus())
+        let framesLeft = 10
+        const focusSearch = () => {
+          const input = searchInputRef.current
+          if (input) {
+            input.focus({ preventScroll: true })
+            return
+          }
+          framesLeft -= 1
+          if (framesLeft > 0) window.requestAnimationFrame(focusSearch)
+        }
+        window.requestAnimationFrame(focusSearch)
       }
     }),
     []
@@ -380,8 +401,6 @@ const ModelSelectBase = (
     : null
 
   const saveFeedback = <SelectedModelSaveFeedback failed={selectedModelSaveFailed} onRetry={retrySelectedModelSave} />
-  // Keep the failed-write owner mounted when a valid selection hides the trigger.
-  if (!showPicker) return saveFeedback
 
   if (isError) {
     return (
@@ -437,6 +456,7 @@ const ModelSelectBase = (
             <div className="w-72">
               <div className="flex items-center gap-2 px-2 py-2 border-b border-border">
                 <Input
+                  ref={searchInputRef}
                   size="small"
                   placeholder={t("modelSelect.searchPlaceholder", "Search models")}
                   value={searchQuery}
@@ -444,7 +464,17 @@ const ModelSelectBase = (
                   className="flex-1"
                   autoFocus
                   onChange={(event) => setSearchQuery(event.target.value)}
-                  onKeyDown={(event) => event.stopPropagation()}
+                  onKeyDown={(event) => {
+                    event.stopPropagation()
+                    // Escape leaves the picker and returns to the chip, so a
+                    // keyboard user is never stranded in the portal (XS-02).
+                    if (event.key === "Escape") {
+                      event.preventDefault()
+                      setDropdownOpen(false)
+                      setSearchQuery("")
+                      triggerRef.current?.focus()
+                    }
+                  }}
                 />
                 <Select
                   size="small"
@@ -485,7 +515,9 @@ const ModelSelectBase = (
               ariaLabel={
                 selectedModelSummary
                   ? `${t("modelSelect.label", "Model")}: ${selectedModelSummary}. ${t("modelSelect.change", "Change model")}`
-                  : (t("selectAModel") as string)
+                  : showSelectedName
+                    ? t("modelSelect.choose", "Choose model")
+                    : (t("selectAModel") as string)
               }
               hasPopup="menu"
               dataTestId="chat-model-select"
