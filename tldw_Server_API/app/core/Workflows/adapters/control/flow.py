@@ -9,6 +9,7 @@ import asyncio
 import re
 import time
 import types
+from collections.abc import Coroutine
 from typing import Any
 
 from loguru import logger
@@ -49,6 +50,23 @@ _FLOW_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     re.error,
 )
+
+
+async def _run_cancelling_siblings(coros: list[Coroutine[Any, Any, Any]]) -> list[Any]:
+    """Run sub-steps together and return their results in order.
+
+    The first sub-step to raise cancels the others, those running and those
+    still waiting for a concurrency slot, and its error is raised once they
+    have stopped. ``asyncio.gather`` alone leaves them running (TASK-13863).
+    """
+    tasks = [asyncio.create_task(coro) for coro in coros]
+    try:
+        return await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 @registry.register(
@@ -354,7 +372,7 @@ async def run_map_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
                     return await adapter(sub_cfg, sub_ctx)
                 return {"error": f"unsupported_substep:{sub_type}"}
 
-    results = await asyncio.gather(*[_run_one(i, it) for i, it in enumerate(items)], return_exceptions=False)
+    results = await _run_cancelling_siblings([_run_one(i, it) for i, it in enumerate(items)])
     return {"results": results, "count": len(results)}
 
 
@@ -408,11 +426,16 @@ async def run_parallel_adapter(config: dict[str, Any], context: dict[str, Any]) 
                 results[idx] = {"error": "parallel_step_error"}
                 if fail_fast:
                     errors.append("parallel_step_error")
+            except LLMQuotaExceededError:
+                raise  # the user's limit fails the step, with or without fail_fast (TASK-13638)
+            except Exception:
+                if fail_fast:
+                    raise
+                results[idx] = {"error": "parallel_step_error"}
+            except asyncio.CancelledError:
+                if fail_fast or asyncio.current_task().cancelling():
+                    raise  # the step, or a failed sibling, cancelled it
+                results[idx] = {"error": "parallel_step_error"}  # the sub-step's own CancelledError
 
-    tasks = [run_step(i, step) for i, step in enumerate(steps)]
-    outcomes = await asyncio.gather(*tasks, return_exceptions=not fail_fast)
-    refusal = next((o for o in outcomes if isinstance(o, LLMQuotaExceededError)), None)
-    if refusal is not None:
-        raise refusal  # the user's limit fails the step; it is not dropped as a missing result
-
+    await _run_cancelling_siblings([run_step(i, step) for i, step in enumerate(steps)])
     return {"results": results, "count": len(results), "errors": errors if errors else None}

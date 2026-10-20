@@ -1,7 +1,7 @@
 ---
 id: TASK-13863
 title: Workflow map and parallel leave sibling sub-steps running after one fails
-status: To Do
+status: In Progress
 labels:
 - workflows
 - quotas
@@ -23,6 +23,7 @@ run_map_adapter and run_parallel_adapter (Workflows/adapters/control/flow.py) us
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-10-20-workflow-map-parallel-cancel-siblings.md. One helper in control/flow.py gathers the sub-steps as tasks and, on the first exception or its own cancellation, cancels and awaits the rest, then re-raises. Not TaskGroup: ruff targets py39 and flags BaseExceptionGroup as F821. A cancelled media_ingest terminates its yt-dlp download. Measured on dev: map items 1-5 and parallel(fail_fast) steps 1-3 finished after the step raised; through the engine with on_failure, the five siblings wrote events and artifacts to the run after step_failed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
