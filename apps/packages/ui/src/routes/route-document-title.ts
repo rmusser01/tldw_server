@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from "react"
+import { getRouteMetadata } from "./route-metadata"
 
 /**
  * Browser tab titles. Pages are named "<Page> | tldw" on the WebUI and in the
@@ -9,6 +10,12 @@ export const DOCUMENT_TITLE_SUFFIX = "tldw"
 
 export const formatPageDocumentTitle = (pageLabel: string): string =>
   `${pageLabel} | ${DOCUMENT_TITLE_SUFFIX}`
+
+/** "<Page> | tldw" for a known route, from the same labels the WebUI uses. */
+export const getRouteDocumentTitle = (pathname: string): string | null => {
+  const label = getRouteMetadata(pathname)?.label
+  return label ? formatPageDocumentTitle(label) : null
+}
 
 export const formatNotesDocumentTitle = (noteTitle: string | null | undefined): string => {
   const trimmed = noteTitle?.trim() ?? ""
