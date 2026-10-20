@@ -319,12 +319,24 @@ describe("NotesManagerPage stage 10 AI content assist actions", () => {
 
     fireEvent.click(screen.getByTestId("notes-assist-suggest-keywords"))
 
-    await waitFor(() => {
-      expect(screen.getByTestId("notes-assist-keyword-suggestions-modal")).toBeInTheDocument()
-    })
+    await waitFor(
+      () => {
+        expect(screen.getByTestId("notes-assist-keyword-suggestions-modal")).toBeInTheDocument()
+      },
+      { timeout: 10_000 }
+    )
 
     expect(mockConfirmDanger).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByTestId("notes-assist-keyword-option-checks"))
+    // NL-17: words used once are not offered, nothing new is pre-ticked, and the
+    // modal says where the suggestions come from.
+    expect(screen.getByTestId("notes-assist-keyword-source")).toHaveTextContent(
+      "Based on word frequency in this note"
+    )
+    expect(screen.queryByTestId("notes-assist-keyword-option-checks")).not.toBeInTheDocument()
+    const quantumOption = screen.getByTestId("notes-assist-keyword-option-quantum")
+    expect(quantumOption).not.toBeChecked()
+    expect(screen.getByTestId("notes-assist-keyword-option-entanglement")).not.toBeChecked()
+    fireEvent.click(quantumOption)
     fireEvent.click(screen.getByRole("button", { name: "Apply selected" }))
 
     await waitFor(() => {
@@ -335,7 +347,7 @@ describe("NotesManagerPage stage 10 AI content assist actions", () => {
     )
     const editorKeywordsControl = screen.getByTestId("notes-keywords-editor")
     expect(within(editorKeywordsControl).getByText("quantum")).toBeInTheDocument()
-    expect(within(editorKeywordsControl).queryByText("checks")).not.toBeInTheDocument()
+    expect(within(editorKeywordsControl).queryByText("entanglement")).not.toBeInTheDocument()
   })
 
   it("does not attach suggested keywords when the review modal is canceled", async () => {

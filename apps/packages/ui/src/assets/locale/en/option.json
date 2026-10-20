@@ -1550,7 +1550,8 @@
     "trashGuidanceTitle": "Trash",
     "trashGuidanceDescription": "Deleted notes wait here. Choose Restore next to a note to put it back with your notes.",
     "trashGuidanceShowList": "Show Trash",
-    "trashGuidanceBack": "Back to notes"
+    "trashGuidanceBack": "Back to notes",
+    "assistKeywordsSource": "Based on word frequency in this note. Tags you already use are ticked; tick any others you want to add."
   },
   "tts": {
     "playground": "TTS Playground"

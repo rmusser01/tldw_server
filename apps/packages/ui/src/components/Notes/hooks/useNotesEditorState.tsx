@@ -91,7 +91,6 @@ import {
   EMPTY_WYSIWYG_HTML,
   buildSummaryDraft,
   buildOutlineDraft,
-  suggestKeywordsDraft,
   NOTE_ASSIST_STOP_WORDS,
   toAttachmentMarkdown,
 } from '../notes-manager-utils'
@@ -102,6 +101,7 @@ import { useNotesAuthorityState } from './useNotesAuthorityState'
 import { createNotesGraphAuthorityScope } from './useNotesGraphAuthorityScope'
 import type { NoteRenamedEvent } from './useNotesWikilinkRename'
 import { useNotesListSaveRefresh } from './useNotesListSaveRefresh'
+import { suggestNoteKeywords } from '../notes-keyword-suggestions'
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
 type NotesOwnedRequestOptions = {
@@ -133,6 +133,8 @@ export interface UseNotesEditorStateDeps {
   /** From keyword hook */
   editorKeywords: string[]
   setEditorKeywords: React.Dispatch<React.SetStateAction<string[]>>
+  /** Every tag in use, so "Suggest tags" can prefer existing ones (NL-17). */
+  knownKeywords?: string[]
   keywordSuggestionReturnFocusRef: React.MutableRefObject<HTMLElement | null>
   setKeywordSuggestionOptions: React.Dispatch<React.SetStateAction<string[]>>
   setKeywordSuggestionSelection: React.Dispatch<React.SetStateAction<string[]>>
@@ -2429,7 +2431,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setAssistLoadingAction(action)
       try {
         if (action === 'suggest_keywords') {
-          const suggestedKeywords = suggestKeywordsDraft(sourceContent, editorKeywords)
+          const { suggestions: suggestedKeywords, preselected } = suggestNoteKeywords(sourceContent, editorKeywords, deps.knownKeywords)
           if (suggestedKeywords.length === 0) {
             message.warning(
               t('option:notesSearch.assistKeywordsNoResult', {
@@ -2441,7 +2443,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           keywordSuggestionReturnFocusRef.current =
             document.activeElement instanceof HTMLElement ? document.activeElement : null
           setKeywordSuggestionOptions(suggestedKeywords)
-          setKeywordSuggestionSelection(suggestedKeywords)
+          setKeywordSuggestionSelection(preselected)
           return
         }
 
@@ -2507,6 +2509,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       content,
       editorDisabled,
       editorKeywords,
+      deps.knownKeywords,
       keywordSuggestionReturnFocusRef,
       message,
       setContentDirty,

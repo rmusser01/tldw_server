@@ -356,6 +356,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     setMobileSidebarOpen,
     editorKeywords: kw.editorKeywords,
     setEditorKeywords: kw.setEditorKeywords,
+    knownKeywords: kw.allKeywords,
     keywordSuggestionReturnFocusRef: kw.keywordSuggestionReturnFocusRef,
     setKeywordSuggestionOptions: kw.setKeywordSuggestionOptions,
     setKeywordSuggestionSelection: kw.setKeywordSuggestionSelection,

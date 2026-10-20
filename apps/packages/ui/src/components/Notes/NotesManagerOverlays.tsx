@@ -180,9 +180,11 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
           <Typography.Text
             type="secondary"
             className="block text-xs text-text-muted"
+            data-testid="notes-assist-keyword-source"
           >
-            {t("option:notesSearch.assistKeywordsReviewHelp", {
-              defaultValue: "Select which suggested tags to add to this note.",
+            {t("option:notesSearch.assistKeywordsSource", {
+              defaultValue:
+                "Based on word frequency in this note. Tags you already use are ticked; tick any others you want to add.",
             })}
           </Typography.Text>
           <div className="flex items-center gap-2">
