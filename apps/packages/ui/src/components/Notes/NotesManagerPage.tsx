@@ -461,7 +461,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [list.data, list.listMode, list.listViewMode, ed.pinnedNoteIdSet])
 
   const filteredCount = visibleNotes.length
-  const listKeyboard = useNotesKeyboardNavigation({ visibleNotes, selectedId: ed.selectedId, selectNote: ed.handleSelectNote, richEditorRef: ed.richEditorRef, contentTextareaRef: ed.contentTextareaRef, editorRegionId: NOTES_EDITOR_REGION_ID })
+  const listKeyboard = useNotesKeyboardNavigation({ visibleNotes, selectedId: ed.selectedId, selectNote: ed.handleSelectNote, richEditorRef: ed.richEditorRef, contentTextareaRef: ed.contentTextareaRef, editorRegionId: NOTES_EDITOR_REGION_ID, listMode: list.listMode })
   const graphInitialFocusNoteId = React.useMemo(
     () =>
       resolveNotesGraphFocusNoteId(

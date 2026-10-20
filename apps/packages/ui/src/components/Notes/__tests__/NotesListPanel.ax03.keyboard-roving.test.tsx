@@ -123,6 +123,18 @@ describe("NotesListPanel AX-03 keyboard access", () => {
     expect(onTogglePinned).toHaveBeenCalledWith("n3")
   })
 
+  it("keeps Space on a row from also opening the note when the key comes up", () => {
+    const onSelectNote = vi.fn()
+    const onToggleBulkSelection = vi.fn()
+    renderPanel({ onSelectNote, onToggleBulkSelection })
+
+    fireEvent.keyDown(rowButton(1), { key: " " })
+    // Buttons activate on keyup (Firefox clicks even when keydown was cancelled).
+    const notCancelled = fireEvent.keyUp(rowButton(1), { key: " " })
+    expect(notCancelled).toBe(false)
+    expect(onToggleBulkSelection).toHaveBeenCalledTimes(1)
+  })
+
   it("opens through the keyboard handler on Enter so the editor can take focus", () => {
     const onSelectNote = vi.fn()
     const onOpenNoteFromKeyboard = vi.fn()

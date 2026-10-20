@@ -5,7 +5,10 @@ import {
   NOTES_LIST_ROW_SELECTOR,
   focusActiveNotesListRow,
   focusNotesEditorBody,
-  isEscapeOwnedByPopup
+  focusNotesEditorContent,
+  isEscapeOwnedByPopup,
+  isImeComposing,
+  isInsideOtherModalDialog
 } from '../notes-list-keyboard'
 
 type NoteRef = { id: string | number }
@@ -17,6 +20,8 @@ type UseNotesKeyboardNavigationOptions = {
   richEditorRef?: React.RefObject<HTMLElement | null>
   contentTextareaRef?: React.RefObject<HTMLTextAreaElement | null>
   editorRegionId: string
+  /** Alt+Arrow opens notes only in the active list; Trash notes cannot be opened. */
+  listMode?: 'active' | 'trash'
 }
 
 const scheduleFrame = (callback: () => void) => {
@@ -42,7 +47,10 @@ const focusListRowById = (id: string | number): boolean => {
  *
  * - Enter on a row opens the note and moves focus into the editor body.
  * - Escape in the editor returns focus to the active list row.
- * - Alt+ArrowUp / Alt+ArrowDown open the previous / next note (outside text fields).
+ * - Alt+ArrowUp / Alt+ArrowDown open the previous / next note (outside text
+ *   fields, dialogs and Trash).
+ *
+ * Keys pressed while an IME is composing belong to the IME.
  */
 export const useNotesKeyboardNavigation = ({
   visibleNotes,
@@ -50,13 +58,18 @@ export const useNotesKeyboardNavigation = ({
   selectNote,
   richEditorRef,
   contentTextareaRef,
-  editorRegionId
+  editorRegionId,
+  listMode = 'active'
 }: UseNotesKeyboardNavigationOptions) => {
-  const latestRef = React.useRef({ visibleNotes, selectedId, selectNote })
-  latestRef.current = { visibleNotes, selectedId, selectNote }
+  const latestRef = React.useRef({ visibleNotes, selectedId, selectNote, listMode })
+  latestRef.current = { visibleNotes, selectedId, selectNote, listMode }
 
   const focusEditorBody = React.useCallback(
     () => focusNotesEditorBody({ richEditorRef, contentTextareaRef, editorRegionId }),
+    [contentTextareaRef, editorRegionId, richEditorRef]
+  )
+  const focusEditorContent = React.useCallback(
+    () => focusNotesEditorContent({ richEditorRef, contentTextareaRef, editorRegionId }),
     [contentTextareaRef, editorRegionId, richEditorRef]
   )
 
@@ -64,18 +77,19 @@ export const useNotesKeyboardNavigation = ({
     async (id: string | number) => {
       const opened = await latestRef.current.selectNote(id)
       if (opened === false) return
-      // Wait for the loaded note to render (the editor is disabled while loading).
+      // Wait for the loaded note to render (the editor is disabled while loading),
+      // and give the editor one more frame before settling for its region.
       scheduleFrame(() => {
-        if (!focusEditorBody()) scheduleFrame(() => void focusEditorBody())
+        if (!focusEditorContent()) scheduleFrame(() => void focusEditorBody())
       })
     },
-    [focusEditorBody]
+    [focusEditorBody, focusEditorContent]
   )
 
   React.useEffect(() => {
     if (typeof window === 'undefined') return
     const handler = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return
+      if (event.defaultPrevented || isImeComposing(event)) return
 
       if (event.key === 'Escape' && !event.altKey && !event.ctrlKey && !event.metaKey) {
         const target = event.target
@@ -94,9 +108,9 @@ export const useNotesKeyboardNavigation = ({
         !event.shiftKey &&
         (event.key === 'ArrowDown' || event.key === 'ArrowUp')
       ) {
-        if (isEditableTarget(event.target)) return
-        const { visibleNotes: notes, selectedId: currentId } = latestRef.current
-        if (notes.length === 0) return
+        if (isEditableTarget(event.target) || isInsideOtherModalDialog(event.target)) return
+        const { visibleNotes: notes, selectedId: currentId, listMode: mode } = latestRef.current
+        if (mode !== 'active' || notes.length === 0) return
         const currentIndex =
           currentId == null ? -1 : notes.findIndex((note) => String(note.id) === String(currentId))
         const nextIndex =

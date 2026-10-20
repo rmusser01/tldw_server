@@ -137,41 +137,56 @@ export const moveNotesListRowFocus = (event: React.KeyboardEvent<HTMLElement>): 
   return true
 }
 
-/** Focus the editor body (WYSIWYG root, else the Markdown textarea, else the region). */
-export const focusNotesEditorBody = (refs: {
+type NotesEditorFocusRefs = {
   richEditorRef?: React.RefObject<HTMLElement | null>
   contentTextareaRef?: React.RefObject<HTMLTextAreaElement | null>
   editorRegionId: string
-}): boolean => {
-  if (typeof document === 'undefined') return false
-  const isUsable = (element: HTMLElement | null | undefined): element is HTMLElement =>
-    Boolean(
-      element &&
-        element.isConnected &&
-        !(element as HTMLTextAreaElement).disabled &&
-        !element.closest('[inert]')
-    )
-  const rich = refs.richEditorRef?.current
-  if (isUsable(rich)) {
-    rich.focus({ preventScroll: true })
-    return true
-  }
-  const textarea = refs.contentTextareaRef?.current
-  if (isUsable(textarea)) {
-    textarea.focus({ preventScroll: true })
-    return true
-  }
-  const region = document.getElementById(refs.editorRegionId)
-  if (isUsable(region)) {
-    region.focus({ preventScroll: true })
-    return true
-  }
-  return false
 }
+
+/**
+ * Focus `element` and report whether focus actually landed there. A disabled
+ * editor (a textarea with `disabled`, or the WYSIWYG root while it is
+ * contenteditable="false") cannot take focus, and focus() on it is a no-op.
+ */
+const tryFocus = (element: HTMLElement | null | undefined): boolean => {
+  if (
+    typeof document === 'undefined' ||
+    !element ||
+    !element.isConnected ||
+    (element as HTMLTextAreaElement).disabled ||
+    element.getAttribute('contenteditable') === 'false' ||
+    element.closest('[inert]')
+  ) {
+    return false
+  }
+  element.focus({ preventScroll: true })
+  return document.activeElement === element
+}
+
+/** Focus where the note's text is typed (WYSIWYG root, else the Markdown textarea). */
+export const focusNotesEditorContent = (refs: NotesEditorFocusRefs): boolean =>
+  tryFocus(refs.richEditorRef?.current) || tryFocus(refs.contentTextareaRef?.current)
+
+/**
+ * Focus the editor body, falling back to the editor region. Returns false when
+ * focus did not land anywhere in the editor.
+ */
+export const focusNotesEditorBody = (refs: NotesEditorFocusRefs): boolean =>
+  focusNotesEditorContent(refs) ||
+  (typeof document !== 'undefined' && tryFocus(document.getElementById(refs.editorRegionId)))
+
+/** True when `target` sits in a modal dialog other than the mobile notes list. */
+export const isInsideOtherModalDialog = (target: EventTarget | null): boolean =>
+  target instanceof Element &&
+  Boolean(target.closest('[role="dialog"][aria-modal="true"]:not([data-notes-list-dialog])'))
 
 /** True when a keydown comes from an open combobox popup that owns Escape. */
 export const isEscapeOwnedByPopup = (target: EventTarget | null): boolean => {
   if (!(target instanceof HTMLElement)) return false
   if (target.getAttribute('aria-expanded') === 'true') return true
-  return Boolean(target.closest('[role="dialog"][aria-modal="true"]:not([data-notes-list-dialog])'))
+  return isInsideOtherModalDialog(target)
 }
+
+/** True while an IME is composing text; its Escape and arrows belong to the IME. */
+export const isImeComposing = (event: Pick<KeyboardEvent, 'isComposing' | 'keyCode'>): boolean =>
+  Boolean(event.isComposing) || event.keyCode === 229

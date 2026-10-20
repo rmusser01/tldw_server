@@ -658,6 +658,13 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
                           onTogglePinned(item.id)
                         }
                       }}
+                      onKeyUp={(e) => {
+                        // Buttons activate on Space keyup (Firefox does so even when
+                        // keydown was cancelled); Space here selects, it does not open.
+                        if (e.key === ' ' && onToggleBulkSelection && !e.altKey && !e.ctrlKey && !e.metaKey) {
+                          e.preventDefault()
+                        }
+                      }}
                     >
                       <div className="w-full">
                         {(() => {
