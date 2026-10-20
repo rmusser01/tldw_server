@@ -1694,6 +1694,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflows_idempotency_ttl.py
               tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
               tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
+              tldw_Server_API/tests/Workflows/test_workflows_ws_*.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -3366,6 +3367,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflows_idempotency_ttl.py
               tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
               tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
+              tldw_Server_API/tests/Workflows/test_workflows_ws_*.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -4877,6 +4879,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflows_idempotency_ttl.py
               tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
               tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
+              tldw_Server_API/tests/Workflows/test_workflows_ws_*.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -6299,6 +6302,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflows_idempotency_ttl.py
               tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
               tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
+              tldw_Server_API/tests/Workflows/test_workflows_ws_*.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio
@@ -7712,6 +7716,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_workflows_idempotency_ttl.py
               tldw_Server_API/tests/Workflows/test_workflows_run_metadata.py
               tldw_Server_API/tests/Workflows/test_workflows_truthiness_flags.py
+              tldw_Server_API/tests/Workflows/test_workflows_ws_*.py
           - name: product-prompt-studio
             paths: >-
               tldw_Server_API/tests/prompt_studio

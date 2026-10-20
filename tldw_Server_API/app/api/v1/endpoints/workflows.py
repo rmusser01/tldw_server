@@ -10,10 +10,12 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
 from uuid import uuid4
+from weakref import WeakValueDictionary
 
 from fastapi import (
     APIRouter,
@@ -30,6 +32,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
+from starlette.concurrency import run_in_threadpool
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
@@ -4591,6 +4594,46 @@ async def _close_workflows_websocket(
     await websocket.close(code=code, reason=reason)
 
 
+class _WorkflowHistoryBudget:
+    """Bound combined history-send work to 1ms before polling the loop's timers."""
+
+    def __init__(self, loop: asyncio.AbstractEventLoop) -> None:
+        self._loop = loop
+        self._deadline = 0.0
+        self._pending: asyncio.Event | None = None
+
+    async def checkpoint(self) -> None:
+        while self._loop.time() >= self._deadline:
+            if self._pending is None:
+                pending = asyncio.Event()
+                self._pending = pending
+
+                def resume(pending: asyncio.Event = pending) -> None:
+                    self._deadline = self._loop.time() + 0.001
+                    self._pending = None
+                    pending.set()
+
+                # Bare yields requeue senders ahead of timers; one shared timer resets the budget.
+                self._loop.call_later(0, resume)
+            await self._pending.wait()
+
+
+_WORKFLOW_HISTORY_BUDGETS: WeakValueDictionary[asyncio.AbstractEventLoop, _WorkflowHistoryBudget] = (
+    WeakValueDictionary()
+)
+_WORKFLOW_HISTORY_BUDGETS_LOCK = threading.Lock()
+
+
+def _workflow_history_budget() -> _WorkflowHistoryBudget:
+    loop = asyncio.get_running_loop()
+    with _WORKFLOW_HISTORY_BUDGETS_LOCK:
+        budget = _WORKFLOW_HISTORY_BUDGETS.get(loop)
+        if budget is None:
+            budget = _WorkflowHistoryBudget(loop)
+            _WORKFLOW_HISTORY_BUDGETS[loop] = budget
+        return budget
+
+
 @router.websocket("/ws")
 async def workflows_ws(
     websocket: WebSocket,
@@ -4627,7 +4670,7 @@ async def workflows_ws(
 
     # Enforce the existing owner-only rule.
     try:
-        run = db.get_run(run_id)
+        run = await run_in_threadpool(db.get_run, run_id)
     except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
         await _close_workflows_websocket(websocket, 1011, "run_lookup_error", error_type=type(exc).__name__)
         return
@@ -4651,6 +4694,7 @@ async def workflows_ws(
     # Normalize event types if provided for server-side filtering
     types_norm = [t.strip() for t in (types or []) if str(t).strip()]
     last_seq: Optional[int] = None
+    history_budget = _workflow_history_budget()
     try:
         await stream.start()
         # On connect, send a snapshot event
@@ -4664,9 +4708,10 @@ async def workflows_ws(
             }
         )
         while True:
-            events = db.get_events(run_id, since=last_seq, types=(types_norm or None))
+            events = await run_in_threadpool(db.get_events, run_id, since=last_seq, types=(types_norm or None))
             if events:
                 for e in events:
+                    await history_budget.checkpoint()
                     payload = e.get("payload_json") or {}
                     await stream.send_json(
                         {
@@ -4685,7 +4730,7 @@ async def workflows_ws(
         logger.bind(
             component="workflows", endpoint="workflows_ws", close_code=exc.code, reason="peer_disconnected"
         ).info("Workflows WS disconnected: code={}", exc.code)
-        raise
+        return
     except _WORKFLOWS_NONCRITICAL_EXCEPTIONS as exc:
         with contextlib.suppress(_WORKFLOWS_NONCRITICAL_EXCEPTIONS):
             await _close_workflows_websocket(
