@@ -63,6 +63,9 @@ export const useNotesOffCanvasList = ({
   const handleKeyDown = React.useCallback(
     (event: React.KeyboardEvent<HTMLElement>) => {
       if (!isModal) return
+      // React bubbles keys from portaled popovers (Search tips, tag menus) up
+      // to the list; those keys belong to the popover, not the dialog.
+      if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return
       if (event.key === 'Escape') {
         if (event.isDefaultPrevented() || isEscapeOwnedByPopup(event.target)) return
         event.preventDefault()
@@ -78,4 +81,40 @@ export const useNotesOffCanvasList = ({
   )
 
   return { asideRef, hidden, isModal, handleKeyDown }
+}
+
+type RevealNotesListSearchOptions = {
+  isMobileViewport: boolean
+  mobileSidebarOpen: boolean
+  sidebarCollapsed: boolean
+  setMobileSidebarOpen: (open: boolean) => void
+  setSidebarCollapsed: (collapsed: boolean) => void
+  focusSearch: () => void
+}
+
+/**
+ * The "/" and Ctrl/Cmd+K search shortcuts (AX-05). A hidden list is inert, so
+ * focusing its search box would do nothing: show the list first, then focus
+ * search once it has rendered.
+ */
+export const revealNotesListAndFocusSearch = ({
+  isMobileViewport,
+  mobileSidebarOpen,
+  sidebarCollapsed,
+  setMobileSidebarOpen,
+  setSidebarCollapsed,
+  focusSearch
+}: RevealNotesListSearchOptions) => {
+  const hidden = isMobileViewport ? !mobileSidebarOpen : sidebarCollapsed
+  if (!hidden) {
+    focusSearch()
+    return
+  }
+  if (isMobileViewport) setMobileSidebarOpen(true)
+  else setSidebarCollapsed(false)
+  if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+    window.requestAnimationFrame(() => focusSearch())
+  } else {
+    setTimeout(focusSearch, 0)
+  }
 }

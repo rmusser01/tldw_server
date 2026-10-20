@@ -120,6 +120,7 @@ import {
 } from './notes-manager-utils'
 import { isEditableTarget } from "@/utils/editable-target"
 import { useNotesKeyboardNavigation } from "@/components/Notes/hooks/useNotesKeyboardNavigation"
+import { revealNotesListAndFocusSearch } from "@/components/Notes/hooks/useNotesOffCanvasList"
 import { focusActiveNotesListRow } from "@/components/Notes/notes-list-keyboard"
 import { buildNotesTimelineSections } from "@/components/Notes/notes-timeline"
 import { isNotesServerUnavailableError } from "@/components/Notes/notes-list-error"
@@ -420,8 +421,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     ed.resetEditor()
   }, [ed.resetEditor])
   const focusSearchInput = React.useCallback(() => {
-    searchInputRef.current?.focus()
-  }, [])
+    revealNotesListAndFocusSearch({ isMobileViewport, mobileSidebarOpen, sidebarCollapsed, setMobileSidebarOpen, setSidebarCollapsed, focusSearch: () => searchInputRef.current?.focus() })
+  }, [isMobileViewport, mobileSidebarOpen, sidebarCollapsed])
 
   React.useEffect(() => {
     if (ed.selectedId != null) {
@@ -2633,7 +2634,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         {t('option:notesSearch.shortcutSummaryText', { defaultValue: 'Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs.' })}
       </p>
       {isMobileViewport && mobileSidebarOpen && (
-        <button type="button" aria-label={t('option:notesSearch.closeMobileSidebar', { defaultValue: 'Close notes list' })} data-testid="notes-mobile-sidebar-backdrop" className="absolute inset-0 z-30 bg-black/35" onClick={() => setMobileSidebarOpen(false)} />
+        <button type="button" aria-label={t('option:notesSearch.closeMobileSidebar', { defaultValue: 'Close notes list' })} data-testid="notes-mobile-sidebar-backdrop" tabIndex={-1} aria-hidden="true" className="absolute inset-0 z-30 bg-black/35" onClick={() => setMobileSidebarOpen(false)} />
       )}
       <NotesSidebar
         isMobileViewport={isMobileViewport}

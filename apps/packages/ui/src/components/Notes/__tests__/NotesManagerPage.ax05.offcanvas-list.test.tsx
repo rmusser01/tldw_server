@@ -266,6 +266,56 @@ describe("NotesManagerPage AX-05 off-canvas notes list", { timeout: 60_000 }, ()
     })
   })
 
+  it("exposes one Close notes list button in the open mobile list", async () => {
+    responsiveState.isMobile = true
+    renderPage()
+
+    fireEvent.click(await screen.findByTestId("notes-mobile-open-list-button"))
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-list-region")).not.toHaveAttribute("inert")
+    })
+
+    expect(screen.getAllByRole("button", { name: "Close notes list" })).toHaveLength(1)
+    expect(screen.getByTestId("notes-mobile-sidebar-backdrop")).toHaveAttribute("tabindex", "-1")
+  })
+
+  it("opens the collapsed desktop list when / asks for search", async () => {
+    renderPage()
+
+    const region = await screen.findByTestId("notes-list-region")
+    fireEvent.click(screen.getByTestId("notes-desktop-sidebar-toggle"))
+    await waitFor(() => {
+      expect(region).toHaveAttribute("inert")
+    })
+
+    fireEvent.keyDown(document.body, { key: "/" })
+
+    await waitFor(() => {
+      expect(region).not.toHaveAttribute("inert")
+    })
+    await waitFor(() => {
+      expect(screen.getByLabelText("Search notes")).toHaveFocus()
+    })
+  })
+
+  it("opens the closed mobile list when Ctrl+K asks for search", async () => {
+    responsiveState.isMobile = true
+    renderPage()
+
+    const region = await screen.findByTestId("notes-list-region")
+    expect(region).toHaveAttribute("inert")
+
+    fireEvent.keyDown(document.body, { key: "k", ctrlKey: true })
+
+    await waitFor(() => {
+      expect(region).not.toHaveAttribute("inert")
+    })
+    expect(region).toHaveAttribute("role", "dialog")
+    await waitFor(() => {
+      expect(screen.getByLabelText("Search notes")).toHaveFocus()
+    })
+  })
+
   it("marks the collapsed desktop list inert and reports the toggle state", async () => {
     renderPage()
 
