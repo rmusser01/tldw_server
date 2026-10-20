@@ -1,21 +1,5 @@
 import React from 'react'
 
-type RelatedNote = { id: string }
-type ManualLink = { noteId: string }
-
-/**
- * The Related list without the notes already shown as manual links, so a
- * link the user added appears once, on the row that can remove it (NE-10).
- */
-export const relatedNotesNotListedElsewhere = <T extends RelatedNote>(relations: {
-  related: T[]
-  manualLinks: ManualLink[]
-}): T[] => {
-  if (relations.manualLinks.length === 0) return relations.related
-  const manualIds = new Set(relations.manualLinks.map((link) => link.noteId))
-  return relations.related.filter((note) => !manualIds.has(note.id))
-}
-
 /** The account half of the editor's `[authorityScope, noteId]` request key. */
 const authorityOf = (requestKey: string | undefined): string | null => {
   if (!requestKey) return null

@@ -1,20 +1,8 @@
 import { act, renderHook } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
-import {
-  relatedNotesNotListedElsewhere,
-  useConnectionsDisclosure
-} from "../notes-connections"
+import { useConnectionsDisclosure } from "../notes-connections"
 
 const key = (authority: string, noteId: string) => JSON.stringify([authority, noteId])
-
-describe("relatedNotesNotListedElsewhere (NE-10)", () => {
-  it("drops related notes that are already manual links", () => {
-    const related = [{ id: "b" }, { id: "c" }]
-    expect(
-      relatedNotesNotListedElsewhere({ related, manualLinks: [{ noteId: "b" }] })
-    ).toEqual([{ id: "c" }])
-  })
-})
 
 describe("useConnectionsDisclosure (NE-10)", () => {
   it("starts closed and requests connections only when opened", () => {

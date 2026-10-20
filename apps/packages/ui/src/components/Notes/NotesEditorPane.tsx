@@ -45,7 +45,7 @@ import type { NoteStudioState, NotesStudioPaperSize } from './notes-studio-types
 import type { NotesTitleSuggestStrategy } from '@/services/settings/ui-settings'
 import type { NotesSaveIssue } from './hooks/useNotesEditorState'
 import { notesEditorSupportHint } from './notes-editor-hints'
-import { relatedNotesNotListedElsewhere, useConnectionsDisclosure } from './notes-connections'
+import { useConnectionsDisclosure } from './notes-connections'
 import {
   NOTES_EDITOR_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
@@ -606,8 +606,9 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
     </div>
   )
 
-  // NE-10: list each manual link once and keep Connections open across notes.
-  const relatedNotes = relatedNotesNotListedElsewhere(noteRelations)
+  // NE-10: Related leaves out manual links (they have their own list), and
+  // Connections stays open across notes.
+  const relatedNotes = noteRelations.related
   const connectionsDisclosure = useConnectionsDisclosure(noteNeighborsRequestKey, onRequestNeighbors)
 
   const renderRelationMeta = (

@@ -530,6 +530,61 @@ describe('NotesManagerPage graph stage 1 related/backlinks panels', () => {
     expect(screen.queryByTestId('notes-related-empty')).not.toBeInTheDocument()
   })
 
+  it('lists an incoming manual link once and keeps the [[link]] to a manually linked note (NE-10)', async () => {
+    mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
+      const path = String(request.path || '')
+      const method = String(request.method || 'GET').toUpperCase()
+      if (path.startsWith('/api/v1/notes/?')) {
+        return { items: [], pagination: { total_items: 0, total_pages: 1 } }
+      }
+      if (path === '/api/v1/notes/' && method === 'POST') {
+        return { id: 'note-a', version: 1, last_modified: '2026-02-18T10:00:00.000Z' }
+      }
+      if (path === '/api/v1/notes/note-a' && method === 'GET') {
+        return {
+          id: 'note-a',
+          title: 'Graph seed note',
+          content: 'Seed content',
+          metadata: { keywords: [] },
+          version: 1,
+          last_modified: '2026-02-18T10:00:00.000Z'
+        }
+      }
+      if (path.startsWith('/api/v1/notes/note-a/neighbors')) {
+        return {
+          nodes: [
+            { id: 'note-a', type: 'note', label: 'Graph seed note' },
+            { id: 'note-b', type: 'note', label: 'Incoming note' },
+            { id: 'note-c', type: 'note', label: 'Both ways note' }
+          ],
+          edges: [
+            // Someone linked note-b to this note by hand, one way.
+            { id: 'e-in', source: 'note-b', target: 'note-a', type: 'manual', directed: true },
+            // note-c is linked by hand and by a [[link]] in this note.
+            { id: 'e-manual-c', source: 'note-a', target: 'note-c', type: 'manual', directed: false },
+            { id: 'e-wiki-c', source: 'note-a', target: 'note-c', type: 'wikilink', directed: true }
+          ]
+        }
+      }
+      return {}
+    })
+
+    renderPage()
+    await seedAndSaveNote()
+
+    const panels = await screen.findByTestId('notes-graph-relation-panels')
+    const incoming = await within(panels).findByTestId('notes-manual-link-e-in')
+    // Once, on the row that can remove it, and still marked as incoming.
+    expect(within(panels).getAllByRole('button', { name: 'Incoming note' })).toHaveLength(1)
+    expect(incoming).toHaveTextContent('Manual backlink')
+    expect(screen.queryByTestId('notes-backlinks-list')).not.toBeInTheDocument()
+
+    // The [[link]] to note-c still shows under Related, beside its manual link.
+    expect(within(panels).getByTestId('notes-manual-link-e-manual-c')).toHaveTextContent('Both ways note')
+    const related = within(panels).getByTestId('notes-related-note-note-c')
+    expect(related).toHaveTextContent('Note link')
+  })
+
   it('keeps Connections open when opening another note from it (NE-10)', async () => {
     const noteRecord = (id: string, title: string) => ({
       id,

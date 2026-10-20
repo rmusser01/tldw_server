@@ -702,7 +702,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
               ? t('option:notesSearch.connectionLabelManualBacklink', { defaultValue: 'Manual backlink' })
               : getNotesGraphEdgeLabel(type)
 
-      upsertRelation(relatedById, counterpartId, relationLabel)
+      // Manual links have their own list (NE-10).
+      if (type !== 'manual') upsertRelation(relatedById, counterpartId, relationLabel)
 
       if (type === 'wikilink' && target === selectedNormalized) {
         upsertRelation(
@@ -718,18 +719,11 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })
         )
       }
-      if (type === 'manual' && directed && target === selectedNormalized) {
-        upsertRelation(
-          backlinksById,
-          source,
-          t('option:notesSearch.connectionLabelManualBacklink', { defaultValue: 'Manual backlink' })
-        )
-      }
       if (type === 'manual') {
         if (!counterpartId) continue
         const edgeId = String(edge?.id || '')
         if (!edgeId) continue
-        const relation = buildNoteRelation(counterpartId, getNotesGraphEdgeLabel(type))
+        const relation = buildNoteRelation(counterpartId, relationLabel)
         manualLinkByEdgeId.set(edgeId, {
           edgeId,
           noteId: counterpartId,
@@ -743,8 +737,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       }
     }
 
+    const manualLinkIds = new Set(Array.from(manualLinkByEdgeId.values(), (link) => link.noteId))
     for (const normalizedId of noteNodeMap.keys()) {
-      if (normalizedId !== selectedNormalized) {
+      if (normalizedId !== selectedNormalized && !manualLinkIds.has(normalizedId)) {
         upsertRelation(
           relatedById,
           normalizedId,
