@@ -669,3 +669,18 @@ it("slows Buddy polling while nothing changes and speeds up again after a change
   await act(async () => vi.advanceTimersByTimeAsync(5_000))
   expect(reads()).toBe(afterChange + 1)
 })
+
+it("backs off Buddy reads that keep failing the same way (XP-16)", async () => {
+  // Buddies disabled or forbidden: every read fails with the same error.
+  mocks.listBuddies.mockRejectedValue(new Error("Buddies are disabled"))
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
+  render(<IndependentBuddySession />)
+  await waitFor(() => expect(mocks.getBuddyAttachment).toHaveBeenCalledTimes(1))
+  const reads = () => mocks.getBuddyAttachment.mock.calls.length
+  const initial = reads()
+  await act(async () => vi.advanceTimersByTimeAsync(120_000))
+  // Every 5 s would be 24 failed reads; backing off to once a minute is far fewer.
+  const failedReads = reads() - initial
+  expect(failedReads).toBeGreaterThan(0)
+  expect(failedReads).toBeLessThanOrEqual(6)
+})
