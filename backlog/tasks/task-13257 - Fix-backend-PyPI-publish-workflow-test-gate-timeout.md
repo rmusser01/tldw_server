@@ -34,6 +34,7 @@ Historical record restored from PR #2956 (f5c541db61c2cd14606d94533abe5569876c15
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Release publish workflow now uses a targeted `release-gate` job instead of running the full backend pytest suite. The gate executes the PyPI workflow contract tests and a bounded minimal startup smoke, then the existing build job runs `make pypi-check` before any TestPyPI/PyPI publish job can run.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
