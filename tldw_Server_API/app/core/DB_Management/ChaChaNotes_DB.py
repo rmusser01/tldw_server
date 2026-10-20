@@ -39,6 +39,7 @@ changes in the `sync_log` and in individual records.
 import hashlib  # noqa: E402
 import json  # noqa: E402
 import math  # noqa: E402
+import queue  # noqa: E402
 import re  # noqa: E402
 import sqlite3  # noqa: E402
 import sys  # noqa: E402
@@ -465,6 +466,55 @@ _CHACHA_NONCRITICAL_EXCEPTIONS = (
     InputError,
     ConflictError,
 )
+
+_DROPPED_CHECKOUTS: queue.SimpleQueue[tuple[Any, Any]] = queue.SimpleQueue()
+
+
+class _LegacyCheckout:
+    """Queue a legacy PostgreSQL checkout for return when its thread-local slot is dropped.
+
+    Outside a ChaCha operation each thread keeps its checkout in the handle's
+    ``threading.local``. The slot is dropped when the thread exits, which CPython
+    does at once, or when the handle is collected, which needs the cyclic garbage
+    collector because the handle's stores hold it. psycopg's ``Connection.__del__``
+    skips pooled connections, so without this the checkout and its pool slot are lost.
+    """
+
+    __slots__ = ("backend", "conn")
+
+    def __init__(self, conn: Any, backend: Any) -> None:
+        self.conn = conn
+        self.backend = backend
+
+    def disarm(self) -> None:
+        """The checkout was returned or closed explicitly."""
+        self.conn = None
+
+    def __del__(self) -> None:
+        if self.conn is not None:
+            # Lock-free: a collection can run this on any thread, even one holding the
+            # pool's own lock, so the return itself waits for _return_dropped_checkouts().
+            _DROPPED_CHECKOUTS.put((self.backend, self.conn))
+
+
+def _disarm_legacy_checkout(state: Any) -> None:
+    guard = getattr(state, "checkout_guard", None)
+    if guard is not None:
+        guard.disarm()
+        state.checkout_guard = None
+
+
+def _return_dropped_checkouts() -> None:
+    """Return checkouts queued by _LegacyCheckout, outside any finalizer."""
+    while True:
+        try:
+            backend, conn = _DROPPED_CHECKOUTS.get_nowait()
+        except queue.Empty:
+            return
+        try:
+            backend.get_pool().return_connection(conn)
+        except Exception as exc:  # noqa: BLE001 - keep draining; one bad return must not strand the rest
+            logger.debug("Returning a dropped legacy checkout failed ({})", type(exc).__name__)
 
 
 class BackendCursorAdapter:
@@ -8458,6 +8508,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return transform_sqlite_query_for_postgres(query)
 
     def _open_new_connection(self, backend: DatabaseBackend | None = None) -> RawBackendConnection:
+        _return_dropped_checkouts()
         active_backend = backend or self.backend
         try:
             pool = active_backend.get_pool()
@@ -8644,6 +8695,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if getattr(state, "borrowed", False):
                 raise CharactersRAGDBError("The borrowed database connection is closed")
             self._release_connection(conn, backend=backend)
+            _disarm_legacy_checkout(state)
             conn = None
             state.conn = None
             state.backend_ref = None
@@ -8653,6 +8705,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conn = self._open_new_connection(backend)
             state.conn = conn
             state.backend_ref = backend
+            if state is self._local:
+                state.checkout_guard = _LegacyCheckout(conn, backend)
             logger.debug(
                 'Acquired backend connection ({}) for thread {}',
                 backend.backend_type.value,
@@ -8679,6 +8733,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         If a transaction is active and uncommitted on this connection, it attempts a rollback.
         Clears the connection reference from `threading.local` for the current thread.
         """
+        _return_dropped_checkouts()
         state = self._connection_state()
         if state is not self._local:
             state.release()
@@ -8726,6 +8781,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self.db_path_str,
                 )
             else:
+                _disarm_legacy_checkout(self._local)
                 backend.get_pool().return_connection(conn)
                 logger.debug(
                     'Returned backend connection ({}) for thread {}.',
@@ -8761,6 +8817,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         backend = self._get_pinned_backend() or self._backend
         self._local.conn = None
         self._local.backend_ref = None
+        _disarm_legacy_checkout(self._local)
         backend.get_pool().discard_connection(conn)
 
     def close_all_connections(self) -> None:
