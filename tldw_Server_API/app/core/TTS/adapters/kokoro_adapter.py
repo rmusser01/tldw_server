@@ -10,7 +10,7 @@ import platform
 import re
 import sys
 import time
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import contextmanager, suppress
 from ctypes.util import find_library as _ctypes_find_library
 from typing import Any, Optional
@@ -38,7 +38,7 @@ from ..tts_exceptions import (
 )
 from ..tts_resource_manager import get_resource_manager as _get_resource_manager
 from ..tts_validation import validate_tts_request
-from ..utils import parse_bool, run_tts_blocking_next
+from ..utils import hold_tts_engine, parse_bool, run_tts_blocking_next
 
 #
 # Local Imports
@@ -354,20 +354,28 @@ class KokoroAdapter(TTSAdapter):
         return self.kokoro_pt_model is not None or self.model_pt is not None
 
     async def _ensure_model_loaded(self) -> bool:
+        """Load the model once, keeping _model_lock until the load thread returns.
+
+        init_timeout_sec (PyTorch only) bounds each caller's wait on the model load, including queueing
+        on _model_lock; queueing on ensure_initialized's _init_lock is not bounded. hold_tts_engine keeps
+        _model_lock with a load thread until it returns, even after its caller left, so no second load
+        starts beside it.
+        """
         if self._model_is_loaded():
             return True
-        async with self._model_lock:
-            if self._model_is_loaded():
-                return True
-            if self.use_onnx:
-                return await self._load_onnx_model()
-            if self.init_timeout_sec:
-                try:
-                    return await asyncio.wait_for(self._load_pytorch_model(), timeout=self.init_timeout_sec)
-                except asyncio.TimeoutError:
-                    logger.error(f"{self.provider_name}: Lazy model load timed out after {self.init_timeout_sec}s")
-                    return False
-            return await self._load_pytorch_model()
+        bound = None if self.use_onnx else (self.init_timeout_sec or None)
+        try:
+            async with asyncio.timeout(bound) as deadline, hold_tts_engine(self._model_lock) as run:
+                if self._model_is_loaded():
+                    return True
+                if self.use_onnx:
+                    return await self._load_onnx_model(run)
+                return await self._load_pytorch_model(run)
+        except TimeoutError:
+            if not deadline.expired():
+                raise  # raised by the load itself, not by the bound
+            logger.error(f"{self.provider_name}: Model load timed out after {bound}s")
+            return False
 
     async def initialize(self) -> bool:
         """Initialize the Kokoro adapter"""
@@ -381,17 +389,7 @@ class KokoroAdapter(TTSAdapter):
                 self._status = ProviderStatus.AVAILABLE
                 return True
 
-            if self.use_onnx:
-                success = await self._load_onnx_model()
-            else:
-                if self.init_timeout_sec:
-                    try:
-                        success = await asyncio.wait_for(self._load_pytorch_model(), timeout=self.init_timeout_sec)
-                    except asyncio.TimeoutError:
-                        logger.error(f"{self.provider_name}: Initialization timed out after {self.init_timeout_sec}s")
-                        success = False
-                else:
-                    success = await self._load_pytorch_model()
+            success = await self._ensure_model_loaded()
 
             # Load dynamic voices if available
             try:
@@ -412,8 +410,8 @@ class KokoroAdapter(TTSAdapter):
             self._status = ProviderStatus.ERROR
             return False
 
-    async def _initialize_onnx(self) -> bool:
-        """Initialize ONNX backend"""
+    async def _initialize_onnx(self, run: Callable[..., Awaitable[Any]]) -> bool:
+        """Initialize ONNX backend, constructing the model through ``run`` from hold_tts_engine."""
         try:
             from kokoro_onnx import EspeakConfig, Kokoro
 
@@ -508,7 +506,7 @@ class KokoroAdapter(TTSAdapter):
 
             # Initialize Kokoro (support constructors that accept either 1 or 2 positional args)
             if voices_json_arg:
-                self.kokoro_instance = await asyncio.to_thread(
+                self.kokoro_instance = await run(
                     Kokoro,
                     self.model_path,
                     voices_json_arg,
@@ -516,14 +514,14 @@ class KokoroAdapter(TTSAdapter):
                 )
             else:
                 try:
-                    self.kokoro_instance = await asyncio.to_thread(
+                    self.kokoro_instance = await run(
                         Kokoro,
                         self.model_path,
                         espeak_config=espeak_config
                     )
                 except TypeError:
                     # Fallback: pass empty string for voices path if constructor requires it
-                    self.kokoro_instance = await asyncio.to_thread(
+                    self.kokoro_instance = await run(
                         Kokoro,
                         self.model_path,
                         "",
@@ -628,8 +626,8 @@ class KokoroAdapter(TTSAdapter):
                 details={"error": str(e), "model_path": self.model_path}
             ) from e
 
-    async def _initialize_pytorch(self) -> bool:
-        """Initialize PyTorch backend"""
+    async def _initialize_pytorch(self, run: Callable[..., Awaitable[Any]]) -> bool:
+        """Initialize PyTorch backend, loading the KModel through ``run`` from hold_tts_engine."""
         # Check model file before importing torch so missing-model failures stay lightweight.
         if not os.path.exists(self.model_path):
             raise TTSModelNotFoundError(
@@ -663,7 +661,7 @@ class KokoroAdapter(TTSAdapter):
                 return KModel(repo_id=repo_id, config=config_path, model=self.model_path).eval()
             try:
                 with _capture_kokoro_repo_warning():
-                    self.kokoro_pt_model = await asyncio.to_thread(_load_model)
+                    self.kokoro_pt_model = await run(_load_model)
             except _KOKORO_NONCRITICAL_EXCEPTIONS:
                 # Fallback to sync load if threading fails in constrained envs
                 with _capture_kokoro_repo_warning():
@@ -730,11 +728,11 @@ class KokoroAdapter(TTSAdapter):
                 ) from e
 
     # Thin wrapper methods for tests to patch
-    async def _load_onnx_model(self) -> bool:
-        return await self._initialize_onnx()
+    async def _load_onnx_model(self, run: Callable[..., Awaitable[Any]]) -> bool:
+        return await self._initialize_onnx(run)
 
-    async def _load_pytorch_model(self) -> bool:
-        return await self._initialize_pytorch()
+    async def _load_pytorch_model(self, run: Callable[..., Awaitable[Any]]) -> bool:
+        return await self._initialize_pytorch(run)
 
     async def get_capabilities(self) -> TTSCapabilities:
         """Get Kokoro TTS capabilities"""
@@ -1653,6 +1651,9 @@ class KokoroAdapter(TTSAdapter):
             if self.model_pt:
                 self.model_pt = None
                 logger.debug(f"{self.provider_name}: PyTorch model cleared")
+            # initialize() reuses a loaded model, so a closed adapter must not keep its KModel.
+            self.kokoro_pt_model = None
+            self.kokoro_pt_pipelines = {}
 
             if self.tokenizer:
                 self.tokenizer = None

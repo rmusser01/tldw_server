@@ -320,7 +320,7 @@ async def test_kokoro_model_construction_does_not_block_control_loop(
             "kokoro_voices_json": str(voices),
         }
     )
-    assert await adapter._initialize_onnx()
+    assert await adapter._ensure_model_loaded()
     assert constructor_threads and constructor_threads[0] != loop_thread
 
 
