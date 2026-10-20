@@ -414,7 +414,7 @@
     "message": "Sort notes"
   },
   "notes_basics_filtersContent": {
-    "message": "Sort the list by date or title. Open Filters below it to narrow the list by tag."
+    "message": "Sort the list by date or title. Use Filters below it to narrow the list by tag."
   },
   "notes_basics_editorTitle": {
     "message": "Editor Workspace"
@@ -447,7 +447,7 @@
     "message": "Save tag filters here to reuse them. To group notes by hand, choose the Collection view."
   },
   "notes_basics_createTitle": {
-    "message": "Create your first note"
+    "message": "Create a note"
   },
   "notes_basics_createContent": {
     "message": "Click + to start a note. To see this tour again, press ? and choose Restart tutorial."

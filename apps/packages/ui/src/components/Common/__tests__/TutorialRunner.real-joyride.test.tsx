@@ -125,31 +125,42 @@ describe("TutorialRunner with the real react-joyride", { timeout: 30_000 }, () =
   })
 
   it("shows a step whose target mounts while the runner is retrying", async () => {
-    defineTutorial("late-target", [step("a"), step("late"), step("c")])
-    const view = renderTour(
-      <>
-        <div data-testid="a">A</div>
-        <div data-testid="c">C</div>
-      </>
-    )
-    startTour("late-target")
-    expect(await screen.findByText("Content a")).toBeInTheDocument()
-    clickPrimary()
+    // jsdom has no scrollIntoView; the runner scrolls a late target into view.
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      writable: true,
+      value: scrollIntoView
+    })
+    const lateTarget = document.createElement("div")
+    lateTarget.dataset.testid = "late"
+    lateTarget.textContent = "Late"
+    try {
+      defineTutorial("late-target", [step("a"), step("late"), step("c")])
+      renderTour(
+        <>
+          <div data-testid="a">A</div>
+          <div data-testid="c">C</div>
+        </>
+      )
+      startTour("late-target")
+      expect(await screen.findByText("Content a")).toBeInTheDocument()
+      clickPrimary()
 
-    // The target appears shortly after the step was requested.
-    await new Promise((resolve) => setTimeout(resolve, 200))
-    view.rerender(
-      <MemoryRouter>
-        <div data-testid="a">A</div>
-        <div data-testid="late">Late</div>
-        <div data-testid="c">C</div>
-        <TutorialRunner />
-      </MemoryRouter>
-    )
+      // The target appears shortly after the step was requested, without
+      // re-rendering the runner: only its own retry can pick it up.
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      document.body.appendChild(lateTarget)
 
-    expect(
-      await screen.findByText("Content late", {}, { timeout: 8_000 })
-    ).toBeInTheDocument()
+      expect(
+        await screen.findByText("Content late", {}, { timeout: 8_000 })
+      ).toBeInTheDocument()
+      expect(scrollIntoView).toHaveBeenCalled()
+      expect(screen.queryByText("Content c")).not.toBeInTheDocument()
+    } finally {
+      lateTarget.remove()
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
   })
 
   it("counts only the steps it can show when optional targets are absent (NO-02)", async () => {

@@ -41,7 +41,7 @@ const notesBasics: TutorialDefinition = {
       titleFallback: "Sort notes",
       contentKey: "tutorials:notes.basics.filtersContent",
       contentFallback:
-        "Sort the list by date or title. Open Filters below it to narrow the list by tag.",
+        "Sort the list by date or title. Use Filters below it to narrow the list by tag.",
       placement: "bottom"
     },
     {
@@ -94,7 +94,7 @@ const notesBasics: TutorialDefinition = {
     {
       target: '[data-testid="notes-new-note-button"]',
       titleKey: "tutorials:notes.basics.createTitle",
-      titleFallback: "Create your first note",
+      titleFallback: "Create a note",
       contentKey: "tutorials:notes.basics.createContent",
       contentFallback:
         "Click + to start a note. To see this tour again, press ? and choose Restart tutorial.",

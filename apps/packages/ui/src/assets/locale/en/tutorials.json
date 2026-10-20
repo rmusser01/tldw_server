@@ -184,7 +184,7 @@
       "modeTitle": "Active and Trash Views",
       "modeContent": "Switch between active notes and trash to recover or permanently remove entries.",
       "filtersTitle": "Sort notes",
-      "filtersContent": "Sort the list by date or title. Open Filters below it to narrow the list by tag.",
+      "filtersContent": "Sort the list by date or title. Use Filters below it to narrow the list by tag.",
       "editorTitle": "Editor Workspace",
       "editorContent": "Edit note content, references, and metadata in the main editor panel.",
       "saveTitle": "Save and Actions",
@@ -195,7 +195,7 @@
       "connectionsContent": "See how notes relate to each other. Type [[ in a note to create a link, or add manual connections here.",
       "organizeTitle": "Saved filters",
       "organizeContent": "Save tag filters here to reuse them. To group notes by hand, choose the Collection view.",
-      "createTitle": "Create your first note",
+      "createTitle": "Create a note",
       "createContent": "Click + to start a note. To see this tour again, press ? and choose Restart tutorial."
     }
   },
