@@ -709,6 +709,7 @@ vi.mock("antd", async (original) => {
         <Dropdown {...props} />
       ),
     Input: InputComponent,
+    Segmented: actual.Segmented,
     InputNumber: ({ value, onChange, disabled, ...rest }: any) => (
       <input
         type="number"

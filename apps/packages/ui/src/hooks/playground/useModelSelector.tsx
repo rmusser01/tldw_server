@@ -5,7 +5,6 @@ import { Tooltip } from "antd"
 import { Star } from "lucide-react"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
-import { tldwModels } from "@/services/tldw"
 import { useStoreChatModelSettings } from "@/store/model"
 import {
   LOCAL_PROVIDERS,
@@ -184,9 +183,9 @@ export function useModelSelector({
   }, [modelContextLength, requestedNumCtx])
 
   const resolvedProviderKey = selectedSelection.provider || "custom"
+  // "" for the tldw transport and placeholder providers: no provider to name.
   const resolvedProviderName = selectedSelection.provider
-    ? formatChatProviderName(selectedSelection.provider) ||
-      tldwModels.getProviderDisplayName(selectedSelection.provider)
+    ? formatChatProviderName(selectedSelection.provider)
     : ""
   const providerLabel =
     resolvedProviderName || t("playground:composer.chooseProvider", "Choose provider")

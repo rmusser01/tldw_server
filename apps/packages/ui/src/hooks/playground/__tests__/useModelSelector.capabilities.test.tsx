@@ -266,6 +266,21 @@ describe("useModelSelector capability rendering", () => {
     ])
   })
 
+  it.each([null, "tldw"])("CC-06: never names the tldw transport as the provider (stored provider %s)", (provider) => {
+    chatModelSettingsState.apiProvider = provider
+    const { result } = renderHook(() =>
+      useModelSelector({
+        composerModels: [],
+        selectedModel: "tldw:gemma3:1b",
+        setSelectedModel: vi.fn(),
+        navigate: vi.fn()
+      })
+    )
+
+    expect(result.current.apiModelLabel).toBe("gemma3:1b")
+    expect(result.current.modelLabelParts).toEqual({ modelName: "gemma3:1b", providerName: "" })
+  })
+
   it("CC-06: names the provider on promoted rows, where no provider group heading does", () => {
     const { result } = renderHook(() =>
       useModelSelector({
