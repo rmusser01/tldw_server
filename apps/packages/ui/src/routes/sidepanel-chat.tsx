@@ -27,6 +27,7 @@ import { getDesignSystemState } from "@/design-system"
 import useBackgroundMessage from "@/hooks/useBackgroundMessage"
 import { useMigration } from "@/hooks/useMigration"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
+import { ScrollToLatestButton } from "@/components/Common/ScrollToLatestButton"
 import { useComposerDockHeight } from "@/hooks/useComposerDockHeight"
 import {
   useChatShortcuts,
@@ -56,7 +57,7 @@ import {
 } from '@/services/settings/ui-settings';
 import { useSetting } from '@/hooks/useSetting';
 import { useStorage } from '@plasmohq/storage/hook';
-import { ChevronDown, ExternalLink } from 'lucide-react';
+import { ExternalLink } from 'lucide-react';
 import React, { lazy, Suspense } from 'react';
 import { Drawer } from 'antd';
 import { ChatErrorBoundary } from '@/components/Common/Playground/ChatErrorBoundary';
@@ -694,8 +695,12 @@ const SidepanelChatContent = ({
   }, [isRestoringChat, checkShownTab])
   sendGate.current = freshness.beforeSend
   captureListener.current = freshness.noteCapture
-  const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
-    useSmartScroll(messages, streaming, 100)
+  const {
+    containerRef,
+    isAutoScrollToBottom,
+    autoScrollToBottom,
+    hasUnseenMessages
+  } = useSmartScroll(messages, streaming, 100)
   const uiMode = useUiModeStore((state) => state.mode)
   const [isNarrow, setIsNarrow] = React.useState(
     () =>
@@ -3304,20 +3309,15 @@ const SidepanelChatContent = ({
             )}
           </div>
 
-          {!isAutoScrollToBottom && (
-            <div
-              className="fixed z-20 left-0 right-0 flex justify-center"
+          {!isAutoScrollToBottom && messages.length > 0 && (
+            <ScrollToLatestButton
+              onClick={() => autoScrollToBottom()}
+              replyInProgress={streaming}
+              hasUnseenMessages={hasUnseenMessages}
+              className="fixed z-20 right-4"
               style={{ bottom: scrollToLatestBottom }}
-            >
-              <button
-                onClick={() => autoScrollToBottom()}
-                aria-label={t("playground:composer.scrollToLatest", "Scroll to latest messages")}
-                title={t("playground:composer.scrollToLatest", "Scroll to latest messages") as string}
-                data-testid="chat-scroll-latest"
-                className="bg-surface shadow border border-border p-1.5 rounded-full pointer-events-auto hover:bg-surface2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-warn">
-                <ChevronDown className="size-4 text-text-muted" aria-hidden="true" />
-              </button>
-            </div>
+              data-testid="chat-scroll-latest"
+            />
           )}
           {!isRestoringChat && stickyChatInput && (
             <div
