@@ -2421,7 +2421,10 @@ class RedisResourceGovernor(ResourceGovernor):
             try:
                 data = await client.hgetall(hkey)
             except _RG_NONCRITICAL_EXCEPTIONS:
-                # Redis is down: renew this process's copy, or the lease lapses after its TTL while still held.
+                data = None
+            if not data:
+                # Redis is down, or never saw a lease taken during an outage: renew this process's copy,
+                # or the lease lapses after its TTL while still held.
                 data = self._local_handles.get(handle_id)
             if not data:
                 return

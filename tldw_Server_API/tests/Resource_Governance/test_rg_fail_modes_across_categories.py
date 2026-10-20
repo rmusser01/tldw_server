@@ -187,6 +187,30 @@ async def test_renew_while_redis_is_down_keeps_the_lease(fail_mode, monkeypatch)
 
 
 @pytest.mark.asyncio
+# Not fallback_memory: there the memory governor holds the lease, which Redis does not see once it returns (ADR-078).
+@pytest.mark.parametrize("fail_mode", ["fail_open", "fail_closed"])
+async def test_renew_after_redis_returns_keeps_a_lease_taken_during_the_outage(fail_mode, monkeypatch):
+    monkeypatch.delenv("RG_TEST_PURGE_LEASES_BEFORE_RESERVE")
+    now = [1000.0]
+    rg = _governor(
+        {"jobs": {"max_concurrent": 1, "ttl_sec": 60}, "scopes": ["user"], "fail_mode": fail_mode},
+        ns=f"rg_back_renew_{fail_mode}",
+        time_source=lambda: now[0],
+    )
+    rg._client = _redis_down_client()
+    req = RGRequest(entity="user:x", categories={"jobs": {"units": 1}}, tags={"policy_id": "p"})
+    first, handle = await rg.reserve(req)  # held by this worker only; the lease runs to 1060
+
+    rg._client = InMemoryAsyncRedis()  # Redis is back, with no record of the lease
+    now[0] = 1050.0
+    await rg.renew(handle, 60)  # now to 1110
+    now[0] = 1070.0
+    second, _ = await rg.reserve(req)
+
+    assert first.allowed and not second.allowed
+
+
+@pytest.mark.asyncio
 async def test_a_redis_outage_is_logged_as_a_warning_once_a_minute(monkeypatch):
     from loguru import logger
 
