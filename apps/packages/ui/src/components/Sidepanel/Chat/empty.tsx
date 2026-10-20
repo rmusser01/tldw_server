@@ -15,6 +15,10 @@ import {
   Search,
 } from "lucide-react";
 import { RecoveryCallout, type RecoveryState } from "@/components/ui/state";
+import {
+  useConnectionRetry,
+  useStickyServerErrorUxState,
+} from "./useConnectionRetry";
 
 type EmptySidePanelProps = {
   inputRef?: React.RefObject<HTMLTextAreaElement>;
@@ -28,9 +32,16 @@ export const EmptySidePanel = ({ inputRef }: EmptySidePanelProps) => {
     "playground",
   ]);
   const { phase, isConnected, serverUrl } = useConnectionState();
-  const { uxState, mode, configStep, hasCompletedFirstRun, isChecking } =
-    useConnectionUxState();
+  const {
+    uxState: liveUxState,
+    mode,
+    configStep,
+    hasCompletedFirstRun,
+  } = useConnectionUxState();
   const { checkOnce } = useConnectionActions();
+  // XS-11: a re-check keeps the error card (and its focused buttons) mounted.
+  const uxState = useStickyServerErrorUxState(liveUxState);
+  const { retry, isRetrying, retryButtonRef } = useConnectionRetry(checkOnce);
   const isConnectionReady = isConnected && phase === ConnectionPhase.CONNECTED;
   const primaryButtonRef = React.useRef<HTMLButtonElement | null>(null);
 
@@ -214,10 +225,9 @@ export const EmptySidePanel = ({ inputRef }: EmptySidePanelProps) => {
       ? [
           {
             label: t("sidepanel:firstRun.retryNow", "Retry now"),
-            onClick: () => {
-              void checkOnce();
-            },
-            loading: Boolean(isChecking),
+            onClick: retry,
+            loading: isRetrying,
+            ref: retryButtonRef,
             "data-testid": "chat-connection-retry",
           },
           {
