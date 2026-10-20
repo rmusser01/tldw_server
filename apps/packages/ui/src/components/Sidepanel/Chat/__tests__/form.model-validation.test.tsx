@@ -125,6 +125,7 @@ const compiled = ts.transpileModule(
     const fetchChatModels = mocks.fetchChatModels;
     const ${catalogQuery.getText(ast)};
     const availableChatModelIds = ${initializer("availableChatModelIds")};
+    const casualModelSelectRef = ${initializer("casualModelSelectRef")};
     const contextFiles = [], selectedDocuments = [];
     const streaming = false, sendWhenEnter = true, greetingStarting = false;
     const connectionReadyRef = { current: isConnectionReady }, connectionGenerationRef = { current: 0 };
@@ -303,7 +304,7 @@ describe("sidebar model validation", () => {
     await waitFor(() => expect(screen.getByText(/Tracked persona chat is unavailable here/)).toBeVisible())
     expect(mocks.send).not.toHaveBeenCalled()
     expect(mocks.queue).not.toHaveBeenCalled()
-    expect(screen.getByRole("textbox")).toHaveValue("keep my draft")
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("keep my draft")
   })
 
   it.each([{ protectedHistory: false, personaMode: "tracked" as const }, { protectedHistory: true, personaMode: "overlay" as const }])(
@@ -334,7 +335,7 @@ describe("sidebar model validation", () => {
       )
       view.rerender(<Harness model={model} />)
       expect(screen.getByRole("alert")).toBeVisible()
-      expect(screen.getByRole("textbox")).toHaveValue("keep my draft")
+      expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("keep my draft")
       expect(mocks.send).not.toHaveBeenCalled()
       expect(mocks.queue).not.toHaveBeenCalled()
     }
@@ -358,14 +359,14 @@ describe("sidebar model validation", () => {
       renderHarness(<Harness model={model} />)
       await waitForCatalog()
       fireEvent.click(screen.getByText("Send"))
-      fireEvent.click(screen.getByTestId("chat-model-select"))
+      // XS-02: the blocked Send opens the picker itself.
       fireEvent.click(
         await screen.findByRole("menuitem", { name: /ready-model/ })
       )
       await waitFor(() =>
         expect(screen.queryByRole("alert")).not.toBeInTheDocument()
       )
-      expect(screen.getByRole("textbox")).toHaveValue("keep my draft")
+      expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("keep my draft")
       fireEvent.click(screen.getByText("Send"))
       await waitFor(() =>
         expect(mocks.send).toHaveBeenCalledWith("keep my draft", "", undefined)
@@ -377,7 +378,7 @@ describe("sidebar model validation", () => {
     renderHarness(<Harness />)
     fireEvent.click(screen.getByText("Send"))
     await screen.findByRole("alert")
-    fireEvent.change(screen.getByRole("textbox"), {
+    fireEvent.change(screen.getByRole("textbox", { name: "Message" }), {
       target: { value: "edited draft" }
     })
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
@@ -390,7 +391,7 @@ describe("sidebar model validation", () => {
     fireEvent.click(screen.getByText("Send"))
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }))
     expect(screen.queryByRole("alert")).not.toBeInTheDocument()
-    expect(screen.getByRole("textbox")).toHaveValue("keep my draft")
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveValue("keep my draft")
   })
 
   it("validates image-only input in Pro mode", async () => {
@@ -433,15 +434,29 @@ describe("sidebar model validation", () => {
     expect(screen.getByLabelText("Message")).toHaveValue("keep my draft")
   })
 
-  it("sends with an available model and keeps the Casual picker out of the way", async () => {
+  it("XS-02: sends with an available model and keeps showing which model it uses", async () => {
     renderHarness(<Harness model="ready-model" />)
     await waitForCatalog()
     fireEvent.click(screen.getByText("Send"))
     await waitFor(() =>
       expect(mocks.send).toHaveBeenCalledWith("keep my draft", "", undefined)
     )
-    expect(screen.queryByTestId("chat-model-select")).not.toBeInTheDocument()
+    expect(await screen.findByTestId("chat-model-select")).toHaveTextContent("ready-model")
   })
+
+  it.each(["", "removed-model"])(
+    "XS-02: opens the Casual model picker when Send is blocked by the model %j",
+    async (model) => {
+      renderHarness(<Harness model={model} />)
+      await waitForCatalog()
+      await screen.findByTestId("chat-model-select")
+      fireEvent.click(screen.getByText("Send"))
+      await screen.findByRole("alert")
+      expect(await screen.findByPlaceholderText("Search models")).toBeInTheDocument()
+      expect(await screen.findByRole("menuitem", { name: /ready-model/ })).toBeInTheDocument()
+      expect(mocks.send).not.toHaveBeenCalled()
+    }
+  )
 
   it.each([{ busy: true }])(
     "preserves queued dispatch for %j",

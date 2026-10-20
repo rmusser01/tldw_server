@@ -46,7 +46,8 @@ vi.mock("@tanstack/react-query", async (original) => {
     useQuery: () => ({
       data: discovery.failed ? undefined : [
         { model: "tldw:Gemma:Q4", provider: "openai", nickname: "Hosted Gemma" },
-        { model: "tldw:Gemma:Q4", provider: "local-llm", nickname: "Local Gemma" }
+        { model: "tldw:Gemma:Q4", provider: "local-llm", nickname: "Local Gemma" },
+        { model: "tldw:llama3.2:3b", provider: "ollama" }
       ],
       isLoading: false,
       isSuccess: !discovery.failed,
@@ -80,6 +81,13 @@ vi.mock("antd", () => ({
       <output data-testid="selected-menu-key">
         {menu.selectedKeys.join(",")}
       </output>
+      {menu.items
+        .filter((item: MenuItem) => item.children)
+        .map((item: MenuItem) => (
+          <div data-testid="menu-group" key={`group-${item.key}`}>
+            {item.label}
+          </div>
+        ))}
       {menu.items
         .flatMap((item: MenuItem) => item.children ?? [item])
         .map((item: MenuItem) => (
@@ -129,5 +137,28 @@ describe("compact explicit model selection", () => {
       ["local:Gemma:Q4"],
       ["local:Gemma:Q4"]
     ])
+  })
+
+  it("XS-02: rows name the model first and the provider second", () => {
+    render(<ModelSelect showSelectedName />)
+    const hosted = screen.getByRole("menuitem", { name: /hosted gemma/i })
+    expect(hosted.textContent ?? "").toMatch(/^Hosted Gemma/)
+    expect(hosted).toHaveTextContent("OpenAI")
+    expect(hosted.textContent).not.toContain(" - ")
+  })
+
+  it("XS-02: groups a local provider under its own name, not 'Custom'", () => {
+    render(<ModelSelect showSelectedName />)
+    const groups = screen.getAllByTestId("menu-group").map((group) => group.textContent)
+    expect(groups).toContain("Local · Ollama")
+    expect(groups).not.toContain("Custom")
+  })
+
+  it("XS-02: the chip names the selected model without the internal prefix", () => {
+    render(<ModelSelect showSelectedName />)
+    const chip = screen.getByTestId("chat-model-select")
+    expect(chip).toHaveTextContent("Gemma:Q4")
+    expect(chip.textContent).not.toContain("tldw:")
+    expect(chip).toHaveAccessibleName(expect.stringContaining("Gemma:Q4"))
   })
 })

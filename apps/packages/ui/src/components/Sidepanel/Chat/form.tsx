@@ -95,7 +95,8 @@ import { useTabMentions, type TabInfo } from "~/hooks/useTabMentions"
 import { useDeferredComposerInput } from "@/hooks/playground"
 import { KnowledgePanel } from "@/components/Knowledge"
 import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel"
-import { ModelSelect } from "@/components/Common/ModelSelect"
+import { ModelSelect, type ModelSelectHandle } from "@/components/Common/ModelSelect"
+import { useSidepanelStartupModel } from "./hooks/useSidepanelStartupModel"
 import { ConnectionStatusIndicator } from "@/components/Sidepanel/Chat/ConnectionStatusIndicator"
 import { ControlRow } from "@/components/Sidepanel/Chat/ControlRow"
 import { SidepanelComposerControlArea } from "@/components/Sidepanel/Chat/SidepanelComposerControlArea"
@@ -293,6 +294,9 @@ export const SidepanelForm = ({
     connectionReadyRef.current = isConnectionReady
   }, [isConnectionReady])
   const { data: chatModels, isFetching: chatModelsLoading } = useChatModelCatalog(isConnectionReady)
+  useSidepanelStartupModel({ enabled: isConnectionReady, models: chatModels })
+  // Opens the Casual model picker when a send is blocked by the model (XS-02).
+  const casualModelSelectRef = React.useRef<ModelSelectHandle>(null)
   const voiceChatModelOptions = React.useMemo(() => {
     const options = [
       {
@@ -2212,6 +2216,7 @@ export const SidepanelForm = ({
         const normalizedSelectedModel = normalizeChatModelId(selectedModel)
         if (!normalizedSelectedModel) {
           form.setFieldError("message", t("formError.noModel"))
+          casualModelSelectRef.current?.openAndFocus()
           return
         }
         const unavailableModel = findUnavailableChatModel(
@@ -2227,6 +2232,7 @@ export const SidepanelForm = ({
               "Selected model is not available on this server. Refresh models or choose a different model."
             )
           )
+          casualModelSelectRef.current?.openAndFocus()
           return
         }
       }
@@ -3350,6 +3356,7 @@ export const SidepanelForm = ({
         const normalizedSelectedModel = normalizeChatModelId(selectedModel)
         if (!normalizedSelectedModel) {
           form.setFieldError("message", t("formError.noModel"))
+          casualModelSelectRef.current?.openAndFocus()
           return
         }
         const unavailableModel = findUnavailableChatModel(
@@ -3365,6 +3372,7 @@ export const SidepanelForm = ({
               "Selected model is not available on this server. Refresh models or choose a different model."
             )
           )
+          casualModelSelectRef.current?.openAndFocus()
           return
         }
       }
@@ -3828,10 +3836,9 @@ export const SidepanelForm = ({
                         <>
                           {personaSubmitDisabledReason && <p role="status" className="px-2 py-1 text-sm text-text-muted">{personaSubmitDisabledReason}</p>}
                           {isConnectionReady && !isProMode && <ModelSelect
+                            ref={casualModelSelectRef}
                             iconClassName="size-4"
                             showSelectedName
-                            showPicker={Boolean(!normalizeChatModelId(selectedModel) ||
-                              findUnavailableChatModel([selectedModel], availableChatModelIds))}
                           />}
                           {form.errors.message && (
                             <div

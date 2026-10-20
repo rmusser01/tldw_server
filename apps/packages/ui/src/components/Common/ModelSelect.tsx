@@ -11,6 +11,11 @@ import { ProviderIcons } from "./ProviderIcon"
 import { IconButton } from "./IconButton"
 import { useStoreChatModelSettings } from "@/store/model"
 import { getCanonicalModelKey, resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils"
+import {
+  formatChatModelLabel,
+  formatChatProviderName,
+  getChatModelLabelParts
+} from "@/utils/chat-model-label"
 
 export type Props = {
   iconClassName?: string
@@ -137,12 +142,9 @@ const ModelSelectBase = (
       return normalized.toLowerCase()
     }
 
+    // Local providers keep their own group, named "Local · Ollama" (XS-02).
     const toGroupKey = (providerRaw: string) =>
-      providerRaw === "chrome"
-        ? "default"
-        : LOCAL_PROVIDERS.has(providerRaw)
-          ? "custom"
-          : providerRaw
+      providerRaw === "chrome" ? "default" : providerRaw
 
     const byDisplayLabel = (a: ChatModel, b: ChatModel) => {
       const aProvider = getProviderDisplayName(toProviderKey(a.provider))
@@ -154,8 +156,9 @@ const ModelSelectBase = (
 
     const buildItem = (model: ChatModel): MenuItem => {
       const providerRaw = toProviderKey(model.provider)
-      const providerLabel = getProviderDisplayName(providerRaw)
-      const modelLabel = model.nickname || model.model
+      const providerLabel =
+        formatChatProviderName(providerRaw) || getProviderDisplayName(providerRaw)
+      const modelLabel = getChatModelLabelParts({ model }).modelName || model.model
       const caps = Array.isArray(model.details?.capabilities)
         ? model.details.capabilities
         : []
@@ -182,8 +185,12 @@ const ModelSelectBase = (
               )}
             </div>
             <div className="flex flex-col min-w-0 flex-1">
-              <span className="truncate">
-                {providerLabel} - {modelLabel}
+              {/* Model first; the provider is secondary and truncates first (XS-02). */}
+              <span className="flex min-w-0 items-baseline gap-1.5">
+                <span className="min-w-0 truncate font-medium">{modelLabel}</span>
+                <span className="min-w-0 max-w-[45%] shrink-[2] truncate text-xs text-text-muted">
+                  {providerLabel}
+                </span>
               </span>
               {(hasVision || hasTools || hasFast) && (
                 <div className="mt-0.5 flex flex-wrap gap-1 text-[10px]">
@@ -292,12 +299,14 @@ const ModelSelectBase = (
 
     const items: MenuItem[] = []
     for (const [groupKey, children] of groupEntries) {
+      const providerText =
+        formatChatProviderName(groupKey) || getProviderDisplayName(groupKey)
       const labelText =
         groupKey === "default"
           ? t("modelSelect.group.default", "Default")
-          : groupKey === "custom"
-            ? t("modelSelect.group.custom", "Custom")
-            : getProviderDisplayName(groupKey)
+          : LOCAL_PROVIDERS.has(groupKey)
+            ? `${t("modelSelect.group.local", "Local")} · ${providerText}`
+            : providerText
       const iconKey = groupKey === "default" ? "chrome" : groupKey
       items.push({
         type: "group",
@@ -321,16 +330,24 @@ const ModelSelectBase = (
     toggleFavorite
   ])
 
-  // Get display name for selected model
+  // The selected model's name and "model (Provider)" label (XS-02). The chip
+  // truncates with CSS so the model name is never cut to a fixed length.
   const selectedModelDisplay = React.useMemo(() => {
     if (!selectedModelValue || !data) return null
     const model = selectedSelection.model
-    if (!model) return selectedModelValue.split('/').pop() || selectedModelValue
-    // Use nickname if available, otherwise extract short name from model ID
-    const shortName = model.nickname || model.model.split('/').pop() || model.model
-    // Truncate if too long
-    return shortName.length > 20 ? shortName.substring(0, 18) + '…' : shortName
+    const modelName = model
+      ? getChatModelLabelParts({ model }).modelName
+      : getChatModelLabelParts({ modelId: selectedModelValue }).modelName
+    return modelName.split("/").pop() || modelName
   }, [selectedModelValue, data, selectedSelection.model])
+  const selectedModelLabel = React.useMemo(() => {
+    if (!selectedModelValue) return null
+    return formatChatModelLabel({
+      model: selectedSelection.model,
+      modelId: selectedSelection.model ? undefined : selectedModelValue,
+      provider: selectedSelection.provider
+    })
+  }, [selectedModelValue, selectedSelection.model, selectedSelection.provider])
 
   const saveFeedback = <SelectedModelSaveFeedback failed={selectedModelSaveFailed} onRetry={retrySelectedModelSave} />
   // Keep the failed-write owner mounted when a valid selection hides the trigger.
@@ -429,20 +446,28 @@ const ModelSelectBase = (
           trigger={["click"]}>
           <Tooltip
             title={
-              selectedModelValue
-                ? `${t("modelSelect.tooltip", "Changes model for next message")}: ${selectedModelValue}`
+              selectedModelLabel
+                ? `${t("modelSelect.tooltip", "Changes model for next message")}: ${selectedModelLabel}`
                 : t("modelSelect.tooltip", "Changes model for next message")
             }>
             <IconButton
               ref={triggerRef}
-              ariaLabel={t("selectAModel") as string}
+              ariaLabel={
+                selectedModelLabel
+                  ? `${t("modelSelect.label", "Model")}: ${selectedModelLabel}. ${t("modelSelect.change", "Change model")}`
+                  : (t("selectAModel") as string)
+              }
               hasPopup="menu"
               dataTestId="chat-model-select"
-              className="px-2 text-text-muted">
-              <LucideBrain className={iconClassName} />
+              className="min-w-0 max-w-full px-2 text-text-muted">
+              <LucideBrain className={`${iconClassName} shrink-0`} />
               {showSelectedName && selectedModelDisplay ? (
-                <span className="ml-1.5 max-w-[120px] truncate text-xs font-medium text-text">
+                <span className="ml-1.5 min-w-0 max-w-[200px] truncate text-xs font-medium text-text">
                   {selectedModelDisplay}
+                </span>
+              ) : showSelectedName ? (
+                <span className="ml-1.5 text-xs font-medium text-text">
+                  {t("modelSelect.choose", "Choose model")}
                 </span>
               ) : (
                 <span className="ml-1 hidden sm:inline text-xs">
