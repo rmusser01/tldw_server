@@ -1537,7 +1537,7 @@
     "moodboardCreateAction": "New collection",
     "moodboardChoosePrompt": "Choose a collection above to see its notes.",
     "moodboardFirstPrompt": "A collection is a group of notes you pick by hand. Create one, then add notes to it.",
-    "moodboardEmptyHowToAdd": "Open a note, then choose Add open note to put it here.",
+    "moodboardEmptyHowToAdd": "Open a note from the List view, then come back here and choose Add open note.",
     "moodboardAddOpenNote": "Add open note",
     "moodboardAddOpenNoteNeedsNote": "Open a note first",
     "moodboardAddOpenNoteAlreadyIn": "The open note is already in this collection",

@@ -1095,7 +1095,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                     </p>
                     <p className="mt-1">
                       {t('option:notesSearch.moodboardEmptyHowToAdd', {
-                        defaultValue: 'Open a note, then choose Add open note to put it here.'
+                        defaultValue: 'Open a note from the List view, then come back here and choose Add open note.'
                       })}
                     </p>
                   </div>

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button, Select, Spin, Tooltip, Typography } from 'antd'
+import { Button, Select, Spin, Typography } from 'antd'
 import { useTranslation } from 'react-i18next'
 import type { MoodboardSummary } from './notes-manager-types'
 
@@ -42,6 +42,7 @@ const NotesCollectionControls: React.FC<NotesCollectionControlsProps> = ({
   addNoteToMoodboard
 }) => {
   const { t } = useTranslation(['option'])
+  const addReasonId = React.useId()
   const addDisabledReason =
     openNoteId == null
       ? t('option:notesSearch.moodboardAddOpenNoteNeedsNote', {
@@ -135,24 +136,34 @@ const NotesCollectionControls: React.FC<NotesCollectionControlsProps> = ({
         </Button>
       </div>
       {selectedMoodboard != null && (
-        <Tooltip title={addDisabledReason ?? undefined}>
-          <span className="block">
-            <Button
-              size="small"
-              block
-              onClick={() => {
-                if (openNoteId == null) return
-                void addNoteToMoodboard(openNoteId)
-              }}
-              disabled={addDisabledReason != null}
-              data-testid="notes-moodboard-add-open-note"
+        <div>
+          <Button
+            size="small"
+            block
+            onClick={() => {
+              if (openNoteId == null) return
+              void addNoteToMoodboard(openNoteId)
+            }}
+            disabled={addDisabledReason != null}
+            aria-describedby={addDisabledReason != null ? addReasonId : undefined}
+            data-testid="notes-moodboard-add-open-note"
+          >
+            {t('option:notesSearch.moodboardAddOpenNote', {
+              defaultValue: 'Add open note'
+            })}
+          </Button>
+          {/* Shown, not hover-only, so everyone learns why it is disabled. */}
+          {addDisabledReason != null && (
+            <Typography.Text
+              id={addReasonId}
+              type="secondary"
+              className="mt-1 block text-[11px] text-text-muted"
+              data-testid="notes-moodboard-add-open-note-reason"
             >
-              {t('option:notesSearch.moodboardAddOpenNote', {
-                defaultValue: 'Add open note'
-              })}
-            </Button>
-          </span>
-        </Tooltip>
+              {addDisabledReason}
+            </Typography.Text>
+          )}
+        </div>
       )}
       {selectedMoodboard?.description ? (
         <Typography.Text type="secondary" className="block text-[11px] text-text-muted">

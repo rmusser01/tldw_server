@@ -69,7 +69,11 @@ describe('NotesSidebar Collection view (NL-13)', () => {
       />
     )
     const empty = screen.getByTestId('notes-moodboard-empty')
-    expect(empty).toHaveTextContent('Open a note, then choose Add open note to put it here.')
+    // The Collection view lists only this collection's notes, so the copy
+    // says where to open one.
+    expect(empty).toHaveTextContent(
+      'Open a note from the List view, then come back here and choose Add open note.'
+    )
     fireEvent.click(screen.getByRole('button', { name: 'Add open note' }))
     expect(addNoteToMoodboard).toHaveBeenCalledWith('note-42')
   })
@@ -85,7 +89,11 @@ describe('NotesSidebar Collection view (NL-13)', () => {
         })}
       />
     )
-    expect(screen.getByRole('button', { name: 'Add open note' })).toBeDisabled()
+    const add = screen.getByRole('button', { name: 'Add open note' })
+    expect(add).toBeDisabled()
+    // The reason is on screen and read with the button, not hover-only.
+    expect(add).toHaveAccessibleDescription('Open a note first')
+    expect(screen.getByText('Open a note first')).toBeVisible()
 
     rerender(
       <NotesSidebar
@@ -101,6 +109,25 @@ describe('NotesSidebar Collection view (NL-13)', () => {
         })}
       />
     )
-    expect(screen.getByRole('button', { name: 'Add open note' })).toBeDisabled()
+    const alreadyIn = screen.getByRole('button', { name: 'Add open note' })
+    expect(alreadyIn).toBeDisabled()
+    expect(alreadyIn).toHaveAccessibleDescription('The open note is already in this collection')
+  })
+
+  it('gives an enabled Add open note no leftover reason', () => {
+    render(
+      <NotesSidebar
+        {...buildNotesSidebarProps({
+          listViewMode: 'moodboard',
+          moodboards: [collection],
+          selectedMoodboardId: 7,
+          selectedMoodboard: collection,
+          selectedId: 'note-42'
+        })}
+      />
+    )
+    const add = screen.getByRole('button', { name: 'Add open note' })
+    expect(add).toBeEnabled()
+    expect(add).not.toHaveAttribute('aria-describedby')
   })
 })

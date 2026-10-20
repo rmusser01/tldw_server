@@ -452,7 +452,7 @@ describe("NotesManagerPage stage 42 moodboard view", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("notes-moodboard-empty")).toHaveTextContent(
-        "Open a note, then choose Add open note to put it here."
+        "Open a note from the List view, then come back here and choose Add open note."
       )
     })
     const readingListFetches = () =>

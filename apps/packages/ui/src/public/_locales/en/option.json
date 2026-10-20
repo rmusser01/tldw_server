@@ -6450,7 +6450,7 @@
     "message": "A collection is a group of notes you pick by hand. Create one, then add notes to it."
   },
   "notesSearch_moodboardEmptyHowToAdd": {
-    "message": "Open a note, then choose Add open note to put it here."
+    "message": "Open a note from the List view, then come back here and choose Add open note."
   },
   "notesSearch_moodboardAddOpenNote": {
     "message": "Add open note"
