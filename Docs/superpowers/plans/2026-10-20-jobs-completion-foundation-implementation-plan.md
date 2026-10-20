@@ -66,13 +66,13 @@ SQLite/contract/import-absence tests must remain runnable without the driver.
 **Goal:** Establish reusable behavior tests before any production move.
 **Success Criteria:** New characterizations pass on the untouched baseline; paired paths use real fixture-owned databases and pin the five review-focus conditions.
 **Tests:** New characterization module plus existing identity, lifecycle, admin-counter and RLS suites.
-**Status:** In Progress
+**Status:** Complete
 
 **Interfaces:** Consume current `JobManager.complete_job(job_id, *, result=None, worker_id=None, lease_id=None, completion_token=None, expected_uuid=None, enforce=None) -> bool`. Test support exports `record_completion_observers(manager, monkeypatch, calls: list[str]) -> None` and `record_completion_boundaries(manager, monkeypatch, calls: list[str], *, on_commit: Callable[[], None] | None = None, fail_at: str | None = None) -> None`; proxies delegate real execute/fetch/context/commit/rollback/close rather than faking successful SQL.
 
-- [ ] Add the support/module pair. `completion_manager` is a module-local fixture parametrized with SQLite and `pytest.param("postgres", marks=pytest.mark.pg_jobs)`. SQLite uses `tmp_path`; PostgreSQL obtains the existing `jobs_pg_dsn` through `request.getfixturevalue`. New paired modules opt in with `USE_SHARED_JOBS_POSTGRES = True` and `pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_isolated_fixtures"]`, following the current failed-requeue tests. Do not modify global conftests or migrate historical modules.
-- [ ] Record calls only after seeding a job; mock external observers/telemetry, not persistence. Wrap the first owning connection/cursor; do not accidentally wrap the pre-existing SLA policy lookup as a second completion transaction.
-- [ ] Write the following binding assertions using the probes. A real processing job has valid lease/token/UUID; counters/outbox are enabled, SLA policy returns no breach, test diagnostics are disabled for these order assertions:
+- [x] Add the support/module pair. `completion_manager` is a module-local fixture parametrized with SQLite and `pytest.param("postgres", marks=pytest.mark.pg_jobs)`. SQLite uses `tmp_path`; PostgreSQL obtains the existing `jobs_pg_dsn` through `request.getfixturevalue`. New paired modules opt in with `USE_SHARED_JOBS_POSTGRES = True` and `pytest_plugins = ["tldw_Server_API.tests._plugins.authnz_isolated_fixtures"]`, following the current failed-requeue tests. Do not modify global conftests or migrate historical modules.
+- [x] Record calls only after seeding a job; mock external observers/telemetry, not persistence. Wrap the first owning connection/cursor; do not accidentally wrap the pre-existing SLA policy lookup as a second completion transaction.
+- [x] Write the following binding assertions using the probes. A real processing job has valid lease/token/UUID; counters/outbox are enabled, SLA policy returns no breach, test diagnostics are disabled for these order assertions:
 
 These snippets show each test's required assertions, not complete test bodies.
 Each test creates `calls: list[str]`, seeds/acquires its job before installing
@@ -98,7 +98,7 @@ def test_unsuppressed_observer_failure_keeps_committed_state(completion_manager,
 
 For each, also assert the current public result/exception and durable event/counter state; the failing observer case must assert propagation and absence of later callbacks. PostgreSQL records cursor exit separately before connection exit; extend the expected order accordingly, never hide that boundary behind a common list.
 
-- [ ] Add parameterized tests with these exact preservation outcomes:
+- [x] Add parameterized tests with these exact preservation outcomes:
 
 | Test name | Required assertion(s) |
 | --- | --- |
@@ -111,9 +111,22 @@ For each, also assert the current public result/exception and durable event/coun
 | `test_completion_sla_policy_lookup_lifetime` | Lookup uses its existing separate read-only connection under the owning lock, closes it before SLA writes, preserves lookup/close suppression, and never owns completion commit. |
 | `test_completion_diagnostic_failure_keeps_pg_commit_guard` | Current test-mode entry/read ordering retained; a real PostgreSQL diagnostic statement abort is not converted into successful completion by suppression. |
 
-- [ ] Run `RUN_JOBS=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_jobs_completion_characterization.py`. Expect all paired cases pass and no substantive PG skips. Characterization is intentionally green on unchanged production; do not manufacture a production defect to obtain red. Prove selected assertions are live with a scoped test-only adversarial probe (wrong binding/order raises an assertion), and keep production unchanged.
-- [ ] Run existing shared-helper matrix tests before relocation: `test_jobs_lifecycle_event_atomicity.py`, `test_jobs_lifecycle_hardening_regressions.py`, `test_jobs_dependency_acquire_counter_regressions.py`, `test_jobs_admin_retry_transaction_boundaries.py`. Add only missing cases for each current helper caller/branch. Keep ordinary discovered defects in separate tasks, not this PR.
-- [ ] Commit characterization and TASK-13875/plan evidence with normal hooks: `test(jobs): characterize completion extraction boundaries (TASK-13875)`.
+- [x] Run `RUN_JOBS=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_jobs_completion_characterization.py`. Expect all paired cases pass and no substantive PG skips. Characterization is intentionally green on unchanged production; do not manufacture a production defect to obtain red. Prove selected assertions are live with a scoped test-only adversarial probe (wrong binding/order raises an assertion), and keep production unchanged.
+- [x] Run existing shared-helper matrix tests before relocation: `test_jobs_lifecycle_event_atomicity.py`, `test_jobs_lifecycle_hardening_regressions.py`, `test_jobs_dependency_acquire_counter_regressions.py`, `test_jobs_admin_retry_transaction_boundaries.py`. Add only missing cases for each current helper caller/branch. Keep ordinary discovered defects in separate tasks, not this PR.
+- [x] Commit characterization and TASK-13875/plan evidence with normal hooks: `test(jobs): characterize completion extraction boundaries (TASK-13875)`.
+
+Stage 1 implementation evidence (2026-10-20; controller independent review pending):
+focused command above: **138 passed, 3648 warnings**, 0 skips (164.39s);
+the four affected helper modules: **242 passed, 581 warnings**, 0 skips (57.44s),
+versus the untouched **232 passed** baseline. Combined with existing row-identity,
+idempotency and real RLS suites: **418 passed, 4300 warnings**, 0 skips (208.86s).
+Scoped late-binding/wrong-order adversarial probes: **4 passed, 134 deselected**;
+each wrong dispatcher triggers the expected order assertion on both real backends.
+Ruff, scoped Black, compilation and whitespace pass; test Bandit with B101 excluded
+has **0 new findings**, 14 unchanged historical helper findings, 0 in new files.
+Production/provisioners/conftests remain unchanged. Exact commands, reused coverage
+map, self-review and pre-existing TASK-13875 identifier collision are recorded in
+`.superpowers/sdd/2026-10-20-jobs-completion-foundation-implementation-plan/task-1-report.md`.
 
 ## Task 2: Add Completion-Only Contracts
 
