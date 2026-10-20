@@ -148,7 +148,9 @@ edited. Controller owns review acceptance and the ledger.
 **Goal:** Define data-only boundaries without changing production routing or accepted input behavior.
 **Success Criteria:** Direct tests prove shallow identity preservation, lazy callbacks, legal internal result states, and no driver/Jobs dependencies.
 **Tests:** `test_jobs_completion_contracts.py`.
-**Status:** Not Started
+**Status:** Complete
+
+Task 2 execution starts at `21f22a88ac900e8121621f2e087733b5942d01d7` in the approved worktree. TASK-13878 is verified active; only new contracts/direct tests and this stage's evidence are owned. Governing ADR-058/ADR-078 are unchanged. Detailed commands and red/green evidence: `.superpowers/sdd/2026-10-20-jobs-completion-foundation-implementation-plan/task-2-report.md`.
 
 **Interfaces:** All types below live only in `DB_Management/jobs_completion_contracts.py`. Use frozen dataclasses, string enums, `Protocol` and `Callable`; no Pydantic validation, copying, environment reads or I/O.
 
@@ -209,11 +211,13 @@ prepare_sla_warning(job_id: int, error_type: str) -> SlaWarningEffect
 
 The later facade adapter owns binding/parsing/clock preparation together, so it can preserve callable-before-argument evaluation and the separate truncation/grouped-metric suppression boundaries. `prepare_metric_effects` must permit a partial prepared prefix. Do not add a separate eager duration callback that samples clocks before callback binding. Implement neither that adapter nor a registry in this foundation; test the Protocol using inert recording stubs.
 
-- [ ] Write direct tests before the module exists. `test_command_is_shallow_and_inert` asserts `command.result is original` and unchanged ID/UUID/token identity with objects whose `__int__`, `__str__`, `__deepcopy__` and JSON conversion fail if invoked. Assert assignment raises `FrozenInstanceError` while nested data is not recursively frozen.
-- [ ] Write parameterized outcome/invariant tests and Hypothesis tests: `assert replay.public_success is True`; `assert no_transition.public_success is False`; `assert applied.locked_row is row`; all legal metric-prefix lengths accepted, conflicting SLA forms/duplicate bindings/payload on replay rejected. Constructors must not call any recording policy stub. Test raw `None`, empty/noncanonical UUIDs, naive/aware/raw timestamp fields without normalization.
-- [ ] Run `RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_jobs_completion_contracts.py`; expect missing-module/import failure before implementation, not an unrelated fixture failure.
-- [ ] Implement the specified contracts only, with module/class/function docstrings and type hints; no backend or manager imports. Run the same tests to green and rerun Stage 1. Add a cold-import check that importing this contracts module loads neither psycopg nor Jobs modules.
-- [ ] Commit contracts/tests/plan/task notes: `refactor(jobs): add shallow completion contracts (TASK-13878)`.
+- [x] Write direct tests before the module exists. `test_command_is_shallow_and_inert` asserts `command.result is original` and unchanged ID/UUID/token identity with objects whose `__int__`, `__str__`, `__deepcopy__` and JSON conversion fail if invoked. Assert assignment raises `FrozenInstanceError` while nested data is not recursively frozen.
+- [x] Write parameterized outcome/invariant tests and Hypothesis tests: `assert replay.public_success is True`; `assert no_transition.public_success is False`; `assert applied.locked_row is row`; all legal metric-prefix lengths accepted, conflicting SLA forms/duplicate bindings/payload on replay rejected. Constructors must not call any recording policy stub. Test raw `None`, empty/noncanonical UUIDs, naive/aware/raw timestamp fields without normalization.
+- [x] Run `RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_jobs_completion_contracts.py`; expect missing-module/import failure before implementation, not an unrelated fixture failure.
+- [x] Implement the specified contracts only, with module/class/function docstrings and type hints; no backend or manager imports. Run the same tests to green and rerun Stage 1. Add a cold-import check that importing this contracts module loads neither psycopg nor Jobs modules.
+- [x] Commit contracts/tests/plan/task notes: `refactor(jobs): add shallow completion contracts (TASK-13878)`.
+
+Task 2 qualification (2026-10-20): expected missing-module RED (exit 2; 12 warnings), then 93 direct tests GREEN. Combined `RUN_JOBS=1 TLDW_TEST_POSTGRES_REQUIRED=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_jobs_completion_contracts.py tldw_Server_API/tests/Jobs/test_jobs_completion_characterization.py` passed 231 cases (3834 warnings, 0 skips), including all 138 unchanged paired characterization cases using the existing shared PostgreSQL fixture. Final direct-source rerun after strengthening the JSON tripwire: 93 passed, 198 warnings, 0 skips; coverage rerun: 99% (142/144 statements). Isolated `python -I` import and spawned-interpreter test load no psycopg/psycopg2/Jobs modules. Touched Ruff, Black, py_compile, whitespace and both Bandit scans pass; production has no exclusions, tests exclude only B101, with 0 findings/errors/nosec/skipped_tests in both scans. No production caller/routing, manager, characterization, fixture, unrelated task or controller-ledger changes. Broad repository fail-fast run cannot collect unchanged `tests/Workspaces/test_workspaces_api.py` because `httpx2` is unavailable (12 collection skips, 9 warnings, 1 error); no dependency installation or out-of-scope fix. Whole foundation remains In Progress and controller owns review acceptance. Full exact commands, self-review and logs are linked in the Task 2 report above.
 
 ## Task 3: Relocate Shared Helpers Mechanically
 
