@@ -45,7 +45,7 @@ Planning used checkout `1077b51a45` and compared relevant Jobs boundaries with l
 - [x] Confirm `JobManager.complete_job` and WorkerSDK preserve the newer `expected_uuid` completion fence. Current-dev code retained; completion baseline included below.
 - [x] Search for concurrent neutral-capability work before creating files. No matching implementation on current dev; open Jobs changes #2862/#2738 are unrelated.
 - [x] Create collision-free Stage 3A implementation Backlog task TASK-13900 before runtime edits. TASK-13902 records planning only.
-- [x] Activate the project virtual environment before all Python/test/lint/security commands. Fresh inline/types/completion baseline: 63 passed, 9 fixture-declared PostgreSQL skips, 144 warnings. PostgreSQL certification remains required.
+- [x] Activate the project virtual environment before all Python/test/lint/security commands. Fresh inline/types/completion baseline: 63 passed, 9 `RUN_JOBS` gate skips, 144 warnings. Enabled PostgreSQL completion baseline: 9 passed, 15 deselected, 30 warnings. Existing SQLite/WorkerSDK baseline: 273 passed; CI/task-format checks: 64 passed. New capability certification remains required.
 
 ## File Map
 
@@ -158,7 +158,7 @@ Define `ROOT_REFERENCE = "00000000-0000-4000-8000-000000000001"` in test support
 
 - [ ] **Step 2: Run red tests.**
 
-Run: `source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_contracts.py tldw_Server_API/tests/Jobs/test_workflow_schema.py -m 'not pg_jobs'`
+Run: `source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_contracts.py tldw_Server_API/tests/Jobs/test_workflow_schema.py -m 'not pg_jobs'`
 
 Expected: imports/new behavior fail, not an unrelated dependency failure. Record the red evidence.
 
@@ -231,7 +231,7 @@ Add parameterized `test_replay_rejects_owner_payload_key_scope_or_retry_control_
 
 `test_fence_rechecks_expiry_inside_transaction` mints a fence, uses the controlled test helper to set the locked row's deadline to current fractional database time, then attempts a horizon/domain mutation. Assert `WorkflowFenceError(STALE_LEASE)` and unchanged synthetic domain data; a transaction-start timestamp must not keep that lease valid.
 
-- [ ] **Step 2: Run red tests:** `source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_admission_fencing.py -m 'not pg_jobs'`.
+- [ ] **Step 2: Run red tests:** `source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_admission_fencing.py -m 'not pg_jobs'`.
 - [ ] **Step 3: Implement the interfaces on both backends.** Admission serializes owner/scope/key correlation (SQLite write transaction; PostgreSQL stable transaction advisory lock), reads retained support authority and both active/archive UUID matches, validates all controls, then creates root/support/event/counter atomically. Reuse transaction-neutral admission leaf helpers such as `_quota_rejection`, `_insert_job`, `_bump_counters`, and `_insert_created_event`; do not call the committing `create_job`/`admit_job` and append support afterward. Retained support pointing to a missing root returns missing/unavailable, never new admission. Conflicting legacy correlation is not adopted. Bounded archive normalization/decryption must preserve exact payload and detect active/archive duplicates even after integer reuse.
 
 The facade opens one connection, begins once, establishes exact transaction-local owner context, verifies the effective PostgreSQL role, commits once, and closes/rolls back on all exits. Do not call the best-effort `_pg_cursor` RLS setup as the security gate: a failed setup must raise, never rollback and continue under old/admin scope. Restore caller ContextVars on exit. Root locks remain held while the synthetic/domain repository checks its version/generation/claim/cursor by CAS; the capability cannot verify domain facts on another connection.
@@ -298,7 +298,7 @@ def test_pruned_history_does_not_erase_unreleased_proof(workflow_case):
 
 Add `test_effect_insert_failure_rolls_back_status_counter_and_event`, `test_new_lease_delivers_same_intent_after_locked_guard_revalidation`, `test_stale_domain_guard_aborts_without_receipt`, `test_same_key_changed_facts_conflict_even_after_release`, `test_release_lost_ack_replays_without_reapplying`, `test_terminal_or_reused_uuid_cannot_receive_unapplied_effect`, and `test_receipt_capacity_exhaustion_precedes_transition`. Assert complete rollback, unchanged key/fingerprint, zero receipt after failed CAS, fixed conflict, absorbing release marker, terminal/replacement untouched, and zero transition at one-over capacity.
 
-- [ ] **Step 2: Run red tests:** `source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_effect_receipts.py -m 'not pg_jobs'`.
+- [ ] **Step 2: Run red tests:** `source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_effect_receipts.py -m 'not pg_jobs'`.
 - [ ] **Step 3: Implement the interfaces.** Receipt lookup by owner/root/key and fingerprint precedes lease validation only for already-applied exact effects. Unapplied effects lock/revalidate the exact live root and fenced domain facts. Apply lifecycle mutation, durable counters/event, and receipt in one transaction. Continue clears the lease and queues at the original scheduled instant without retry/streak increments. Retry charges once and honors max retries/quarantine; complete/fail/cancel are terminal and clear authority. Use existing Jobs transition/counter/event semantics; do not call a committing legacy prepared operation or bypass a current UUID fence.
 
 Release atomically marks the exact receipt released and returns its proof; repeat release is acknowledgement-neutral. Keep a compact immutable key/fingerprint/outcome tombstone for the support-root lifetime so delayed duplicate delivery cannot reapply after release. Unreleased proof and minimal root support survive ordinary Jobs active/archive pruning. A missing root is not missing receipt authority. No support-root deletion is exposed in this unit: eventual owner-scoped domain retention release belongs to Stage 3B/3D after every delivery horizon is proven closed. Capacity exhaustion leaves existing obligations inspectable and rejects new effects before any transition.
@@ -368,7 +368,7 @@ def test_progress_proof_resets_only_once_across_restart(workflow_case):
 
 Define `recover("acquire")` to finish the expired episode through acquisition's recovery path without leaving a second untracked lease in this loop: return/store the lease acquired by that call and have the next `acquire()` consume it once. For sweep, `acquire()` gets a fresh lease normally. Add `test_acquire_and_sweep_race_charge_same_epoch_once`, `test_fractional_deadline_is_not_expired_early`, `test_same_progress_key_changed_facts_conflicts`, `test_late_proof_from_prior_epoch_cannot_reset_current_count`, `test_cancel_wins_over_expiry_terminal_disposition`, `test_schema_loss_blocks_enrolled_acquire`, and `test_legacy_and_admin_webhook_expiry_behavior_unchanged`. Assert once-only episode/event, unchanged before-expiry state, conflict/no reset, cancellation preserved, no lease publication, and existing retry budgets respectively. Parameterize both `single_update` modes on each backend. No provider mock should be invoked in any test.
 
-- [ ] **Step 2: Run red tests:** `source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_expiry_progress.py -m 'not pg_jobs'`.
+- [ ] **Step 2: Run red tests:** `source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_expiry_progress.py -m 'not pg_jobs'`.
 - [ ] **Step 3: Implement the episode algorithm.** On each enrolled acquisition, record epoch/lease digest in the same transaction that publishes processing state. On continue or locked expiry, close that epoch once: if new semantic progress was committed in it, retain/reset zero; otherwise increment the independent no-progress count. On the pinned limit, apply non-retryable Jobs failure with `no_progress_exhausted` and retained proof rather than queuing again. Provider retries/streaks remain untouched by expiry/no-progress accounting; existing provider-origin retry effects still use Jobs quarantine policy. Terminal/cancelled roots take precedence. Expiry maintenance authority is the locked exact old lease plus DB expiry, not a fabricated worker lease.
 
 Use a separate deterministic failure key, SHA-256 of the versioned tuple `(jobs_workflow_no_progress_v1, root_uuid, acquisition_epoch)`, when exhaustion stops a continuation. Return `EXHAUSTED` without applying that continuation; never store a fail action under the continuation's existing key. Expiry-triggered failure uses the same exact episode identity, so competing reclaim paths converge on one failure receipt/event.
@@ -433,17 +433,17 @@ Use bounded examples and the existing CI Hypothesis profile. Include changed-fac
 - [ ] **Step 3: Run the complete matrix.** Commands below are execution gates, not assertions that this planning turn implemented or passed the new tests.
 
 ```bash
-source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_*.py tldw_Server_API/tests/Jobs/property/test_workflow_capability_properties.py -m 'not pg_jobs'
-source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_*.py tldw_Server_API/tests/Jobs/property/test_workflow_capability_properties.py -m pg_jobs
-source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Jobs/test_jobs_admission_operations_* tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_* tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_* tldw_Server_API/tests/Jobs/test_jobs_lease_reclaim_budget_* tldw_Server_API/tests/Jobs/test_jobs_prune_* tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py
-source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Jobs/test_jobs_completion_row_identity_atomicity.py tldw_Server_API/tests/Jobs/test_jobs_lifecycle_hardening_regressions.py tldw_Server_API/tests/Jobs/test_jobs_rls_postgres.py
-source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_workflow_runner.py tldw_Server_API/tests/Embeddings_isolated/test_workflow_types.py
+source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_*.py tldw_Server_API/tests/Jobs/property/test_workflow_capability_properties.py -m 'not pg_jobs'
+source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_*.py tldw_Server_API/tests/Jobs/property/test_workflow_capability_properties.py -m pg_jobs
+source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_jobs_admission_operations_* tldw_Server_API/tests/Jobs/test_jobs_idempotency_receipts_* tldw_Server_API/tests/Jobs/test_jobs_prepared_disposition_operations_* tldw_Server_API/tests/Jobs/test_jobs_lease_reclaim_budget_* tldw_Server_API/tests/Jobs/test_jobs_prune_* tldw_Server_API/tests/Jobs/test_worker_sdk_prepared.py
+source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_jobs_completion_row_identity_atomicity.py tldw_Server_API/tests/Jobs/test_jobs_lifecycle_hardening_regressions.py tldw_Server_API/tests/Jobs/test_jobs_rls_postgres.py
+source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Embeddings_isolated/test_workflow_runner.py tldw_Server_API/tests/Embeddings_isolated/test_workflow_types.py
 ```
 
 Expected: all selected tests pass, PostgreSQL runtime roles are actually non-bypass, and no unexpected deselection/skip hides a capability case. Record fixture-declared PostgreSQL unavailability as incomplete certification; no merge/activation claim until CI supplies the missing evidence. `test_jobs_completion_row_identity_atomicity.py` comes from current `dev`, so an absent file means preflight was not completed. Run endpoint/legacy parity explicitly:
 
 ```bash
-source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py tldw_Server_API/tests/Embeddings/test_embeddings_jobs_adapter.py tldw_Server_API/tests/Embeddings/test_embeddings_redis_worker.py tldw_Server_API/tests/Embeddings/test_media_embeddings_storage_scope.py
+source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Embeddings/test_embeddings_orchestrator_endpoint_parity.py tldw_Server_API/tests/Embeddings/test_embeddings_jobs_adapter.py tldw_Server_API/tests/Embeddings/test_embeddings_redis_worker.py tldw_Server_API/tests/Embeddings/test_media_embeddings_storage_scope.py
 ```
 
 - [ ] **Step 4: Run changed-scope quality/security and CI membership checks.**
@@ -457,7 +457,7 @@ git diff --check
 
 Include the modified manager/lifecycle/conftest files in Ruff and formatter verification, comparing pre-existing findings with the recorded baseline rather than ignoring changed lines. Do not rewrite whole legacy files for formatting. Run the existing required-workflow/Jobs-shard coverage guard, adding exact new test paths only if uncovered; do not relax that guard. Expected: no new lint/format/security findings, compile success, clean diff, complete shard membership. Capture warnings and genuine skips.
 
-Run the existing guard with `source .venv/bin/activate && python -m pytest -q tldw_Server_API/tests/CI/test_required_workflow_contracts.py`; all assertions must pass. Use `python -m ruff format --check` on the new modules/test files listed in the Ruff command, and add the modified legacy files to lint/compile verification while preserving their established formatting.
+Run the existing guard with `source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/CI/test_required_workflow_contracts.py`; all assertions must pass. Use `python -m ruff format --check` on the new modules/test files listed in the Ruff command, and add the modified legacy files to lint/compile verification while preserving their established formatting.
 
 - [ ] **Step 5: Document, review, and commit.** Write the internal doc with actual API examples, explicit migration invocation, owner/lease/proof semantics, independent budgets, dormant rollback (stop callers; preserve proof/support obligations; no destructive down migration), and deferred support/domain cleanup. Update this plan's stage statuses and the implementation Backlog task incrementally. Request a whole-branch review against the approved spec and address validated findings before integration. Stage exact verified Task 5 files and `git commit -m "test(jobs): certify prepared workflow recovery contracts"`. PR creation/merge is a later explicit instruction; any materially AI-authored PR requires the requester's own Change summary.
 

@@ -23,6 +23,7 @@ Execute the approved Stage 3A plan using subagent-driven development. Plan: Docs
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-10-20: Requester selected subagent-driven execution (option 1). Isolated design branch rebased onto origin/dev df7c290fbf; current dev completion fences preserved. Open PR inventory max task ID 13870; no neutral workflow capability on dev. Relevant open PRs #2862 and #2738 do not implement this capability. Rebase encountered canonical task-note and ADR index conflicts; retaining upstream accepted ADRs and canonicalizing workstream tracking. Historical TASK-13450/13451 collide with unrelated dev records and must not be used for new mutations.
+Preflight verification correction: the initial 9 PostgreSQL skips came from the RUN_JOBS CI gate, not fixture unavailability. With RUN_JOBS=1 and local fixture access, all9 PostgreSQL completion atomicity cases passed (15 deselected,30 warnings,3.92s). Existing SQLite admission/idempotency/prepared-disposition/reclaim/prune and WorkerSDK suites:273 passed,772 warnings,16.11s. Required-workflow and task-format ratchet:64 passed,140 warnings,9.08s. Fixture server is available; new support RLS/schema certification remains mandatory.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
