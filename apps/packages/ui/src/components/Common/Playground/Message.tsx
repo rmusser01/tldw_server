@@ -295,7 +295,9 @@ type Props = {
   discoSkillComment?: DiscoSkillComment | null
   historyId?: string
   conversationInstanceId: string
-  onDeleteMessage?: () => void | boolean | Promise<void | boolean>
+  onDeleteMessage?:
+    | (() => void | boolean | Promise<void | boolean>)
+    | { readonly current: () => void | boolean | Promise<void | boolean> }
   suppressDeleteSuccessToast?: boolean
   onSaveToWorkspaceNotes?: (payload: {
     message: string
@@ -701,6 +703,16 @@ const PlaygroundMessageImpl = (props: Props) => {
       minute: "2-digit"
     })
   }, [props.createdAt, props.generationInfo])
+  // Search highlighting (WP-09): memoized so re-renders caused by unrelated
+  // prop changes (streaming flags, toggles, action metadata) do not re-run
+  // the regex split for unchanged message + query pairs.
+  const highlightedMessage = React.useMemo(
+    () =>
+      props.searchQuery
+        ? highlightText(props.message, props.searchQuery)
+        : props.message,
+    [props.message, props.searchQuery]
+  )
   const fallbackAudit = React.useMemo(
     () => resolveFallbackAudit(props.generationInfo),
     [props.generationInfo]
@@ -1539,7 +1551,24 @@ const PlaygroundMessageImpl = (props: Props) => {
   ])
 
   const handleDelete = React.useCallback(() => {
-    if (!props.onDeleteMessage) return
+    const rawDeleteSource = props.onDeleteMessage
+    if (!rawDeleteSource) return
+
+    // Resolve the widened union ONCE into a plain callable. Ref-like
+    // delete sources (memoized rows, e.g. SidePanelBody, whose interned
+    // source is a function carrying a `current` getter) are resolved HERE,
+    // at confirmation-open time, so the pending onOk keeps acting on the
+    // exact deleteMessage instance and row captured when the dialog
+    // opened, even if later renders replace either the source or the
+    // target. Plain per-render closure props are used as-is. Presence of
+    // `current` — not typeof — is the discriminator: the interned source
+    // is itself callable (direct calls live-dispatch per dev's
+    // pending-outcome contract) and must still resolve through `.current`
+    // here.
+    const deleteFn =
+      "current" in rawDeleteSource
+        ? rawDeleteSource.current
+        : rawDeleteSource
 
     Modal.confirm({
       title: t("common:confirmTitle", "Please confirm"),
@@ -1549,7 +1578,7 @@ const PlaygroundMessageImpl = (props: Props) => {
       okButtonProps: { danger: true },
       onOk: async () => {
         try {
-          const accepted = await props.onDeleteMessage?.()
+          const accepted = await deleteFn()
           if (accepted !== false && !props.suppressDeleteSuccessToast) {
             messageApi.success(t("common:deleted", "Deleted"))
           }
@@ -2879,9 +2908,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                     "italic text-text-muted text-body"
                   }
                   `}>
-                  {props.searchQuery
-                    ? highlightText(props.message, props.searchQuery)
-                    : props.message}
+                  {highlightedMessage}
                 </p>
               )
             ) : (

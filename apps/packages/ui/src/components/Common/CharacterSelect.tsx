@@ -174,8 +174,16 @@ export const CharacterSelect: React.FC<Props> = ({
     useSelectedCharacter<CharacterSelection | null>(null)
   const clearChat = useClearChat()
   const captureSelectionFence = useHistorySelectionContext()?.fence
-  const messages = useStoreMessageOption((state) => state.messages)
-  const serverChatId = useStoreMessageOption((state) => state.serverChatId)
+  // Derived boolean subscription (WP-06): the component only consumes the
+  // transcript through hasActiveChat, so subscribing to the boolean keeps
+  // message-text updates (streaming flushes) from re-rendering this tree.
+  const hasActiveChat = useStoreMessageOption(
+    (state) =>
+      Boolean(state.serverChatId) ||
+      state.messages.some(
+        (message) => message.messageType !== "character:greeting"
+      )
+  )
   const [userDisplayName, setUserDisplayName] = useStorage(
     "chatUserDisplayName",
     ""
@@ -312,12 +320,6 @@ export const CharacterSelect: React.FC<Props> = ({
     () => getCharacterMoodImagesFromExtensions(selectedCharacter?.extensions),
     [selectedCharacter?.extensions]
   )
-  const hasActiveChat = React.useMemo(() => {
-    if (serverChatId) return true
-    return messages.some(
-      (message) => message.messageType !== "character:greeting"
-    )
-  }, [messages, serverChatId])
   const openDisplayNameModal = React.useCallback(() => {
     let nextValue = trimmedDisplayName
     displayNameModalRef.current = modal.confirm({

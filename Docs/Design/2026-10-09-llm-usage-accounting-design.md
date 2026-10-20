@@ -490,3 +490,7 @@ Revision of 2026-10-18, TASK-13638:
 
 - **Callers that turned a refusal into degraded output** let it through, or keep their artifact and record the refusal. Benchmark runs join the §4a table.
 - **The workflow engine does not retry a step refused with a 402.** This replaces the 2026-10-13 note that an `llm` step is retried once.
+
+Revision of 2026-10-20, TASK-13862:
+
+- **The FVA adjudicator's LLM call** runs on the bounded adapter pool, as the claims engine's own calls do, so it is checked at the call (§5). A refusal there fails the FVA batch instead of becoming a neutral stance. Its only caller, `POST /claims/verify/fva`, answers 500 to every request (TASK-13881).

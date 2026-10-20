@@ -372,10 +372,20 @@ class AnthropicAdapter(ChatProvider):
         }
         usage = data.get("usage") or {}
         if isinstance(usage, dict):
+            # input_tokens is only the uncached remainder; prompt_tokens is the whole prompt, as in OpenAI's usage (ADR-075).
+            cache = {
+                key: usage[key]
+                for key in ("cache_creation_input_tokens", "cache_read_input_tokens")
+                if isinstance(usage.get(key), int)
+            }
+            prompt_tokens = usage.get("input_tokens")
+            if cache:
+                prompt_tokens = (prompt_tokens or 0) + sum(cache.values())
             shaped["usage"] = {
-                "prompt_tokens": usage.get("input_tokens"),
+                "prompt_tokens": prompt_tokens,
                 "completion_tokens": usage.get("output_tokens"),
-                "total_tokens": (usage.get("input_tokens") or 0) + (usage.get("output_tokens") or 0),
+                "total_tokens": (prompt_tokens or 0) + (usage.get("output_tokens") or 0),
+                **cache,
             }
         shaped["provider_response"] = data
         return shaped

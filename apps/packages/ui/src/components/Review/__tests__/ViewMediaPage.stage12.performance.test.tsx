@@ -24,7 +24,10 @@ const mocks = vi.hoisted(() => ({
   showUndoNotification: vi.fn(),
   setChatMode: vi.fn(),
   setSelectedKnowledge: vi.fn(),
-  setRagMediaIds: vi.fn()
+  setRagMediaIds: vi.fn(),
+  // Row-destined ResultsList props captured on every render by the ResultsList
+  // mock below, so tests can assert referential stability (WP-11 row memo).
+  resultsListProps: [] as Array<Record<string, unknown>>
 }))
 
 vi.mock('react-i18next', () => ({
@@ -264,21 +267,35 @@ vi.mock('@/components/Media/MediaSectionNavigator', () => ({
 }))
 
 vi.mock('@/components/Media/ResultsList', () => ({
-  ResultsList: ({ results, selectedId, onSelect }: any) => (
-    <div data-testid="results-list">
-      {results.map((result: any) => (
-        <button
-          key={String(result.id)}
-          type="button"
-          data-testid={`result-${String(result.id)}`}
-          aria-pressed={selectedId === result.id}
-          onClick={() => onSelect(result.id)}
-        >
-          {result.title}
-        </button>
-      ))}
-    </div>
-  )
+  ResultsList: (props: any) => {
+    mocks.resultsListProps.push({
+      results: props.results,
+      searchQuery: props.searchQuery,
+      selectionMode: props.selectionMode,
+      selectedIds: props.selectedIds,
+      onSelect: props.onSelect,
+      onToggleSelected: props.onToggleSelected,
+      favorites: props.favorites,
+      onToggleFavorite: props.onToggleFavorite,
+      readingProgress: props.readingProgress
+    })
+    const { results, selectedId, onSelect } = props
+    return (
+      <div data-testid="results-list">
+        {results.map((result: any) => (
+          <button
+            key={String(result.id)}
+            type="button"
+            data-testid={`result-${String(result.id)}`}
+            aria-pressed={selectedId === result.id}
+            onClick={() => onSelect(result.id)}
+          >
+            {result.title}
+          </button>
+        ))}
+      </div>
+    )
+  }
 }))
 
 vi.mock('@/components/Media/ContentViewer', () => ({
@@ -447,6 +464,48 @@ describe('ViewMediaPage stage 12 performance guardrails', () => {
       vi.advanceTimersByTime(1)
     })
     expect(mocks.refetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps ResultsList row props referentially stable across parent re-renders (WP-11)', async () => {
+    renderMediaPage('/media')
+
+    // Let the mounted page settle (initial refetch resolves, rows render)
+    // before snapshotting, so async hydration doesn't race the comparison.
+    await waitFor(() => {
+      expect(mocks.refetch.mock.calls.length).toBeGreaterThan(0)
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('result-1')).toBeInTheDocument()
+    })
+    await act(async () => {})
+
+    const latestProps = () =>
+      mocks.resultsListProps[mocks.resultsListProps.length - 1]
+    const before = latestProps()
+    expect(before).toBeTruthy()
+
+    // Search typing is the hot parent re-render path (every keystroke).
+    fireEvent.change(screen.getByTestId('search-bar'), {
+      target: { value: 'stable' }
+    })
+
+    await waitFor(() => {
+      expect(latestProps()?.searchQuery).toBe('stable')
+    })
+    const after = latestProps()
+
+    // The parent really re-rendered (query text changed), yet every
+    // row-destined prop kept its identity, so the memoized ResultRow
+    // children are skipped instead of re-rendered.
+    expect(before.searchQuery).not.toBe('stable')
+    expect(after.results).toBe(before.results)
+    expect(after.onSelect).toBe(before.onSelect)
+    expect(after.selectedIds).toBe(before.selectedIds)
+    expect(after.onToggleSelected).toBe(before.onToggleSelected)
+    expect(after.selectionMode).toBe(before.selectionMode)
+    expect(after.favorites).toBe(before.favorites)
+    expect(after.onToggleFavorite).toBe(before.onToggleFavorite)
+    expect(after.readingProgress).toBe(before.readingProgress)
   })
 
   it('keeps explicit pagination changes instead of snapping back to page 1', async () => {
