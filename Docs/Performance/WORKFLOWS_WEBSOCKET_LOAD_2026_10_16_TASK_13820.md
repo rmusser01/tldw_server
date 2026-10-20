@@ -100,7 +100,9 @@ A subsequent integration rebase onto dev `7c94a2efb1edc938070abcaa868d59e319a951
 
 Prior integration base: dev `29fda0d860c7a0d76dd3d9ea0561a32ac8e48148`. Independent review confirms all nine PR patches and the four measured source hashes remain unchanged. Upstream provider/tool usage, Claims, admin, watchlist and TTS changes do not execute in this lifespan-disabled workflow workload. The measurements remain historical evidence for the unchanged path; they are not a new timing run on this integration base.
 
-Latest integration base: dev `b5b572c01dd6dfea231b0928d6c9d20f64b181dc`. All ten PR patches and four measured source hashes remain unchanged. Independent review confirms upstream resource-governance middleware bypasses WebSockets; audio/media concurrency leases, audio workers and frontend transport are outside this workload. The database parity addition is documentation only. Historical timings remain evidence for the unchanged measured path, without a new timing run or a capacity claim on this integration base.
+Prior integration base: dev `b5b572c01dd6dfea231b0928d6c9d20f64b181dc`. All ten PR patches and four measured source hashes remain unchanged. Independent review confirms upstream resource-governance middleware bypasses WebSockets; audio/media concurrency leases, audio workers and frontend transport are outside this workload. The database parity addition is documentation only. Historical timings remain evidence for the unchanged measured path, without a new timing run or a capacity claim on this integration base.
+
+Latest integration base: dev `a6719bf24f5f124f931c48a2250e103365514c48`. All fourteen PR patches and all four measured source hashes remain unchanged. Independent review confirms upstream workflow execution/retry handling and adapter quota errors are outside this database-row replay workload; chat, TTS and audio workers are also outside the lifespan-disabled measured path. Subsequent CI repairs affect tests and the pytest version bound only. These remain historical timings, without a new timing run or a capacity claim on this integration base.
 
 ## Limits and rollback
 
