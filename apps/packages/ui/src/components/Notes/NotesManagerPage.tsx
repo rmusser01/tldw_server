@@ -2675,6 +2675,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         searchTipsContent={searchTipsContent}
         query={list.query}
         isFetching={list.isFetching}
+        isPlaceholderData={list.isPlaceholderData}
         hasListError={list.isError}
         listErrorMessage={list.listErrorMessage}
         isStaleResults={list.isError && Array.isArray(list.data) && list.data.length > 0}

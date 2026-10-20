@@ -165,13 +165,21 @@ const listRows = [
   { id: "n2", title: "Other note", content: "Other body", version: 1, last_modified: "2026-09-30T10:00:00.000Z", metadata: { keywords: [] } }
 ]
 
+const trashedRows = [
+  { id: "t1", title: "Trashed note", content: "Trashed body", version: 3, deleted: true, last_modified: "2026-09-29T10:00:00.000Z", metadata: { keywords: [] } }
+]
+
 describe("NotesManagerPage NS-04 save keeps the list in place", { timeout: 60_000 }, () => {
   let holdListRefetch: boolean
+  let holdTrash: boolean
+  let holdSearch: boolean
   let releaseList: Array<() => void>
 
   beforeEach(() => {
     vi.clearAllMocks()
     holdListRefetch = false
+    holdTrash = false
+    holdSearch = false
     releaseList = []
     mockConfirmDanger.mockResolvedValue(true)
     mockGetSetting.mockResolvedValue(null)
@@ -179,6 +187,18 @@ describe("NotesManagerPage NS-04 save keeps the list in place", { timeout: 60_00
     mockBgRequest.mockImplementation(async (request: { path?: string; method?: string }) => {
       const path = String(request.path || "")
       const method = String(request.method || "GET").toUpperCase()
+      const held = (payload: unknown, hold: boolean) =>
+        hold
+          ? new Promise((resolve) => {
+              releaseList.push(() => resolve(payload))
+            })
+          : payload
+      if (path.startsWith("/api/v1/notes/trash?")) {
+        return held({ items: trashedRows, total: trashedRows.length }, holdTrash)
+      }
+      if (path.startsWith("/api/v1/notes/search/")) {
+        return held({ items: [listRows[1]], pagination: { total_items: 1, total_pages: 1 } }, holdSearch)
+      }
       if (path.startsWith("/api/v1/notes/?")) {
         const payload = { items: listRows, pagination: { total_items: listRows.length, total_pages: 1 } }
         if (!holdListRefetch) return payload
@@ -239,6 +259,49 @@ describe("NotesManagerPage NS-04 save keeps the list in place", { timeout: 60_00
     })
     expect(screen.queryByTestId("notes-list-loading")).not.toBeInTheDocument()
     expect(screen.getByTestId("notes-open-button-n2")).toBeInTheDocument()
+  })
+
+  it("does not show active notes as Trash rows while Trash loads", async () => {
+    renderPage()
+    await screen.findByTestId("notes-open-button-n1")
+
+    holdTrash = true
+    fireEvent.click(screen.getByTestId("notes-mode-trash"))
+
+    await waitFor(() => {
+      expect(
+        mockBgRequest.mock.calls.some(([request]) => String(request?.path || "").startsWith("/api/v1/notes/trash?"))
+      ).toBe(true)
+    })
+    expect(screen.getByTestId("notes-list-loading")).toBeInTheDocument()
+    expect(screen.queryByTestId("notes-open-button-n1")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("notes-restore-n1")).not.toBeInTheDocument()
+    expect(screen.getByTestId("notes-header-count")).toHaveTextContent("Loading…")
+
+    releaseList.forEach((release) => release())
+    expect(await screen.findByTestId("notes-restore-t1")).toBeInTheDocument()
+  })
+
+  it("does not show the previous results as matches while a search loads", async () => {
+    renderPage()
+    await screen.findByTestId("notes-open-button-n1")
+
+    holdSearch = true
+    const searchInput = screen.getByRole("textbox", { name: "Search notes" })
+    fireEvent.change(searchInput, { target: { value: "other" } })
+    fireEvent.keyDown(searchInput, { key: "Enter", code: "Enter", keyCode: 13, charCode: 13 })
+
+    await waitFor(() => {
+      expect(
+        mockBgRequest.mock.calls.some(([request]) => String(request?.path || "").startsWith("/api/v1/notes/search/"))
+      ).toBe(true)
+    })
+    expect(screen.getByTestId("notes-list-loading")).toBeInTheDocument()
+    expect(screen.queryByTestId("notes-open-button-n1")).not.toBeInTheDocument()
+
+    releaseList.forEach((release) => release())
+    expect(await screen.findByTestId("notes-open-button-n2")).toBeInTheDocument()
+    expect(screen.queryByTestId("notes-open-button-n1")).not.toBeInTheDocument()
   })
 
   it("asks the list endpoint to skip its duplicate arrays", async () => {

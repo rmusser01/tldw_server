@@ -30,6 +30,29 @@ type PatchSavedNoteOptions = {
 
 const AUTHORITY_KEY_SEGMENT = 'authority'
 
+/**
+ * The kind of rows a notes list query holds: active notes, Trash, or one
+ * collection's notes. Reads the key built in useNotesListManagement:
+ * ['notes', listMode, viewMode, moodboardId, ...].
+ */
+const notesListRowsKind = (queryKey: readonly unknown[]): string => {
+  const [, listMode, viewMode, moodboardId] = queryKey
+  if (listMode === 'trash') return 'trash'
+  if (viewMode === 'moodboard') return `moodboard:${String(moodboardId)}`
+  return 'active'
+}
+
+/**
+ * Whether rows cached for one list query may stand in while another loads
+ * (NS-04). A new page, search or sort of the same list may keep the current
+ * rows on screen; active notes must never stand in for Trash (where they
+ * would show Restore buttons), nor one collection's notes for another's.
+ */
+export const isSameNotesListRowsKind = (
+  previousKey: readonly unknown[],
+  nextKey: readonly unknown[]
+): boolean => notesListRowsKind(previousKey) === notesListRowsKind(nextKey)
+
 const isListForScope = (
   queryKey: readonly unknown[],
   authorityScope: string | null | undefined

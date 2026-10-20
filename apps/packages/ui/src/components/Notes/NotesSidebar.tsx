@@ -106,6 +106,8 @@ export interface NotesSidebarProps {
 
   // Fetching / online
   isFetching: boolean
+  /** The rows belong to the previous page or search while this one loads. */
+  isPlaceholderData?: boolean
   hasListError?: boolean
   listErrorMessage?: string | null
   isStaleResults?: boolean
@@ -242,6 +244,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
 
   // Fetching / online
   isFetching,
+  isPlaceholderData = false,
   hasListError = false,
   listErrorMessage = null,
   isStaleResults = false,
@@ -1160,7 +1163,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       defaultValue: 'Create or select a collection to start.'
                     })}
                   </div>
-                ) : isFetching && visibleNotes.length === 0 ? (
+                ) : isFetching && (visibleNotes.length === 0 || isPlaceholderData) ? (
                   <div className="mb-3 inline-flex items-center gap-2 text-xs text-text-muted">
                     <Spin size="small" />
                     <span>
@@ -1323,6 +1326,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 bulkSelectedIds={bulkSelectedIds}
                 isOnline={isOnline}
                 isFetching={isFetching}
+                isPlaceholderData={isPlaceholderData}
                 hasError={hasListError}
                 errorMessage={listErrorMessage}
                 isStaleResults={isStaleResults}

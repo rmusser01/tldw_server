@@ -34,6 +34,7 @@ import {
   promptModal,
 } from '../notes-manager-utils'
 import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
+import { isSameNotesListRowsKind } from '../notes-list-cache'
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
 type NotesAuthorityScope = string | null | undefined
@@ -448,9 +449,11 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     queryKey: listQueryKey,
     queryFn: fetchNotes,
     placeholderData: (previousData, previousQuery) => {
+      const previousKey = previousQuery?.queryKey ?? []
+      // Trash or another collection must not show the previous list's rows (NS-04).
+      if (!isSameNotesListRowsKind(previousKey, listQueryKey)) return undefined
       if (authorityScope === undefined) return previousData
       if (authorityScope === null) return undefined
-      const previousKey = previousQuery?.queryKey ?? []
       return previousKey.at(-4) === 'authority' &&
         previousKey.at(-3) === authorityScope &&
         previousKey.at(-2) === 'generation' &&

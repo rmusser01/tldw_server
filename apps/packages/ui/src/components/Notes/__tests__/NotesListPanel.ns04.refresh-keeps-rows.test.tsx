@@ -87,4 +87,12 @@ describe("NotesListPanel NS-04 background refresh", () => {
 
     expect(screen.getByTestId("notes-list-loading")).toBeInTheDocument()
   })
+
+  it("hides rows left over from another page or search while the new one loads", () => {
+    renderPanel({ isFetching: true, isPlaceholderData: true })
+
+    expect(screen.getByTestId("notes-list-loading")).toBeInTheDocument()
+    expect(screen.queryByTestId("notes-open-button-n1")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("notes-list-refreshing")).not.toBeInTheDocument()
+  })
 })

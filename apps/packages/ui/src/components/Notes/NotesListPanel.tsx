@@ -95,6 +95,8 @@ type NotesListPanelProps = {
   pinnedNoteIds?: string[]
   isOnline: boolean
   isFetching: boolean
+  /** The rows belong to the previous page or search while this one loads. */
+  isPlaceholderData?: boolean
   hasError?: boolean
   errorMessage?: string | null
   demoEnabled: boolean
@@ -145,6 +147,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   pinnedNoteIds = [],
   isOnline,
   isFetching,
+  isPlaceholderData = false,
   hasError = false,
   errorMessage = null,
   demoEnabled,
@@ -182,9 +185,11 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
   const { t } = useTranslation(['option', 'settings'])
   const isTrashView = listMode === 'trash'
   const hasNotes = Array.isArray(notes) && notes.length > 0
-  // A refresh keeps the rows on screen so the scroll position survives; only
-  // a list with nothing to show yet gets the loading state (NS-04).
-  const isRefreshingRows = isFetching && hasNotes
+  // A refresh of the same list keeps its rows on screen so the scroll position
+  // survives (NS-04). Rows held over from another page or search are not this
+  // list's rows, so they give way to the loading state like an empty list.
+  const isRefreshingRows = isFetching && hasNotes && !isPlaceholderData
+  const isLoadingRows = isFetching && !isRefreshingRows
   const hasListError = hasError
   const bulkSelectedIdSet = React.useMemo(
     () => new Set((bulkSelectedIds || []).map((id) => String(id))),
@@ -489,7 +494,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
           <div className="h-0.5 w-full animate-pulse rounded-full bg-primary/60" />
         </div>
       )}
-      {isFetching && !hasNotes ? (
+      {isLoadingRows ? (
         <div role="status" aria-live="polite" data-testid="notes-list-loading">
           <div className="flex items-center gap-2 pb-2 text-xs text-text-muted">
             <Spin size="small" />
