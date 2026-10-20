@@ -574,13 +574,15 @@ class RedisResourceGovernor(ResourceGovernor):
         return cnt
 
     async def _add_members(self, *, key: str, members: list[str], now: float, window: int) -> None:
+        """Add window members; a failed write (OOM, READONLY) is logged and raised, so the caller applies the fail mode."""
         client = await self._client_get()
         try:
             await client.zadd(key, dict.fromkeys(members, now))
             await client.expire(key, _window_ttl(window))
         except _RG_NONCRITICAL_EXCEPTIONS as exc:
             logger.debug("RG window add/expire failed for key={}", key, exc_info=True)
-            log_redis_failure(self._keys.ns, exc)  # the window lives only in this worker's acceptance tracker
+            log_redis_failure(self._keys.ns, exc)
+            raise
 
     async def _zrem_members(self, *, key: str, members: list[str]) -> None:
         client = await self._client_get()
@@ -1612,6 +1614,7 @@ class RedisResourceGovernor(ResourceGovernor):
         # First, try to atomically add request/token units across scopes; track members for rollback/refund
         added_members: dict[str, dict[tuple[str, str], list[str]]] = {}
         add_failed = False
+        fallback_to_memory = False
         denial_retry_after = 0
         used_lua = False
 
@@ -1725,7 +1728,8 @@ class RedisResourceGovernor(ResourceGovernor):
                         for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
                             members = [f"{handle_id}:{sc}:{ev}:{i}:{uuid.uuid4().hex}" for i in range(units_m)]
-                            await self._add_members(key=key, members=members, now=now, window=window)
+                            with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):  # the check above applied the fail mode
+                                await self._add_members(key=key, members=members, now=now, window=window)
                             with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):
                                 logger.debug(
                                     "RG stub add: policy_id={pid} cat={cat} scope={sc} entity={ev} units={units}",
@@ -1750,7 +1754,6 @@ class RedisResourceGovernor(ResourceGovernor):
                         added_members.setdefault(category, {})
                         for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                             key = self._keys.win(policy_id, category, sc, ev)
-                            _ = await self._purge_and_count(key=key, now=now, window=window)
                             added_for_scope: list[str] = []
                             for i in range(units_m):
                                 try:
@@ -1762,9 +1765,12 @@ class RedisResourceGovernor(ResourceGovernor):
                                     await self._add_members(key=key, members=[member], now=now, window=window)
                                     added_for_scope.append(member)
                                 except _RG_NONCRITICAL_EXCEPTIONS:
+                                    # Redis cannot count or take the write (OOM, READONLY): the fail mode, as in check().
                                     if cat_fail == "fail_open":
                                         continue
                                     add_failed = True
+                                    fallback_to_memory = cat_fail == "fallback_memory"
+                                    denial_retry_after = max(denial_retry_after, int(window))
                                     break
                             added_members[category][(sc, ev)] = added_for_scope
                             if add_failed:
@@ -1774,6 +1780,16 @@ class RedisResourceGovernor(ResourceGovernor):
 
         if add_failed:
             # Rollback any added members
+            for category, scopes in added_members.items():
+                for (sc, ev), mems in scopes.items():
+                    key = self._keys.win(policy_id, category, sc, ev)
+                    await self._zrem_members(key=key, members=mems)
+            if fallback_to_memory and self._stub_delegate is not None:
+                # Redis rejected the window write: this worker's memory governor counts the request.
+                dec_f, handle_f = await self._stub_delegate.reserve(daily_req, op_id=op_id)
+                if handle_f:
+                    self._fallback_handles.add(handle_f)
+                return dec_f, handle_f
             try:
                 # Establish deny-until/backoff using the computed retry_after for stability
                 now_df = self._time()
@@ -1793,10 +1809,6 @@ class RedisResourceGovernor(ResourceGovernor):
                     self._stub_backoff_until[(self._keys.ns, policy_id_df, req.entity, "requests", rpm_df, win_df)] = now_df + float(ra_df)
             except _RG_NONCRITICAL_EXCEPTIONS:
                 pass
-            for category, scopes in added_members.items():
-                for (sc, ev), mems in scopes.items():
-                    key = self._keys.win(policy_id, category, sc, ev)
-                    await self._zrem_members(key=key, members=mems)
             # Build a denial decision reflecting max retry_after across attempted keys
             try:
                 base_cats = dict((dec.details or {}).get("categories") or {})

@@ -145,3 +145,36 @@ async def test_redis_rejecting_writes_is_logged(real_redis, rg_unique_ns, monkey
         f"Resource Governor Redis backend {rg_unique_ns!r} is failing ({type(error).__name__}); "
         "this worker enforces its limits on its own until it recovers"
     ]
+
+
+# 7 requests against a limit of 5 while Redis rejects writes, as while it is unreachable: what each fail mode
+# admits, and the shortest Retry-After on a denial.
+_WHILE_REJECTING_WRITES = {
+    ("fail_open", "requests"): ([True] * 5 + [False] * 2, 1),  # each worker's acceptance window holds requests
+    ("fail_open", "tokens"): ([True] * 7, 1),  # admitted: tokens has no per-worker window
+    ("fallback_memory", "requests"): ([True] * 5 + [False] * 2, 1),  # the worker's memory governor counts
+    ("fallback_memory", "tokens"): ([True] * 5 + [False] * 2, 1),
+    ("fail_closed", "requests"): ([False] * 7, 59),  # denied for the window, not a retry storm
+    ("fail_closed", "tokens"): ([False] * 7, 59),
+}
+
+
+@pytest.mark.parametrize("fault", [_READ_ONLY, _OUT_OF_MEMORY], ids=["readonly", "oom"])
+@pytest.mark.parametrize("fail_mode", ["fail_open", "fallback_memory", "fail_closed"])
+@pytest.mark.parametrize(("category", "limits"), [("requests", {"rpm": 5}), ("tokens", {"per_min": 5})], ids=["requests", "tokens"])
+async def test_redis_rejecting_writes_follows_the_fail_mode(real_redis, rg_unique_ns, monkeypatch, category, limits, fail_mode, fault) -> None:
+    """A Redis that answers reads but rejects writes gets the fail mode, as an unreachable one does; reserve never raises (TASK-13859)."""
+    gov = RedisResourceGovernor(policy_loader=_Policy(fail_mode, **{category: limits}), ns=rg_unique_ns)
+    if not await gov._is_real_redis():
+        pytest.skip("Redis client is not real; using in-memory stub")
+    error, commands = fault
+    client = await gov._client_get()
+    for command in commands:
+        monkeypatch.setattr(client, command, _rejecting(error))
+    req = RGRequest(entity="user:42", categories={category: {"units": 1}}, tags={"policy_id": "write.test"})
+
+    decisions = [(await gov.reserve(req))[0] for _ in range(7)]
+
+    admitted, min_retry_after = _WHILE_REJECTING_WRITES[(fail_mode, category)]
+    assert [d.allowed for d in decisions] == admitted
+    assert all(d.retry_after >= min_retry_after for d in decisions if not d.allowed)
