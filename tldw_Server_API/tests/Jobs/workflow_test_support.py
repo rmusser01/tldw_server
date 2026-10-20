@@ -1,5 +1,7 @@
 """Shared, explicitly installed workflow schema cases; no alternate PG lifecycle."""
 
+import hashlib
+import json
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
@@ -17,6 +19,7 @@ from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
     WorkflowLease,
     WorkflowOutcome,
     WorkflowPolicy,
+    WorkflowProgress,
     WorkflowScope,
 )
 from tldw_Server_API.app.core.Jobs.workflow_capability import (
@@ -38,6 +41,8 @@ class WorkflowCase:
     installer: Any = None
     root: Any = None
     guard_installed: bool = False
+    pending_lease: Any = None
+    current_lease: Any = None
 
     def effect(self, key, action, reason=None):
         return WorkflowEffect(
@@ -109,10 +114,21 @@ class WorkflowCase:
         return self.job_row()["retry_count"]
 
     def receipt_count(self):
+        """Count caller proofs; automatic expiry deferrals are maintenance proofs."""
+        epochs = self.support_row()["current_epoch"]
+        maintenance = {
+            hashlib.sha256(
+                json.dumps(["jobs_workflow_expiry_v1", self.root.job_uuid, epoch], separators=(",", ":")).encode()
+            ).hexdigest()
+            for epoch in range(1, epochs + 1)
+        }
         with self.connection() as conn:
-            return self.execute(
-                conn, "SELECT COUNT(*) FROM job_workflow_effect_receipts WHERE job_uuid=?", (self.root.job_uuid,)
-            ).fetchone()[0]
+            return sum(
+                row[0] not in maintenance
+                for row in self.execute(
+                    conn, "SELECT effect_key FROM job_workflow_effect_receipts WHERE job_uuid=?", (self.root.job_uuid,)
+                )
+            )
 
     def effect_receipt(self, root, key):
         with self.connection() as conn:
@@ -126,7 +142,11 @@ class WorkflowCase:
 
     def snapshot(self):
         with self.connection() as conn:
-            events = conn.execute("SELECT COUNT(*) FROM job_events").fetchone()[0]
+            # Real acquisition adds its own event on PG; historical effect tests
+            # intentionally observe only admission/lifecycle events for Jobs rows.
+            events = conn.execute(
+                "SELECT COUNT(*) FROM job_events WHERE job_id IS NOT NULL AND event_type<>'job.acquired'"
+            ).fetchone()[0]
             domain = (
                 conn.execute("SELECT applications FROM workflow_effect_domain").fetchone()[0]
                 if self.guard_installed
@@ -185,31 +205,77 @@ class WorkflowCase:
             statement.replace("?", "%s") if self.manager.backend == "postgres" else statement, parameters
         )
 
-    def acquire(self):
-        """Seed an exact live delivery; acquisition policy belongs to Task4."""
-        lease = WorkflowLease("worker-a", str(uuid4()))
-        with self.connection() as conn:
+    def acquire(self, *, replace_current=True):
+        """Consume a recovery acquisition once, otherwise use public Jobs acquisition."""
+        if self.pending_lease is not None:
+            self.current_lease, self.pending_lease = self.pending_lease, None
+            return self.current_lease
+        if replace_current and self.current_lease is not None:
             row = self.job_row()
-            if self.manager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")) and row["status"] == "queued":
-                column = "scheduled_count" if row["available_at"] is not None else "ready_count"
-                # Closed column vocabulary in this synthetic Task2 delivery helper.
-                statement = {
-                    "scheduled_count": "UPDATE job_counters SET scheduled_count=scheduled_count-1,processing_count=processing_count+1 WHERE domain=? AND queue=? AND job_type=?",
-                    "ready_count": "UPDATE job_counters SET ready_count=ready_count-1,processing_count=processing_count+1 WHERE domain=? AND queue=? AND job_type=?",
-                }[column]
-                self.execute(conn, statement, (row["domain"], row["queue"], row["job_type"]))
-            deadline = (
-                "clock_timestamp()+interval '120 seconds'"
-                if self.manager.backend == "postgres"
-                else "STRFTIME('%Y-%m-%d %H:%M:%f','now','+120 seconds')"
-            )
-            self.execute(
-                conn,
-                "UPDATE jobs SET status='processing',worker_id=?,lease_id=?,leased_until=" + deadline + " WHERE uuid=?",
-                (lease.worker_id, lease.lease_id, self.root.job_uuid),
-            )
+            if row["status"] == "processing" and row["lease_id"] == self.current_lease.lease_id:
+                # Older fencing tests request a replacement delivery directly.
+                # Expire it explicitly, then let the real public path reclaim it.
+                self.expire_current_lease()
+        row = self.manager.acquire_next_job(
+            domain="embeddings",
+            queue="workflow",
+            job_type="embedding_workflow",
+            owner_user_id=self.root.owner_user_id,
+            lease_seconds=120,
+            worker_id="worker-a",
+        )
+        self.current_lease = WorkflowLease(row["worker_id"], row["lease_id"]) if row else None
+        return self.current_lease
+
+    def expire_current_lease(self, fractional=False):
+        with self.connection() as conn:
+            if self.manager.backend == "postgres":
+                deadline = conn.execute(
+                    "SELECT clock_timestamp()-(%s*interval '1 second')", (0.125 if fractional else 2,)
+                ).fetchone()[0]
+            else:
+                deadline = conn.execute(
+                    "SELECT STRFTIME('%Y-%m-%d %H:%M:%f','now',?)", ("-0.125 seconds" if fractional else "-2 seconds",)
+                ).fetchone()[0]
+            self.execute(conn, "UPDATE jobs SET leased_until=? WHERE uuid=?", (deadline, self.root.job_uuid))
             conn.commit()
-        return lease
+
+    def recover(self, via):
+        if via == "acquire":
+            self.pending_lease = self.acquire(replace_current=False)
+            return self.pending_lease
+        assert via == "sweep"
+        return self.manager.integrity_sweep(
+            fix=True, domain="embeddings", queue="workflow", job_type="embedding_workflow"
+        )
+
+    def support_row(self):
+        with self.connection() as conn:
+            cursor = self.execute(conn, "SELECT * FROM job_workflow_roots WHERE job_uuid=?", (self.root.job_uuid,))
+            return dict(zip([column[0] for column in cursor.description], cursor.fetchone()))
+
+    def no_progress_count(self):
+        return self.support_row()["no_progress_count"]
+
+    def failure_reason(self):
+        return self.job_row()["error_code"]
+
+    def restart(self):
+        from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+        self.manager = JobManager(
+            db_path=self.manager.db_path, db_url=self.manager.db_url, backend=self.manager.backend
+        )
+        self.capability = self.manager.workflow_capability(self.capability.policy)
+        self.pending_lease = self.current_lease = None
+
+    def close_empty_episode(self):
+        return self.apply(self.effect(uuid4().hex * 2, WorkflowAction.CONTINUE), self.acquire())
+
+    def progress(self, proof_key, kind, facts_fingerprint):
+        with self.capability.transaction(self.root.owner_user_id) as tx:
+            fence = tx.lock_live_root(self.root, self.current_lease)
+            return tx.record_progress(fence, WorkflowProgress(proof_key, kind, facts_fingerprint))
 
     def job_count(self):
         with self.connection() as conn:
@@ -273,8 +339,12 @@ class WorkflowCase:
             return (datetime.fromisoformat(value) if isinstance(value, str) else value).replace(tzinfo=timezone.utc)
 
     def expire(self, conn):
-        now = "clock_timestamp()" if self.manager.backend == "postgres" else "STRFTIME('%Y-%m-%d %H:%M:%f','now')"
-        self.execute(conn, "UPDATE jobs SET leased_until=" + now + " WHERE uuid=?", (self.root.job_uuid,))
+        statement = (
+            "UPDATE jobs SET leased_until=clock_timestamp() WHERE uuid=?"
+            if self.manager.backend == "postgres"
+            else "UPDATE jobs SET leased_until=STRFTIME('%Y-%m-%d %H:%M:%f','now') WHERE uuid=?"
+        )
+        self.execute(conn, statement, (self.root.job_uuid,))
 
     def archive(self, *, compressed=False, keep_active=False):
         import base64

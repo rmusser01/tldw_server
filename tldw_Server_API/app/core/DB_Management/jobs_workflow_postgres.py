@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Mapping
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
@@ -14,6 +16,7 @@ from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
     WorkflowAdmissionCommand,
     WorkflowAdmissionInputs,
     WorkflowEffect,
+    WorkflowEffectResult,
     WorkflowFenceError,
     WorkflowLease,
     WorkflowOutcome,
@@ -217,6 +220,7 @@ def transition_effect(
     *,
     counters_enabled: bool,
     outbox_enabled: bool,
+    expired: bool = False,
 ) -> dict:
     """Apply on the caller's locked connection without a committing wrapper."""
     from psycopg.rows import dict_row
@@ -228,15 +232,22 @@ def transition_effect(
 
     from .jobs_workflow_store import effect_event_type, effect_transition_parameters
 
+    expiry_guard = "leased_until<=clock_timestamp()" if expired else "leased_until>clock_timestamp()"
+    parameters = effect_transition_parameters(root, lease, effect, receipt, row)
+    if expired and receipt.resulting_status == "queued":
+        parameters = parameters[:8] + (None,) + parameters[9:]
     changed = connection.execute(
-        "UPDATE jobs SET status=%s,result=%s::jsonb,retry_count=%s,failure_streak_code=%s,failure_streak_count=%s,error_code=%s,error_message=%s,last_error=%s,available_at=%s,quarantined_at=%s,completed_at=%s,cancelled_at=%s,completion_token=%s,acquired_at=%s,started_at=%s,leased_until=NULL,worker_id=NULL,lease_id=NULL,updated_at=clock_timestamp() WHERE uuid=%s AND owner_user_id=%s AND status='processing' AND worker_id=%s AND lease_id=%s AND (completion_token IS NULL OR completion_token=%s) AND leased_until>clock_timestamp()",
-        effect_transition_parameters(root, lease, effect, receipt, row),
+        "UPDATE jobs SET status=%s,result=%s::jsonb,retry_count=%s,failure_streak_code=%s,failure_streak_count=%s,error_code=%s,error_message=%s,last_error=%s,available_at=%s,quarantined_at=%s,completed_at=%s,cancelled_at=%s,completion_token=%s,acquired_at=%s,started_at=%s,leased_until=NULL,worker_id=NULL,lease_id=NULL,updated_at=clock_timestamp() WHERE uuid=%s AND owner_user_id=%s AND status='processing' AND worker_id=%s AND lease_id=%s AND (completion_token IS NULL OR completion_token=%s) AND "
+        + expiry_guard,  # nosec B608
+        parameters,
     )
     if changed.rowcount != 1:
         raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
     with connection.cursor(row_factory=dict_row) as cursor:
         if counters_enabled:
-            _prepared_counter_transition(cursor, row=row, new_status=receipt.resulting_status)
+            _prepared_counter_transition(
+                cursor, row=row, new_status=receipt.resulting_status, queued_scheduled=not expired
+            )
         updated = jobs_by_uuid(connection, root.job_uuid)[0]
         if outbox_enabled:
             _insert_prepared_event(
@@ -247,6 +258,95 @@ def transition_effect(
                 reason_code=effect.reason_code,
             )
     return updated
+
+
+def enrollment_projection(connection: Any) -> str:
+    """Project one bounded marker without assuming explicit schema installation."""
+    return (
+        "workflow_capability_version"
+        if "workflow_capability_version" in _columns(connection, "jobs")
+        else "NULL AS workflow_capability_version"
+    )
+
+
+@contextmanager
+def _maintenance_owner_scope(connection: Any, owner: str):
+    """Explicit non-bypass owner scope, restored on success and by rollback on SQL error."""
+    from psycopg import sql
+    from psycopg.pq import TransactionStatus
+
+    from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import _text
+
+    _text(owner, 512)
+    old = connection.execute(
+        "SELECT current_setting('role'),current_setting('app.owner_user_id',true),current_setting('app.is_admin',true),current_setting('app.domain_allowlist',true),current_setting('row_security')"
+    ).fetchone()
+    try:
+        role = os.getenv("JOBS_PG_RLS_ROLE", "").strip()
+        if role:
+            connection.execute(sql.SQL("SET LOCAL ROLE {}").format(sql.Identifier(role)))
+        flags = connection.execute("SELECT rolsuper,rolbypassrls FROM pg_roles WHERE rolname=current_user").fetchone()
+        if flags is None or any(flags):
+            raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+        connection.execute(
+            "SELECT set_config('app.owner_user_id',%s,true),set_config('app.is_admin','false',true),set_config('app.domain_allowlist','',true),set_config('row_security','on',true)",
+            (owner,),
+        )
+        actual = connection.execute(
+            "SELECT current_setting('app.owner_user_id'),current_setting('app.is_admin'),current_setting('app.domain_allowlist'),current_setting('row_security')"
+        ).fetchone()
+        if actual != (owner, "false", "", "on"):
+            raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+        yield
+    finally:
+        if connection.info.transaction_status is TransactionStatus.INTRANS:
+            connection.execute(
+                "SELECT set_config('app.owner_user_id',%s,true),set_config('app.is_admin',%s,true),set_config('app.domain_allowlist',%s,true),set_config('row_security',%s,true),set_config('role',%s,true)",
+                (*(value or "" for value in old[1:4]), old[4], old[0]),
+            )
+
+
+def lease_is_expired(connection: Any, job_uuid: str) -> bool:
+    """Use a non-frozen database clock and the exact concrete old deadline."""
+    return bool(
+        connection.execute(
+            "SELECT 1 FROM jobs WHERE uuid=%s AND leased_until<=clock_timestamp()", (job_uuid,)
+        ).fetchone()
+    )
+
+
+def record_workflow_acquisition_in_transaction(
+    connection: Any, *, backend: str, acquired: Mapping[str, object]
+) -> None:
+    """Publish epoch/digest atomically under explicit runtime authority."""
+    if acquired.get("workflow_capability_version") is None:
+        return
+    from psycopg import Error
+
+    from .jobs_workflow_store import _record_workflow_acquisition
+
+    try:
+        with _maintenance_owner_scope(connection, acquired.get("owner_user_id")):
+            _record_workflow_acquisition(connection, backend=backend, acquired=acquired)
+    except (Error, ValueError, TypeError, KeyError):
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE) from None
+
+
+def recover_workflow_expiry_in_transaction(
+    connection: Any, *, backend: str, locked_root: Mapping[str, object]
+) -> WorkflowEffectResult:
+    """Lock ownership is external; support access never uses an admin bypass."""
+    if locked_root.get("workflow_capability_version") is None:
+        return WorkflowEffectResult(WorkflowOutcome.MISSING)
+    from psycopg import Error
+
+    from .jobs_workflow_store import _recover_workflow_expiry
+
+    try:
+        with _maintenance_owner_scope(connection, locked_root.get("owner_user_id")):
+            return _recover_workflow_expiry(connection, backend=backend, locked_root=locked_root)
+    except (Error, ValueError, TypeError, KeyError):
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE) from None
 
 
 def _normalized(definition: str) -> exp.Expression:

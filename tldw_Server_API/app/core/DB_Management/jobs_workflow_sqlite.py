@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -13,6 +14,7 @@ from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
     WorkflowAdmissionCommand,
     WorkflowAdmissionInputs,
     WorkflowEffect,
+    WorkflowEffectResult,
     WorkflowFenceError,
     WorkflowLease,
     WorkflowOutcome,
@@ -38,6 +40,7 @@ def begin_runtime(connection: sqlite3.Connection, owner_user_id: str) -> None:
 
 def rows(connection: sqlite3.Connection, statement: str, parameters: tuple = ()) -> list[dict]:
     """Execute an internal, parameterized workflow statement."""
+    parameters = tuple(value.isoformat() if isinstance(value, datetime) else value for value in parameters)
     return [dict(row) for row in connection.execute(statement, parameters).fetchall()]
 
 
@@ -172,6 +175,7 @@ def transition_effect(
     *,
     counters_enabled: bool,
     outbox_enabled: bool,
+    expired: bool = False,
 ) -> dict:
     """Native UUID/lease-fenced mutation and existing counter/event semantics."""
     from tldw_Server_API.app.core.Jobs.operations.sqlite.lifecycle import (
@@ -187,14 +191,22 @@ def transition_effect(
         value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f") if isinstance(value, datetime) else value
         for value in effect_transition_parameters(root, lease, effect, receipt, row)
     )
+    if expired and receipt.resulting_status == "queued":
+        parameters = parameters[:8] + (None,) + parameters[9:]
+    expiry_guard = (
+        "JULIANDAY(leased_until)<=JULIANDAY('now')" if expired else "JULIANDAY(leased_until)>JULIANDAY('now')"
+    )
     changed = connection.execute(
-        "UPDATE jobs SET status=?,result=?,retry_count=?,failure_streak_code=?,failure_streak_count=?,error_code=?,error_message=?,last_error=?,available_at=?,quarantined_at=?,completed_at=?,cancelled_at=?,completion_token=?,acquired_at=?,started_at=?,leased_until=NULL,worker_id=NULL,lease_id=NULL,updated_at=STRFTIME('%Y-%m-%d %H:%M:%f','now') WHERE uuid=? AND owner_user_id=? AND status='processing' AND worker_id=? AND lease_id=? AND (completion_token IS NULL OR completion_token=?) AND JULIANDAY(leased_until)>JULIANDAY('now')",
+        "UPDATE jobs SET status=?,result=?,retry_count=?,failure_streak_code=?,failure_streak_count=?,error_code=?,error_message=?,last_error=?,available_at=?,quarantined_at=?,completed_at=?,cancelled_at=?,completion_token=?,acquired_at=?,started_at=?,leased_until=NULL,worker_id=NULL,lease_id=NULL,updated_at=STRFTIME('%Y-%m-%d %H:%M:%f','now') WHERE uuid=? AND owner_user_id=? AND status='processing' AND worker_id=? AND lease_id=? AND (completion_token IS NULL OR completion_token=?) AND "
+        + expiry_guard,  # nosec B608
         parameters,
     )
     if changed.rowcount != 1:
         raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
     if counters_enabled:
-        _prepared_counter_transition(connection, row=row, new_status=receipt.resulting_status)
+        _prepared_counter_transition(
+            connection, row=row, new_status=receipt.resulting_status, queued_scheduled=not expired
+        )
     updated = jobs_by_uuid(connection, root.job_uuid)[0]
     if outbox_enabled:
         _insert_prepared_event(
@@ -205,6 +217,53 @@ def transition_effect(
             reason_code=effect.reason_code,
         )
     return updated
+
+
+def enrollment_projection(connection: sqlite3.Connection) -> str:
+    """Read Jobs columns only, never support or page payloads for legacy roots."""
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(jobs)")}
+    return (
+        "workflow_capability_version"
+        if "workflow_capability_version" in columns
+        else "NULL AS workflow_capability_version"
+    )
+
+
+def lease_is_expired(connection: sqlite3.Connection, job_uuid: str) -> bool:
+    """Only a concrete strict fractional deadline grants maintenance authority."""
+    return bool(
+        connection.execute(
+            "SELECT 1 FROM jobs WHERE uuid=? AND JULIANDAY(leased_until)<=JULIANDAY('now')", (job_uuid,)
+        ).fetchone()
+    )
+
+
+def record_workflow_acquisition_in_transaction(
+    connection: sqlite3.Connection, *, backend: str, acquired: Mapping[str, object]
+) -> None:
+    """Record enrollment within the acquisition owner's write transaction."""
+    if acquired.get("workflow_capability_version") is None:
+        return
+    from .jobs_workflow_store import _record_workflow_acquisition
+
+    try:
+        _record_workflow_acquisition(connection, backend=backend, acquired=acquired)
+    except (sqlite3.Error, ValueError, TypeError, KeyError):
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE) from None
+
+
+def recover_workflow_expiry_in_transaction(
+    connection: sqlite3.Connection, *, backend: str, locked_root: Mapping[str, object]
+) -> WorkflowEffectResult:
+    """Close the exact old episode without owning any transaction boundary."""
+    if locked_root.get("workflow_capability_version") is None:
+        return WorkflowEffectResult(WorkflowOutcome.MISSING)
+    from .jobs_workflow_store import _recover_workflow_expiry
+
+    try:
+        return _recover_workflow_expiry(connection, backend=backend, locked_root=locked_root)
+    except (sqlite3.Error, ValueError, TypeError, KeyError):
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE) from None
 
 
 def _triggers() -> dict[str, str]:

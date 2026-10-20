@@ -510,6 +510,17 @@ def acquire_job(
             )
             if acquired is None:
                 return LifecycleResult.no_transition(NoTransitionReason.NO_ELIGIBLE_JOB)
+            if acquired.get("workflow_capability_version") == 1:
+                cur.execute(
+                    "UPDATE jobs SET leased_until=clock_timestamp()+%s*interval '1 second' WHERE uuid=%s RETURNING leased_until",
+                    (command.lease_seconds, acquired["uuid"]),
+                )
+                acquired["leased_until"] = cur.fetchone()["leased_until"]
+            from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
+                record_workflow_acquisition_in_transaction,
+            )
+
+            record_workflow_acquisition_in_transaction(conn, backend="postgres", acquired=acquired)
             if counters_enabled:
                 _bump_acquired_counters_best_effort(cur, acquired=acquired)
             return LifecycleResult.applied(row=acquired)
@@ -597,14 +608,15 @@ def _prepared_counter_transition(
     *,
     row: dict[str, Any],
     new_status: str,
+    queued_scheduled: bool = True,
 ) -> None:
     old_status = str(row.get("status") or "")
     old_scheduled = old_status == "queued" and row.get("available_at") is not None
     ready_delta = -int(old_status == "queued" and not old_scheduled)
     scheduled_delta = -int(old_scheduled)
     if new_status == "queued":
-        ready_delta = 0
-        scheduled_delta += 1
+        ready_delta = 0 if queued_scheduled else 1 - int(old_status == "queued" and not old_scheduled)
+        scheduled_delta += int(queued_scheduled)
     processing_delta = -int(old_status == "processing")
     quarantined_delta = int(new_status == "quarantined") - int(old_status == "quarantined")
     apply_postgres_job_counter_transition(

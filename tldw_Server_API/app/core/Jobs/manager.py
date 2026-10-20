@@ -6096,10 +6096,22 @@ class JobManager:
                         where.append(f"{column} = %s")
                         params.append(value)
                 with conn, self._pg_cursor(conn) as cur:
+                    from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
+                        effect_event_type,
+                        recover_workflow_expiry_in_transaction,
+                        workflow_enrollment_projection,
+                    )
+
+                    enrollment = workflow_enrollment_projection(conn, backend=self.backend)
+                    if enrollment == "workflow_capability_version":
+                        where[1] = (
+                            "(leased_until IS NULL OR leased_until <= CASE WHEN workflow_capability_version=1 THEN clock_timestamp() ELSE NOW() END)"
+                        )
                     counter_deltas: dict[tuple[str, str, str], tuple[int, int]] = {}
                     cur.execute(
                         (
                             "SELECT id, uuid, domain, queue, job_type, owner_user_id, request_id, trace_id, "
+                            f"{enrollment}, "  # nosec B608
                             "COALESCE(retry_count, 0) AS effective_retry_count, "
                             "COALESCE(max_retries, %s) AS effective_max_retries, "
                             "COALESCE(expired_lease_policy, 'consume_retry') AS effective_expired_lease_policy "
@@ -6112,11 +6124,18 @@ class JobManager:
                     rows = cur.fetchall() or []
                     for raw_row in rows:
                         row = dict(raw_row)
+                        if row.get("workflow_capability_version") is not None:
+                            result = recover_workflow_expiry_in_transaction(conn, backend=self.backend, locked_root=row)
+                            if result.receipt is not None:
+                                attrs = {"origin": "recovery"}
+                                if result.receipt.resulting_status == "failed":
+                                    attrs["error_code"] = "no_progress_exhausted"
+                                recovered.append((effect_event_type(result.receipt), row, attrs))
+                            continue
                         retry_count = int(row["effective_retry_count"])
                         max_retries = int(row["effective_max_retries"])
                         no_attempt = (
-                            row["effective_expired_lease_policy"]
-                            == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
+                            row["effective_expired_lease_policy"] == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
                         )
                         requeue = no_attempt or retry_count < max_retries
                         if no_attempt:
@@ -6247,6 +6266,18 @@ class JobManager:
                         where.append(f"{column} = ?")
                         params.append(value)
                 scoped_where = " AND ".join(where)
+                from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
+                    effect_event_type,
+                    recover_workflow_expiry_in_transaction,
+                    workflow_enrollment_projection,
+                )
+
+                enrollment = workflow_enrollment_projection(conn, backend=self.backend)
+                if enrollment == "workflow_capability_version":
+                    where[1] = (
+                        "(leased_until IS NULL OR (workflow_capability_version=1 AND JULIANDAY(leased_until)<=JULIANDAY('now')) OR (workflow_capability_version IS NULL AND leased_until<=STRFTIME('%Y-%m-%d %H:%M:%f','now')))"
+                    )
+                    scoped_where = " AND ".join(where)
                 # Healthy acquisitions pay only a scoped read; take the write
                 # lock only when an expired row may need recovery.
                 precheck = conn.execute(
@@ -6260,6 +6291,7 @@ class JobManager:
                     rows = conn.execute(
                         (
                             "SELECT id, uuid, domain, queue, job_type, owner_user_id, request_id, trace_id, "
+                            f"{enrollment}, "  # nosec B608
                             "COALESCE(retry_count, 0) AS effective_retry_count, "
                             "COALESCE(max_retries, ?) AS effective_max_retries, "
                             "COALESCE(expired_lease_policy, 'consume_retry') AS effective_expired_lease_policy "
@@ -6270,11 +6302,18 @@ class JobManager:
                     ).fetchall()
                     for raw_row in rows:
                         row = dict(raw_row)
+                        if row.get("workflow_capability_version") is not None:
+                            result = recover_workflow_expiry_in_transaction(conn, backend=self.backend, locked_root=row)
+                            if result.receipt is not None:
+                                attrs = {"origin": "recovery"}
+                                if result.receipt.resulting_status == "failed":
+                                    attrs["error_code"] = "no_progress_exhausted"
+                                recovered.append((effect_event_type(result.receipt), row, attrs))
+                            continue
                         retry_count = int(row["effective_retry_count"])
                         max_retries = int(row["effective_max_retries"])
                         no_attempt = (
-                            row["effective_expired_lease_policy"]
-                            == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
+                            row["effective_expired_lease_policy"] == ExpiredLeasePolicy.REQUEUE_NO_ATTEMPT.value
                         )
                         requeue = no_attempt or retry_count < max_retries
                         if no_attempt:
