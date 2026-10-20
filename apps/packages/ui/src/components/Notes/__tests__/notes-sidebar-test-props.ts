@@ -87,6 +87,7 @@ export const buildNotesSidebarProps = (
     createMoodboard: noopAsync,
     renameMoodboard: noopAsync,
     deleteMoodboard: noopAsync,
+    addNoteToMoodboard: noopAsync,
     clearBulkSelection: noop,
     exportSelectedBulk: noop,
     addTagsToSelectedBulk: noopAsync,

@@ -85,10 +85,10 @@ const notesBasics: TutorialDefinition = {
     {
       target: '[data-testid="notes-section-organize"]',
       titleKey: "tutorials:notes.basics.organizeTitle",
-      titleFallback: "Collections and Filters",
+      titleFallback: "Saved filters",
       contentKey: "tutorials:notes.basics.organizeContent",
       contentFallback:
-        "Group notes into collections, or save tag filters for quick access to related notes.",
+        "Save tag filters here to reuse them. To group notes by hand, choose the Collection view.",
       placement: "bottom"
     },
     {

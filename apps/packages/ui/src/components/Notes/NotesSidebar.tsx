@@ -10,6 +10,7 @@ import { QuestionCircleOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import NotesListPanel from '@/components/Notes/NotesListPanel'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
+import NotesCollectionControls from '@/components/Notes/NotesCollectionControls'
 import type { NoteListItem } from '@/components/Notes/notes-manager-types'
 import type {
   NotesSortOption,
@@ -144,6 +145,7 @@ export interface NotesSidebarProps {
   createMoodboard: () => Promise<void>
   renameMoodboard: () => Promise<void>
   deleteMoodboard: () => Promise<void>
+  addNoteToMoodboard: (noteId: string | number) => Promise<void>
   clearBulkSelection: () => void
   exportSelectedBulk: () => void
   addTagsToSelectedBulk: () => Promise<void>
@@ -277,6 +279,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   createMoodboard,
   renameMoodboard,
   deleteMoodboard,
+  addNoteToMoodboard,
   clearBulkSelection,
   exportSelectedBulk,
   addTagsToSelectedBulk,
@@ -548,7 +551,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   titleAccessory={
                     <Tooltip
                       title={t('option:notesSearch.organizeHelpTooltip', {
-                        defaultValue: 'Collections group notes manually. Saved filters auto-group notes by tags.'
+                        defaultValue: 'Saved filters group notes by tags. To group notes by hand, choose the Collection view.'
                       })}
                     >
                       {renderHelpButton(
@@ -562,97 +565,6 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                   storageKey="organize"
                   testId="notes-section-organize"
                 >
-                {listMode === 'active' && listViewMode === 'moodboard' && (
-                  <div
-                    className="space-y-2 rounded border border-border bg-surface2 p-2"
-                    data-testid="notes-moodboard-controls"
-                  >
-                    <div className="flex items-center justify-between">
-                      <Typography.Text className="text-[11px] uppercase tracking-[0.08em] text-text-muted">
-                        {t('option:notesSearch.moodboardLabel', {
-                          defaultValue: 'Collection'
-                        })}
-                      </Typography.Text>
-                      {isMoodboardsFetching && <Spin size="small" />}
-                    </div>
-                    <Select
-                      className="w-full"
-                      size="small"
-                      aria-label={t('option:notesSearch.moodboardSelectAriaLabel', {
-                        defaultValue: 'Collection'
-                      })}
-                      value={selectedMoodboardId == null ? undefined : selectedMoodboardId}
-                      onChange={(value) => {
-                        if (value == null) {
-                          setSelectedMoodboardId(null)
-                          setPage(1)
-                          return
-                        }
-                        const parsed = Number(value)
-                        if (!Number.isFinite(parsed)) return
-                        setSelectedMoodboardId(Math.floor(parsed))
-                        setPage(1)
-                      }}
-                      placeholder={t('option:notesSearch.moodboardEmptyOption', {
-                        defaultValue: 'No collections yet'
-                      })}
-                      options={moodboards.map((board) => ({
-                        value: board.id,
-                        label: board.name
-                      }))}
-                      data-testid="notes-moodboard-select"
-                    />
-                    <div className="grid grid-cols-3 gap-2">
-                      <Button
-                        size="small"
-                        onClick={() => {
-                          void createMoodboard()
-                        }}
-                        data-testid="notes-moodboard-create"
-                      >
-                        {t('option:notesSearch.moodboardCreate', {
-                          defaultValue: 'New'
-                        })}
-                      </Button>
-                      <Button
-                        size="small"
-                        onClick={() => {
-                          void renameMoodboard()
-                        }}
-                        disabled={selectedMoodboard == null}
-                        data-testid="notes-moodboard-rename"
-                      >
-                        {t('option:notesSearch.moodboardRename', {
-                          defaultValue: 'Rename'
-                        })}
-                      </Button>
-                      <Button
-                        size="small"
-                        danger
-                        onClick={() => {
-                          void deleteMoodboard()
-                        }}
-                        disabled={selectedMoodboard == null}
-                        data-testid="notes-moodboard-delete"
-                      >
-                        {t('option:notesSearch.moodboardDelete', {
-                          defaultValue: 'Delete'
-                        })}
-                      </Button>
-                    </div>
-                    <Typography.Text
-                      type="secondary"
-                      className="block text-[11px] text-text-muted"
-                    >
-                      {selectedMoodboard?.description
-                        ? String(selectedMoodboard.description)
-                        : t('option:notesSearch.moodboardHelperDefault', {
-                            defaultValue:
-                              'Pin notes manually or use smart rules to populate this collection.'
-                          })}
-                    </Typography.Text>
-                  </div>
-                )}
                 {listMode === 'active' && (
                   <div className="space-y-1">
                     <Typography.Text
@@ -1109,16 +1021,58 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
               </div>
             ) : listMode === 'active' && listViewMode === 'moodboard' ? (
               <div className="h-full overflow-y-auto px-3 py-3" data-testid="notes-moodboard-view">
+                <NotesCollectionControls
+                  moodboards={moodboards}
+                  selectedMoodboardId={selectedMoodboardId}
+                  selectedMoodboard={selectedMoodboard}
+                  isMoodboardsFetching={isMoodboardsFetching}
+                  openNoteId={selectedId}
+                  openNoteInCollection={
+                    selectedId != null &&
+                    visibleNotes.some((note) => String(note.id) === String(selectedId))
+                  }
+                  setSelectedMoodboardId={setSelectedMoodboardId}
+                  setPage={setPage}
+                  createMoodboard={createMoodboard}
+                  renameMoodboard={renameMoodboard}
+                  deleteMoodboard={deleteMoodboard}
+                  addNoteToMoodboard={addNoteToMoodboard}
+                />
                 {listErrorState ? (
                   listErrorState
                 ) : selectedMoodboard == null ? (
                   <div
-                    className="rounded-md border border-dashed border-border bg-surface2 px-3 py-4 text-sm text-text-muted"
+                    className="space-y-3 rounded-md border border-dashed border-border bg-surface2 px-3 py-4 text-sm text-text-muted"
                     data-testid="notes-moodboard-empty-selection"
                   >
-                    {t('option:notesSearch.moodboardSelectPrompt', {
-                      defaultValue: 'Create or select a collection to start.'
-                    })}
+                    {moodboards.length > 0 ? (
+                      <p>
+                        {t('option:notesSearch.moodboardChoosePrompt', {
+                          defaultValue: 'Choose a collection above to see its notes.'
+                        })}
+                      </p>
+                    ) : (
+                      <>
+                        <p>
+                          {t('option:notesSearch.moodboardFirstPrompt', {
+                            defaultValue:
+                              'A collection is a group of notes you pick by hand. Create one, then add notes to it.'
+                          })}
+                        </p>
+                        <Button
+                          type="primary"
+                          size="small"
+                          onClick={() => {
+                            void createMoodboard()
+                          }}
+                          data-testid="notes-moodboard-empty-create"
+                        >
+                          {t('option:notesSearch.moodboardCreateAction', {
+                            defaultValue: 'New collection'
+                          })}
+                        </Button>
+                      </>
+                    )}
                   </div>
                 ) : isFetching ? (
                   <div className="mb-3 inline-flex items-center gap-2 text-xs text-text-muted">
@@ -1134,9 +1088,16 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                     className="rounded-md border border-dashed border-border bg-surface2 px-3 py-4 text-sm text-text-muted"
                     data-testid="notes-moodboard-empty"
                   >
-                    {t('option:notesSearch.moodboardEmpty', {
-                      defaultValue: 'No notes in this collection yet.'
-                    })}
+                    <p>
+                      {t('option:notesSearch.moodboardEmpty', {
+                        defaultValue: 'No notes in this collection yet.'
+                      })}
+                    </p>
+                    <p className="mt-1">
+                      {t('option:notesSearch.moodboardEmptyHowToAdd', {
+                        defaultValue: 'Open a note, then choose Add open note to put it here.'
+                      })}
+                    </p>
                   </div>
                 ) : (
                   <>

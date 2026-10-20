@@ -441,10 +441,10 @@
     "message": "See how notes relate to each other. Type [[ in a note to create a link, or add manual connections here."
   },
   "notes_basics_organizeTitle": {
-    "message": "Collections and Filters"
+    "message": "Saved filters"
   },
   "notes_basics_organizeContent": {
-    "message": "Group notes into collections, or save tag filters for quick access to related notes."
+    "message": "Save tag filters here to reuse them. To group notes by hand, choose the Collection view."
   },
   "notes_basics_createTitle": {
     "message": "Create your first note"

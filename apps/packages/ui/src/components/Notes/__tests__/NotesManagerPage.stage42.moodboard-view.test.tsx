@@ -375,15 +375,15 @@ describe("NotesManagerPage stage 42 moodboard view", () => {
     allowMoodboardFetch = true
     fireEvent.click(screen.getByTestId("notes-view-mode-moodboard"))
 
-    // Open the nested Organize section (collapsed by default)
-    await waitFor(() => {
-      expect(screen.getByTestId("notes-section-organize-toggle")).toBeInTheDocument()
-    })
-    fireEvent.click(screen.getByTestId("notes-section-organize-toggle"))
-
+    // The collection controls live in the Collection view itself, not in
+    // the collapsed Organize section (NL-13).
     await waitFor(() => {
       expect(screen.getByTestId("notes-moodboard-controls")).toBeInTheDocument()
     })
+    expect(screen.getByTestId("notes-section-organize-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    )
 
     fireEvent.click(screen.getByTestId("notes-moodboard-create"))
 
@@ -418,6 +418,66 @@ describe("NotesManagerPage stage 42 moodboard view", () => {
       )
     })
 
+  })
+
+  it("adds the open note to another collection from the Collection view (NL-13)", async () => {
+    seededMoodboards = [
+      { id: 7, name: "Inspiration", description: "Visual ideas", version: 1 },
+      { id: 8, name: "Reading list", description: null, version: 1 }
+    ]
+    renderPage()
+
+    allowMoodboardFetch = true
+    fireEvent.click(screen.getByTestId("notes-view-mode-moodboard"))
+    fireEvent.click(await screen.findByTestId("notes-moodboard-card-2"))
+    await waitFor(() => {
+      expect(mockBgRequest).toHaveBeenCalledWith(
+        expect.objectContaining({ path: "/api/v1/notes/2" })
+      )
+    })
+    // Already in Inspiration, so there is nothing to add here.
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-moodboard-add-open-note")).toBeDisabled()
+    })
+
+    const select = screen.getByTestId("notes-moodboard-select")
+    fireEvent.mouseDown(select.querySelector(".ant-select-content") || select)
+    await waitFor(() => {
+      const option = Array.from(document.querySelectorAll(".ant-select-item-option")).find(
+        (el) => el.textContent === "Reading list"
+      )
+      if (!option) throw new Error('Option "Reading list" not found')
+      fireEvent.click(option)
+    })
+
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-moodboard-empty")).toHaveTextContent(
+        "Open a note, then choose Add open note to put it here."
+      )
+    })
+    const readingListFetches = () =>
+      mockBgRequest.mock.calls.filter(([arg]) =>
+        String(arg?.path || "").startsWith("/api/v1/notes/moodboards/8/notes?")
+      ).length
+    const fetchesBeforeAdd = readingListFetches()
+    const add = screen.getByTestId("notes-moodboard-add-open-note")
+    expect(add).toBeEnabled()
+    fireEvent.click(add)
+
+    await waitFor(() => {
+      expect(mockBgRequest).toHaveBeenCalledWith(
+        expect.objectContaining({
+          path: "/api/v1/notes/moodboards/8/notes/2",
+          method: "POST"
+        })
+      )
+    })
+    await waitFor(() => {
+      // This file's i18n mock does not interpolate, so match the prefix.
+      expect(mockMessageSuccess).toHaveBeenCalledWith(expect.stringMatching(/^Added to /))
+    })
+    // The collection reloads so the added note shows up.
+    expect(readingListFetches()).toBeGreaterThan(fetchesBeforeAdd)
   })
 
   it("supports moodboard pagination controls and page navigation", async () => {

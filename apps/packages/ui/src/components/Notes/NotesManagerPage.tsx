@@ -2736,6 +2736,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         createMoodboard={list.createMoodboard}
         renameMoodboard={list.renameMoodboard}
         deleteMoodboard={list.deleteMoodboard}
+        addNoteToMoodboard={list.addNoteToMoodboard}
         clearBulkSelection={list.clearBulkSelection}
         exportSelectedBulk={exp.exportSelectedBulk}
         addTagsToSelectedBulk={addTagsToSelectedBulk}

@@ -742,6 +742,39 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     }
   }, [authorityOwner, confirmDanger, isCurrentAuthority, message, refetchMoodboards, selectedMoodboard])
 
+  /** Puts a note in the selected collection; the only add path on /notes (NL-13). */
+  const addNoteToMoodboard = React.useCallback(async (noteId: string | number) => {
+    const requestOwner = authorityOwner
+    if (!isCurrentAuthority(requestOwner)) return
+    if (!selectedMoodboard) {
+      message.warning("Select a collection first")
+      return
+    }
+    try {
+      await bgRequest({
+        path: `/api/v1/notes/moodboards/${selectedMoodboard.id}/notes/${encodeURIComponent(String(noteId))}` as any,
+        method: "POST" as any
+      })
+      if (!isCurrentAuthority(requestOwner)) return
+      await refetch()
+      if (!isCurrentAuthority(requestOwner)) return
+      message.success(
+        t('option:notesSearch.moodboardAddOpenNoteSuccess', {
+          defaultValue: 'Added to "{{name}}"',
+          name: selectedMoodboard.name
+        })
+      )
+    } catch {
+      if (isCurrentAuthority(requestOwner)) {
+        message.error(
+          t('option:notesSearch.moodboardAddOpenNoteError', {
+            defaultValue: 'Could not add the note to this collection'
+          })
+        )
+      }
+    }
+  }, [authorityOwner, isCurrentAuthority, message, refetch, selectedMoodboard, t])
+
   // ---- notebook server operations ----
   const fetchServerNotebooks = React.useCallback(async (): Promise<NotebookFilterOption[]> => {
     const requestOwner = authorityOwner
@@ -1231,7 +1264,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     clearSearchQueryTimeout,
     searchQueryTimeoutRef,
     // callbacks
-    createMoodboard, renameMoodboard, deleteMoodboard,
+    createMoodboard, renameMoodboard, deleteMoodboard, addNoteToMoodboard,
     createNotebookFromCurrentKeywords, removeSelectedNotebook,
     handleClearFilters,
     clearBulkSelection, handleToggleBulkSelection,

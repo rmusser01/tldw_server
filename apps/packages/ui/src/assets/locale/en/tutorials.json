@@ -193,8 +193,8 @@
       "tagsContent": "Add tags to organize your notes. Use the filter in the sidebar to find notes by tag.",
       "connectionsTitle": "Note Connections",
       "connectionsContent": "See how notes relate to each other. Type [[ in a note to create a link, or add manual connections here.",
-      "organizeTitle": "Collections and Filters",
-      "organizeContent": "Group notes into collections, or save tag filters for quick access to related notes.",
+      "organizeTitle": "Saved filters",
+      "organizeContent": "Save tag filters here to reuse them. To group notes by hand, choose the Collection view.",
       "createTitle": "Create your first note",
       "createContent": "Click + to start a note. To see this tour again, press ? and choose Restart tutorial."
     }

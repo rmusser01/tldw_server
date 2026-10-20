@@ -1532,7 +1532,16 @@
       "notes_graph_sync_not_ready": "Suggestion decisions are unavailable for this Notes dataset."
     },
     "controlsMoreBelow": "More filters below",
-    "editorDraftHint": "Start typing to create a note. Ctrl/Cmd+S saves it to your server. Type [[ to link another note."
+    "editorDraftHint": "Start typing to create a note. Ctrl/Cmd+S saves it to your server. Type [[ to link another note.",
+    "moodboardCreateAction": "New collection",
+    "moodboardChoosePrompt": "Choose a collection above to see its notes.",
+    "moodboardFirstPrompt": "A collection is a group of notes you pick by hand. Create one, then add notes to it.",
+    "moodboardEmptyHowToAdd": "Open a note, then choose Add open note to put it here.",
+    "moodboardAddOpenNote": "Add open note",
+    "moodboardAddOpenNoteNeedsNote": "Open a note first",
+    "moodboardAddOpenNoteAlreadyIn": "The open note is already in this collection",
+    "moodboardAddOpenNoteSuccess": "Added to \"{{name}}\"",
+    "moodboardAddOpenNoteError": "Could not add the note to this collection"
   },
   "tts": {
     "playground": "TTS Playground"
