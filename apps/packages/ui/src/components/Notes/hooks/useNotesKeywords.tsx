@@ -14,7 +14,6 @@ import type {
 import {
   KEYWORD_FREQUENCY_DOT_CLASS,
   toKeywordTestIdSegment,
-  suggestKeywordsDraft,
 } from '../notes-manager-utils'
 import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
 
