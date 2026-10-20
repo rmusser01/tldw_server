@@ -21,6 +21,7 @@ from tldw_Server_API.app.api.v1.API_Deps.Prompts_DB_Deps import get_prompts_db_f
 from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.schemas.media_request_models import (
     IngestWebContentRequest,
+    ScrapeMethod,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
@@ -74,7 +75,9 @@ async def ingest_web_content(
     # Basic validation: require at least one URL.
     if not request.urls:
         raise HTTPException(status_code=400, detail="At least one URL is required")
-    if media_analysis_requested(request):
+    # The crawl methods summarize with a default provider when none is named, so analysis alone means LLM work.
+    crawl_summaries = request.scrape_method in {ScrapeMethod.URL_LEVEL, ScrapeMethod.RECURSIVE}
+    if request.perform_analysis and (media_analysis_requested(request) or crawl_summaries):
         # Usage quotas (LLM usage accounting spec §4a), before any page is fetched.
         await enforce_llm_quota(current_user.id)
 

@@ -535,6 +535,19 @@ WEB_SUMMARY_REQUESTS = [
         "perform_analysis",
         id="ingest-web-content",
     ),
+    # The crawl methods summarize with a default provider when none is named (TASK-13864 review I1).
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "url_level", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content-url-level-default-provider",
+    ),
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "recursive_scraping", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content-recursive-default-provider",
+    ),
     pytest.param(
         "/api/v1/media/process-web-scraping",
         {
