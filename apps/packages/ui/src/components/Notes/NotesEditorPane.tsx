@@ -44,6 +44,7 @@ import type { SingleNoteCopyMode, SingleNoteExportFormat } from './export-utils'
 import type { NoteStudioState, NotesStudioPaperSize } from './notes-studio-types'
 import type { NotesTitleSuggestStrategy } from '@/services/settings/ui-settings'
 import type { NotesSaveIssue } from './hooks/useNotesEditorState'
+import { notesEditorSupportHint } from './notes-editor-hints'
 import {
   NOTES_EDITOR_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
@@ -114,6 +115,7 @@ export interface NotesEditorPaneProps {
 
   // Selection / identity
   selectedId: string | number | null
+  /** No note open and nothing typed: the hint says how to start (NO-04). */
   showEmptyState: boolean
   title: string
   content: string
@@ -744,14 +746,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         studioBadgeLabel={studioBadgeLabel}
       />
       <div className="flex-1 flex flex-col px-4 py-3 overflow-auto" data-testid="notes-editor-body">
-        {showEmptyState && !loadingDetail && (
-          <NotesEditorEmptyState
-            disabled={editorDisabled}
-            onCreateNote={() => {
-              void handleNewNote()
-            }}
-          />
-        )}
         {showStudioMarkdownOnlyNotice ? (
           <div className="mb-3 flex items-center justify-between gap-3 rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">
             <span>
@@ -1814,13 +1808,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   type="secondary"
                   className="block text-[11px] mt-1 text-text-muted"
                 >
-                  {editorInputMode === 'wysiwyg'
-                    ? t('option:notesSearch.wysiwygSupportHint', {
-                        defaultValue: 'WYSIWYG mode keeps markdown structure while you edit.'
-                      })
-                    : t('option:notesSearch.editorSupportHint', {
-                        defaultValue: 'Markdown + LaTeX supported'
-                      })}
+                  {notesEditorSupportHint(t, editorInputMode, showEmptyState)}
                 </Typography.Text>
               </div>
               <div className="flex min-h-0 flex-col">
@@ -1955,13 +1943,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 type="secondary"
                 className="block text-[11px] mt-1 text-text-muted"
               >
-                {editorInputMode === 'wysiwyg'
-                  ? t('option:notesSearch.wysiwygSupportHint', {
-                      defaultValue: 'WYSIWYG mode keeps markdown structure while you edit.'
-                    })
-                  : t('option:notesSearch.editorSupportHint', {
-                      defaultValue: 'Markdown + LaTeX supported'
-                    })}
+                {notesEditorSupportHint(t, editorInputMode, showEmptyState)}
               </Typography.Text>
             </div>
           )}

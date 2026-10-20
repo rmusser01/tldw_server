@@ -370,8 +370,8 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
     setViewportWidth(375)
     renderPage()
 
-    fireEvent.click(screen.getByTestId("notes-editor-empty-create"))
-
+    // The blank editor is already a draft (NO-04): no create click needed.
+    expect(screen.queryByTestId("notes-editor-empty-create")).not.toBeInTheDocument()
     const titleInput = await screen.findByRole("textbox", { name: "Note title" })
     expect(screen.getByTestId("notes-title-row")).toHaveClass("flex-wrap")
     expect(titleInput).toHaveClass("!min-w-full")

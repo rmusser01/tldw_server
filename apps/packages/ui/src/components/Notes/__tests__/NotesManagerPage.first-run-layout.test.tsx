@@ -211,6 +211,44 @@ describe("NotesManagerPage first-run layout", { timeout: 60_000 }, () => {
     expect(missingRequired).toEqual([])
   })
 
+  it("shows a usable draft editor, not an empty state on top of it, when notes exist (NO-04)", async () => {
+    listState.items = [savedNote("n-1", "First saved note"), savedNote("n-2", "Second saved note")]
+    renderPage()
+    const listRegion = screen.getByTestId("notes-list-region")
+    await within(listRegion).findByText("First saved note", {}, { timeout: 5000 })
+
+    expect(screen.getByPlaceholderText("Title")).toBeEnabled()
+    // "Select or create a note" over a live editor contradicted itself.
+    expect(screen.queryByTestId("notes-editor-empty-state")).not.toBeInTheDocument()
+    expect(screen.queryByTestId("notes-editor-empty-create")).not.toBeInTheDocument()
+    expect(
+      screen.getByText(
+        "Start typing to create a note. Ctrl/Cmd+S saves it to your server. Type [[ to link another note."
+      )
+    ).toBeInTheDocument()
+  })
+
+  it("never renders the empty state together with the editor, before or after the first keystroke (NO-04)", async () => {
+    renderPage()
+    const listRegion = screen.getByTestId("notes-list-region")
+    await within(listRegion).findByText("No notes yet", {}, { timeout: 5000 })
+
+    const title = screen.getByPlaceholderText("Title")
+    const textarea = screen.getByPlaceholderText("Write your note here... (Markdown supported)")
+    expect(screen.queryByTestId("notes-editor-empty-state")).not.toBeInTheDocument()
+
+    fireEvent.change(textarea, { target: { value: "F" } })
+
+    // Nothing above the textarea unmounts on the first keystroke, so it
+    // does not jump under the caret.
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Write your note here... (Markdown supported)")).toBe(textarea)
+    })
+    expect(title.isConnected).toBe(true)
+    expect(screen.queryByTestId("notes-editor-empty-state")).not.toBeInTheDocument()
+    expect(screen.getByText("Markdown + LaTeX supported")).toBeInTheDocument()
+  })
+
   it("ends the Notes tour on the create action (NO-02)", () => {
     const tour = notesTutorials.find((entry) => entry.id === "notes-basics")
     const lastStep = tour?.steps[tour.steps.length - 1]

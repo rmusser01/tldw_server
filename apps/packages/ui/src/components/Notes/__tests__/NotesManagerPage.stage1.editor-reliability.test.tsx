@@ -505,16 +505,13 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
     })
   })
 
-  it("opens a writable, focused title field after starting a new draft from the empty state", async () => {
+  it("opens a writable, focused title field after starting a new draft from New note", async () => {
     renderPage()
 
-    expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
+    // The blank editor is a draft, not an empty state (NO-04).
+    expect(screen.queryByTestId("notes-editor-empty-state")).not.toBeInTheDocument()
 
-    fireEvent.click(screen.getByRole("button", { name: "Create note" }))
-
-    await waitFor(() => {
-      expect(screen.queryByTestId("notes-editor-empty-state")).not.toBeInTheDocument()
-    })
+    fireEvent.click(screen.getByRole("button", { name: "New note" }))
 
     const titleInput = screen.getByRole("textbox", { name: "Note title" })
     expect(titleInput).toBeEnabled()
@@ -525,20 +522,20 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
     })
   })
 
-  it("keeps the empty-state create CTA disabled when the notes capability is unavailable", async () => {
+  it("keeps the draft editor read-only when the notes capability is unavailable", async () => {
     mockCapabilities.hasNotes = false
 
     renderPage()
 
-    const createButton = screen.getByTestId("notes-editor-empty-create")
-    expect(createButton).toBeDisabled()
+    expect(screen.queryByTestId("notes-editor-empty-create")).not.toBeInTheDocument()
+    expect(screen.getByRole("textbox", { name: "Note title" })).toBeDisabled()
+    expect(screen.getByTestId("notes-save-button")).toBeDisabled()
 
-    fireEvent.click(createButton)
+    fireEvent.click(screen.getByRole("button", { name: "New note" }))
 
     await waitFor(() => {
       expect(createCalls()).toHaveLength(0)
     })
-    expect(screen.getByTestId("notes-editor-empty-state")).toBeInTheDocument()
   })
 
   it("encodes reserved note ids for save refresh requests", async () => {
