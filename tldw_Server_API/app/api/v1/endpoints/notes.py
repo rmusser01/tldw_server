@@ -2554,7 +2554,7 @@ def _notes_list_payload(
     """Build a notes list response (NS-04).
 
     ``items`` always carries the page. ``notes`` and ``results`` repeat it for
-    older clients and are left empty when ``legacy_aliases`` is false.
+    older clients and are ``null`` when ``legacy_aliases`` is false.
     """
     alias_rows = notes_data if legacy_aliases else None
     return {
