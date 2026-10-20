@@ -385,7 +385,6 @@ export const formatSourceNodeLabel = (
   return parsed.externalRef ? `${sourceLabel}: ${parsed.externalRef}` : sourceLabel
 }
 
-// 120px offset accounts for page header and padding
 export const NOTE_AUTOSAVE_DELAY_MS = 5000
 export const NOTE_SEARCH_DEBOUNCE_MS = 350
 export const LARGE_NOTE_PREVIEW_THRESHOLD = 10_000
