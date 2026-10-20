@@ -29,6 +29,13 @@ class FakeResizeObserver {
   }
 }
 
+// The hook also keeps a viewport observer on the scroller itself; the content
+// observer is the one that watches the transcript's children.
+const contentObservers = () =>
+  observers.filter((entry) =>
+    entry.targets.some((target) => target.getAttribute("data-testid") === "content")
+  )
+
 const notifyResize = () => {
   act(() => {
     observers
@@ -38,8 +45,9 @@ const notifyResize = () => {
 }
 
 const Transcript = ({ pin, tokens = 0 }: { pin: boolean; tokens?: number }) => {
-  // A new array on every render, like a streamed reply's message list.
-  const { containerRef } = useSmartScroll([{ id: "m-1", tokens }], tokens > 0, 100, {
+  // A new array for every streamed token, like a reply's message list.
+  const messages = React.useMemo(() => [{ id: "m-1", tokens }], [tokens])
+  const { containerRef } = useSmartScroll(messages, tokens > 0, 100, {
     pinOnContentResize: pin
   })
   return (
@@ -138,10 +146,13 @@ describe("useSmartScroll content growth", () => {
   it("keeps one content observer while a reply streams", () => {
     const { rerender } = render(<Transcript pin />)
     measure(screen.getByTestId("scroller"), { scrollHeight: 1000, clientHeight: 400, scrollTop: 600 })
+    const observersAfterMount = observerCount
+    expect(contentObservers()).toHaveLength(1)
     for (let tokens = 1; tokens <= 5; tokens += 1) {
       rerender(<Transcript pin tokens={tokens} />)
     }
-    expect(observerCount).toBe(1)
+    expect(observerCount).toBe(observersAfterMount)
+    expect(contentObservers()).toHaveLength(1)
   })
 
   it("watches transcript content that renders after mount", async () => {
@@ -152,6 +163,6 @@ describe("useSmartScroll content growth", () => {
       scroller.appendChild(late)
       await Promise.resolve()
     })
-    expect(observers[0].targets).toContain(late)
+    expect(contentObservers()[0].targets).toContain(late)
   })
 })
