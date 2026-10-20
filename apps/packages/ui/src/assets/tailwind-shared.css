@@ -81,8 +81,8 @@
   --color-primary-strong-foreground: 255 255 255;
   --color-accent: 31 181 159;
   --color-success: 4 120 87;
-  --color-warn: 217 119 6;
-  --color-danger: 224 88 109;
+  --color-warn: 168 82 7;
+  --color-danger: 190 45 74;
   --color-muted: 102 112 133;
   --color-border: 226 221 211;
   --color-border-strong: 207 200 186;
@@ -763,6 +763,12 @@ body {
   outline: 2px solid rgb(var(--color-focus));
   outline-offset: 2px;
   border-radius: 8px;
+}
+
+/* A checked switch's label sits on the primary track; antd writes it white,
+   which fails contrast on light primaries such as the dark theme's (AX-07). */
+.ant-switch.ant-switch-checked .ant-switch-inner .ant-switch-inner-checked {
+  color: rgb(var(--color-primary-foreground));
 }
 
 .focus-ring.ant-switch:focus-visible {

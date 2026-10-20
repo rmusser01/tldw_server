@@ -131,6 +131,67 @@ describe("antd theme text contrast", () => {
   })
 })
 
+// AX-07 (#3124): pinning the theme primary and danger colours left other antd
+// components drawing white (colorTextLightSolid) on those fills: in the
+// default dark theme the current Steps number measured 3.13:1 and Badge
+// counts 2.72:1. Every component that puts text on a solid primary or
+// danger fill needs a readable foreground too.
+describe("antd theme text on solid fills in other components", () => {
+  type Fill = "primary" | "danger"
+  const FILL_TEXT: Array<{ component: string; token: string; fills: Fill[] }> = [
+    { component: "Steps", token: "colorTextLightSolid", fills: ["primary", "danger"] },
+    { component: "Badge", token: "colorTextLightSolid", fills: ["danger", "primary"] },
+    { component: "Tour", token: "colorTextLightSolid", fills: ["primary"] },
+    { component: "Dropdown", token: "colorTextLightSolid", fills: ["danger"] },
+    { component: "Tag", token: "colorTextLightSolid", fills: ["primary"] },
+    { component: "Menu", token: "darkItemSelectedColor", fills: ["primary"] },
+    { component: "Menu", token: "darkDangerItemSelectedColor", fills: ["danger"] },
+    { component: "Tree", token: "directoryNodeSelectedColor", fills: ["primary"] }
+  ]
+
+  it.each(cases)("keeps text on primary and danger fills readable in $name", ({ preset, mode }) => {
+    const { config, design } = build(preset, mode)
+    const fills: Record<Fill, RGBTriple> = {
+      primary: toTriple(design.colorPrimary, "0 0 0"),
+      danger: toTriple(design.colorError, "0 0 0")
+    }
+    const failures = FILL_TEXT.flatMap(({ component, token, fills: names }) => {
+      const override = (config.components as Record<string, Record<string, unknown>> | undefined)?.[
+        component
+      ]?.[token]
+      // Unset, each of these tokens falls back to the global colorTextLightSolid.
+      const value = typeof override === "string" ? override : design.colorTextLightSolid
+      const text = toTriple(value, "0 0 0")
+      // One text colour on two fills cannot always reach 4.5:1 on both (for
+      // example rose-pine light primary and danger), so the bar drops to the
+      // best worst case black or white can manage there.
+      const bestWorstCase = Math.max(
+        ...(["0 0 0", "255 255 255"] as const).map((candidate) =>
+          Math.min(...names.map((fill) => contrastRatio(candidate, fills[fill])))
+        )
+      )
+      const bar = Math.min(4.5, bestWorstCase) - 0.005
+      return names
+        .map((fill) => [fill, contrastRatio(text, fills[fill])] as const)
+        .filter(([, value]) => value < bar)
+        .map(([fill, value]) => `${component}.${token} on ${fill}=${value.toFixed(2)}`)
+    })
+    expect(failures).toEqual([])
+  })
+
+  it.each(cases)("keeps the fallback avatar icon readable in $name", ({ preset, mode }) => {
+    // antd paints the fallback avatar colorTextPlaceholder with a
+    // colorTextLightSolid icon; the global placeholder is now a text colour.
+    const { tokens, config, design } = build(preset, mode)
+    const avatar = config.components?.Avatar as
+      | { colorTextPlaceholder?: string; colorTextLightSolid?: string }
+      | undefined
+    const fill = toTriple(avatar?.colorTextPlaceholder ?? design.colorTextPlaceholder, tokens.surface)
+    const icon = toTriple(avatar?.colorTextLightSolid ?? design.colorTextLightSolid, "0 0 0")
+    expect(contrastRatio(icon, fill)).toBeGreaterThanOrEqual(4.5)
+  })
+})
+
 // AX-08 (#3124): antd drew keyboard focus as a 3px outline in a pale primary
 // tint (1.35-1.57:1), not in the theme focus colour.
 describe("antd theme focus outlines", () => {
@@ -201,6 +262,19 @@ describe("default palette text tokens", () => {
     }
   })
 
+  // AX-07: light danger text (#e0586d, used by Delete menu items and
+  // text-danger) measured 3.25-3.48:1, and warning text (#d97706) 2.73-3.19:1.
+  it.each(defaultCases)("keeps danger and warning text at 4.5:1 on every surface in $name", ({ preset, mode }) => {
+    const tokens = preset.palette[mode]
+    const failures = surfaces(tokens).flatMap(([name, background]) =>
+      (["danger", "warn"] as const)
+        .map((token) => [token, contrastRatio(tokens[token], background)] as const)
+        .filter(([, value]) => value < 4.5)
+        .map(([token, value]) => `${token}/${name}=${value.toFixed(2)}`)
+    )
+    expect(failures).toEqual([])
+  })
+
   it.each([
     [":root", "light"],
     [".dark", "dark"]
@@ -210,5 +284,7 @@ describe("default palette text tokens", () => {
     expect(values.get("--color-text-subtle")).toBe(tokens.textSubtle)
     expect(values.get("--color-success")).toBe(tokens.success)
     expect(values.get("--color-focus")).toBe(tokens.focus)
+    expect(values.get("--color-danger")).toBe(tokens.danger)
+    expect(values.get("--color-warn")).toBe(tokens.warn)
   })
 })

@@ -82,6 +82,17 @@ export const readableForeground = (background: RGBTriple): RGBTriple =>
     : WHITE
 
 /**
+ * Black or white, whichever keeps the higher worst-case contrast across all
+ * of `backgrounds`. For components that put one text colour on several
+ * fills (for example antd Steps on primary and danger).
+ */
+export const readableForegroundOnAll = (backgrounds: RGBTriple[]): RGBTriple => {
+  const worst = (color: RGBTriple) =>
+    Math.min(...backgrounds.map((background) => contrastRatio(color, background)))
+  return worst(BLACK) >= worst(WHITE) ? BLACK : WHITE
+}
+
+/**
  * The first candidate whose lowest contrast against `backgrounds` reaches
  * `minimum`; otherwise the candidate with the best lowest contrast.
  */

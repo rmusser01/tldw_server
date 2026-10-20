@@ -29,8 +29,10 @@ const defaultTheme: ThemeDefinition = {
       primaryStrong: "36 86 199",
       accent: "31 181 159",
       success: "4 120 87",
-      warn: "217 119 6",
-      danger: "224 88 109",
+      // Darkened so warning and error text reach 4.5:1 on every light
+      // surface (AX-07); was 217 119 6 and 224 88 109.
+      warn: "168 82 7",
+      danger: "190 45 74",
       muted: "102 112 133",
       border: "226 221 211",
       borderStrong: "207 200 186",

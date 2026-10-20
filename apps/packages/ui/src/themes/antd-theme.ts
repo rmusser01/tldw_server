@@ -1,5 +1,5 @@
 import { theme, type ThemeConfig } from "antd"
-import { firstReadableColor, readableForeground } from "./contrast"
+import { firstReadableColor, readableForeground, readableForegroundOnAll } from "./contrast"
 import type { RGBTriple, ThemeColorTokens, ThemeTypography, ThemeShape, ThemeLayout } from "./types"
 
 type MappingAlgorithm = Extract<
@@ -63,7 +63,8 @@ function pinMapColors(pins: Partial<MapToken>): MappingAlgorithm {
  * Accessibility (UX review 2026-10, #3124):
  * - Primary, danger and link colours are the theme's own values (XP-20).
  * - Text on solid primary/danger fills is black or white, whichever reads
- *   better, matching --color-primary-foreground (AX-07).
+ *   better, matching --color-primary-foreground (AX-07). That covers every
+ *   component that draws colorTextLightSolid on those fills, not only Button.
  * - Links, placeholders and secondary text use the first theme text colour
  *   that reaches 4.5:1 on the surfaces they sit on (AX-07).
  * - Keyboard focus is a 2px outline in the theme focus colour (AX-08).
@@ -102,6 +103,10 @@ export function buildAntdThemeConfig(
   const components = Object.fromEntries(
     FOCUS_OUTLINE_COMPONENTS.map((name) => [name, { ...focusOutline }])
   ) as ComponentsConfig
+  // The fallback avatar is painted colorTextPlaceholder, which is now a text
+  // colour; give it a surface fill and a readable icon instead.
+  const avatarFill = tokens.surface2
+  const avatarIcon = firstReadableColor([tokens.textMuted, tokens.text], [avatarFill])
 
   return {
     algorithm: algorithms,
@@ -135,6 +140,26 @@ export function buildAntdThemeConfig(
       Button: { ...focusOutline, primaryColor: onPrimary, dangerColor: onDanger },
       Radio: { ...focusOutline, buttonSolidCheckedColor: onPrimary },
       DatePicker: { colorTextLightSolid: onPrimary },
+      // Text on primary and danger fills elsewhere (AX-07).
+      Steps: {
+        colorTextLightSolid: rgbTripleToHex(readableForegroundOnAll([tokens.primary, tokens.danger])),
+      },
+      Badge: {
+        colorTextLightSolid: rgbTripleToHex(readableForegroundOnAll([tokens.danger, tokens.primary])),
+      },
+      Tour: { ...focusOutline, colorTextLightSolid: onPrimary },
+      Dropdown: { ...focusOutline, colorTextLightSolid: onDanger },
+      Tag: { colorTextLightSolid: onPrimary },
+      Menu: {
+        ...focusOutline,
+        darkItemSelectedColor: onPrimary,
+        darkDangerItemSelectedColor: onDanger,
+      },
+      Tree: { ...focusOutline, directoryNodeSelectedColor: onPrimary },
+      Avatar: {
+        colorTextPlaceholder: rgbTripleToHex(avatarFill),
+        colorTextLightSolid: rgbTripleToHex(avatarIcon),
+      },
     },
   }
 }
