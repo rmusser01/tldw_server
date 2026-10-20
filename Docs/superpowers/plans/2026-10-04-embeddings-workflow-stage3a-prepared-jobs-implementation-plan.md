@@ -174,7 +174,7 @@ Enable foreign keys for SQLite. PostgreSQL forces owner RLS on roots and receipt
 **Goal:** Create one exact root/control authority and validate its live lease inside a caller-enlisted transaction.
 **Success Criteria:** Concurrent creates converge; conflicting or missing authority never recreates work; domain rollback rolls back capability mutations.
 **Tests:** Replay, controls, queue-policy changes, identity reuse, cancellation and expiry races.
-**Status:** In Progress
+**Status:** Complete
 
 ### Task 2: Admission, Lookup, And Transaction Lifetime
 
@@ -192,7 +192,7 @@ WorkflowTransaction.ensure_horizon(fence: WorkflowFence, minimum_seconds: int) -
 
 `WorkflowTransaction` protocol lives in `jobs_workflow_store.py`. It exposes the same native `connection` and `backend` to a DB_Management repository, not a second manager read. `WorkflowFence` is a transaction-bound opaque token minted by `lock_live_root`; define it in store, reject manually constructed, cross-transaction, expired, or post-commit tokens. Invalid fences raise `WorkflowFenceError(outcome: WorkflowOutcome)` from contracts. Lease checks compare the exact root UUID/owner/scope/payload/key/controls, processing status, worker, lease ID, and database expiry. Revalidate at every mutating use, not only token construction; use PostgreSQL `clock_timestamp()` rather than transaction-frozen `NOW()` and fractional SQLite database time. PostgreSQL locks the Jobs row first, then support row; SQLite starts `BEGIN IMMEDIATE`. Horizon exceeding the configured cap returns insufficient, not a silently smaller guarantee.
 
-- [ ] **Step 1: Write failing behavior tests.** Test support adds `admit(**control_overrides)`, `admit_new_reference()`, `acquire() -> WorkflowLease`, `root -> WorkflowRoot`, `counters() -> tuple[int, int]`, `job_count()`, `set_queue_allowed(bool)`, `replace_numeric_id_with_other_uuid()`, `write_domain(tx, value)`, `read_domain()`, and `lease_deadline() -> datetime`. Acquire a 120-second lease by default.
+- [x] **Step 1: Write failing behavior tests.** Test support adds `admit(**control_overrides)`, `admit_new_reference()`, `acquire() -> WorkflowLease`, `root -> WorkflowRoot`, `counters() -> tuple[int, int]`, `job_count()`, `set_queue_allowed(bool)`, `replace_numeric_id_with_other_uuid()`, `write_domain(tx, value)`, `read_domain()`, and `lease_deadline() -> datetime`. Acquire a 120-second lease by default.
 
 ```python
 def test_duplicate_admission_reuses_exact_root(workflow_case):
@@ -231,20 +231,20 @@ Add parameterized `test_replay_rejects_owner_payload_key_scope_or_retry_control_
 
 `test_fence_rechecks_expiry_inside_transaction` mints a fence, uses the controlled test helper to set the locked row's deadline to current fractional database time, then attempts a horizon/domain mutation. Assert `WorkflowFenceError(STALE_LEASE)` and unchanged synthetic domain data; a transaction-start timestamp must not keep that lease valid.
 
-- [ ] **Step 2: Run red tests:** `source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_admission_fencing.py -m 'not pg_jobs'`.
-- [ ] **Step 3: Implement the interfaces on both backends.** Admission serializes owner/scope/key correlation (SQLite write transaction; PostgreSQL stable transaction advisory lock), reads retained support authority and both active/archive UUID matches, validates all controls, then creates root/support/event/counter atomically. Reuse transaction-neutral admission leaf helpers such as `_quota_rejection`, `_insert_job`, `_bump_counters`, and `_insert_created_event`; do not call the committing `create_job`/`admit_job` and append support afterward. Retained support pointing to a missing root returns missing/unavailable, never new admission. Conflicting legacy correlation is not adopted. Bounded archive normalization/decryption must preserve exact payload and detect active/archive duplicates even after integer reuse.
+- [x] **Step 2: Run red tests:** `source .venv/bin/activate && RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_workflow_admission_fencing.py -m 'not pg_jobs'`.
+- [x] **Step 3: Implement the interfaces on both backends.** Admission serializes owner/scope/key correlation (SQLite write transaction; PostgreSQL stable transaction advisory lock), reads retained support authority and both active/archive UUID matches, validates all controls, then creates root/support/event/counter atomically. Reuse transaction-neutral admission leaf helpers such as `_quota_rejection`, `_insert_job`, `_bump_counters`, and `_insert_created_event`; do not call the committing `create_job`/`admit_job` and append support afterward. Retained support pointing to a missing root returns missing/unavailable, never new admission. Conflicting legacy correlation is not adopted. Bounded archive normalization/decryption must preserve exact payload and detect active/archive duplicates even after integer reuse.
 
 The facade opens one connection, begins once, establishes exact transaction-local owner context, verifies the effective PostgreSQL role, commits once, and closes/rolls back on all exits. Do not call the best-effort `_pg_cursor` RLS setup as the security gate: a failed setup must raise, never rollback and continue under old/admin scope. Restore caller ContextVars on exit. Root locks remain held while the synthetic/domain repository checks its version/generation/claim/cursor by CAS; the capability cannot verify domain facts on another connection.
 
-- [ ] **Step 4: Run green tests** with the Step 2 command and `-m pg_jobs`; also run existing admission/idempotency tests for each backend.
-- [ ] **Step 5: Commit:** `git commit -m "feat(jobs): admit and fence exact owned workflow roots"` after staging only Task 2 files.
+- [x] **Step 4: Run green tests** with the Step 2 command and `-m pg_jobs`; also run existing admission/idempotency tests for each backend.
+- [x] **Step 5: Commit:** `git commit -m "feat(jobs): admit and fence exact owned workflow roots"` after staging only Task 2 files.
 
 ## Stage 3: Lease-Independent Effects And Retained Proofs
 
 **Goal:** Apply transitions once, retain proof after later transitions/archive/prune, and release proof recoverably.
 **Success Criteria:** Old applied effects replay without mutation; unapplied effects need current authority plus domain revalidation; changed facts fail closed.
 **Tests:** Lost acknowledgement, retry accounting, terminal races, archive compression, release/replay.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 3: Logical Effects, Proof Lookup, And Release
 
