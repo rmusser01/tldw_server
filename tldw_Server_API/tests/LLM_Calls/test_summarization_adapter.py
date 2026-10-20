@@ -584,6 +584,22 @@ def test_untyped_callers_still_get_the_network_error(monkeypatch):
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("streaming", [False, True], ids=["chat", "stream"])
+@pytest.mark.parametrize("provider", ["custom-openai-api", "custom-openai-api-2"])
+def test_a_custom_provider_without_a_base_url_is_a_configuration_error(monkeypatch, provider, streaming):
+    monkeypatch.setattr(custom_openai_mod, "resolve_trusted_provider_endpoint", lambda _name: None)
+
+    with pytest.raises(sgl.SummaryProviderError) as exc_info:
+        result = sgl.analyze(
+            provider, "hello", None, api_key="key", model_override="m", streaming=streaming, raise_on_error=True
+        )
+        if streaming:
+            list(result)
+
+    assert exc_info.value.code == "configuration"
+
+
+@pytest.mark.unit
 def test_dispatch_failure_is_typed_for_runtime_callers(monkeypatch):
     class BrokenRegistry:
         def get_adapter(self, _provider):
