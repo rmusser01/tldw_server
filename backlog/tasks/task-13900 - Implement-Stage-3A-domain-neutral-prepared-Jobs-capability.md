@@ -1,7 +1,7 @@
 ---
 id: TASK-13900
 title: Implement Stage 3A domain-neutral prepared Jobs capability
-status: In Progress
+status: Done
 ---
 
 ## Description
@@ -16,7 +16,7 @@ Execute the approved Stage 3A plan using subagent-driven development. Plan: Docs
 - [x] #2 Exact atomic admission, replay, and enlisted live fencing
 - [x] #3 Retained effect proofs across transition, archive, and pruning
 - [x] #4 Bounded retry-neutral acquisition episodes and semantic progress
-- [ ] #5 Backend/security/property/compatibility tests and scoped Bandit verification
+- [x] #5 Backend/security/property/compatibility tests and scoped Bandit verification
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -35,19 +35,24 @@ Task4 completed after348f5392cc and independent scoped re-review. Real public co
 Exact execution-base correction: git parent verification shows rebase parent454974e812, whose first parent is initially observed df7c290fbf; one unrelated VZ merge advanced the remote between initial read and rebase. Broad final review must use454974e812. origin/dev has continued advancing during this long execution; no rebase under active worker, integration/retest is later PR work. Current origin/dev has no13900/13901/13902 tracking collisions. No production activation/merge-ready claim.
 Task5 implementationfc5e809bee ready for independent task review:1514selected tests passed,no skips; workflow/property742 (392SQLite+350PG),compat409,lifecycle/RLS100,inline48,endpoint/media155,CI60; coverage94.87%,shardguardnew_uncovered0. Controller validated and authorized narrow known PG role/owner setup failure mapping to typed WorkflowFenceError(UNAVAILABLE), preserving driver cause and rollback/close/context (4real denial RED->5GREEN); existing raw-error assertion updated. InternalDoc and real-store state model/security/race/privacy/dormancy tests added. NewCodequality/strictBandit clear; old managerB608,3conftestI001,formatter drift and incompletely attributed warnings retained. AC5 awaits task and whole-branch review; no PR/activation/merge.
 Task5 independent task review approved substantive spec/quality with no Critical/Important. Minor doclimit wording corrected in f9641ac57b (configured1-5, default5); document checks pass, no code changes. All five implementation tasks and task reviews complete; whole-branch review and controller final verification remain, so status/AC5 stay In Progress/pending. Extra canonical Backlog format gate4pass,20warnings1.24s. NewcodeBandit0; one oldmanagerB608/3oldconftestI001/formatter+warnings baselines explicit.
+Whole-branch review found one validated P1: encrypted root admission/lookup succeeds, but shared acquisition/recovery authority compares the stored AES envelope with plaintext and rejects UNAVAILABLE before epoch1. Reviewer reproduced public SQLite acquisition in both modes; shared PostgreSQL path requires regression coverage. No other Critical/Important; all three recorded design rulings endorsed. Controller fresh pre-fix854pass/no skips,1720warnings243.04s; strictworkflow/lifecycleBandit0, manager unchangedB608, shardguard0new. One grouped final fix wave plus scoped re-review next; task and AC5 remain pending, no PR or activation.
+Final grouped fix ef0d5faa16 reuses bounded strict payload decryption in lookup/acquisition/recovery, preserving encrypted storage, exact reference/owner/control authority, transaction rollback and programming/cancellation propagation. Corrected pre-production RED40fail84pass; same GREEN124pass, then authenticated wrong-reference/extra-field and encrypted acquire/sweep races added. Final post-fix matrix1666pass,zero skips: workflow/property468SQLite+426PostgreSQL,compat409,lifecycle/RLS100,inline48,endpoint quartet155,CI60. Linecoverage1222/1281=95.39%,notbranchcoverage. Exact compatibility selectors remain in the approved plan; all commands activate primary .venv, RUN_JOBS=1,TLDW_TEST_NO_DOCKER=1,TLDW_TEST_POSTGRES_REQUIRED=1 and addopts importlib/strict-markers/tb=short with warnings visible. No custom DB setup. CI shardguard852shards/5135testfiles/4ignored/44baseline/0newuncovered. New/workflow/lifecycle Ruff,14file format,compile,strictBandit,configuredprecommit hooks exit0. Full managerBandit raw1 only unchangedB608(current9975,original9807),3unchangedconftestI001 and legacy whole-file formatter drift preserved with explicit BASE comparisons, no suppression. Unrelated fullrepo httpx2 collection blocker and incompletely attributed constructor ResourceWarnings remain; no global-green claim. Single scoped final re-review pending.
+Rulings I made, chronological, retained before SDD scratch cleanup: (1) No new ordinary Jobs pruning production hook: independent support/receipt tables and real prune/archive/no-history/race tests retain proof. Cost if wrong: untested prune path may strand retained proof. (2) Preserve legacy manager/lifecycle formatting outside changed ranges after immutable BASE comparisons. Cost if wrong: a whole-file formatter gate may still reject; do not claim full-file clean. (3) Map known PostgreSQL role/owner setup failures to typed WorkflowFenceError(UNAVAILABLE), preserving established raising transaction API and original driver cause. Cost if wrong: callers expecting a raw driver class need to inspect cause/adapt; dormant unpublished capability. Whole-branch reviewer evaluated and endorsed all three on merits. No architecture decision beyond accepted ADR060; ADR022/058 unchanged.
+Final whole-branch P1 encryption finding addressed by ef0d5faa16 and independent scoped re-review: ADDRESSED, no new Critical/Important/Minor, no out-of-scope observations. Reviewer checked real decoder forwarding bothbackends/modes/acquire+sweep, bounded exact authority, ciphertext immutability, atomic UNAVAILABLE, observer suppression, RuntimeError/cancellation propagation, all1666raw test results and baseline formatter comparisons. Controller independently reran148encrypted cases:148pass156deselected0skips308warnings38.71s; strictworkflow/lifecycleBandit0findings0errors; whitespace/tasknormalize clear. Prior controller854pass was pre-fix and is not substituted for post-fix certification. All validated findings addressed; all five stages complete. Broad review declined only explicitly deferred3Bdomain/CAS/manifests/generations/globalcapacity/cleanup,3Ccoordinator/adapters/accounting/deadlines/tracing,3Dfullfoundation, absent productioncredentials/activation, unrelatedfullrepo failures and universal warning attribution; not Stage3A obligations. No PR/push/merge/activation. Shared primary untouched; local branch preserved pending later integration/rebase/retest. Retire only this own completed plan per AGENTS after recording completed version in Git; preserve governing spec/ADR/internalguide/task and all other plans.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented and independently reviewed the dormant Stage3A domain-neutral prepared Jobs capability on SQLite/PostgreSQL: immutable exact authority, atomic admission/replay, native live fences, retained logical effects, bounded retry-neutral acquisition/recovery, owner RLS, fail-closed encryption and security/property/compatibility certification. All task and whole-branch findings fixed and re-reviewed. Final1666selected passes0skips,95.39%scope linecoverage; independent148encrypted regressions pass; strictworkflow/lifecycleBandit0new. Existing managerB608,3conftestI001,legacyformat/warning debt and unrelated httpx2 fullrepo blocker remain explicit. No Embeddings production wiring, PR, push, merge or activation. ADR060 governs; Stage3B domain substrate is later work. Human-authored Change summary remains required before merging any future AI-authored PR.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
+- [x] #5 Final summary added
 - [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
