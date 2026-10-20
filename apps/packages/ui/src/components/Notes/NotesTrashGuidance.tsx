@@ -2,6 +2,7 @@ import React from 'react'
 import { Button } from 'antd'
 import { Trash2 as TrashIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
+import { NOTES_EDITOR_REGION_ID } from './notes-manager-utils'
 
 type NotesTrashGuidanceProps = {
   isMobileViewport: boolean
@@ -21,7 +22,10 @@ const NotesTrashGuidance: React.FC<NotesTrashGuidanceProps> = ({
   const { t } = useTranslation(['option'])
   return (
     <section
-      className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-border bg-surface p-6 text-center"
+      // Takes the editor's place, so "Skip to editor" still lands somewhere.
+      id={NOTES_EDITOR_REGION_ID}
+      tabIndex={-1}
+      className="flex min-w-0 flex-1 flex-col items-center justify-center gap-3 rounded-lg border border-border bg-surface p-6 text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
       aria-labelledby="notes-trash-guidance-title"
       data-testid="notes-trash-guidance"
     >

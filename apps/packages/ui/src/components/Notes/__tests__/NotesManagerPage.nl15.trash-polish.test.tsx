@@ -217,7 +217,7 @@ describe("NotesManagerPage NL-15 Trash polish", { timeout: 60_000 }, () => {
 
     expect(await screen.findByTestId("notes-restore-n-trash", undefined, { timeout: 10_000 })).toBeInTheDocument()
     expect(screen.getByTestId("notes-sidebar-header-label")).toHaveTextContent("Trash")
-    expect(screen.getByTestId("notes-trash-guidance")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-trash-guidance")).toHaveAttribute("id", "notes-editor-region")
     expect(screen.queryByTestId("notes-editor-empty-create")).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Import" })).not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "Export" })).not.toBeInTheDocument()
