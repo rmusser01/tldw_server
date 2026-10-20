@@ -272,6 +272,91 @@ it("shows confirmed native refusal with exact input, Copy and Dismiss without un
   ).toBeNull()
 })
 
+it("CC-02 / CM-06: names why a send got no reply and offers Switch model and Edit and send again", async () => {
+  const events: Array<{ type: string; detail: unknown }> = []
+  const record = (event: Event) =>
+    events.push({ type: event.type, detail: (event as CustomEvent).detail })
+  window.addEventListener("tldw:open-model-settings", record)
+  window.addEventListener("tldw:set-composer-message", record)
+  try {
+    const selection = {
+      ...controller(),
+      status: "ready",
+      recoveries: [
+        {
+          scope: { profile_id: "p", client_session_id: "old" },
+          turn: {
+            operation_id: "timed-out",
+            persistence: "server",
+            state: "unknown",
+            input_text: "slow question",
+            result_text: "",
+            failure: { model: "gemma3:1b", timeout_ms: 120_000 }
+          }
+        }
+      ],
+      dismissRecovery: vi.fn(async () => true)
+    } as unknown as HistorySelectionController
+    render(<HistorySelectionReview selection={selection} />)
+    fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+    const card = screen.getByText("No response from gemma3:1b after 2:00.").closest("[role='alert']") as HTMLElement
+    expect(card).toBeTruthy()
+    expect(within(card).getByText(/Your message may have reached the server/)).toBeVisible()
+    expect(within(card).queryByText("Turn needs review")).toBeNull()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Switch model" }))
+    expect(events.map((event) => event.type)).toEqual(["tldw:open-model-settings"])
+
+    await act(async () => {
+      fireEvent.click(within(card).getByRole("button", { name: "Edit and send again" }))
+    })
+    expect(selection.dismissRecovery).toHaveBeenCalledWith(selection.recoveries[0], expect.any(Function))
+    await waitFor(() =>
+      expect(events.at(-1)).toEqual({
+        type: "tldw:set-composer-message",
+        detail: { message: "slow question" }
+      })
+    )
+  } finally {
+    window.removeEventListener("tldw:open-model-settings", record)
+    window.removeEventListener("tldw:set-composer-message", record)
+  }
+})
+
+it("CC-02: a kept failure whose question is saved names the cause without offering to send the question again", () => {
+  const selection = {
+    ...controller(),
+    status: "ready",
+    recoveries: [
+      {
+        scope: { profile_id: "p", client_session_id: "old" },
+        turn: {
+          operation_id: "kept-failure",
+          state: "accepted_unsent",
+          outcome: "interrupted",
+          input_text: "saved question",
+          result_text: "",
+          failure: {
+            status: 502,
+            code: "provider_unavailable",
+            message: "The chat service provider is currently unavailable.",
+            provider: "ollama",
+            model: "gemma3:1b"
+          }
+        }
+      }
+    ],
+    dismissRecovery: vi.fn(async () => true)
+  } as unknown as HistorySelectionController
+  render(<HistorySelectionReview selection={selection} />)
+  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+  const card = screen.getByText("Couldn't reach Ollama (gemma3:1b)").closest("[role='alert']") as HTMLElement
+  expect(within(card).getByText("Your question is saved, but no reply was.")).toBeVisible()
+  expect(within(card).queryByText(/part of the reply that arrived/)).toBeNull()
+  expect(within(card).getByRole("button", { name: "Switch model" })).toBeTruthy()
+  expect(within(card).queryByRole("button", { name: "Edit and send again" })).toBeNull()
+})
+
 const recoveryController = (
   persistence: "server" | "client" | undefined,
   state: "accepted_unsent" | "generated_unsaved",

@@ -13,6 +13,7 @@ import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   chronologicalHistoryNodes,
   hasReviewableHistory,
+  historyTurnFailureCopy,
   partialHistoryCoverage,
   plainHistoryPreview
 } from "./history-review-presentation"
@@ -577,13 +578,36 @@ export function HistorySelectionReview({
       }
     }
   }
+  // Put the message of a send that got no reply back in the composer, so it
+  // can be sent again, e.g. after switching model (CC-02, CM-06).
+  const sendAgain = async (
+    entry: HistorySelectionController["recoveries"][number]
+  ) => {
+    const isCurrent = () =>
+      mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent()
+    if (!isCurrent() || retryAbort.current || recoveryActionRef.current?.pending) return
+    if (!(await selection.dismissRecovery(entry, isCurrent)) || !isCurrent()) return
+    window.dispatchEvent(
+      new CustomEvent("tldw:set-composer-message", {
+        detail: { message: entry.turn.input_text }
+      })
+    )
+    focusComposer()
+  }
   const renderRecovery = (
     entry: HistorySelectionController["recoveries"][number]
-  ) => (
+  ) => {
+    // A send that got no reply, with a known cause (CC-02, CM-06).
+    const failed =
+      entry.turn.failure && !entry.turn.roleplay_resume && entry.turn.action === undefined &&
+      !entry.turn.settled_message_id && !(entry.turn.result_text ?? "").trim()
+        ? historyTurnFailureCopy(entry.turn.failure)
+        : null
+    return (
     <div
       key={entry.turn.operation_id}
-      className="mb-3 rounded border p-3"
-      role="status">
+      className={`mb-3 rounded border p-3${failed ? " border-danger/30 bg-danger/10" : ""}`}
+      role={failed ? "alert" : "status"}>
       {entry.turn.roleplay_resume ? (
         <>
           <p className="font-medium">{entry.turn.roleplay_resume.completion?.saved
@@ -653,6 +677,21 @@ export function HistorySelectionReview({
                 )}
           </p>
         </>
+      ) : failed ? (
+        <>
+          <p className="font-medium">{failed.summary}</p>
+          {failed.hint && <p>{failed.hint}</p>}
+          <p>
+            {entry.turn.outcome
+              ? text("failedTurnSavedMessage", "Your question is saved, but no reply was.")
+              : text(
+                  entry.turn.persistence === "server" ? "failedTurnServerMessage" : "failedTurnMessage",
+                  entry.turn.persistence === "server"
+                    ? "No reply was saved. Your message may have reached the server; it will not be sent again automatically."
+                    : "No reply was saved. It will not be sent again automatically."
+                )}
+          </p>
+        </>
       ) : entry.turn.persistence !== 'server' &&
         (entry.turn.outcome === 'stopped' || entry.turn.outcome === 'interrupted') ? (
         <>
@@ -663,10 +702,12 @@ export function HistorySelectionReview({
               : text("keptReplyInterruptedTitle", "Reply interrupted")}
           </p>
           <p>
-            {text(
-              "keptReplyMessage",
-              "Your question is saved. The part of the reply that arrived is kept on this device only; it was not saved to your server."
-            )}
+            {(entry.turn.result_text ?? "").trim()
+              ? text(
+                  "keptReplyMessage",
+                  "Your question is saved. The part of the reply that arrived is kept on this device only; it was not saved to your server."
+                )
+              : text("keptReplyStoppedEarlyMessage", "Your question is saved. The reply was stopped before it started.")}
           </p>
         </>
       ) : entry.turn.state === "refused" ? (
@@ -740,6 +781,24 @@ export function HistorySelectionReview({
             </a>
           ))}
       </details>
+      {failed && (
+        <>
+          {/* A saved question is answered by Retry, not sent a second time. */}
+          {!entry.turn.outcome && (
+            <Button
+              disabled={retrying !== null || recoveryAction?.pending || openingRecovery !== null}
+              onClick={() => void sendAgain(entry)}>
+              {text("sendAgain", "Edit and send again")}
+            </Button>
+          )}
+          <Button
+            onClick={() =>
+              window.dispatchEvent(new CustomEvent("tldw:open-model-settings"))
+            }>
+            {text("switchModel", "Switch model")}
+          </Button>
+        </>
+      )}
       <Button
         disabled={retrying !== null || recoveryAction?.pending || openingRecovery !== null}
         loading={recoveryAction?.pending && recoveryAction.action === "copy" && recoveryAction.operationId === entry.turn.operation_id}
@@ -777,7 +836,8 @@ export function HistorySelectionReview({
         {text("dismissRecovery", "Dismiss recovery")}
       </Button>
     </div>
-  )
+    )
+  }
 
   // Shown once there is something to choose between (CC-04): two or more
   // turns, alternative replies, a legacy review, a partial choice to undo, or

@@ -1185,7 +1185,7 @@ const captureNormalHistoryTurn = async (
     state: HistoryTurnRecovery["state"],
     extra: Pick<
       Partial<HistoryTurnRecovery>,
-      "outcome" | "interruption_reason" | "settled_message_id"
+      "outcome" | "interruption_reason" | "settled_message_id" | "failure"
     > = {}
   ): HistoryTurnRecovery => ({
     operation_id: operationId,
@@ -1354,24 +1354,48 @@ const captureNormalHistoryTurn = async (
       }
       // A reply the server never received leaves the server copy incomplete.
       endReplyWrite?.(turn.persistence === "server" ? "unknown" : data.content.trim() ? "failed" : "unknown")
-      await saveRecord(
-        record(
-          turn,
-          data.content,
-          data.content
-            ? "generated_unsaved"
-            : turn.admission
-              ? "accepted_unsent"
-              : "unknown",
-          data.outcome
+      if (
+        !turn.admission &&
+        (data.cancelled || (data.failure && turn.persistence === "server"))
+      ) {
+        // Stopped before the question was confirmed (CM-02), or refused by
+        // the server before it saved the question (CC-02): there is nothing
+        // to recover. The text goes back to the composer, or the error is
+        // shown under the question.
+        await recoveryWrites
+        await dismissHistoryTurnRecovery(bookmarkScope, view, operationId, "completed")
+        await controller.refreshRecovery?.()
+        return
+      }
+      const failure = data.failure ?? data.cause
+      const retained = record(
+        turn,
+        data.content,
+        data.content
+          ? "generated_unsaved"
+          : turn.admission
+            ? "accepted_unsent"
+            : "unknown",
+        {
+          ...(data.outcome
             ? {
                 outcome: data.outcome,
                 ...(data.interruptionReason
                   ? { interruption_reason: data.interruptionReason }
                   : {})
               }
-            : {}
-        )
+            : {}),
+          ...(failure ? { failure } : {})
+        }
+      )
+      await saveRecord(
+        // A server-settled turn the user stopped, or that failed after the
+        // server took its question, keeps its reply bubble on this device
+        // (CM-02, CC-02).
+        turn.persistence === "server" && turn.admission &&
+          (data.outcome === "stopped" || (data.outcome && data.failure))
+          ? { ...retained, assistant_id: data.assistantId }
+          : retained
       )
       await controller.refreshRecovery?.()
     },

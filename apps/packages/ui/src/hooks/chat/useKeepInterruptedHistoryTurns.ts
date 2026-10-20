@@ -25,7 +25,9 @@ const inputIdOf = (entry: HistoryTurnRecoveryEntry) =>
  * page ends off-screen, turns retained with an `outcome` are put back into the
  * selected history instead of waiting in review. A partial reply of a server
  * chat, which only this device holds, is shown after its question as an
- * interrupted reply until the user retries or moves on.
+ * interrupted reply until the user retries or moves on; so are a reply the
+ * user stopped before it started and the error the server answered with
+ * (CM-02, CC-02).
  *
  * Returns whether a retained turn is shown in the transcript or handled here,
  * so the review panel can leave it out.
@@ -59,7 +61,9 @@ export function useKeepInterruptedHistoryTurns({
         (entry) =>
           entry.turn.action === undefined &&
           !entry.turn.roleplay_resume &&
-          (entry.turn.persistence !== 'server' || entry.turn.settled_message_id) &&
+          (entry.turn.persistence !== 'server' ||
+            entry.turn.settled_message_id ||
+            isRetainedPartialReply(entry.turn, ownerKind)) &&
           entry.turn.outcome &&
           !isHistoryTurnLive(entry.turn.operation_id) &&
           !keptRef.current.has(entry.turn.operation_id)
@@ -78,7 +82,7 @@ export function useKeepInterruptedHistoryTurns({
     return () => {
       cancelled = true
     }
-  }, [recoveries, status])
+  }, [ownerKind, recoveries, status])
 
   // A turn of this page that ended off-screen (e.g. it finished after the
   // user left and came back) leaves a record for this view to keep.
@@ -92,13 +96,11 @@ export function useKeepInterruptedHistoryTurns({
 
   const retainedReplies = React.useMemo(
     () =>
-      ownerKind === "native"
-        ? (recoveries ?? []).filter(
-            (entry) =>
-              entry.turn.action === undefined && !entry.turn.roleplay_resume &&
-              isRetainedPartialReply(entry.turn, ownerKind)
-          )
-        : [],
+      (recoveries ?? []).filter(
+        (entry) =>
+          entry.turn.action === undefined && !entry.turn.roleplay_resume &&
+          isRetainedPartialReply(entry.turn, ownerKind)
+      ),
     [ownerKind, recoveries]
   )
 
@@ -131,6 +133,7 @@ export function useKeepInterruptedHistoryTurns({
       (entry.turn.action === undefined &&
         !entry.turn.roleplay_resume &&
         (entry.turn.persistence !== 'server' ||
+          isRetainedPartialReply(entry.turn, ownerKind) ||
           messages.some((message) => message.id === entry.turn.settled_message_id)) &&
         Boolean(entry.turn.outcome) &&
         (!isRetainedPartialReply(entry.turn, ownerKind) ||

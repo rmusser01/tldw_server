@@ -132,7 +132,8 @@ import { createCharacterEmoteStream } from "@/hooks/chat/character-emote-stream"
 import {
   discardAbortedTurnIfRequested,
   isAbortLikeError,
-  markChatTurnStoppedByUser
+  markChatTurnStoppedByUser,
+  wasChatTurnStoppedByUser
 } from "@/hooks/chat/abort-turn-cleanup"
 import { resolveSavedDegradedCharacterPersist } from "@/hooks/chat/characterPersistOutcome"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
@@ -208,6 +209,7 @@ import {
   loadLocalHistoryAdmission
 } from "@/db/dexie/history-selection"
 import type { HistoryAdmissionReferenceV1 } from "@/types/history-selection"
+import { isRetainedPartialReply } from "@/services/history-turn-keep"
 
 type ChatModelSettingsStore = ChatModelSettings & {
   setSystemPrompt?: (prompt: string) => void
@@ -4998,10 +5000,12 @@ export const useChatActions = ({
     } catch (e) {
       const errorMessage =
         e instanceof Error ? e.message : t("somethingWentWrong")
+      // A send stopped while it was still being prepared fails its lease
+      // checks; it was cancelled, not broken (CM-02).
       const requestCancelled =
         signal.aborted &&
-        isAbortLikeError(e) &&
-        !isRequestConfigScopeChangedError(e)
+        ((isAbortLikeError(e) && !isRequestConfigScopeChangedError(e)) ||
+          wasChatTurnStoppedByUser(signal))
       if ((!preparingOriginalScene || preparationSourceIsCurrent() ||
         ((e instanceof NativeHistoryBranchRefusal || e instanceof NativeHistoryContextRefusal || e instanceof NativeHistorySettingsReadError || e instanceof NativeHistoryRoleplaySendError) && e.isCurrent())) && (!historyRegenerate || historyRegenerate.isOriginCurrent()) && (!continuationSource || continuationSource.isCurrent()) && !((e instanceof NativeHistoryBranchRefusal || e instanceof NativeHistoryContextRefusal || e instanceof NativeHistorySettingsReadError || e instanceof NativeHistoryRoleplaySendError) && !e.isCurrent()) && !greetingSeed && !requestCancelled && !isChatPromotionIncompleteError(e)) {
         const preflightMessage = nativeCharacterPreflightMessage(e, t)
@@ -5597,7 +5601,7 @@ export const useChatActions = ({
           : selection.recoveries ?? []
       if (!sourceFence() || !sameSource()) return retired()
       const retained = recoveries.filter(
-        (entry) => entry.turn.persistence !== "server" && (
+        (entry) => (entry.turn.persistence !== "server" || isRetainedPartialReply(entry.turn, "native")) && (
           entry.turn.input_id === question.id ||
           entry.turn.admission?.input_message_id === question.id)
       )
@@ -5620,10 +5624,15 @@ export const useChatActions = ({
       if (!sourceFence() || !sameSource()) return retired()
       dispatch?.controller?.signal.throwIfAborted()
       dispatch?.assertCurrent?.()
-      const choosing = selection.choose({
-        kind: "before_message",
-        message_id: question.id
-      })
+      // A question the server refused before saving it is not in the chat:
+      // it is asked again from where the chat ends (CC-02).
+      const choosing = !questionAdmission && current.capture?.status === "captured" &&
+        !current.capture.snapshot.nodes.some((row) => row.id === question.id)
+        ? Promise.resolve(true)
+        : selection.choose({
+            kind: "before_message",
+            message_id: question.id
+          })
       // Retain this choice while its capture is still loading.
       const retryFence = selection.fence()
       const moved = await choosing

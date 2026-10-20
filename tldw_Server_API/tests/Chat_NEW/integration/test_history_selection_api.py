@@ -1372,3 +1372,59 @@ def test_actual_put_and_native_delete_use_conversation_first_order(native_mutati
         assert stored["deleted"]
         assert stored["content"] == "Original"
         assert not (db.get_message_metadata(leaf) or {}).get("extra", {}).get("pinned")
+
+
+@pytest.mark.parametrize("stream", [False, True])
+@pytest.mark.parametrize("failure", ["provider_error", "provider_unavailable"])
+def test_server_settled_failure_after_admission_returns_the_saved_question(history_api, monkeypatch, stream, failure):
+    """CC-02: a provider failure after the server saved the question names it.
+
+    The question is admitted before the provider is called and stays saved when
+    the provider then fails. The error carries the same admission the stream's
+    first frame would, so the client can keep the question in view and retry it
+    without saving it twice.
+    """
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints import chat as endpoint
+    from tldw_Server_API.app.core.Chat.chat_exceptions import ChatProviderError
+
+    client, db, cid, headers = history_api
+    body = capture(client, cid, headers).json()
+    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "failure")["selection"]
+
+    def provider(**_kwargs):
+        if failure == "provider_unavailable":
+            raise HTTPException(status_code=502, detail={
+                "error_code": "provider_unavailable",
+                "message": "The chat service provider is currently unavailable.",
+            })
+        raise ChatProviderError(provider="openai", message="connection refused", status_code=502)
+
+    monkeypatch.setattr(endpoint, "perform_chat_api_call", provider)
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True, "stream": stream,
+        "messages": [{"role": "user", "content": "failed question"}], "tldw_history_selection_v1": selection})
+    assert response.status_code == 502, response.text
+    detail = response.json()["detail"]
+    assert isinstance(detail, dict)
+    assert detail["message"] == "The chat service provider is currently unavailable."
+    admission = detail["tldw_history_admission_v1"]
+    assert admission["conversation_id"] == cid
+    saved = db.get_message_by_id(admission["input_message_id"])
+    assert saved["content"] == "failed question"
+    assert [row["sender"] for row in db.get_messages_for_conversation(cid)] == ["user"]
+
+
+def test_failure_before_admission_names_no_saved_question(history_api):
+    """A request refused before the question is saved carries no admission."""
+    client, db, cid, headers = history_api
+    body = capture(client, cid, headers).json()
+    selection = resolve_history_selection(body["snapshot"], body["view"], "send", "stale")["selection"]
+    stale = {**selection, "selection_digest": "0" * len(selection["selection_digest"])}
+    response = client.post("/api/v1/chat/completions", headers=headers, json={
+        "model": "gpt-4o-mini", "conversation_id": cid, "save_to_db": True,
+        "messages": [{"role": "user", "content": "refused question"}], "tldw_history_selection_v1": stale})
+    assert response.status_code == 409, response.text
+    assert "tldw_history_admission_v1" not in response.text
+    assert db.count_messages_for_conversation(cid) == 0

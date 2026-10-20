@@ -10,6 +10,11 @@ import type {
   HistoryViewSelectionV1
 } from "@/types/history-selection"
 import { latestHistoryTipId, resolveHistorySelection } from "@/utils/history-selection"
+import type { HistoryTurnFailure } from "@/db/dexie/types"
+import {
+  buildSendFailureContent,
+  decodeChatErrorPayload
+} from "@/utils/chat-error-message"
 
 type LinkedNode = Pick<HistoryNodeV1, "id" | "parent_id">
 
@@ -117,4 +122,16 @@ export const partialHistoryCoverage = (
     }
   }
   return null
+}
+
+/**
+ * Plain-language cause of a send that got no reply (CC-02, CM-06), e.g.
+ * "Couldn't reach Ollama (gemma3:1b)" or "No response from gemma3:1b after
+ * 2:00.", worded exactly as the error reply in the transcript would be.
+ */
+export const historyTurnFailureCopy = (
+  failure: HistoryTurnFailure
+): { summary: string; hint?: string } | null => {
+  const payload = decodeChatErrorPayload(buildSendFailureContent(failure))
+  return payload ? { summary: payload.summary, hint: payload.hint } : null
 }

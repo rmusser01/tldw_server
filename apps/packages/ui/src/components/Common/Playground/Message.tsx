@@ -3015,10 +3015,15 @@ const PlaygroundMessageImpl = (props: Props) => {
                     : t("playground:errorRecovery.interruptedLabel", "Interrupted")}
                 </span>
                 {stoppedGeneration
-                  ? t(
-                      "playground:errorRecovery.stoppedSummary",
-                      "You stopped this reply. What it wrote so far is kept."
-                    )
+                  ? hasVisibleAssistantResponseContent
+                    ? t(
+                        "playground:errorRecovery.stoppedSummary",
+                        "You stopped this reply. What it wrote so far is kept."
+                      )
+                    : t(
+                        "playground:errorRecovery.stoppedBeforeReplySummary",
+                        "You stopped this reply before it started."
+                      )
                   : t(
                       "playground:errorRecovery.interruptedSummary",
                       "Generation was interrupted. Any text received is kept."

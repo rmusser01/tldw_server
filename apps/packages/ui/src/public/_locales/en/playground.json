@@ -4619,6 +4619,24 @@
   "historySelection_roleAssistant": {
     "message": "Assistant"
   },
+  "historySelection_failedTurnMessage": {
+    "message": "No reply was saved. It will not be sent again automatically."
+  },
+  "historySelection_failedTurnServerMessage": {
+    "message": "No reply was saved. Your message may have reached the server; it will not be sent again automatically."
+  },
+  "historySelection_sendAgain": {
+    "message": "Edit and send again"
+  },
+  "historySelection_switchModel": {
+    "message": "Switch model"
+  },
+  "errorRecovery_stoppedSummary": {
+    "message": "You stopped this reply. What it wrote so far is kept."
+  },
+  "errorRecovery_stoppedBeforeReplySummary": {
+    "message": "You stopped this reply before it started."
+  },
   "composer_stop": {
     "message": "Stop"
   },
@@ -4642,5 +4660,11 @@
   },
   "composer_providerUnreachableGenericTitle": {
     "message": "This model's provider didn't respond to the last message. Start the provider or switch models."
+  },
+  "historySelection_failedTurnSavedMessage": {
+    "message": "Your question is saved, but no reply was."
+  },
+  "historySelection_keptReplyStoppedEarlyMessage": {
+    "message": "Your question is saved. The reply was stopped before it started."
   }
 }
