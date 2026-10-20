@@ -251,6 +251,20 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
     }
   })
 
+  it("fills the viewport frame with no top band or window-sized panels (NO-01)", async () => {
+    renderPage()
+    const frame = screen.getByTestId("notes-page-frame")
+    // mt-16 left an ~80px empty band under the app header.
+    expect(frame.className).not.toContain("mt-16")
+    expect(frame.className).toContain("h-full")
+    expect(frame.className).toContain("min-h-0")
+    // Panels stretch to the frame instead of innerHeight-120px.
+    const toggle = screen.getByTestId("notes-desktop-sidebar-toggle")
+    expect(toggle.style.height).toBe("")
+    expect(toggle.style.minHeight).toBe("")
+    expect(screen.getByTestId("notes-list-region").style.height).toBe("")
+  })
+
   it("restores desktop sidebar collapse state after returning from mobile", async () => {
     const { rerender } = renderPage()
     const listRegion = screen.getByTestId("notes-list-region")
@@ -356,8 +370,8 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
     setViewportWidth(375)
     renderPage()
 
-    fireEvent.click(screen.getByTestId("notes-editor-empty-create"))
-
+    // The blank editor is already a draft (NO-04): no create click needed.
+    expect(screen.queryByTestId("notes-editor-empty-create")).not.toBeInTheDocument()
     const titleInput = await screen.findByRole("textbox", { name: "Note title" })
     expect(screen.getByTestId("notes-title-row")).toHaveClass("flex-wrap")
     expect(titleInput).toHaveClass("!min-w-full")

@@ -82,11 +82,9 @@ import {
   normalizeGraphNoteId,
   getNotesGraphEdgeLabel,
   parseSourceNodeId,
-  MIN_SIDEBAR_HEIGHT,
   NOTES_LIST_REGION_ID,
   NOTES_EDITOR_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
-  calculateSidebarHeight,
   NOTE_TEMPLATES,
   toSortableTimestamp,
   toNoteVersion,
@@ -120,6 +118,7 @@ import {
   resolveNotesGraphFocusNoteId,
 } from './notes-manager-utils'
 import { isEditableTarget } from "@/utils/editable-target"
+import { useConnectionsMemory } from './notes-connections'
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
 
@@ -246,7 +245,6 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   const [shortcutHelpOpen, setShortcutHelpOpen] = React.useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
   const desktopSidebarCollapsedRef = React.useRef(false)
-  const [sidebarHeight, setSidebarHeight] = React.useState(calculateSidebarHeight())
   const [conversationLabelById, setConversationLabelById] = React.useState<Record<string, string>>({})
   const conversationLabelByIdRef = React.useRef<Record<string, string>>({})
   conversationLabelByIdRef.current = conversationLabelById
@@ -532,6 +530,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     setNeighborsIntent({ owner: noteNeighborsOwner, requested: false, denied: false })
   }
   const noteNeighborsRequested = neighborsIntent.owner === noteNeighborsOwner && neighborsIntent.requested
+  const connectionsMemory = useConnectionsMemory()
   const {
     data: requestedNoteNeighborsData,
     error: noteNeighborsFailure,
@@ -705,7 +704,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
               ? t('option:notesSearch.connectionLabelManualBacklink', { defaultValue: 'Manual backlink' })
               : getNotesGraphEdgeLabel(type)
 
-      upsertRelation(relatedById, counterpartId, relationLabel)
+      // Manual links have their own list (NE-10).
+      if (type !== 'manual') upsertRelation(relatedById, counterpartId, relationLabel)
 
       if (type === 'wikilink' && target === selectedNormalized) {
         upsertRelation(
@@ -721,18 +721,11 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           t('option:notesSearch.connectionLabelBacklink', { defaultValue: 'Backlink' })
         )
       }
-      if (type === 'manual' && directed && target === selectedNormalized) {
-        upsertRelation(
-          backlinksById,
-          source,
-          t('option:notesSearch.connectionLabelManualBacklink', { defaultValue: 'Manual backlink' })
-        )
-      }
       if (type === 'manual') {
         if (!counterpartId) continue
         const edgeId = String(edge?.id || '')
         if (!edgeId) continue
-        const relation = buildNoteRelation(counterpartId, getNotesGraphEdgeLabel(type))
+        const relation = buildNoteRelation(counterpartId, relationLabel)
         manualLinkByEdgeId.set(edgeId, {
           edgeId,
           noteId: counterpartId,
@@ -746,8 +739,9 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       }
     }
 
+    const manualLinkIds = new Set(Array.from(manualLinkByEdgeId.values(), (link) => link.noteId))
     for (const normalizedId of noteNodeMap.keys()) {
-      if (normalizedId !== selectedNormalized) {
+      if (normalizedId !== selectedNormalized && !manualLinkIds.has(normalizedId)) {
         upsertRelation(
           relatedById,
           normalizedId,
@@ -2482,14 +2476,6 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     return () => { cancelled = true }
   }, [list.data, ed, isOnline, list.listMode, pendingNoteId, sourceNoteId])
 
-  // Sidebar layout
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return
-    const handleResize = () => setSidebarHeight(calculateSidebarHeight())
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [])
-
   React.useEffect(() => {
     if (!isMobileViewport) desktopSidebarCollapsedRef.current = sidebarCollapsed
   }, [isMobileViewport, sidebarCollapsed])
@@ -2651,7 +2637,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   )
 
   return (
-    <div className="relative flex h-full w-full bg-bg p-2 sm:p-4 mt-16">
+    <div className="relative flex h-full min-h-0 w-full flex-1 bg-bg p-2 sm:p-4" data-testid="notes-page-frame">
       {LeaveGuard ? <LeaveGuard when={ed.leaveGuard.when} onLeave={ed.leaveGuard.onLeave} /> : null}
       <a href={`#${NOTES_LIST_REGION_ID}`} onClick={handleSkipLinkActivate(NOTES_LIST_REGION_ID)} className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-50 focus:rounded-md focus:border focus:border-border focus:bg-surface focus:px-3 focus:py-2 focus:text-sm focus:text-text focus:shadow">
         {t('option:notesSearch.skipToNotesList', { defaultValue: 'Skip to notes list' })}
@@ -2669,7 +2655,6 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         isMobileViewport={isMobileViewport}
         mobileSidebarOpen={mobileSidebarOpen}
         sidebarCollapsed={sidebarCollapsed}
-        sidebarHeight={sidebarHeight}
         listMode={list.listMode}
         listViewMode={list.listViewMode}
         page={list.page}
@@ -2748,6 +2733,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         createMoodboard={list.createMoodboard}
         renameMoodboard={list.renameMoodboard}
         deleteMoodboard={list.deleteMoodboard}
+        addNoteToMoodboard={list.addNoteToMoodboard}
         clearBulkSelection={list.clearBulkSelection}
         exportSelectedBulk={exp.exportSelectedBulk}
         addTagsToSelectedBulk={addTagsToSelectedBulk}
@@ -2767,8 +2753,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       {!isMobileViewport && (
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          className="relative w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors motion-reduce:transition-none rounded-r-lg"
-          style={{ minHeight: `${MIN_SIDEBAR_HEIGHT}px`, height: `${sidebarHeight}px` }}
+          className="relative h-full w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors motion-reduce:transition-none rounded-r-lg"
           aria-label={sidebarCollapsed ? t('option:notesSearch.expandSidebar', { defaultValue: 'Expand sidebar' }) : t('option:notesSearch.collapseSidebar', { defaultValue: 'Collapse sidebar' })}
           data-testid="notes-desktop-sidebar-toggle"
         >
@@ -2823,6 +2808,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         noteNeighborsState={noteNeighborsState}
         noteNeighborsRequestKey={noteNeighborsOwner}
         onRequestNeighbors={() => setNeighborsIntent((current) => ({ ...current, requested: true }))}
+        connectionsMemory={connectionsMemory}
         onRetryNeighbors={noteNeighborsUnavailable ? undefined : () => {
           void refetchNoteNeighbors()
         }}

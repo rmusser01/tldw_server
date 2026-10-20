@@ -41,7 +41,6 @@ const baseProps = {
   isMobileViewport: false,
   mobileSidebarOpen: false,
   sidebarCollapsed: false,
-  sidebarHeight: 720,
   listMode: 'active',
   listViewMode: 'list',
   page: 1,
@@ -142,7 +141,6 @@ const notes = Array.from({ length: 5 }, (_, index) => ({
 }))
 const expandedProps = {
   ...baseProps,
-  sidebarHeight: 600,
   total: 5,
   visibleNotes: notes,
   filteredCount: 5,
@@ -209,11 +207,12 @@ describe('Notes expanded sidebar result access', () => {
       'aria-expanded',
       'true'
     )
-    restored.rerender(<NotesSidebar {...expandedProps} sidebarHeight={760} />)
     fireEvent(window, new Event('resize'))
-    expect(screen.getByTestId('notes-list-region')).toHaveStyle({
-      height: '760px'
-    })
+    // The desktop sidebar fills the viewport-framed page; it no longer
+    // tracks window.innerHeight (NO-01).
+    expect(screen.getByTestId('notes-list-region').className).toContain(
+      'h-full'
+    )
     restored.rerender(
       <NotesSidebar {...expandedProps} isMobileViewport mobileSidebarOpen />
     )

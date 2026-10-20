@@ -385,8 +385,6 @@ export const formatSourceNodeLabel = (
   return parsed.externalRef ? `${sourceLabel}: ${parsed.externalRef}` : sourceLabel
 }
 
-// 120px offset accounts for page header and padding
-export const MIN_SIDEBAR_HEIGHT = 600
 export const NOTE_AUTOSAVE_DELAY_MS = 5000
 export const NOTE_SEARCH_DEBOUNCE_MS = 350
 export const LARGE_NOTE_PREVIEW_THRESHOLD = 10_000
@@ -428,11 +426,6 @@ export const isEditorSaveShortcutContext = (target: EventTarget | null): boolean
     return true
   }
   return false
-}
-
-export const calculateSidebarHeight = () => {
-  const vh = typeof window !== 'undefined' ? window.innerHeight : MIN_SIDEBAR_HEIGHT
-  return Math.max(MIN_SIDEBAR_HEIGHT, vh - 120)
 }
 
 export type SaveNoteOptions = {

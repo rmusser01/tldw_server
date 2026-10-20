@@ -1530,7 +1530,20 @@
       "notes_graph_suggestions_disabled": "Graph suggestions are disabled.",
       "notes_graph_suggestions_worker_unavailable": "The suggestion worker is unavailable.",
       "notes_graph_sync_not_ready": "Suggestion decisions are unavailable for this Notes dataset."
-    }
+    },
+    "controlsMoreBelow": "More filters below",
+    "editorDraftHint": "Start typing to create a note. Ctrl/Cmd+S saves it to your server. Type [[ to link another note.",
+    "moodboardCreateAction": "New collection",
+    "moodboardChoosePrompt": "Choose a collection above to see its notes.",
+    "moodboardFirstPrompt": "A collection is a group of notes you pick by hand. Create one, then add notes to it.",
+    "moodboardEmptyHowToAdd": "Open a note from the List view, then come back here and choose Add open note.",
+    "moodboardAddOpenNote": "Add open note",
+    "moodboardAddOpenNoteNeedsNote": "Open a note first",
+    "moodboardAddOpenNoteAlreadyIn": "The open note is already in this collection",
+    "moodboardAddOpenNoteSuccess": "Added to \"{{name}}\"",
+    "moodboardAddOpenNoteError": "Could not add the note to this collection",
+    "taskChipLabel": "Tasks {{done}}/{{total}}",
+    "taskChipTooltip": "Open the list to check off tasks. Changes update the note text and your task list."
   },
   "tts": {
     "playground": "TTS Playground"
@@ -1728,6 +1741,7 @@
     "studyPackJobRunning": "Creating your study pack.",
     "studyPackJobStatusUnavailable": "Unable to check study pack progress. Checking again shortly.",
     "studyPackResultUnavailable": "Study pack completed, but its review deck is unavailable.",
+    "studyPackManualSourceToggle": "Add a source by ID",
     "review": "Review",
     "cards": "Cards",
     "manageCardCount": "{count, plural, one {# card} other {# cards}}",

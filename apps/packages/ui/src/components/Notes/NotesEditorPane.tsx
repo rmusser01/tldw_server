@@ -20,7 +20,7 @@ import { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from '@/design-system'
 import NotesEditorHeader from '@/components/Notes/NotesEditorHeader'
 import NotesStudioView from '@/components/Notes/NotesStudioView'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
-import TaskChecklistPreview from '@/components/Notes/TaskChecklistPreview'
+import TaskChecklistToggle from '@/components/Notes/TaskChecklistToggle'
 import type { TaskChecklistTogglePayload } from '@/components/Notes/TaskChecklistPreview'
 import TaskActivityNotice from '@/components/Notes/TaskActivityNotice'
 import type { ActiveWikilinkQuery, WikilinkCandidate } from '@/components/Notes/wikilinks'
@@ -44,6 +44,8 @@ import type { SingleNoteCopyMode, SingleNoteExportFormat } from './export-utils'
 import type { NoteStudioState, NotesStudioPaperSize } from './notes-studio-types'
 import type { NotesTitleSuggestStrategy } from '@/services/settings/ui-settings'
 import type { NotesSaveIssue } from './hooks/useNotesEditorState'
+import { notesEditorSupportHint } from './notes-editor-hints'
+import { useConnectionsDisclosure, type ConnectionsMemory } from './notes-connections'
 import {
   NOTES_EDITOR_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
@@ -114,6 +116,7 @@ export interface NotesEditorPaneProps {
 
   // Selection / identity
   selectedId: string | number | null
+  /** No note open and nothing typed: the hint says how to start (NO-04). */
   showEmptyState: boolean
   title: string
   content: string
@@ -136,6 +139,8 @@ export interface NotesEditorPaneProps {
   noteNeighborsState?: 'not_loaded' | 'loading' | 'success' | 'error'
   noteNeighborsRequestKey?: string
   onRequestNeighbors?: () => void
+  /** Page-owned open/closed choice for Connections (NE-10). */
+  connectionsMemory?: ConnectionsMemory
   onRetryNeighbors?: () => void
 
   // Pinning
@@ -353,6 +358,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   noteNeighborsState,
   noteNeighborsRequestKey,
   onRequestNeighbors,
+  connectionsMemory,
   onRetryNeighbors,
   selectedNotePinned,
   editorMode,
@@ -603,6 +609,11 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
     </div>
   )
 
+  // NE-10: Related leaves out manual links (they have their own list), and
+  // Connections stays open across notes.
+  const relatedNotes = noteRelations.related
+  const connectionsDisclosure = useConnectionsDisclosure(noteNeighborsRequestKey, onRequestNeighbors, connectionsMemory)
+
   const renderRelationMeta = (
     relationLabel?: string,
     unavailableReason?: string | null
@@ -629,7 +640,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
       style={editorMode === 'split' ? { height: pairedHeight || editorMaxHeight, maxHeight: editorMaxHeight } : undefined}
       className={`flex min-h-0 flex-col gap-3 ${editorMode === 'split' ? 'overflow-auto flex-none' : 'flex-1'}`}
     >
-      <TaskChecklistPreview
+      <TaskChecklistToggle
         content={previewContent}
         tasks={noteTasks}
         isDirty={isDirty}
@@ -744,14 +755,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         studioBadgeLabel={studioBadgeLabel}
       />
       <div className="flex-1 flex flex-col px-4 py-3 overflow-auto" data-testid="notes-editor-body">
-        {showEmptyState && !loadingDetail && (
-          <NotesEditorEmptyState
-            disabled={editorDisabled}
-            onCreateNote={() => {
-              void handleNewNote()
-            }}
-          />
-        )}
         {showStudioMarkdownOnlyNotice ? (
           <div className="mb-3 flex items-center justify-between gap-3 rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">
             <span>
@@ -1070,17 +1073,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             onInspect={inspectTaskActivity}
             onDismiss={(eventId) => void dismissTaskActivity(eventId)}
           />
-          {noteTasks.length > 0 && (
-            <Typography.Text
-              type="secondary"
-              className="block text-[11px] mt-2 text-text-muted"
-              data-testid="notes-task-continuity-notice"
-            >
-              {t('option:notesSearch_taskContinuityNotice', {
-                defaultValue: 'Portable markdown with best-effort task continuity'
-              })}
-            </Typography.Text>
-          )}
           {canUndoAssist && (
             <div className="mt-2">
               <Button
@@ -1115,9 +1107,9 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 )}
               </Tooltip>
             }
-            defaultOpen={!onRequestNeighbors}
+            defaultOpen={!onRequestNeighbors || connectionsDisclosure.initiallyOpen}
             storageKey={onRequestNeighbors ? undefined : "connections"}
-            onOpenChange={(open) => { if (open) onRequestNeighbors?.() }}
+            onOpenChange={connectionsDisclosure.onOpenChange}
             testId="notes-section-connections"
           >
           {noteNeighborsUnavailable ? (
@@ -1307,7 +1299,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     </Button>
                   )}
                 </div>
-              ) : noteRelations.related.length === 0 ? (
+              ) : relatedNotes.length === 0 ? (noteRelations.manualLinks.length > 0 ? null : (
                 <Typography.Text
                   type="secondary"
                   className="block mt-2 text-[12px] text-text-muted"
@@ -1317,9 +1309,9 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     defaultValue: 'No related notes yet.'
                   })}
                 </Typography.Text>
-              ) : (
+              )) : (
                 <div className="mt-2 flex flex-wrap gap-1.5" data-testid="notes-related-list">
-                  {noteRelations.related.map((note) => (
+                  {relatedNotes.map((note) => (
                     <div
                       key={`related-${note.id}`}
                       className="rounded border border-border bg-surface"
@@ -1814,13 +1806,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   type="secondary"
                   className="block text-[11px] mt-1 text-text-muted"
                 >
-                  {editorInputMode === 'wysiwyg'
-                    ? t('option:notesSearch.wysiwygSupportHint', {
-                        defaultValue: 'WYSIWYG mode keeps markdown structure while you edit.'
-                      })
-                    : t('option:notesSearch.editorSupportHint', {
-                        defaultValue: 'Markdown + LaTeX supported'
-                      })}
+                  {notesEditorSupportHint(t, editorInputMode, showEmptyState, editorDisabled)}
                 </Typography.Text>
               </div>
               <div className="flex min-h-0 flex-col">
@@ -1955,13 +1941,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 type="secondary"
                 className="block text-[11px] mt-1 text-text-muted"
               >
-                {editorInputMode === 'wysiwyg'
-                  ? t('option:notesSearch.wysiwygSupportHint', {
-                      defaultValue: 'WYSIWYG mode keeps markdown structure while you edit.'
-                    })
-                  : t('option:notesSearch.editorSupportHint', {
-                      defaultValue: 'Markdown + LaTeX supported'
-                    })}
+                {notesEditorSupportHint(t, editorInputMode, showEmptyState, editorDisabled)}
               </Typography.Text>
             </div>
           )}

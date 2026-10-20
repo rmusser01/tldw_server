@@ -636,7 +636,6 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
             }
           >
             <Button
-              type="primary"
               size={toolbarButtonSize}
               onClick={onCreateStudyPack}
               disabled={!canCreateStudyPack}

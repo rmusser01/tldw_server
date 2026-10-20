@@ -6430,5 +6430,44 @@
   },
   "assistant_trackedModelsLoading": {
     "message": "Loading models before tracked chat selection. Wait for discovery to finish, or retry in the model picker."
+  },
+  "notesSearch_controlsMoreBelow": {
+    "message": "More filters below"
+  },
+  "notesSearch_editorDraftHint": {
+    "message": "Start typing to create a note. Ctrl/Cmd+S saves it to your server. Type [[ to link another note."
+  },
+  "notesSearch_moodboardCreateAction": {
+    "message": "New collection"
+  },
+  "notesSearch_moodboardChoosePrompt": {
+    "message": "Choose a collection above to see its notes."
+  },
+  "notesSearch_moodboardFirstPrompt": {
+    "message": "A collection is a group of notes you pick by hand. Create one, then add notes to it."
+  },
+  "notesSearch_moodboardEmptyHowToAdd": {
+    "message": "Open a note from the List view, then come back here and choose Add open note."
+  },
+  "notesSearch_moodboardAddOpenNote": {
+    "message": "Add open note"
+  },
+  "notesSearch_moodboardAddOpenNoteNeedsNote": {
+    "message": "Open a note first"
+  },
+  "notesSearch_moodboardAddOpenNoteAlreadyIn": {
+    "message": "The open note is already in this collection"
+  },
+  "notesSearch_moodboardAddOpenNoteSuccess": {
+    "message": "Added to \"{{name}}\""
+  },
+  "notesSearch_moodboardAddOpenNoteError": {
+    "message": "Could not add the note to this collection"
+  },
+  "notesSearch_taskChipLabel": {
+    "message": "Tasks {{done}}/{{total}}"
+  },
+  "notesSearch_taskChipTooltip": {
+    "message": "Open the list to check off tasks. Changes update the note text and your task list."
   }
 }
