@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import sqlite3
 import zlib
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -26,6 +28,8 @@ from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
     WorkflowLookupResult,
     WorkflowOutcome,
     WorkflowPolicy,
+    WorkflowProgress,
+    WorkflowProgressResult,
     WorkflowReceipt,
     WorkflowRoot,
     WorkflowScope,
@@ -65,6 +69,8 @@ class WorkflowTransaction(Protocol):
 
     def release_effect(self, root: WorkflowRoot, effect: WorkflowEffect) -> WorkflowEffectResult: ...
 
+    def record_progress(self, fence: WorkflowFence, proof: WorkflowProgress) -> WorkflowProgressResult: ...
+
 
 class WorkflowStore(Protocol):
     """Explicit schema and transaction-neutral admission/fencing leaves."""
@@ -93,6 +99,18 @@ class WorkflowStore(Protocol):
 
     def lease_is_live(self, connection: Any, job_uuid: str) -> bool: ...
 
+    def lease_is_expired(self, connection: Any, job_uuid: str) -> bool: ...
+
+    def enrollment_projection(self, connection: Any) -> str: ...
+
+    def record_workflow_acquisition_in_transaction(
+        self, connection: Any, *, backend: str, acquired: Mapping[str, object]
+    ) -> None: ...
+
+    def recover_workflow_expiry_in_transaction(
+        self, connection: Any, *, backend: str, locked_root: Mapping[str, object]
+    ) -> WorkflowEffectResult: ...
+
     def extend_horizon(self, connection: Any, job_uuid: str, minimum_seconds: int) -> Any: ...
 
     def database_now(self, connection: Any) -> datetime: ...
@@ -108,6 +126,7 @@ class WorkflowStore(Protocol):
         *,
         counters_enabled: bool,
         outbox_enabled: bool,
+        expired: bool = False,
     ) -> dict: ...
 
     def insert_effect_receipt(
@@ -217,6 +236,8 @@ class LiveWorkflowTransaction:
         self._fences: dict[WorkflowFence, tuple[WorkflowRoot, WorkflowLease]] = {}
         self._consumed_fences: dict[WorkflowFence, WorkflowRoot] = {}
         self._applied_effects: list[tuple[WorkflowRoot, WorkflowEffect, WorkflowReceipt]] = []
+        self._applied_progress: list[tuple[WorkflowRoot, tuple]] = []
+        self._closed_episodes: list[tuple[WorkflowRoot, tuple]] = []
         self.effect_events: list[tuple] = []
         self.admission_event: AdmissionResult | None = None
         if self.backend == "sqlite":
@@ -421,6 +442,87 @@ class LiveWorkflowTransaction:
             if proof.receipt is None or replace(proof.receipt, released=receipt.released) != receipt:
                 self._rollback_only = WorkflowOutcome.STALE_LEASE
                 raise WorkflowFenceError(self._rollback_only)
+        for root, expected in self._applied_progress:
+            retained = self._rows(
+                "SELECT * FROM job_workflow_effect_receipts WHERE owner_user_id=? AND job_uuid=? AND effect_key=?",
+                (root.owner_user_id, root.job_uuid, dict(expected)["effect_key"]),
+            )
+            support = self.store.support_by_uuid(self._connection, root.owner_user_id, root.job_uuid)
+            if (
+                len(retained) != 1
+                or tuple(sorted(retained[0].items())) != expected
+                or len(support) != 1
+                or support[0]["progress_flag"] != 1
+                or support[0]["no_progress_count"] != 0
+            ):
+                self._rollback_only = WorkflowOutcome.STALE_LEASE
+                raise WorkflowFenceError(self._rollback_only)
+        for root, expected in self._closed_episodes:
+            support = self.store.support_by_uuid(self._connection, root.owner_user_id, root.job_uuid)
+            if len(support) != 1 or _episode_state(support[0]) != expected:
+                self._rollback_only = WorkflowOutcome.STALE_LEASE
+                raise WorkflowFenceError(self._rollback_only)
+
+    def record_progress(self, fence: WorkflowFence, proof: WorkflowProgress) -> WorkflowProgressResult:
+        """Insert immutable semantic evidence and reset only under current authority."""
+        self.validate_fences()
+        if type(fence) is not WorkflowFence or fence not in self._fences:
+            raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
+        if type(proof) is not WorkflowProgress:
+            raise ValueError("workflow progress requires exact proof facts")
+        root, lease = self._fences[fence]
+        self._validate_live(root, lease)
+        support = self.store.support_by_uuid(self._connection, root.owner_user_id, root.job_uuid, lock=True)[0]
+        _require_episode(support, lease)
+        retained = self._rows(
+            "SELECT * FROM job_workflow_effect_receipts WHERE owner_user_id=? AND job_uuid=? AND effect_key=?",
+            (root.owner_user_id, root.job_uuid, proof.proof_key),
+        )
+        if retained:
+            row = retained[0]
+            expected = ("progress", proof.kind.value, proof.facts_fingerprint)
+            actual = (row["purpose"], row["progress_kind"], row["facts_fingerprint"])
+            return WorkflowProgressResult(
+                WorkflowOutcome.ALREADY_APPLIED if actual == expected else WorkflowOutcome.CONFLICT
+            )
+        slot = _next_slot(self.store, self._connection, root, "progress")
+        if slot > 32768:
+            self._rollback_only = WorkflowOutcome.EXHAUSTED
+            raise WorkflowFenceError(self._rollback_only)
+        facts = json.dumps(
+            [
+                "jobs_workflow_progress_v1",
+                root.job_uuid,
+                support["current_epoch"],
+                proof.proof_key,
+                proof.kind.value,
+                proof.facts_fingerprint,
+            ],
+            separators=(",", ":"),
+        )
+        self._rows(
+            "INSERT INTO job_workflow_effect_receipts(owner_user_id,job_uuid,effect_key,purpose,progress_kind,facts_fingerprint,facts,applied_at,slot) VALUES(?,?,?,'progress',?,?,?,?,?)",
+            (
+                root.owner_user_id,
+                root.job_uuid,
+                proof.proof_key,
+                proof.kind.value,
+                proof.facts_fingerprint,
+                facts,
+                self.store.database_now(self._connection),
+                slot,
+            ),
+        )
+        self._rows(
+            "UPDATE job_workflow_roots SET progress_flag=1,no_progress_count=0 WHERE owner_user_id=? AND job_uuid=? AND current_epoch=? AND lease_digest=? AND last_closed_epoch<current_epoch",
+            (root.owner_user_id, root.job_uuid, support["current_epoch"], support["lease_digest"]),
+        )
+        retained = self._rows(
+            "SELECT * FROM job_workflow_effect_receipts WHERE owner_user_id=? AND job_uuid=? AND effect_key=?",
+            (root.owner_user_id, root.job_uuid, proof.proof_key),
+        )[0]
+        self._applied_progress.append((root, tuple(sorted(retained.items()))))
+        return WorkflowProgressResult(WorkflowOutcome.APPLIED, reset=True)
 
     def _effect_proof(self, root: WorkflowRoot, effect: WorkflowEffect, *, lock: bool = False) -> WorkflowEffectResult:
         self._check_open()
@@ -528,6 +630,22 @@ class LiveWorkflowTransaction:
             # even if caught. It is not a committed lifecycle exhaustion proof.
             self._rollback_only = WorkflowOutcome.EXHAUSTED
             raise WorkflowFenceError(self._rollback_only)
+        exhausted = False
+        if effect.action in {WorkflowAction.CONTINUE, WorkflowAction.RETRY}:
+            support = self.store.support_by_uuid(self._connection, root.owner_user_id, root.job_uuid, lock=True)[0]
+            _require_episode(support, lease)
+            support = _close_episode(
+                self.store, self._connection, root, support, charge=effect.action is WorkflowAction.CONTINUE
+            )
+            self._closed_episodes.append((root, _episode_state(support)))
+            if (
+                effect.action is WorkflowAction.CONTINUE
+                and support["no_progress_count"] >= root.controls.no_progress_limit
+            ):
+                # This is a committed failure with its own identity, not a
+                # capacity denial and never a rewrite of the caller's intent.
+                effect = _no_progress_failure(root, support["current_epoch"])
+                exhausted = True
         row = self.store.jobs_by_uuid(self._connection, root.job_uuid)[0]
         status = {
             WorkflowAction.CONTINUE: "queued",
@@ -583,7 +701,11 @@ class LiveWorkflowTransaction:
             "started_at",
         )
         self.effect_events.append((effect, receipt, tuple((key, updated.get(key)) for key in fields), outbox))
-        return WorkflowEffectResult(WorkflowOutcome.APPLIED, receipt)
+        return (
+            WorkflowEffectResult(WorkflowOutcome.EXHAUSTED)
+            if exhausted
+            else WorkflowEffectResult(WorkflowOutcome.APPLIED, receipt)
+        )
 
     def ensure_horizon(self, fence: WorkflowFence, minimum_seconds: int) -> WorkflowHorizonResult:
         """Revalidate authority and promise the requested horizon or none."""
@@ -616,3 +738,164 @@ def workflow_store(backend: str) -> WorkflowStore:
 
         return jobs_workflow_postgres
     raise ValueError("unsupported Jobs workflow backend")
+
+
+def workflow_enrollment_projection(connection: Any, *, backend: str) -> str:
+    """Bounded Jobs metadata projection that also works on uninstalled schemas."""
+    return workflow_store(backend).enrollment_projection(connection)
+
+
+def _lease_digest(lease: WorkflowLease) -> str:
+    return hashlib.sha256(
+        json.dumps(["jobs_workflow_lease_v1", lease.worker_id, lease.lease_id], separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _episode_state(support: Mapping[str, object]) -> tuple:
+    return tuple(
+        support[key]
+        for key in ("current_epoch", "lease_digest", "progress_flag", "last_closed_epoch", "no_progress_count")
+    )
+
+
+def _require_episode(support: Mapping[str, object], lease: WorkflowLease) -> None:
+    if support["current_epoch"] <= support["last_closed_epoch"] or support["lease_digest"] != _lease_digest(lease):
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+
+
+def _next_slot(store: Any, connection: Any, root: WorkflowRoot, purpose: str) -> int:
+    return int(
+        store.rows(
+            connection,
+            "SELECT COALESCE(MAX(slot),0)+1 AS slot FROM job_workflow_effect_receipts WHERE owner_user_id=? AND job_uuid=? AND purpose=?",
+            (root.owner_user_id, root.job_uuid, purpose),
+        )[0]["slot"]
+    )
+
+
+def _close_episode(store: Any, connection: Any, root: WorkflowRoot, support: dict, *, charge: bool) -> dict:
+    count = support["no_progress_count"] + int(charge and not support["progress_flag"])
+    store.rows(
+        connection,
+        "UPDATE job_workflow_roots SET last_closed_epoch=current_epoch,no_progress_count=? WHERE owner_user_id=? AND job_uuid=? AND last_closed_epoch<current_epoch",
+        (count, root.owner_user_id, root.job_uuid),
+    )
+    return store.support_by_uuid(connection, root.owner_user_id, root.job_uuid)[0]
+
+
+def _episode_key(version: str, job_uuid: str, epoch: int) -> str:
+    return hashlib.sha256(json.dumps([version, job_uuid, epoch], separators=(",", ":")).encode()).hexdigest()
+
+
+def _no_progress_failure(root: WorkflowRoot, epoch: int) -> WorkflowEffect:
+    key = _episode_key("jobs_workflow_no_progress_v1", root.job_uuid, epoch)
+    return WorkflowEffect(key, WorkflowAction.FAIL, key, "no_progress_exhausted")
+
+
+def _enrolled_authority(store: Any, connection: Any, enrolled: Mapping[str, object]) -> tuple[WorkflowRoot, dict, dict]:
+    if enrolled.get("workflow_capability_version") != 1:
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+    jobs = store.jobs_by_uuid(connection, str(enrolled["uuid"]), lock=True)
+    if len(jobs) != 1:
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+    if store.inspect_support(connection) is not WorkflowOutcome.APPLIED:
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+    row = jobs[0]
+    retained = store.support_by_uuid(connection, row["owner_user_id"], str(row["uuid"]), lock=True)
+    if len(retained) != 1:
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+    support = retained[0]
+    root = _root_from_row(support)
+    if (
+        row.get("workflow_capability_version") != 1
+        or (row["domain"], row["queue"], row["job_type"]) != (root.scope.domain, root.scope.queue, root.scope.job_type)
+        or row["idempotency_key"] != root.idempotency_key
+        or row["max_retries"] != root.controls.max_retries
+        or row["quarantine_threshold"] != root.controls.quarantine_threshold
+        or row["expired_lease_policy"] != root.controls.expired_lease_policy.value
+        or _json_payload(row["payload"]) != {support["payload_field"]: root.reference_id}
+    ):
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+    return root, row, support
+
+
+def _record_workflow_acquisition(connection: Any, *, backend: str, acquired: Mapping[str, object]) -> None:
+    store = workflow_store(backend)
+    root, row, support = _enrolled_authority(store, connection, acquired)
+    if (
+        row["status"] != "processing"
+        or not store.lease_is_live(connection, root.job_uuid)
+        or support["current_epoch"] != support["last_closed_epoch"]
+    ):
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+    lease = WorkflowLease(row["worker_id"], row["lease_id"])
+    store.rows(
+        connection,
+        "UPDATE job_workflow_roots SET current_epoch=current_epoch+1,lease_digest=?,progress_flag=0 WHERE owner_user_id=? AND job_uuid=?",
+        (_lease_digest(lease), root.owner_user_id, root.job_uuid),
+    )
+
+
+def record_workflow_acquisition_in_transaction(
+    connection: Any, *, backend: str, acquired: Mapping[str, object]
+) -> None:
+    """Dispatch only enrolled deliveries, before the real acquisition commits."""
+    if acquired.get("workflow_capability_version") is None:
+        return
+    workflow_store(backend).record_workflow_acquisition_in_transaction(connection, backend=backend, acquired=acquired)
+
+
+def _recover_workflow_expiry(
+    connection: Any, *, backend: str, locked_root: Mapping[str, object]
+) -> WorkflowEffectResult:
+    store = workflow_store(backend)
+    root, row, support = _enrolled_authority(store, connection, locked_root)
+    if row["status"] in {"completed", "failed", "cancelled", "quarantined"}:
+        return WorkflowEffectResult(WorkflowOutcome.TERMINAL)
+    if row["status"] != "processing" or not store.lease_is_expired(connection, root.job_uuid):
+        return WorkflowEffectResult(WorkflowOutcome.STALE_LEASE)
+    lease = WorkflowLease(row["worker_id"], row["lease_id"])
+    _require_episode(support, lease)
+    support = _close_episode(store, connection, root, support, charge=True)
+    if support["no_progress_count"] >= root.controls.no_progress_limit:
+        effect = _no_progress_failure(root, support["current_epoch"])
+        status = "failed"
+    else:
+        key = _episode_key("jobs_workflow_expiry_v1", root.job_uuid, support["current_epoch"])
+        effect = WorkflowEffect(key, WorkflowAction.CONTINUE, key, not_before_at=store.database_now(connection))
+        status = "queued"
+    slot = _next_slot(store, connection, root, "action")
+    if slot > 32768:
+        raise WorkflowFenceError(WorkflowOutcome.EXHAUSTED)
+    receipt = WorkflowReceipt(
+        effect.effect_key,
+        workflow_effect_fingerprint(root, effect),
+        root.job_uuid,
+        effect.action,
+        status,
+        store.database_now(connection),
+    )
+    store.transition_effect(
+        connection,
+        root,
+        lease,
+        effect,
+        receipt,
+        row,
+        counters_enabled=os.getenv("JOBS_COUNTERS_ENABLED", "").lower() in {"1", "true", "yes", "on"},
+        outbox_enabled=os.getenv("JOBS_EVENTS_OUTBOX", "").lower() in {"1", "true", "yes", "on"},
+        expired=True,
+    )
+    store.insert_effect_receipt(connection, root, receipt, slot)
+    return WorkflowEffectResult(WorkflowOutcome.APPLIED, receipt)
+
+
+def recover_workflow_expiry_in_transaction(
+    connection: Any, *, backend: str, locked_root: Mapping[str, object]
+) -> WorkflowEffectResult:
+    """Use the caller's locked expired Jobs identity, never a replacement lease."""
+    if locked_root.get("workflow_capability_version") is None:
+        return WorkflowEffectResult(WorkflowOutcome.MISSING)
+    return workflow_store(backend).recover_workflow_expiry_in_transaction(
+        connection, backend=backend, locked_root=locked_root
+    )
