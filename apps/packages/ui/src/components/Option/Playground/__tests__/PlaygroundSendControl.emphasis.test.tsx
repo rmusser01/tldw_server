@@ -61,6 +61,55 @@ describe("PlaygroundSendControl emphasis", () => {
       screen.getByRole("button", { name: "Send message" })
     ).not.toHaveAttribute("data-draft-empty")
   })
+
+  it("does not dim Send a second time when it is already disabled", () => {
+    render(
+      <PlaygroundSendControl
+        {...casualDesktop}
+        isConnectionReady={false}
+        hasDraftContent={false}
+      />
+    )
+
+    const send = screen.getByRole("button", { name: "Send message" })
+    expect(send).toBeDisabled()
+    expect(send).not.toHaveClass("opacity-60")
+    expect(send).not.toHaveAttribute("data-draft-empty")
+  })
+})
+
+// CC-03 (#3101): the disabled Send must not say "Connect…" while the first
+// server check is still running and the rest of the composer says Connecting….
+describe("PlaygroundSendControl while the server connection is pending", () => {
+  it("says it is still connecting rather than asking to connect", () => {
+    render(
+      <PlaygroundSendControl
+        {...casualDesktop}
+        isConnectionReady={false}
+        connectionPending
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Send message" })).toHaveAttribute(
+      "title",
+      "Still connecting to your tldw server. Your draft has not been sent."
+    )
+  })
+
+  it("asks to connect once a check has failed", () => {
+    render(
+      <PlaygroundSendControl
+        {...casualDesktop}
+        isConnectionReady={false}
+        connectionPending={false}
+      />
+    )
+
+    expect(screen.getByRole("button", { name: "Send message" })).toHaveAttribute(
+      "title",
+      "Connect to your tldw server before sending. Your draft has not been queued."
+    )
+  })
 })
 
 describe("hasSendableDraft", () => {
@@ -74,5 +123,10 @@ describe("hasSendableDraft", () => {
     expect(hasSendableDraft({ message: "", image: "data:image/png;base64,x" })).toBe(true)
     expect(hasSendableDraft({ message: "", attachmentCount: 1 })).toBe(true)
     expect(hasSendableDraft({ message: "", hasImportedContext: true })).toBe(true)
+  })
+
+  it("counts pinned search results, which send on their own", () => {
+    expect(hasSendableDraft({ message: "", pinnedResultCount: 2 })).toBe(true)
+    expect(hasSendableDraft({ message: "", pinnedResultCount: 0 })).toBe(false)
   })
 })

@@ -116,6 +116,22 @@ describe("Playground while the server connection is pending", { timeout: 60_000 
     expect(server.completionRequests()).toHaveLength(0)
   })
 
+  it("stays quiet when Enter is pressed in an empty composer while not connected", async () => {
+    const server = createFakeTldwServer()
+    const view = await renderPlayground({ server })
+    await setConnection(CHECK_FAILED)
+
+    await view.user.click(view.composer)
+    await view.user.keyboard("{Enter}")
+    // Notices render asynchronously; give one the chance to appear.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    })
+
+    expect(visibleNotifications().join(" ")).not.toContain("Your draft has not been")
+    expect(server.completionRequests()).toHaveLength(0)
+  })
+
   it("explains why Enter did not send after a failed check", async () => {
     const server = createFakeTldwServer()
     const view = await renderPlayground({ server })

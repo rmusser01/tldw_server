@@ -5106,6 +5106,7 @@ export const PlaygroundForm = ({
     navigate("/settings");
   }, [navigate]);
 
+  const composerDraftSendable = hasSendableDraft({ message: form.values.message, image: form.values.image, attachmentCount: selectedDocuments.length + uploadedFiles.length, hasImportedContext: Boolean(importedSidepanelContext), pinnedResultCount: fileRetrievalEnabled ? 0 : ragPinnedResults.length });
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!isFirefoxTarget) {
       if (e.key === "Process" || e.key === "229") return;
@@ -5160,7 +5161,7 @@ export const PlaygroundForm = ({
     if (!isConnectionReady) {
       if (handleChatInputKeyDown({ e, sendWhenEnter, typing, isSending: false })) {
         e.preventDefault();
-        notifySendNeedsConnection(notificationApi, t, connectionPending);
+        if (composerDraftSendable) notifySendNeedsConnection(notificationApi, t, connectionPending);
       }
       return;
     }
@@ -6070,7 +6071,8 @@ export const PlaygroundForm = ({
       onSubmitForm={handleComposerSend}
       characterChatSendBlocker={characterChatSendBlocker}
       submitDisabledReason={personaSubmitDisabledReason ?? modelCatalogSubmitDisabledReason}
-      hasDraftContent={hasSendableDraft({ message: form.values.message, image: form.values.image, attachmentCount: selectedDocuments.length + uploadedFiles.length, hasImportedContext: Boolean(importedSidepanelContext) })}
+      hasDraftContent={composerDraftSendable}
+      connectionPending={connectionPending}
       sendMenuOpen={sendMenuOpen}
       onSendMenuChange={handleSendMenuChange}
       t={t}
