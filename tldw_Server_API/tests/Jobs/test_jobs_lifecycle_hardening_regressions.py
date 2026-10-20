@@ -861,16 +861,15 @@ def test_queued_terminal_lifecycle_reconciles_missing_counter(
     )
     sibling = _create_job(manager, domain=domain)
     _delete_counter(manager, target)
+    completion_value = "queued-token"
     if operation == "complete":
-        assert manager.complete_job(
-            int(target["id"]), completion_token="queued-token", enforce=False
-        )  # nosec B106 # Deterministic replay marker, not a credential.
+        assert manager.complete_job(int(target["id"]), completion_token=completion_value, enforce=False)
     else:
         assert manager.fail_job(
             int(target["id"]),
             error="administrative failure",
             retryable=False,
-            completion_token="queued-token",  # nosec B106 # Deterministic replay marker, not a credential.
+            completion_token=completion_value,
             enforce=False,
         )
     expected_status, event_type = (

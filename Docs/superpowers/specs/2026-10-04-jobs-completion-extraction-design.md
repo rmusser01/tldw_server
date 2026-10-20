@@ -377,7 +377,7 @@ be revertible at its own merge point.
 
 Written-specification and plan review are complete. The
 [foundation implementation plan](../plans/2026-10-20-jobs-completion-foundation-implementation-plan.md)
-is approved for subagent-driven execution. TASK-13875 covers PR 1 only; PR 2
+is approved for subagent-driven execution. TASK-13878 covers PR 1 only; PR 2
 gets a separate task and plan after the foundation merges. TASK-13421 records the
 completed ownership assessment and written-design approval. No completion
 implementation is included here.

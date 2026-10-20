@@ -169,10 +169,9 @@ def test_completion_identity_short_circuits_result_work(completion_manager, monk
     monkeypatch.setattr(manager, "_maybe_encrypt_json", lambda *args: transforms.append(args))
     record_completion_observers(manager, monkeypatch, calls)
     expected = (stored_uuid or "") if matching else "stale-identity"
+    completion_value = completion_arguments(job)["completion_token"]
     assert (
-        manager.complete_job(
-            job["id"], result=result, expected_uuid=expected, completion_token="binding-token"
-        )  # nosec B106 # Deterministic replay marker, not a credential.
+        manager.complete_job(job["id"], result=result, expected_uuid=expected, completion_token=completion_value)
         is matching
     )
     assert transforms == []
