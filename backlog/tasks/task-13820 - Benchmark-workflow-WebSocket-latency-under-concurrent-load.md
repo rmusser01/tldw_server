@@ -1,7 +1,7 @@
 ---
 id: TASK-13820
 title: Benchmark workflow WebSocket latency under concurrent load
-status: In Progress
+status: Done
 labels:
 - backend
 - workflows
@@ -19,7 +19,7 @@ Measure real-TCP workflow WebSocket setup, snapshot and persisted-event latency 
 - [x] #1 Reproducible real-network benchmark reports latency percentiles correctness failures and environment for concurrent clients
 - [x] #2 Any demonstrated responsiveness or lifecycle bugs have failing-first regression coverage and root-cause repairs
 - [x] #3 Raw baseline and fixed measurements and limits are documented without production credentials or data
-- [ ] #4 Connected tests lint Bandit independent exact-head review requester summary and hosted checks pass before merge
+- [x] #4 Connected tests lint Bandit independent exact-head review requester summary and hosted checks pass before merge
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -89,17 +89,18 @@ Latest a671 integration verification PASS:342connected cases (310prior plus32new
 Safe-regex boundary fixture repair verified: same4ownedCPUthread contention red1failed/errorregex_timeout→green1passed0.73s; fullsafe-regex204passed2.60s. One-lineinput now999999b+finala preserves1Mboundary/a$/matcha/span999999..1000000/realengine/100mssafetybound. Actualdelta independentreviewCLEAN. Ruffclean, touchedfunctionBlack120clean; fullfileBlackdrift verifiedidenticalbefore/after. ChangedfunctionBandit0findings/errors excludingB101assertions; fullfile13preexistingB404/fake-secretB105findings verifiedbyteidenticalbefore/after,0errors. Qualityguard--enforcePASS. No production/harness/hash/timingchange. Logs/private/tmp/ws13820-regex-{boundary-contention-red,boundary-contention-green,full-green,quality}.log; security bandit_ws13820_regex_{test,before,changed_function}.json. Freshfinalreview/push/ALLhostedchecks remain required.
 7876 actualadminstorageCI run39421850064 job118625330727 failed1/63: atomic_save_never_publishes_partial_destination[fdopen] os.fstat(fd) postcleanup DIDNOTRAISE. Standalonepasses1/0.90s; deterministicprivateclose→openunrelatedfile reusesfd16 and reproduces exactfailure1/0.61s, proving stale numericFDassertion ratherthan publication failure. Productionalreadyclosesrawfdinfinally. TESTONLYrootfix plan capture realstream.closed and successfulrealrawclosecalls; isolate OS/tempfile faultinjection to service modulebindings(existingSimpleNamespacepattern) to avoidrecording/disruptingbackgroundopens. Preserveall5injectedfailures/oldJSON/tempabsence/realclosebehavior. Independentdiagnosisagrees. Verify sameFDreusecasegreen/full63shard/scopedRuffBlackBandit/quality/exactreview, no production/harness/benchmarkchange.
 Adminstoragefixture repair verified: sameprivatefdreuse oldfd16closedthenunrelatedfd16opened red1failed0.61s→green1pass0.60s; fullhosted63case storage/tools selection63PASS12.34s. Successfulrealstreams.closed andrawclosecall assertions preserveall5failurepoints/oldJSON/tempabsence; service-localOS/tempfilebindings avoidglobalfaultinjection. IndependentactualdeltaCLEAN; Ruff/touchedfunctionBlack120clean, unrelatedfullfileBlackdrift verifiedpreexisting. FulltouchedfileBandit0findings/errors excludingtestB101. QualityguardPASS. Logs/private/tmp/ws13820-{fdopen-unchanged,fdopen-reuse-red,fdopen-reuse-green,admin-storage-shard-green,admin-storage-quality}.log; bandit_ws13820_storage_test.json. NO production/harness/hash/benchmarkchange. Finalexactreview/push/freshALLhostedchecks stillrequired.
+PR3256 MERGED2026-10-20T14:38:29Z into dev, merge2b925562e585fe1703219dd4af5eac29fafbce09 exactreviewedhead2d5db15508375138231dfa87b36f133a620c2600. All266hostedSUCCESS/36expectedskip/1neutral, supersededfrontendlicenseauditcancelled; all7requiredSUCCESS incl trustedlicense status, queueUNSET, devbasea671fresh, no bypass. GitHubstateMERGED and headancestryverified; mergedtree identicalreviewedhead and4measuredhashes asserted inmergecommit. Latest342connected+14chatcleanup+34adminruntime+204safe-regex+63storage/tests passed scoped as recorded; allCIrootfixes reviewed. Historical72trialmeasurements unchanged; limitations remain inreport. Allplanstages fulfilled; remove only own implementation plan. Task closeout retained as a local metadata commit on the task branch; no post-merge application changes or additional PR requested. Delete this followup monitor.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Workflow WebSocket repair and matched performance validation are complete: guarded SQLite JSON pages with compatibility fallback, existing threadpool reads, shared timer budget and normalization-once metrics preserve delivery/auth/storage contracts. Accepted72-trial ABBA shows c64/history500 replay P95 improvement6.38% and loop P99 improvement58.22%; setup/single-client costs and measurement limits are documented. Rebased310 connected tests pass; independent code/performance review is clean and requester-owned PR3256 summary is supplied. Hosted CI integration remains in progress, including the diagnosed endpoint-local exception-injection test repair; do not merge until all checks pass on current up-to-date reviewed head.
+Merged PR #3256 into dev as 2b925562e585fe1703219dd4af5eac29fafbce09 after all 266 hosted checks and all seven required gates passed on reviewed head 2d5db15508375138231dfa87b36f133a620c2600, current with dev a6719bf. Verified ancestry, identical merged tree and four measured source hashes. Workflow replay repair preserves auth/ownership/delivery/storage contracts. Accepted 72-trial historical ABBA reports c64/history500 replay P95 improvement 6.38% and loop P99 improvement 58.22%, with setup/single-client costs and environment limits disclosed. Connected integration and failing-first CI fixture repairs pass; requester-owned Change summary and independent exact-head review satisfied. No benchmark rerun or production-capacity claim. Own plan completed and removed; local metadata closeout commit retained.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
+- [x] #1 Acceptance criteria completed
 - [x] #2 Tests or verification recorded
 - [x] #3 Documentation updated when relevant
 - [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
