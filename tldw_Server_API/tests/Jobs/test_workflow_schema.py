@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.DB_Management.jobs_workflow_migrations import (
 )
 from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import WorkflowOutcome
 from tldw_Server_API.app.core.Jobs.workflow_capability import inspect_workflow_support
+from tldw_Server_API.tests.Jobs.workflow_test_support import ROOT_REFERENCE, ROOT_UUID
 
 pytestmark = pytest.mark.integration
 DATABASE_ERRORS = (sqlite3.IntegrityError, psycopg.IntegrityError, psycopg.errors.RaiseException)
@@ -103,6 +104,64 @@ def test_schema_rejects_invalid_root_facts(workflow_case, changes):
     with case.connection() as conn:
         with pytest.raises(DATABASE_ERRORS):
             case.insert_root(conn, **changes)
+
+
+@pytest.mark.parametrize(
+    "column,value",
+    [
+        ("domain", "embeddings"),
+        ("queue", "workflow"),
+        ("job_type", "embedding_workflow"),
+        ("payload_field", "workflow_id"),
+        ("job_uuid", ROOT_UUID),
+        ("reference_id", ROOT_REFERENCE),
+        ("lease_digest", "a" * 64),
+    ],
+)
+@pytest.mark.parametrize("suffix", ["\x00suffix", "\x00/" + "\u00e9" * 64], ids=["nul", "nul-oversize"])
+def test_root_shape_rejects_embedded_nul(workflow_case, column, value, suffix):
+    case = workflow_case
+    assert inspect_workflow_support(case.manager) is WorkflowOutcome.APPLIED
+    errors = (sqlite3.IntegrityError,) if case.manager.backend == "sqlite" else (ValueError, psycopg.DataError)
+    match = "CHECK constraint failed" if case.manager.backend == "sqlite" else "NUL|0x00"
+    with case.connection() as conn:
+        with pytest.raises(errors, match=match):
+            case.insert_root(conn, **{column: value + suffix})
+
+
+@pytest.mark.parametrize("column", ["domain", "queue", "job_type", "payload_field"])
+def test_root_fixed_codes_accept_64_reject_65_bytes(workflow_case, column):
+    case = workflow_case
+    with case.connection() as conn:
+        case.insert_root(conn, **{column: "a" * 64})
+    with case.connection() as conn:
+        with pytest.raises(DATABASE_ERRORS):
+            case.insert_root(conn, **{column: "a" * 65})
+
+
+@pytest.mark.parametrize(
+    "column,value", [("job_uuid", ROOT_UUID), ("effect_key", "a" * 64), ("facts_fingerprint", "b" * 64)]
+)
+@pytest.mark.parametrize("suffix", ["\x00suffix", "\x00/" + "\u00e9" * 64], ids=["nul", "nul-oversize"])
+def test_receipt_shape_rejects_embedded_nul(workflow_case, column, value, suffix):
+    case = workflow_case
+    invalid = value + suffix
+    assert inspect_workflow_support(case.manager) is WorkflowOutcome.APPLIED
+    errors = (sqlite3.IntegrityError,) if case.manager.backend == "sqlite" else (ValueError, psycopg.DataError)
+    match = "CHECK constraint failed" if case.manager.backend == "sqlite" else "NUL|0x00"
+    with case.connection() as conn:
+        if column == "job_uuid" and case.manager.backend == "sqlite":
+            # Isolate the receipt UUID CHECK from its FK to the same malformed parent.
+            conn.execute("PRAGMA ignore_check_constraints=ON")
+            try:
+                case.insert_root(conn, job_uuid=invalid)
+            finally:
+                conn.execute("PRAGMA ignore_check_constraints=OFF")
+            assert conn.execute("PRAGMA ignore_check_constraints").fetchone()[0] == 0
+        else:
+            case.insert_root(conn)
+        with pytest.raises(errors, match=match):
+            case.insert(conn, "job_workflow_effect_receipts", case.receipt_values(**{column: invalid}))
 
 
 def test_roots_are_not_tied_to_active_jobs_and_snapshot_is_immutable(workflow_case):
