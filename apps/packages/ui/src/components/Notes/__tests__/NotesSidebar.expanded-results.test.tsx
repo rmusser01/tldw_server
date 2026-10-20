@@ -187,12 +187,21 @@ describe('Notes expanded sidebar result access', () => {
     expect(screen.getByTestId('notes-results-scroll').className).toContain(
       'overflow-auto'
     )
-    await user.click(within(results).getByTestId('notes-open-button-5'))
+    const fifth = within(results).getByTestId('notes-open-button-5')
+    await user.click(fifth)
     expect(noopAsync).toHaveBeenCalledWith('5')
-    const first = within(results).getByTestId('notes-open-button-1')
-    for (let step = 0; step < 80 && document.activeElement !== first; step += 1) {
+    // The results are one Tab stop that remembers the last row used (AX-03).
+    filters.focus()
+    for (
+      let step = 0;
+      step < 80 && !document.activeElement?.hasAttribute('data-notes-list-item');
+      step += 1
+    ) {
       await user.tab()
     }
+    expect(fifth).toHaveFocus()
+    await user.keyboard('{Home}')
+    const first = within(results).getByTestId('notes-open-button-1')
     expect(first).toHaveFocus()
     await user.keyboard('{Enter}')
     expect(noopAsync).toHaveBeenCalledWith('1')
