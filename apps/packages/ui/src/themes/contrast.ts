@@ -92,6 +92,34 @@ export const readableForegroundOnAll = (backgrounds: RGBTriple[]): RGBTriple => 
   return worst(BLACK) >= worst(WHITE) ? BLACK : WHITE
 }
 
+/** Mix `from` towards `to` by `amount` (0 keeps `from`, 1 gives `to`). */
+export const mixRgb = (from: RGBTriple, to: RGBTriple, amount: number): RGBTriple => {
+  const a = parseRgbTriple(from)
+  const b = parseRgbTriple(to)
+  return a.map((channel, index) => Math.round(channel + (b[index] - channel) * amount)).join(" ")
+}
+
+/**
+ * `color` moved towards `toward` in 5% steps until its lowest contrast
+ * against `backgrounds` reaches `minimum`. Used to keep a theme hue while
+ * making it readable; `toward` should itself be readable (e.g. the text
+ * colour), and is returned when no earlier step is.
+ */
+export const readableShade = (
+  color: RGBTriple,
+  toward: RGBTriple,
+  backgrounds: RGBTriple[],
+  minimum = 4.5
+): RGBTriple => {
+  const worst = (candidate: RGBTriple) =>
+    Math.min(...backgrounds.map((background) => contrastRatio(candidate, background)))
+  for (let step = 0; step <= 20; step += 1) {
+    const candidate = mixRgb(color, toward, step / 20)
+    if (worst(candidate) >= minimum) return candidate
+  }
+  return toward
+}
+
 /**
  * The first candidate whose lowest contrast against `backgrounds` reaches
  * `minimum`; otherwise the candidate with the best lowest contrast.

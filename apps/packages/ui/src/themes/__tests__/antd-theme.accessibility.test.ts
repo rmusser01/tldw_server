@@ -116,18 +116,52 @@ describe("antd theme text contrast", () => {
     expect(failures).toEqual([])
   })
 
-  it.each(defaultCases)("keeps links readable on page and panel backgrounds in $name", ({ preset, mode }) => {
+  // Solarized and Nord links measured 3.30-4.44:1 when neither primary shade
+  // reached 4.5:1; hover and pressed links (#7099e0, 2.87:1) were derived.
+  it.each(cases)("keeps links readable on page and panel backgrounds in $name", ({ preset, mode }) => {
     const { tokens, design } = build(preset, mode)
-    for (const [name, background] of surfaces(tokens)) {
-      expect(ratio(design.colorLink, background), name).toBeGreaterThanOrEqual(4.5)
-    }
+    const failures = surfaces(tokens).flatMap(([name, background]) =>
+      (["colorLink", "colorLinkHover", "colorLinkActive"] as const)
+        .map((token) => [token, ratio(design[token], background)] as const)
+        .filter(([, value]) => value < 4.5)
+        .map(([token, value]) => `${token}/${name}=${value.toFixed(2)}`)
+    )
+    expect(failures).toEqual([])
   })
 
   it.each(cases)("draws links in a primary shade in $name", ({ preset, mode }) => {
     const { tokens, design } = build(preset, mode)
-    expect([rgbTripleToHex(tokens.primary), rgbTripleToHex(tokens.primaryStrong)]).toContain(
-      design.colorLink.toLowerCase()
+    const link = design.colorLink.toLowerCase()
+    const primaryShades = [rgbTripleToHex(tokens.primary), rgbTripleToHex(tokens.primaryStrong)]
+    const readablePrimary = [tokens.primary, tokens.primaryStrong].some((shade) =>
+      surfaces(tokens).every(([, background]) => contrastRatio(shade, background) >= 4.5)
     )
+    if (readablePrimary) {
+      expect(primaryShades).toContain(link)
+    } else {
+      // Only darkened or lightened towards the text colour as far as needed.
+      expect(link).not.toBe(rgbTripleToHex(tokens.text))
+    }
+  })
+
+  // The light theme's pressed primary button (#1e51c7) put its black label at
+  // 3.06:1, and pressed danger (#ba3f56) at 3.93:1.
+  it.each(cases)("keeps button text readable on hover and pressed fills in $name", ({ preset, mode }) => {
+    const { config, design } = build(preset, mode)
+    const button = config.components?.Button
+    const onPrimary = toTriple(String(button?.primaryColor), "0 0 0")
+    const onDanger = toTriple(String(button?.dangerColor), "0 0 0")
+    const failures = [
+      ...(["colorPrimaryHover", "colorPrimaryActive"] as const).map(
+        (token) => [token, contrastRatio(onPrimary, toTriple(design[token], "0 0 0"))] as const
+      ),
+      ...(["colorErrorHover", "colorErrorActive"] as const).map(
+        (token) => [token, contrastRatio(onDanger, toTriple(design[token], "0 0 0"))] as const
+      )
+    ]
+      .filter(([, value]) => value < 4.5)
+      .map(([token, value]) => `${token}=${value.toFixed(2)}`)
+    expect(failures).toEqual([])
   })
 })
 

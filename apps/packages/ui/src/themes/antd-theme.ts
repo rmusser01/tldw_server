@@ -1,5 +1,11 @@
 import { theme, type ThemeConfig } from "antd"
-import { firstReadableColor, readableForeground, readableForegroundOnAll } from "./contrast"
+import {
+  firstReadableColor,
+  mixRgb,
+  readableForeground,
+  readableForegroundOnAll,
+  readableShade,
+} from "./contrast"
 import type { RGBTriple, ThemeColorTokens, ThemeTypography, ThemeShape, ThemeLayout } from "./types"
 
 type MappingAlgorithm = Extract<
@@ -55,6 +61,23 @@ function pinMapColors(pins: Partial<MapToken>): MappingAlgorithm {
   return (_seed, mapToken) => ({ ...(mapToken as MapToken), ...pins })
 }
 
+const WHITE: RGBTriple = "255 255 255"
+const BLACK: RGBTriple = "0 0 0"
+
+/**
+ * Hover and pressed shades of a solid fill that carries `foreground` text.
+ * antd derives these from its seed, which can move the fill towards the text
+ * colour (the light theme's pressed primary put black text at 3.06:1). Moving
+ * away from the text colour keeps the label at least as readable as at rest.
+ */
+function fillStateShades(fill: RGBTriple, foreground: RGBTriple) {
+  const away = foreground === BLACK ? WHITE : BLACK
+  return {
+    hover: rgbTripleToHex(mixRgb(fill, away, 0.12)),
+    active: rgbTripleToHex(mixRgb(fill, away, 0.24)),
+  }
+}
+
 /**
  * Build an Ant Design ThemeConfig from our semantic tokens + dark mode flag.
  * This bridges our CSS custom property system to Ant Design's theme engine
@@ -65,8 +88,13 @@ function pinMapColors(pins: Partial<MapToken>): MappingAlgorithm {
  * - Text on solid primary/danger fills is black or white, whichever reads
  *   better, matching --color-primary-foreground (AX-07). That covers every
  *   component that draws colorTextLightSolid on those fills, not only Button.
- * - Links, placeholders and secondary text use the first theme text colour
- *   that reaches 4.5:1 on the surfaces they sit on (AX-07).
+ * - Hover and pressed primary/danger fills move away from their text colour,
+ *   so the label stays readable in every state (AX-07).
+ * - Placeholders and secondary text use the first theme text colour that
+ *   reaches 4.5:1 on the surfaces they sit on. Links use the primary or
+ *   strong primary shade when one reaches 4.5:1, otherwise the strong shade
+ *   moved towards the text colour until it does; hover and pressed links
+ *   move further towards the text colour (AX-07).
  * - Keyboard focus is a 2px outline in the theme focus colour (AX-08).
  */
 export function buildAntdThemeConfig(
@@ -79,12 +107,21 @@ export function buildAntdThemeConfig(
   const primary = rgbTripleToHex(tokens.primary)
   const danger = rgbTripleToHex(tokens.danger)
   const focus = rgbTripleToHex(tokens.focus)
-  const onPrimary = rgbTripleToHex(readableForeground(tokens.primary))
-  const onDanger = rgbTripleToHex(readableForeground(tokens.danger))
+  const onPrimaryTriple = readableForeground(tokens.primary)
+  const onDangerTriple = readableForeground(tokens.danger)
+  const onPrimary = rgbTripleToHex(onPrimaryTriple)
+  const onDanger = rgbTripleToHex(onDangerTriple)
+  const primaryStates = fillStateShades(tokens.primary, onPrimaryTriple)
+  const dangerStates = fillStateShades(tokens.danger, onDangerTriple)
   const pageSurfaces = [tokens.bg, tokens.surface, tokens.surface2, tokens.elevated]
-  const link = rgbTripleToHex(
-    firstReadableColor([tokens.primary, tokens.primaryStrong], pageSurfaces)
+  const linkTriple = readableShade(
+    firstReadableColor([tokens.primary, tokens.primaryStrong], pageSurfaces),
+    tokens.text,
+    pageSurfaces
   )
+  const link = rgbTripleToHex(linkTriple)
+  const linkHover = rgbTripleToHex(mixRgb(linkTriple, tokens.text, 0.2))
+  const linkActive = rgbTripleToHex(mixRgb(linkTriple, tokens.text, 0.35))
   const secondaryText = rgbTripleToHex(
     firstReadableColor([tokens.textMuted, tokens.text], pageSurfaces)
   )
@@ -97,7 +134,19 @@ export function buildAntdThemeConfig(
   if (layout?.density === "compact") {
     algorithms.push(theme.compactAlgorithm)
   }
-  algorithms.push(pinMapColors({ colorPrimary: primary, colorError: danger, colorLink: link }))
+  algorithms.push(
+    pinMapColors({
+      colorPrimary: primary,
+      colorPrimaryHover: primaryStates.hover,
+      colorPrimaryActive: primaryStates.active,
+      colorError: danger,
+      colorErrorHover: dangerStates.hover,
+      colorErrorActive: dangerStates.active,
+      colorLink: link,
+      colorLinkHover: linkHover,
+      colorLinkActive: linkActive,
+    })
+  )
 
   const focusOutline = { colorPrimaryBorder: focus }
   const components = Object.fromEntries(
