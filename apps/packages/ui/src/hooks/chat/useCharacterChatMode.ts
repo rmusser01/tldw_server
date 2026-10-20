@@ -19,6 +19,7 @@ import {
   resolveApiProviderForModel,
 } from "@/utils/resolve-api-provider";
 import { consumeStreamingChunk } from "@/utils/streaming-chunks";
+import { createStreamingTextScheduler } from "@/hooks/chat/streamingThrottle";
 import { normalizeConversationState } from "@/utils/conversation-state";
 import {
   WEBUI_CHARACTER_CHAT_SOURCE,
@@ -54,8 +55,6 @@ import {
   type SaveMessagePayload,
   type ChatModelSettingsStore,
 } from "./chat-action-utils";
-
-const STREAMING_UPDATE_INTERVAL_MS = 80;
 
 export type CharacterChatFailureRecovery =
   | {
@@ -533,48 +532,15 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
         ? normalizeMessageVariants(regenerateFromMessage)
         : [];
     const resolvedModel = model?.trim();
-    let streamingTimer: ReturnType<typeof setTimeout> | null = null;
-    let pendingStreamingText = "";
-    let pendingReasoningTime = 0;
-    let lastStreamingUpdateAt = 0;
     let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
 
-    const flushStreamingUpdate = () => {
-      if (pendingStreamingText.length === 0) return;
-      const text = pendingStreamingText;
-      const reasoningTime = pendingReasoningTime;
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === generateMessageId
-            ? updateActiveVariant(m, {
-                message: text,
-                reasoning_time_taken: reasoningTime,
-              })
-            : m,
-        ),
-      );
-      pendingStreamingText = "";
-      pendingReasoningTime = 0;
-      lastStreamingUpdateAt = Date.now();
-    };
-
-    const scheduleStreamingUpdate = (text: string, reasoningTime: number) => {
-      pendingStreamingText = text;
-      pendingReasoningTime = reasoningTime;
-      if (streamingTimer !== null) return;
-      const elapsed = Date.now() - lastStreamingUpdateAt;
-      const delay = Math.max(0, STREAMING_UPDATE_INTERVAL_MS - elapsed);
-      streamingTimer = setTimeout(() => {
-        streamingTimer = null;
-        flushStreamingUpdate();
-      }, delay);
-    };
-
-    const cancelStreamingUpdate = () => {
-      if (streamingTimer === null) return;
-      clearTimeout(streamingTimer);
-      streamingTimer = null;
-    };
+    // Shared 80ms streaming throttle (hooks/chat/streamingThrottle.ts): chunks
+    // coalesce into at most one transcript update per window, and the update
+    // replaces only the streaming message instead of cloning via prev.map.
+    const streamingScheduler = createStreamingTextScheduler(
+      generateMessageId,
+      setMessages,
+    );
     const emoteStream = createCharacterEmoteStream();
     const getExplicitEmoteMoodLabel = () =>
       emoteStream.events.length > 0
@@ -617,8 +583,11 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       applyEmoteEventsToMessage(flushedEmotes.emoteEvents);
     };
 
-    const abortCancelStreamingUpdate = () => cancelStreamingUpdate();
-    signal.addEventListener("abort", abortCancelStreamingUpdate);
+    // Abort keeps the former inline-cancel semantics: disarm the trailing
+    // flush but keep the pending text, so the post-stream flushNow() below can
+    // still land the partial streamed text before error handling.
+    const abortDisarmStreamingUpdate = () => streamingScheduler.disarm();
+    signal.addEventListener("abort", abortDisarmStreamingUpdate);
 
     try {
       if (!resolvedModel) {
@@ -1009,7 +978,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
         applyEmoteEventsToMessage(sanitizedChunkState.emoteEvents);
 
         if (fullText !== previousFullText) {
-          scheduleStreamingUpdate(`${fullText}▋`, timetaken);
+          streamingScheduler.schedule(`${fullText}▋`, timetaken);
         }
         if (count === 0) {
           setIsProcessing(true);
@@ -1033,8 +1002,9 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
         count++;
         if (signal?.aborted) break;
       }
-      cancelStreamingUpdate();
-      flushStreamingUpdate();
+      // Flush any trailing streamed text (and disarm the timer) so the last
+      // chunk is never dropped.
+      streamingScheduler.flushNow();
       if (inactivityTimer) clearTimeout(inactivityTimer);
       flushCharacterEmoteStream();
 
@@ -1340,7 +1310,7 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
         return;
       }
 
-      cancelStreamingUpdate();
+      streamingScheduler.cancel();
       flushCharacterEmoteStream();
       const recoveryMoodLabel = getExplicitEmoteMoodLabel();
       const recoveryMetadataExtra = getExplicitEmoteMetadataExtra();
@@ -1534,8 +1504,8 @@ export const createCharacterChatMode = (deps: CharacterChatModeDeps) => {
       setStreaming(false);
     } finally {
       discardCurrentTurnOnAbortRef.current = false;
-      cancelStreamingUpdate();
-      signal.removeEventListener("abort", abortCancelStreamingUpdate);
+      streamingScheduler.cancel();
+      signal.removeEventListener("abort", abortDisarmStreamingUpdate);
       if (inactivityTimer) clearTimeout(inactivityTimer);
       setAbortController(null);
     }
