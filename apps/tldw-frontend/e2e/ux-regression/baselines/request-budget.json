@@ -73,7 +73,7 @@
       "count": 1,
       "reviewIds": ["XP-16"],
       "issue": 3121,
-      "note": "users/me/profile?sections=preferences issued twice concurrently at load."
+      "note": "users/me/profile?sections=preferences issued twice concurrently at load. From the code (not re-measured): one is the composer's preference read, which the transport and the composer now merge into one request; the other is useDefaultCharacterSelection's account-scoped read of the same path, which is not merged because scoped reads opt out of coalescing. Removing it needs one shared scoped preferences read."
     },
     {
       "page": "chat",
