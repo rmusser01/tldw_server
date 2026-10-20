@@ -390,6 +390,9 @@ it("offers repair and suppresses the legacy shell when the attached profile cann
   await screen.findByRole("button", { name: "Open Duck — Research" })
 })
 it("keeps later workspace conversation choices and drafts through refresh and artwork changes", async () => {
+  // Hold the periodic Buddy poll so a slow run cannot add a conversation read
+  // before the refresh this test counts.
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
   const firstPage = Array.from({ length: 100 }, (_, i) => ({
     id: `c${i}`,
     title: `Conversation ${i}`
