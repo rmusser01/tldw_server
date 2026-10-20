@@ -505,8 +505,9 @@ it("preserves animation props through unchanged polls and observes profile updat
   expect(unchanged.manifest).toBe(before.manifest)
   expect(unchanged.assets).toBe(before.assets)
   version = 2
+  // An unchanged read doubles the wait before the next one (XP-16).
   await act(async () => {
-    await vi.advanceTimersByTimeAsync(5000)
+    await vi.advanceTimersByTimeAsync(10_000)
   })
   const updated = mocks.renderArtwork.mock.calls.at(-1)![0]
   expect(updated.manifest).not.toBe(before.manifest)
@@ -597,4 +598,71 @@ it("stops Buddy polls on disconnect and discards late data before verified recon
   expect(mocks.getBuddyAttachment).toHaveBeenCalledTimes(countAfterReconnect + 1)
   view.unmount()
   vi.useRealTimers()
+})
+
+// XP-16: the host used to re-read Buddies and the attachment every 5 s on
+// every page, forever, even in a background tab.
+const setPageVisibility = (state: DocumentVisibilityState) => {
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue(state)
+  document.dispatchEvent(new Event("visibilitychange"))
+}
+
+it("does not poll Buddies while the page is hidden and re-reads when it is shown (XP-16)", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
+  try {
+    render(<IndependentBuddySession />)
+    await screen.findByRole("button", { name: "Open Duck — Research" })
+    const reads = mocks.getBuddyAttachment.mock.calls.length
+    await act(async () => setPageVisibility("hidden"))
+    await act(async () => vi.advanceTimersByTimeAsync(60_000))
+    expect(mocks.getBuddyAttachment).toHaveBeenCalledTimes(reads)
+    expect(mocks.listBuddies).toHaveBeenCalledTimes(reads)
+
+    await act(async () => setPageVisibility("visible"))
+    await waitFor(() =>
+      expect(mocks.getBuddyAttachment).toHaveBeenCalledTimes(reads + 1)
+    )
+  } finally {
+    vi.restoreAllMocks()
+  }
+})
+
+it("waits for a hidden page to be shown before the first Buddy read (XP-16)", async () => {
+  vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+  try {
+    render(<IndependentBuddySession />)
+    await act(async () => Promise.resolve())
+    expect(mocks.getBuddyAttachment).not.toHaveBeenCalled()
+    await act(async () => setPageVisibility("visible"))
+    await screen.findByRole("button", { name: "Open Duck — Research" })
+  } finally {
+    vi.restoreAllMocks()
+  }
+})
+
+it("slows Buddy polling while nothing changes and speeds up again after a change (XP-16)", async () => {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] })
+  render(<IndependentBuddySession />)
+  await screen.findByRole("button", { name: "Open Duck — Research" })
+  const reads = () => mocks.getBuddyAttachment.mock.calls.length
+  const initial = reads()
+  await act(async () => vi.advanceTimersByTimeAsync(120_000))
+  // Every 5 s would be 24 reads; backing off to once a minute is far fewer.
+  const idleReads = reads() - initial
+  expect(idleReads).toBeGreaterThan(0)
+  expect(idleReads).toBeLessThanOrEqual(6)
+
+  mocks.getBuddyAttachment.mockResolvedValue({
+    version: 2,
+    attachment: { buddy_id: "duck", scope_type: "conversation", scope_id: "chat" },
+    target: { title: "Renamed research" }
+  })
+  const renamed = { name: "Open Duck — Renamed research" }
+  for (let tick = 0; tick < 12 && !screen.queryByRole("button", renamed); tick += 1) {
+    await act(async () => vi.advanceTimersByTimeAsync(5_000))
+  }
+  expect(screen.getByRole("button", renamed)).toBeInTheDocument()
+  const afterChange = reads()
+  await act(async () => vi.advanceTimersByTimeAsync(5_000))
+  expect(reads()).toBe(afterChange + 1)
 })
