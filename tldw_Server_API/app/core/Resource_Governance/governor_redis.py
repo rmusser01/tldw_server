@@ -2486,7 +2486,12 @@ class RedisResourceGovernor(ResourceGovernor):
             for sc, ev in self._scope_pairs(pol, entity_scope, entity_value):
                 current_cnt = 0
                 key = self._keys.win(policy_id, category, sc, ev)
-                current_cnt = await self._purge_and_count(key=key, now=now, window=window)
+                try:
+                    current_cnt = await self._purge_and_count(key=key, now=now, window=window)
+                except _RG_NONCRITICAL_EXCEPTIONS:
+                    # Redis cannot be read: this category's headroom is unknown.
+                    remainings, resets = [], []
+                    break
                 if current_cnt >= limit_m:
                     try:
                         res = await self._ensure_tokens_lua()

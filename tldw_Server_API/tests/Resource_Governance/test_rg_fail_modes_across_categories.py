@@ -119,3 +119,12 @@ async def test_renew_and_commit_survive_redis_raising_connection_error(fail_mode
     rg._client = _redis_down_client()  # Redis goes away while the lease is held
     await rg.renew(handle, 60)
     await rg.commit(handle)
+
+
+@pytest.mark.asyncio
+async def test_peek_reports_unknown_headroom_when_redis_raises_connection_error():
+    rg = _governor({"requests": {"rpm": 5}, "scopes": ["user"]}, ns="rg_down_peek")
+    rg._client = _redis_down_client()
+
+    # Ingress headers and the character rate limiter's usage stats read this; it must not raise.
+    assert await rg.peek_with_policy("user:x", ["requests"], "p") == {"requests": {"remaining": None, "reset": None}}

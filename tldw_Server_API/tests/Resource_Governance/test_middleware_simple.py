@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from redis import exceptions as redis_exceptions
 
 from tldw_Server_API.app.core.Resource_Governance.governor import RGDecision
 from tldw_Server_API.app.core.Resource_Governance.middleware_simple import RGSimpleMiddleware
@@ -61,8 +62,11 @@ class _Gov:
 
 
 class _ExplodingGov:
+    def __init__(self, error: Exception | None = None):
+        self._error = error or RuntimeError("resource governor unavailable")
+
     async def reserve(self, req, op_id=None):
-        raise RuntimeError("resource governor unavailable")
+        raise self._error
 
 
 class _CaptureGov:
@@ -206,7 +210,12 @@ async def test_middleware_resolves_new_domain_paths(path: str, pattern: str, pol
 
 
 @pytest.mark.asyncio
-async def test_middleware_fail_closed_on_reserve_error_when_policy_requires_it():
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError("resource governor unavailable"), redis_exceptions.ConnectionError("Connection refused")],
+    ids=["builtin", "redis"],
+)
+async def test_middleware_fail_closed_on_reserve_error_when_policy_requires_it(error):
     app = FastAPI()
     app.add_middleware(RGSimpleMiddleware)
 
@@ -216,7 +225,7 @@ async def test_middleware_fail_closed_on_reserve_error_when_policy_requires_it()
 
     route_map = {"by_path": {"/api/v1/fail-closed": "fail.closed"}}
     app.state.rg_policy_loader = _Loader(route_map, policies={"fail.closed": {"fail_mode": "fail_closed"}})
-    app.state.rg_governor = _ExplodingGov()
+    app.state.rg_governor = _ExplodingGov(error)
 
     with TestClient(app) as c:
         r = c.get("/api/v1/fail-closed")
@@ -352,4 +361,30 @@ class _NoLimitGov:
 def test_fractional_policy_header_fallback_reports_capacity_not_zero(allowed: bool, status: int) -> None:
     with TestClient(_fractional_app(lambda _loader: _NoLimitGov(allowed))) as c:
         r = c.get("/api/v1/echo")
+    assert (r.status_code, r.headers.get("X-RateLimit-Limit")) == (status, "3")
+
+
+def _redis_down_governor(loader: _Loader) -> Any:
+    """A Redis-backend governor whose server has gone: every command raises redis.exceptions.ConnectionError."""
+    import redis.asyncio as aioredis
+    from redis.asyncio.retry import Retry
+    from redis.backoff import NoBackoff
+
+    from tldw_Server_API.app.core.Resource_Governance.governor_redis import RedisResourceGovernor
+
+    gov = RedisResourceGovernor(policy_loader=loader, ns="rg_t_mw_redis_down")
+    # Nothing listens on port 1, and retries are off, so each command fails at once.
+    gov._client = aioredis.Redis(host="127.0.0.1", port=1, socket_connect_timeout=0.2, retry=Retry(NoBackoff(), 0))
+    return gov
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("fail_mode, status", [("fail_open", 200), ("fallback_memory", 200), ("fail_closed", 429)])
+def test_ingress_honours_the_fail_mode_when_redis_raises_connection_error(
+    fail_mode: str, status: int, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("RG_REDIS_FAIL_MODE", fail_mode)
+    with TestClient(_fractional_app(_redis_down_governor)) as c:
+        r = c.get("/api/v1/echo")
+    # The governor decided (the policy's limit is in the headers): not a 500, and not the 503 for a governor error.
     assert (r.status_code, r.headers.get("X-RateLimit-Limit")) == (status, "3")
