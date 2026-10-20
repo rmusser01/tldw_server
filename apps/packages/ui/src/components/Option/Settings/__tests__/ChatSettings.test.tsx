@@ -1,5 +1,5 @@
 import React from "react"
-import { fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { ChatSettings } from "../ChatSettings"
@@ -410,5 +410,54 @@ describe("ChatSettings background image controls", () => {
       }
     ])
     expect(notificationSuccessMock).toHaveBeenCalled()
+  })
+})
+
+describe("ChatSettings side panel pinned composer (XS-09)", () => {
+  const SIDEPANEL_LABEL = "Keep the side panel chat input visible while scrolling"
+  const setSidepanelSticky = vi.fn()
+  let sidepanelSticky: boolean | undefined
+
+  beforeEach(() => {
+    sidepanelSticky = undefined
+    setSidepanelSticky.mockReset()
+    useChatSettingsMock.mockReturnValue(buildChatSettingsState())
+    useStorageMock.mockImplementation((key: string, defaultValue: unknown) => {
+      if (key === "sidepanelStickyChatInput") {
+        return [
+          sidepanelSticky ?? defaultValue,
+          setSidepanelSticky,
+          { isLoading: false }
+        ] as const
+      }
+      return [defaultValue, vi.fn(), { isLoading: false }] as const
+    })
+    useSettingMock.mockReturnValue([undefined, vi.fn(), { isLoading: false }])
+  })
+
+  it("shows the side panel switch On by default while the full-page switch is Off", () => {
+    render(<ChatSettings />)
+    expect(screen.getByRole("switch", { name: SIDEPANEL_LABEL })).toBeChecked()
+    expect(
+      screen.getByRole("switch", {
+        name: "generalSettings.settings.stickyChatInput.label"
+      })
+    ).not.toBeChecked()
+  })
+
+  it("turns side panel pinning off with one click", () => {
+    render(<ChatSettings />)
+    fireEvent.click(screen.getByRole("switch", { name: SIDEPANEL_LABEL }))
+    expect(setSidepanelSticky).toHaveBeenCalledWith(false, expect.anything())
+  })
+
+  it("resets the side panel switch back to On", () => {
+    sidepanelSticky = false
+    render(<ChatSettings />)
+    const row = screen
+      .getByRole("switch", { name: SIDEPANEL_LABEL })
+      .closest(".group") as HTMLElement
+    fireEvent.click(within(row).getByRole("button", { name: "Reset to default" }))
+    expect(setSidepanelSticky).toHaveBeenCalledWith(true)
   })
 })

@@ -53,6 +53,7 @@ const io = vi.hoisted(() => ({
   useComposer: false,
   useRecovery: false,
   stickyChatInput: undefined as boolean | undefined,
+  sidepanelStickyChatInput: undefined as boolean | undefined,
   write: vi.fn(),
   physicalTabId: 7 as number | null,
   controller: null as HistorySelectionController | null,
@@ -241,7 +242,10 @@ vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (key: unknown, fallback: unknown) => [
     key === "stickyChatInput" && io.stickyChatInput !== undefined
       ? io.stickyChatInput
-      : fallback,
+      : key === "sidepanelStickyChatInput" &&
+          io.sidepanelStickyChatInput !== undefined
+        ? io.sidepanelStickyChatInput
+        : fallback,
     storageWrite,
     { isLoading: false }
   ]
@@ -773,6 +777,7 @@ describe.each([
     io.useComposer = false
     io.useRecovery = false
     io.stickyChatInput = undefined
+    io.sidepanelStickyChatInput = undefined
     io.write.mockReset().mockImplementation(async (key, value) => { io.data.set(key, value) })
     io.physicalTabId = 7
     sessionStorage.clear()
@@ -1326,6 +1331,29 @@ describe.each([
     expect(screen.getByTestId("chat-messages")).not.toContainElement(composer)
   })
 
+  it("keeps the composer pinned when the full-page sticky input setting is off (XS-09)", async () => {
+    // Settings > Chat shows the full-page switch Off by default; that must not
+    // unpin the side panel, which has its own setting.
+    io.useComposer = true
+    io.stickyChatInput = false
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    const composer = await screen.findByRole("textbox", { name: "Composer draft" })
+    expect(screen.getByTestId("chat-messages")).not.toContainElement(composer)
+  })
+
+  it("lets the composer scroll with the messages when the side panel setting is off (XS-09)", async () => {
+    io.useComposer = true
+    io.stickyChatInput = true
+    io.sidepanelStickyChatInput = false
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    const composer = await screen.findByRole("textbox", { name: "Composer draft" })
+    expect(screen.getByTestId("chat-messages")).toContainElement(composer)
+  })
+
   it("hides 'Scroll to latest' while the chat is empty (XS-09)", async () => {
     render(<Route />)
     await waitFor(() => expect(screen.getByTestId("chat-messages")).toBeInTheDocument())
@@ -1342,7 +1370,7 @@ describe.each([
 
   it("keeps 'Scroll to latest' above an unpinned composer (XS-09)", async () => {
     io.useComposer = true
-    io.stickyChatInput = false
+    io.sidepanelStickyChatInput = false
     const measure = vi
       .spyOn(HTMLElement.prototype, "getBoundingClientRect")
       .mockImplementation(function (this: HTMLElement) {

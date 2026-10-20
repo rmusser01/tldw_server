@@ -80,7 +80,10 @@ import { useMessage } from '~/hooks/useMessage';
 import { useSelectedCharacter } from '@/hooks/useSelectedCharacter';
 import { useSelectedAssistant } from '@/hooks/useSelectedAssistant';
 import { useSidepanelChatTabsStore } from '@/store/sidepanel-chat-tabs';
-import { SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT } from '@/types/chat-settings';
+import {
+  SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT,
+  SIDEPANEL_STICKY_CHAT_INPUT_KEY,
+} from '@/types/chat-settings';
 import type { Character } from '@/types/character';
 import type {
   ChatModelSettingsSnapshot,
@@ -854,7 +857,10 @@ const SidepanelChatContent = ({
     if (!sidebarOpen) returnSidebarFocus();
   }, [sidebarOpen, returnSidebarFocus]);
 
-  const [stickyChatInput] = useStorage('stickyChatInput', SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT);
+  const [stickyChatInput] = useStorage(
+    SIDEPANEL_STICKY_CHAT_INPUT_KEY,
+    SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT
+  );
   const [userDisplayName] = useStorage('chatUserDisplayName', '');
 
   const composerPadding = composerHeight

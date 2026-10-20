@@ -4,6 +4,8 @@ import { useStorage } from "@plasmohq/storage/hook"
 import { useTranslation } from "react-i18next"
 import {
   DEFAULT_CHAT_SETTINGS,
+  SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT,
+  SIDEPANEL_STICKY_CHAT_INPUT_KEY,
   type ChatRichTextColorOption,
   type ChatRichTextFontOption,
   type ChatRichTextMode,
@@ -59,6 +61,11 @@ export const ChatSettings = () => {
     "quickChatStrictDocsOnly",
     true
   )
+  const [sidepanelStickyChatInput, setSidepanelStickyChatInput] =
+    useStorage<boolean>(
+      SIDEPANEL_STICKY_CHAT_INPUT_KEY,
+      SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT
+    )
   const [quickChatDocsNamespace, setQuickChatDocsNamespace] = useStorage<string>(
     "quickChatDocsIndexNamespace",
     QUICK_CHAT_DEFAULT_PROJECT_DOCS_NAMESPACE
@@ -774,6 +781,27 @@ export const ChatSettings = () => {
             checked={stickyChatInput}
             onChange={setStickyChatInput}
             aria-label={t("generalSettings.settings.stickyChatInput.label")}
+          />
+        }
+      />
+      <SettingRow
+        label={t(
+          "generalSettings.settings.sidepanelStickyChatInput.label",
+          "Keep the side panel chat input visible while scrolling"
+        )}
+        {...getResetProps(
+          sidepanelStickyChatInput,
+          SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT,
+          setSidepanelStickyChatInput
+        )}
+        control={
+          <Switch
+            checked={sidepanelStickyChatInput}
+            onChange={setSidepanelStickyChatInput}
+            aria-label={t(
+              "generalSettings.settings.sidepanelStickyChatInput.label",
+              "Keep the side panel chat input visible while scrolling"
+            )}
           />
         }
       />
