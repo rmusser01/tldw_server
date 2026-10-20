@@ -241,7 +241,7 @@ export const SidepanelHeaderSimple = ({
             src={logoSrc}
             alt={t("common:pageAssist")}
           />
-          <span className="ml-2 text-sm font-medium">
+          <span className="ml-2 whitespace-nowrap text-sm font-medium max-[379px]:hidden">
             {t("common:pageAssist")}
           </span>
         </div>
