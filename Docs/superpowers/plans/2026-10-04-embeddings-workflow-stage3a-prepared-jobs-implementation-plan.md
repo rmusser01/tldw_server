@@ -10,7 +10,7 @@
 
 **Spec:** [Approved Stage 3 design](../specs/2026-10-02-embeddings-workflow-stage3-durable-store-jobs-runner-design.md).
 
-**Tracking:** TASK-13451; approved design TASK-13450. The original Embeddings TASK-13421 is archived because upstream uses that number for unrelated work.
+**Tracking:** Planning TASK-13902; approved design TASK-13901; implementation TASK-13900. Historical TASK-13421/13450/13451 records are archived because upstream reused those numbers for unrelated work.
 
 **ADR check:** ADR required: yes; [accepted ADR-060](../../ADR/060-embeddings-durable-workflow-foundation.md) already governs these persistence and authority rules. Preserve ADR-022 and the upstream Jobs completion decision ADR-058. No additional architecture decision is proposed here.
 
@@ -40,12 +40,12 @@
 
 Planning used checkout `1077b51a45` and compared relevant Jobs boundaries with local `origin/dev` at `75ab224081bf140ef52017c1a9b0a04f6878d488`. No rebase or runtime change occurred while writing this plan.
 
-- [ ] Use an isolated execution checkout based on then-current `dev`, carrying only this workstream's reviewed docs/tasks. Review current instructions and tracking-tool policy first. Do not overwrite the shared dirty checkout.
-- [ ] Recheck task IDs and ADR numbering against current `dev` and available PR/ref inventories; preserve accepted ADRs and the archived design history.
-- [ ] Confirm `JobManager.complete_job` and WorkerSDK still preserve the newer `expected_uuid` completion fence. Do not apply this older checkout's manager file wholesale.
-- [ ] Search for concurrent neutral-capability work before creating files. If one exists, reconcile interfaces before implementation, not by maintaining two capabilities.
-- [ ] Create or reuse a collision-free Stage 3A implementation Backlog task before runtime edits; TASK-13451 tracks planning only. Link this plan and the approved spec instead of duplicating their content.
-- [ ] Activate the project virtual environment before all Python/test/lint/security commands. Baseline commands appear in Stage 5; record failures before edits.
+- [x] Use an isolated execution checkout based on then-current `dev`, carrying only this workstream's reviewed docs/tasks. Rebased onto `df7c290fbf` on 2026-10-20; shared checkout untouched. Current instructions use backlog-py.
+- [x] Recheck task IDs and ADR numbering against current `dev` and open PR inventories; preserve accepted ADRs and the archived design history. Fresh tasks TASK-13900/13901/13902; ADR-060 remains available.
+- [x] Confirm `JobManager.complete_job` and WorkerSDK preserve the newer `expected_uuid` completion fence. Current-dev code retained; completion baseline included below.
+- [x] Search for concurrent neutral-capability work before creating files. No matching implementation on current dev; open Jobs changes #2862/#2738 are unrelated.
+- [x] Create collision-free Stage 3A implementation Backlog task TASK-13900 before runtime edits. TASK-13902 records planning only.
+- [x] Activate the project virtual environment before all Python/test/lint/security commands. Fresh inline/types/completion baseline: 63 passed, 9 fixture-declared PostgreSQL skips, 144 warnings. PostgreSQL certification remains required.
 
 ## File Map
 
@@ -76,7 +76,7 @@ No Embeddings production module, endpoint, worker registration, application life
 **Goal:** Validate capability facts and install an inert, owner-scoped support schema.
 **Success Criteria:** Invalid identities/facts reject before I/O; repeat migration is safe; readiness rejects incomplete or insecure schema without repair.
 **Tests:** Contract boundary/property cases, fresh/repeat/rollback migration, dormancy.
-**Status:** Not Started
+**Status:** In Progress
 
 ### Task 1: Contracts, Store Protocol, And Schema
 
@@ -481,4 +481,4 @@ The follow-on repository receives the transaction/fence/receipt APIs, not access
 
 ## Plan Review Gate
 
-All stages remain Not Started. This document defines execution decisions, not completed software. Requester review and execution-method selection precede runtime edits; do not infer an execution method from choices made for earlier, already merged workstream stages.
+Requester reviewed the committed plan and selected subagent-driven execution (option 1) on 2026-10-20. Runtime implementation proceeds under TASK-13900 with task-scoped reviews and final verification; stage statuses above record actual progress.
