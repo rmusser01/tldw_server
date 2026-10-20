@@ -5,11 +5,19 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import type { ModelSortMode } from "@/hooks/playground"
+import { useModelProviderFailure } from "@/store/model-provider-failures"
+import { providerDisplayLabel } from "@/utils/chat-send-failure"
 
 type ChatModelSelectorDropdownProps = {
   apiModelLabel: string
   connectionStatusLabel: string
   connectionStatusWarning?: boolean
+  /**
+   * The tldw server itself is not reachable. A model's own "Unreachable"
+   * status outranks a merely degraded server, but not an offline one. When
+   * omitted, any connection warning outranks it.
+   */
+  connectionOffline?: boolean
   catalogControls?: React.ReactNode
   modelUsabilityLabel?: string
   modelUsabilityTitle?: string
@@ -33,6 +41,7 @@ export const ChatModelSelectorDropdown = React.memo(
     catalogControls,
     connectionStatusLabel,
     connectionStatusWarning = false,
+    connectionOffline,
     modelUsabilityLabel,
     modelUsabilityTitle,
     modelUsabilityWarning = false,
@@ -76,16 +85,32 @@ export const ChatModelSelectorDropdown = React.memo(
     // but showing that green badge next to "Select a model" is contradictory —
     // you cannot chat yet. Surface a truthful "No model selected" state instead.
     const noModelSelected = !selectedModel?.trim()
+    // The last send to this model got no answer from its provider (CC-N2):
+    // the tldw server may be healthy, the model is not reachable.
+    const providerFailure = useModelProviderFailure(selectedModel)
+    const unreachable =
+      !noModelSelected &&
+      Boolean(providerFailure) &&
+      !(connectionOffline ?? connectionStatusWarning)
+    const unreachableTitle = unreachable
+      ? providerFailure?.provider
+        ? t("playground:composer.providerUnreachableTitle", "{{provider}} didn't respond to the last message. Start the provider or switch models.", {
+            provider: providerDisplayLabel(providerFailure.provider)
+          })
+        : t("playground:composer.providerUnreachableGenericTitle", "This model's provider didn't respond to the last message. Start the provider or switch models.")
+      : null
     const providerSelectionNeeded = !noModelSelected && modelSelectorWarning && !modelUsabilityWarning && !connectionStatusWarning
-    const statusLabel = connectionStatusWarning ? connectionStatusLabel :
+    const statusLabel = unreachable ? t("playground:composer.providerStatusUnreachable", "Unreachable") :
+      connectionStatusWarning ? connectionStatusLabel :
       (providerSelectionNeeded
         ? t("playground:composer.chooseProvider", "Choose provider")
         : modelUsabilityLabel) ??
       (noModelSelected
         ? t("playground:composer.providerStatusNoModel", "No model selected")
         : connectionStatusLabel)
-    const statusTitle = connectionStatusWarning ? connectionStatusLabel : providerSelectionNeeded ? apiModelLabel : modelUsabilityTitle ?? apiModelLabel
+    const statusTitle = unreachableTitle ? unreachableTitle : connectionStatusWarning ? connectionStatusLabel : providerSelectionNeeded ? apiModelLabel : modelUsabilityTitle ?? apiModelLabel
     const statusWarning =
+      unreachable ||
       noModelSelected ||
       modelUsabilityWarning ||
       connectionStatusWarning ||

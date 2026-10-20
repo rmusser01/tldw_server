@@ -402,7 +402,13 @@
     "imageBackendUnavailableHint": "Enable an image backend (e.g., Flux-Klein or ZTurbo) in your tldw server config, then try again.",
     "showDetails": "Show technical details",
     "hideDetails": "Hide technical details",
-    "createFolder": "Failed to create folder"
+    "createFolder": "Failed to create folder",
+    "providerUnavailableSummary": "Couldn't reach {{provider}} ({{model}})",
+    "providerUnavailableModelSummary": "Couldn't reach the provider for {{model}}",
+    "providerUnavailableGenericSummary": "Couldn't reach the model's provider",
+    "providerUnavailableHint": "The tldw server is fine, but this model's provider didn't respond. Start the provider or switch models.",
+    "switchModel": "Switch model",
+    "chatStartupTimeoutModelSummary": "No response from {{model}} after {{wait}}."
   },
   "folders": "Folders",
   "folderView": "Folder view",

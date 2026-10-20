@@ -4633,5 +4633,14 @@
   },
   "composer_nothingToSend": {
     "message": "Type a message to send."
+  },
+  "composer_providerStatusUnreachable": {
+    "message": "Unreachable"
+  },
+  "composer_providerUnreachableTitle": {
+    "message": "{{provider}} didn't respond to the last message. Start the provider or switch models."
+  },
+  "composer_providerUnreachableGenericTitle": {
+    "message": "This model's provider didn't respond to the last message. Start the provider or switch models."
   }
 }

@@ -3468,6 +3468,7 @@ export const PlaygroundForm = ({
       connectionStatusWarning={
         !isConnectionReady || connectionUxState === "connected_degraded"
       }
+      connectionOffline={!isConnectionReady}
       modelUsabilityLabel={characterChatModelUsabilityLabel ?? undefined}
       modelUsabilityTitle={characterChatModelUsabilityTitle ?? undefined}
       modelUsabilityWarning={Boolean(

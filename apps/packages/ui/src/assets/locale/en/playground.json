@@ -543,6 +543,9 @@
     "stopStreaming": "Stop streaming response",
     "stop": "Stop",
     "nothingToSend": "Type a message to send.",
+    "providerStatusUnreachable": "Unreachable",
+    "providerUnreachableTitle": "{{provider}} didn't respond to the last message. Start the provider or switch models.",
+    "providerUnreachableGenericTitle": "This model's provider didn't respond to the last message. Start the provider or switch models.",
     "queue": {
       "sendNext": "Send next",
       "sendNextTitle": "Send this message after the current reply finishes.",

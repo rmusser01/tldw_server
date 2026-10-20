@@ -4,6 +4,12 @@ import { render, screen } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { ChatModelSelectorDropdown } from "../ChatModelSelectorDropdown"
+import {
+  clearModelProviderFailure,
+  recordModelProviderFailure,
+  resetModelProviderFailures
+} from "@/store/model-provider-failures"
+import { act } from "@testing-library/react"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -195,5 +201,73 @@ describe("ChatModelSelectorDropdown character model usability", () => {
     expect(popup).toHaveTextContent("Search all models")
     expect(screen.getByTestId("model-list-scope-toggle")).toBeInTheDocument()
     expect(screen.queryByLabelText("Search models")).toBeNull()
+  })
+
+  it("CC-N2: says Unreachable, not Healthy, after the model's provider failed to answer, until it answers again", () => {
+    resetModelProviderFailures()
+    try {
+      render(
+        <ChatModelSelectorDropdown
+          {...baseProps}
+          apiModelLabel="Ollama / gemma3:1b"
+          selectedModel="ollama:gemma3:1b"
+          connectionStatusLabel="Healthy"
+        />
+      )
+      expect(screen.getByRole("button", { name: /Ollama \/ gemma3:1b/ })).toHaveTextContent("Healthy")
+
+      act(() => recordModelProviderFailure("ollama:gemma3:1b", { provider: "ollama", model: "gemma3:1b" }))
+      const selector = screen.getByRole("button", { name: /didn't respond to the last message/ })
+      expect(selector).toHaveTextContent("Unreachable")
+      expect(selector).not.toHaveTextContent("Healthy")
+
+      act(() => clearModelProviderFailure("ollama:gemma3:1b"))
+      expect(screen.getByRole("button", { name: /Ollama \/ gemma3:1b/ })).toHaveTextContent("Healthy")
+    } finally {
+      resetModelProviderFailures()
+    }
+  })
+
+  it("CC-N2: Unreachable outranks a degraded server, but an offline server stays Offline", () => {
+    resetModelProviderFailures()
+    try {
+      recordModelProviderFailure("ollama:gemma3:1b", { provider: "ollama", model: "gemma3:1b" })
+      const { rerender } = render(
+        <ChatModelSelectorDropdown
+          {...baseProps}
+          apiModelLabel="Ollama / gemma3:1b"
+          selectedModel="ollama:gemma3:1b"
+          connectionStatusLabel="Degraded"
+          connectionStatusWarning
+          connectionOffline={false}
+        />
+      )
+      expect(screen.getByRole("button", { name: /didn't respond to the last message/ })).toHaveTextContent("Unreachable")
+
+      rerender(
+        <ChatModelSelectorDropdown
+          {...baseProps}
+          apiModelLabel="Ollama / gemma3:1b"
+          selectedModel="ollama:gemma3:1b"
+          connectionStatusLabel="Offline"
+          connectionStatusWarning
+          connectionOffline
+        />
+      )
+      expect(screen.getByRole("button", { name: "Ollama / gemma3:1b. Offline" })).toHaveTextContent("Offline")
+    } finally {
+      resetModelProviderFailures()
+    }
+  })
+
+  it("CC-N2: a provider failure for another model leaves this one alone", () => {
+    resetModelProviderFailures()
+    try {
+      recordModelProviderFailure("ollama:llama3", { provider: "ollama", model: "llama3" })
+      render(<ChatModelSelectorDropdown {...baseProps} selectedModel="openai:gpt-4o" connectionStatusLabel="Healthy" />)
+      expect(screen.getByRole("button", { name: /OpenAI \/ gpt-4o/ })).toHaveTextContent("Healthy")
+    } finally {
+      resetModelProviderFailures()
+    }
   })
 })

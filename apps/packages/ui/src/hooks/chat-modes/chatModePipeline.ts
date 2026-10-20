@@ -27,6 +27,7 @@ import type {
   SaveMessageErrorData
 } from "@/types/chat-modes"
 import { buildAssistantErrorContent } from "@/utils/chat-error-message"
+import { noteModelProviderOutcome, sendFailureTarget } from "@/utils/chat-send-failure"
 import { applyMcpModuleDisclosureFromToolCalls } from "@/utils/mcp-disclosure"
 import {
   buildMessageVariant,
@@ -1218,6 +1219,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     )
 
     replyCompleted = true
+    // The model's provider answered (CC-N2).
+    noteModelProviderOutcome(rawSelectedModel)
     await saveMessageOnSuccess({
       historyTurn,
       historyId,
@@ -1270,6 +1273,8 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       ? createServicePromptScopeChangedError("The server or authenticated account changed.") : caught
     cancelStreamingUpdate()
     signal.removeEventListener("abort", abortCancelStreamingUpdate)
+    // A provider that did not answer marks its model unreachable (CC-N2).
+    if (!signal.aborted) noteModelProviderOutcome(rawSelectedModel, e)
     if (!dispatched && !historyTurn?.dispatched && !preparationIsCurrent()) {
       await historyTurn?.cancelPreparation?.()
       return chatSubmitSkipped("Conversation changed")
@@ -1406,7 +1411,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     }
     const assistantContent = isAbort
       ? fullText
-      : buildAssistantErrorContent(fullText, e)
+      : buildAssistantErrorContent(fullText, e, sendFailureTarget(rawSelectedModel))
     const assistantErrorDynamicUIEnvelope =
       params.dynamicUIRequest?.renderer === "openui"
         ? buildDynamicUIEnvelope("openui", assistantContent)

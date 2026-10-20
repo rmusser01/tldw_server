@@ -154,6 +154,7 @@ const ErrorBubble: React.FC<{
     <div
       role="alert"
       aria-live="assertive"
+      data-chat-error-bubble=""
       className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
       <p className="font-semibold">{payload.summary}</p>
       {payload.hint && (
