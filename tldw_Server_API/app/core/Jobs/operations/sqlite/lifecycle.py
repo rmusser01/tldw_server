@@ -430,11 +430,21 @@ def acquire_job(
         # Selection and transition must exclude concurrent dependency writers.
         conn.execute("BEGIN IMMEDIATE")
         if command.max_inflight_quota and command.owner_user_id:
-            inflight_row = conn.execute(
-                (
+            from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import workflow_enrollment_projection
+
+            inflight_sql = (
+                "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND status='processing' "
+                "AND leased_until IS NOT NULL AND leased_until > DATETIME(?)"
+            )
+            if workflow_enrollment_projection(conn, backend="sqlite") == "workflow_capability_version":
+                inflight_sql = (
                     "SELECT COUNT(*) FROM jobs WHERE domain=? AND owner_user_id=? AND status='processing' "
-                    "AND leased_until IS NOT NULL AND leased_until > DATETIME(?)"
-                ),
+                    "AND leased_until IS NOT NULL AND ("
+                    "(workflow_capability_version=1 AND JULIANDAY(leased_until)>JULIANDAY('now')) OR "
+                    "(workflow_capability_version IS NULL AND leased_until > DATETIME(?)))"
+                )
+            inflight_row = conn.execute(
+                inflight_sql,
                 (command.domain, command.owner_user_id, now_sql),
             ).fetchone()
             if int(inflight_row[0] or 0) >= command.max_inflight_quota:
