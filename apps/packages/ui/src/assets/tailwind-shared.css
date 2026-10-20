@@ -420,7 +420,7 @@ body {
 .ant-table-column-sorter,
 .ant-tag,
 .ant-drawer-title,
-.ant-typography:not(.ant-typography-danger):not(.ant-typography-success):not(.ant-typography-warning),
+.ant-typography:not(.ant-typography-danger):not(.ant-typography-success):not(.ant-typography-warning):not(.ant-typography-secondary),
 .ant-form-item-label > label,
 .ant-checkbox-wrapper,
 .ant-radio-wrapper,

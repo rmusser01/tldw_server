@@ -164,6 +164,15 @@ describe("NotesSidebar toggle and help-button accessibility", () => {
     ])
   })
 
+  // XP-15 (#3124): the hint rendered at 14px in the body colour.
+  it("renders the paging hint as small muted text, not antd Typography", () => {
+    render(<NotesSidebar {...baseProps} showLargeListPaginationHint />)
+
+    const hint = screen.getByTestId("notes-large-list-pagination-hint")
+    expect(hint).toHaveClass("text-[11px]", "text-text-muted")
+    expect(hint.className).not.toMatch(/ant-typography/)
+  })
+
   it("gives section help icons a 24px target and a focus ring", () => {
     render(<NotesSidebar {...baseProps} />)
 

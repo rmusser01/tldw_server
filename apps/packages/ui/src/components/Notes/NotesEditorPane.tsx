@@ -20,6 +20,7 @@ import NotesEditorHeader from '@/components/Notes/NotesEditorHeader'
 import NotesStudioView from '@/components/Notes/NotesStudioView'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
 import NotesSectionHelpButton from '@/components/Notes/NotesSectionHelpButton'
+import { MetaText } from '@/components/Common/MetaText'
 import TaskChecklistPreview from '@/components/Notes/TaskChecklistPreview'
 import type { TaskChecklistTogglePayload } from '@/components/Notes/TaskChecklistPreview'
 import TaskActivityNotice from '@/components/Notes/TaskActivityNotice'
@@ -1464,14 +1465,11 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 </Button>
               </div>
             )}
-            <Typography.Text
-              type="secondary"
-              className="text-[11px] mr-1 uppercase tracking-[0.08em]"
-            >
+            <MetaText className="mr-1 uppercase tracking-[0.08em]">
               {t('option:notesSearch.formattingLabel', {
                 defaultValue: 'Formatting'
               })}
-            </Typography.Text>
+            </MetaText>
             <Tooltip title={t('option:notesSearch.toolbarBoldTooltip', { defaultValue: 'Bold' })}>
               <Button
                 size="small"
@@ -1566,14 +1564,11 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               />
             </Tooltip>
             <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
-            <Typography.Text
-              type="secondary"
-              className="text-[11px] mr-1 uppercase tracking-[0.08em]"
-            >
+            <MetaText className="mr-1 uppercase tracking-[0.08em]">
               {t('option:notesSearch.assistLabel', {
                 defaultValue: 'Assist'
               })}
-            </Typography.Text>
+            </MetaText>
             <Tooltip
               title={t('option:notesSearch.assistSummarizeTooltip', {
                 defaultValue: 'Generate a concise summary draft'
@@ -1811,10 +1806,9 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     )}
                   </>
                 )}
-                <Typography.Text
+                <MetaText
                   id={NOTES_EDITOR_CONTENT_HELP_ID}
-                  type="secondary"
-                  className="block text-[11px] mt-1 text-text-muted"
+                  className="block mt-1"
                 >
                   {editorInputMode === 'wysiwyg'
                     ? t('option:notesSearch.wysiwygSupportHint', {
@@ -1823,7 +1817,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     : t('option:notesSearch.editorSupportHint', {
                         defaultValue: 'Markdown + LaTeX supported'
                       })}
-                </Typography.Text>
+                </MetaText>
               </div>
               <div className="flex min-h-0 flex-col">
                 {content.trim().length > 0 ? (
@@ -1952,10 +1946,9 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   )}
                 </>
               )}
-              <Typography.Text
+              <MetaText
                 id={NOTES_EDITOR_CONTENT_HELP_ID}
-                type="secondary"
-                className="block text-[11px] mt-1 text-text-muted"
+                className="block mt-1"
               >
                 {editorInputMode === 'wysiwyg'
                   ? t('option:notesSearch.wysiwygSupportHint', {
@@ -1964,7 +1957,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   : t('option:notesSearch.editorSupportHint', {
                       defaultValue: 'Markdown + LaTeX supported'
                     })}
-              </Typography.Text>
+              </MetaText>
             </div>
           )}
         </div>

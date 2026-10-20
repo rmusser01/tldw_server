@@ -10,6 +10,7 @@ import { useTranslation } from 'react-i18next'
 import NotesListPanel from '@/components/Notes/NotesListPanel'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
 import NotesSectionHelpButton from '@/components/Notes/NotesSectionHelpButton'
+import { MetaText } from '@/components/Common/MetaText'
 import type { NoteListItem } from '@/components/Notes/notes-manager-types'
 import type {
   NotesSortOption,
@@ -436,16 +437,15 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 testId="notes-section-view-organize"
               >
                 {showLargeListPaginationHint && (
-                  <Typography.Text
-                    type="secondary"
-                    className="block text-[11px] text-text-muted"
+                  <MetaText
+                    className="block"
                     data-testid="notes-large-list-pagination-hint"
                   >
                     {t('option:notesSearch.largeListPaginationHint', {
                       defaultValue:
                         'Showing notes in pages for faster loading.'
                     })}
-                  </Typography.Text>
+                  </MetaText>
                 )}
                 <div className="grid grid-cols-2 gap-2">
                   <Button
