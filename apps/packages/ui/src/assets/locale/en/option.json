@@ -1539,7 +1539,18 @@
     "loadErrorUnreachable": "Could not reach the notes server.",
     "loadErrorDetails": "Details",
     "serverUnavailableTitle": "Notes server unavailable",
-    "serverUnavailableDescription": "You can keep writing. Your edits are kept on this device and saved when the server is back."
+    "serverUnavailableDescription": "You can keep writing. Your edits are kept on this device and saved when the server is back.",
+    "moveToTrashConfirmTitle": "Move to Trash?",
+    "moveToTrashConfirmOk": "Move to Trash",
+    "moveToTrashConfirmNamed": "Move \"{{title}}\" to Trash? You can restore it from Trash.",
+    "moveToTrashConfirmUnnamed": "Move this note to Trash? You can restore it from Trash.",
+    "moveToTrashLinkedOne": "This note is linked from 1 other note. That link will not work while the note is in Trash.",
+    "moveToTrashLinkedMany": "This note is linked from {{count}} other notes. Those links will not work while the note is in Trash.",
+    "trashHeaderLabel": "Trash",
+    "trashGuidanceTitle": "Trash",
+    "trashGuidanceDescription": "Deleted notes wait here. Choose Restore next to a note to put it back with your notes.",
+    "trashGuidanceShowList": "Show Trash",
+    "trashGuidanceBack": "Back to notes"
   },
   "tts": {
     "playground": "TTS Playground"

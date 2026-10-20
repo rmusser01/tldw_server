@@ -286,107 +286,110 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
               ? t('option:notesSearch.trashResultsLabel', { defaultValue: 'Trash' })
               : t('option:notesSearch.resultsLabel', { defaultValue: 'Results' })}
           </span>
-          <div className="flex items-center gap-1">
-            <Tooltip
-              title={
-                importDisabled
-                  ? t('option:notesSearch.importDisabled', {
-                      defaultValue: isOnline
-                        ? 'Switch to Notes view to import'
-                        : 'Connect to import notes'
-                    })
-                  : undefined
-              }
-            >
-              <Button
-                size="small"
-                type="text"
-                className="text-xs"
-                disabled={importDisabled}
-                loading={importInProgress}
-                onClick={() => onImportNotes?.()}
-              >
-                {t('option:notesSearch.importMenuTrigger', {
-                  defaultValue: 'Import'
-                })}
-              </Button>
-            </Tooltip>
-            <Tooltip title={syncFolderDisabled ? syncFolderDisabledReason : undefined}>
-              <Button
-                size="small"
-                type="text"
-                className="text-xs"
-                disabled={syncFolderDisabled}
-                loading={syncFolderInProgress}
-                title={syncFolderDisabled ? syncFolderDisabledReason : undefined}
-                onClick={() => onSyncFolder?.()}
-              >
-                {t('option:notesSearch.syncFolder', {
-                  defaultValue: 'Sync folder'
-                })}
-              </Button>
-            </Tooltip>
-            <Dropdown
-              menu={{
-                items: [
-                  {
-                    key: 'md',
-                    label: t('option:notesSearch.exportMdTooltip', {
-                      defaultValue: 'Export matching notes as Markdown (.md)'
-                    })
-                  },
-                  {
-                    key: 'csv',
-                    label: t('option:notesSearch.exportCsvTooltip', {
-                      defaultValue: 'Export matching notes as CSV'
-                    })
-                  },
-                  {
-                    key: 'json',
-                    label: t('option:notesSearch.exportJsonTooltip', {
-                      defaultValue: 'Export matching notes as JSON'
-                    })
-                  }
-                ],
-                onClick: ({ key }) => {
-                  if (exportDisabled) return
-                  if (key === 'md') onExportAllMd()
-                  if (key === 'csv') onExportAllCsv()
-                  if (key === 'json') onExportAllJson()
+          {/* Import, folder sync and export do not apply to Trash (NL-15). */}
+          {!isTrashView && (
+            <div className="flex items-center gap-1">
+              <Tooltip
+                title={
+                  importDisabled
+                    ? t('option:notesSearch.importDisabled', {
+                        defaultValue: isOnline
+                          ? 'Switch to Notes view to import'
+                          : 'Connect to import notes'
+                      })
+                    : undefined
                 }
-              }}
-              disabled={exportDisabled}
-            >
-              <span className="inline-flex">
-                <Tooltip
-                  title={
-                    exportDisabled
-                      ? isExporting
-                        ? t('option:notesSearch.exportProgressDisabled', {
-                            defaultValue: 'Export in progress'
-                          })
-                        : t('option:notesSearch.exportDisabled', {
-                            defaultValue: isOnline
-                              ? 'No results to export'
-                              : 'Connect to export notes'
-                          })
-                      : undefined
-                  }
+              >
+                <Button
+                  size="small"
+                  type="text"
+                  className="text-xs"
+                  disabled={importDisabled}
+                  loading={importInProgress}
+                  onClick={() => onImportNotes?.()}
                 >
-                  <Button
-                    size="small"
-                    type="text"
-                    className="text-xs"
-                    disabled={exportDisabled}
+                  {t('option:notesSearch.importMenuTrigger', {
+                    defaultValue: 'Import'
+                  })}
+                </Button>
+              </Tooltip>
+              <Tooltip title={syncFolderDisabled ? syncFolderDisabledReason : undefined}>
+                <Button
+                  size="small"
+                  type="text"
+                  className="text-xs"
+                  disabled={syncFolderDisabled}
+                  loading={syncFolderInProgress}
+                  title={syncFolderDisabled ? syncFolderDisabledReason : undefined}
+                  onClick={() => onSyncFolder?.()}
+                >
+                  {t('option:notesSearch.syncFolder', {
+                    defaultValue: 'Sync folder'
+                  })}
+                </Button>
+              </Tooltip>
+              <Dropdown
+                menu={{
+                  items: [
+                    {
+                      key: 'md',
+                      label: t('option:notesSearch.exportMdTooltip', {
+                        defaultValue: 'Export matching notes as Markdown (.md)'
+                      })
+                    },
+                    {
+                      key: 'csv',
+                      label: t('option:notesSearch.exportCsvTooltip', {
+                        defaultValue: 'Export matching notes as CSV'
+                      })
+                    },
+                    {
+                      key: 'json',
+                      label: t('option:notesSearch.exportJsonTooltip', {
+                        defaultValue: 'Export matching notes as JSON'
+                      })
+                    }
+                  ],
+                  onClick: ({ key }) => {
+                    if (exportDisabled) return
+                    if (key === 'md') onExportAllMd()
+                    if (key === 'csv') onExportAllCsv()
+                    if (key === 'json') onExportAllJson()
+                  }
+                }}
+                disabled={exportDisabled}
+              >
+                <span className="inline-flex">
+                  <Tooltip
+                    title={
+                      exportDisabled
+                        ? isExporting
+                          ? t('option:notesSearch.exportProgressDisabled', {
+                              defaultValue: 'Export in progress'
+                            })
+                          : t('option:notesSearch.exportDisabled', {
+                              defaultValue: isOnline
+                                ? 'No results to export'
+                                : 'Connect to export notes'
+                            })
+                        : undefined
+                    }
                   >
-                    {t('option:notesSearch.exportMenuTrigger', {
-                      defaultValue: 'Export'
-                    })}
-                  </Button>
-                </Tooltip>
-              </span>
-            </Dropdown>
-          </div>
+                    <Button
+                      size="small"
+                      type="text"
+                      className="text-xs"
+                      disabled={exportDisabled}
+                    >
+                      {t('option:notesSearch.exportMenuTrigger', {
+                        defaultValue: 'Export'
+                      })}
+                    </Button>
+                  </Tooltip>
+                </span>
+              </Dropdown>
+            </div>
+          )}
         </div>
         {exportProgress && (
           <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-text-muted">

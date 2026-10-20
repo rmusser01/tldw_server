@@ -123,6 +123,8 @@ import { useNotesKeyboardNavigation } from "@/components/Notes/hooks/useNotesKey
 import { focusActiveNotesListRow } from "@/components/Notes/notes-list-keyboard"
 import { buildNotesTimelineSections } from "@/components/Notes/notes-timeline"
 import { isNotesServerUnavailableError } from "@/components/Notes/notes-list-error"
+import { buildMoveToTrashConfirm, dismissNoteDeletedToast, findNoteTitleForConfirm } from "@/components/Notes/notes-trash"
+import NotesTrashGuidance from "@/components/Notes/NotesTrashGuidance"
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
 
@@ -1366,18 +1368,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     if (target == null) { message.warning('No note selected'); return }
     const targetId = String(target)
     const inboundReferenceCount = await countInboundDeleteReferences(targetId)
-    const warningSuffix =
-      inboundReferenceCount > 0
-        ? `\n\nThis note is referenced by ${inboundReferenceCount} other note${
-            inboundReferenceCount === 1 ? '' : 's'
-          }. Deleting it will break those links.`
-        : ''
-    const ok = await confirmDanger({
-      title: 'Please confirm',
-      content: `Delete this note?${warningSuffix}`,
-      okText: 'Delete',
-      cancelText: 'Cancel'
-    })
+    const noteTitle = findNoteTitleForConfirm(targetId, { selectedId: ed.selectedId, selectedTitle: ed.title, rows: list.data })
+    const ok = await confirmDanger(buildMoveToTrashConfirm(t, { noteTitle, inboundReferenceCount }))
     if (!ok) return
     try {
       let expectedVersion: number | null = null
@@ -1440,6 +1432,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         )}` as any,
         method: 'POST' as any
       })
+      dismissNoteDeletedToast(message, target)
       message.success('Note restored')
       list.setListMode('active')
       list.setPage(1)
@@ -2779,6 +2772,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
             void handleNewNote()
           }}
         />
+      ) : list.listMode === 'trash' && showEditorEmptyState ? (
+        <NotesTrashGuidance isMobileViewport={isMobileViewport} onShowTrashList={() => setMobileSidebarOpen(true)} onBackToNotes={() => { void ed.switchListMode('active') }} />
       ) : (
       <NotesEditorPane
         isMobileViewport={isMobileViewport}

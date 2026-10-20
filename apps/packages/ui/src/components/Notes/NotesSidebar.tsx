@@ -436,8 +436,13 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
             {/* ---- Always visible: Header row ---- */}
             <div className="flex items-center justify-between mb-3">
               <div className="flex min-w-0 items-baseline">
-                <div className="text-xs uppercase tracking-[0.16em] text-text-muted">
-                  {t('option:notesSearch.headerLabel', { defaultValue: 'Notes' })}
+                <div
+                  className="text-xs uppercase tracking-[0.16em] text-text-muted"
+                  data-testid="notes-sidebar-header-label"
+                >
+                  {listMode === 'trash'
+                    ? t('option:notesSearch.trashHeaderLabel', { defaultValue: 'Trash' })
+                    : t('option:notesSearch.headerLabel', { defaultValue: 'Notes' })}
                 </div>
                 <span
                   className="ml-2 text-xs uppercase tracking-[0.16em] text-text-subtle"

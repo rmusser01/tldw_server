@@ -338,10 +338,10 @@ export class NotesPage extends BasePage {
     await expect(deleteMenuItem).toBeVisible({ timeout: 5_000 })
     await deleteMenuItem.click()
 
-    // Handle "Please confirm" modal (the component uses confirmDanger with "Delete" button)
+    // Handle the "Move to Trash?" confirm (confirmDanger with a "Move to Trash" button)
     const confirmModal = this.page.locator('.ant-modal-confirm')
     await confirmModal.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-    const confirmDeleteBtn = confirmModal.getByRole("button", { name: /^delete$/i })
+    const confirmDeleteBtn = confirmModal.getByRole("button", { name: /^(delete|move to trash)$/i })
     if (await confirmDeleteBtn.isVisible({ timeout: 3_000 }).catch(() => false)) {
       await confirmDeleteBtn.click()
     }
