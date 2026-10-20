@@ -218,6 +218,7 @@ An endpoint asks before it starts LLM work, and answers 402 before it does anyth
 | `/evaluations/geval`, `/evaluations/rag` and `/evaluations/response-quality` | Always. |
 | `/evaluations/batch` | When the evaluation type is `geval`, `rag` or `response_quality`. |
 | Evaluation runs (`POST /evaluations/{eval_id}/runs`) | Always. The run is a task the request starts, so it is admitted with the request; checked at the call, a refused sample would be scored 0.0 and the run would complete. |
+| Benchmark runs (`/evaluations/benchmarks/{name}/run`, `/benchmarks/{name}/run`) | Always. Checked only at the call, every item would be refused and counted as failed, and the run would still complete. |
 | The six `/media/process-*` endpoints and `/media/add` | When `perform_analysis` is set and an `api_name` is given. |
 
 Simple search (`/rag/simple`) no longer generates an answer it then discarded, so it makes no LLM call and needs no check.
@@ -484,3 +485,8 @@ Revision of 2026-10-13, while planning PR 2b:
 Revision of 2026-10-18, TASK-13585 and TASK-13610:
 
 - **MCP tool calls and the in-process claims rebuild** are recorded and checked (§1, §4b). The Messages API native path is recorded (§3). It needs no check at the call: `require_llm_quota` admits it first, so its calls run `prechecked`.
+
+Revision of 2026-10-18, TASK-13638:
+
+- **Callers that turned a refusal into degraded output** let it through, or keep their artifact and record the refusal. Benchmark runs join the §4a table.
+- **The workflow engine does not retry a step refused with a 402.** This replaces the 2026-10-13 note that an `llm` step is retried once.

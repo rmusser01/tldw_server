@@ -24,7 +24,7 @@ from ....core.Chat.streaming_utils import (
     provider_result_contains_error,
     sanitized_provider_stream_exception,
 )
-from ....core.exceptions import raise_detached_error
+from ....core.exceptions import LLMQuotaExceededError, raise_detached_error
 from ....core.LLM_Calls.adapter_utils import (
     ensure_app_config,
     get_adapter_or_raise,
@@ -215,6 +215,8 @@ class TestRunner:
             actual_output = {"response": response_text}
             _log.info("PS testrun.llm.done time_ms={}", int((time.time() - start_time) * 1000))
 
+        except LLMQuotaExceededError:
+            raise  # the user's limit: neither a provider outage nor a failed run scored 0.0
         except Exception as e:
             safe_error = sanitized_provider_stream_exception(e)
             _log.error(

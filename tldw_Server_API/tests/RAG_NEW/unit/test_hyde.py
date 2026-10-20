@@ -1741,3 +1741,42 @@ async def test_sync_embedding_call_owns_worker_and_marks_only_valid_late_result(
         expected_lifecycle.append("mark-used")
     expected_lifecycle.append("runtime-close")
     assert lifecycle == expected_lifecycle  # nosec B101
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_unified_pipeline_runs_legacy_hyde_generation_off_the_event_loop():
+    """With no credential runtime, the sync HyDE call runs on a worker thread, where the LLM quota check runs (TASK-13638)."""
+    loop_thread = threading.get_ident()
+    generation_threads: list[int] = []
+
+    def _generate(_query, _provider, _model):
+        generation_threads.append(threading.get_ident())
+        return "A hypothetical answer with enough words in it."
+
+    class _FakeMediaRetriever:
+        async def retrieve_hybrid(self, *args, **kwargs):
+            return []
+
+    class _FakeMultiRetriever:
+        def __init__(self, *args, **kwargs):
+            self.retrievers = {DataSource.MEDIA_DB: _FakeMediaRetriever()}
+
+        async def retrieve(self, *args, **kwargs):
+            return []
+
+    with patch("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.MultiDatabaseRetriever", _FakeMultiRetriever), \
+         patch("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.generate_hypothetical_answer", _generate), \
+         patch("tldw_Server_API.app.core.RAG.rag_service.unified_pipeline.hyde_embed_text", new=AsyncMock(return_value=[0.1, 0.2, 0.3])):
+        result = await unified_rag_pipeline(
+            query="test hyde",
+            sources=["media_db"],
+            top_k=10,
+            enable_hyde=True,
+            adaptive_hybrid_weights=False,
+            enable_generation=False,
+        )
+
+    assert result.metadata.get("hyde_applied") is True
+    assert len(generation_threads) == 1
+    assert generation_threads[0] != loop_thread

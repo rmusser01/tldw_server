@@ -11,8 +11,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
-from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import require_eval_permissions
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import User, get_rate_limiter_dep
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
+from tldw_Server_API.app.api.v1.endpoints.evaluations.evaluations_auth import (
+    get_eval_request_user,
+    require_eval_permissions,
+)
 from tldw_Server_API.app.core.AuthNZ.permissions import EVALS_MANAGE, EVALS_READ
 from tldw_Server_API.app.core.Evaluations.benchmark_loaders import load_benchmark_dataset
 from tldw_Server_API.app.core.Evaluations.benchmark_registry import get_registry
@@ -201,7 +205,8 @@ async def get_benchmark_samples(
 async def run_benchmark(
     benchmark_name: str,
     request: BenchmarkRunRequest,
-    user_id: str = Depends(get_rate_limiter_dep)
+    user_id: str = Depends(get_rate_limiter_dep),
+    current_user: User = Depends(get_eval_request_user),
 ):
     """
     Run a benchmark evaluation.
@@ -217,6 +222,8 @@ async def run_benchmark(
     Returns:
         Summary of benchmark results.
     """
+    # Usage quotas (LLM usage accounting spec §4a): checked before any work, as the evaluations route does.
+    await enforce_llm_quota(getattr(current_user, "id", None))
     try:
         registry = get_registry()
         config = registry.get(benchmark_name)
