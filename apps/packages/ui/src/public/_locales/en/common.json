@@ -2062,5 +2062,38 @@
   "modelSelect": {
     "saveFailed": "This model is selected for this tab. Your preference could not be saved.",
     "retrySave": "Retry saving model"
+  },
+  "actionInfo_webSearch": {
+    "message": "Searching the web..."
+  },
+  "actionInfo_ragSearch": {
+    "message": "Searching knowledge base..."
+  },
+  "actionInfo_embedding": {
+    "message": "Processing context..."
+  },
+  "actionInfo_generating": {
+    "message": "Generating response..."
+  },
+  "actionInfo_processing": {
+    "message": "Processing..."
+  },
+  "actionInfo_thinking": {
+    "message": "Thinking..."
+  },
+  "actionInfo_started": {
+    "message": "{{label}} started"
+  },
+  "actionInfo_complete": {
+    "message": "Response complete"
+  },
+  "actionInfo_waitingFor": {
+    "message": "Waiting for {{model}}..."
+  },
+  "actionInfo_stillWaitingFor": {
+    "message": "Still waiting for {{model}} ({{seconds}} seconds)."
+  },
+  "actionInfo_stillGenerating": {
+    "message": "Still writing the reply ({{seconds}} seconds)."
   }
 }

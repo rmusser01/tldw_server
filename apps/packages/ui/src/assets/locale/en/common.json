@@ -854,5 +854,18 @@
     "scope": "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat.",
     "unsupported": "This reply or its active setup does not support regeneration yet. Your original exchange and draft are kept. Review conversation and response settings or start a compatible saved chat.",
     "failed": "We could not confirm the new reply. Your original exchange and draft are kept. Reload this chat and review recovery before regenerating again."
+  },
+  "actionInfo": {
+    "webSearch": "Searching the web...",
+    "ragSearch": "Searching knowledge base...",
+    "embedding": "Processing context...",
+    "generating": "Generating response...",
+    "processing": "Processing...",
+    "thinking": "Thinking...",
+    "started": "{{label}} started",
+    "complete": "Response complete",
+    "waitingFor": "Waiting for {{model}}...",
+    "stillWaitingFor": "Still waiting for {{model}} ({{seconds}} seconds).",
+    "stillGenerating": "Still writing the reply ({{seconds}} seconds)."
   }
 }

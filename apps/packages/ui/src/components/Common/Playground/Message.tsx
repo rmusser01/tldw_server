@@ -2436,6 +2436,8 @@ const PlaygroundMessageImpl = (props: Props) => {
               isSearchingInternet={props.isSearchingInternet}
               isEmbedding={props.isEmbedding}
               actionInfo={props.actionInfo}
+              modelName={resolvedModelName}
+              waitingForReply={!props.message?.replace(/▋/g, "").trim()}
             />
           )}
           {showUsageMetadata && (
