@@ -14,13 +14,15 @@ ADR required: no. ADR-002 and ADR-059 govern tracking; this documentation-only c
 **Goal:** Address the two outstanding documentation comments and qualify this exact change.
 **Success criteria:** AC4 remains unchecked until the new review/checks actually complete. The final summary lists completed steps and genuinely pending gates accurately; current prose uses readable spacing. Independent requesting-code-review passes, with no Qodo request.
 **Tests:** Applicable pre-commit, git diff --check, deterministic preservation checks and exact-head reviewer assessment.
-**Status:** In Progress
+**Status:** Complete
 
 ## Stage 3: Land normally
 **Goal:** Merge PR3207 with the retained human Change summary after all required gates.
 **Success criteria:** Rebase only when at the front of the serial merge sequence; protect publication with the full expected remote head. Require all seven exact-head/current-base statuses and settled reviews before normal merge.
 **Tests:** Verify queue mode, current dev ancestry, remote head, required statuses and merge result.
-**Status:** Not Started
+**Status:** Complete
+
+Verified normal merge: PR #3207, 2e6ceab9fb97c5712533be670504a81a24525489 from reviewed 1938258c37dee1ed776fa8fea02e80ed4a4a1e70 at 2026-10-20T16:15:10Z, after all seven required statuses passed on current base. The historical plan below is retained intact.
 
 ## Historical plan (2026-10-06)
 
