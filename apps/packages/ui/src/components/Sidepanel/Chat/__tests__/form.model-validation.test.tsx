@@ -111,6 +111,17 @@ const trackedLoadingNode = nodes.find((node): node is ts.JsxAttribute =>
 if (!trackedLoadingNode?.initializer || !ts.isJsxExpression(trackedLoadingNode.initializer) || !trackedLoadingNode.initializer.expression)
   throw new Error("Missing actual compact tracked picker loading binding")
 const trackedLoadingExpression = trackedLoadingNode.initializer.expression.getText(ast)
+// XS-02: in Pro mode the model chip lives in ControlRow. Read which ref the
+// form hands it, so the harness can mount the chip on that same ref.
+const controlRowModelPickerRef = nodes
+  .filter((node): node is ts.JsxSelfClosingElement =>
+    ts.isJsxSelfClosingElement(node) && node.tagName.getText(ast) === "ControlRow")
+  .flatMap((node) => node.attributes.properties)
+  .find((attr): attr is ts.JsxAttribute =>
+    ts.isJsxAttribute(attr) && attr.name.getText(ast) === "modelPickerRef")
+  ?.initializer?.getText(ast)
+  .replace(/^\{|\}$/g, "")
+  .trim()
 const compiled = ts.transpileModule(
   `
   return function useSidebarValidation(scope) {
@@ -125,7 +136,7 @@ const compiled = ts.transpileModule(
     const fetchChatModels = mocks.fetchChatModels;
     const ${catalogQuery.getText(ast)};
     const availableChatModelIds = ${initializer("availableChatModelIds")};
-    const casualModelSelectRef = ${initializer("casualModelSelectRef")};
+    const modelPickerRef = ${initializer("modelPickerRef")};
     const contextFiles = [], selectedDocuments = [];
     const streaming = false, sendWhenEnter = true, greetingStarting = false;
     const connectionReadyRef = { current: isConnectionReady }, connectionGenerationRef = { current: 0 };
@@ -138,7 +149,7 @@ const compiled = ts.transpileModule(
     ${effects}
     const submit = ${initializer("submitCurrentRequest")};
     const inline = ${initializer("composerInlineMessagesNode")};
-    return { submit, inline, catalogReady: ${catalogDataName} !== undefined, trackedSelectionLoading: ${trackedLoadingExpression} };
+    return { submit, inline, modelPickerRef, catalogReady: ${catalogDataName} !== undefined, trackedSelectionLoading: ${trackedLoadingExpression} };
   }
 `,
   { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2022 } }
@@ -184,6 +195,7 @@ const useSidebarValidation = new Function(
 }) => {
   submit: (message: string, image: string) => Promise<void>
   inline: React.ReactNode
+  modelPickerRef: React.RefObject<React.ComponentRef<typeof ModelSelect>>
   catalogReady: boolean
   trackedSelectionLoading: boolean
 }
@@ -216,7 +228,7 @@ function Harness({
   const [controlsOpen, setControlsOpen] = React.useState(false);
   const [selectedModel, setSelectedModel] = React.useState(model)
   mocks.useMessage.mockReturnValue({ selectedModel, setSelectedModel: async (next: string) => { setSelectedModel(next); return true } })
-  const { submit, inline, catalogReady, trackedSelectionLoading } = useSidebarValidation({
+  const { submit, inline, modelPickerRef, catalogReady, trackedSelectionLoading } = useSidebarValidation({
     form,
     selectedModel,
     isSending: busy,
@@ -244,6 +256,11 @@ function Harness({
       </output>
       <output data-testid="tracked-selection-loading">{String(trackedSelectionLoading)}</output>
       {inline}
+      {pro && controlRowModelPickerRef === "modelPickerRef" && (
+        <div data-testid="pro-control-row">
+          <ModelSelect ref={modelPickerRef} showSelectedName />
+        </div>
+      )}
     </>
   )
 }
@@ -469,6 +486,18 @@ describe("sidebar model validation", () => {
       expect(mocks.send).not.toHaveBeenCalled()
     }
   )
+
+  it("XS-02: opens the Pro control row's model picker when Send is blocked by the model", async () => {
+    renderHarness(<Harness model="" pro />)
+    await waitForCatalog()
+    const row = await screen.findByTestId("pro-control-row")
+    expect(row).toContainElement(screen.getByTestId("chat-model-select"))
+    fireEvent.click(screen.getByText("Send"))
+    await screen.findByRole("alert")
+    const search = await screen.findByPlaceholderText("Search models")
+    await waitFor(() => expect(search).toHaveFocus())
+    expect(mocks.send).not.toHaveBeenCalled()
+  })
 
   it("XS-02: Escape in the picker's search closes it and returns focus to the model chip", async () => {
     renderHarness(<Harness model="" />)
