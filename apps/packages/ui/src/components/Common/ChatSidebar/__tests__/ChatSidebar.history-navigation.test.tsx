@@ -220,6 +220,12 @@ describe("history-first sidebar navigation", () => {
       const toggle = screen.getByTestId("chat-sidebar-toggle");
       expect(toggle).toHaveAccessibleName(name);
       expect(toggle).toHaveAttribute("aria-expanded", expanded);
+      // The toggle names the sidebar it opens and closes.
+      const controlled = toggle.getAttribute("aria-controls");
+      expect(controlled).toBeTruthy();
+      expect(document.getElementById(String(controlled))).toBe(
+        screen.getByTestId("chat-sidebar"),
+      );
     },
   );
 
