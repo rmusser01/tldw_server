@@ -24,7 +24,7 @@
 - Normalized STT artifact helper (`to_normalized_stt_artifact`) is implemented and used by adapters and ingestion to represent STT results in a single internal shape.
 - REST `/api/v1/audio/transcriptions` and batch ingestion paths now produce/consume this normalized artifact internally, while preserving their existing public response JSON.
 - `persist_primary_av_item` upserts transcripts into `Transcripts` (via `upsert_transcript`) with `whisper_model` derived from the registry, and stores the normalized artifact on `process_result["normalized_stt"]`; chunking continues through the existing `chunks` → `UnvectorizedMediaChunks`/`MediaChunks` pipeline.
-- Jobs (CPU and GPU workers) attach the normalized artifact to their `audio_transcribe` payloads (`normalized_stt`), and dedicated DB round‑trip/contract tests for the normalized artifact remain the primary outstanding item for this stage.
+- Jobs (CPU and GPU workers) attach the normalized artifact to their `audio_transcribe` payloads (`normalized_stt`, without the `text` and `segments` the payload already carries), and dedicated DB round‑trip/contract tests for the normalized artifact remain the primary outstanding item for this stage.
 
 ## Stage 3: Streaming STT Latency & Quotas (M1 Alignment)
 **Goal**: Finalize unified WS STT (turn detection + quotas) to meet latency and fairness requirements while failing open safely when VAD is unavailable.

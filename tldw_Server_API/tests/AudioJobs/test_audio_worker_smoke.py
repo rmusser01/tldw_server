@@ -500,7 +500,7 @@ async def test_audio_gpu_worker_sanitizes_owner_slot_release_log(monkeypatch):
             }
 
         def complete_job(self, *args, **kwargs):
-            return None
+            return True
 
         def create_job(self, *args, **kwargs):
             return {"id": 104}
@@ -1218,10 +1218,11 @@ async def test_a_failed_stage_hand_off_fails_the_job_visibly(pipeline_worker, mo
 
 
 @pytest.mark.unit
-async def test_a_transient_hand_off_failure_is_retried(pipeline_worker, monkeypatch):
+async def test_a_hand_off_that_keeps_failing_retries_the_stage(pipeline_worker, monkeypatch):
     from tldw_Server_API.app.core.Jobs.manager import JobManager
 
     worker, jm, stt_calls = pipeline_worker
+    monkeypatch.setattr(worker, "_ENQUEUE_RETRY_DELAYS", (0.0, 0.0), raising=True)
     original_create = JobManager.create_job
 
     def _flaky_create(self, **kwargs):
@@ -1503,3 +1504,389 @@ async def test_a_hand_off_is_not_refused_by_the_queued_job_quota(pipeline_worker
     )
     assert [j["status"] for j in _jobs_of(jm, "audio_store")] == ["completed"]
     assert (jm.get_job(int(later["id"])) or {}).get("status") == "queued"
+
+
+# --- long recordings and refused hand-offs (TASK-13851) ---
+
+
+def _long_transcript(minutes: int) -> dict:
+    """An STT artifact shaped like faster-whisper's: one segment every 5 s, about 150 words a minute."""
+    segments = [
+        {"start_seconds": 5.0 * i, "end_seconds": 5.0 * i + 5, "Time_Start": 5.0 * i, "Time_End": 5.0 * i + 5,
+         "Text": f"Part {i} of the talk, where the speaker keeps on explaining the topic."}
+        for i in range(minutes * 12)
+    ]
+    return {"text": " ".join(s["Text"] for s in segments), "language": "en", "segments": segments,
+            "diarization": {"enabled": False, "speakers": None}, "usage": {"duration_ms": None, "tokens": None},
+            "metadata": {"provider": "faster-whisper", "model": "large-v3"}}
+
+
+@pytest.mark.unit
+async def test_a_three_hour_recording_runs_through_every_stage(pipeline_worker, monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    worker, jm, stt_calls = pipeline_worker
+    artifact = _long_transcript(180)
+
+    def _long_stt(wav_path, model, *args, **kwargs):
+        stt_calls.append(wav_path)
+        return artifact
+
+    monkeypatch.setattr(atlib, "run_stt_job_via_registry", _long_stt)
+    jm.create_job(
+        domain="audio", queue="default", job_type="audio_convert",
+        payload={"local_path": "/tmp/long.mp3", "model": "whisper-1", "perform_chunking": True, "perform_analysis": False},
+        owner_user_id="7",
+    )
+    await _run_worker_until(
+        worker,
+        lambda: _store_completed(jm) or any(j["status"] in {"failed", "quarantined"} for j in jm.list_jobs(domain="audio")),
+        seconds=20,
+    )
+    assert [j["status"] for j in _jobs_of(jm, "audio_store")] == ["completed"], jm.list_jobs(domain="audio")
+    assert len(stt_calls) == 1
+    stored = _jobs_of(jm, "audio_store")[0]["payload"]
+    assert stored["text"] == artifact["text"] and stored["segments"] == artifact["segments"]
+    assert stored["chunks"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("env", "value", "segment_extra"),
+    [
+        ("JOBS_MAX_JSON_BYTES", "600", {}),
+        ("JOBS_ALLOWED_JOB_TYPES_AUDIO", "audio_convert,audio_transcribe", {}),
+        ("JOBS_MAX_JSON_BYTES", "1048576", {"speakers": {"a", "b"}}),  # the default cap; a set is not JSON
+    ],
+    ids=["payload-over-the-cap", "job-type-not-allowed", "payload-not-json"],
+)
+async def test_a_refused_hand_off_fails_without_running_the_stage_again(
+    pipeline_worker, monkeypatch, env, value, segment_extra
+):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    worker, jm, stt_calls = pipeline_worker
+
+    def _stt(wav_path, model, *args, **kwargs):
+        stt_calls.append(wav_path)
+        text = "hello pipeline " * 20  # puts the audio_store payload over a 600-byte cap
+        return {"text": text, "segments": [{"Text": text, **segment_extra}]}
+
+    monkeypatch.setattr(atlib, "run_stt_job_via_registry", _stt)
+    monkeypatch.setenv(env, value)
+    _convert_job(jm)
+    await _run_worker_until(
+        worker, lambda: any(j["status"] in {"failed", "quarantined"} for j in _jobs_of(jm, "audio_transcribe"))
+    )
+    assert [(j["status"], j["retry_count"], j["error_code"]) for j in _jobs_of(jm, "audio_transcribe")] == [
+        ("failed", 0, "next_stage_enqueue_failed")
+    ]
+    assert len(stt_calls) == 1
+    assert _jobs_of(jm, "audio_store") == []
+
+
+@pytest.mark.unit
+async def test_a_transient_enqueue_error_is_retried_without_running_the_stage_again(pipeline_worker, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    worker, jm, stt_calls = pipeline_worker
+    monkeypatch.setattr(worker, "_ENQUEUE_RETRY_DELAYS", (0.0, 0.0), raising=True)
+    logger_capture = _CaptureLogger()
+    monkeypatch.setattr(worker, "logger", logger_capture)
+    original_create = JobManager.create_job
+    failed_once = []
+
+    def _flaky_create(self, **kwargs):
+        if kwargs.get("job_type") == "audio_store" and not failed_once:
+            failed_once.append(True)
+            raise RuntimeError("connection to server at db.internal (10.0.0.5) failed")
+        return original_create(self, **kwargs)
+
+    monkeypatch.setattr(JobManager, "create_job", _flaky_create)
+    _convert_job(jm)
+    await _run_worker_until(worker, lambda: _store_completed(jm))
+    assert [(j["status"], j["retry_count"]) for j in _jobs_of(jm, "audio_transcribe")] == [("completed", 0)]
+    assert len(stt_calls) == 1
+    # The log names the error type only: a backend error can carry host and user names.
+    rendered_logs = _render_log_records(logger_capture.records)
+    assert "RuntimeError" in rendered_logs
+    assert "db.internal" not in rendered_logs
+
+
+@pytest.mark.unit
+async def test_a_transient_complete_error_after_the_hand_off_is_retried_in_place(pipeline_worker, monkeypatch):
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    worker, jm, stt_calls = pipeline_worker
+    monkeypatch.setattr(worker, "_ENQUEUE_RETRY_DELAYS", (0.0, 0.0), raising=True)
+    original_complete = JobManager.complete_job
+    failed_once = []
+
+    def _flaky_complete(self, job_id, **kwargs):
+        if (self.get_job(job_id) or {}).get("job_type") == "audio_transcribe" and not failed_once:
+            failed_once.append(True)
+            raise RuntimeError("database is locked")
+        return original_complete(self, job_id, **kwargs)
+
+    monkeypatch.setattr(JobManager, "complete_job", _flaky_complete)
+    _convert_job(jm)
+    await _run_worker_until(worker, lambda: _store_completed(jm))
+    # Before: the error escaped hand_off and left the stage processing, to be run again once its lease ran out.
+    assert [(j["status"], j["retry_count"]) for j in _jobs_of(jm, "audio_transcribe")] == [("completed", 0)]
+    assert len(stt_calls) == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("broken", ["get_job", "cancel_job"])
+async def test_an_error_checking_for_a_cancel_after_the_hand_off_is_logged_not_raised(monkeypatch, broken):
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+
+    def _fails(*args, **kwargs):
+        raise RuntimeError("connection to server at db.internal (10.0.0.5) failed")
+
+    jm = SimpleNamespace(
+        create_job=lambda **kwargs: {"id": 2},
+        complete_job=lambda *args, **kwargs: False,  # the stage was cancelled while it ran
+        get_job=lambda job_id: {"status": "cancelled"},
+        cancel_job=lambda *args, **kwargs: True,
+    )
+    setattr(jm, broken, _fails)
+    logger_capture = _CaptureLogger()
+    monkeypatch.setattr(worker, "logger", logger_capture)
+    job = {"id": 1, "owner_user_id": "7", "lease_id": "lease"}
+    assert await worker.hand_off(jm, job, "audio_store", {}, worker_id="w") is None
+    rendered_logs = _render_log_records(logger_capture.records)
+    assert "RuntimeError" in rendered_logs
+    assert "db.internal" not in rendered_logs
+
+
+@pytest.mark.unit
+async def test_audio_gpu_worker_fails_a_job_without_an_owner(monkeypatch, tmp_path):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+    import tldw_Server_API.app.services.audio_transcribe_gpu_worker as gpu_worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs_gpu_ownerless.db"))
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.05")
+
+    async def _yes(user_id: int):
+        return True, ""
+
+    async def _noop(user_id: int):
+        return None
+
+    monkeypatch.setattr(gpu_worker, "can_start_job", _yes)
+    monkeypatch.setattr(gpu_worker, "increment_jobs_started", _noop)
+    monkeypatch.setattr(gpu_worker, "finish_job", _noop)
+    stt_calls = []
+
+    def _stt(wav_path, model, *args, **kwargs):
+        stt_calls.append(wav_path)
+        return {"text": "hello gpu", "segments": [{"Text": "hello gpu"}]}
+
+    monkeypatch.setattr(atlib, "run_stt_job_via_registry", _stt)
+    jm = JobManager()
+    job_id = int(jm.create_job(
+        domain="audio", queue="transcribe", job_type="audio_transcribe",
+        payload={"wav_path": "/tmp/g.wav", "model": "whisper-1", "perform_chunking": False, "perform_analysis": False},
+        owner_user_id=None,
+    )["id"])
+    stop = asyncio.Event()
+    task = asyncio.create_task(gpu_worker.run_audio_transcribe_gpu_worker(stop))
+    try:
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            if (jm.get_job(job_id) or {}).get("status") not in {"queued", "processing"}:
+                break
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=5.0)
+    job = jm.get_job(job_id) or {}
+    # Before: it ran as user "0"; through hand_off, its next stage would be queued for the owner "None".
+    assert (job.get("status"), job.get("retry_count"), job.get("error_message")) == (
+        "failed", 0, "missing owner_user_id"
+    )
+    assert stt_calls == []
+    assert jm.list_jobs(domain="audio", job_type="audio_store") == []
+
+
+@pytest.mark.unit
+async def test_audio_gpu_worker_fails_a_stage_whose_hand_off_is_refused(monkeypatch, tmp_path):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+    import tldw_Server_API.app.services.audio_transcribe_gpu_worker as gpu_worker
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs_gpu_refused.db"))
+    monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.05")
+    monkeypatch.setenv("JOBS_ALLOWED_JOB_TYPES_AUDIO", "audio_transcribe")  # audio_store is refused
+
+    async def _yes(user_id: int):
+        return True, ""
+
+    async def _noop(user_id: int):
+        return None
+
+    monkeypatch.setattr(gpu_worker, "can_start_job", _yes)
+    monkeypatch.setattr(gpu_worker, "increment_jobs_started", _noop)
+    monkeypatch.setattr(gpu_worker, "finish_job", _noop)
+    stt_calls = []
+
+    def _stt(wav_path, model, *args, **kwargs):
+        stt_calls.append(wav_path)
+        return {"text": "hello gpu", "segments": [{"Text": "hello gpu"}]}
+
+    monkeypatch.setattr(atlib, "run_stt_job_via_registry", _stt)
+    jm = JobManager()
+    job_id = int(jm.create_job(
+        domain="audio", queue="transcribe", job_type="audio_transcribe",
+        payload={"wav_path": "/tmp/g.wav", "model": "whisper-1", "perform_chunking": False, "perform_analysis": False},
+        owner_user_id="7",
+    )["id"])
+    stop = asyncio.Event()
+    task = asyncio.create_task(gpu_worker.run_audio_transcribe_gpu_worker(stop))
+    try:
+        for _ in range(100):
+            await asyncio.sleep(0.05)
+            if (jm.get_job(job_id) or {}).get("status") not in {"queued", "processing"}:
+                break
+    finally:
+        stop.set()
+        await asyncio.wait_for(task, timeout=5.0)
+    job = jm.get_job(job_id) or {}
+    # Before: the stage completed first, so it read completed with nothing after it.
+    assert (job.get("status"), job.get("retry_count"), job.get("error_code")) == ("failed", 0, "next_stage_enqueue_failed")
+    assert len(stt_calls) == 1
+
+
+@pytest.mark.unit
+async def test_audio_store_with_a_result_over_the_cap_fails_instead_of_staying_processing(pipeline_worker, monkeypatch):
+    import json
+
+    worker, jm, stt_calls = pipeline_worker
+    payload = {"text": "x" * 5000, "model": "whisper-1"}
+    # The payload fits; the stored result ({"payload": ...}) is 13 bytes larger and does not.
+    monkeypatch.setenv("JOBS_MAX_JSON_BYTES", str(len(json.dumps(payload)) + 5))
+    job_id = int(jm.create_job(domain="audio", queue="default", job_type="audio_store", payload=payload, owner_user_id="7")["id"])
+    await _run_worker_until(worker, lambda: (jm.get_job(job_id) or {}).get("status") in {"completed", "failed"}, seconds=2)
+    job = jm.get_job(job_id) or {}
+    assert (job.get("status"), job.get("retry_count"), job.get("error_code")) == ("failed", 0, "result_too_large")
+
+
+# --- cancelling a pipeline (TASK-13852) ---
+
+
+@pytest.mark.unit
+async def test_cancelling_a_running_stage_stops_the_stages_after_it(pipeline_worker, monkeypatch):
+    import tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib as atlib
+
+    worker, jm, stt_calls = pipeline_worker
+
+    def _stt_cancelled_while_running(wav_path, model, *args, **kwargs):
+        stt_calls.append(wav_path)
+        assert jm.cancel_job(int(_jobs_of(jm, "audio_transcribe")[0]["id"]), reason="user")
+        return {"text": "hello pipeline", "segments": [{"Text": "hello pipeline"}]}
+
+    monkeypatch.setattr(atlib, "run_stt_job_via_registry", _stt_cancelled_while_running)
+    _convert_job(jm)
+    await _run_worker_until(
+        worker, lambda: any(j["status"] not in {"queued", "processing"} for j in _jobs_of(jm, "audio_store"))
+    )
+    assert [j["status"] for j in _jobs_of(jm, "audio_transcribe")] == ["cancelled"]
+    assert [j["status"] for j in _jobs_of(jm, "audio_store")] == ["cancelled"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("canceller", ["owner", "admin"])
+async def test_cancel_endpoint_cancels_the_rest_of_the_pipeline(monkeypatch, tmp_path, canceller):
+    from fastapi import HTTPException
+
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_jobs
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager(db_path=tmp_path / "jobs_cancel.db")
+    owner = User(id=7, username="owner", email="owner@example.com", role="user", is_active=True)
+    stranger = User(id=8, username="stranger", email="stranger@example.com", role="user", is_active=True)
+    no_claims = SimpleNamespace(roles=[], permissions=[])
+    # An admin who does not own the pipeline may cancel it too.
+    user, principal = (owner, no_claims) if canceller == "owner" else (stranger, SimpleNamespace(roles=["admin"], permissions=[]))
+    submitted = await audio_jobs.submit_audio_job(
+        req=audio_jobs.SubmitAudioJobRequest(url="https://example.com/a.mp3", model="whisper-1"),
+        current_user=owner, jm=jm, request=None,
+    )
+    # The first stage runs and hands over to the next one, as the worker would.
+    first = jm.acquire_next_job(domain="audio", queue="default", lease_seconds=60, worker_id="w")
+    assert first["id"] == submitted.id
+    assert await worker.hand_off(jm, first, "audio_convert", {"local_path": "/tmp/a.mp3"}, worker_id="w") is None
+
+    with pytest.raises(HTTPException) as refused:
+        await audio_jobs.cancel_audio_job(job_id=submitted.id, current_user=stranger, jm=jm, principal=no_claims)
+    assert refused.value.status_code == 403
+
+    result = await audio_jobs.cancel_audio_job(job_id=submitted.id, current_user=user, jm=jm, principal=principal)
+    assert result.cancelled == 1
+    statuses = {j["job_type"]: j["status"] for j in jm.list_jobs(domain="audio", owner_user_id="7")}
+    assert statuses == {"audio_download": "completed", "audio_convert": "cancelled"}
+
+    with pytest.raises(HTTPException) as finished:
+        await audio_jobs.cancel_audio_job(job_id=submitted.id, current_user=user, jm=jm, principal=principal)
+    assert finished.value.status_code == 400
+
+
+@pytest.mark.unit
+async def test_cancel_endpoint_cancels_a_stage_queued_while_it_cancels(monkeypatch, tmp_path):
+    import threading
+
+    import tldw_Server_API.app.services.audio_jobs_worker as worker
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_jobs
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager(db_path=tmp_path / "jobs_cancel_race.db")
+    owner = User(id=7, username="owner", email="owner@example.com", role="user", is_active=True)
+    submitted = await audio_jobs.submit_audio_job(
+        req=audio_jobs.SubmitAudioJobRequest(url="https://example.com/a.mp3", model="whisper-1"),
+        current_user=owner, jm=jm, request=None,
+    )
+    first = jm.acquire_next_job(domain="audio", queue="default", lease_seconds=60, worker_id="w")
+    list_jobs = jm.list_jobs
+
+    def _list_then_the_worker_hands_off(**kwargs):
+        stages = list_jobs(**kwargs)
+        if (jm.get_job(int(first["id"])) or {}).get("status") == "processing":
+            # The worker finishes the first stage right after the route listed it as running.
+            hand_off = worker.hand_off(jm, first, "audio_convert", {"local_path": "/tmp/a.mp3"}, worker_id="w")
+            runner = threading.Thread(target=asyncio.run, args=(hand_off,))
+            runner.start()
+            runner.join()
+        return stages
+
+    monkeypatch.setattr(jm, "list_jobs", _list_then_the_worker_hands_off)
+    result = await audio_jobs.cancel_audio_job(
+        job_id=submitted.id, current_user=owner, jm=jm, principal=SimpleNamespace(roles=[], permissions=[])
+    )
+    assert result.cancelled == 1
+    statuses = {j["job_type"]: j["status"] for j in list_jobs(domain="audio", owner_user_id="7")}
+    assert statuses == {"audio_download": "completed", "audio_convert": "cancelled"}
+
+
+@pytest.mark.unit
+async def test_cancel_endpoint_does_not_handle_other_audio_jobs(tmp_path):
+    from fastapi import HTTPException
+
+    from tldw_Server_API.app.api.v1.endpoints.audio import audio_jobs
+    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+
+    jm = JobManager(db_path=tmp_path / "jobs_cancel_tts.db")
+    owner = User(id=7, username="owner", email="owner@example.com", role="user", is_active=True)
+    tts_id = int(jm.create_job(
+        domain="audio", queue="default", job_type="tts_longform", payload={"text": "hi"}, owner_user_id="7"
+    )["id"])
+    with pytest.raises(HTTPException) as refused:
+        await audio_jobs.cancel_audio_job(
+            job_id=tts_id, current_user=owner, jm=jm, principal=SimpleNamespace(roles=[], permissions=[])
+        )
+    assert refused.value.status_code == 404
+    assert (jm.get_job(tts_id) or {}).get("status") == "queued"
