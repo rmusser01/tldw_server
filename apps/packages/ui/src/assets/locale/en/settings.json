@@ -1043,6 +1043,9 @@
       "stickyChatInput": {
         "label": "Keep chat input visible while scrolling"
       },
+      "sidepanelStickyChatInput": {
+        "label": "Keep the side panel chat input visible while scrolling"
+      },
       "openReasoning": {
         "label": "Open Reasoning Collapse by default"
       },

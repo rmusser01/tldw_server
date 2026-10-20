@@ -30,6 +30,11 @@ import { BuddyInteraction } from "./BuddyInteraction"
 import { SpriteFrameRenderer } from "./SpriteFrameRenderer"
 import type { BuddyDraftState } from "./buddy-drafts"
 import { buddyConversationLabels } from "./buddy-conversation-labels"
+import {
+  buddyReadSignature,
+  startBuddyPoll,
+  type BuddyPoll
+} from "./buddy-poll-schedule"
 
 const emptyAttachment: BuddyAttachmentState = {
   client_slot: "default",
@@ -113,6 +118,7 @@ export const IndependentBuddySession = ({
   React.useEffect(() => {
     let active = true
     let pending = false
+    let poll: BuddyPoll | null = null
     const refresh = async () => {
       if (pending) return
       pending = true
@@ -208,6 +214,9 @@ export const IndependentBuddySession = ({
         setLoadedScope(nextScope)
         setHasLoaded(true)
         setAttached(Boolean(next.attachment || next.unavailable_reason))
+        poll?.settle(
+          buddyReadSignature({ attachment: next, profiles, conversations: rows })
+        )
       } catch (e) {
         if (active) {
           setError(e instanceof Error ? e.message : "Buddy unavailable")
@@ -221,11 +230,10 @@ export const IndependentBuddySession = ({
         }
       }
     }
-    void refresh()
-    const timer = window.setInterval(() => void refresh(), 5000)
+    poll = startBuddyPoll(() => void refresh())
     return () => {
       active = false
-      window.clearInterval(timer)
+      poll?.stop()
     }
   }, [revision, profilePages, conversationPages, loadedScope, setAttached])
   React.useEffect(

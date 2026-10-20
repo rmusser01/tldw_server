@@ -29,6 +29,10 @@ const controlRowSource = readFileSync(
   resolveSourcePath("src/components/Sidepanel/Chat/ControlRow.tsx"),
   "utf8",
 )
+const headerSource = readFileSync(
+  resolveSourcePath("src/components/Sidepanel/Chat/SidepanelHeaderSimple.tsx"),
+  "utf8",
+)
 
 describe("sidepanel chat narrow layout contract", () => {
   it("keeps the sidepanel chat shell from exporting horizontal overflow at 390px", () => {
@@ -43,6 +47,16 @@ describe("sidepanel chat narrow layout contract", () => {
     )
     expect(sidepanelChatSource).toContain(
       "relative z-10 flex min-w-0 flex-1 min-h-0 w-full flex-col items-center overflow-x-hidden overflow-y-auto",
+    )
+  })
+
+  it("keeps the header brand on one line and shows only the logo below 380px (XS-14)", () => {
+    expect(headerSource).toContain(
+      'className="ml-2 min-w-0 truncate text-sm font-medium max-[379px]:hidden"',
+    )
+    // The brand truncates instead of pushing into the right-hand controls.
+    expect(headerSource).toContain(
+      '${activeTitle ? "hidden sm:flex" : "flex"} min-w-0 items-center text-text',
     )
   })
 

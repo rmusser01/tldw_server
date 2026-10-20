@@ -116,7 +116,11 @@
     "clearQueueConfirmContent": "This will delete {{count}} queued message(s) that haven't been sent yet.",
     "documentHandoffFailedTitle": "Could not open documents in chat",
     "documentHandoffFailedDescription": "Try again, or remove the files and open chat without them.",
-    "documentPreflightFailed": "Document preflight failed. Try again or remove the file."
+    "documentPreflightFailed": "Document preflight failed. Try again or remove the file.",
+    "sendAfterReplyTitle": "Sends your message after the current reply finishes.",
+    "sendAfterReplyAria": "Send after this reply",
+    "waitingForModel": "Waiting for {{model}}…",
+    "waitingForReply": "Waiting for the reply…"
   },
   "notification": {
     "ingestSent": "Sent to tldw server",
@@ -876,6 +880,16 @@
   },
   "firstRun": {
     "headline": "Finish setup to start chatting",
-    "description": "Finish setup in Options to connect to your tldw server, then return here to chat."
+    "description": "Finish setup in Options to connect to your tldw server, then return here to chat.",
+    "retryNow": "Retry now",
+    "openDiagnostics": "Open diagnostics",
+    "retryingAutomatically": "Retrying automatically every few seconds…"
+  },
+  "modelParams": {
+    "default": "Default",
+    "defaultWithValue": "Default ({{value}})",
+    "allModelsValue": "{{value}} (all models)",
+    "allModelsHint": "Set for all models. Move the slider to change it for this model only.",
+    "resetToDefault": "Reset {{label}} to default"
   }
 }

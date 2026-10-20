@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { SettingsBody } from "../body"
@@ -10,8 +10,16 @@ vi.mock("react-i18next", () => ({
   })
 }))
 
+const storage = vi.hoisted(() => ({
+  values: new Map<string, unknown>(),
+  write: vi.fn()
+}))
+
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (_key: string, fallback: unknown) => [fallback, vi.fn()]
+  useStorage: (key: string, fallback: unknown) => [
+    storage.values.has(key) ? storage.values.get(key) : fallback,
+    (next: unknown) => storage.write(key, next)
+  ]
 }))
 
 vi.mock("@/components/Common/Settings/ThemePicker", () => ({
@@ -27,6 +35,8 @@ const originalChrome = runtimeGlobals.chrome
 
 describe("SettingsBody", () => {
   afterEach(() => {
+    storage.values.clear()
+    storage.write.mockReset()
     runtimeGlobals.browser = originalBrowser
     runtimeGlobals.chrome = originalChrome
   })
@@ -104,5 +114,25 @@ describe("SettingsBody", () => {
       "href",
       "chrome-extension://chrome-only/options.html#/settings"
     )
+  })
+
+  it("keeps the side panel chat input pinned by default and lets the user turn it off (XS-09)", () => {
+    render(<SettingsBody />)
+    const toggle = screen.getByRole("switch", {
+      name: "Keep the side panel chat input visible while scrolling"
+    })
+    expect(toggle).toBeChecked()
+    fireEvent.click(toggle)
+    expect(storage.write).toHaveBeenCalledWith("sidepanelStickyChatInput", false)
+  })
+
+  it("ignores the full-page sticky input setting (XS-09)", () => {
+    storage.values.set("stickyChatInput", false)
+    render(<SettingsBody />)
+    expect(
+      screen.getByRole("switch", {
+        name: "Keep the side panel chat input visible while scrolling"
+      })
+    ).toBeChecked()
   })
 })

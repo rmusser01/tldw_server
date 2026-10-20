@@ -85,7 +85,10 @@
   "codeCopied": "Copied",
   "table": {
     "copyCsv": "Copy as CSV",
-    "downloadCsv": "Download CSV"
+    "downloadCsv": "Download CSV",
+    "scrollForMore": "Scroll for more columns →",
+    "regionLabel": "Table",
+    "regionLabelNamed": "Table: {{name}}"
   },
   "webSearch": "Searching the web",
   "regenerate": "Regenerate",
@@ -158,6 +161,7 @@
   "artifactsCopy": "Copy",
   "artifactsDownload": "Download",
   "artifactsRun": "Run",
+  "artifactsActions": "Artifact actions",
   "copyShort": "Copy",
   "branchShort": "Branch",
   "infoShort": "Info",

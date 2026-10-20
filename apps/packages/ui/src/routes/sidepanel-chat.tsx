@@ -68,6 +68,12 @@ import { SidepanelHeaderSimple } from '~/components/Sidepanel/Chat/SidepanelHead
 import { ConnectionBanner } from '~/components/Sidepanel/Chat/ConnectionBanner';
 import { ServerChatFreshnessNotice } from '~/components/Sidepanel/Chat/ServerChatFreshnessNotice';
 import {
+  SIDEPANEL_UNDOCKED_SIDEBAR_MEDIA_QUERY,
+  readProSidebarCollapsed,
+  writeProSidebarCollapsed,
+} from '~/components/Sidepanel/Chat/sidepanel-sidebar-layout';
+import { sidepanelScrollToLatestBottom } from '~/components/Sidepanel/Chat/sidepanel-scroll-latest';
+import {
   readTabConversationTitle,
   renameTabConversation,
 } from '~/components/Sidepanel/Chat/tab-conversation-actions';
@@ -75,7 +81,10 @@ import { useMessage } from '~/hooks/useMessage';
 import { useSelectedCharacter } from '@/hooks/useSelectedCharacter';
 import { useSelectedAssistant } from '@/hooks/useSelectedAssistant';
 import { useSidepanelChatTabsStore } from '@/store/sidepanel-chat-tabs';
-import { DEFAULT_CHAT_SETTINGS } from '@/types/chat-settings';
+import {
+  SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT,
+  SIDEPANEL_STICKY_CHAT_INPUT_KEY,
+} from '@/types/chat-settings';
 import type { Character } from '@/types/character';
 import type {
   ChatModelSettingsSnapshot,
@@ -700,22 +709,23 @@ const SidepanelChatContent = ({
     isAutoScrollToBottom,
     autoScrollToBottom,
     hasUnseenMessages
-  } = useSmartScroll(messages, streaming, 100)
+  } = useSmartScroll(messages, streaming, 100, { pinOnContentResize: true })
   const uiMode = useUiModeStore((state) => state.mode)
   const [isNarrow, setIsNarrow] = React.useState(
     () =>
-      typeof window !== 'undefined' && Boolean(window.matchMedia?.('(max-width: 400px)').matches)
+      typeof window !== 'undefined' &&
+      Boolean(window.matchMedia?.(SIDEPANEL_UNDOCKED_SIDEBAR_MEDIA_QUERY).matches)
   );
   const isDockedSidebar = uiMode === 'pro' && !isNarrow;
-  const [sidebarVisibility, publishSidebarVisibility] = React.useState({
-    open: isDockedSidebar,
+  const [sidebarVisibility, publishSidebarVisibility] = React.useState(() => ({
+    open: isDockedSidebar && !readProSidebarCollapsed(),
     revision: 0,
-  });
+  }));
   const sidebarOpen = sidebarVisibility.open;
   const sidebarPresented = React.useRef(false);
   const sidebarOpening = React.useRef({
     revision: 0,
-    open: isDockedSidebar,
+    open: sidebarVisibility.open,
     initiator: null as HTMLElement | null,
   });
   const sidebarReturnFocus = React.useRef<null | {
@@ -760,6 +770,7 @@ const SidepanelChatContent = ({
       }
       opening.revision = revision;
       opening.open = next;
+      if (isDockedSidebar) writeProSidebarCollapsed(!next);
       publishSidebarVisibility({ open: next, revision });
     },
     [owner, isDockedSidebar]
@@ -773,7 +784,9 @@ const SidepanelChatContent = ({
     []
   );
   React.useEffect(() => {
-    setSidebarOpen(isDockedSidebar);
+    setSidebarOpen(
+      isDockedSidebar && (sidebarOpening.current.open || !readProSidebarCollapsed())
+    );
   }, [isDockedSidebar, setSidebarOpen]);
 
   const { checkOnce } = useConnectionActions();
@@ -849,7 +862,10 @@ const SidepanelChatContent = ({
     if (!sidebarOpen) returnSidebarFocus();
   }, [sidebarOpen, returnSidebarFocus]);
 
-  const [stickyChatInput] = useStorage('stickyChatInput', DEFAULT_CHAT_SETTINGS.stickyChatInput);
+  const [stickyChatInput] = useStorage(
+    SIDEPANEL_STICKY_CHAT_INPUT_KEY,
+    SIDEPANEL_STICKY_CHAT_INPUT_DEFAULT
+  );
   const [userDisplayName] = useStorage('chatUserDisplayName', '');
 
   const composerPadding = composerHeight
@@ -859,13 +875,10 @@ const SidepanelChatContent = ({
     () => messages.reduce((count, item) => count + (item?.isBot ? 0 : 1), 0),
     [messages]
   )
-  const scrollToLatestBottom = React.useMemo(() => {
-    if (!stickyChatInput) return "8rem"
-    const baseOffset = composerHeight
-      ? composerHeight + 24
-      : DEFAULT_COMPOSER_HEIGHT
-    return `${Math.max(baseOffset, 128)}px`
-  }, [composerHeight, stickyChatInput])
+  const scrollToLatestBottom = sidepanelScrollToLatestBottom(
+    composerHeight,
+    DEFAULT_COMPOSER_HEIGHT
+  )
 
   const clearNoteCapture = React.useCallback(() => {
     const capture = noteCaptureRef.current
@@ -1469,7 +1482,7 @@ const SidepanelChatContent = ({
 
   React.useEffect(() => {
     if (typeof window === "undefined" || !window.matchMedia) return
-    const media = window.matchMedia("(max-width: 400px)")
+    const media = window.matchMedia(SIDEPANEL_UNDOCKED_SIDEBAR_MEDIA_QUERY)
     const update = () => setIsNarrow(media.matches)
     update()
     media.addEventListener("change", update)
@@ -3292,7 +3305,10 @@ const SidepanelChatContent = ({
               </>
             )}
             {!isRestoringChat && !stickyChatInput && (
-              <div className="w-full min-w-0 pt-4 pb-6">
+              <div
+                ref={composerDockRef}
+                data-testid="sidepanel-composer-dock"
+                className="w-full min-w-0 pt-4 pb-6">
                 <SidepanelForm
                   key={activeTabId || "sidepanel-chat"}
                   dropedFile={dropedFile}
@@ -3322,6 +3338,7 @@ const SidepanelChatContent = ({
           {!isRestoringChat && stickyChatInput && (
             <div
               ref={composerDockRef}
+              data-testid="sidepanel-composer-dock"
               className="absolute bottom-0 left-0 right-0 z-10 max-h-[60%] min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain"
               style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
             >

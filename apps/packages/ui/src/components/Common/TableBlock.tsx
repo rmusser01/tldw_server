@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next"
 import { IconButton } from "./IconButton"
 import { useArtifactsStore, type ArtifactTableData } from "@/store/artifacts"
 import { useUiModeStore } from "@/store/ui-mode"
+import { useHorizontalOverflow, useTableName } from "./useHorizontalOverflow"
 
 interface TableProps {
   children: React.ReactNode
@@ -26,6 +27,9 @@ export const TableBlock: FC<TableProps> = ({ children }) => {
   const [artifactOriginId, setArtifactOriginId] = useState<string | null>(null)
   const { t } = useTranslation("common")
   const ref = useRef<HTMLDivElement>(null)
+  const scrollRegionRef = useRef<HTMLDivElement>(null)
+  const { overflows, hasMoreRight } = useHorizontalOverflow(scrollRegionRef)
+  const tableName = useTableName(scrollRegionRef, overflows)
   const { openArtifact, isPinned } = useArtifactsStore()
   const uiMode = useUiModeStore((state) => state.mode)
   const isProMode = uiMode === "pro"
@@ -194,11 +198,16 @@ export const TableBlock: FC<TableProps> = ({ children }) => {
     >
       <div className="my-4 bg-surface rounded-xl border border-border overflow-hidden">
         <div className="flex flex-row px-4 py-2 rounded-t-xl bg-surface2 border-b border-border">
-          <div className="flex items-center gap-2 flex-1">
+          <div className="flex min-w-0 items-center gap-2 flex-1">
             <TableIcon className="size-4 text-text-muted" />
             <span className="font-mono text-xs text-text-muted">
               Table
             </span>
+            {hasMoreRight && (
+              <span className="truncate text-[11px] text-text-muted">
+                {t("table.scrollForMore", "Scroll for more columns →")}
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-1">
@@ -250,12 +259,36 @@ export const TableBlock: FC<TableProps> = ({ children }) => {
           </div>
         </div>
 
-        <div className="overflow-x-auto">
+        <div className="relative">
           <div
-            ref={ref}
-            className={`prose dark:prose-invert max-w-none [&_table]:table-fixed [&_table]:text-sm [&_table]:w-full [&_table]:border-collapse [&_thead]:bg-surface2 [&_th]:px-6 [&_th]:py-4 [&_th]:text-left [&_th]:font-semibold [&_th]:text-text [&_th]:text-xs [&_th]:uppercase [&_th]:tracking-wider [&_th]:whitespace-nowrap [&_th:nth-child(1)]:w-1/2 [&_th:nth-child(2)]:w-1/2 [&_th:nth-child(3)]:w-1/3 [&_th]:border-b [&_th]:border-border [&_td]:px-6 [&_td]:py-4 [&_td]:text-text-muted [&_td]:text-sm [&_td]:text-left [&_td]:whitespace-nowrap  [&_td]:border-b [&_td]:border-border [&_tr:last-child_td]:border-b-0`}>
-            {children}
+            ref={scrollRegionRef}
+            data-testid="table-scroll-region"
+            className="overflow-x-auto rounded-b-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus"
+            role={overflows ? "region" : undefined}
+            aria-label={
+              overflows
+                ? tableName
+                  ? t("table.regionLabelNamed", "Table: {{name}}", {
+                      name: tableName
+                    })
+                  : t("table.regionLabel", "Table")
+                : undefined
+            }
+            tabIndex={overflows ? 0 : undefined}
+          >
+            <div
+              ref={ref}
+              className={`prose dark:prose-invert max-w-none [&_table]:table-fixed [&_table]:text-sm [&_table]:w-full [&_table]:border-collapse [&_thead]:bg-surface2 [&_th]:px-6 [&_th]:py-4 [&_th]:text-left [&_th]:font-semibold [&_th]:text-text [&_th]:text-xs [&_th]:uppercase [&_th]:tracking-wider [&_th]:whitespace-nowrap [&_th:nth-child(1)]:w-1/2 [&_th:nth-child(2)]:w-1/2 [&_th:nth-child(3)]:w-1/3 [&_th]:border-b [&_th]:border-border [&_td]:px-6 [&_td]:py-4 [&_td]:text-text-muted [&_td]:text-sm [&_td]:text-left [&_td]:whitespace-nowrap  [&_td]:border-b [&_td]:border-border [&_tr:last-child_td]:border-b-0`}>
+              {children}
+            </div>
           </div>
+          {hasMoreRight && (
+            <div
+              aria-hidden="true"
+              data-testid="table-scroll-fade"
+              className="pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-surface to-transparent"
+            />
+          )}
         </div>
       </div>
     </div>

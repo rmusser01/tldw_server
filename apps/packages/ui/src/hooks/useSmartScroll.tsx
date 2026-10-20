@@ -2,6 +2,12 @@ import { useRef, useEffect, useState, useCallback } from "react";
 
 type SmartScrollOptions = {
   bottomOffsetPx?: number;
+  /**
+   * Keep following the bottom when the transcript grows without a new
+   * message, for example when the final markdown, table or code block of a
+   * reply renders after streaming ends.
+   */
+  pinOnContentResize?: boolean;
 };
 
 type ScrollableMessage =
@@ -295,6 +301,58 @@ export const useSmartScroll = (
     lastScrollTop.current = container.scrollTop;
     syncViewport();
   }, [bottomOffsetPx, isAtBottom, syncViewport]);
+
+  const pinOnContentResize = options.pinOnContentResize === true;
+  const hasMessages = messages.length > 0;
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!pinOnContentResize || !container) return;
+    if (typeof ResizeObserver === "undefined") return;
+
+    let lastScrollHeight = container.scrollHeight;
+    let lastClientHeight = container.clientHeight;
+    const resizeObserver = new ResizeObserver(() => {
+      const nextScrollHeight = container.scrollHeight;
+      const previousScrollHeight = lastScrollHeight;
+      const previousClientHeight = lastClientHeight;
+      lastScrollHeight = nextScrollHeight;
+      lastClientHeight = container.clientHeight;
+      if (nextScrollHeight <= previousScrollHeight) return;
+      if (!autoScrollPermission.current) return;
+      // Follow the growth only if the reader was at the bottom before it; a
+      // short upward scroll can be missed while a programmatic scroll settles.
+      const distanceFromBottomBeforeGrowth =
+        previousScrollHeight -
+        container.scrollTop -
+        previousClientHeight -
+        bottomOffsetPxRef.current;
+      if (distanceFromBottomBeforeGrowth > threshold) return;
+      scrollToBottom(false);
+    });
+    resizeObserver.observe(container);
+    Array.from(container.children).forEach((child) =>
+      resizeObserver.observe(child),
+    );
+
+    // Watch transcript blocks that render later without rebuilding the
+    // observer on every streamed token.
+    const childObserver =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver((records) => {
+            records.forEach((record) => {
+              record.addedNodes.forEach((node) => {
+                if (node instanceof Element) resizeObserver.observe(node);
+              });
+            });
+          });
+    childObserver?.observe(container, { childList: true });
+
+    return () => {
+      childObserver?.disconnect();
+      resizeObserver.disconnect();
+    };
+  }, [hasMessages, pinOnContentResize, scrollToBottom, threshold]);
 
   const autoScrollToBottom = useCallback(() => {
     setIsAutoScrollEnabled(true);

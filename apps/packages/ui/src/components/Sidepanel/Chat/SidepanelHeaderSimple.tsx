@@ -235,13 +235,13 @@ export const SidepanelHeaderSimple = ({
         </Tooltip>
         <StatusDot />
         <div
-          className={`${activeTitle ? "hidden sm:flex" : "flex"} shrink-0 items-center text-text`}>
+          className={`${activeTitle ? "hidden sm:flex" : "flex"} min-w-0 items-center text-text`}>
           <img
-            className="h-5 w-auto"
+            className="h-5 w-auto shrink-0"
             src={logoSrc}
             alt={t("common:pageAssist")}
           />
-          <span className="ml-2 text-sm font-medium">
+          <span className="ml-2 min-w-0 truncate text-sm font-medium max-[379px]:hidden">
             {t("common:pageAssist")}
           </span>
         </div>

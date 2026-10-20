@@ -38,6 +38,7 @@ import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner"
 import { useComposerText } from "@/components/Chat/composer/hooks/useComposerText"
 import { chatDraftAddressKey, conversationDraftKey } from "@/utils/chat-draft-address"
 import { decodeSidepanelChatWebUiHandoff } from "@/services/tldw/sidepanel-chat-webui-handoff"
+import { PRO_SIDEBAR_COLLAPSED_STORAGE_KEY } from "@/components/Sidepanel/Chat/sidepanel-sidebar-layout"
 
 const io = vi.hoisted(() => ({
   noop: () => {},
@@ -51,6 +52,8 @@ const io = vi.hoisted(() => ({
   captureNative: false,
   useComposer: false,
   useRecovery: false,
+  stickyChatInput: undefined as boolean | undefined,
+  sidepanelStickyChatInput: undefined as boolean | undefined,
   write: vi.fn(),
   physicalTabId: 7 as number | null,
   controller: null as HistorySelectionController | null,
@@ -236,8 +239,13 @@ vi.mock("@/hooks/useSelectedAssistant", () => ({
 vi.mock("@/hooks/useSetting", () => ({ useSetting: () => [100] }))
 const storageWrite = vi.hoisted(() => async () => {})
 vi.mock("@plasmohq/storage/hook", () => ({
-  useStorage: (_key: unknown, fallback: unknown) => [
-    fallback,
+  useStorage: (key: unknown, fallback: unknown) => [
+    key === "stickyChatInput" && io.stickyChatInput !== undefined
+      ? io.stickyChatInput
+      : key === "sidepanelStickyChatInput" &&
+          io.sidepanelStickyChatInput !== undefined
+        ? io.sidepanelStickyChatInput
+        : fallback,
     storageWrite,
     { isLoading: false }
   ]
@@ -560,7 +568,7 @@ const installSidebarViewport = (initialNarrow: boolean) => {
     get matches() {
       return narrow
     },
-    media: "(max-width: 400px)",
+    media: "(max-width: 639px)",
     onchange: null,
     addEventListener: (_type: string, listener: () => void) =>
       listeners.add(listener),
@@ -575,6 +583,39 @@ const installSidebarViewport = (initialNarrow: boolean) => {
     setNarrow: (value: boolean) =>
       act(() => {
         narrow = value
+        listeners.forEach((listener) => listener())
+      })
+  }
+}
+
+// Evaluates width media queries the way a browser does, so a test states the
+// panel width instead of which query the route happens to use.
+const installSidebarViewportWidth = (initialWidth: number) => {
+  let width = initialWidth
+  const listeners = new Set<() => void>()
+  const matches = (query: string) => {
+    const max = /max-width:\s*(\d+)px/.exec(query)
+    const min = /min-width:\s*(\d+)px/.exec(query)
+    return (!max || width <= Number(max[1])) && (!min || width >= Number(min[1]))
+  }
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    get matches() {
+      return matches(query)
+    },
+    media: query,
+    onchange: null,
+    addEventListener: (_type: string, listener: () => void) =>
+      listeners.add(listener),
+    removeEventListener: (_type: string, listener: () => void) =>
+      listeners.delete(listener),
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => true
+  }))
+  return {
+    setWidth: (value: number) =>
+      act(() => {
+        width = value
         listeners.forEach((listener) => listener())
       })
   }
@@ -725,6 +766,7 @@ describe.each([
 ] as const)("%s sidepanel snapshot ownership", (_name, Route) => {
   beforeEach(() => {
     vi.unstubAllGlobals()
+    localStorage.removeItem(PRO_SIDEBAR_COLLAPSED_STORAGE_KEY)
     vi.spyOn(window, "open").mockReset().mockImplementation(() => ({}) as Window)
     io.user = "alice"
     io.uiMode = "pro"
@@ -734,6 +776,8 @@ describe.each([
     io.captureNative = false
     io.useComposer = false
     io.useRecovery = false
+    io.stickyChatInput = undefined
+    io.sidepanelStickyChatInput = undefined
     io.write.mockReset().mockImplementation(async (key, value) => { io.data.set(key, value) })
     io.physicalTabId = 7
     sessionStorage.clear()
@@ -1256,6 +1300,119 @@ describe.each([
     page.rerender(<Route />)
     expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
     expect(screen.getByText("alice first")).toBeVisible()
+  })
+
+  it("docks the Pro chat list only when the panel is at least 640px wide (XS-04)", async () => {
+    const viewport = installSidebarViewportWidth(520)
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    // A 288px dock would crush a 520px panel, so the list stays closed and
+    // opens as an overlay on demand.
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    const toggle = screen.getByRole("button", { name: "Toggle conversation sidebar" })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(toggle)
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "overlay")
+    fireEvent.click(screen.getByRole("button", { name: "Collapse conversation sidebar" }))
+    await waitFor(() => expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument())
+    viewport.setWidth(800)
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "docked")
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+  })
+
+  it("keeps the composer pinned below the messages by default (XS-09)", async () => {
+    io.useComposer = true
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    const composer = await screen.findByRole("textbox", { name: "Composer draft" })
+    // The composer must not scroll away with the transcript.
+    expect(screen.getByTestId("chat-messages")).not.toContainElement(composer)
+  })
+
+  it("keeps the composer pinned when the full-page sticky input setting is off (XS-09)", async () => {
+    // Settings > Chat shows the full-page switch Off by default; that must not
+    // unpin the side panel, which has its own setting.
+    io.useComposer = true
+    io.stickyChatInput = false
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    const composer = await screen.findByRole("textbox", { name: "Composer draft" })
+    expect(screen.getByTestId("chat-messages")).not.toContainElement(composer)
+  })
+
+  it("lets the composer scroll with the messages when the side panel setting is off (XS-09)", async () => {
+    io.useComposer = true
+    io.stickyChatInput = true
+    io.sidepanelStickyChatInput = false
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    const composer = await screen.findByRole("textbox", { name: "Composer draft" })
+    expect(screen.getByTestId("chat-messages")).toContainElement(composer)
+  })
+
+  it("hides 'Scroll to latest' while the chat is empty (XS-09)", async () => {
+    render(<Route />)
+    await waitFor(() => expect(screen.getByTestId("chat-messages")).toBeInTheDocument())
+    await act(async () => {})
+    expect(screen.queryByTestId("chat-scroll-latest")).not.toBeInTheDocument()
+  })
+
+  it("offers 'Scroll to latest' once the chat has messages (XS-09)", async () => {
+    io.data.set(storedKey("alice"), tabsState())
+    render(<Route />)
+    await screen.findByText("alice first")
+    expect(screen.getByTestId("chat-scroll-latest")).toBeInTheDocument()
+  })
+
+  it("keeps 'Scroll to latest' above an unpinned composer (XS-09)", async () => {
+    io.useComposer = true
+    io.sidepanelStickyChatInput = false
+    const measure = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        const height = this.dataset.testid === "sidepanel-composer-dock" ? 300 : 0
+        return { x: 0, y: 0, top: 0, left: 0, right: 0, bottom: height, width: 0, height, toJSON: () => ({}) } as DOMRect
+      })
+    try {
+      io.data.set(storedKey("alice"), tabsState())
+      render(<Route />)
+      await screen.findByText("alice first")
+      await screen.findByRole("textbox", { name: "Composer draft" })
+      // The pill sits 24px above the measured composer, not at a fixed 8rem.
+      await waitFor(() =>
+        expect(screen.getByTestId("chat-scroll-latest").parentElement).toHaveStyle({ bottom: "324px" })
+      )
+    } finally {
+      measure.mockRestore()
+    }
+  })
+
+  it("remembers a collapsed Pro chat list when the panel reopens (XS-04)", async () => {
+    installSidebarViewportWidth(800)
+    io.data.set(storedKey("alice"), tabsState())
+    const first = render(<Route />)
+    await screen.findByText("alice first")
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "docked")
+    fireEvent.click(screen.getByRole("button", { name: "Collapse conversation sidebar" }))
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    first.unmount()
+
+    const second = render(<Route />)
+    await screen.findByText("alice first")
+    expect(screen.queryByTestId("compact-sidebar")).not.toBeInTheDocument()
+    const toggle = screen.getByRole("button", { name: "Toggle conversation sidebar" })
+    expect(toggle).toHaveAttribute("aria-expanded", "false")
+    fireEvent.click(toggle)
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "docked")
+    second.unmount()
+
+    render(<Route />)
+    await screen.findByText("alice first")
+    expect(await screen.findByTestId("compact-sidebar")).toHaveAttribute("data-variant", "docked")
   })
 
   if (_name === "shared")
