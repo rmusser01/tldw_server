@@ -16,9 +16,9 @@ verify_claims_with_fva (Claims_Extraction/claims_service.py) has three construct
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 POST /claims/verify/fva runs the FVA pipeline on the caller's media DB, with an endpoint test that checks a result
+- [ ] #1 POST /claims/verify/fva runs the FVA pipeline on the media DB and vector store of the user that AC #3 resolves, with an endpoint test that checks a result
 - [ ] #2 A quota refusal at its verify or adjudication call answers 402, with a test
-- [ ] #3 Claims usage rows are written for the authenticated user's id unless an admin passes user_id, with a test
+- [ ] #3 The user_id query parameter counts only for a platform admin, as rebuild_claims does (_legacy_user_has_platform_admin_claims). With an admin's user_id, the media DB, the vector store, the quota decision and the usage rows all belong to that user; otherwise all of them belong to the authenticated user, by id, not username. With a test for each case: a non-admin's user_id is ignored for all four, and an admin's is honoured for all four
 - [ ] #4 Usage_Quotas.md lists POST /claims/verify/fva among the endpoints that answer 402
 <!-- AC:END -->
 
@@ -26,6 +26,7 @@ verify_claims_with_fva (Claims_Extraction/claims_service.py) has three construct
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Owner decision, 2026-10-20 (approving the TASK-13862 plan): repair the endpoint in this task, and admin-gate the user_id parameter as the sibling claims endpoints do (rebuild_claims); the two alternatives are not taken. Until this lands, Docs/Operations/Usage_Quotas.md says the endpoint answers 500.
+Review of PR #3287 (I1), 2026-10-20: AC #1 and AC #3 reworded. As first written, AC #3 admin-gated user_id only for the usage row, so a repair could meet every AC and still let a non-admin's ?user_id=2 read user 2's embeddings: the user_id passed to MultiDatabaseRetriever picks the vector store (MediaDBRetriever: create_from_settings_for_user near database_retrievers.py:997, collection user_{id}_media_embeddings near :2203), and the snippets come back as evidence. AC #1's 'the caller's media DB' also contradicted the admin case. AC #3 now gives user_id one meaning for the media DB, vector store, quota decision and usage rows, with a test for the non-admin and the admin case; AC #1 follows it.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

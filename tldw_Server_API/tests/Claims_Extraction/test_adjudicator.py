@@ -24,6 +24,7 @@ from tldw_Server_API.app.core.Claims_Extraction.adjudicator import (
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.Usage import llm_accounting, llm_quota_gate, quota_resolver
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
+from tldw_Server_API.app.core.Usage.quota_checks import LLMQuotaRefusal
 
 # Import types
 try:
@@ -745,3 +746,39 @@ class TestClaimAdjudicatorLLMQuota:
                 original_verification=MockClaimVerification(claim=claim),
             )
         assert refused.value.detail["category"] == "llm_tokens_month"
+
+    @pytest.mark.unit
+    @pytest.mark.asyncio
+    async def test_a_refusal_in_the_worker_thread_does_not_reach_the_prompt_only_fallback(self, monkeypatch):
+        """The app's analyze shape: sync, full signature only, refused by the check in the worker thread.
+
+        Sent on to the prompt-only fallback, the refusal would be replaced by that call's TypeError: NEUTRAL 0.5.
+        """
+        decided_for: list[int] = []
+
+        async def _refuse(user_id, requested_tokens=1):
+            decided_for.append(user_id)
+            return LLMQuotaRefusal(
+                category="llm_tokens_month", current=1, limit=1, message="Monthly LLM token limit reached", retry_after=60
+            )
+
+        monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "1")
+        quota_resolver.invalidate_all()
+        monkeypatch.setattr(llm_quota_gate, "llm_quota_refusal", _refuse)
+        monkeypatch.setattr(llm_accounting, "_accounting_loop", asyncio.get_running_loop())
+        loop_thread = threading.get_ident()
+        off_loop: list[bool] = []
+
+        def _analyze(api_endpoint, input_data, prompt, api_key, system_message, temp=None, **_kwargs):
+            # The shape of claims_service._fva_claims_analyze_call; perform_chat_api_call runs this check first.
+            off_loop.append(threading.get_ident() != loop_thread)
+            llm_quota_gate.check_llm_call_sync()
+            return '{"stance": "SUPPORTS", "confidence": 0.9}'
+
+        adjudicator = ClaimAdjudicator(llm_analyze_fn=_analyze)
+        with llm_call_context(user_id=7), pytest.raises(LLMQuotaExceededError) as refused:
+            await adjudicator._llm_assess("claim", "evidence")
+
+        assert refused.value.detail["category"] == "llm_tokens_month"
+        assert off_loop == [True]
+        assert decided_for == [7]
