@@ -5,10 +5,10 @@
       "state": "notes-empty",
       "rule": "color-contrast",
       "impact": "serious",
-      "nodes": 8,
+      "nodes": 7,
       "reviewIds": ["AX-07"],
       "issue": 3124,
-      "note": "Token-level contrast: selected 'Notes' and 'List' view buttons, 'Edit' and 'Markdown' mode buttons, 'Create note', the 'Search tips' link and the 'Filter by tag' / 'Tags' placeholders."
+      "note": "Token-level contrast: selected 'Notes' and 'List' view buttons, 'Edit' and 'Markdown' mode buttons, the 'Search tips' link and the 'Filter by tag' / 'Tags' placeholders. Was 8: the editor's primary 'Create note' empty state is gone (NO-04, #3114). Lowered from the code change, not a live run; re-record at integration (#3124)."
     },
     {
       "state": "notes-empty",
@@ -23,10 +23,10 @@
       "state": "notes-populated",
       "rule": "color-contrast",
       "impact": "serious",
-      "nodes": 8,
+      "nodes": 7,
       "reviewIds": ["AX-07"],
       "issue": 3124,
-      "note": "Same eight nodes as the empty library; list rows add none."
+      "note": "Same seven nodes as the empty library; list rows add none. Was 8 until the editor's 'Create note' empty state went (NO-04, #3114); re-record at integration (#3124)."
     },
     {
       "state": "notes-populated",
@@ -41,10 +41,10 @@
       "state": "notes-editor",
       "rule": "color-contrast",
       "impact": "serious",
-      "nodes": 8,
+      "nodes": 7,
       "reviewIds": ["AX-07"],
       "issue": 3124,
-      "note": "The empty-library nodes, with 'Create study pack' in place of 'Create note'. 'Save' no longer fails: it is primary only while there are unsaved edits (#3164). Scanned after the editor finishes loading; earlier, its disabled toolbar is skipped and the count varies."
+      "note": "The seven empty-library nodes. 'Create study pack' no longer fails: it is a default button now (NE-08, #3114), so the count went from 8 to 7; re-record at integration (#3124). 'Save' no longer fails: it is primary only while there are unsaved edits (#3164). Scanned after the editor finishes loading; earlier, its disabled toolbar is skipped and the count varies."
     },
     {
       "state": "notes-editor",
