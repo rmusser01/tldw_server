@@ -32,6 +32,9 @@ Task3 implementation2730d12c46 submitted for independent review:426 workflow+346
 Task3 completed after b6f32ccb7e and independent re-review: both P1 atomicity defects fixed with SQLite/PostgreSQL red-green regressions. Capacity denial sticky rollback-only; consumed-fence proof obligations detect savepoint rollback and cached reapplication, preventing false observers/domain-only commits. Final460 workflow+346 compatibility pass,no backend skips,94%scope coverage; strictBandit0new. Formatter status evidence now explicit; old manager formatting/B608 and partially attributed constructor ResourceWarnings remain baseline limitations, not warning-clean claims. Proceeding to bounded acquisition/recovery episodes.
 Task4 implementation467d51f22a submitted for independent spec/quality review:877 combined cases passed (128 new,460 prior workflow,289 compatibility),no backend skips,92%scope coverage; Ruff/changed-range format/compile and strict workflow/lifecycle Bandit0. Caller-clock schedule risk verified with4 SQLite red failures and PG controls; enrolled DB-time schedule/lease handling fixed with legacy controls. Real public acquisition replaces synthetic helper, shared acquire/sweep epochs close once and fifth no-progress failure uses separate key; new progress proofs are savepoint-validated. Existing warnings/legacy formatting/B608 retained explicitly. AC4 awaits review.
 Task4 completed after348f5392cc and independent scoped re-review. Real public concurrent max-inflight race reproduced4SQLite failures with20controls; enrollment-aware DBclock quota fix green24. Final901 combined workflow/compatibility cases pass,both backends/modes,no skips,92%coverage. Enrolled scheduling/leases/expiry and in-flight quotas use DBtime; null/absent legacy semantics remain. All validated Task4 findings addressed; unchanged warning/format/B608 baselines remain explicit. Proceeding to Stage5 property/security/compatibility certification and internal docs, before whole-branch review.
+Exact execution-base correction: git parent verification shows rebase parent454974e812, whose first parent is initially observed df7c290fbf; one unrelated VZ merge advanced the remote between initial read and rebase. Broad final review must use454974e812. origin/dev has continued advancing during this long execution; no rebase under active worker, integration/retest is later PR work. Current origin/dev has no13900/13901/13902 tracking collisions. No production activation/merge-ready claim.
+Task5 implementationfc5e809bee ready for independent task review:1514selected tests passed,no skips; workflow/property742 (392SQLite+350PG),compat409,lifecycle/RLS100,inline48,endpoint/media155,CI60; coverage94.87%,shardguardnew_uncovered0. Controller validated and authorized narrow known PG role/owner setup failure mapping to typed WorkflowFenceError(UNAVAILABLE), preserving driver cause and rollback/close/context (4real denial RED->5GREEN); existing raw-error assertion updated. InternalDoc and real-store state model/security/race/privacy/dormancy tests added. NewCodequality/strictBandit clear; old managerB608,3conftestI001,formatter drift and incompletely attributed warnings retained. AC5 awaits task and whole-branch review; no PR/activation/merge.
+Task5 independent task review approved substantive spec/quality with no Critical/Important. Minor doclimit wording corrected in f9641ac57b (configured1-5, default5); document checks pass, no code changes. All five implementation tasks and task reviews complete; whole-branch review and controller final verification remain, so status/AC5 stay In Progress/pending. Extra canonical Backlog format gate4pass,20warnings1.24s. NewcodeBandit0; one oldmanagerB608/3oldconftestI001/formatter+warnings baselines explicit.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
@@ -42,9 +45,9 @@ Task4 completed after348f5392cc and independent scoped re-review. Real public co
 ## Definition of Done
 <!-- DOD:BEGIN -->
 - [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
 - [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
