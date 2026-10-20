@@ -44,7 +44,7 @@
 - [x] Run the checks and record their actual results in TASK-13867.
 - [x] Dispatch a read-only reviewer with only requirements and exact base/head.
 - [x] Initial preservation-only review found no actionable findings.
-- [ ] Review the combined final documentation scope, including verified implementation-task closeouts, on its exact current-base head.
+- [x] Review the combined final documentation scope, including verified implementation-task closeouts, on its exact current-base head.
 - [ ] Satisfy the human Change summary gate for this concrete batch.
 
 Bandit and runtime tests are inapplicable: no Python or runtime files change. Cross-repo reference contents and a live media instance are not revalidated; this limitation is explicit in the preserved tasks.
