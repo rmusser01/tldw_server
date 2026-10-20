@@ -164,8 +164,12 @@ def test_terminal_or_reused_uuid_cannot_receive_unapplied_effect(workflow_case, 
     assert workflow_case.snapshot() == before
 
 
-def test_receipt_capacity_exhaustion_precedes_transition(workflow_case):
+@pytest.mark.parametrize("catch_inside", [False, True])
+def test_receipt_capacity_exhaustion_precedes_transition(workflow_case, monkeypatch, catch_inside):
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "1")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "1")
     workflow_case.admit()
+    workflow_case.install_effect_guard()
     lease = workflow_case.acquire()
     retained = workflow_case.effect("a" * 64, WorkflowAction.CONTINUE)
     retained_proof = WorkflowReceipt(
@@ -191,15 +195,150 @@ def test_receipt_capacity_exhaustion_precedes_transition(workflow_case):
         )
         conn.commit()
     effect = workflow_case.effect("b" * 64, WorkflowAction.COMPLETE)
-    with workflow_case.capability.transaction(workflow_case.root.owner_user_id) as tx:
-        fence = tx.lock_live_root(workflow_case.root, lease)
-        result = tx.apply_effect(fence, effect, effect.guard_fingerprint)
-    assert result.outcome is WorkflowOutcome.EXHAUSTED
+    before = workflow_case.snapshot()
+    observer = Mock()
+    monkeypatch.setattr(workflow_case.manager, "_emit_workflow_effect_side_effects", observer)
+    denied = None
+    try:
+        with workflow_case.capability.transaction(workflow_case.root.owner_user_id) as tx:
+            fence = tx.lock_live_root(workflow_case.root, lease)
+            connection = tx.connection
+            guard = workflow_case.guard_cas(tx, effect)
+            try:
+                tx.apply_effect(fence, effect, guard)
+            except WorkflowFenceError as error:
+                assert error.outcome is WorkflowOutcome.EXHAUSTED
+                if not catch_inside:
+                    raise
+                # Catching a typed denial and using a cached native connection
+                # must not allow the facade's final commit to publish any CAS.
+                connection.execute("UPDATE workflow_effect_domain SET applications=applications+10")
+    except WorkflowFenceError as error:
+        denied = error.outcome
+    assert workflow_case.snapshot() == before
+    assert denied is WorkflowOutcome.EXHAUSTED
+    observer.assert_not_called()
     assert workflow_case.status() == "processing"
     assert workflow_case.receipt_count() == 1
     assert workflow_case.capability.lookup_effect(workflow_case.root, retained).receipt == retained_proof
     assert workflow_case.capability.release_effect(workflow_case.root, retained).receipt.released
     assert workflow_case.status() == "processing"
+
+
+@pytest.mark.parametrize("action", [WorkflowAction.CONTINUE, WorkflowAction.RETRY, WorkflowAction.COMPLETE])
+@pytest.mark.parametrize("check_before_commit", [False, True])
+@pytest.mark.parametrize("expire_after_rollback", [False, True])
+def test_rolled_back_effect_savepoint_aborts_outer_transaction(
+    workflow_case, monkeypatch, action, check_before_commit, expire_after_rollback
+):
+    monkeypatch.setenv("JOBS_COUNTERS_ENABLED", "1")
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "1")
+    workflow_case.admit()
+    workflow_case.install_effect_guard()
+    lease = workflow_case.acquire()
+    effect = workflow_case.effect("a" * 64, action, "transient" if action is WorkflowAction.RETRY else None)
+    before = workflow_case.snapshot()
+    observer = Mock()
+    monkeypatch.setattr(workflow_case.manager, "_emit_workflow_effect_side_effects", observer)
+    denied = None
+    try:
+        with workflow_case.capability.transaction(workflow_case.root.owner_user_id) as tx:
+            fence = tx.lock_live_root(workflow_case.root, lease)
+            connection = tx.connection
+            connection.execute("SAVEPOINT effect_scope")
+            assert (
+                tx.apply_effect(fence, effect, workflow_case.guard_cas(tx, effect)).outcome is WorkflowOutcome.APPLIED
+            )
+            connection.execute("ROLLBACK TO SAVEPOINT effect_scope")
+            connection.execute("RELEASE SAVEPOINT effect_scope")
+            if expire_after_rollback:
+                workflow_case.expire(connection)
+            if check_before_commit:
+                try:
+                    assert tx.connection is connection
+                except WorkflowFenceError as error:
+                    assert error.outcome is WorkflowOutcome.STALE_LEASE
+                    # A caught invalidation cannot restore commit authority.
+                    connection.execute("UPDATE workflow_effect_domain SET applications=applications+10")
+    except WorkflowFenceError as error:
+        denied = error.outcome
+    observer.assert_not_called()
+    assert workflow_case.snapshot() == before
+    assert denied is WorkflowOutcome.STALE_LEASE
+    assert workflow_case.capability.lookup_effect(workflow_case.root, effect).outcome is WorkflowOutcome.MISSING
+
+
+@pytest.mark.parametrize("savepoint", ["release_effect", "rollback_unrelated", "nested_release"])
+def test_savepoints_preserving_applied_proof_commit_once(workflow_case, monkeypatch, savepoint):
+    workflow_case.admit()
+    workflow_case.install_effect_guard()
+    lease = workflow_case.acquire()
+    effect = workflow_case.effect("a" * 64, WorkflowAction.COMPLETE)
+    observer = Mock()
+    monkeypatch.setattr(workflow_case.manager, "_emit_workflow_effect_side_effects", observer)
+    with workflow_case.capability.transaction(workflow_case.root.owner_user_id) as tx:
+        fence = tx.lock_live_root(workflow_case.root, lease)
+        connection = tx.connection
+        connection.execute("SAVEPOINT effect_scope")
+        applied = tx.apply_effect(fence, effect, workflow_case.guard_cas(tx, effect))
+        if savepoint == "rollback_unrelated":
+            connection.execute("SAVEPOINT unrelated")
+            connection.execute("UPDATE workflow_effect_domain SET applications=applications+10")
+            connection.execute("ROLLBACK TO SAVEPOINT unrelated")
+            connection.execute("RELEASE SAVEPOINT unrelated")
+        elif savepoint == "nested_release":
+            connection.execute("SAVEPOINT release_scope")
+            assert tx.release_effect(workflow_case.root, effect).receipt.released
+            connection.execute("RELEASE SAVEPOINT release_scope")
+        connection.execute("RELEASE SAVEPOINT effect_scope")
+        assert tx.connection is connection
+    assert workflow_case.status() == "completed"
+    assert workflow_case.snapshot()[4] == 1
+    replay = workflow_case.capability.lookup_effect(workflow_case.root, effect)
+    assert replace(replay.receipt, released=False) == applied.receipt
+    assert replay.receipt.released is (savepoint == "nested_release")
+    observer.assert_called_once()
+    assert workflow_case.receipt_count() == 1
+
+
+def test_rolled_back_effect_cannot_be_reapplied_through_cached_connection(workflow_case, monkeypatch):
+    from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import workflow_store
+
+    workflow_case.admit()
+    workflow_case.install_effect_guard()
+    lease = workflow_case.acquire()
+    effect = workflow_case.effect("a" * 64, WorkflowAction.COMPLETE)
+    store = workflow_store(workflow_case.manager.backend)
+    with workflow_case.connection() as connection:
+        instant = store.database_now(connection)
+    # Equal receipt timestamps must not disguise a rolled-back application or
+    # allow its stale Python observer to be emitted alongside a second one.
+    monkeypatch.setattr(store, "database_now", lambda _connection: instant)
+    observer = Mock()
+    monkeypatch.setattr(workflow_case.manager, "_emit_workflow_effect_side_effects", observer)
+    before = workflow_case.snapshot()
+    denied = None
+    try:
+        with workflow_case.capability.transaction(workflow_case.root.owner_user_id) as tx:
+            fence = tx.lock_live_root(workflow_case.root, lease)
+            connection = tx.connection
+            connection.execute("SAVEPOINT effect_scope")
+            tx.apply_effect(fence, effect, workflow_case.guard_cas(tx, effect))
+            connection.execute("ROLLBACK TO SAVEPOINT effect_scope")
+            connection.execute("RELEASE SAVEPOINT effect_scope")
+            fence = tx.lock_live_root(workflow_case.root, lease)
+            changed = workflow_case.execute(
+                connection,
+                "UPDATE workflow_effect_domain SET applications=applications+1 WHERE guard=?",
+                (effect.guard_fingerprint,),
+            )
+            assert changed.rowcount == 1
+            tx.apply_effect(fence, effect, effect.guard_fingerprint)
+    except WorkflowFenceError as error:
+        denied = error.outcome
+    observer.assert_not_called()
+    assert workflow_case.snapshot() == before
+    assert denied is WorkflowOutcome.STALE_LEASE
 
 
 @pytest.mark.parametrize(

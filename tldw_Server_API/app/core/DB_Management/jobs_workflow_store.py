@@ -213,8 +213,10 @@ class LiveWorkflowTransaction:
         self.transaction_id = transaction_id
         self.store = workflow_store(manager.backend)
         self.active = True
+        self._rollback_only: WorkflowOutcome | None = None
         self._fences: dict[WorkflowFence, tuple[WorkflowRoot, WorkflowLease]] = {}
         self._consumed_fences: dict[WorkflowFence, WorkflowRoot] = {}
+        self._applied_effects: list[tuple[WorkflowRoot, WorkflowEffect, WorkflowReceipt]] = []
         self.effect_events: list[tuple] = []
         self.admission_event: AdmissionResult | None = None
         if self.backend == "sqlite":
@@ -243,6 +245,8 @@ class LiveWorkflowTransaction:
     def _check_open(self) -> None:
         if not self.active:
             raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
+        if self._rollback_only is not None:
+            raise WorkflowFenceError(self._rollback_only)
         if self.backend == "sqlite":
             if not self._connection.in_transaction:
                 raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
@@ -406,10 +410,17 @@ class LiveWorkflowTransaction:
         return fence
 
     def validate_fences(self) -> None:
-        """Recheck native connection access and the final pre-commit boundary."""
+        """Require live fences or their retained transition proofs before commit."""
         self._check_open()
         for root, lease in self._fences.values():
             self._validate_live(root, lease)
+        # Native savepoint rollback restores SQL state, not consumed Python
+        # fences or observers. Only retained exact proof discharges a fence.
+        for root, effect, receipt in self._applied_effects:
+            proof = self._effect_proof(root, effect)
+            if proof.receipt is None or replace(proof.receipt, released=receipt.released) != receipt:
+                self._rollback_only = WorkflowOutcome.STALE_LEASE
+                raise WorkflowFenceError(self._rollback_only)
 
     def _effect_proof(self, root: WorkflowRoot, effect: WorkflowEffect, *, lock: bool = False) -> WorkflowEffectResult:
         self._check_open()
@@ -485,6 +496,7 @@ class LiveWorkflowTransaction:
 
         Jobs never inspects domain tables. A matching digest is the caller's
         assertion of revalidation, not a substitute for that enlisted CAS.
+        Capacity denial raises EXHAUSTED and makes this transaction rollback-only.
         """
         self._check_open()
         if type(fence) is not WorkflowFence:
@@ -496,6 +508,9 @@ class LiveWorkflowTransaction:
         replay = self._effect_proof(root, effect)
         if replay.outcome is not WorkflowOutcome.MISSING:
             return replay
+        # Do not let a new application replace lost proof with equal facts and
+        # accidentally validate an earlier rolled-back observer obligation.
+        self.validate_fences()
         if authority is None:
             raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
         root, lease = authority
@@ -509,7 +524,10 @@ class LiveWorkflowTransaction:
             )[0]["slot"]
         )
         if slot > 32768:
-            return WorkflowEffectResult(WorkflowOutcome.EXHAUSTED)
+            # This admission denial must undo the caller's preceding domain CAS,
+            # even if caught. It is not a committed lifecycle exhaustion proof.
+            self._rollback_only = WorkflowOutcome.EXHAUSTED
+            raise WorkflowFenceError(self._rollback_only)
         row = self.store.jobs_by_uuid(self._connection, root.job_uuid)[0]
         status = {
             WorkflowAction.CONTINUE: "queued",
@@ -543,6 +561,7 @@ class LiveWorkflowTransaction:
             self._connection, root, lease, effect, receipt, row, counters_enabled=counters, outbox_enabled=outbox
         )
         self.store.insert_effect_receipt(self._connection, root, receipt, slot)
+        self._applied_effects.append((root, effect, receipt))
         # A successful transition consumes this delivery's authority, not all
         # transaction fences. Final validation must still check other roots.
         for token, (bound, _) in tuple(self._fences.items()):
