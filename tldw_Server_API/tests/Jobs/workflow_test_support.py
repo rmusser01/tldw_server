@@ -1,16 +1,21 @@
 """Shared, explicitly installed workflow schema cases; no alternate PG lifecycle."""
 
+import os
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
 from tldw_Server_API.app.core.Jobs.operations.contracts import ExpiredLeasePolicy
 from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
+    WorkflowAction,
     WorkflowAdmissionCommand,
     WorkflowControls,
+    WorkflowEffect,
+    WorkflowFenceError,
     WorkflowLease,
+    WorkflowOutcome,
     WorkflowPolicy,
     WorkflowScope,
 )
@@ -32,6 +37,138 @@ class WorkflowCase:
     command: WorkflowAdmissionCommand
     installer: Any = None
     root: Any = None
+    guard_installed: bool = False
+
+    def effect(self, key, action, reason=None):
+        return WorkflowEffect(
+            key,
+            action,
+            "e" * 64,
+            reason,
+            datetime(2026, 1, 2, tzinfo=timezone.utc)
+            if action in {WorkflowAction.CONTINUE, WorkflowAction.RETRY}
+            else None,
+        )
+
+    def install_effect_guard(self):
+        if self.guard_installed:
+            return
+        with self.connection() as conn:
+            conn.execute(
+                "CREATE TABLE workflow_effect_domain (id INTEGER PRIMARY KEY, guard TEXT, applications INTEGER)"
+            )
+            self.execute(conn, "INSERT INTO workflow_effect_domain VALUES(1,?,0)", ("e" * 64,))
+            if self.manager.backend == "postgres":
+                from psycopg import sql
+
+                with self.connection(runtime=True) as runtime:
+                    role = runtime.execute("SELECT current_user").fetchone()[0]
+                conn.execute(
+                    sql.SQL("GRANT SELECT,UPDATE ON workflow_effect_domain TO {}").format(sql.Identifier(role))
+                )
+            conn.commit()
+        self.guard_installed = True
+
+    def guard_cas(self, tx, effect):
+        """Explicit locked domain revalidation, after Jobs locking, on tx.connection."""
+        changed = self.execute(
+            tx.connection,
+            "UPDATE workflow_effect_domain SET applications=applications+1 WHERE id=1 AND guard=?",
+            (effect.guard_fingerprint,),
+        )
+        if changed.rowcount != 1:
+            raise WorkflowFenceError(WorkflowOutcome.CONFLICT)
+        return effect.guard_fingerprint
+
+    def apply(self, effect, lease, verified_guard=None):
+        self.install_effect_guard()
+        with self.capability.transaction(self.root.owner_user_id) as tx:
+            replay = tx.lookup_effect(self.root, effect)
+            if replay.outcome is not WorkflowOutcome.MISSING:
+                return replay
+            fence = tx.lock_live_root(self.root, lease)
+            guard = self.guard_cas(tx, effect)
+            return tx.apply_effect(fence, effect, guard if verified_guard is None else verified_guard)
+
+    def job_row(self):
+        with self.connection() as conn:
+            cursor = self.execute(conn, "SELECT * FROM jobs WHERE uuid=?", (self.root.job_uuid,))
+            row = cursor.fetchone()
+            return dict(zip([column[0] for column in cursor.description], row)) if row else None
+
+    def status(self):
+        row = self.job_row()
+        if row:
+            return row["status"]
+        with self.connection() as conn:
+            return self.execute(conn, "SELECT status FROM jobs_archive WHERE uuid=?", (self.root.job_uuid,)).fetchone()[
+                0
+            ]
+
+    def retry_count(self):
+        return self.job_row()["retry_count"]
+
+    def receipt_count(self):
+        with self.connection() as conn:
+            return self.execute(
+                conn, "SELECT COUNT(*) FROM job_workflow_effect_receipts WHERE job_uuid=?", (self.root.job_uuid,)
+            ).fetchone()[0]
+
+    def effect_receipt(self, root, key):
+        with self.connection() as conn:
+            cursor = self.execute(
+                conn,
+                "SELECT * FROM job_workflow_effect_receipts WHERE owner_user_id=? AND job_uuid=? AND effect_key=?",
+                (root.owner_user_id, root.job_uuid, key),
+            )
+            row = cursor.fetchone()
+            return dict(zip([column[0] for column in cursor.description], row)) if row else None
+
+    def snapshot(self):
+        with self.connection() as conn:
+            events = conn.execute("SELECT COUNT(*) FROM job_events").fetchone()[0]
+            domain = (
+                conn.execute("SELECT applications FROM workflow_effect_domain").fetchone()[0]
+                if self.guard_installed
+                else 0
+            )
+        return self.job_row(), self.counters(), events, self.receipt_count(), domain
+
+    def backdate_root(self):
+        old = datetime.now(timezone.utc) - timedelta(days=40)
+        with self.connection() as conn:
+            self.execute(
+                conn,
+                "UPDATE jobs SET completed_at=?,created_at=? WHERE uuid=?",
+                (old.isoformat(), old.isoformat(), self.root.job_uuid),
+            )
+            conn.commit()
+
+    def archive_root(self, compressed=False):
+        """Exercise the real manager archive move, not a synthetic archive copy."""
+        from unittest.mock import patch
+
+        self.backdate_root()
+        with patch.dict(
+            os.environ,
+            {
+                "JOBS_ARCHIVE_BEFORE_DELETE": "true",
+                "JOBS_ARCHIVE_COMPRESS": str(compressed),
+                "JOBS_ARCHIVE_COMPRESS_DROP_JSON": str(compressed),
+            },
+        ):
+            assert self.installer.prune_jobs(statuses=[self.status()], older_than_days=30, domain="embeddings") == 1
+
+    def prune_root_history(self):
+        from unittest.mock import patch
+
+        if self.job_row():
+            self.backdate_root()
+            with patch.dict(os.environ, {"JOBS_ARCHIVE_BEFORE_DELETE": "false"}):
+                assert self.installer.prune_jobs(statuses=[self.status()], older_than_days=30, domain="embeddings") == 1
+        with self.connection() as conn:
+            self.execute(conn, "DELETE FROM jobs_archive WHERE uuid=?", (self.root.job_uuid,))
+            conn.commit()
 
     def admit(self, **control_overrides):
         command = replace(self.command, controls=replace(self.command.controls, **control_overrides))
@@ -52,6 +189,15 @@ class WorkflowCase:
         """Seed an exact live delivery; acquisition policy belongs to Task4."""
         lease = WorkflowLease("worker-a", str(uuid4()))
         with self.connection() as conn:
+            row = self.job_row()
+            if self.manager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")) and row["status"] == "queued":
+                column = "scheduled_count" if row["available_at"] is not None else "ready_count"
+                # Closed column vocabulary in this synthetic Task2 delivery helper.
+                statement = {
+                    "scheduled_count": "UPDATE job_counters SET scheduled_count=scheduled_count-1,processing_count=processing_count+1 WHERE domain=? AND queue=? AND job_type=?",
+                    "ready_count": "UPDATE job_counters SET ready_count=ready_count-1,processing_count=processing_count+1 WHERE domain=? AND queue=? AND job_type=?",
+                }[column]
+                self.execute(conn, statement, (row["domain"], row["queue"], row["job_type"]))
             deadline = (
                 "clock_timestamp()+interval '120 seconds'"
                 if self.manager.backend == "postgres"
@@ -170,7 +316,7 @@ class WorkflowCase:
         policy = WorkflowPolicy(
             WorkflowScope("embeddings", "workflow", "embedding_workflow"),
             "workflow_id",
-            frozenset({"transient", "permanent", "no_progress_exhausted"}),
+            frozenset({"transient", "provider_transient", "permanent", "no_progress_exhausted"}),
         )
         command = WorkflowAdmissionCommand(
             "owner-a",

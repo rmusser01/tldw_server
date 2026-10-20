@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from typing import Any
 
 import sqlglot
@@ -11,10 +12,14 @@ import sqlglot
 from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
     WorkflowAdmissionCommand,
     WorkflowAdmissionInputs,
+    WorkflowEffect,
     WorkflowFenceError,
+    WorkflowLease,
     WorkflowOutcome,
     WorkflowPolicy,
+    WorkflowReceipt,
     WorkflowRoot,
+    encode_workflow_receipt,
 )
 
 from .jobs_workflow_migrations import (
@@ -130,6 +135,76 @@ def extend_horizon(connection: sqlite3.Connection, job_uuid: str, minimum_second
     if cursor.rowcount != 1:
         raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
     return connection.execute("SELECT leased_until FROM jobs WHERE uuid=?", (job_uuid,)).fetchone()[0]
+
+
+def database_now(connection: sqlite3.Connection) -> datetime:
+    """Read fractional UTC database time for immutable acknowledgment facts."""
+    return datetime.fromisoformat(connection.execute("SELECT STRFTIME('%Y-%m-%dT%H:%M:%f+00:00','now')").fetchone()[0])
+
+
+def insert_effect_receipt(
+    connection: sqlite3.Connection, root: WorkflowRoot, receipt: WorkflowReceipt, slot: int
+) -> None:
+    """Insert proof on the lifecycle transaction; never commit independently."""
+    connection.execute(
+        "INSERT INTO job_workflow_effect_receipts(owner_user_id,job_uuid,effect_key,purpose,action,facts_fingerprint,facts,resulting_status,applied_at,slot) VALUES(?,?,?,'action',?,?,?,?,?,?)",
+        (
+            root.owner_user_id,
+            root.job_uuid,
+            receipt.effect_key,
+            receipt.action.value,
+            receipt.facts_fingerprint,
+            encode_workflow_receipt(receipt).decode("utf-8"),
+            receipt.resulting_status,
+            receipt.applied_at.isoformat(),
+            slot,
+        ),
+    )
+
+
+def transition_effect(
+    connection: sqlite3.Connection,
+    root: WorkflowRoot,
+    lease: WorkflowLease,
+    effect: WorkflowEffect,
+    receipt: WorkflowReceipt,
+    row: dict,
+    *,
+    counters_enabled: bool,
+    outbox_enabled: bool,
+) -> dict:
+    """Native UUID/lease-fenced mutation and existing counter/event semantics."""
+    from tldw_Server_API.app.core.Jobs.operations.sqlite.lifecycle import (
+        _insert_prepared_event,
+        _prepared_counter_transition,
+    )
+
+    from .jobs_workflow_store import effect_event_type, effect_transition_parameters
+
+    # Jobs compares timestamps as SQL text. Preserve the original UTC instant
+    # (including fractions), with a space separator rather than ISO's T/offset.
+    parameters = tuple(
+        value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f") if isinstance(value, datetime) else value
+        for value in effect_transition_parameters(root, lease, effect, receipt, row)
+    )
+    changed = connection.execute(
+        "UPDATE jobs SET status=?,result=?,retry_count=?,failure_streak_code=?,failure_streak_count=?,error_code=?,error_message=?,last_error=?,available_at=?,quarantined_at=?,completed_at=?,cancelled_at=?,completion_token=?,acquired_at=?,started_at=?,leased_until=NULL,worker_id=NULL,lease_id=NULL,updated_at=STRFTIME('%Y-%m-%d %H:%M:%f','now') WHERE uuid=? AND owner_user_id=? AND status='processing' AND worker_id=? AND lease_id=? AND (completion_token IS NULL OR completion_token=?) AND JULIANDAY(leased_until)>JULIANDAY('now')",
+        parameters,
+    )
+    if changed.rowcount != 1:
+        raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
+    if counters_enabled:
+        _prepared_counter_transition(connection, row=row, new_status=receipt.resulting_status)
+    updated = jobs_by_uuid(connection, root.job_uuid)[0]
+    if outbox_enabled:
+        _insert_prepared_event(
+            connection,
+            row=updated,
+            event_type=effect_event_type(receipt),
+            marker={"kind": effect.action.value, "origin": "workflow"},
+            reason_code=effect.reason_code,
+        )
+    return updated
 
 
 def _triggers() -> dict[str, str]:

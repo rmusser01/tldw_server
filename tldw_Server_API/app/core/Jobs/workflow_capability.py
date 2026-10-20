@@ -20,6 +20,8 @@ from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import (
 from .operations.workflow_contracts import (
     WorkflowAdmissionCommand,
     WorkflowAdmissionResult,
+    WorkflowEffect,
+    WorkflowEffectResult,
     WorkflowFenceError,
     WorkflowLookupResult,
     WorkflowOutcome,
@@ -75,6 +77,10 @@ class PreparedWorkflowCapability:
                 manager._WORKFLOW_TRANSACTION.reset(transaction_token)
             for variable, token in zip(variables, tokens):
                 variable.reset(token)
+        # Only a successful outer commit reaches observers. Facts were copied
+        # from the UUID-locked row, never re-resolved through an integer ID.
+        for event in tx.effect_events:
+            manager._emit_workflow_effect_side_effects(*event)
 
     def admit(self, command: WorkflowAdmissionCommand) -> WorkflowAdmissionResult:
         """Replay exact retained authority before evaluating mutable policy."""
@@ -94,6 +100,20 @@ class PreparedWorkflowCapability:
             raise ValueError("workflow lookup requires exact root facts")
         with self.transaction(root.owner_user_id) as tx:
             return tx.lookup(root)
+
+    def lookup_effect(self, root: WorkflowRoot, effect: WorkflowEffect) -> WorkflowEffectResult:
+        """Read exact retained proof without requiring a lease or Jobs history."""
+        if type(root) is not WorkflowRoot:
+            raise ValueError("workflow effect lookup requires exact root facts")
+        with self.transaction(root.owner_user_id) as tx:
+            return tx.lookup_effect(root, effect)
+
+    def release_effect(self, root: WorkflowRoot, effect: WorkflowEffect) -> WorkflowEffectResult:
+        """Release an existing exact proof, retaining its immutable tombstone."""
+        if type(root) is not WorkflowRoot:
+            raise ValueError("workflow effect release requires exact root facts")
+        with self.transaction(root.owner_user_id) as tx:
+            return tx.release_effect(root, effect)
 
 
 def install_workflow_support(manager: JobManager) -> None:

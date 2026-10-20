@@ -13,10 +13,14 @@ from sqlglot import exp
 from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
     WorkflowAdmissionCommand,
     WorkflowAdmissionInputs,
+    WorkflowEffect,
     WorkflowFenceError,
+    WorkflowLease,
     WorkflowOutcome,
     WorkflowPolicy,
+    WorkflowReceipt,
     WorkflowRoot,
+    encode_workflow_receipt,
 )
 
 from .jobs_workflow_migrations import (
@@ -178,6 +182,71 @@ def extend_horizon(connection: Any, job_uuid: str, minimum_seconds: int) -> date
     if row is None:
         raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
     return row[0]
+
+
+def database_now(connection: Any) -> datetime:
+    """Use the current database clock, not frozen transaction time."""
+    return connection.execute("SELECT clock_timestamp()").fetchone()[0]
+
+
+def insert_effect_receipt(connection: Any, root: WorkflowRoot, receipt: WorkflowReceipt, slot: int) -> None:
+    """Retain compact proof under forced transaction-local owner RLS."""
+    connection.execute(
+        "INSERT INTO job_workflow_effect_receipts(owner_user_id,job_uuid,effect_key,purpose,action,facts_fingerprint,facts,resulting_status,applied_at,slot) VALUES(%s,%s,%s,'action',%s,%s,%s,%s,%s,%s)",
+        (
+            root.owner_user_id,
+            root.job_uuid,
+            receipt.effect_key,
+            receipt.action.value,
+            receipt.facts_fingerprint,
+            encode_workflow_receipt(receipt).decode("utf-8"),
+            receipt.resulting_status,
+            receipt.applied_at,
+            slot,
+        ),
+    )
+
+
+def transition_effect(
+    connection: Any,
+    root: WorkflowRoot,
+    lease: WorkflowLease,
+    effect: WorkflowEffect,
+    receipt: WorkflowReceipt,
+    row: dict,
+    *,
+    counters_enabled: bool,
+    outbox_enabled: bool,
+) -> dict:
+    """Apply on the caller's locked connection without a committing wrapper."""
+    from psycopg.rows import dict_row
+
+    from tldw_Server_API.app.core.Jobs.operations.postgres.lifecycle import (
+        _insert_prepared_event,
+        _prepared_counter_transition,
+    )
+
+    from .jobs_workflow_store import effect_event_type, effect_transition_parameters
+
+    changed = connection.execute(
+        "UPDATE jobs SET status=%s,result=%s::jsonb,retry_count=%s,failure_streak_code=%s,failure_streak_count=%s,error_code=%s,error_message=%s,last_error=%s,available_at=%s,quarantined_at=%s,completed_at=%s,cancelled_at=%s,completion_token=%s,acquired_at=%s,started_at=%s,leased_until=NULL,worker_id=NULL,lease_id=NULL,updated_at=clock_timestamp() WHERE uuid=%s AND owner_user_id=%s AND status='processing' AND worker_id=%s AND lease_id=%s AND (completion_token IS NULL OR completion_token=%s) AND leased_until>clock_timestamp()",
+        effect_transition_parameters(root, lease, effect, receipt, row),
+    )
+    if changed.rowcount != 1:
+        raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
+    with connection.cursor(row_factory=dict_row) as cursor:
+        if counters_enabled:
+            _prepared_counter_transition(cursor, row=row, new_status=receipt.resulting_status)
+        updated = jobs_by_uuid(connection, root.job_uuid)[0]
+        if outbox_enabled:
+            _insert_prepared_event(
+                cursor,
+                row=updated,
+                event_type=effect_event_type(receipt),
+                marker={"kind": effect.action.value, "origin": "workflow"},
+                reason_code=effect.reason_code,
+            )
+    return updated
 
 
 def _normalized(definition: str) -> exp.Expression:
