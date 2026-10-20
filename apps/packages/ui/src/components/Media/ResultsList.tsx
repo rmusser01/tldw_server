@@ -1,10 +1,16 @@
 import { mediaResultKey } from './types'
-import { useState, useCallback } from 'react'
+import { memo, useCallback, useState, useMemo } from 'react'
 import { CheckCircle2, Circle, Clock, FileText, List, LayoutGrid, Loader2, Star, User, AlertCircle, Upload } from 'lucide-react'
 import { Tooltip, Button, Input } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { formatRelativeTime } from '@/utils/dateFormatters'
 import { highlightMatches } from '@/components/Media/highlightMatches'
+import {
+  buildInspectorTooltip,
+  formatDuration,
+  formatPublishedDate,
+  normalizeProcessingStatus
+} from './resultInspectorTooltip'
 import {
   persistFirstIngestDismissed,
   readFirstIngestDismissed
@@ -12,7 +18,7 @@ import {
 
 export type ResultsViewMode = 'standard' | 'compact'
 
-interface Result {
+export interface Result {
   id: string | number
   title?: string
   kind: 'media' | 'note'
@@ -32,35 +38,247 @@ interface Result {
   }
 }
 
-/** Normalize processing status string to a display category. */
-const normalizeProcessingStatus = (status: any): 'complete' | 'processing' | 'failed' | 'unknown' => {
-  if (status == null) return 'unknown'
-  const s = String(status).toLowerCase().trim()
-  if (s === 'completed' || s === 'succeeded' || s === 'done' || s === 'ready') return 'complete'
-  if (s === 'running' || s === 'processing' || s === 'started' || s === 'queued' || s === 'pending' || s === 'in_progress') return 'processing'
-  if (s === 'failed' || s === 'error' || s === 'cancelled') return 'failed'
-  return 'unknown'
+interface ResultRowProps {
+  result: Result
+  isCompact: boolean
+  searchQuery: string
+  selectedId: string | number | null
+  selectionMode: boolean
+  selectedIds?: Set<string>
+  favorites?: Set<string>
+  readingProgress?: Map<string, number>
+  onSelect: (id: string | number) => void
+  onToggleSelected?: (id: string | number) => void
+  onToggleFavorite?: (id: string) => void
 }
 
-/** Format duration seconds to human readable. */
-const formatDuration = (seconds: number): string => {
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  return `${h}h ${m}m`
-}
+/**
+ * Memoized results row (WP-11): parent re-renders (counts, loading state,
+ * quick-ingest typing) skip unchanged rows, and the inspector tooltip is
+ * built inside the row's `useMemo` so it is recomputed only when this row's
+ * inputs actually change.
+ */
+const ResultRow = memo(function ResultRow({
+  result,
+  isCompact,
+  searchQuery,
+  selectedId,
+  selectionMode,
+  selectedIds,
+  favorites,
+  readingProgress,
+  onSelect,
+  onToggleSelected,
+  onToggleFavorite
+}: ResultRowProps) {
+  const { t } = useTranslation(['review'])
+  const relativeDate = result.meta?.created_at
+    ? formatRelativeTime(result.meta.created_at, t, { compact: true })
+    : null
+  const bulkSelected = selectedIds?.has(mediaResultKey(result)) === true
+  const showSelectedStyle = selectionMode ? bulkSelected : selectedId === result.id
+  const processingStatus = normalizeProcessingStatus(result.meta?.status)
+  const progress = readingProgress?.get(String(result.id))
+  const hasProgress = progress != null && progress > 0
+  const isRead = progress != null && progress >= 95
+  const inspectorTooltip = useMemo(
+    () => buildInspectorTooltip(result, t, readingProgress),
+    [result, t, readingProgress]
+  )
 
-/** Format publication date to short display. */
-const formatPublishedDate = (dateStr: string): string => {
-  try {
-    const d = new Date(dateStr)
-    if (Number.isNaN(d.getTime())) return dateStr
-    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short' })
-  } catch {
-    return dateStr
-  }
-}
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => {
+        if (selectionMode && onToggleSelected) {
+          onToggleSelected(mediaResultKey(result))
+          return
+        }
+        onSelect(result.id)
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          if (selectionMode && onToggleSelected) {
+            onToggleSelected(mediaResultKey(result))
+            return
+          }
+          onSelect(result.id)
+        }
+      }}
+      aria-label={t('mediaPage.selectResult', 'Select {{type}}: {{title}}', {
+        type: result.kind,
+        title: result.title || `${result.kind} ${result.id}`
+      })}
+
+      className={`w-full ${isCompact ? 'py-2' : 'py-3'} text-left hover:bg-surface2/80 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset cursor-pointer ${
+        showSelectedStyle
+          ? 'bg-surface2/90 border-l-4 border-l-primary px-3.5'
+          : 'px-4'
+      }`}
+    >
+      <div className="flex items-start gap-3">
+        {selectionMode && (
+          <label className="flex min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 items-center justify-center" onClick={event => event.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={bulkSelected}
+            onChange={() => onToggleSelected?.(mediaResultKey(result))}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={event => event.stopPropagation()}
+            className="mt-1 h-4 w-4 rounded border-border bg-surface"
+            aria-label={t('mediaPage.selectResultCheckbox', {
+              defaultValue: 'Select {{title}}',
+              title: result.title || `${result.kind} ${result.id}`
+            })}
+            data-testid={`results-select-${String(result.id)}`}
+          />
+          </label>
+        )}
+        <div className="mt-0.5 flex flex-col items-center gap-1">
+          <FileText className="w-4 h-4 text-text-subtle" />
+          {!isCompact && onToggleFavorite && (
+            <Tooltip title={favorites?.has(String(result.id)) ? t('mediaPage.unfavorite', 'Remove from favorites') : t('mediaPage.favorite', 'Add to favorites')}>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggleFavorite(String(result.id))
+                }}
+                className="p-1.5 hover:bg-surface2 rounded transition-colors"
+                aria-label={favorites?.has(String(result.id)) ? t('mediaPage.unfavorite', 'Remove from favorites') : t('mediaPage.favorite', 'Add to favorites')}
+                title={favorites?.has(String(result.id)) ? t('mediaPage.unfavorite', 'Remove from favorites') : t('mediaPage.favorite', 'Add to favorites')}
+              >
+                <Star className={`w-3.5 h-3.5 ${
+                  favorites?.has(String(result.id))
+                    ? 'text-warn fill-warn'
+                    : 'text-text-subtle'
+                }`} />
+              </button>
+            </Tooltip>
+          )}
+        </div>
+        <Tooltip placement="right" title={inspectorTooltip}>
+          <div className="flex-1 min-w-0">
+            {/* Badge row: kind, type, processing status, date */}
+            <div className="mb-0.5 flex items-center gap-1.5">
+              <span className="inline-flex items-center rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primaryStrong">
+                {result.kind.toUpperCase()}
+              </span>
+              {result.meta?.type && (
+                <span className="inline-flex items-center rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text capitalize">
+                  {result.meta.type}
+                </span>
+              )}
+              {/* Processing status indicator */}
+              {processingStatus === 'processing' && (
+                <Tooltip title={t('mediaPage.statusProcessing', 'Processing...')}>
+                  <span className="inline-flex items-center">
+                    <Clock className="w-3 h-3 text-primary animate-pulse" />
+                  </span>
+                </Tooltip>
+              )}
+              {processingStatus === 'failed' && (
+                <Tooltip title={t('mediaPage.statusFailed', 'Processing failed')}>
+                  <span className="inline-flex items-center">
+                    <AlertCircle className="w-3 h-3 text-danger" />
+                  </span>
+                </Tooltip>
+              )}
+              {/* Duration for audio/video */}
+              {result.meta?.duration != null && result.meta.duration > 0 && (
+                <span className="inline-flex items-center rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
+                  {formatDuration(result.meta.duration)}
+                </span>
+              )}
+              {/* Page count */}
+              {!isCompact && result.meta?.page_count != null && (
+                <span className="inline-flex items-center rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
+                  {t('mediaPage.pageCountBadge', '{{count}}pp', { count: result.meta.page_count })}
+                </span>
+              )}
+              {/* Date: prefer publication date, fallback to ingestion date */}
+              {result.meta?.published_at ? (
+                <Tooltip title={relativeDate ? t('mediaPage.ingestedDateTooltip', 'Ingested {{date}}', { date: relativeDate }) : undefined}>
+                  <span className="inline-flex items-center rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
+                    {formatPublishedDate(result.meta.published_at)}
+                  </span>
+                </Tooltip>
+              ) : relativeDate ? (
+                <span className="inline-flex items-center rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
+                  {relativeDate}
+                </span>
+              ) : null}
+              {/* Reading progress indicator */}
+              {isRead && (
+                <Tooltip title={t('mediaPage.readComplete', 'Read')}>
+                  <span className="inline-flex items-center">
+                    <CheckCircle2 className="w-3 h-3 text-success" />
+                  </span>
+                </Tooltip>
+              )}
+              {hasProgress && !isRead && (
+                <Tooltip title={t('mediaPage.readingProgressBadge', '{{percent}}% read', { percent: Math.round(progress) })}>
+                  <span className="inline-flex items-center">
+                    <Circle className="w-3 h-3 text-primary" strokeWidth={3} strokeDasharray={`${(progress / 100) * 9.42} 9.42`} />
+                  </span>
+                </Tooltip>
+              )}
+            </div>
+            {/* Title */}
+            <div className="truncate text-[13px] leading-5 text-text font-semibold">
+              {result.title || `${result.kind} ${result.id}`}
+            </div>
+            {/* Author line */}
+            {result.meta?.author && (
+              <div className="mt-0.5 flex items-center gap-1">
+                <User className="w-3 h-3 text-text-subtle shrink-0" />
+                <span className="truncate text-[11px] text-text-muted">
+                  {result.meta.author}
+                </span>
+              </div>
+            )}
+            {/* Snippet - hidden in compact mode */}
+            {!isCompact && result.snippet && (
+              <div className="mt-0.5 line-clamp-1 text-[11px] text-text-muted">
+                {highlightMatches(result.snippet, searchQuery)}
+              </div>
+            )}
+            {/* Keywords - hidden in compact mode */}
+            {!isCompact && Array.isArray(result.keywords) && result.keywords.length > 0 && (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {result.keywords.slice(0, 5).map((keyword, idx) => (
+                  <span
+                    key={idx}
+                    className="inline-flex max-w-[120px] items-center rounded bg-surface2 px-2 py-0.5 text-[10px] font-medium text-text line-clamp-1"
+                    title={keyword}
+                  >
+                    {keyword}
+                  </span>
+                ))}
+                {result.keywords.length > 5 && (
+                  <Tooltip
+                    title={t('mediaPage.moreTags', '+{{count}} more tags', { count: result.keywords.length - 5 })}
+                  >
+                    <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium text-text-muted">
+                      +{result.keywords.length - 5}
+                    </span>
+                  </Tooltip>
+                )}
+              </div>
+            )}
+            {/* Source - hidden in compact mode */}
+            {!isCompact && result.meta?.source && (
+              <div className="mt-0.5 text-[11px] text-text-subtle">
+                {result.meta.source}
+              </div>
+            )}
+          </div>
+        </Tooltip>
+      </div>
+    </div>
+  )
+})
 
 interface ResultsListProps {
   results: Result[]
@@ -129,115 +347,6 @@ export function ResultsList({
       onOpenQuickIngest()
     }
   }, [ingestUrl, onOpenQuickIngest])
-
-  const buildInspectorTooltip = (result: Result) => {
-    const title = result.title || `${result.kind} ${result.id}`
-    const lines: Array<{
-      label: string
-      value: string
-      multiline?: boolean
-      preserveWhitespace?: boolean
-    }> = [
-      {
-        label: t('mediaPage.titleLabel', 'Title'),
-        value: title
-      },
-      {
-        label: t('mediaPage.typeLabel', 'Type'),
-        value: result.meta?.type || result.kind
-      }
-    ]
-    if (result.meta?.author) {
-      lines.push({
-        label: t('mediaPage.authorLabel', 'Author'),
-        value: result.meta.author
-      })
-    }
-    if (result.meta?.source) {
-      lines.push({
-        label: t('mediaPage.source', 'Source'),
-        value: result.meta.source
-      })
-    }
-    if (result.meta?.published_at) {
-      lines.push({
-        label: t('mediaPage.publishedLabel', 'Published'),
-        value: formatPublishedDate(result.meta.published_at)
-      })
-    }
-    if (result.meta?.created_at) {
-      lines.push({
-        label: t('mediaPage.ingested', 'Ingested'),
-        value: formatRelativeTime(result.meta.created_at, t, { compact: true })
-      })
-    }
-    if (result.meta?.duration != null && result.meta.duration > 0) {
-      lines.push({
-        label: t('mediaPage.durationLabel', 'Duration'),
-        value: formatDuration(result.meta.duration)
-      })
-    }
-    if (result.meta?.page_count != null) {
-      lines.push({
-        label: t('mediaPage.pagesLabel', 'Pages'),
-        value: String(result.meta.page_count)
-      })
-    }
-    if (result.meta?.transcription_model) {
-      lines.push({
-        label: t('mediaPage.transcriptionModelLabel', 'Transcription'),
-        value: result.meta.transcription_model
-      })
-    }
-    {
-      const progress = readingProgress?.get(String(result.id))
-      if (progress != null && progress > 0) {
-        lines.push({
-          label: t('mediaPage.readingProgressLabel', 'Read'),
-          value: `${Math.round(progress)}%`
-        })
-      }
-    }
-    if (result.snippet) {
-      lines.push({
-        label: t('mediaPage.previewLabel', 'Preview'),
-        value: result.snippet,
-        multiline: true,
-        preserveWhitespace: true
-      })
-    }
-    if (Array.isArray(result.keywords) && result.keywords.length > 0) {
-      lines.push({
-        label: t('mediaPage.keywords', 'Keywords'),
-        value: result.keywords.join(', '),
-        multiline: true
-      })
-    }
-
-    return (
-      <div className="space-y-1 text-xs max-w-xs">
-        {lines.map((line, index) => (
-          <div
-            key={`${line.label}-${index}`}
-            className={line.multiline ? "flex flex-col gap-1" : "flex gap-1"}
-          >
-            <span className="font-medium text-text">{line.label}:</span>
-            <span
-              className={
-                line.multiline
-                  ? `text-text-subtle break-words line-clamp-4 ${
-                      line.preserveWhitespace ? "whitespace-pre-wrap" : "whitespace-normal"
-                    }`
-                  : "text-text-subtle break-words"
-              }
-            >
-              {line.value}
-            </span>
-          </div>
-        ))}
-      </div>
-    )
-  }
 
   return (
     <div data-testid="media-results-list">
@@ -387,211 +496,22 @@ export function ResultsList({
             )}
           </div>
         ) : (
-          results.map((result) => {
-            const relativeDate = result.meta?.created_at
-              ? formatRelativeTime(result.meta.created_at, t, { compact: true })
-              : null
-            const bulkSelected = selectedIds?.has(mediaResultKey(result)) === true
-            const showSelectedStyle = selectionMode ? bulkSelected : selectedId === result.id
-            const processingStatus = normalizeProcessingStatus(result.meta?.status)
-            const progress = readingProgress?.get(String(result.id))
-            const hasProgress = progress != null && progress > 0
-            const isRead = progress != null && progress >= 95
-
-            return (
-              <div
-              role="button"
-              tabIndex={0}
+          results.map((result) => (
+            <ResultRow
               key={mediaResultKey(result)}
-              onClick={() => {
-                if (selectionMode && onToggleSelected) {
-                  onToggleSelected(mediaResultKey(result))
-                  return
-                }
-                onSelect(result.id)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault()
-                  if (selectionMode && onToggleSelected) {
-                    onToggleSelected(mediaResultKey(result))
-                    return
-                  }
-                  onSelect(result.id)
-                }
-              }}
-              aria-label={t('mediaPage.selectResult', 'Select {{type}}: {{title}}', {
-                type: result.kind,
-                title: result.title || `${result.kind} ${result.id}`
-              })}
-
-              className={`w-full ${isCompact ? 'py-2' : 'py-3'} text-left hover:bg-surface2/80 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-focus focus-visible:ring-inset cursor-pointer ${
-                showSelectedStyle
-                  ? 'bg-surface2/90 border-l-4 border-l-primary px-3.5'
-                  : 'px-4'
-              }`}
-            >
-              <div className="flex items-start gap-3">
-                {selectionMode && (
-                  <label className="flex min-h-[44px] min-w-[44px] md:min-h-0 md:min-w-0 items-center justify-center" onClick={event => event.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    checked={bulkSelected}
-                    onChange={() => onToggleSelected?.(mediaResultKey(result))}
-                    onClick={(event) => event.stopPropagation()}
-                    onKeyDown={event => event.stopPropagation()}
-                    className="mt-1 h-4 w-4 rounded border-border bg-surface"
-                    aria-label={t('mediaPage.selectResultCheckbox', {
-                      defaultValue: 'Select {{title}}',
-                      title: result.title || `${result.kind} ${result.id}`
-                    })}
-                    data-testid={`results-select-${String(result.id)}`}
-                  />
-                  </label>
-                )}
-                <div className="mt-0.5 flex flex-col items-center gap-1">
-                  <FileText className="w-4 h-4 text-text-subtle" />
-                  {!isCompact && onToggleFavorite && (
-                    <Tooltip title={favorites?.has(String(result.id)) ? t('mediaPage.unfavorite', 'Remove from favorites') : t('mediaPage.favorite', 'Add to favorites')}>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onToggleFavorite(String(result.id))
-                        }}
-                        className="p-1.5 hover:bg-surface2 rounded transition-colors"
-                        aria-label={favorites?.has(String(result.id)) ? t('mediaPage.unfavorite', 'Remove from favorites') : t('mediaPage.favorite', 'Add to favorites')}
-                        title={favorites?.has(String(result.id)) ? t('mediaPage.unfavorite', 'Remove from favorites') : t('mediaPage.favorite', 'Add to favorites')}
-                      >
-                        <Star className={`w-3.5 h-3.5 ${
-                          favorites?.has(String(result.id))
-                            ? 'text-warn fill-warn'
-                            : 'text-text-subtle'
-                        }`} />
-                      </button>
-                    </Tooltip>
-                  )}
-                </div>
-                <Tooltip placement="right" title={buildInspectorTooltip(result)}>
-                  <div className="flex-1 min-w-0">
-                    {/* Badge row: kind, type, processing status, date */}
-                    <div className="mb-0.5 flex items-center gap-1.5">
-                      <span className="inline-flex items-center rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primaryStrong">
-                        {result.kind.toUpperCase()}
-                      </span>
-                      {result.meta?.type && (
-                        <span className="inline-flex items-center rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text capitalize">
-                          {result.meta.type}
-                        </span>
-                      )}
-                      {/* Processing status indicator */}
-                      {processingStatus === 'processing' && (
-                        <Tooltip title={t('mediaPage.statusProcessing', 'Processing...')}>
-                          <span className="inline-flex items-center">
-                            <Clock className="w-3 h-3 text-primary animate-pulse" />
-                          </span>
-                        </Tooltip>
-                      )}
-                      {processingStatus === 'failed' && (
-                        <Tooltip title={t('mediaPage.statusFailed', 'Processing failed')}>
-                          <span className="inline-flex items-center">
-                            <AlertCircle className="w-3 h-3 text-danger" />
-                          </span>
-                        </Tooltip>
-                      )}
-                      {/* Duration for audio/video */}
-                      {result.meta?.duration != null && result.meta.duration > 0 && (
-                        <span className="inline-flex items-center rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
-                          {formatDuration(result.meta.duration)}
-                        </span>
-                      )}
-                      {/* Page count */}
-                      {!isCompact && result.meta?.page_count != null && (
-                        <span className="inline-flex items-center rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
-                          {t('mediaPage.pageCountBadge', '{{count}}pp', { count: result.meta.page_count })}
-                        </span>
-                      )}
-                      {/* Date: prefer publication date, fallback to ingestion date */}
-                      {result.meta?.published_at ? (
-                        <Tooltip title={relativeDate ? t('mediaPage.ingestedDateTooltip', 'Ingested {{date}}', { date: relativeDate }) : undefined}>
-                          <span className="inline-flex items-center rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
-                            {formatPublishedDate(result.meta.published_at)}
-                          </span>
-                        </Tooltip>
-                      ) : relativeDate ? (
-                        <span className="inline-flex items-center rounded bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted">
-                          {relativeDate}
-                        </span>
-                      ) : null}
-                      {/* Reading progress indicator */}
-                      {isRead && (
-                        <Tooltip title={t('mediaPage.readComplete', 'Read')}>
-                          <span className="inline-flex items-center">
-                            <CheckCircle2 className="w-3 h-3 text-success" />
-                          </span>
-                        </Tooltip>
-                      )}
-                      {hasProgress && !isRead && (
-                        <Tooltip title={t('mediaPage.readingProgressBadge', '{{percent}}% read', { percent: Math.round(progress) })}>
-                          <span className="inline-flex items-center">
-                            <Circle className="w-3 h-3 text-primary" strokeWidth={3} strokeDasharray={`${(progress / 100) * 9.42} 9.42`} />
-                          </span>
-                        </Tooltip>
-                      )}
-                    </div>
-                    {/* Title */}
-                    <div className="truncate text-[13px] leading-5 text-text font-semibold">
-                      {result.title || `${result.kind} ${result.id}`}
-                    </div>
-                    {/* Author line */}
-                    {result.meta?.author && (
-                      <div className="mt-0.5 flex items-center gap-1">
-                        <User className="w-3 h-3 text-text-subtle shrink-0" />
-                        <span className="truncate text-[11px] text-text-muted">
-                          {result.meta.author}
-                        </span>
-                      </div>
-                    )}
-                    {/* Snippet - hidden in compact mode */}
-                    {!isCompact && result.snippet && (
-                      <div className="mt-0.5 line-clamp-1 text-[11px] text-text-muted">
-                        {highlightMatches(result.snippet, searchQuery)}
-                      </div>
-                    )}
-                    {/* Keywords - hidden in compact mode */}
-                    {!isCompact && Array.isArray(result.keywords) && result.keywords.length > 0 && (
-                      <div className="mt-1.5 flex flex-wrap gap-1">
-                        {result.keywords.slice(0, 5).map((keyword, idx) => (
-                          <span
-                            key={idx}
-                            className="inline-flex max-w-[120px] items-center rounded bg-surface2 px-2 py-0.5 text-[10px] font-medium text-text line-clamp-1"
-                            title={keyword}
-                          >
-                            {keyword}
-                          </span>
-                        ))}
-                        {result.keywords.length > 5 && (
-                          <Tooltip
-                            title={t('mediaPage.moreTags', '+{{count}} more tags', { count: result.keywords.length - 5 })}
-                          >
-                            <span className="inline-flex items-center px-2 py-0.5 text-[10px] font-medium text-text-muted">
-                              +{result.keywords.length - 5}
-                            </span>
-                          </Tooltip>
-                        )}
-                      </div>
-                    )}
-                    {/* Source - hidden in compact mode */}
-                    {!isCompact && result.meta?.source && (
-                      <div className="mt-0.5 text-[11px] text-text-subtle">
-                        {result.meta.source}
-                      </div>
-                    )}
-                  </div>
-                </Tooltip>
-              </div>
-            </div>
-            )
-          })
+              result={result}
+              isCompact={isCompact}
+              searchQuery={searchQuery}
+              selectedId={selectedId}
+              selectionMode={selectionMode}
+              selectedIds={selectedIds}
+              favorites={favorites}
+              readingProgress={readingProgress}
+              onSelect={onSelect}
+              onToggleSelected={onToggleSelected}
+              onToggleFavorite={onToggleFavorite}
+            />
+          ))
         )}
         {/* Loading indicator */}
         {isLoading && (

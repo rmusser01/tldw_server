@@ -409,3 +409,144 @@ async def test_kitten_tts_runtime_load_keeps_the_lock_until_the_load_returns(mon
         return await adapter._load_runtime_for_model("KittenML/kitten-tts-nano-0.8")
 
     await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+
+
+def _kokoro_adapter(monkeypatch, tmp_path, gate: _Gate, *, backend: str, init_timeout_sec: float | None = None):
+    """A Kokoro adapter whose model load (the ONNX constructor or KModel) blocks on the gate."""
+    from tldw_Server_API.app.core.TTS.adapters import kokoro_adapter as kokoro_mod
+
+    async def _resource_manager():
+        return types.SimpleNamespace(register_model=lambda **_kwargs: None)
+
+    monkeypatch.setattr(kokoro_mod, "get_resource_manager", _resource_manager)
+    # The adapter falls back to this env var; a shell that sets it would bound the "unbounded" cases.
+    monkeypatch.delenv("KOKORO_INIT_TIMEOUT_SEC", raising=False)
+    config: dict[str, object] = {"kokoro_device": "cpu", "kokoro_lazy_init": False}
+    if init_timeout_sec is not None:
+        config["kokoro_init_timeout_sec"] = init_timeout_sec
+    if backend == "onnx":
+
+        class _Kokoro:
+            def __init__(self, *_args, **_kwargs):
+                gate.enter("load")
+
+        monkeypatch.setitem(
+            sys.modules, "kokoro_onnx", types.SimpleNamespace(Kokoro=_Kokoro, EspeakConfig=lambda **_kwargs: None)
+        )
+        model, voices = tmp_path / "model.onnx", tmp_path / "voices.bin"
+        model.touch()
+        voices.touch()
+        config.update(kokoro_use_onnx=True, kokoro_model_path=str(model), kokoro_voices_json=str(voices))
+    else:
+
+        class _KModel:
+            def __init__(self, **_kwargs):
+                gate.enter("load")
+
+            def eval(self):
+                return self
+
+            def cpu(self):
+                return self
+
+        model_module = types.ModuleType("kokoro.model")
+        model_module.KModel = _KModel
+        monkeypatch.setitem(sys.modules, "kokoro", types.ModuleType("kokoro"))
+        monkeypatch.setitem(sys.modules, "kokoro.model", model_module)
+        monkeypatch.setattr(kokoro_mod, "safe_import_torch", lambda: types.SimpleNamespace())
+        model = tmp_path / "kokoro-v1_0.pth"
+        model.touch()
+        (tmp_path / "config.json").write_text("{}")
+        config.update(kokoro_use_onnx=False, kokoro_model_path=str(model))
+    return kokoro_mod.KokoroAdapter(config)
+
+
+# ensure_initialized() is the production entry (the registry and generate()); initialize() is what it runs.
+_KOKORO_ENTRIES = pytest.mark.parametrize("entry", ["ensure_initialized", "initialize", "_ensure_model_loaded"])
+
+
+@pytest.mark.asyncio
+@CANCEL_MODES
+@_KOKORO_ENTRIES
+@pytest.mark.parametrize(
+    ("backend", "init_timeout_sec"),
+    [("onnx", None), ("pytorch", None), ("pytorch", 30.0)],
+    ids=["onnx", "pytorch-unbounded", "pytorch-bounded"],
+)
+async def test_kokoro_model_load_keeps_the_lock_until_the_load_returns(
+    monkeypatch, tmp_path, backend, init_timeout_sec, entry, via_anyio_scope
+):
+    """A cancelled Kokoro load keeps the next load waiting for its thread.
+
+    "pytorch-bounded" cancels the caller while it waits inside init_timeout_sec.
+    """
+    gate = _Gate()
+    adapter = _kokoro_adapter(monkeypatch, tmp_path, gate, backend=backend, init_timeout_sec=init_timeout_sec)
+
+    await _assert_cancelled_call_keeps_the_engine(getattr(adapter, entry), gate, via_anyio_scope=via_anyio_scope)
+
+
+@pytest.mark.asyncio
+@_KOKORO_ENTRIES
+async def test_kokoro_load_past_init_timeout_keeps_the_lock_until_the_load_returns(monkeypatch, tmp_path, entry):
+    """init_timeout_sec bounds each caller's wait; the lock stays with the load until its thread returns."""
+    gate = _Gate()
+    adapter = _kokoro_adapter(monkeypatch, tmp_path, gate, backend="pytorch", init_timeout_sec=0.1)
+    call = getattr(adapter, entry)
+    try:
+        # The first load outlasts the timeout; its thread keeps running.
+        assert await asyncio.wait_for(call(), 5) is False
+        # The next caller waits behind that thread, up to its own timeout, and starts no load.
+        assert await asyncio.wait_for(call(), 5) is False
+        assert gate.started == ["load"]
+    finally:
+        gate.release.set()
+    # Only the stuck load had to outlast the bound; give the reload room on a slow runner.
+    adapter.init_timeout_sec = 5.0
+    # The timed-out load's model was discarded, so once its thread returns the next caller loads again.
+    assert await asyncio.wait_for(call(), 5) is True
+    assert gate.started == ["load", "load"]
+
+
+@pytest.mark.asyncio
+async def test_kokoro_onnx_load_ignores_init_timeout_sec(monkeypatch, tmp_path):
+    """init_timeout_sec is PyTorch-only: an ONNX load that outlasts it still completes for its caller."""
+    gate = _Gate()
+    adapter = _kokoro_adapter(monkeypatch, tmp_path, gate, backend="onnx", init_timeout_sec=0.1)
+    load = asyncio.create_task(adapter._ensure_model_loaded())
+    try:
+        await asyncio.sleep(0.3)  # three times the bound
+        assert not load.done()
+    finally:
+        gate.release.set()
+    assert await asyncio.wait_for(load, 5) is True
+
+
+@pytest.mark.asyncio
+async def test_kokoro_load_timeout_error_is_not_reported_as_the_bound(monkeypatch, tmp_path):
+    """A TimeoutError raised by the load itself (a hub download, say) propagates; only the bound's expiry returns False."""
+    adapter = _kokoro_adapter(monkeypatch, tmp_path, _Gate(), backend="pytorch", init_timeout_sec=30.0)
+
+    class _TimingOutKModel:
+        def __init__(self, **_kwargs):
+            raise TimeoutError("hub download timed out")
+
+    monkeypatch.setattr(sys.modules["kokoro.model"], "KModel", _TimingOutKModel)
+    with pytest.raises(TimeoutError, match="hub download"):
+        await asyncio.wait_for(adapter._ensure_model_loaded(), 5)
+
+
+@pytest.mark.asyncio
+async def test_kokoro_close_releases_the_pytorch_model(monkeypatch, tmp_path):
+    """close() drops the PyTorch model and pipelines, so the next ensure_initialized() loads the model again."""
+    gate = _Gate()
+    gate.release.set()
+    adapter = _kokoro_adapter(monkeypatch, tmp_path, gate, backend="pytorch")
+    assert await adapter.ensure_initialized()
+    adapter.kokoro_pt_pipelines["a"] = object()
+
+    await adapter.close()
+
+    assert (adapter.kokoro_pt_model, adapter.kokoro_pt_pipelines) == (None, {})
+    assert await adapter.ensure_initialized()
+    assert gate.started == ["load", "load"]

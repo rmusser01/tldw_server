@@ -1,4 +1,4 @@
-import React, { useEffect, useReducer, useState } from 'react';
+import React, { useEffect, useMemo, useReducer, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
@@ -722,11 +722,17 @@ function stringListToText(items: string[]): string {
   return items.join('\n');
 }
 
-function textToStringList(value: string): string[] {
-  return value
-    .split('\n')
-    .map((item) => item.trim())
-    .filter((item, index, all) => item.length > 0 && all.indexOf(item) === index);
+export function textToStringList(value: string): string[] {
+  const seen = new Set<string>();
+  const items: string[] = [];
+  for (const line of value.split('\n')) {
+    const item = line.trim();
+    if (item && !seen.has(item)) {
+      seen.add(item);
+      items.push(item);
+    }
+  }
+  return items;
 }
 
 function arraysEqual(left: string[], right: string[]): boolean {
@@ -1160,9 +1166,16 @@ export default function ResearchRunsPage() {
         launchParams?.sourceArtifactId ||
         null
       : null;
-  const trustView = deriveTrustView(state.bundle, state.artifactContents);
-  const loadedTrustArtifactNames = TRUST_ARTIFACT_NAMES.filter(
-    (artifactName) => state.artifactContents[artifactName] !== undefined
+  const trustView = useMemo(
+    () => deriveTrustView(state.bundle, state.artifactContents),
+    [state.bundle, state.artifactContents]
+  );
+  const loadedTrustArtifactNames = useMemo(
+    () =>
+      TRUST_ARTIFACT_NAMES.filter(
+        (artifactName) => state.artifactContents[artifactName] !== undefined
+      ),
+    [state.artifactContents]
   );
   const allTrustArtifactsLoaded = loadedTrustArtifactNames.length === TRUST_ARTIFACT_NAMES.length;
   const trustArtifacts =
@@ -1174,7 +1187,10 @@ export default function ResearchRunsPage() {
     trustArtifacts.length > 0 &&
     TRUST_READY_PHASES.has(selectedRun.phase) &&
     !isLoadingTrust;
-  const checkpointEvaluation = evaluateCheckpointEditor(checkpointEditor);
+  const checkpointEvaluation = useMemo(
+    () => evaluateCheckpointEditor(checkpointEditor),
+    [checkpointEditor]
+  );
   const selectedRunTitle =
     selectedListItem?.query ||
     (selectedSnapshot?.run as ResearchRun & { query?: string } | undefined)?.query ||
