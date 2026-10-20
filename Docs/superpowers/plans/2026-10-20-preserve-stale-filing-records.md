@@ -2,7 +2,7 @@
 
 > **For agentic workers:** Execute inline using the existing backlog-py editor and requesting-code-review; no implementation delegation is needed.
 
-**Goal:** Land the useful records from PRs #2783 and #2810 under fresh IDs before closing those filing PRs.
+**Goal:** Land the useful records from PRs #2783 and #2810 under fresh IDs before closing those filing PRs, and record verified task closeouts for the same authorized cleanup batch (#3061, #3207, #3176).
 
 **Architecture:** Documentation-only preservation. TASK-13868 and TASK-13869 retain the two media requests with qualified historical evidence; TASK-13870 retains the Actor Pack design request and all nine criteria. Unrelated colliding task records remain unchanged.
 
@@ -18,7 +18,7 @@
 
 - Create and edit task records only through backlog-py; use fresh IDs checked against dev and all open PRs.
 - Preserve original identity, dates, requirements, references and evidence provenance; qualify outdated statements.
-- Leave all three feature/design tasks To Do. This PR implements none of those requests.
+- Leave all three preserved feature/design requests To Do. Record Done for the other three implementation tasks only after their actual verified normal merges. This PR implements none of the preserved requests.
 - Preserve unrelated colliding records byte-for-byte.
 - Require independent requesting-code-review and normal exact-head/current-base CI before merging.
 - Verify replacement records on dev before closing either source PR; retain source branches.
@@ -43,7 +43,8 @@
 
 - [x] Run the checks and record their actual results in TASK-13867.
 - [x] Dispatch a read-only reviewer with only requirements and exact base/head.
-- [x] Independent review found no actionable findings; no substantive correction required.
+- [x] Initial preservation-only review found no actionable findings.
+- [ ] Review the combined final documentation scope, including verified implementation-task closeouts, on its exact current-base head.
 - [ ] Satisfy the human Change summary gate for this concrete batch.
 
 Bandit and runtime tests are inapplicable: no Python or runtime files change. Cross-repo reference contents and a live media instance are not revalidated; this limitation is explicit in the preserved tasks.
@@ -55,6 +56,7 @@ Bandit and runtime tests are inapplicable: no Python or runtime files change. Cr
 **Tests:** Read required statuses and merge/base identity; verify replacement blobs on freshly fetched dev; verify source PR states.
 **Status:** Not Started.
 
+- [ ] Collect the task-only closeouts for #3061, #3207 and #3176 after verifying their normal merges, retaining prior phase evidence.
 - [ ] Publish the replacement PR and satisfy normal required gates.
 - [ ] Merge and verify all three records on dev.
 - [ ] Close the two source PRs only after that verification, retaining branches and linking replacements.
