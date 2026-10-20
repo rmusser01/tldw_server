@@ -111,7 +111,7 @@ Registered under `StepTypeRegistry`:
 - `delay`: Pause the workflow for a fixed time (milliseconds). Useful for demos, backoffs or pacing.
 - `log`: Log a templated message at the chosen level (`debug|info|warning|error`). Helps with debugging and audit trails.
 - `branch`: Evaluate a boolean condition and optionally jump to a target step id (`true_next` / `false_next`).
-- `map`: Fan-out over a list and apply a nested step with optional concurrency; returns a list of `results`.
+- `map`: Fan-out over a list and apply a nested step with optional concurrency; returns a list of `results`. If an item's step raises, the other items are cancelled and the map step fails with that error.
 
 See `adapters.py` for configuration keys and behavior of each step.
 
