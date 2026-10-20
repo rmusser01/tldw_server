@@ -80,7 +80,7 @@
   --color-primary-strong: 36 86 199;
   --color-primary-strong-foreground: 255 255 255;
   --color-accent: 31 181 159;
-  --color-success: 34 160 123;
+  --color-success: 4 120 87;
   --color-warn: 217 119 6;
   --color-danger: 224 88 109;
   --color-muted: 102 112 133;
@@ -88,7 +88,7 @@
   --color-border-strong: 207 200 186;
   --color-text: 31 35 40;
   --color-text-muted: 91 100 114;
-  --color-text-subtle: 110 120 135;
+  --color-text-subtle: 95 104 119;
   --color-focus: 13 134 119;
   --state-ready: var(--color-success);
   --state-unavailable: var(--color-danger);
@@ -1337,4 +1337,14 @@ body {
     outline: 2px solid Highlight;
     outline-offset: 2px;
   }
+}
+
+/* ===== Accessibility: link focus (AX-08, #3124) =====
+   antd's global reset sets `a { outline: none }` and `a:focus { outline: 0 }`
+   (scoped by its hashed class), so links without focus classes of their own
+   showed nothing on keyboard focus. Links that already style their focus
+   (Tailwind focus: / focus-visible: utilities) are left alone. */
+a[href]:focus-visible:not([class*="focus:"]):not([class*="focus-visible:"]) {
+  outline: 2px solid rgb(var(--color-focus));
+  outline-offset: 2px;
 }

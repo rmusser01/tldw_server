@@ -1,5 +1,5 @@
 {
-  "$comment": "Accessibility ratchet baseline for a11y.spec.ts: serious and critical axe violations per page state and rule, light theme, 1280x720. A new rule or a higher node count fails; so does a lower count or a missing rule, until this file is updated. See e2e/ux-regression/README.md.",
+  "$comment": "Accessibility ratchet baseline for a11y.spec.ts: serious and critical axe violations per page state and rule, the app's default (dark) theme, 1280x720. A new rule or a higher node count fails; so does a lower count or a missing rule, until this file is updated. See e2e/ux-regression/README.md.",
   "entries": [
     {
       "state": "notes-empty",

@@ -7046,7 +7046,7 @@ export const PlaygroundForm = ({
                                   suppressComposerToolbarForMobileCockpit
                                     ? "hidden"
                                     : "inline-flex"
-                                } h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-surface/80 text-text-muted transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus/40 ${
+                                } h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-surface/80 text-text-muted transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
                                   composerOptionsExpanded
                                     ? "border-primary/40 text-primaryStrong"
                                     : ""

@@ -69,6 +69,34 @@ export const meetsNonTextContrast = (
   adjacentColor: RGBTriple
 ): boolean => contrastRatio(indicator, adjacentColor) >= 3
 
+const BLACK: RGBTriple = "0 0 0"
+const WHITE: RGBTriple = "255 255 255"
+
+/**
+ * Black or white, whichever reads better on `background`. Black wins ties.
+ * Used for text on solid primary and danger fills.
+ */
+export const readableForeground = (background: RGBTriple): RGBTriple =>
+  contrastRatio(BLACK, background) >= contrastRatio(WHITE, background)
+    ? BLACK
+    : WHITE
+
+/**
+ * The first candidate whose lowest contrast against `backgrounds` reaches
+ * `minimum`; otherwise the candidate with the best lowest contrast.
+ */
+export const firstReadableColor = (
+  candidates: RGBTriple[],
+  backgrounds: RGBTriple[],
+  minimum = 4.5
+): RGBTriple => {
+  const worst = (color: RGBTriple) =>
+    Math.min(...backgrounds.map((background) => contrastRatio(color, background)))
+  const readable = candidates.find((color) => worst(color) >= minimum)
+  if (readable) return readable
+  return candidates.reduce((best, color) => (worst(color) > worst(best) ? color : best))
+}
+
 const toAuditResult = (
   pair: string,
   foreground: RGBTriple,
