@@ -156,7 +156,13 @@ from .pg_migrations import (
 from .tracing import job_span
 
 if TYPE_CHECKING:
-    from .operations.workflow_contracts import WorkflowAdmissionCommand, WorkflowAdmissionInputs, WorkflowPolicy
+    from .operations.workflow_contracts import (
+        WorkflowAdmissionCommand,
+        WorkflowAdmissionInputs,
+        WorkflowEffect,
+        WorkflowPolicy,
+        WorkflowReceipt,
+    )
     from .workflow_capability import PreparedWorkflowCapability
 
 try:
@@ -4219,6 +4225,41 @@ class JobManager:
             return _sqlite_ensure_lease_horizon(conn, command=capped_command)
         finally:
             conn.close()
+
+    def _emit_workflow_effect_side_effects(
+        self,
+        effect: WorkflowEffect,
+        receipt: WorkflowReceipt,
+        job_facts: tuple[tuple[str, Any], ...],
+        outbox_enabled: bool,
+    ) -> None:
+        """Best-effort postcommit observers from immutable UUID-bound facts."""
+        from tldw_Server_API.app.core.DB_Management.jobs_workflow_store import effect_event_type
+
+        from .operations.workflow_contracts import WorkflowAction
+
+        job = dict(job_facts)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            if effect.action is WorkflowAction.COMPLETE:
+                increment_completed(job)
+            elif receipt.resulting_status in {"failed", "quarantined"}:
+                increment_failures(job, reason="terminal")
+            elif effect.action is WorkflowAction.RETRY:
+                increment_retries(job)
+            elif effect.action is WorkflowAction.CANCEL:
+                increment_cancelled(job)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._assert_invariants(job)
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            self._update_gauges(domain=job["domain"], queue=job["queue"], job_type=job["job_type"])
+        with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
+            attrs = {"kind": effect.action.value, "origin": "workflow"}
+            if effect.reason_code is not None:
+                attrs["reason_code"] = effect.reason_code
+            if outbox_enabled:
+                submit_job_audit_event(effect_event_type(receipt), job=job, attrs=attrs)
+            else:
+                emit_job_event(effect_event_type(receipt), job=job, attrs=attrs)
 
     def apply_prepared_disposition(
         self,

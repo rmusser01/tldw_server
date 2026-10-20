@@ -14,18 +14,24 @@ from uuid import uuid4
 
 from tldw_Server_API.app.core.Jobs.operations.contracts import AdmissionResult, ExpiredLeasePolicy
 from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import (
+    WorkflowAction,
     WorkflowAdmissionCommand,
     WorkflowAdmissionResult,
     WorkflowControls,
+    WorkflowEffect,
+    WorkflowEffectResult,
     WorkflowFenceError,
     WorkflowHorizonResult,
     WorkflowLease,
     WorkflowLookupResult,
     WorkflowOutcome,
     WorkflowPolicy,
+    WorkflowReceipt,
     WorkflowRoot,
     WorkflowScope,
     bounded_workflow_json,
+    decode_workflow_receipt,
+    workflow_effect_fingerprint,
 )
 
 
@@ -50,6 +56,14 @@ class WorkflowTransaction(Protocol):
     def lock_live_root(self, root: WorkflowRoot, lease: WorkflowLease) -> WorkflowFence: ...
 
     def ensure_horizon(self, fence: WorkflowFence, minimum_seconds: int) -> WorkflowHorizonResult: ...
+
+    def apply_effect(
+        self, fence: WorkflowFence, effect: WorkflowEffect, verified_guard_fingerprint: str
+    ) -> WorkflowEffectResult: ...
+
+    def lookup_effect(self, root: WorkflowRoot, effect: WorkflowEffect) -> WorkflowEffectResult: ...
+
+    def release_effect(self, root: WorkflowRoot, effect: WorkflowEffect) -> WorkflowEffectResult: ...
 
 
 class WorkflowStore(Protocol):
@@ -80,6 +94,25 @@ class WorkflowStore(Protocol):
     def lease_is_live(self, connection: Any, job_uuid: str) -> bool: ...
 
     def extend_horizon(self, connection: Any, job_uuid: str, minimum_seconds: int) -> Any: ...
+
+    def database_now(self, connection: Any) -> datetime: ...
+
+    def transition_effect(
+        self,
+        connection: Any,
+        root: WorkflowRoot,
+        lease: WorkflowLease,
+        effect: WorkflowEffect,
+        receipt: WorkflowReceipt,
+        row: dict,
+        *,
+        counters_enabled: bool,
+        outbox_enabled: bool,
+    ) -> dict: ...
+
+    def insert_effect_receipt(
+        self, connection: Any, root: WorkflowRoot, receipt: WorkflowReceipt, slot: int
+    ) -> None: ...
 
 
 def _json_payload(value: Any) -> object:
@@ -125,6 +158,48 @@ def _same_root(left: WorkflowRoot, right: WorkflowRoot) -> bool:
     return replace(left, job_id_hint=None) == replace(right, job_id_hint=None)
 
 
+def effect_event_type(receipt: WorkflowReceipt) -> str:
+    """Use the established Jobs lifecycle event vocabulary."""
+    if receipt.resulting_status != "queued":
+        return "job." + receipt.resulting_status
+    return "job.retry_scheduled" if receipt.action is WorkflowAction.RETRY else "job.deferred"
+
+
+def effect_transition_parameters(
+    root: WorkflowRoot, lease: WorkflowLease, effect: WorkflowEffect, receipt: WorkflowReceipt, row: dict
+) -> tuple:
+    """Prepare only bound scalar values for the two closed SQL updates."""
+    queued = receipt.resulting_status == "queued"
+    retry = effect.action is WorkflowAction.RETRY and receipt.resulting_status != "failed"
+    failure = effect.action in {WorkflowAction.RETRY, WorkflowAction.FAIL}
+    streak = (row.get("failure_streak_count") or 0) + 1 if row.get("failure_streak_code") == effect.reason_code else 1
+    now = receipt.applied_at
+    from tldw_Server_API.app.core.Jobs.operations.workflow_contracts import encode_workflow_receipt
+
+    return (
+        receipt.resulting_status,
+        encode_workflow_receipt(receipt).decode("utf-8"),
+        (row.get("retry_count") or 0) + int(retry),
+        effect.reason_code if retry else row.get("failure_streak_code"),
+        streak if retry else row.get("failure_streak_count"),
+        effect.reason_code if failure else row.get("error_code"),
+        effect.reason_code if failure else row.get("error_message"),
+        effect.reason_code if failure else row.get("last_error"),
+        effect.not_before_at if queued else row.get("available_at"),
+        now if receipt.resulting_status == "quarantined" else row.get("quarantined_at"),
+        None if queued else now,
+        now if receipt.resulting_status == "cancelled" else row.get("cancelled_at"),
+        None if queued else effect.effect_key,
+        None if queued else row.get("acquired_at"),
+        None if queued else row.get("started_at"),
+        root.job_uuid,
+        root.owner_user_id,
+        lease.worker_id,
+        lease.lease_id,
+        effect.effect_key,
+    )
+
+
 class LiveWorkflowTransaction:
     """One synchronous connection, with Jobs-first locks and registered fences."""
 
@@ -139,6 +214,8 @@ class LiveWorkflowTransaction:
         self.store = workflow_store(manager.backend)
         self.active = True
         self._fences: dict[WorkflowFence, tuple[WorkflowRoot, WorkflowLease]] = {}
+        self._consumed_fences: dict[WorkflowFence, WorkflowRoot] = {}
+        self.effect_events: list[tuple] = []
         self.admission_event: AdmissionResult | None = None
         if self.backend == "sqlite":
             connection.set_authorizer(self._authorize_sqlite_operation)
@@ -333,6 +410,161 @@ class LiveWorkflowTransaction:
         self._check_open()
         for root, lease in self._fences.values():
             self._validate_live(root, lease)
+
+    def _effect_proof(self, root: WorkflowRoot, effect: WorkflowEffect, *, lock: bool = False) -> WorkflowEffectResult:
+        self._check_open()
+        if type(root) is not WorkflowRoot:
+            raise ValueError("workflow effect requires exact root facts")
+        self.policy.validate_effect(effect)
+        if root.owner_user_id != self.owner_user_id or root.scope != self.policy.scope:
+            return WorkflowEffectResult(WorkflowOutcome.CONFLICT)
+        if lock:
+            self.store.jobs_by_uuid(self._connection, root.job_uuid, lock=True)
+        support = self.store.support_by_uuid(self._connection, self.owner_user_id, root.job_uuid, lock=lock)
+        if len(support) != 1:
+            return WorkflowEffectResult(WorkflowOutcome.MISSING)
+        if support[0]["payload_field"] != self.policy.payload_field or not _same_root(root, _root_from_row(support[0])):
+            return WorkflowEffectResult(WorkflowOutcome.CONFLICT)
+        proofs = self._rows(
+            "SELECT * FROM job_workflow_effect_receipts WHERE owner_user_id=? AND job_uuid=? AND effect_key=?",
+            (self.owner_user_id, root.job_uuid, effect.effect_key),
+        )
+        if not proofs:
+            return WorkflowEffectResult(WorkflowOutcome.MISSING)
+        proof = proofs[0]
+        fingerprint = workflow_effect_fingerprint(root, effect)
+        if proof["purpose"] != "action" or proof["facts_fingerprint"] != fingerprint:
+            return WorkflowEffectResult(WorkflowOutcome.CONFLICT)
+        try:
+            receipt = decode_workflow_receipt(proof["facts"].encode("utf-8"))
+            if receipt.action is not effect.action:
+                return WorkflowEffectResult(WorkflowOutcome.CONFLICT)
+            applied_at = proof["applied_at"]
+            if isinstance(applied_at, str):
+                applied_at = datetime.fromisoformat(applied_at)
+            if (
+                receipt.effect_key,
+                receipt.facts_fingerprint,
+                receipt.job_uuid,
+                receipt.action.value,
+                receipt.resulting_status,
+                receipt.applied_at,
+            ) != (
+                effect.effect_key,
+                fingerprint,
+                root.job_uuid,
+                proof["action"],
+                proof["resulting_status"],
+                applied_at,
+            ):
+                return WorkflowEffectResult(WorkflowOutcome.CONFLICT)
+            receipt = replace(receipt, released=bool(proof["released"]))
+        except (ValueError, TypeError, UnicodeError):
+            return WorkflowEffectResult(WorkflowOutcome.UNAVAILABLE)
+        return WorkflowEffectResult(WorkflowOutcome.ALREADY_APPLIED, receipt)
+
+    def lookup_effect(self, root: WorkflowRoot, effect: WorkflowEffect) -> WorkflowEffectResult:
+        """Read retained proof before live validation; Jobs history is not authority."""
+        return self._effect_proof(root, effect)
+
+    def release_effect(self, root: WorkflowRoot, effect: WorkflowEffect) -> WorkflowEffectResult:
+        """Keep immutable proof/key tombstones; release is an absorbing acknowledgment."""
+        result = self._effect_proof(root, effect, lock=True)
+        if result.receipt is None or result.receipt.released:
+            return result
+        self._rows(
+            "UPDATE job_workflow_effect_receipts SET released=1 WHERE owner_user_id=? AND job_uuid=? AND effect_key=? AND facts_fingerprint=? AND released=0",
+            (self.owner_user_id, root.job_uuid, effect.effect_key, result.receipt.facts_fingerprint),
+        )
+        return WorkflowEffectResult(WorkflowOutcome.APPLIED, replace(result.receipt, released=True))
+
+    def apply_effect(
+        self, fence: WorkflowFence, effect: WorkflowEffect, verified_guard_fingerprint: str
+    ) -> WorkflowEffectResult:
+        """Apply only after the caller's same-transaction locked domain guard CAS.
+
+        Jobs never inspects domain tables. A matching digest is the caller's
+        assertion of revalidation, not a substitute for that enlisted CAS.
+        """
+        self._check_open()
+        if type(fence) is not WorkflowFence:
+            raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
+        authority = self._fences.get(fence)
+        root = authority[0] if authority else self._consumed_fences.get(fence)
+        if root is None:
+            raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
+        replay = self._effect_proof(root, effect)
+        if replay.outcome is not WorkflowOutcome.MISSING:
+            return replay
+        if authority is None:
+            raise WorkflowFenceError(WorkflowOutcome.STALE_LEASE)
+        root, lease = authority
+        self._validate_live(root, lease)
+        if type(verified_guard_fingerprint) is not str or verified_guard_fingerprint != effect.guard_fingerprint:
+            raise WorkflowFenceError(WorkflowOutcome.CONFLICT)
+        slot = int(
+            self._rows(
+                "SELECT COALESCE(MAX(slot),0)+1 AS slot FROM job_workflow_effect_receipts WHERE owner_user_id=? AND job_uuid=? AND purpose='action'",
+                (self.owner_user_id, root.job_uuid),
+            )[0]["slot"]
+        )
+        if slot > 32768:
+            return WorkflowEffectResult(WorkflowOutcome.EXHAUSTED)
+        row = self.store.jobs_by_uuid(self._connection, root.job_uuid)[0]
+        status = {
+            WorkflowAction.CONTINUE: "queued",
+            WorkflowAction.RETRY: "queued",
+            WorkflowAction.COMPLETE: "completed",
+            WorkflowAction.FAIL: "failed",
+            WorkflowAction.CANCEL: "cancelled",
+        }[effect.action]
+        if effect.action is WorkflowAction.RETRY:
+            if (row.get("retry_count") or 0) >= root.controls.max_retries:
+                status = "failed"
+            else:
+                streak = (
+                    (row.get("failure_streak_count") or 0) + 1
+                    if row.get("failure_streak_code") == effect.reason_code
+                    else 1
+                )
+                if root.controls.quarantine_threshold is not None and streak >= root.controls.quarantine_threshold:
+                    status = "quarantined"
+        receipt = WorkflowReceipt(
+            effect.effect_key,
+            workflow_effect_fingerprint(root, effect),
+            root.job_uuid,
+            effect.action,
+            status,
+            self.store.database_now(self._connection),
+        )
+        counters = self.manager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", ""))
+        outbox = self.manager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
+        updated = self.store.transition_effect(
+            self._connection, root, lease, effect, receipt, row, counters_enabled=counters, outbox_enabled=outbox
+        )
+        self.store.insert_effect_receipt(self._connection, root, receipt, slot)
+        # A successful transition consumes this delivery's authority, not all
+        # transaction fences. Final validation must still check other roots.
+        for token, (bound, _) in tuple(self._fences.items()):
+            if bound.job_uuid == root.job_uuid:
+                self._consumed_fences[token] = bound
+                del self._fences[token]
+        fields = (
+            "id",
+            "uuid",
+            "owner_user_id",
+            "domain",
+            "queue",
+            "job_type",
+            "status",
+            "retry_count",
+            "request_id",
+            "trace_id",
+            "acquired_at",
+            "started_at",
+        )
+        self.effect_events.append((effect, receipt, tuple((key, updated.get(key)) for key in fields), outbox))
+        return WorkflowEffectResult(WorkflowOutcome.APPLIED, receipt)
 
     def ensure_horizon(self, fence: WorkflowFence, minimum_seconds: int) -> WorkflowHorizonResult:
         """Revalidate authority and promise the requested horizon or none."""
