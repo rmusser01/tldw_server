@@ -6437,9 +6437,6 @@
   "notesSearch_editorDraftHint": {
     "message": "Start typing to create a note. Ctrl/Cmd+S saves it to your server. Type [[ to link another note."
   },
-  "notesSearch_editorReadOnlyHint": {
-    "message": "This server can't save notes, so the editor is read-only."
-  },
   "notesSearch_moodboardCreateAction": {
     "message": "New collection"
   },

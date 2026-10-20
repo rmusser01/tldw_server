@@ -532,7 +532,7 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
     expect(screen.getByTestId("notes-save-button")).toBeDisabled()
     // A read-only draft must not invite the user to type and save (NO-04).
     expect(screen.queryByText(/Start typing to create a note/)).not.toBeInTheDocument()
-    expect(screen.getByText(/can't save notes, so the editor is read-only/)).toBeInTheDocument()
+    expect(screen.getByText("Markdown + LaTeX supported")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "New note" }))
 

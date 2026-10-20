@@ -1533,7 +1533,6 @@
     },
     "controlsMoreBelow": "More filters below",
     "editorDraftHint": "Start typing to create a note. Ctrl/Cmd+S saves it to your server. Type [[ to link another note.",
-    "editorReadOnlyHint": "This server can't save notes, so the editor is read-only.",
     "moodboardCreateAction": "New collection",
     "moodboardChoosePrompt": "Choose a collection above to see its notes.",
     "moodboardFirstPrompt": "A collection is a group of notes you pick by hand. Create one, then add notes to it.",

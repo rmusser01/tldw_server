@@ -15,14 +15,10 @@ export const notesEditorSupportHint = (
   isPristineDraft: boolean,
   readOnly = false
 ): string => {
-  // A read-only editor (the server has no notes support) must not invite
-  // typing and saving.
-  if (readOnly) {
-    return t('option:notesSearch.editorReadOnlyHint', {
-      defaultValue: "This server can't save notes, so the editor is read-only."
-    })
-  }
-  if (isPristineDraft) {
+  // A read-only editor (no notes support on the server, or a note still
+  // loading) must not invite typing and saving, so it keeps the neutral
+  // format hint below.
+  if (isPristineDraft && !readOnly) {
     return t('option:notesSearch.editorDraftHint', {
       defaultValue:
         'Start typing to create a note. Ctrl/Cmd+S saves it to your server. Type [[ to link another note.'
