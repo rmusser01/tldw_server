@@ -211,12 +211,15 @@ def _raise_sanitized_local_provider_error(
     if isinstance(exc, ChatBadRequestError) or (
         isinstance(status, int) and 400 <= status < 500
     ):
-        raise_detached_error(
-            ChatBadRequestError(
-                provider=provider,
-                message="The local model provider rejected the request.",
-            )
+        error = ChatBadRequestError(
+            provider=provider,
+            message="The local model provider rejected the request.",
         )
+        if status is not None:
+            # As ChatProvider._raise_sanitized_provider_failure: a summary reads it to tell a
+            # local 401, 403 or 429 from a rejected request. Chat responses do not use it.
+            error.upstream_status_code = status
+        raise_detached_error(error)
     public_status = 504 if is_network_error(exc) else 502
     raise_detached_error(
         ChatProviderError(
