@@ -6,10 +6,10 @@
       "page": "notes",
       "kind": "total",
       "key": "api-requests",
-      "count": 21,
+      "count": 23,
       "reviewIds": ["XP-16"],
       "issue": 3121,
-      "note": "21: 19 load requests plus 2 buddy reads at ~5 s. Buddy reads back off while nothing changes (next at ~15 s, outside the window), so they no longer count as polling (XP-16). Predicted from the 2026-10-03 samples, not re-measured; lower it further when you remove a duplicate below."
+      "note": "23 in 10 of 10 samples: 19 load requests plus 4 buddy polls. Lower it when you remove a poll or a duplicate below."
     },
     {
       "page": "notes",
@@ -48,23 +48,41 @@
       "note": "Two sequential requests ~0.1 s apart from separate consumers, not coalesced (10 of 10 samples)."
     },
     {
+      "page": "notes",
+      "kind": "polling",
+      "key": "GET /api/v1/buddies",
+      "count": 2,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "IndependentBuddyHost polls every 5 s with no visibility check: 2 hits in the 10 s idle window."
+    },
+    {
+      "page": "notes",
+      "kind": "polling",
+      "key": "GET /api/v1/buddies/attachment",
+      "count": 2,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "Polled with /buddies every 5 s."
+    },
+    {
       "page": "chat",
       "kind": "total",
       "key": "api-requests",
-      "count": 21,
+      "count": 25,
       "tolerance": 1,
       "reviewIds": ["XP-16"],
       "issue": 3121,
-      "note": "21 or 22 (+1 when the config/providers race below loses): 19 or 20 load requests plus 2 buddy reads at ~5 s. FirstRunGate no longer reads persona/profiles on /chat and buddy reads back off while idle (XP-16). Predicted from the 2026-10-03 samples, not re-measured."
+      "note": "25 or 26 (+1 when the config/providers race below loses): 21 or 22 load requests plus 4 buddy polls."
     },
     {
       "page": "chat",
       "kind": "duplicate-get",
       "key": "GET /api/v1/persona/profiles",
-      "count": 1,
+      "count": 3,
       "reviewIds": ["XP-16"],
       "issue": 3121,
-      "note": "Two concurrent requests at ~0.7 s from the chat first-run nudge: a StrictMode double effect (dev only), since useFirstRunCheck opts out of coalescing. The app-level FirstRunGate pair is gone on /chat (XP-16)."
+      "note": "Four requests: two concurrent pairs at ~0.2 s and ~0.7 s. The review measured 3x on /chat; pairs are StrictMode doubles."
     },
     {
       "page": "chat",
@@ -73,7 +91,7 @@
       "count": 1,
       "reviewIds": ["XP-16"],
       "issue": 3121,
-      "note": "users/me/profile?sections=preferences issued twice concurrently at load. From the code (not re-measured): one is the composer's preference read, which the transport and the composer now merge into one request; the other is useDefaultCharacterSelection's account-scoped read of the same path, which is not merged because scoped reads opt out of coalescing. Removing it needs one shared scoped preferences read."
+      "note": "users/me/profile?sections=preferences issued twice concurrently at load."
     },
     {
       "page": "chat",
@@ -102,6 +120,24 @@
       "reviewIds": ["XP-16"],
       "issue": 3121,
       "note": "Race: Playground and PlaygroundChat both fetch provider status. In-flight coalescing merges them only while the first request is pending, so a second request appears in ~1 of 4 loads. Tolerance 1 lets it be absent, so this entry cannot report its own fix: delete it when you dedupe the two consumers."
+    },
+    {
+      "page": "chat",
+      "kind": "polling",
+      "key": "GET /api/v1/buddies",
+      "count": 2,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "IndependentBuddyHost polls every 5 s with no visibility check: 2 hits in the 10 s idle window."
+    },
+    {
+      "page": "chat",
+      "kind": "polling",
+      "key": "GET /api/v1/buddies/attachment",
+      "count": 2,
+      "reviewIds": ["XP-16"],
+      "issue": 3121,
+      "note": "Polled with /buddies every 5 s."
     }
   ]
 }
