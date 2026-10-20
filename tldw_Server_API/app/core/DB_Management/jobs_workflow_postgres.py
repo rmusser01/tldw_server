@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
@@ -320,7 +320,7 @@ def lease_is_expired(connection: Any, job_uuid: str) -> bool:
 
 
 def record_workflow_acquisition_in_transaction(
-    connection: Any, *, backend: str, acquired: Mapping[str, object]
+    connection: Any, *, backend: str, acquired: Mapping[str, object], decode_payload: Callable[..., Any] | None = None
 ) -> None:
     """Publish epoch/digest atomically under explicit runtime authority."""
     if acquired.get("workflow_capability_version") is None:
@@ -331,13 +331,17 @@ def record_workflow_acquisition_in_transaction(
 
     try:
         with _maintenance_owner_scope(connection, acquired.get("owner_user_id")):
-            _record_workflow_acquisition(connection, backend=backend, acquired=acquired)
+            _record_workflow_acquisition(connection, backend=backend, acquired=acquired, decode_payload=decode_payload)
     except (Error, ValueError, TypeError, KeyError):
         raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE) from None
 
 
 def recover_workflow_expiry_in_transaction(
-    connection: Any, *, backend: str, locked_root: Mapping[str, object]
+    connection: Any,
+    *,
+    backend: str,
+    locked_root: Mapping[str, object],
+    decode_payload: Callable[..., Any] | None = None,
 ) -> WorkflowEffectResult:
     """Lock ownership is external; support access never uses an admin bypass."""
     if locked_root.get("workflow_capability_version") is None:
@@ -348,7 +352,9 @@ def recover_workflow_expiry_in_transaction(
 
     try:
         with _maintenance_owner_scope(connection, locked_root.get("owner_user_id")):
-            return _recover_workflow_expiry(connection, backend=backend, locked_root=locked_root)
+            return _recover_workflow_expiry(
+                connection, backend=backend, locked_root=locked_root, decode_payload=decode_payload
+            )
     except (Error, ValueError, TypeError, KeyError):
         raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE) from None
 

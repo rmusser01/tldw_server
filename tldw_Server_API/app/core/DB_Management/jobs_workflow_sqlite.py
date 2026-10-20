@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from typing import Any
 
@@ -239,7 +239,11 @@ def lease_is_expired(connection: sqlite3.Connection, job_uuid: str) -> bool:
 
 
 def record_workflow_acquisition_in_transaction(
-    connection: sqlite3.Connection, *, backend: str, acquired: Mapping[str, object]
+    connection: sqlite3.Connection,
+    *,
+    backend: str,
+    acquired: Mapping[str, object],
+    decode_payload: Callable[..., Any] | None = None,
 ) -> None:
     """Record enrollment within the acquisition owner's write transaction."""
     if acquired.get("workflow_capability_version") is None:
@@ -247,13 +251,17 @@ def record_workflow_acquisition_in_transaction(
     from .jobs_workflow_store import _record_workflow_acquisition
 
     try:
-        _record_workflow_acquisition(connection, backend=backend, acquired=acquired)
+        _record_workflow_acquisition(connection, backend=backend, acquired=acquired, decode_payload=decode_payload)
     except (sqlite3.Error, ValueError, TypeError, KeyError):
         raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE) from None
 
 
 def recover_workflow_expiry_in_transaction(
-    connection: sqlite3.Connection, *, backend: str, locked_root: Mapping[str, object]
+    connection: sqlite3.Connection,
+    *,
+    backend: str,
+    locked_root: Mapping[str, object],
+    decode_payload: Callable[..., Any] | None = None,
 ) -> WorkflowEffectResult:
     """Close the exact old episode without owning any transaction boundary."""
     if locked_root.get("workflow_capability_version") is None:
@@ -261,7 +269,9 @@ def recover_workflow_expiry_in_transaction(
     from .jobs_workflow_store import _recover_workflow_expiry
 
     try:
-        return _recover_workflow_expiry(connection, backend=backend, locked_root=locked_root)
+        return _recover_workflow_expiry(
+            connection, backend=backend, locked_root=locked_root, decode_payload=decode_payload
+        )
     except (sqlite3.Error, ValueError, TypeError, KeyError):
         raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE) from None
 

@@ -6226,7 +6226,9 @@ class JobManager:
                     for raw_row in rows:
                         row = dict(raw_row)
                         if row.get("workflow_capability_version") is not None:
-                            result = recover_workflow_expiry_in_transaction(conn, backend=self.backend, locked_root=row)
+                            result = recover_workflow_expiry_in_transaction(
+                                conn, backend=self.backend, locked_root=row, decode_payload=self._maybe_decrypt_json
+                            )
                             if result.receipt is not None:
                                 attrs = {"origin": "recovery"}
                                 if result.receipt.resulting_status == "failed":
@@ -6407,7 +6409,9 @@ class JobManager:
                     for raw_row in rows:
                         row = dict(raw_row)
                         if row.get("workflow_capability_version") is not None:
-                            result = recover_workflow_expiry_in_transaction(conn, backend=self.backend, locked_root=row)
+                            result = recover_workflow_expiry_in_transaction(
+                                conn, backend=self.backend, locked_root=row, decode_payload=self._maybe_decrypt_json
+                            )
                             if result.receipt is not None:
                                 attrs = {"origin": "recovery"}
                                 if result.receipt.resulting_status == "failed":
@@ -6684,6 +6688,7 @@ class JobManager:
                     ),
                     counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                     now=self._clock.now_utc(),
+                    decode_payload=self._maybe_decrypt_json,
                 )
                 if result.outcome is not OperationOutcome.APPLIED or result.row is None:
                     return None
@@ -6709,6 +6714,7 @@ class JobManager:
                     ),
                     counters_enabled=JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", "")),
                     now=self._clock.now_utc(),
+                    decode_payload=self._maybe_decrypt_json,
                 )
                 if result.outcome is not OperationOutcome.APPLIED or result.row is None:
                     return None

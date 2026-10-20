@@ -8,7 +8,7 @@ import json
 import os
 import sqlite3
 import zlib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any, Protocol
@@ -104,11 +104,21 @@ class WorkflowStore(Protocol):
     def enrollment_projection(self, connection: Any) -> str: ...
 
     def record_workflow_acquisition_in_transaction(
-        self, connection: Any, *, backend: str, acquired: Mapping[str, object]
+        self,
+        connection: Any,
+        *,
+        backend: str,
+        acquired: Mapping[str, object],
+        decode_payload: Callable[..., Any] | None = None,
     ) -> None: ...
 
     def recover_workflow_expiry_in_transaction(
-        self, connection: Any, *, backend: str, locked_root: Mapping[str, object]
+        self,
+        connection: Any,
+        *,
+        backend: str,
+        locked_root: Mapping[str, object],
+        decode_payload: Callable[..., Any] | None = None,
     ) -> WorkflowEffectResult: ...
 
     def extend_horizon(self, connection: Any, job_uuid: str, minimum_seconds: int) -> Any: ...
@@ -154,6 +164,24 @@ def _json_payload(value: Any) -> object:
     elif not isinstance(value, bytes):
         value = json.dumps(value, allow_nan=False).encode("utf-8")
     return bounded_workflow_json(value)
+
+
+def _workflow_payload_matches(
+    row: Mapping[str, object], payload_field: str, reference_id: str, decode_payload: Callable[..., Any] | None
+) -> bool:
+    expected = {payload_field: reference_id}
+    values = [row.get("payload")]
+    if row.get("payload_compressed") is not None:
+        values.append(row["payload_compressed"])
+    # Every present projection must agree; bound envelopes before decryption.
+    present = [value for value in values if value is not None]
+    for value in present:
+        payload = _json_payload(value)
+        if decode_payload is not None:
+            payload = decode_payload(payload, fail_on_error=True)
+        if payload != expected:
+            return False
+    return bool(present)
 
 
 def _root_from_row(row: dict) -> WorkflowRoot:
@@ -295,17 +323,6 @@ class LiveWorkflowTransaction:
             )[0]["count"]
         )
 
-    def _payload_matches(self, row: dict, root: WorkflowRoot) -> bool:
-        expected = {self.policy.payload_field: root.reference_id}
-        values = [row.get("payload")]
-        if row.get("payload_compressed") is not None:
-            values.append(row["payload_compressed"])
-        # All present projections must agree, not just the preferred one.
-        present = [value for value in values if value is not None]
-        return bool(present) and all(
-            self.manager._maybe_decrypt_json(_json_payload(value), fail_on_error=True) == expected for value in present
-        )
-
     def _lookup(self, root: WorkflowRoot, *, lock: bool = False) -> tuple[WorkflowLookupResult, dict | None]:
         self._check_open()
         if root.owner_user_id != self.owner_user_id or root.scope != self.policy.scope:
@@ -339,7 +356,9 @@ class LiveWorkflowTransaction:
         ):
             return WorkflowLookupResult(WorkflowOutcome.CONFLICT), None
         try:
-            if not self._payload_matches(row, root):
+            if not _workflow_payload_matches(
+                row, self.policy.payload_field, root.reference_id, self.manager._maybe_decrypt_json
+            ):
                 return WorkflowLookupResult(WorkflowOutcome.CONFLICT), None
         except (ValueError, TypeError, RuntimeError, zlib.error):
             return WorkflowLookupResult(WorkflowOutcome.UNAVAILABLE), None
@@ -792,7 +811,9 @@ def _no_progress_failure(root: WorkflowRoot, epoch: int) -> WorkflowEffect:
     return WorkflowEffect(key, WorkflowAction.FAIL, key, "no_progress_exhausted")
 
 
-def _enrolled_authority(store: Any, connection: Any, enrolled: Mapping[str, object]) -> tuple[WorkflowRoot, dict, dict]:
+def _enrolled_authority(
+    store: Any, connection: Any, enrolled: Mapping[str, object], decode_payload: Callable[..., Any] | None
+) -> tuple[WorkflowRoot, dict, dict]:
     if enrolled.get("workflow_capability_version") != 1:
         raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
     jobs = store.jobs_by_uuid(connection, str(enrolled["uuid"]), lock=True)
@@ -813,15 +834,24 @@ def _enrolled_authority(store: Any, connection: Any, enrolled: Mapping[str, obje
         or row["max_retries"] != root.controls.max_retries
         or row["quarantine_threshold"] != root.controls.quarantine_threshold
         or row["expired_lease_policy"] != root.controls.expired_lease_policy.value
-        or _json_payload(row["payload"]) != {support["payload_field"]: root.reference_id}
     ):
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
+    from tldw_Server_API.app.core.Jobs.manager import JobPayloadDecryptionError
+
+    try:
+        matches = _workflow_payload_matches(row, support["payload_field"], root.reference_id, decode_payload)
+    except (JobPayloadDecryptionError, zlib.error):
+        raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE) from None
+    if not matches:
         raise WorkflowFenceError(WorkflowOutcome.UNAVAILABLE)
     return root, row, support
 
 
-def _record_workflow_acquisition(connection: Any, *, backend: str, acquired: Mapping[str, object]) -> None:
+def _record_workflow_acquisition(
+    connection: Any, *, backend: str, acquired: Mapping[str, object], decode_payload: Callable[..., Any] | None = None
+) -> None:
     store = workflow_store(backend)
-    root, row, support = _enrolled_authority(store, connection, acquired)
+    root, row, support = _enrolled_authority(store, connection, acquired, decode_payload)
     if (
         row["status"] != "processing"
         or not store.lease_is_live(connection, root.job_uuid)
@@ -837,19 +867,25 @@ def _record_workflow_acquisition(connection: Any, *, backend: str, acquired: Map
 
 
 def record_workflow_acquisition_in_transaction(
-    connection: Any, *, backend: str, acquired: Mapping[str, object]
+    connection: Any, *, backend: str, acquired: Mapping[str, object], decode_payload: Callable[..., Any] | None = None
 ) -> None:
     """Dispatch only enrolled deliveries, before the real acquisition commits."""
     if acquired.get("workflow_capability_version") is None:
         return
-    workflow_store(backend).record_workflow_acquisition_in_transaction(connection, backend=backend, acquired=acquired)
+    workflow_store(backend).record_workflow_acquisition_in_transaction(
+        connection, backend=backend, acquired=acquired, decode_payload=decode_payload
+    )
 
 
 def _recover_workflow_expiry(
-    connection: Any, *, backend: str, locked_root: Mapping[str, object]
+    connection: Any,
+    *,
+    backend: str,
+    locked_root: Mapping[str, object],
+    decode_payload: Callable[..., Any] | None = None,
 ) -> WorkflowEffectResult:
     store = workflow_store(backend)
-    root, row, support = _enrolled_authority(store, connection, locked_root)
+    root, row, support = _enrolled_authority(store, connection, locked_root, decode_payload)
     if row["status"] in {"completed", "failed", "cancelled", "quarantined"}:
         return WorkflowEffectResult(WorkflowOutcome.TERMINAL)
     if row["status"] != "processing" or not store.lease_is_expired(connection, root.job_uuid):
@@ -891,11 +927,15 @@ def _recover_workflow_expiry(
 
 
 def recover_workflow_expiry_in_transaction(
-    connection: Any, *, backend: str, locked_root: Mapping[str, object]
+    connection: Any,
+    *,
+    backend: str,
+    locked_root: Mapping[str, object],
+    decode_payload: Callable[..., Any] | None = None,
 ) -> WorkflowEffectResult:
     """Use the caller's locked expired Jobs identity, never a replacement lease."""
     if locked_root.get("workflow_capability_version") is None:
         return WorkflowEffectResult(WorkflowOutcome.MISSING)
     return workflow_store(backend).recover_workflow_expiry_in_transaction(
-        connection, backend=backend, locked_root=locked_root
+        connection, backend=backend, locked_root=locked_root, decode_payload=decode_payload
     )
