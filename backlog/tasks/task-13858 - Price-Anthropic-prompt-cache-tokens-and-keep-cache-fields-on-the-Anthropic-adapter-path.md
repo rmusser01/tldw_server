@@ -38,6 +38,8 @@ Follow-ups:
 - TASK-13878: 1-hour cache writes at 2x (Decision 1).
 - TASK-13879: OpenAI cached-input rates (Decision 2).
 - TASK-13880: Haiku 5.5's tiered price, Mythos, Haiku 3.5's API ID, the dotted keys.
+Clean review of #3286 (0 Critical, 0 Important, 5 Minor), all applied: Usage_Quotas.md names the virtual-key token budgets and the RG daily token cap among the token consumers (M1), and says every streamed Anthropic adapter call is estimated and costed at the input rate (M2); TASK-13880 notes the two non-ID dated keys and warns to keep claude-opus-4 and claude-sonnet-4 (M3); Anthropic_Messages_API.md says the 6 newly priced bare Claude IDs now route to anthropic (M4). Follow-up:
+- TASK-13885: fast mode (2x) and US-only inference (1.1x) price multipliers (M5).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
