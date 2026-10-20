@@ -13,6 +13,7 @@
  */
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import type { Message } from "@/store/option"
+import type { NativeHistoryRegenerate } from "@/types/chat-modes"
 import type {
   HistoryNodeV1,
   HistorySelectedContentV1,
@@ -122,6 +123,61 @@ export const isContinuableReply = (content: HistorySelectedContentV1): boolean =
   )
 }
 
+type SavedReplyAction = "regenerate" | "continue"
+
+/**
+ * Saved replies the server refused to regenerate or continue in this session,
+ * by owner, conversation, reply and revision. A question saved before server
+ * admissions existed cannot be told apart up front; after one definitive
+ * refusal its actions say so instead of failing again.
+ */
+const refusedSavedReplies = new Map<string, Set<SavedReplyAction>>()
+
+const savedReplyKey = (reply: {
+  owner_key: string
+  conversation_id: string
+  message_id: string
+  message_revision: string
+}) =>
+  JSON.stringify([reply.owner_key, reply.conversation_id, reply.message_id, reply.message_revision])
+
+/**
+ * True for the server's definitive refusal of a saved-reply Regenerate or
+ * Continue. The server sends it before admitting anything or calling the
+ * model, so nothing was saved and nothing needs recovering.
+ */
+export const isSavedReplyActionRefusal = (error: unknown): boolean => {
+  const response = error as { status?: unknown; details?: { detail?: { status?: unknown; code?: unknown } } } | null
+  const detail = response?.details?.detail
+  return (
+    response?.status === 409 &&
+    detail?.status === "unsupported_history_capability" &&
+    (detail.code === "unsupported_history_regeneration" || detail.code === "unsupported_history_continuation")
+  )
+}
+
+/** Remember a definitive refusal; a refused Regenerate also rules out Continue. */
+export const rememberSavedReplyRefusal = (intent: NativeHistoryRegenerate) => {
+  const key = savedReplyKey(intent)
+  const refused = refusedSavedReplies.get(key) ?? new Set<SavedReplyAction>()
+  refused.add("continue")
+  if (intent.action !== "continue") refused.add("regenerate")
+  refusedSavedReplies.set(key, refused)
+}
+
+/** Test seam: forget remembered refusals. */
+export const resetSavedReplyRefusals = () => refusedSavedReplies.clear()
+
+const refusedActions = (target: NativeSavedReplyTarget) =>
+  refusedSavedReplies.get(
+    savedReplyKey({
+      owner_key: target.origin.view.owner_key,
+      conversation_id: target.origin.view.conversation_id,
+      message_id: target.reply.id,
+      message_revision: target.reply.revision
+    })
+  )
+
 /** Why a reply action cannot start right now. */
 export type SavedReplyActionBlock = "loading" | "unsupported"
 
@@ -169,11 +225,16 @@ export const savedReplyActionAvailability = ({
   if (state.status === "loading")
     return { regenerate: "loading", continue: "loading" }
   const target = nativeSavedReplyTarget(historySelection, messages)
+  const refused = target ? refusedActions(target) : undefined
   return {
     regenerate:
-      target || isRetryableInterruptedReply(messages) ? null : "unsupported",
+      (target && !refused?.has("regenerate")) || isRetryableInterruptedReply(messages)
+        ? null
+        : "unsupported",
     continue:
-      target && isContinuableReply(target.replyContent) ? null : "unsupported"
+      target && !refused?.has("continue") && isContinuableReply(target.replyContent)
+        ? null
+        : "unsupported"
   }
 }
 

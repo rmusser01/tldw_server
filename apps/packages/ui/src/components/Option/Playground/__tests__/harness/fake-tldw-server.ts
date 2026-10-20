@@ -449,8 +449,10 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
     let persisted: Awaited<ReturnType<typeof persistCompletionTurn>>
     try { persisted = persistCompletionTurn(body, reply, edited, canonical) }
     catch (error) {
-      return edited ? editRefusal(error) : json({ detail: { code: body?.metadata?.tldw_continue_from_message_id !== undefined
-        ? "unsupported_history_continuation" : "unsupported_history_regeneration" } }, 409)
+      // Matches the server: a saved-reply refusal is an unsupported history capability.
+      return edited ? editRefusal(error) : json({ detail: { status: "unsupported_history_capability",
+        code: body?.metadata?.tldw_continue_from_message_id !== undefined
+          ? "unsupported_history_continuation" : "unsupported_history_regeneration" } }, 409)
     }
     if (!body?.stream) {
       return json({

@@ -54,6 +54,7 @@ import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import { requireServerSettingsResponse } from "@/services/chat-settings"
 import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistoryEditRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, validateNativeCharacterConfiguration } from "./native-character-preflight"
 import { extractStreamTransportInterruption } from "@/utils/extract-token-from-chunk"
+import { isSavedReplyActionRefusal, rememberSavedReplyRefusal } from "./saved-reply-actions"
 import { consumeStreamingChunk } from "@/utils/streaming-chunks"
 
 export type NativeHistoryCharacterSendParams = {
@@ -842,6 +843,15 @@ export const sendNativeHistoryCharacter = async (
           }
         }
         throw refusal
+      }
+
+      if (regenerate && dispatched && !streamStarted && !admission && !resultId && content === "" &&
+          isSavedReplyActionRefusal(error)) {
+        // CM-01: the server refused before admitting or generating anything, so
+        // there is nothing to recover; the reply's actions now say why.
+        rememberSavedReplyRefusal(regenerate)
+        await dismissHistoryTurnRecovery(scope, view, operationId)
+        throw error
       }
 
       if (dispatched) {

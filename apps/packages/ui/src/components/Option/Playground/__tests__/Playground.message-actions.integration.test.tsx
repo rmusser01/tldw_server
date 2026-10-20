@@ -218,6 +218,13 @@ describe(
           expect(visibleNotifications().join(" ")).not.toMatch(/unsupported_history|invalid_history/)
           expect(view.server.chats.get("saved-chat")!.messages.map(row => row.content)).toEqual(["Saved question", "Saved answer"])
           expect(screen.getByText("Saved answer")).toBeInTheDocument()
+          // The refusal is definitive: no "unconfirmed" recovery is left behind, and
+          // the button now says why instead of failing again on the next click.
+          await waitForChatIdle()
+          expect(screen.queryByText(/New reply unconfirmed|New reply refused/)).toBeNull()
+          await waitFor(() => expect(screen.getByRole("button", { name: "Regenerate" })).toBeDisabled(), HARNESS_WAIT)
+          expect(screen.getByRole("button", { name: "Regenerate" })).toHaveAttribute("title", expect.stringMatching(/New Branch/))
+          expect(view.server.completionRequests()).toHaveLength(1)
         })
       }
     )
@@ -356,6 +363,10 @@ describe("native admitted regeneration through the actual Playground", { timeout
 const savedAssistantRow = () =>
   screen.getAllByTestId("chat-message").filter(row => row.getAttribute("data-role") === "assistant").at(-1)!
 
+const moreActions = async (view: Awaited<ReturnType<typeof renderPlayground>>) => {
+  await view.user.click(within(savedAssistantRow()).getByRole("button", { name: "More actions" }))
+}
+
 const clickContinue = async (view: Awaited<ReturnType<typeof renderPlayground>>) => {
   await view.user.click(within(savedAssistantRow()).getByRole("button", { name: "More actions" }))
   await view.user.click(await screen.findByRole("button", { name: "Continue Response" }, HARNESS_WAIT))
@@ -403,13 +414,15 @@ describe("native admitted continuation through the actual Playground", { timeout
       expect(notices).toContain("original exchange and draft are kept")
       expect(view.server.chats.get("saved-chat")!.messages.map(row => row.content)).toEqual(["Saved question", "Saved answer"])
       expect(screen.getByText("Saved answer")).toBeInTheDocument()
+      // The refusal is remembered: Continue is no longer offered on this reply.
+      await waitForChatIdle()
+      expect(screen.queryByText(/New reply unconfirmed|New reply refused/)).toBeNull()
+      await moreActions(view)
+      expect(screen.queryByRole("button", { name: "Continue Response" })).toBeNull()
+      expect(view.server.completionRequests()).toHaveLength(1)
     })
   })
 })
-
-const moreActions = async (view: Awaited<ReturnType<typeof renderPlayground>>) => {
-  await view.user.click(within(savedAssistantRow()).getByRole("button", { name: "More actions" }))
-}
 
 describe("saved-reply action availability (CM-01)", { timeout: 60_000 }, () => {
   beforeEach(async () => { await resetPlaygroundHarness() })
