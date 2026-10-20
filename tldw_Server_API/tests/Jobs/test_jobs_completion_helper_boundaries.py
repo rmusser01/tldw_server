@@ -21,6 +21,7 @@ USE_SHARED_JOBS_POSTGRES = True
 DB_PACKAGE = "tldw_Server_API.app.core.DB_Management"
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("module_name", "names"),
     [
@@ -90,6 +91,7 @@ def helper_owner(request, tmp_path, monkeypatch):
         yield manager, conn, ExecutorProbe(cursor)
 
 
+@pytest.mark.integration
 @pytest.mark.parametrize("attrs", [None, {}, {"nested": [1, False, None], "label": "raw"}])
 @pytest.mark.parametrize("finish", ["rollback", "commit"])
 def test_event_attribution_and_owning_transaction(helper_owner, attrs, finish):
@@ -122,6 +124,7 @@ def test_event_attribution_and_owning_transaction(helper_owner, attrs, finish):
     assert len(persisted) == (1 if finish == "commit" else 0)
 
 
+@pytest.mark.integration
 def test_counter_reconstruction_is_transaction_local(helper_owner):
     """Rebuild all four buckets, excluding terminal and other-key jobs."""
     from tldw_Server_API.tests.Jobs._completion_characterization_support import rows
@@ -161,6 +164,7 @@ def test_counter_reconstruction_is_transaction_local(helper_owner):
     assert rows(manager, "SELECT * FROM jobs") == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("backend", ["sqlite", "postgres"])
 @pytest.mark.parametrize("failure", ["execute", "malformed"])
 def test_counter_errors_propagate_without_owning_transaction(backend, failure):
@@ -185,6 +189,7 @@ def test_counter_errors_propagate_without_owning_transaction(backend, failure):
     assert executor.boundaries == []
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize(
     "state,fail_at", [("INTRANS", None), ("INTRANS", "commit"), ("INERROR", None), ("INERROR", "rollback")]
 )
@@ -221,6 +226,7 @@ def test_commit_guard_order_and_error_precedence(state, fail_at, monkeypatch):
     assert calls == (["rollback"] if state == "INERROR" else ["commit"])
 
 
+@pytest.mark.integration
 @pytest.mark.pg_jobs
 def test_real_aborted_transaction_guard(jobs_pg_dsn, monkeypatch):
     """A native PostgreSQL diagnostic abort is rolled back, never committed."""
@@ -333,6 +339,7 @@ def driver_import_probe(present: bool, manager_first: bool) -> None:
         builtins.__import__ = original_import
 
 
+@pytest.mark.unit
 @pytest.mark.parametrize("present", [False, True], ids=["absent-driver", "present-driver"])
 @pytest.mark.parametrize("manager_first", [False, True], ids=["helpers-first", "manager-first"])
 def test_isolated_driver_imports(present, manager_first):
