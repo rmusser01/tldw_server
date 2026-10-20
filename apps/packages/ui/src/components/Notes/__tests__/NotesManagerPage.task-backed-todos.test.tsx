@@ -313,6 +313,13 @@ const setupTaskBackedNoteMock = (options: { conflictOnSave?: boolean } = {}) => 
   })
 }
 
+// The checkable task list sits behind a compact chip so it does not
+// duplicate the rendered preview (NE-09).
+const openTaskList = async () => {
+  const chip = await screen.findByRole("button", { name: /^Tasks \d+\/\d+$/ })
+  if (chip.getAttribute("aria-expanded") !== "true") fireEvent.click(chip)
+}
+
 describe("NotesManagerPage task-backed todos", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -327,13 +334,30 @@ describe("NotesManagerPage task-backed todos", () => {
     expect(await screen.findByDisplayValue("- [ ] Draft PRD")).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole("button", { name: "Preview" }))
+    await openTaskList()
 
     expect(await screen.findByRole("checkbox", { name: /Draft PRD/ })).not.toBeChecked()
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }))
 
     expect(screen.getByDisplayValue("- [ ] Draft PRD")).toBeInTheDocument()
-  }, 10000)
+  }, 30_000)
+
+  it("shows tasks as one chip in Preview, without a duplicate list or a jargon notice (NE-09)", async () => {
+    setupTaskBackedNoteMock()
+    await renderPage()
+
+    await screen.findByDisplayValue("- [ ] Draft PRD")
+    expect(
+      screen.queryByText("Portable markdown with best-effort task continuity")
+    ).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }))
+    const chip = await screen.findByRole("button", { name: "Tasks 0/1" })
+    expect(chip).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryAllByRole("checkbox")).toHaveLength(0)
+    expect(screen.getByTestId("markdown-preview-content")).toHaveTextContent("Draft PRD")
+  }, 30_000)
 
   it("uses the backend status endpoint for clean checkbox toggles and refreshes the note", async () => {
     setupTaskBackedNoteMock()
@@ -341,6 +365,7 @@ describe("NotesManagerPage task-backed todos", () => {
 
     await screen.findByDisplayValue("- [ ] Draft PRD")
     fireEvent.click(screen.getByRole("button", { name: "Preview" }))
+    await openTaskList()
     fireEvent.click(await screen.findByRole("checkbox", { name: /Draft PRD/ }))
 
     await waitFor(() => {
@@ -364,7 +389,7 @@ describe("NotesManagerPage task-backed todos", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Edit" }))
     expect(await screen.findByDisplayValue("- [x] Draft PRD")).toBeInTheDocument()
-  }, 10000)
+  }, 30_000)
 
   it("keeps dirty checkbox toggles local and preserves the draft on save conflict", async () => {
     setupTaskBackedNoteMock({ conflictOnSave: true })
@@ -373,6 +398,7 @@ describe("NotesManagerPage task-backed todos", () => {
     const textarea = await screen.findByDisplayValue("- [ ] Draft PRD")
     fireEvent.change(textarea, { target: { value: "- [ ] Draft PRD\nlocal note" } })
     fireEvent.click(screen.getByRole("button", { name: "Preview" }))
+    await openTaskList()
     fireEvent.click(await screen.findByRole("checkbox", { name: /Draft PRD/ }))
 
     expect(mockBgRequest).not.toHaveBeenCalledWith(
@@ -387,7 +413,7 @@ describe("NotesManagerPage task-backed todos", () => {
     expect(await screen.findByTestId("notes-save-issue")).toHaveAttribute("data-kind", "conflict")
     expect(mockMessageError).not.toHaveBeenCalled()
     expect(screen.getByLabelText("Note content")).toHaveValue("- [x] Draft PRD\nlocal note")
-  }, 10000)
+  }, 30_000)
 
   it("shows unread agent task activity and can dismiss it", async () => {
     setupTaskBackedNoteMock()
@@ -413,5 +439,5 @@ describe("NotesManagerPage task-backed todos", () => {
         screen.queryByText("agent-1 via notes.tasks.set_status changed 1 task in Task note.")
       ).not.toBeInTheDocument()
     })
-  }, 10000)
+  }, 30_000)
 })

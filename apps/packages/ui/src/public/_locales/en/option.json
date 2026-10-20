@@ -6463,5 +6463,11 @@
   },
   "notesSearch_moodboardAddOpenNoteError": {
     "message": "Could not add the note to this collection"
+  },
+  "notesSearch_taskChipLabel": {
+    "message": "Tasks"
+  },
+  "notesSearch_taskChipTooltip": {
+    "message": "Checking a box updates the note text and your task list."
   }
 }

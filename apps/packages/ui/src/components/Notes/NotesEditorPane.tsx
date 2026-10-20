@@ -20,7 +20,7 @@ import { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from '@/design-system'
 import NotesEditorHeader from '@/components/Notes/NotesEditorHeader'
 import NotesStudioView from '@/components/Notes/NotesStudioView'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
-import TaskChecklistPreview from '@/components/Notes/TaskChecklistPreview'
+import TaskChecklistToggle from '@/components/Notes/TaskChecklistToggle'
 import type { TaskChecklistTogglePayload } from '@/components/Notes/TaskChecklistPreview'
 import TaskActivityNotice from '@/components/Notes/TaskActivityNotice'
 import type { ActiveWikilinkQuery, WikilinkCandidate } from '@/components/Notes/wikilinks'
@@ -631,7 +631,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
       style={editorMode === 'split' ? { height: pairedHeight || editorMaxHeight, maxHeight: editorMaxHeight } : undefined}
       className={`flex min-h-0 flex-col gap-3 ${editorMode === 'split' ? 'overflow-auto flex-none' : 'flex-1'}`}
     >
-      <TaskChecklistPreview
+      <TaskChecklistToggle
         content={previewContent}
         tasks={noteTasks}
         isDirty={isDirty}
@@ -1064,17 +1064,6 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
             onInspect={inspectTaskActivity}
             onDismiss={(eventId) => void dismissTaskActivity(eventId)}
           />
-          {noteTasks.length > 0 && (
-            <Typography.Text
-              type="secondary"
-              className="block text-[11px] mt-2 text-text-muted"
-              data-testid="notes-task-continuity-notice"
-            >
-              {t('option:notesSearch_taskContinuityNotice', {
-                defaultValue: 'Portable markdown with best-effort task continuity'
-              })}
-            </Typography.Text>
-          )}
           {canUndoAssist && (
             <div className="mt-2">
               <Button
