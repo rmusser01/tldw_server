@@ -10,9 +10,7 @@
 
 ## Decision
 
-The Resource Governor's Redis backend treats `redis.exceptions.RedisError` as a Redis failure and answers it by its fail mode. So while Redis is unreachable, a per-user concurrency lease is counted in the worker that holds it, whether Redis was down when the worker first connected or dropped later. When Redis answers but cannot run the lease script, leases are counted in Python, and the script loads again on the next reserve:
-- after a Redis restart (NOSCRIPT), against Redis, so the limit holds across workers;
-- while Redis rejects writes (OOM, READONLY), in each worker on its own.
+The Resource Governor's Redis backend answers every redis-py error (`RedisError`) by its fail mode, so while Redis is unreachable or rejects writes each worker counts per-user concurrency leases on its own, instead of admitting the request without a lease.
 
 ## Context
 
@@ -31,12 +29,22 @@ ADR-076 says that if Redis drops after a worker has connected, "a reserve that f
 
 - **Per-worker counting.** While Redis is unreachable or rejects writes, each worker counts its own leases, so with N workers a user can run up to N times the limit.
   - That is how the memory backend works, and what ADR-076 already says for a worker that never connected.
-  - Under the default `fallback_memory`, the worker's memory governor holds the lease. Under `fail_open` and `fail_closed`, RG's in-process lease map does. While Redis rejects writes, the lease is in that map but not in Redis.
+  - Under the default `fallback_memory`, the worker's memory governor holds the lease while Redis is unreachable or read-only (READONLY), because counting leases starts with a write. Otherwise RG's in-process lease map holds it: under `fail_open` and `fail_closed`, and under `fallback_memory` while Redis is out of memory (OOM). A lease taken while Redis rejects writes is not in Redis.
   - `fail_closed` does not refuse a lease during an outage.
-  - While Redis rejects writes, each reserve also loads the lease script and fails it again.
+- **Lease scripts Redis cannot run.** When Redis answers but cannot run the lease script, leases are counted in Python, and the script loads again on the next reserve.
+  - After a Redis restart (NOSCRIPT), they are counted against Redis, so the limit holds across workers.
+  - While Redis rejects writes (OOM, READONLY), each worker counts on its own, and each reserve loads the script and fails it again.
+  - If the script ran but its reply was lost (a redis-py `TimeoutError`, or a connection reset), the Python count includes the lease the script just took. With a limit of 1 the request is refused, and that lease blocks the user's slot until it expires, within 120 s. With a higher limit, the request uses one extra slot until then. The multi-key rate script's members are charged again the same way and never refunded. Before this ADR, the request was admitted with no lease, and the script's lease was stranded the same way.
 - **Leases on the other side.** A worker counting on its own does not see leases taken before Redis dropped. When Redis returns, Redis does not see the leases the memory governor took during the outage, until those requests end. Either way, a user can briefly exceed the limit by the leases the other side holds.
-- **Release and renewal.** A lease released or renewed during the outage acts on the worker's own copy of the lease. Redis leases the worker could not release expire within 120 s.
+- **Release and renewal.** A lease released or renewed during the outage acts on the worker's own copy of the lease. A lease taken during the outage and renewed after Redis returns is written to Redis by that renewal. Redis leases the worker could not release expire within 120 s.
+- **Rates.** A `requests` or `tokens` window that Redis cannot read or write gets the fail mode, whether Redis is unreachable or rejects writes:
+  - `fallback_memory` counts both in each worker's memory governor;
+  - `fail_open` admits, and holds only `requests` per worker, in its acceptance window;
+  - `fail_closed` answers 429 (`Retry-After` up to 60 s) while the failure lasts, and for up to 60 s after, while each worker's deny floor runs out.
 - **Logging.** Every Redis error that leaves the worker enforcing a limit on its own is logged: unreachable, READONLY or OOM. Each worker process logs one WARNING per Redis namespace at most once a minute. A restart (NOSCRIPT) is not logged, because the limit still holds.
-- **No more 500s.** A Redis error no longer answers a request with HTTP 500. Ingress answers by fail mode:
-  - `fail_open` and `fallback_memory` admit, within the requests limit each worker keeps on its own;
-  - `fail_closed` answers 429 (`Retry-After` up to 60 s) while Redis is unreachable, and for up to 60 s after, while each worker's deny floor runs out.
+- **No more 500s from RG.** With Redis unreachable, read-only or out of memory, no Redis error escapes RG's `reserve`, `check`, `renew`, `commit` or `peek_with_policy`. So none answers a request with HTTP 500, at ingress or at the endpoints that call RG directly, such as chat's tokens reserve. That holds even though chat's guard (`_CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS`) does not list `RedisError`.
+
+## Follow-up
+
+- TASK-13882: a connect timeout, or a circuit breaker, for the RG Redis client. A governed request now makes several Redis calls during an outage, and redis-py 8.1's `from_url` waits 5 s per call on a black-holed Redis. That adds up to about 30-70 s per request.
+- TASK-13892: before counting in Python after a failed script, `reserve` removes the members it planned for that script, so a lost reply does not count the script's own lease.

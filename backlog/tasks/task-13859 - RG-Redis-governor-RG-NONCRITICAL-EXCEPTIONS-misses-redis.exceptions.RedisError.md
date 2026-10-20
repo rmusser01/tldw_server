@@ -44,6 +44,16 @@ Tests (real redis-py errors from real clients):
 - Sweep: 1 failed, 1910 passed, 4 skipped, 2 xfailed; the one failure (test_required_workflow_contracts::test_critical_e2e_budget_preserves_other_policies_and_still_enforces_limits) runs a workflow step that calls python, which is not on this machine's PATH (exit 127); with a venv python wrapper on PATH it passes on this branch. Docs 212 passed. Test-quality ratchet OK; scope-predicate baseline exact.
 - Ruff clean. Bandit: only the B113 false positive dev already has in policy_eval.py.
 Follow-up: TASK-13882, a connect timeout or circuit breaker for the RG Redis client.
+Clean review of #3288 (2026-10-20): 0 Critical, 2 Important, 6 Minor; all folded in.
+- I1: a READONLY Redis made fail_open requests/tokens reserves raise ReadOnlyError from a redundant, unguarded _purge_and_count at the head of the real-Redis add loop; the line is deleted.
+- I2: under OOM a rejected window ZADD was swallowed, so no fail mode held the tokens per-minute limit. _add_members now re-raises after logging, and the add loop applies the fail mode as an unreachable Redis does (fail_open admits, fail_closed denies for the window, fallback_memory hands the request to the memory governor). test_redis_rejecting_writes_follows_the_fail_mode (READONLY and OOM x 3 modes x requests/tokens, real Redis): RED 5 failed, 7 passed; GREEN 12 passed.
+- M1: renew falls back to the worker's copy when Redis has no record, as commit does (RED 2 failed; GREEN).
+- M2: _tokens_lua_sha is cleared when its script fails, at the check and the peek estimate (RED [60, 60] == [60, 30] x2; GREEN).
+- M3: a lost script reply counts the script's own lease in the Python fallback; recorded in ADR-078 and filed as TASK-13892.
+- M4: TASK-13882's latency premise corrected (redis-py 8.1 from_url waits 5 s per call).
+- M5: ADR-078 text fixed (one-sentence Decision, fallback_memory READONLY lease holder, rates, narrowed 500 claim, Follow-up section).
+- M6: test_renew_and_commit_survive_redis_raising_connection_error asserts the slot frees; mutants (commit without fallback, tuple without RedisError) fail it.
+Verification: RG suite + Usage/test_concurrency_quota.py 484 passed, 2 xfailed (one earlier run had 2 Postgres setup errors from the shared tldw_test database being dropped mid-run; both tests pass on rerun). tests/Docs passed; test-quality ratchet OK; ruff clean; bandit clean on governor_redis.py.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

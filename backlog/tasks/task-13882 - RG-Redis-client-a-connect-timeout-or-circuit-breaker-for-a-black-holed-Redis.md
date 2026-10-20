@@ -21,6 +21,7 @@ After TASK-13859, RG applies its fail mode on Redis errors instead of raising, s
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Correction from the clean review of #3288 (M4, 2026-10-20): the description's 'waits for the OS connect timeout' is wrong for the installed redis-py. redis-py 8.1's from_url defaults socket_connect_timeout (and socket_timeout) to 5 s: on the black-holed address 10.255.255.1 one command waited 5.00 s, then raised redis.exceptions.TimeoutError. Measured Redis calls per request with Redis down (production from_url client): ingress 6 under fallback_memory (not 7), 14 under fail_open, and 7 on the first request then 2 under fail_closed; a quota acquire 2 (fallback_memory) or 8 (fail_open, fail_closed); renew 2; release 3; dev 1 for any of these. With a black-holed Redis a governed request therefore takes about 30 s (fallback_memory), 70 s (fail_open), or 35 s then 10 s (fail_closed), against 5 s and then a 500 on dev. Older redis-py versions, which the redis>=4.5.0 pin still allows, may wait for the OS connect timeout instead.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
