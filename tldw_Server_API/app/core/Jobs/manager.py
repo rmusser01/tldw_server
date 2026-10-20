@@ -21,9 +21,16 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.jobs_failed_requeue import (
     retry_failed_job_admission as _retry_failed_job_admission,
 )
+from tldw_Server_API.app.core.DB_Management.jobs_lifecycle_persistence import (
+    _insert_lifecycle_event,
+    _reconcile_lifecycle_counter_row,
+)
 from tldw_Server_API.app.core.DB_Management.jobs_sql_fragments import (
     fetch_slides_archive_collision_rows,
     job_event_filter_fragment,
+)
+from tldw_Server_API.app.core.DB_Management.jobs_transaction_helpers import (
+    _commit_postgres_transaction,
 )
 from tldw_Server_API.app.core.DB_Management.sqlite_policy import (
     configure_sqlite_connection,
@@ -157,31 +164,15 @@ from .pg_migrations import (
 )
 from .tracing import job_span
 
-try:
-    import psycopg  # type: ignore
-
-    _PG_ERRORS: tuple[type[BaseException], ...] = (psycopg.Error,)
-except ImportError:
-    _PG_ERRORS = ()
-
-_JOB_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
-    AttributeError,
-    BadRequestError,
-    ConnectionError,
-    ImportError,
-    IndexError,
-    KeyError,
-    LookupError,
-    OSError,
-    RuntimeError,
-    TimeoutError,
-    TypeError,
-    UnicodeDecodeError,
-    ValueError,
-    json.JSONDecodeError,
-    sqlite3.Error,
-    *_PG_ERRORS,
+# Keep optional-driver initialization after the existing Jobs imports.
+# isort: split
+from tldw_Server_API.app.core.DB_Management.jobs_exception_policy import (
+    _JOB_NONCRITICAL_EXCEPTIONS,
+    _PG_ERRORS,
 )
+
+if _PG_ERRORS:
+    from tldw_Server_API.app.core.DB_Management.jobs_exception_policy import psycopg as psycopg
 
 _LEASE_EXPIRED_ERROR_CODE = "lease_expired"
 _LEASE_EXPIRED_ERROR_MESSAGE = "Job lease expired; retry budget exhausted"
@@ -326,19 +317,6 @@ def _close_connection_nonfatal(conn: Any, *, operation: str) -> None:
         )
 
 
-def _commit_postgres_transaction(conn: Any, *, operation: str) -> None:
-    """Commit a PostgreSQL mutation, rejecting already-aborted transactions."""
-
-    from psycopg.pq import TransactionStatus
-
-    if conn.info.transaction_status == TransactionStatus.INERROR:
-        conn.rollback()
-        raise RuntimeError(
-            f"Cannot commit PostgreSQL {operation}: transaction is aborted"
-        )
-    conn.commit()
-
-
 def _run_post_commit_side_effects(
     side_effects: list[tuple[Any, tuple[Any, ...], dict[str, Any]]],
 ) -> None:
@@ -360,47 +338,6 @@ def _record_job_span(
         pass
 
 
-def _insert_lifecycle_event(
-    executor: Any,
-    *,
-    backend: str,
-    event_type: str,
-    job: dict[str, Any],
-    attrs: dict[str, Any] | None = None,
-) -> None:
-    """Append a durable lifecycle event inside the caller's transaction."""
-
-    values = (
-        int(job["id"]),
-        job.get("domain"),
-        job.get("queue"),
-        job.get("job_type"),
-        event_type,
-        json.dumps(attrs or {}),
-        job.get("owner_user_id"),
-        job.get("request_id"),
-        job.get("trace_id"),
-    )
-    if backend == "postgres":
-        executor.execute(
-            (
-                "INSERT INTO job_events(job_id, domain, queue, job_type, event_type, "
-                "attrs_json, owner_user_id, request_id, trace_id, created_at) "
-                "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, NOW())"
-            ),
-            values,
-        )
-        return
-    executor.execute(
-        (
-            "INSERT INTO job_events(job_id, domain, queue, job_type, event_type, "
-            "attrs_json, owner_user_id, request_id, trace_id, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, DATETIME('now'))"
-        ),
-        values,
-    )
-
-
 def _queue_lifecycle_event_observer(
     side_effects: list[tuple[Any, tuple[Any, ...], dict[str, Any]]],
     *,
@@ -412,78 +349,6 @@ def _queue_lifecycle_event_observer(
 
     side_effects.append(
         (observe_job_event, (event_type,), {"job": job, "attrs": attrs})
-    )
-
-
-def _reconcile_lifecycle_counter_row(
-    executor: Any,
-    *,
-    backend: str,
-    domain: Any,
-    queue: Any,
-    job_type: Any,
-) -> None:
-    """Rebuild one missing counter row from transaction-local job state."""
-
-    params = (domain, queue, job_type)
-    if backend == "postgres":
-        executor.execute(
-            (
-                "SELECT "
-                "COUNT(*) FILTER (WHERE status='queued' AND available_at IS NULL) AS ready_count, "
-                "COUNT(*) FILTER (WHERE status='queued' AND available_at IS NOT NULL) AS scheduled_count, "
-                "COUNT(*) FILTER (WHERE status='processing') AS processing_count, "
-                "COUNT(*) FILTER (WHERE status='quarantined') AS quarantined_count "
-                "FROM jobs WHERE domain=%s AND queue=%s AND job_type=%s"
-            ),
-            params,
-        )
-        row = executor.fetchone()
-        if isinstance(row, dict):
-            counts = tuple(
-                int(row.get(name) or 0)
-                for name in (
-                    "ready_count",
-                    "scheduled_count",
-                    "processing_count",
-                    "quarantined_count",
-                )
-            )
-        else:
-            counts = tuple(int(value or 0) for value in (row or (0, 0, 0, 0)))
-        executor.execute(
-            (
-                "INSERT INTO job_counters(domain,queue,job_type,ready_count,scheduled_count,processing_count,quarantined_count) "
-                "VALUES(%s,%s,%s,%s,%s,%s,%s) ON CONFLICT (domain,queue,job_type) DO UPDATE SET "
-                "ready_count=EXCLUDED.ready_count, scheduled_count=EXCLUDED.scheduled_count, "
-                "processing_count=EXCLUDED.processing_count, quarantined_count=EXCLUDED.quarantined_count, "
-                "updated_at=NOW()"
-            ),
-            (*params, *counts),
-        )
-        return
-
-    row = executor.execute(
-        (
-            "SELECT "
-            "COALESCE(SUM(CASE WHEN status='queued' AND available_at IS NULL THEN 1 ELSE 0 END),0), "
-            "COALESCE(SUM(CASE WHEN status='queued' AND available_at IS NOT NULL THEN 1 ELSE 0 END),0), "
-            "COALESCE(SUM(CASE WHEN status='processing' THEN 1 ELSE 0 END),0), "
-            "COALESCE(SUM(CASE WHEN status='quarantined' THEN 1 ELSE 0 END),0) "
-            "FROM jobs WHERE domain=? AND queue=? AND job_type=?"
-        ),
-        params,
-    ).fetchone()
-    counts = tuple(int(value or 0) for value in (row or (0, 0, 0, 0)))
-    executor.execute(
-        (
-            "INSERT INTO job_counters(domain,queue,job_type,ready_count,scheduled_count,processing_count,quarantined_count) "
-            "VALUES(?,?,?,?,?,?,?) ON CONFLICT(domain,queue,job_type) DO UPDATE SET "
-            "ready_count=excluded.ready_count, scheduled_count=excluded.scheduled_count, "
-            "processing_count=excluded.processing_count, quarantined_count=excluded.quarantined_count, "
-            "updated_at=DATETIME('now')"
-        ),
-        (*params, *counts),
     )
 
 
