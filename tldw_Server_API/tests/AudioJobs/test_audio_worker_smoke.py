@@ -1094,8 +1094,9 @@ def _analysis_failure_code(jm, job_id: int) -> str | None:
     [
         (lambda errors: errors.ChatBadRequestError(provider="openai"), "request_rejected"),
         (lambda errors: errors.ChatRateLimitError(provider="openai", quota_exhausted=True), "provider_quota_exhausted"),
+        (lambda errors: errors.EgressPolicyError("blocked-host.example", reason_code="host_denied"), "configuration"),
     ],
-    ids=["rejected-request", "spent-quota"],
+    ids=["rejected-request", "spent-quota", "egress-blocked"],
 )
 async def test_audio_analyze_failure_a_retry_cannot_fix_is_not_retried(analyze_worker, make_error, code):
     from tldw_Server_API.app.core import exceptions
@@ -1108,6 +1109,35 @@ async def test_audio_analyze_failure_a_retry_cannot_fix_is_not_retried(analyze_w
     assert int(job.get("retry_count") or 0) == 0
     assert len(adapter.requests) == 1
     assert _analysis_failure_code(jm, job_id) == code
+
+
+@pytest.mark.unit
+async def test_audio_analyze_unreachable_provider_is_retried_as_a_provider_failure(analyze_worker):
+    from tldw_Server_API.app.core.exceptions import NetworkError
+
+    worker, jm, adapter = analyze_worker
+    adapter.error = NetworkError("ConnectError")
+    job_id = _analyze_job(jm, "hello transcript")
+    await _run_worker_until(worker, lambda: _settled(jm, job_id))
+    job = jm.get_job(job_id) or {}
+    assert (job.get("status"), job.get("retry_count"), job.get("error_code")) == ("queued", 1, "provider_failure")
+    assert _stored(jm) == []
+
+
+@pytest.mark.unit
+async def test_audio_analyze_unreachable_provider_on_the_last_attempt_keeps_the_transcript(analyze_worker):
+    from tldw_Server_API.app.core.exceptions import NetworkError
+
+    worker, jm, adapter = analyze_worker
+    adapter.error = NetworkError("ConnectError")
+    job_id = _analyze_job(jm, "hello transcript")
+    max_retries = _exhaust_retries(jm, job_id)
+    await _run_worker_until(worker, lambda: _settled(jm, job_id, retries=max_retries + 1))
+    assert _stored(jm), "audio_analyze did not hand over to audio_store"
+    payload = _stored(jm)[0]["payload"]
+    assert payload["text"] == "hello transcript"
+    assert payload["analysis_error"]["code"] == "provider_failure"
+    assert "analysis" not in payload
 
 
 # --- the audio_convert -> audio_transcribe hand-off (TASK-13848) ---

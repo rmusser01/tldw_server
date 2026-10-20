@@ -2,7 +2,7 @@
 id: TASK-13865
 title: 'Summary errors: an egress-blocked endpoint, an unconfigured custom endpoint
   and local-provider 4xx replies get the wrong code'
-status: To Do
+status: In Progress
 labels:
 - llm
 - errors
@@ -24,6 +24,7 @@ Found while planning TASK-13844. EgressPolicyError (core/exceptions.py) is in ne
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-10-20-summary-codes-egress-custom-local.md (four tasks: egress and a local server that is down, custom base URL, local 4xx, docs and close-out; independent review folded in: 0 Blocker, 1 Important, 6 Minor). ADR assessment: none needed (the failures map to existing summary codes and one int is kept on ChatBadRequestError; ADR-025 followed, the local mapper keeps the upstream status as the shared _raise_sanitized_provider_failure does; ADR-026/030 followed, the transport keeps EgressPolicyError.reason_code and the summary only reads it).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

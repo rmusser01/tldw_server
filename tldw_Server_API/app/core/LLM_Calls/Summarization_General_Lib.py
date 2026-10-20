@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_name,
     custom_openai_provider_number,
 )
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     bind_provider_call_credentials,
@@ -107,7 +108,12 @@ _SUMMARIZATION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
 )
-_SUMMARY_ADAPTER_EXCEPTIONS = (ChatAPIError,) + _SUMMARIZATION_NONCRITICAL_EXCEPTIONS
+# Not ChatAPIErrors, and some adapters let them through untouched: an endpoint the egress policy
+# blocks, and a transport failure such as a local server that is down (it falls through to
+# provider_failure). They are caught only to type them for raise_on_error callers; the other
+# callers still get the exception itself.
+_SUMMARY_PASSTHROUGH_EXCEPTIONS = (EgressPolicyError, NetworkError)
+_SUMMARY_ADAPTER_EXCEPTIONS = (ChatAPIError, *_SUMMARY_PASSTHROUGH_EXCEPTIONS) + _SUMMARIZATION_NONCRITICAL_EXCEPTIONS
 
 _SUMMARY_ERROR_CODES = frozenset(
     {
@@ -148,6 +154,10 @@ def _native_http_disabled(adapter: Any) -> bool:
 
 def _summary_error_code(exc: BaseException, adapter: Any = None) -> str:
     """Map chat adapter failures to a bounded, detail-free summary taxonomy."""
+    if isinstance(exc, EgressPolicyError):
+        # As chat_service._map_provider_egress_error: a host that did not resolve may resolve on a
+        # retry; an endpoint the outbound policy blocks stays blocked until the configuration changes.
+        return "provider_failure" if exc.reason_code == "dns_unresolved" else "configuration"
     if isinstance(exc, ChatAuthenticationError):
         return "authentication"
     if isinstance(exc, ChatConfigurationError):
@@ -356,6 +366,8 @@ def _summarize_via_adapter(
                 if raise_on_error:
                     logging.error(f"Adapter streaming failed for {provider}")
                     raise SummaryProviderError(code=_summary_error_code(exc, adapter), provider=provider) from None
+                if isinstance(exc, _SUMMARY_PASSTHROUGH_EXCEPTIONS):
+                    raise
                 logging.error(f"Adapter streaming failed for {provider}")
                 yield f"Error: Provider streaming failed for '{provider}'."
             finally:
@@ -407,6 +419,8 @@ def _summarize_via_adapter(
         if raise_on_error:
             logging.error(f"Adapter summarization failed for {provider}")
             raise SummaryProviderError(code=_summary_error_code(exc, adapter), provider=provider) from None
+        if isinstance(exc, _SUMMARY_PASSTHROUGH_EXCEPTIONS):
+            raise
         logging.error(f"Adapter summarization failed for {provider}")
         return f"Error: Provider request failed for '{provider}'."
 
