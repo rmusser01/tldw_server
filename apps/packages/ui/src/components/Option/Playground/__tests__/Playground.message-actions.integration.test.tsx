@@ -400,6 +400,14 @@ describe("native admitted continuation through the actual Playground", { timeout
       expect(view.composer).toHaveValue("UNSENT NEXT QUESTION")
       // The original reply stays available as the other version of this answer.
       expect(within(savedAssistantRow()).getByTestId("variant-count-label")).toHaveTextContent("2 of 2")
+      // The pager follows the saved versions: back to the original reply and forward again.
+      await view.user.click(within(savedAssistantRow()).getByRole("button", { name: "Previous response" }))
+      await waitFor(() => expect(within(savedAssistantRow()).getByTestId("variant-count-label")).toHaveTextContent("1 of 2"), HARNESS_WAIT)
+      expect(savedAssistantRow()).toHaveTextContent("Saved answer")
+      expect(savedAssistantRow()).not.toHaveTextContent("and the rest of it.")
+      await view.user.click(within(savedAssistantRow()).getByRole("button", { name: "Next response" }))
+      await waitFor(() => expect(savedAssistantRow()).toHaveTextContent("Saved answer and the rest of it."), HARNESS_WAIT)
+      expect(within(savedAssistantRow()).getByTestId("variant-count-label")).toHaveTextContent("2 of 2")
     })
   })
 
