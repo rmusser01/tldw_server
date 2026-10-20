@@ -36,6 +36,8 @@ export type FakeChatMessage = {
   parent_message_id?: string | null
   created_at: string
   version: number
+  /** Generation metadata the server records with a reply it settles (D7), e.g. `generation_status`. */
+  metadata_extra?: Record<string, unknown>
 }
 
 export type FakeChat = {
@@ -200,7 +202,17 @@ const OPENAPI_SPEC = {
   }
 }
 
-export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: FakeCatalog } = {}) => {
+export const createFakeTldwServer = ({
+  catalog = DEFAULT_CATALOG,
+  nativeCompletion = false
+}: {
+  catalog?: FakeCatalog
+  /**
+   * Advertise `native_completion_v1` on send captures, like the real server
+   * without Sync v2, so a saved chat's turns are settled by the server (D7).
+   */
+  nativeCompletion?: boolean
+} = {}) => {
   const requests: RecordedRequest[] = []
   const unhandled: RecordedRequest[] = []
   const chats = new Map<string, FakeChat>()
@@ -245,7 +257,8 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
     content: message.content,
     created_at: message.created_at,
     version: message.version,
-    parent_message_id: message.parent_message_id ?? null
+    parent_message_id: message.parent_message_id ?? null,
+    ...(message.metadata_extra ? { metadata_extra: message.metadata_extra } : {})
   })
 
   const appendMessage = (
@@ -330,7 +343,7 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
    * `save_to_db: true` on /chat/completions persists the turn server side, into
    * `conversation_id` or a new conversation, like the real endpoint.
    */
-  const persistCompletionTurn = (body: JsonBody | undefined, reply: string, edited: ReturnType<typeof admitEditedCompletion>, { canonicalHistoryJson, historyDigest }: HistoryCanonical) => {
+  const persistCompletionTurn = (body: JsonBody | undefined, reply: string, edited: ReturnType<typeof admitEditedCompletion>, { canonicalHistoryJson, historyDigest }: HistoryCanonical, finishReason?: string) => {
     if (body?.save_to_db !== true) return null
     const existing = body.conversation_id ? chats.get(String(body.conversation_id)) : undefined
     const selection = body.tldw_history_selection_v1
@@ -385,12 +398,14 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
         inputAdmissions.set(user.id, admission)
       }
     }
-    const assistant = appendMessage(chat, { role: "assistant", content: prefix + reply, parent_message_id: user.id })
+    // Like the server, a reply cut off at the output limit is saved with that status.
+    const assistant = appendMessage(chat, { role: "assistant", content: prefix + reply, parent_message_id: user.id,
+      ...(finishReason === "length" ? { metadata_extra: { generation_status: "length", finish_reason: "length" } } : {}) })
     return { conversationId: chat.id, assistantId: assistant.id, admission }
   }
 
   /** Emulates the native history-selection capture with the client's own resolver. */
-  const captureSelection = (chat: FakeChat, request: JsonBody) => {
+  const captureSelection = (chat: FakeChat, request: JsonBody, advertiseNativeCompletion = false) => {
     const ownerKey = "harness-native-owner"
     const view = { ...request.view, owner_key: ownerKey }
     const nodes = chat.messages.map((message, index) => ({
@@ -423,8 +438,12 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
       return { status: resolved.status, code: resolved.code, snapshot, view }
     }
     const text = new Map(chat.messages.map((message) => [message.id, message.content]))
+    const extra = new Map(chat.messages.map((message) => [message.id, message.metadata_extra]))
     return {
       status: "captured",
+      ...(advertiseNativeCompletion && request.purpose === "send"
+        ? { native_completion_v1: { policy: "selected_history_v1", supported: true, storage_context_digest: "storage" } }
+        : {}),
       snapshot,
       view,
       rows: resolved.rows,
@@ -434,7 +453,8 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
         id: row.id,
         revision: row.revision,
         message: text.get(row.id) ?? "",
-        images: []
+        images: [],
+        ...(extra.get(row.id) ? { extra_metadata: extra.get(row.id) } : {})
       }))
     }
   }
@@ -453,7 +473,7 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
     const reply = plan.chunks ? plan.chunks.join("") : (plan.reply ?? defaultReply)
     const model = body?.model ?? FAKE_MODEL
     let persisted: Awaited<ReturnType<typeof persistCompletionTurn>>
-    try { persisted = persistCompletionTurn(body, reply, edited, canonical) }
+    try { persisted = persistCompletionTurn(body, reply, edited, canonical, plan.finishReason) }
     catch (error) {
       // Matches the server: a saved-reply refusal is an unsupported history capability.
       return edited ? editRefusal(error) : json({ detail: { status: "unsupported_history_capability",
@@ -513,7 +533,8 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
               id: "chatcmpl-harness",
               object: "chat.completion.chunk",
               model,
-              ...(persisted ? { tldw_conversation_id: persisted.conversationId, tldw_message_id: persisted.assistantId } : {}),
+              ...(persisted ? { tldw_conversation_id: persisted.conversationId, tldw_message_id: persisted.assistantId,
+                ...(persisted.admission ? { tldw_user_message_id: persisted.admission.input_message_id } : {}) } : {}),
               choices: [{ index: 0, delta: {}, finish_reason: plan.finishReason ?? "stop" }]
             })
           )
@@ -601,7 +622,9 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
     const capture = path.match(/^\/api\/v1\/chat\/conversations\/([^/]+)\/history\/selection$/)
     if (capture && method === "POST") {
       const chat = chats.get(decodeURIComponent(capture[1]))
-      return chat ? json(captureSelection(chat, body)) : json({ detail: "Chat not found" }, 404)
+      return chat
+        ? json(captureSelection(chat, body ?? {}, nativeCompletion && request.query.include_native_completion === "true"))
+        : json({ detail: "Chat not found" }, 404)
     }
     if ((path === "/api/v1/chats/" || path === "/api/v1/chats") && method === "GET") {
       const list = [...chats.values()].map(chatSummary)

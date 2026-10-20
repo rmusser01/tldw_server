@@ -238,6 +238,18 @@ export const savedReplyActionAvailability = ({
   }
 }
 
+/**
+ * Whether the last reply's recorded status (Output limit reached, Interrupted)
+ * may offer its Continue and Retry. Those actions run on the server's saved
+ * reply (D7), so they are offered only when the selection shows that reply as
+ * the last saved reply of a server chat; the recorded status grants nothing by
+ * itself (CM-03).
+ */
+export const savedReplyStatusOffersActions = (
+  historySelection: HistorySelectionController | null | undefined,
+  messages: readonly Message[]
+): boolean => nativeSavedReplyTarget(historySelection, messages) !== null
+
 /** Plain explanation shown on a disabled Regenerate control. */
 export const savedReplyRegenerateUnavailableReason = (
   block: SavedReplyActionBlock | null,

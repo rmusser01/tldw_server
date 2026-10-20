@@ -572,6 +572,44 @@ describe("PlaygroundMessage error recovery integration", () => {
     expect(screen.queryByText("Output limit reached")).not.toBeInTheDocument()
   })
 
+  it.each([
+    ["length", "Output limit reached"],
+    ["interrupted", "Interrupted"]
+  ])("CM-03 offers Continue and Retry on a saved %s reply whose actions run on the server", async (status, label) => {
+    const user = userEvent.setup()
+    const onRegenerate = vi.fn()
+    const onContinue = vi.fn()
+
+    render(
+      <PlaygroundMessage
+        {...baseProps}
+        onRegenerate={onRegenerate}
+        onContinue={onContinue}
+        savedStatusActions
+        metadataExtra={{ generation_status: status }}
+      />
+    )
+
+    const notice = screen.getByRole("status", { name: label })
+    expect(notice).toHaveTextContent("The saved content is kept.")
+    await user.click(within(notice).getByRole("button", { name: "Continue from partial" }))
+    expect(onContinue).toHaveBeenCalledTimes(1)
+    await user.click(within(notice).getByRole("button", { name: "Retry same model" }))
+    expect(onRegenerate).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    ["stopped", "Stopped", { metadataExtra: { generation_status: "stopped" } }],
+    ["failed", "Generation failed", { metadataExtra: { generation_status: "error" } }],
+    ["older", "Output limit reached", { metadataExtra: { generation_status: "length" }, currentMessageIndex: 0, totalMessages: 3 }],
+    ["busy", "Output limit reached", { metadataExtra: { generation_status: "length" }, isProcessing: true }]
+  ])("CM-03 keeps a %s saved reply's status passive", (_label, statusLabel, props) => {
+    render(<PlaygroundMessage {...baseProps} savedStatusActions {...props} />)
+    expect(screen.getByRole("status", { name: statusLabel })).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Retry same model" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "Continue from partial" })).not.toBeInTheDocument()
+  })
+
   it("renders recovery for completed assistant turns with no visible text", async () => {
     const user = userEvent.setup()
     const onRegenerate = vi.fn()

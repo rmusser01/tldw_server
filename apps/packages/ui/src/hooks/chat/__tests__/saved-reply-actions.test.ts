@@ -6,7 +6,8 @@ import {
   rememberSavedReplyRefusal,
   resetSavedReplyRefusals,
   savedReplyActionAvailability,
-  savedReplyRegenerateUnavailableReason
+  savedReplyRegenerateUnavailableReason,
+  savedReplyStatusOffersActions
 } from "../saved-reply-actions"
 import type { HistorySelectionController } from "../useHistorySelection"
 import type { Message } from "@/store/option"
@@ -113,6 +114,26 @@ describe("saved reply action availability (CM-01)", () => {
     const interrupted = [visible[0], { id: "local-draft", isBot: true, name: "Assistant", message: "Part", sources: [], generationInfo: { interrupted: true } }]
     expect(savedReplyActionAvailability({ historySelection: ready(), messages: interrupted as Message[] }))
       .toEqual({ regenerate: null, continue: "unsupported" })
+  })
+})
+
+describe("recorded reply status actions (CM-03)", () => {
+  it("lets the last saved reply of a server chat offer its Continue and Retry", () => {
+    expect(savedReplyStatusOffersActions(ready(), visible)).toBe(true)
+  })
+
+  it.each([
+    ["no selected saved history", null],
+    ["a new chat", controller({ status: "idle" })],
+    ["a loading saved chat", controller({ status: "loading", owner: { kind: "native" } })],
+    ["a local owner", ready({}, { kind: "local" })],
+    ["a legacy linear history", ready({ interpretation: { kind: "legacy_linear_v1", projection_id: "p" } })]
+  ])("keeps the recorded status passive for %s", (_label, historySelection) => {
+    expect(savedReplyStatusOffersActions(historySelection, visible)).toBe(false)
+  })
+
+  it("keeps the recorded status passive when the visible reply is not the saved one", () => {
+    expect(savedReplyStatusOffersActions(ready(), [visible[0], { ...visible[1], message: "Edited locally" }])).toBe(false)
   })
 })
 

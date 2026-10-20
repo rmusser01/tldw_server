@@ -248,6 +248,11 @@ type Props = {
   totalMessages: number
   onRegenerate: () => void
   regenerateDisabledReason?: string | null
+  /**
+   * This reply's Continue and Retry run on the server's saved reply (D7), so its
+   * recorded output-limit or interrupted status may offer them (CM-03).
+   */
+  savedStatusActions?: boolean
   onEditFormSubmit: (
     value: string,
     isSend: boolean,
@@ -586,6 +591,8 @@ const PlaygroundMessageImpl = (props: Props) => {
   const liveOutputLimited =
     !hasSavedGenerationStatus && props.isBot && props.role !== "system" &&
     !isImageGenerationMessageType(props.message_type) && isOutputLimitedReply(props.generationInfo)
+  const recordedIncomplete = props.savedStatusActions === true &&
+    (savedPartialStatus === "length" || savedPartialStatus === "interrupted")
   const savedUsage = savedGeneration?.usage
   const savedPartialCopy = savedPartialStatus
     ? savedPartialStatusCopy[savedPartialStatus]
@@ -1868,7 +1875,7 @@ const PlaygroundMessageImpl = (props: Props) => {
 
   const outputLimitRecoveryActions = React.useMemo(
     () =>
-      !liveOutputLimited || !isLastMessage || errorPayload || responseRecoveryBusy
+      (!liveOutputLimited && !recordedIncomplete) || !isLastMessage || errorPayload || responseRecoveryBusy
         ? []
         : incompleteReplyRecoveryActions({
             t: (key, fallback) => t(key, fallback) as string,
@@ -1878,7 +1885,7 @@ const PlaygroundMessageImpl = (props: Props) => {
             onContinue: props.onContinue && !props.hideContinue
               ? () => runResponseRecovery(() => props.onContinue?.(), true) : undefined
           }),
-    [liveOutputLimited, isLastMessage, errorPayload, responseRecoveryBusy, runResponseRecovery,
+    [liveOutputLimited, recordedIncomplete, isLastMessage, errorPayload, responseRecoveryBusy, runResponseRecovery,
       handleOpenModelSettings, props.hideContinue, props.onContinue, props.onRegenerate,
       props.regenerateDisabledReason, t]
   )

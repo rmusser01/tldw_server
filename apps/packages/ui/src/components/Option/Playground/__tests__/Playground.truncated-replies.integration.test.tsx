@@ -15,6 +15,7 @@ import {
   renderPlayground,
   resetPlaygroundHarness,
   screen,
+  sendFromComposer,
   visibleNotifications,
   waitFor,
   waitForChatIdle,
@@ -135,5 +136,41 @@ describe("Playground cut-off replies (CM-03)", { timeout: 90_000 }, () => {
     )
     // The continued reply finished normally, so it is no longer marked incomplete.
     expect(within(lastReply()).queryByRole("status", { name: "Output limit reached" })).toBeNull()
+  })
+
+  it("CM-03: a saved chat's reply the server recorded at the output limit offers Continue and Retry, and Continue saves the rest", async () => {
+    const server = createFakeTldwServer({ nativeCompletion: true })
+    server.planCompletion({ chunks: ["Here is the first part of a long answer that was cut off mid-"], finishReason: "length" })
+    const view = await renderPlayground({ server })
+
+    await sendFromComposer(view, "Explain everything")
+
+    // The server settles the reply and records that it hit the output limit.
+    const [chat] = [...server.chats.values()]
+    expect(chat.messages.at(-1)?.metadata_extra).toMatchObject({ generation_status: "length" })
+    const notice = await within(lastReply()).findByRole("status", { name: "Output limit reached" }, HARNESS_WAIT)
+    expect(within(notice).getByRole("button", { name: "Retry same model" })).toBeEnabled()
+    const continueButton = within(notice).getByRole("button", { name: "Continue from partial" })
+
+    server.planCompletion({ reply: " sentence, and the rest." })
+    await view.user.click(continueButton)
+    await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)
+    await waitForChatIdle()
+    // Continue runs on the saved reply (D7): the server saves it plus the rest as another version.
+    expect(server.completionRequests()[1].body).toMatchObject({
+      save_to_db: true,
+      metadata: { tldw_continue_from_message_id: chat.messages[1].id }
+    })
+    await waitFor(
+      () => expect(lastReply()).toHaveTextContent("Here is the first part of a long answer that was cut off mid- sentence, and the rest."),
+      HARNESS_WAIT
+    )
+    expect(within(lastReply()).queryByRole("status", { name: "Output limit reached" })).toBeNull()
+    expect(chat.messages.map((row) => row.content)).toEqual([
+      "Explain everything",
+      "Here is the first part of a long answer that was cut off mid-",
+      "Here is the first part of a long answer that was cut off mid- sentence, and the rest."
+    ])
+    expect(visibleNotifications()).toEqual([])
   })
 })
