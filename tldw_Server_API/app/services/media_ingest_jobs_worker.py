@@ -630,6 +630,7 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
                 temp_dir=temp_dir,
                 user_id=int(user_id) if user_id.isdigit() else None,
                 cancel_check=cancel_check,
+                analysis_refusal=analysis_refusal,
             )
         else:
             progress.percent = 20.0
