@@ -93,7 +93,9 @@ describe("notes option route identity", () => {
         'import NotesManagerPage from "@/components/Notes/NotesManagerPage"'
       )
       // The route supplies the router-aware leave guard (#3102 NS-01).
-      expect(optionModule).toContain('<NotesManagerPage sourceNoteId={new URLSearchParams(search).get("source_ref_id")} LeaveGuard={RouteLeaveGuard} />')
+      expect(optionModule).toContain('<NotesManagerPage sourceNoteId={sourceNoteId} onNoteSelectionChange={onNoteSelectionChange} LeaveGuard={RouteLeaveGuard} />')
+      // The address names the open note (XP-05).
+      expect(optionModule).toContain('import { useNotesRouteAddress } from "@/routes/hooks/useNotesRouteAddress"')
       expect(optionModule).toContain('import { RouteLeaveGuard } from "@/entries/shared/route-leave-guard"')
       expect(optionModule).not.toMatch(/components\/Notes\/(?!NotesManagerPage)/)
     }
