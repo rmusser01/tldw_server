@@ -65,7 +65,10 @@ async def _run_cancelling_siblings(coros: list[Coroutine[Any, Any, Any]]) -> lis
     except BaseException:
         for task in tasks:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        except asyncio.CancelledError:
+            pass  # e.g. the step timeout fired while they stopped: report the sub-step's own error, not a timeout
         raise
 
 
@@ -428,12 +431,14 @@ async def run_parallel_adapter(config: dict[str, Any], context: dict[str, Any]) 
                     errors.append("parallel_step_error")
             except LLMQuotaExceededError:
                 raise  # the user's limit fails the step, with or without fail_fast (TASK-13638)
-            except Exception:
+            except Exception as exc:
                 if fail_fast:
                     raise
+                logger.warning("parallel sub-step {} ({}) failed: {}", idx, step_type, type(exc).__name__)
                 results[idx] = {"error": "parallel_step_error"}
             except asyncio.CancelledError:
-                if fail_fast or asyncio.current_task().cancelling():
+                current = asyncio.current_task()
+                if fail_fast or (current is not None and current.cancelling()):
                     raise  # the step, or a failed sibling, cancelled it
                 results[idx] = {"error": "parallel_step_error"}  # the sub-step's own CancelledError
 
