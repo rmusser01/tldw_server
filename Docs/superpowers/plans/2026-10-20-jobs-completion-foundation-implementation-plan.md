@@ -10,7 +10,7 @@
 
 **Spec:** [Approved completion extraction design](../specs/2026-10-04-jobs-completion-extraction-design.md), approved 2026-10-20.
 
-**Tracking:** TASK-13875; assessment TASK-13421. Human approved the plan and selected subagent-driven execution on 2026-10-20. Stage 1 is In Progress; later stages are Not Started. The provisional Jobs TASK-13871 is archived because a concurrent VN merge introduced that same ID.
+**Tracking:** TASK-13878; assessment TASK-13421. Human approved the plan and selected subagent-driven execution on 2026-10-20. Stage 1 is In Progress; later stages are Not Started. Provisional Jobs TASK-13871 and TASK-13875 are archived because their IDs also belong to VN and Moderation records. Those unrelated records remain unchanged.
 
 **Baseline:** Live dev `454974e812f8faf8532c931f3f7c8e0bf8d9445c`; this documentation branch is rebased onto it. The 16 completion/policy/context/helper function ASTs are unchanged from the approved October 4 baseline. Fresh existing completion/event/RLS baseline: 86 passed, 227 warnings, no skips; `/tmp/jobs_completion_plan_baseline_20261020.xml`. This is not foundation qualification.
 
@@ -128,6 +128,19 @@ Production/provisioners/conftests remain unchanged. Exact commands, reused cover
 map, self-review and pre-existing TASK-13875 identifier collision are recorded in
 `.superpowers/sdd/2026-10-20-jobs-completion-foundation-implementation-plan/task-1-report.md`.
 
+Task 1 review fix round 1 (I1, TASK-13878; 2026-10-20): removed all three new
+Bandit B106 suppressions using equivalent marker values/argument helpers; original
+implementation commit `99f1d0cba1` and production behavior are unchanged. The two
+affected paired test functions pass **20 cases, 299 warnings, 0 skips** (21.74s).
+Ruff, scoped Black, compilation and whitespace pass. Fresh test Bandit compared
+with execution BASE `be07b6618217743938ea395bc756cf15fb0426aa` reports identical
+14 semantic findings, 0 errors, **skipped_tests 0/0 and nosec 0/0**: no new findings
+or suppressions. This corrects the initial evidence, whose 3 targeted suppressions
+did not satisfy the separate no-new-suppressions gate. Exact commands/results and
+self-review are appended to the Task 1 report. Controller tracking repair to
+TASK-13878 is retained; archived Jobs and unrelated Moderation records are not
+edited. Controller owns review acceptance and the ledger.
+
 ## Task 2: Add Completion-Only Contracts
 
 ### Stage 2
@@ -200,7 +213,7 @@ The later facade adapter owns binding/parsing/clock preparation together, so it 
 - [ ] Write parameterized outcome/invariant tests and Hypothesis tests: `assert replay.public_success is True`; `assert no_transition.public_success is False`; `assert applied.locked_row is row`; all legal metric-prefix lengths accepted, conflicting SLA forms/duplicate bindings/payload on replay rejected. Constructors must not call any recording policy stub. Test raw `None`, empty/noncanonical UUIDs, naive/aware/raw timestamp fields without normalization.
 - [ ] Run `RUN_JOBS=1 python -m pytest -q tldw_Server_API/tests/Jobs/test_jobs_completion_contracts.py`; expect missing-module/import failure before implementation, not an unrelated fixture failure.
 - [ ] Implement the specified contracts only, with module/class/function docstrings and type hints; no backend or manager imports. Run the same tests to green and rerun Stage 1. Add a cold-import check that importing this contracts module loads neither psycopg nor Jobs modules.
-- [ ] Commit contracts/tests/plan/task notes: `refactor(jobs): add shallow completion contracts (TASK-13875)`.
+- [ ] Commit contracts/tests/plan/task notes: `refactor(jobs): add shallow completion contracts (TASK-13878)`.
 
 ## Task 3: Relocate Shared Helpers Mechanically
 
@@ -235,7 +248,7 @@ The policy module takes the existing `try: import psycopg`/`except ImportError` 
 - [ ] Move one responsibility at a time and import it back into manager under its exact private name. Keep every caller untouched, including completion/SLA, `fail_job` terminal/retry/quarantine, `reschedule_jobs`, and `retry_now_jobs`. No new observer preparer or production completion-contract import is needed.
 - [ ] After each move run the direct helper test plus Stage 1 and affected matrix tests. Preserve `_insert_lifecycle_event`'s `json.dumps(attrs or {})`, raw values, counter SQL, INERROR guard and exact exception-class identity.
 - [ ] Before committing, compare `ast.dump(..., include_attributes=False)` for each moved function against execution-baseline `git show` and for `JobManager.complete_job` against the unchanged baseline. Inspect SQL strings/parameter order and imports manually; store the comparison result in task notes, not a brittle permanent facade source snapshot. Changed AST bodies require explanation/review, not automatic acceptance.
-- [ ] Commit mechanical moves and evidence: `refactor(jobs): relocate lifecycle persistence helpers (TASK-13875)`.
+- [ ] Commit mechanical moves and evidence: `refactor(jobs): relocate lifecycle persistence helpers (TASK-13878)`.
 
 ## Task 4: Qualify and Prepare the Foundation PR
 
@@ -276,7 +289,7 @@ Append `--junitxml=/tmp/task13871_postgres.xml`. Expected: zero failures and zer
 - [ ] Before production moves, retain baseline Bandit JSON for manager and touched existing tests. After moves run project-venv `python -m bandit -r <touched-production-paths> -f json -o /tmp/bandit_task13871_prod.json` and a separate touched-test scan with `-s B101 -o /tmp/bandit_task13871_tests.json`. Compare semantic findings (test ID, code, severity/confidence), mapping mechanically relocated helper findings to their old definitions rather than treating line-number churn as new defects. No new findings/errors or new suppressions; record inherited warnings and exact comparison, not just the scan exit code.
 - [ ] Run `python -m pytest -q tldw_Server_API/tests/Docs` with the repository-supported MkDocs toolchain. If canonical ADR/docs metadata changed, run `bash Helper_Scripts/refresh_docs_published.sh`, require a deterministic second refresh and canonical/generated parity, then rerun strict Docs checks. Never publish this private plan into the public tree.
 - [ ] Perform whole-branch review: no new backend completion modules/entry points, unchanged complete_job AST and SQL, mechanically identical helper bodies, no new driver import/DB-to-Jobs dependencies, all policy/preparation/cleanup fault paths accounted for, and spec-to-test coverage including shared callers. Fix only foundation-caused regressions; create separate tasks for validated inherited ordinary defects.
-- [ ] Record fresh verification and remaining blockers in TASK-13875; mark stages Complete only when actually complete. With separate PR authorization, use explicit `--repo rmusser01/tldw_server`, target current `dev`, attach the created PR to this chat, and request a new human-written Change summary. Do not reuse PR #3092's summary or treat written-spec/plan approval as merge approval. Obey current repository merge-queue and exact-head hosted/Jobs requirements; no bypass/admin merge or unrelated CI cancellation.
+- [ ] Record fresh verification and remaining blockers in TASK-13878; mark stages Complete only when actually complete. With separate PR authorization, use explicit `--repo rmusser01/tldw_server`, target current `dev`, attach the created PR to this chat, and request a new human-written Change summary. Do not reuse PR #3092's summary or treat written-spec/plan approval as merge approval. Obey current repository merge-queue and exact-head hosted/Jobs requirements; no bypass/admin merge or unrelated CI cancellation.
 - [ ] Commit final plan/task evidence with normal hooks. Reverting the foundation at its own merge point restores helper definitions/imports and removes unused contracts; after routing depends on it, revert routing first. Routing gets a new task/plan only after this foundation merges.
 
 ## Plan Review and Execution Gate
