@@ -53,13 +53,15 @@ export function useKeepInterruptedHistoryTurns({
 
   React.useEffect(() => {
     const controller = selectionRef.current
-    if (!controller || status !== "ready" || !recoveries?.length) return
+    if (!controller || !recoveries?.length) return
     const pending = recoveries
       .filter(
         (entry) =>
           entry.turn.action === undefined &&
           !entry.turn.roleplay_resume &&
-          (entry.turn.persistence !== 'server' || entry.turn.settled_message_id) &&
+          (entry.turn.persistence !== 'server' || entry.turn.settled_message_id || entry.turn.existing_selection) &&
+          (status === "ready" ||
+            (status === "stale_selection" && entry.turn.existing_selection)) &&
           entry.turn.outcome &&
           !isHistoryTurnLive(entry.turn.operation_id) &&
           !keptRef.current.has(entry.turn.operation_id)

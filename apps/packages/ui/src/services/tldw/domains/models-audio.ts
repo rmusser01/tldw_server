@@ -1,3 +1,4 @@
+import { requestScopeFields } from "./service-prompts"
 import {
   bgRequest,
   sanitizeResponseData
@@ -1071,7 +1072,9 @@ export const modelsAudioMethods = {
     audioFile: File | Blob,
     options?: any
   ): Promise<any> {
+    options?.signal?.throwIfAborted()
     await this.ensureConfigForRequest(true)
+    options?.signal?.throwIfAborted()
     const fields: Record<string, any> = {}
     if (options) {
       if (options.model != null) fields.model = options.model
@@ -1102,9 +1105,11 @@ export const modelsAudioMethods = {
       }
     }
     const data = await audioFile.arrayBuffer()
+    options?.signal?.throwIfAborted()
     const name = (typeof File !== 'undefined' && audioFile instanceof File && (audioFile as File).name) ? (audioFile as File).name : 'audio'
     const type = (audioFile as any)?.type || 'application/octet-stream'
-    return await this.upload<any>({ path: '/api/v1/audio/transcriptions', method: 'POST', fields, file: { name, type, data } })
+    // Local ASR can exceed the generic ten-second request budget.
+    return await this.upload<any>({ path: '/api/v1/audio/transcriptions', method: 'POST', ...requestScopeFields(options?.requestScope), abortSignal: options?.signal, timeoutMs: options?.timeoutMs ?? 180000, fields, file: { name, type, data } })
   },
 
   async synthesizeSpeech(

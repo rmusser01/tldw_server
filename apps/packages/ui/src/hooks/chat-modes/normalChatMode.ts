@@ -38,6 +38,8 @@ import {
   beginChatTurnSettlement,
   wasChatTurnStoppedByUser
 } from "@/hooks/chat/abort-turn-cleanup"
+import { buildFriendlyErrorMessage, decodeChatErrorPayload } from "@/utils/chat-error-message"
+import { useStoreChatModelSettings } from "@/store/model"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { resolveChatToolRequest } from "@/utils/chat-tools"
 import { systemPromptForNonRagOption } from "~/services/tldw-server"
@@ -211,6 +213,8 @@ type NormalChatModeParams = {
     retryAdmission?: HistoryAdmissionReferenceV1
     editResend?: NativeHistoryEditResend
     retryRecoveries?: HistoryTurnRecoveryEntry[]
+    /** The source instruction block explicitly reviewed for this recovery retry. */
+    reviewedSystemPrompts?: string[]
   }
   historyTurn?: HistorySendTurn
 
@@ -710,6 +714,16 @@ const normalChatModeDefinition: ChatModeDefinition<NormalChatModeParams> = {
     }
 
     let currentSystemMessages: typeof applicationChatHistory = []
+    const reviewedSystemPrompts = ctx.historySelection?.reviewedSystemPrompts
+    if (reviewedSystemPrompts) {
+      if (ctx.selectedSystemPrompt && !selectedPrompt)
+        throw new Error("retry_prompt_unavailable")
+      // Bind the review to the strings this preparation actually uses. Later
+      // awaits format this captured block; they never reread Prompt/default sources.
+      if (canonicalHistoryJson(baseSystemPrompts) !== canonicalHistoryJson(reviewedSystemPrompts))
+        throw new Error("retry_context_changed")
+    }
+
     if (baseSystemPrompts.length > 0) {
       const promptMessages = await Promise.all(
         baseSystemPrompts.map((content) =>
@@ -787,6 +801,7 @@ export const captureNormalChatPreparation = (
 const captureNormalHistoryTurn = async (
   params: ChatModeParamsBase & HistoryChatModeParams,
   message: string,
+  image: string,
   snapshot: ServicePromptSnapshot,
   signal: AbortSignal,
   dispatchIsCurrent: () => boolean,
@@ -1175,6 +1190,7 @@ const captureNormalHistoryTurn = async (
   // record of the turn.
   let recoveryWrites: Promise<void> = Promise.resolve()
   let lastRecord: HistoryTurnRecovery | null = null
+  let settlementPayload: import("@/db/dexie/types").Message | undefined
   const saveRecord = (next: HistoryTurnRecovery) => {
     const write = recoveryWrites.then(async () => {
       lastRecord = next
@@ -1194,7 +1210,7 @@ const captureNormalHistoryTurn = async (
     state: HistoryTurnRecovery["state"],
     extra: Pick<
       Partial<HistoryTurnRecovery>,
-      "outcome" | "interruption_reason" | "settled_message_id"
+      "outcome" | "interruption_reason" | "failure_reason" | "settled_message_id"
     > = {}
   ): HistoryTurnRecovery => ({
     operation_id: operationId,
@@ -1221,6 +1237,10 @@ const captureNormalHistoryTurn = async (
     ...(turn.admission
       ? { admission: historyAdmissionReference(turn.admission) }
       : {}),
+    ...(turn.existingSelection && turn.selection
+      ? { existing_selection: structuredClone(turn.selection) }
+      : {}),
+    ...(settlementPayload ? { settlement_payload: structuredClone(settlementPayload) } : {}),
     ...extra
   })
   // A server chat holds the question once it is admitted; until the reply is
@@ -1242,7 +1262,7 @@ const captureNormalHistoryTurn = async (
     checkpointTimer = null
     const content = pendingCheckpoint
     pendingCheckpoint = null
-    if (checkpointsStopped || content == null || !turn.admission) return
+    if (checkpointsStopped || content == null || (!turn.admission && !turn.existingSelection)) return
     lastCheckpointAt = Date.now()
     // If the page goes away now, this partial reply was interrupted.
     void saveRecord(
@@ -1304,8 +1324,16 @@ const captureNormalHistoryTurn = async (
         endReplyWrite = beginServerChatWrite(turn.owner.conversation_id)
       await saveRecord(record(turn, "", "accepted_unsent"))
     },
+    stageSettlementPayload: async (message) => {
+      if (!turn.existingSelection || message.id !== turn.assistantId ||
+          message.parent_message_id !== turn.input?.id)
+        throw new Error("history_operation_conflict")
+      stopCheckpoints()
+      settlementPayload = structuredClone(message)
+      await saveRecord(record(turn, message.content, "generated_unsaved", { outcome: "complete" }))
+    },
     checkpoint: (content) => {
-      if (checkpointsStopped || !turn.admission || !content.trim()) return
+      if (checkpointsStopped || (!turn.admission && !turn.existingSelection) || !content.trim()) return
       pendingCheckpoint = content
       if (checkpointTimer) return
       const wait = Math.max(
@@ -1363,25 +1391,32 @@ const captureNormalHistoryTurn = async (
       }
       // A reply the server never received leaves the server copy incomplete.
       endReplyWrite?.(turn.persistence === "server" ? "unknown" : data.content.trim() ? "failed" : "unknown")
+      const failure = !data.outcome && error != null
+        ? decodeChatErrorPayload(buildFriendlyErrorMessage(error))
+        : null
       await saveRecord(
         record(
           turn,
           data.content,
           data.content
             ? "generated_unsaved"
-            : turn.admission
+            : turn.admission || turn.existingSelection
               ? "accepted_unsent"
               : "unknown",
-          data.outcome
-            ? {
-                outcome: data.outcome,
-                ...(data.interruptionReason
-                  ? { interruption_reason: data.interruptionReason }
-                  : {})
-              }
-            : {}
+          {
+            ...(data.outcome ? {
+              outcome: data.outcome,
+              ...(data.interruptionReason
+                ? { interruption_reason: data.interruptionReason }
+                : {})
+            } : {}),
+            ...(failure ? { failure_reason: `${failure.summary} ${failure.hint}` } : {})
+          }
         )
       )
+      // Keep the admitted question selected so a deliberate no-output retry can reuse it.
+      if (turn.admission && !data.content && !data.outcome && !turn.existingSelection)
+        await controller.followResult(view, turn.admission.input_message_id)
       await controller.refreshRecovery?.()
     },
     cancelPreparation: async () => {
@@ -1508,6 +1543,7 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
       const historyTurn = await captureNormalHistoryTurn(
         { ...params, historyPreparation: preparation },
         message,
+        image,
         servicePromptSnapshot!,
         executionSignal,
         preparation!.dispatchIsCurrent,

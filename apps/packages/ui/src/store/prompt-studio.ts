@@ -1,4 +1,5 @@
-import { create } from "zustand"
+import React from "react"
+import { create, useStore } from "zustand"
 
 export type StudioSubTab =
   | "projects"
@@ -94,7 +95,7 @@ const initialState = {
   editingTestCaseId: null
 }
 
-export const usePromptStudioStore = create<PromptStudioState>((set) => ({
+const createPromptStudioStore = () => create<PromptStudioState>((set) => ({
   ...initialState,
 
   setActiveSubTab: (activeSubTab) => set({ activeSubTab }),
@@ -157,3 +158,22 @@ export const usePromptStudioStore = create<PromptStudioState>((set) => ({
 
   resetStore: () => set(initialState)
 }))
+
+// Each authenticated Studio workspace owns its selections, drafts and async setters.
+// Standalone consumers retain their existing store contract outside the workspace.
+const standaloneStore = createPromptStudioStore()
+const PromptStudioStoreContext = React.createContext<ReturnType<typeof createPromptStudioStore> | null>(null)
+
+export const PromptStudioStoreProvider = ({ children }: React.PropsWithChildren) => {
+  const parentStore = React.useContext(PromptStudioStoreContext)
+  const [store] = React.useState(createPromptStudioStore)
+  return React.createElement(PromptStudioStoreContext.Provider, { value: parentStore ?? store }, children)
+}
+
+export const usePromptStudioStore = Object.assign(
+  function usePromptStudioStore<T>(selector: (state: PromptStudioState) => T): T {
+    const store = React.useContext(PromptStudioStoreContext) ?? standaloneStore
+    return useStore(store, selector)
+  },
+  standaloneStore
+)

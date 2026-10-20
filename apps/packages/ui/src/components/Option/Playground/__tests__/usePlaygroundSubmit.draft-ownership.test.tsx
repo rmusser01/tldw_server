@@ -15,6 +15,9 @@ import { useStoreChatModelSettings } from "@/store/model";
 import { createSidepanelChatHandoff } from "@/services/sidepanel-chat-handoff";
 import { useSidepanelChatHandoffImport } from "../hooks/useSidepanelChatHandoffImport";
 import { usePlaygroundSubmit } from "../hooks/usePlaygroundSubmit";
+import { buildCompareModelMetaById, compareModelsSupportCapability } from "../compare-preflight";
+import { getCanonicalModelKey } from "@/hooks/playground/modelSelectorUtils";
+const visionModel = { model: "tldw:vision-test", id: "vision-test", provider: "llama.cpp" };
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -25,6 +28,7 @@ vi.mock("react-i18next", () => ({
 
 const services = vi.hoisted(() => ({
   account: "alice" as string | null,
+  scopeBarrier: null as Promise<void> | null,
   embedding: vi.fn<() => Promise<string | null>>(),
   simpleSearch: vi.fn<() => Promise<boolean>>(),
   upload: vi.fn(),
@@ -38,6 +42,7 @@ vi.mock(
 vi.mock("@/services/service-prompts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/service-prompts")>()),
   resolveServicePromptScope: async () => {
+    if (services.scopeBarrier) await services.scopeBarrier;
     if (!services.account) throw new Error("Signed out");
     return {
       scopeKey: services.account,
@@ -63,6 +68,9 @@ vi.mock("@/services/background-proxy", async (importOriginal) => ({
 }));
 
 type Input = {
+  draftEnabled?: boolean;
+  visionSupported?: boolean;
+  selectedModel?: string;
   webSearch?: boolean;
   isSending?: boolean;
   historyId?: string | null;
@@ -98,6 +106,7 @@ const t = (key: string, fallback?: unknown) =>
 
 describe("Playground send owns only its captured composer draft", () => {
   const sendMessage = vi.fn();
+  const warnNotReady = vi.fn();
   const clearSelectedDocuments = vi.fn();
   const clearUploadedFiles = vi.fn();
   const clearOpenUIRequestMode = vi.fn();
@@ -115,6 +124,7 @@ describe("Playground send owns only its captured composer draft", () => {
         const composer = useComposerText({
           draftKey: "tldw:playgroundChatDraft:ownership-test",
           tabScopedDraft: true,
+          draftEnabled: input.draftEnabled,
           textareaRef,
         });
         const systemPrompt = useStoreChatModelSettings(
@@ -168,7 +178,7 @@ describe("Playground send owns only its captured composer draft", () => {
           systemPrompt,
           compareModeActive: false,
           compareSelectedModels: [],
-          selectedModel: "ready-model",
+          selectedModel: input.selectedModel ?? "ready-model",
           historyId: input.historyId,
           serverChatId: null,
           fileRetrievalEnabled: false,
@@ -201,8 +211,8 @@ describe("Playground send owns only its captured composer draft", () => {
           resolveSubmissionIntent: slash.resolveSubmissionIntent,
           queueSubmission,
           validateSelectedChatModelsAvailability: () => true,
-          compareModelsSupportCapability: () => true,
-          notificationApi: { error: vi.fn(), warning: vi.fn() },
+          compareModelsSupportCapability: (models, capability) => compareModelsSupportCapability(models, capability, buildCompareModelMetaById([{ model: "ready-model", capabilities: input.visionSupported === false ? [] : ["vision"] }, { ...visionModel, capabilities: input.visionSupported === false ? [] : ["vision"] }])),
+          notificationApi: { error: vi.fn(), warning: warnNotReady },
           t,
         });
         return {
@@ -232,6 +242,8 @@ describe("Playground send owns only its captured composer draft", () => {
     sessionStorage.clear();
     useStoreChatModelSettings.getState().reset();
     services.account = "alice";
+    services.scopeBarrier = null;
+    warnNotReady.mockReset();
     services.embedding.mockReset().mockResolvedValue("embedding-model");
     services.simpleSearch.mockReset().mockResolvedValue(false);
     services.upload.mockReset();
@@ -245,6 +257,140 @@ describe("Playground send owns only its captured composer draft", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
+
+  it.each([true, false])("B02 reports unresolved ownership without losing or automatically sending the draft (persistence=%s)", async draftEnabled => {
+    const owner = deferred<void>();
+    services.scopeBarrier = owner.promise;
+    const view = mount({ draftEnabled });
+    try {
+      act(() => view.result.current.composer.setMessageValue("Hello."));
+      act(() => view.result.current.submit.submitForm());
+      await act(async () => { await Promise.all(view.result.current.submissions.current); });
+      expect(warnNotReady).toHaveBeenCalledWith({ message: "Preparing chat", description: "Your draft is retained. Try Send again in a moment." });
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(queueSubmission).not.toHaveBeenCalled();
+      expect(view.result.current.composer.form.values.message).toBe("Hello.");
+      await act(async () => { owner.resolve(); await owner.promise; });
+      await waitFor(() => expect(view.result.current.composer.captureDraftOwnership().isOwnerCurrent()).toBe(true));
+      if (draftEnabled) await waitFor(() => expect(view.result.current.composer.draftReady).toBe(true));
+      else expect(view.result.current.composer.draftReady).toBe(false);
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(view.result.current.composer.form.values.message).toBe("Hello.");
+      act(() => view.result.current.submit.submitForm());
+      await act(async () => { await Promise.all(view.result.current.submissions.current); });
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+      expect(sendMessage.mock.calls[0][0]).toMatchObject({ message: "Hello." });
+      expect(warnNotReady).toHaveBeenCalledTimes(1);
+    } finally { owner.resolve(); view.unmount(); }
+  });
+
+  it.each(["unchanged", "new draft", "cleared newer draft", "explicit reset", "image ABA", "changed owner"] as const)(
+    "B03 preflight rejection restores only its unchanged optimistic reset (%s)",
+    async boundary => {
+      const response = deferred<ChatSubmitResult>();
+      sendMessage.mockReturnValueOnce(response.promise);
+      const view = mount();
+      try {
+        await waitFor(() => expect(view.result.current.composer.draftReady).toBe(true));
+        act(() => view.result.current.composer.setMessageValue("B03 retained question"));
+        act(() => view.result.current.submit.submitForm());
+        await waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
+        expect(view.result.current.composer.form.values.message).toBe("");
+        if (boundary === "new draft") act(() => view.result.current.composer.setMessageValue("Newer work"));
+        if (boundary === "cleared newer draft") {
+          act(() => view.result.current.composer.setMessageValue("Newer work"));
+          act(() => view.result.current.composer.setMessageValue(""));
+        }
+        if (boundary === "explicit reset") act(() => view.result.current.composer.form.reset());
+        if (boundary === "image ABA") act(() => {
+          view.result.current.composer.form.setFieldValue("image", "data:image/png;base64,newer");
+          view.result.current.composer.form.setFieldValue("image", "");
+        });
+        if (boundary === "changed owner") {
+          act(() => { services.account = "bob"; window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed")); });
+          await waitFor(() => expect(view.result.current.composer.draftReady).toBe(true));
+        }
+        await act(async () => {
+          response.resolve({ status: "failed", errorMessage: "Chat details unavailable", restoreDraft: true } as ChatSubmitResult);
+          await Promise.all(view.result.current.submissions.current);
+        });
+        await waitFor(() => expect(view.result.current.composer.form.values.message).toBe(
+          boundary === "unchanged" ? "B03 retained question" : boundary === "new draft" ? "Newer work" : ""));
+        expect(sendMessage).toHaveBeenCalledOnce();
+        expect(view.result.current.composer.promptAssistSavedAttemptId).toBeNull();
+      } finally {
+        response.resolve({ status: "failed", errorMessage: "Chat details unavailable" });
+        await Promise.allSettled(view.result.current.submissions.current);
+        view.unmount();
+      }
+    });
+
+  it.each([true, false])("B03 preflight immediate refusal restores text only with its no-admission flag (%s)", async restoreDraft => {
+    sendMessage.mockResolvedValueOnce({ status: "failed", errorMessage: "Refused", ...(restoreDraft ? { restoreDraft: true } : {}) });
+    const view = mount();
+    try {
+      await waitFor(() => expect(view.result.current.composer.draftReady).toBe(true));
+      act(() => view.result.current.composer.setMessageValue("Immediate question"));
+      act(() => view.result.current.submit.submitForm());
+      await act(async () => { await Promise.all(view.result.current.submissions.current); });
+      await waitFor(() => expect(view.result.current.composer.form.values.message).toBe(restoreDraft ? "Immediate question" : ""));
+      expect(sendMessage).toHaveBeenCalledOnce();
+    } finally { view.unmount(); }
+  });
+
+  it.each(
+    [false, true].flatMap((visionSupported) =>
+      ["ready-model", getCanonicalModelKey(visionModel)].map((selectedModel) => ({
+        visionSupported,
+        selectedModel,
+      })),
+    ),
+  )(
+    "preserves unsupported image work and dispatches only vision-capable images ($visionSupported / $selectedModel)",
+    async ({ visionSupported, selectedModel }) => {
+      const view = mount({ visionSupported, selectedModel });
+      try {
+        await waitFor(() => expect(view.result.current.composer.draftReady).toBe(true));
+        act(() => {
+          view.result.current.composer.setMessageValue("Describe this image");
+          view.result.current.composer.form.setFieldValue("image", "data:image/png;base64,fixture");
+          view.result.current.composer.form.setFieldValue("imageFilename", "diagram.png");
+        });
+        act(() => view.result.current.submit.submitForm());
+        await act(async () => {
+          await Promise.all(view.result.current.submissions.current);
+        });
+        if (visionSupported) {
+          expect(sendMessage).toHaveBeenCalledTimes(1);
+          expect(sendMessage.mock.calls[0][0]).toMatchObject({
+            message: "Describe this image",
+            image: "data:image/png;base64,fixture",
+          });
+          expect(sendMessage.mock.calls[0][0]).not.toHaveProperty("imageFilename");
+          expect(view.result.current.composer.form.values).toEqual({
+            message: "",
+            image: "",
+            imageFilename: "",
+          });
+        } else {
+          expect(sendMessage).not.toHaveBeenCalled();
+          expect(view.result.current.composer.form.values).toEqual({
+            message: "Describe this image",
+            image: "data:image/png;base64,fixture",
+            imageFilename: "diagram.png",
+          });
+          expect(view.result.current.composer.form.errors.message).toBe(
+            "Image support is not confirmed for this model. Choose a model that supports images, or remove the attachment.",
+          );
+        }
+      } finally {
+        await act(async () => {
+          await Promise.allSettled(view.result.current.submissions.current);
+        });
+        view.unmount();
+      }
+    },
+  );
 
   it.each([
     { command: "/web", expectedWebSearch: true, expectedChatMode: "normal" },
@@ -464,6 +610,7 @@ describe("Playground send owns only its captured composer draft", () => {
         expect(view.result.current.composer.form.values).toEqual({
           message: change === "replacement" ? "second" : "first",
           image: change === "image" ? "new-image" : "",
+          imageFilename: "",
         });
       } finally {
         await act(async () => {
@@ -637,6 +784,29 @@ describe("Playground send owns only its captured composer draft", () => {
         preparation.resolve({ text: "parsed notes" });
         await Promise.allSettled(view.result.current.submissions.current);
       });
+      view.unmount();
+    }
+  });
+
+  it("keeps the composer intact when selected history is unavailable before dispatch", async () => {
+    const view = mount({ historyId: "missing-a04-history" });
+    try {
+      await waitFor(() => expect(view.result.current.composer.draftReady).toBe(true));
+      await act(async () => { await view.result.current.historySelection.loadConversation({ historyId: "missing-a04-history" }); });
+      expect(view.result.current.historySelection.getCurrent().status).toBe("unsupported_history_capability");
+      act(() => {
+        view.result.current.composer.setMessageValue("Retain my missing-image question");
+        view.result.current.composer.form.setFieldValue("image", "data:image/png;base64,reattached");
+        view.result.current.composer.form.setFieldValue("imageFilename", "reattached.png");
+      });
+      act(() => view.result.current.submit.submitForm());
+      await act(async () => { await Promise.all(view.result.current.submissions.current); });
+      expect(sendMessage).not.toHaveBeenCalled();
+      expect(view.result.current.composer.form.values).toMatchObject({ message: "Retain my missing-image question", image: "data:image/png;base64,reattached", imageFilename: "reattached.png" });
+      expect(clearSelectedDocuments).not.toHaveBeenCalled();
+      expect(clearUploadedFiles).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => { await Promise.allSettled(view.result.current.submissions.current); });
       view.unmount();
     }
   });

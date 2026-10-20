@@ -25,6 +25,7 @@ vi.mock("@/services/prompt-studio", () => ({
   createProject: (...args: unknown[]) => mocks.createProject(...args)
 }))
 vi.mock("@/services/prompt-studio-settings", () => ({
+  getPromptStudioDefaultsForOwner: (...args: unknown[]) => mocks.defaults(...args),
   getPromptStudioDefaults: (...args: unknown[]) => mocks.defaults(...args),
   setPromptStudioDefaults: vi.fn()
 }))
@@ -54,6 +55,11 @@ vi.mock("@/db/dexie/schema", () => ({
       },
       where: (field: string) => ({
         equals: (value: unknown) => ({
+          filter: (predicate: (row: Record<string, unknown>) => boolean) => ({
+            first: async () => [...mocks.rows.values()].find(
+              row => row[field] === value && predicate(row)
+            )
+          }),
           first: async () =>
             [...mocks.rows.values()].find((row) => row[field] === value)
         })
@@ -81,6 +87,7 @@ const response = () => ({
 const seed = (linked = false) =>
   mocks.rows.set("exact-id", {
     id: "exact-id",
+    ownerId: ownerB,
     title: "Recipe",
     syncStatus: linked ? "conflict" : "local",
     promptFormat: "structured",
@@ -213,6 +220,7 @@ describe("owner-aware sync and exact reconciliation", () => {
   })
   beforeEach(async () => {
     vi.clearAllMocks()
+    vi.spyOn(registry, "resolveRecipePersistenceOwnerView").mockResolvedValue({ ownerId: ownerB, authorizationRevision: "test-owner" })
     mocks.rows.clear()
     mocks.defaults.mockResolvedValue({
       defaultProjectId: 42,
@@ -509,7 +517,7 @@ describe("owner-aware sync and exact reconciliation", () => {
       recipeWriteBlocked: true
     })
     expect(mocks.rows.get("exact-id")).toMatchObject({
-      name: "Reconciled",
+      title: "Recipe",
       syncStatus: "error",
       serverId: 101,
       studioProjectId: 42

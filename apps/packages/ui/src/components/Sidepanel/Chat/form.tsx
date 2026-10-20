@@ -1353,7 +1353,7 @@ export const SidepanelForm = ({
       ? [
           {
             id: "image",
-            label: t("playground:actions.upload", "Attach image"),
+            label: form.values.imageFilename || t("playground:actions.upload", "Attach image"),
             previewSrc: form.values.image,
             onRemove: () => {
               form.setFieldValue("image", "")
@@ -1382,8 +1382,10 @@ export const SidepanelForm = ({
   // base64 encoding); we supply Sidepanel-specific toast callbacks.
   const attachmentHandler = useComposerAttachments({
     chatMode: "normal",
+    captureImageOwnership: () => captureDraftOwnership().isImageCurrent,
     setImageField: (base64) => form.setFieldValue("image", base64),
     onImageAccepted: (file) => {
+      form.setFieldValue("imageFilename", file.name)
       message.success({
         content: t("sidepanel:composer.imageUploaded", {
           defaultValue: "Image added: {{name}}",
@@ -1408,7 +1410,7 @@ export const SidepanelForm = ({
       message.error({
         content: t(
           "sidepanel:composer.imageUploadError",
-          "Failed to process image"
+          "This image could not be opened. Choose a valid image file."
         ),
         duration: 3
       })

@@ -44,6 +44,14 @@ export const EvaluationDetailPanel: React.FC<EvaluationDetailPanelProps> = ({
 
   const evaluation: PromptStudioEvaluation | undefined = (evaluationResponse as any)?.data
 
+  const metrics = evaluation?.aggregate_metrics ?? evaluation?.metrics
+  const hasMetric = (key: string): boolean =>
+    typeof metrics?.[key] === "number" && Number.isFinite(metrics[key])
+  const hasMetrics = ["accuracy", "pass_rate", "f1", "precision", "recall"].some(hasMetric)
+  const configs = evaluation?.model_configs === undefined
+    ? evaluation?.config && Object.keys(evaluation.config).length ? [evaluation.config] : []
+    : evaluation.model_configs ?? []
+
   const getStatusTag = (status?: string) => {
     const statusLower = status?.toLowerCase()
     switch (statusLower) {
@@ -146,8 +154,7 @@ export const EvaluationDetailPanel: React.FC<EvaluationDetailPanelProps> = ({
           )}
 
           {/* Metrics summary */}
-          {evaluation.aggregate_metrics &&
-            Object.keys(evaluation.aggregate_metrics).length > 0 && (
+          {hasMetrics && metrics && (
               <div>
                 <h4 className="font-medium mb-3">
                   {t("managePrompts.studio.evaluations.metrics", {
@@ -155,7 +162,7 @@ export const EvaluationDetailPanel: React.FC<EvaluationDetailPanelProps> = ({
                   })}
                 </h4>
                 <div className="grid grid-cols-3 gap-4">
-                  {evaluation.aggregate_metrics.accuracy !== undefined && (
+                  {hasMetric("accuracy") && (
                     <div className="p-3 bg-surface2 rounded-md text-center">
                       <Statistic
                         title={
@@ -164,16 +171,16 @@ export const EvaluationDetailPanel: React.FC<EvaluationDetailPanelProps> = ({
                             Accuracy
                           </span>
                         }
-                        value={evaluation.aggregate_metrics.accuracy * 100}
+                        value={metrics.accuracy * 100}
                         precision={1}
                         suffix="%"
                         valueStyle={{
-                          color: metricColor(evaluation.aggregate_metrics.accuracy)
+                          color: metricColor(metrics.accuracy)
                         }}
                       />
                     </div>
                   )}
-                  {evaluation.aggregate_metrics.pass_rate !== undefined && (
+                  {hasMetric("pass_rate") && (
                     <div className="p-3 bg-surface2 rounded-md text-center">
                       <Statistic
                         title={
@@ -182,16 +189,16 @@ export const EvaluationDetailPanel: React.FC<EvaluationDetailPanelProps> = ({
                             Pass Rate
                           </span>
                         }
-                        value={evaluation.aggregate_metrics.pass_rate * 100}
+                        value={metrics.pass_rate * 100}
                         precision={1}
                         suffix="%"
                         valueStyle={{
-                          color: metricColor(evaluation.aggregate_metrics.pass_rate)
+                          color: metricColor(metrics.pass_rate)
                         }}
                       />
                     </div>
                   )}
-                  {evaluation.aggregate_metrics.f1 !== undefined && (
+                  {hasMetric("f1") && (
                     <div className="p-3 bg-surface2 rounded-md text-center">
                       <Statistic
                         title={
@@ -200,7 +207,7 @@ export const EvaluationDetailPanel: React.FC<EvaluationDetailPanelProps> = ({
                             F1 Score
                           </span>
                         }
-                        value={evaluation.aggregate_metrics.f1}
+                        value={metrics.f1}
                         precision={3}
                       />
                     </div>
@@ -208,30 +215,30 @@ export const EvaluationDetailPanel: React.FC<EvaluationDetailPanelProps> = ({
                 </div>
 
                 {/* Additional metrics */}
-                {(evaluation.aggregate_metrics.precision !== undefined ||
-                  evaluation.aggregate_metrics.recall !== undefined) && (
+                {(hasMetric("precision") ||
+                  hasMetric("recall")) && (
                   <div className="grid grid-cols-2 gap-4 mt-4">
-                    {evaluation.aggregate_metrics.precision !== undefined && (
+                    {hasMetric("precision") && (
                       <div className="p-3 bg-surface2 rounded-md">
                         <div className="text-sm text-text-muted mb-1">
                           Precision
                         </div>
                         <Progress
                           percent={Math.round(
-                            evaluation.aggregate_metrics.precision * 100
+                            metrics.precision * 100
                           )}
                           size="small"
                         />
                       </div>
                     )}
-                    {evaluation.aggregate_metrics.recall !== undefined && (
+                    {hasMetric("recall") && (
                       <div className="p-3 bg-surface2 rounded-md">
                         <div className="text-sm text-text-muted mb-1">
                           Recall
                         </div>
                         <Progress
                           percent={Math.round(
-                            evaluation.aggregate_metrics.recall * 100
+                            metrics.recall * 100
                           )}
                           size="small"
                         />
@@ -263,7 +270,7 @@ export const EvaluationDetailPanel: React.FC<EvaluationDetailPanelProps> = ({
                 defaultValue: "Test Cases"
               })}
             >
-              {evaluation.test_case_ids?.length ?? 0}
+              {evaluation.test_case_ids?.length ?? "Unavailable"}
             </Descriptions.Item>
             <Descriptions.Item
               label={t("managePrompts.studio.evaluations.created", {
@@ -281,33 +288,23 @@ export const EvaluationDetailPanel: React.FC<EvaluationDetailPanelProps> = ({
             </Descriptions.Item>
           </Descriptions>
 
-          {/* Model config */}
-          {evaluation.config && Object.keys(evaluation.config).length > 0 && (
-            <Descriptions
-              title={t("managePrompts.studio.evaluations.modelConfig", {
-                defaultValue: "Model Configuration"
-              })}
-              column={2}
-              size="small"
-              bordered
-            >
-              {evaluation.config.model_name && (
-                <Descriptions.Item label="Model">
-                  {evaluation.config.model_name}
-                </Descriptions.Item>
-              )}
-              {evaluation.config.temperature !== undefined && (
-                <Descriptions.Item label="Temperature">
-                  {evaluation.config.temperature}
-                </Descriptions.Item>
-              )}
-              {evaluation.config.max_tokens !== undefined && (
-                <Descriptions.Item label="Max Tokens">
-                  {evaluation.config.max_tokens}
-                </Descriptions.Item>
-              )}
-            </Descriptions>
-          )}
+          {!hasMetrics && <p>Metrics: <span>Unavailable</span></p>}
+
+          {/* Each recorded model has its own public names and parameters. */}
+          {configs.length === 0 ? <p>Model Configuration: <span>Unavailable</span></p> : configs.map((config, index) => {
+            const names = [
+              { key: "provider", label: "Provider", children: config.provider ?? config.api_name ?? "Unavailable" },
+              { key: "model", label: "Model", children: config.model_name ?? config.model ?? "Unavailable" }
+            ]
+            const parameters = ([
+              ["temperature", "Temperature"], ["max_tokens", "Max Tokens"], ["top_p", "Top P"],
+              ["frequency_penalty", "Frequency Penalty"], ["presence_penalty", "Presence Penalty"],
+              ["timeout_seconds", "Timeout (seconds)"], ["retry_count", "Retry Count"], ["parallel_requests", "Parallel Requests"]
+            ] as const).filter(([key]) => typeof config[key] === "number" && Number.isFinite(config[key]))
+              .map(([key, label]) => ({ key, label, children: config[key] }))
+            return <Descriptions key={index} title={configs.length > 1 ? `Model Configuration ${index + 1}` : "Model Configuration"}
+              column={2} size="small" bordered items={[...names, ...parameters]} />
+          })}
         </div>
       )}
     </Drawer>

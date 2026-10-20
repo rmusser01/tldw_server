@@ -362,10 +362,17 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     onNoteRenamed: (event) => noteRenamedRef.current(event),
   })
   const [hasActiveDraft, setHasActiveDraft] = React.useState(false)
+  const [preparingDraft, setPreparingDraft] = React.useState(false)
+  const preparingDraftRef = React.useRef<ReturnType<typeof ed.captureNoteMutation> | null>(null)
+  const retireDraftTransition = React.useCallback(() => {
+    preparingDraftRef.current = null
+    setPreparingDraft(false)
+  }, [])
   const resetEditorToEmptyState = React.useCallback(() => {
+    retireDraftTransition()
     setHasActiveDraft(false)
     ed.resetEditor()
-  }, [ed.resetEditor])
+  }, [ed.resetEditor, retireDraftTransition])
   const selectedAuthorityEvidenceRef = React.useRef<{
     noteId: string
     authorityScope: string
@@ -403,16 +410,24 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [notesGraphAuthorityScope, resetEditorToEmptyState])
   React.useEffect(() => {
     const resetOnLogout = (event: Event) => {
+      retireDraftTransition()
       if ((event as CustomEvent).detail?.kind !== 'logout') return
       selectedAuthorityEvidenceRef.current = null
       lastVerifiedAuthorityScopeRef.current = null
       resetEditorToEmptyState()
     }
-    window.addEventListener('tldw:auth-principal-changed', resetOnLogout)
-    return () => {
-      window.removeEventListener('tldw:auth-principal-changed', resetOnLogout)
+    const retireOnConfigChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ authorityChanged?: boolean; refreshSessionInvalidated?: boolean }>).detail
+      if (detail?.authorityChanged !== false || detail.refreshSessionInvalidated) retireDraftTransition()
     }
-  }, [resetEditorToEmptyState])
+    window.addEventListener('tldw:auth-principal-changed', resetOnLogout)
+    window.addEventListener('tldw:config-updated', retireOnConfigChange)
+    return () => {
+      preparingDraftRef.current = null
+      window.removeEventListener('tldw:auth-principal-changed', resetOnLogout)
+      window.removeEventListener('tldw:config-updated', retireOnConfigChange)
+    }
+  }, [resetEditorToEmptyState, retireDraftTransition])
   const startDraftSession = React.useCallback(() => {
     setHasActiveDraft(true)
     ed.resetEditor()
@@ -1040,23 +1055,33 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   // ---- Handlers remaining in component ----
 
   const handleNewNote = React.useCallback(async (templateId?: string) => {
-    const ok = await ed.confirmDiscardIfDirty()
-    if (!ok) return
-    if (list.listMode !== 'active') list.setListMode('active')
-    if (isMobileViewport) setMobileSidebarOpen(false)
-    startDraftSession()
-    const template = NOTE_TEMPLATES.find((entry) => entry.id === templateId)
-    if (template) {
-      ed.setTitle(template.title)
-      ed.setContent(template.content)
-      ed.setIsDirty(true)
-      ed.setSaveIndicator('dirty')
-      message.success(`Applied template: ${template.label}`)
+    if (preparingDraftRef.current) return
+    const transition = ed.captureNoteMutation()
+    preparingDraftRef.current = transition
+    setPreparingDraft(true)
+    try {
+      const ok = await ed.confirmDiscardIfDirty()
+      if (!ok || preparingDraftRef.current !== transition || !transition.isOwnerCurrent()) return
+      if (list.listMode !== 'active') list.setListMode('active')
+      if (isMobileViewport) setMobileSidebarOpen(false)
+      startDraftSession()
+      const template = NOTE_TEMPLATES.find((entry) => entry.id === templateId)
+      if (template) {
+        ed.setTitle(template.title)
+        ed.setContent(template.content)
+        ed.setIsDirty(true)
+        ed.setSaveIndicator('dirty')
+        message.success(`Applied template: ${template.label}`)
+      }
+      setTimeout(() => {
+        ed.titleInputRef.current?.focus()
+      }, 0)
+    } finally {
+      if (preparingDraftRef.current === transition) retireDraftTransition()
     }
-    setTimeout(() => {
-      ed.titleInputRef.current?.focus()
-    }, 0)
   }, [
+    ed.captureNoteMutation,
+    retireDraftTransition,
     ed.confirmDiscardIfDirty,
     ed.setContent,
     ed.setIsDirty,
@@ -1071,15 +1096,25 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   ])
 
   const saveAndStartNew = React.useCallback(async () => {
-    const saved = await ed.saveNote()
-    if (!saved) return
-    if (list.listMode !== 'active') list.setListMode('active')
-    if (isMobileViewport) setMobileSidebarOpen(false)
-    startDraftSession()
-    window.setTimeout(() => {
-      ed.titleInputRef.current?.focus()
-    }, 0)
+    if (preparingDraftRef.current) return
+    const transition = ed.captureNoteMutation()
+    preparingDraftRef.current = transition
+    setPreparingDraft(true)
+    try {
+      const saved = await ed.saveNote()
+      if (!saved || preparingDraftRef.current !== transition || !transition.isOwnerCurrent()) return
+      if (list.listMode !== 'active') list.setListMode('active')
+      if (isMobileViewport) setMobileSidebarOpen(false)
+      startDraftSession()
+      window.setTimeout(() => {
+        ed.titleInputRef.current?.focus()
+      }, 0)
+    } finally {
+      if (preparingDraftRef.current === transition) retireDraftTransition()
+    }
   }, [
+    ed.captureNoteMutation,
+    retireDraftTransition,
     ed.saveNote,
     ed.titleInputRef,
     isMobileViewport,
@@ -2936,7 +2971,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         showEmptyState={showEditorEmptyState}
         title={ed.title}
         content={ed.content}
-        editorDisabled={editorDisabled || ed.loadingSelection}
+        editorDisabled={editorDisabled || ed.loadingSelection || preparingDraft}
         isDirty={ed.isDirty}
         isOnline={isOnline}
         loadingDetail={ed.loadingDetail}

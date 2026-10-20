@@ -1105,12 +1105,15 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
    */
   const settlePendingEdits = React.useCallback(
     async (trigger: 'switch' | 'leave'): Promise<'clean' | 'saved' | 'failed'> => {
+      const operation = captureNoteMutation()
       clearAutosaveTimeout()
       let saved = false
       for (let round = 0; round < 4; round += 1) {
+        if (!operation.isOwnerCurrent()) return 'failed'
         const inFlight = activeSavePromiseRef.current
         if (inFlight) {
           saved = (await inFlight.catch(() => false)) || saved
+          if (!operation.isOwnerCurrent()) return 'failed'
           continue
         }
         if (!isDirtyRef.current) return saved ? 'saved' : 'clean'
@@ -1118,13 +1121,13 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
         if (!snapshot.title.trim() && !snapshot.content.trim()) return 'failed'
         if (!saveNoteRef.current || !canStartNoteSave(saveStateRef.current, trigger)) return 'failed'
         const ok = await saveNoteRef.current({ showSuccessMessage: false, trigger }).catch(() => false)
-        if (!ok) return 'failed'
+        if (!operation.isOwnerCurrent() || !ok) return 'failed'
         saved = true
         if (trigger === 'switch') return 'saved'
       }
       return isDirtyRef.current ? 'failed' : saved ? 'saved' : 'clean'
     },
-    [clearAutosaveTimeout]
+    [captureNoteMutation, clearAutosaveTimeout]
   )
 
   const markEditsDiscarded = React.useCallback(() => {
@@ -1136,6 +1139,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const askAboutUnsavedEdits = React.useCallback(
     (trigger: 'switch' | 'leave') =>
       new Promise<'saved' | 'continue' | 'discard' | 'stay'>((resolve) => {
+        const operation = captureNoteMutation()
         const state = saveStateRef.current
         const keptOnDevice = isDraftKeptOnDevice()
         const title = t('option:notesSearch.unsavedEditsTitle', {
@@ -1172,9 +1176,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           cancelText: stayText,
           okButtonProps: { type: 'primary' },
           onOk: async () => {
+            if (!operation.isOwnerCurrent()) { resolve('stay'); return }
             const saved = await (saveNoteRef.current?.({ showSuccessMessage: true, trigger }) ?? Promise.resolve(false))
               .catch(() => false)
-            resolve(saved ? 'saved' : 'stay')
+            resolve(operation.isOwnerCurrent() && saved ? 'saved' : 'stay')
           },
           onCancel: () => resolve('stay'),
           footer: (_, { OkBtn, CancelBtn }) => (
@@ -1194,7 +1199,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           ),
         })
       }),
-    [describeSaveFailure, isDraftKeptOnDevice, t]
+    [captureNoteMutation, describeSaveFailure, isDraftKeptOnDevice, t]
   )
 
   /**
@@ -1204,8 +1209,10 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
   const confirmDiscardIfDirty = React.useCallback(
     async (onSaved?: () => void, options?: { trigger?: 'switch' | 'leave' }) => {
       const trigger = options?.trigger ?? 'switch'
+      const operation = captureNoteMutation()
       if (!isDirtyRef.current && !activeSavePromiseRef.current) return true
       const outcome = await settlePendingEdits(trigger)
+      if (!operation.isOwnerCurrent()) return false
       if (outcome === 'clean') return true
       if (outcome === 'saved') {
         onSaved?.()
@@ -1221,10 +1228,12 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           okText: t('option:notesSearch.discardChanges', { defaultValue: 'Discard changes' }),
           cancelText: t('common:cancel', { defaultValue: 'Cancel' })
         })
+        if (!operation.isOwnerCurrent()) return false
         if (ok) markEditsDiscarded()
         return ok
       }
       const choice = await askAboutUnsavedEdits(trigger)
+      if (!operation.isOwnerCurrent()) return false
       if (choice === 'saved') {
         onSaved?.()
         return true
@@ -1232,7 +1241,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       if (choice === 'discard') markEditsDiscarded()
       return choice !== 'stay'
     },
-    [askAboutUnsavedEdits, confirmDanger, markEditsDiscarded, settlePendingEdits, t]
+    [askAboutUnsavedEdits, captureNoteMutation, confirmDanger, markEditsDiscarded, settlePendingEdits, t]
   )
   const confirmDiscardIfDirtyRef = React.useRef(confirmDiscardIfDirty)
   confirmDiscardIfDirtyRef.current = confirmDiscardIfDirty

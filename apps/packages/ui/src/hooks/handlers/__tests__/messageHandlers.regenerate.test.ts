@@ -5,6 +5,7 @@ import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
 import { freshChatDraftAddress } from "@/utils/chat-draft-address"
 import { createDefaultActorSettings } from "@/types/actor"
 import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
+import type { HistorySelectionCaptureV1, HistoryViewSelectionV1 } from "@/types/history-selection"
 import { createRegenerateLastMessage } from "../messageHandlers"
 
 const buildMessages = (): Message[] => [
@@ -146,6 +147,51 @@ describe("createRegenerateLastMessage", () => {
     expect(setMessages).not.toHaveBeenCalled()
   })
 
+  it("Regenerate uses reviewed legacy adjacency and keeps original display rows during submission", async () => {
+    const messages = [
+      { id: "question", isBot: false, name: "You", message: "Why?", sources: [] },
+      { id: "answer", isBot: true, name: "Assistant", message: "Because", sources: [] }
+    ] as Message[]
+    const history = [
+      { role: "user", content: "Why?" },
+      { role: "assistant", content: "Because" }
+    ] as ChatHistory
+    const setMessages = vi.fn()
+    const setHistory = vi.fn()
+    const onSubmit = vi.fn(async () => ({ status: "submitted" as const }))
+    const owner = { kind: "local", conversation_id: "chat", owner_key: "owner" }
+    const view = {
+      view_session_id: "view", owner_key: "owner", conversation_id: "chat",
+      interpretation: { kind: "legacy_linear_v1", projection_id: "reviewed" },
+      cursor: { kind: "after_message", message_id: "answer" }, selection_revision: 1
+    }
+    const regenerate = createRegenerateLastMessage({
+      validateBeforeSubmitFn: () => true, history, messages, setHistory, setMessages, onSubmit,
+      historySelection: {
+        getCurrent: () => ({ status: "ready", owner, view, capture: {
+          status: "captured", rows: [
+            { id: "question", revision: "q-revision", role: "user", parent_id: null },
+            { id: "answer", revision: "a-revision", role: "assistant", parent_id: null }
+          ],
+          selected_content: [
+            { id: "question", revision: "q-revision", message: "Why?", images: [] },
+            { id: "answer", revision: "a-revision", message: "Because", images: [] }
+          ]
+        } }),
+        fence: () => () => true
+      } as unknown as NonNullable<Parameters<typeof createRegenerateLastMessage>[0]["historySelection"]>
+    })
+    await regenerate()
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      message: "Why?", historyRegenerateBoundary: expect.objectContaining({
+        answerId: "answer", questionId: "question", questionRevision: "q-revision"
+      })
+    }))
+    expect(setMessages).not.toHaveBeenCalled()
+    expect(setHistory).not.toHaveBeenCalled()
+    expect(messages.map((row) => row.id)).toEqual(["question", "answer"])
+  })
+
   it("rejects before truncation when selection exists but has no captured path", async () => {
     const setHistory = vi.fn()
     const setMessages = vi.fn()
@@ -167,46 +213,60 @@ describe("createRegenerateLastMessage", () => {
     expect(onSubmit).not.toHaveBeenCalled()
   })
 
-  it("captures the selected assistant boundary and never invokes the old copy/resubmit callback", async () => {
+  it("submits the captured existing question boundary without the old copy/resubmit callback", async () => {
     const setHistory = vi.fn()
     const setMessages = vi.fn()
-    const onSubmit = vi.fn()
+    const onSubmit = vi.fn().mockResolvedValue({ status: "submitted" })
     const beforeSubmit = vi.fn()
+    const owner = {
+      kind: "local" as const, profile_id: "profile", owner_key: "owner", conversation_id: "chat"
+    }
+    const view: HistoryViewSelectionV1 = {
+      view_session_id: "view", owner_key: owner.owner_key, conversation_id: owner.conversation_id,
+      interpretation: { kind: "parent_graph_v1" },
+      cursor: { kind: "after_message", message_id: "selected-assistant" }, selection_revision: 1
+    }
+    const rows: HistorySelectionCaptureV1["rows"] = [
+      { id: "user", revision: "question-revision", parent_id: null, role: "user", settled: true },
+      { id: "selected-assistant", revision: "answer-revision", parent_id: "user", role: "assistant", settled: true }
+    ]
+    const capture: HistorySelectionCaptureV1 = {
+      status: "captured", view, purpose: "send", rows, storage_context_digest: "storage",
+      snapshot: {
+        version: 1, owner_key: owner.owner_key, conversation_id: owner.conversation_id,
+        fences: { conversation: "1", history: "1", settings: "1" }, nodes: rows,
+        source_digest: "source", storage_context_digest: "storage",
+        interpretation_status: { kind: "parent_graph_v1" }
+      },
+      selected_content: [
+        { id: "user", revision: "question-revision", message: "Hello", images: [] },
+        { id: "selected-assistant", revision: "answer-revision", message: "Hi", images: [] }
+      ]
+    }
+    const originIsCurrent = vi.fn(() => true)
     const regenerate = createRegenerateLastMessage({
       validateBeforeSubmitFn: () => true,
-      history: [
-        { role: "user", content: "Hello" },
-        { role: "assistant", content: "Hi" }
-      ],
+      history: [{ role: "user", content: "Hello" }, { role: "assistant", content: "Hi" }],
       messages: [
-        {
-          id: "user",
-          isBot: false,
-          name: "You",
-          message: "Hello",
-          sources: []
-        },
-        {
-          id: "selected-assistant",
-          parentMessageId: "user",
-          isBot: true,
-          name: "Assistant",
-          message: "Hi",
-          sources: []
-        }
+        { id: "user", isBot: false, name: "You", message: "Hello", sources: [] },
+        { id: "selected-assistant", parentMessageId: "user", isBot: true, name: "Assistant", message: "Hi", sources: [] }
       ],
-      setHistory,
-      setMessages,
-      onSubmit,
-      beforeSubmit,
-      historySelection: { getCurrent: () => ({ status: "ready", capture: { status: "captured" } }) } as any
+      setHistory, setMessages, onSubmit, beforeSubmit,
+      historySelection: {
+        getCurrent: () => ({ status: "ready", owner, view, capture }),
+        fence: () => originIsCurrent
+      } as unknown as NonNullable<Parameters<typeof createRegenerateLastMessage>[0]["historySelection"]>
     })
-    await expect(regenerate()).rejects.toMatchObject({
-      message: "unsupported_history_regeneration",
-      boundary: { kind: "before_message", message_id: "selected-assistant" }
+    await expect(regenerate()).resolves.toEqual({ status: "submitted" })
+    expect(onSubmit).toHaveBeenCalledOnce()
+    expect(onSubmit).toHaveBeenCalledWith({
+      message: "Hello", image: "",
+      historyRegenerateBoundary: {
+        answerId: "selected-assistant", questionId: "user", questionRevision: "question-revision",
+        owner, originView: view, originIsCurrent
+      }
     })
     expect(beforeSubmit).not.toHaveBeenCalled()
-    expect(onSubmit).not.toHaveBeenCalled()
     expect(setHistory).not.toHaveBeenCalled()
     expect(setMessages).not.toHaveBeenCalled()
   })

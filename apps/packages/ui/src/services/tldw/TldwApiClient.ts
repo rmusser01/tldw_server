@@ -36,6 +36,7 @@ import type {
 import { Storage } from "@plasmohq/storage"
 import { createSafeStorage, safeStorageSerde } from "@/utils/safe-storage"
 import { bgRequest, bgStream, bgUpload } from "@/services/background-proxy"
+import { requestOwnedPrompt } from "@/services/prompt-owner-request"
 import { isPlaceholderApiKey } from "@/utils/api-key"
 import { normalizeChatRole } from "@/utils/normalize-chat-role"
 import { createJsonResponseLike } from "@/services/tldw/json-response-like"
@@ -1054,6 +1055,7 @@ export interface ChatCompletionRequest {
   tldw_history_selection_v1?: import("@/types/history-selection").HistorySelectionV1
   tldw_history_branch?: boolean
   tldw_history_edit_v1?: import("@/types/history-selection").HistoryEditTargetV1
+  tldw_history_server_existing_input_v1?: import("@/types/history-selection").HistorySelectionV1
   messages: ChatMessage[]
   model: string
   routing?: {
@@ -1514,6 +1516,9 @@ export interface AdminUserListResponse {
 }
 
 export interface AdminUserUpdateRequest {
+  reason?: string
+  admin_password?: string
+  admin_reauth_token?: string
   email?: string
   role?: string
   is_active?: boolean
@@ -1723,19 +1728,21 @@ type TldwProvidersStatus = {
 // module-level TTL cache + in-flight dedup (mirroring the apiSend pattern)
 // collapses the resulting burst into one request per TTL window.
 const PROVIDERS_STATUS_CACHE_TTL_MS = 60_000
-let providersStatusCache: { at: number; value: TldwProvidersStatus } | null = null
-let providersStatusInFlight: Promise<TldwProvidersStatus> | null = null
+let providersStatusCache: { revision: number; at: number; value: TldwProvidersStatus } | null = null
+let providersStatusInFlight: { revision: number; request: Promise<TldwProvidersStatus> } | null = null
 
 const getProvidersStatusCached = async (): Promise<TldwProvidersStatus> => {
+  const revision = domainCacheAccountRevision
   const now = Date.now()
   if (
     providersStatusCache &&
+    providersStatusCache.revision === revision &&
     now - providersStatusCache.at < PROVIDERS_STATUS_CACHE_TTL_MS
   ) {
     return providersStatusCache.value
   }
-  if (providersStatusInFlight) {
-    return providersStatusInFlight
+  if (providersStatusInFlight?.revision === revision) {
+    return providersStatusInFlight.request
   }
   const request = (async () => {
     try {
@@ -1743,15 +1750,17 @@ const getProvidersStatusCached = async (): Promise<TldwProvidersStatus> => {
         path: '/api/v1/config/providers',
         method: 'GET'
       })) as TldwProvidersStatus
-      providersStatusCache = { at: Date.now(), value }
+      if (revision !== domainCacheAccountRevision)
+        throw createServicePromptScopeChangedError()
+      providersStatusCache = { revision, at: Date.now(), value }
       return value
     } finally {
-      if (providersStatusInFlight === request) {
+      if (providersStatusInFlight?.request === request) {
         providersStatusInFlight = null
       }
     }
   })()
-  providersStatusInFlight = request
+  providersStatusInFlight = { revision, request }
   return request
 }
 
@@ -1837,6 +1846,14 @@ export class TldwApiClientBase {
     const authorityChanged = !connectionAuthoritiesMatch(this.config, previousConfig)
     if (onlyIfAuthorityChanged && !authorityChanged) return
     if (authorityChanged) {
+      if (typeof window !== "undefined") {
+        try {
+          window.sessionStorage.removeItem("tldw-h1-playground-reference")
+        } catch {
+          // Owner validation still fences old references when storage is blocked.
+          console.warn("Could not retire the automatic Chat handoff after the account or server changed.")
+        }
+      }
       void clearFlashcardsGenerateHandoffs().catch(() => console.warn("Could not clear private Flashcards transfers after the account or server changed."))
     }
     if (typeof window !== "undefined") {
@@ -4790,12 +4807,13 @@ export class TldwApiClientBase {
     return await bgRequest<any>({ path, method: 'GET' })
   }
 
-  async searchPrompts(query: string): Promise<any> {
+  async searchPrompts(query: string, options?: { expectedOwnerId?: string | null }): Promise<any> {
     // TODO: confirm trailing slash per OpenAPI (`/api/v1/prompts/search` exists without slash)
-    return await bgRequest<any>({ path: '/api/v1/prompts/search', method: 'POST', headers: { 'Content-Type': 'application/json' }, body: { query } })
+    const request = { path: '/api/v1/prompts/search' as const, method: 'POST' as const, headers: { 'Content-Type': 'application/json' }, body: { query } }
+    return options?.expectedOwnerId !== undefined ? await requestOwnedPrompt(request, options.expectedOwnerId) : await bgRequest<any>(request)
   }
 
-  async createPrompt(payload: PromptPayload): Promise<any> {
+  async createPrompt(payload: PromptPayload, options?: { expectedOwnerId?: string | null }): Promise<any> {
     const name = payload.name || payload.title || 'Untitled'
     const system_prompt = payload.system_prompt ?? (payload.is_system ? payload.content : undefined)
     const user_prompt = payload.user_prompt ?? (!payload.is_system ? payload.content : undefined)
@@ -4817,15 +4835,16 @@ export class TldwApiClientBase {
       "/api/v1/prompts",
       "/api/v1/prompts/"
     ])
-    return await bgRequest<any>({
+    const request = {
       path,
-      method: 'POST',
+      method: 'POST' as const,
       headers: { 'Content-Type': 'application/json' },
       body: normalized
-    })
+    }
+    return options?.expectedOwnerId !== undefined ? await requestOwnedPrompt(request, options.expectedOwnerId) : await bgRequest<any>(request)
   }
 
-  async updatePrompt(id: string | number, payload: PromptPayload): Promise<any> {
+  async updatePrompt(id: string | number, payload: PromptPayload, options?: { expectedOwnerId?: string | null }): Promise<any> {
     const pid = String(id)
     const name = payload.name || payload.title || 'Untitled'
     const system_prompt = payload.system_prompt ?? (payload.is_system ? payload.content : undefined)
@@ -4846,7 +4865,8 @@ export class TldwApiClientBase {
     })
 
     // Path per OpenAPI: /api/v1/prompts/{prompt_identifier}
-    return await bgRequest<any>({ path: `/api/v1/prompts/${pid}`, method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: normalized })
+    const request = { path: `/api/v1/prompts/${pid}` as const, method: 'PUT' as const, headers: { 'Content-Type': 'application/json' }, body: normalized }
+    return options?.expectedOwnerId !== undefined ? await requestOwnedPrompt(request, options.expectedOwnerId) : await bgRequest<any>(request)
   }
 
   // Characters API
@@ -5969,6 +5989,9 @@ export class TldwApiClientBase {
   async createChat(
     payload: Record<string, any>,
     options?: {
+      seedFirstMessage?: boolean
+      greetingStrategy?: "default" | "alternate_index"
+      alternateIndex?: number
       scope?: ChatScope
       signal?: AbortSignal
       requestScope?: ServicePromptRequestScope
@@ -7516,7 +7539,9 @@ export class TldwApiClientBase {
   }
 
   async transcribeAudio(audioFile: File | Blob, options?: any): Promise<any> {
+    options?.signal?.throwIfAborted()
     await this.ensureConfigForRequest(true)
+    options?.signal?.throwIfAborted()
     const fields: Record<string, any> = {}
     if (options) {
       if (options.model != null) fields.model = options.model
@@ -7547,9 +7572,11 @@ export class TldwApiClientBase {
       }
     }
     const data = await audioFile.arrayBuffer()
+    options?.signal?.throwIfAborted()
     const name = (typeof File !== 'undefined' && audioFile instanceof File && (audioFile as File).name) ? (audioFile as File).name : 'audio'
     const type = (audioFile as any)?.type || 'application/octet-stream'
-    return await this.upload<any>({ path: '/api/v1/audio/transcriptions', method: 'POST', fields, file: { name, type, data } })
+    // Local ASR can exceed the generic ten-second request budget.
+    return await this.upload<any>({ path: '/api/v1/audio/transcriptions', method: 'POST', ...requestScopeFields(options?.requestScope), abortSignal: options?.signal, timeoutMs: options?.timeoutMs ?? 180000, fields, file: { name, type, data } })
   }
 
   async createTtsJob(payload: {

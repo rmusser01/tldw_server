@@ -123,7 +123,7 @@ export class DatabaseMigration {
         const prompts = await this.chromeDB.getAllPrompts()
         for (const prompt of prompts) {
           try {
-            await this.dexieDB.addPrompt(prompt)
+            await this.dexieDB.migrateLegacyPrompt(prompt)
             migratedCounts.prompts++
           } catch (promptError) {
             errors.push(`Failed to migrate prompt ${prompt.id}: ${promptError}`)
@@ -232,7 +232,7 @@ export class DatabaseMigration {
 
       // Count Dexie data
       const dexieChatHistories = await this.dexieDB.getChatHistories()
-      const dexiePrompts = await this.dexieDB.getAllPrompts()
+      const dexiePromptsCount = await this.dexieDB.countStoredPromptsForMigration()
       const dexieWebshares = await this.dexieDB.getAllWebshares()
 
       const counts = {
@@ -243,7 +243,7 @@ export class DatabaseMigration {
         },
         dexie: {
           chatHistories: dexieChatHistories.length,
-          prompts: dexiePrompts.length,
+          prompts: dexiePromptsCount,
           webshares: dexieWebshares.length
         }
       }

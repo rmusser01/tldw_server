@@ -182,6 +182,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
     firstSourceAddMode,
   } = state
 
+  const [fileRejections, setFileRejections] = useState<string[]>([])
   const [urlInput, setUrlInput] = useState("")
   const [pastedTextInput, setPastedTextInput] = useState("")
   const [playlistPreflightUrl, setPlaylistPreflightUrl] = useState("")
@@ -205,6 +206,7 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
   // Add files from the drop zone
   const handleFilesAdded = useCallback(
     (files: File[]) => {
+      setFileRejections([])
       const newItems: WizardQueueItem[] = []
       for (const file of files) {
         const detectedType = detectTypeFromFile(file)
@@ -529,9 +531,15 @@ export const AddContentStep: React.FC<AddContentStepProps> = ({
       <div className="space-y-3">
         <FileDropZone
           onFilesAdded={handleFilesAdded}
+          onFilesRejected={setFileRejections}
           isOnlineForIngest={isOnlineForIngest}
           autoFocus={firstSourceAddMode === "file_upload"}
         />
+        {fileRejections.length > 0 && (
+          <div role="alert" className="text-sm text-danger">
+            {fileRejections.map((reason, index) => <p key={index}>{reason}</p>)}
+          </div>
+        )}
         <Typography.Text className="text-[11px] text-text-subtle">
           {qi(
             "fileSizeLimits",

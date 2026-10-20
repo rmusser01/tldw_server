@@ -199,7 +199,7 @@ describe("core route identity guardrails", () => {
     expect(
       screen.getByRole("heading", {
         level: 2,
-        name: "Setup operator recovery"
+        name: "Setup complete"
       })
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Return home" })).toBeInTheDocument()

@@ -25,7 +25,7 @@ vi.mock("@/utils/safe-storage", () => ({
       typeof value === "string" ? JSON.parse(value) : value,
   },
 }));
-import { TldwApiClient } from "../TldwApiClient";
+import { TldwApiClient, type TldwConfig } from "../TldwApiClient";
 import { createServicePromptScopeChangedError } from "../service-prompt-scope-error";
 const target = {
   serverUrl: "https://auth.example.test/base",
@@ -517,4 +517,72 @@ it("review: rejects a verified foreign account despite a delayed own storage eve
   expect({ outcome, visible, stored: mocks.storage.get("tldwConfig") }).toEqual(
     { outcome: 412, visible: bob, stored: bob },
   );
+});
+
+const actorToken = (user: string, revision = 1) =>
+  `test.${btoa(JSON.stringify({ sub: user, revision }))}.signature`;
+
+it.each([
+  ["logout", undefined, null],
+  ["another principal", actorToken("bob"), null],
+  ["same-principal rotation", actorToken("alice", 2), "alice-reference"],
+] as const)(
+  "A01: a cold settings client handles its automatic Chat handoff on %s",
+  async (_kind, accessToken, expectedReference) => {
+    const alice = { ...target, accessToken: actorToken("alice") };
+    mocks.storage.set("tldwConfig", alice);
+    sessionStorage.setItem("tldw-h1-playground-reference", "alice-reference");
+    sessionStorage.setItem("unrelated-view-reference", "keep-unrelated");
+    const publishedReferences: Array<string | null> = [];
+    const onBoundary = (event: Event) => {
+      if (
+        (event as CustomEvent<{ authorityChanged: boolean }>).detail
+          .authorityChanged
+      )
+        publishedReferences.push(
+          sessionStorage.getItem("tldw-h1-playground-reference"),
+        );
+    };
+    window.addEventListener("tldw:config-updated", onBoundary);
+    try {
+      const client = new TldwApiClient();
+      vi.spyOn(client, "initialize").mockResolvedValue(undefined);
+      vi.spyOn(client, "getConfig").mockImplementation(
+        async () => mocks.storage.get("tldwConfig") as TldwConfig,
+      );
+      await client.updateConfig({ accessToken });
+      expect(sessionStorage.getItem("tldw-h1-playground-reference")).toBe(
+        expectedReference,
+      );
+      expect(sessionStorage.getItem("unrelated-view-reference")).toBe(
+        "keep-unrelated",
+      );
+      expect(publishedReferences).toEqual(
+        expectedReference === null ? [null] : [],
+      );
+    } finally {
+      window.removeEventListener("tldw:config-updated", onBoundary);
+      sessionStorage.clear();
+    }
+  },
+);
+
+it("A01: blocked automatic-handoff storage cannot interrupt a committed account change", async () => {
+  mocks.storage.set("tldwConfig", {
+    ...target,
+    accessToken: actorToken("alice"),
+  });
+  const client = new TldwApiClient();
+  vi.spyOn(client, "initialize").mockResolvedValue(undefined);
+  vi.spyOn(client, "getConfig").mockImplementation(
+    async () => mocks.storage.get("tldwConfig") as TldwConfig,
+  );
+  vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+    throw new DOMException("Storage unavailable", "SecurityError");
+  });
+  await client.updateConfig({ accessToken: actorToken("bob") });
+  expect(mocks.storage.get("tldwConfig")).toMatchObject({
+    ...target,
+    accessToken: actorToken("bob"),
+  });
 });

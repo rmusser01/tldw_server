@@ -456,7 +456,7 @@ Follow these examples for consistency."""
                     user_prompt, version_number, parent_version_id, client_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                f"opt-{uuid.uuid4()}",
+                str(uuid.uuid4()),
                 prompt["project_id"],
                 prompt.get("signature_id"),
                 variant_name,
@@ -709,7 +709,7 @@ class BootstrapOptimizer:
                     user_prompt, version_number, parent_version_id, client_id
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                f"bootstrap-{uuid.uuid4()}",
+                str(uuid.uuid4()),
                 prompt["project_id"],
                 prompt.get("signature_id"),
                 variant_name,

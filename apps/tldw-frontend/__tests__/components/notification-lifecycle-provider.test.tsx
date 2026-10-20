@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const mocks = vi.hoisted(() => ({
   connection: { phase: "connected", isConnected: true, mode: "normal", offlineBypass: false },
+  config: null as Record<string, unknown> | null,
+  apiKey: "test-api-key" as string | null,
   getUnreadCount: vi.fn(),
   listNotifications: vi.fn(),
   subscribeNotificationsStream: vi.fn()
@@ -26,8 +28,8 @@ vi.mock("@web/lib/api", () => ({
 
 vi.mock("@web/lib/authStorage", () => ({
   getApiBearer: () => null,
-  getApiKey: () => "test-api-key",
-  getEffectiveStoredTldwConfig: () => null,
+  getApiKey: () => mocks.apiKey,
+  getEffectiveStoredTldwConfig: () => mocks.config,
   getSessionAccessToken: () => window.localStorage.getItem("access_token")
 }))
 
@@ -81,12 +83,49 @@ describe("NotificationLifecycleProvider", () => {
     vi.clearAllMocks()
     mocks.connection = { phase: "connected", isConnected: true, mode: "normal", offlineBypass: false }
     window.localStorage.clear()
+    mocks.config = null
+    mocks.apiKey = "test-api-key"
     mocks.getUnreadCount.mockResolvedValue({ unread_count: 5 })
     mocks.listNotifications.mockResolvedValue({
       items: [{ id: 10, title: "Existing" }],
       total: 1
     })
     mocks.subscribeNotificationsStream.mockImplementation(() => vi.fn())
+  })
+
+  it("retires cleared manual single-user credentials while connection state is still connected", async () => {
+    vi.useFakeTimers()
+    mocks.config = { serverUrl: "https://api.example.test", authMode: "single-user", apiKey: "manual-key" }
+    mocks.apiKey = "manual-key"
+    const unsubscribe = vi.fn()
+    mocks.subscribeNotificationsStream.mockReturnValue(unsubscribe)
+    let current: NotificationLifecycleContextValue | null = null
+    const view = render(
+      <NotificationLifecycleProvider>
+        <Probe onValue={(value) => { current = value }} />
+      </NotificationLifecycleProvider>
+    )
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1)
+
+    mocks.config = { ...mocks.config, apiKey: undefined }
+    mocks.apiKey = null
+    act(() => window.dispatchEvent(new Event("tldw:config-updated")))
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    expect(unsubscribe).toHaveBeenCalledTimes(1)
+    expect(current!.state).toBe("auth-required")
+    expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(1)
+    await act(async () => vi.advanceTimersByTimeAsync(30_000))
+    expect(mocks.getUnreadCount).toHaveBeenCalledTimes(1)
+
+    mocks.config = { ...mocks.config, apiKey: "replacement-key" }
+    mocks.apiKey = "replacement-key"
+    act(() => window.dispatchEvent(new Event("tldw:config-updated")))
+    await act(async () => vi.advanceTimersByTimeAsync(0))
+    expect(mocks.subscribeNotificationsStream).toHaveBeenCalledTimes(2)
+    expect(current!.unreadCount).toBe(5)
+    view.unmount()
+    vi.useRealTimers()
   })
 
   describe("tab visibility", () => {

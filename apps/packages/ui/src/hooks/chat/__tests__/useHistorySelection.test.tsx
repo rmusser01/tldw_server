@@ -16,7 +16,7 @@ import type {
   HistoryViewSelectionV1,
   HistorySelectionSnapshotV1
 } from "@/types/history-selection"
-import { resolveHistorySelection } from "@/utils/history-selection"
+import { resolveHistorySelection, selectionDigest } from "@/utils/history-selection"
 
 const mocks = vi.hoisted(() => ({
   openButtons: [] as Array<() => void>,
@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   profile: vi.fn(),
   details: vi.fn(),
   localOwner: vi.fn(),
+  bindLocal: vi.fn(),
   link: vi.fn(),
   recoveries: vi.fn<(...args: any[]) => Promise<any[]>>(async () => []),
   dismissRecovery: vi.fn<(...args: any[]) => Promise<boolean>>(async () => true)
@@ -83,7 +84,8 @@ vi.mock("@/db/dexie/history-selection", async (original) => ({
       { ...scope, view }
     )
   },
-  getLocalHistoryOwner: (id: string) => mocks.localOwner(id)
+  getLocalHistoryOwner: (id: string) => mocks.localOwner(id),
+  bindUnboundLocalHistory: (...args: any[]) => mocks.bindLocal(...args)
 }))
 vi.mock("@/services/chat-history-selection", async (original) => ({
   readNativeHistoryVersion: (...args: unknown[]) => mocks.historyVersion(...args),
@@ -200,6 +202,7 @@ beforeEach(() => {
   mocks.localOwner
     .mockReset()
     .mockImplementation(async (id) => ({ ...owner, conversation_id: id }))
+  mocks.bindLocal.mockReset().mockImplementation(async (id: string) => ({ ...owner, conversation_id: id }))
   mocks.details.mockReset().mockResolvedValue(null)
   mocks.link.mockReset()
   mocks.capture.mockReset().mockImplementation(async (_owner, view) => {
@@ -512,7 +515,7 @@ it("does not install ownership on an unowned local cache", async () => {
   mocks.details.mockResolvedValue({ id: "unowned" })
   const { result } = renderHook(() => useHistorySelection())
   await act(async () => { await result.current.loadConversation({ historyId: "unowned" }) })
-  expect(result.current.error).toBe("owner_conversation_mismatch")
+  expect(result.current.error).toBe("unbound_local_history")
   expect(mocks.localOwner).not.toHaveBeenCalled()
   expect(mocks.capture).not.toHaveBeenCalled()
 })
@@ -967,6 +970,71 @@ it("restores scoped pending operations from older views without making them sele
     "op", "dismissed", expect.objectContaining({ validate_lease: expect.any(Function) })
   )
   expect(result.current.recoveries).toEqual([])
+})
+
+it("Regenerate reload keeps a reviewed legacy bookmark and exposes bound recovery after stale projection", async () => {
+  const origin = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await origin.result.current.loadConversation({ serverChatId: "chat" })
+  })
+  const reference = origin.result.current.getReference()!
+  const legacyView = {
+    ...origin.result.current.view!,
+    interpretation: { kind: "legacy_linear_v1" as const, projection_id: "reviewed" },
+    cursor: { kind: "after_message" as const, message_id: "u" }
+  }
+  const key = JSON.stringify([
+    { profile_id: reference.profile_id, client_session_id: reference.client_session_id },
+    { owner_key: reference.owner_key, conversation_id: reference.conversation_id }
+  ])
+  mocks.bookmarks.set(key, { ...reference, view: legacyView })
+  const savedSelection = {
+    version: 1 as const, owner_key: "owner", conversation_id: "chat",
+    interpretation: legacyView.interpretation, cursor: legacyView.cursor,
+    selection_revision: legacyView.selection_revision, purpose: "send" as const,
+    messages: [{ id: "u", revision: "u1" }], fences: snapshot.fences,
+    storage_context_digest: snapshot.storage_context_digest,
+    request_context_digest: "prepared"
+  }
+  const existingSelection = {
+    ...savedSelection, selection_digest: selectionDigest({ ...savedSelection, selection_digest: "" })
+  }
+  const entry: ReturnType<typeof useHistorySelection>["recoveries"][number] = {
+    scope: { profile_id: reference.profile_id, client_session_id: reference.client_session_id },
+    turn: {
+      operation_id: "regenerate-retained", origin_view: legacyView,
+      owner_key: "owner", conversation_id: "chat", state: "generated_unsaved",
+      input_id: "u", assistant_id: "alternative", input_text: "Question",
+      result_text: "New answer", input_images: [], created_at: 1,
+      outcome: "complete", selection_digest: existingSelection.selection_digest,
+      request_context_digest: existingSelection.request_context_digest,
+      existing_selection: existingSelection
+    }
+  }
+  mocks.recoveries.mockResolvedValue([entry])
+  mocks.capture.mockImplementation(async (_owner, view, _purpose, _signal, capability) => {
+    if (view.interpretation.kind === "legacy_linear_v1")
+      throw Object.assign(new Error("stale_projection"), { status: 409 })
+    if (capability === "tldw_history_existing_input_v1") return {
+      status: "legacy_review_required", code: "legacy_review_required",
+      acknowledged_capability: capability,
+      snapshot: { ...snapshot, interpretation_status: { kind: "legacy_review_required" } },
+      view: { ...view, owner_key: "owner" }
+    }
+    throw new Error("unexpected_history_read")
+  })
+  const reopened = renderHook(() => useHistorySelection())
+  await act(async () => {
+    await reopened.result.current.loadConversation({ serverChatId: "chat" }, reference)
+  })
+  await waitFor(() => expect(reopened.result.current.recoveries).toEqual([entry]))
+  expect(mocks.capture).toHaveBeenCalledWith(expect.objectContaining({ kind: "native" }),
+    expect.objectContaining({ interpretation: { kind: "parent_graph_v1" }, cursor: { kind: "empty" } }),
+    "send", expect.anything(), "tldw_history_existing_input_v1")
+  expect(reopened.result.current.view?.interpretation).toEqual(legacyView.interpretation)
+  expect(reopened.result.current.view?.cursor).toEqual(legacyView.cursor)
+  expect(mocks.bookmarks.get(key).view).toEqual(legacyView)
+  expect(mocks.confirm).not.toHaveBeenCalled()
 })
 
 it("a historyId-only bound native mirror supplies its own successful load receipt", async () => {
@@ -2825,6 +2893,40 @@ describe("shared proactive native freshness", () => {
     hook.unmount()
   })
 })
+describe("explicit imported local consent", () => {
+  it("keeps an import unowned until consent, then resumes its exact loader target", async () => {
+    mocks.details.mockResolvedValue({ id: "imported", message_source: "web-ui" })
+    const resumeAfterBind = vi.fn(async () => true)
+    const { result } = renderHook(() => useHistorySelection())
+    await act(async () => { await result.current.loadConversation({ historyId: "imported", resumeAfterBind }) })
+    expect(result.current.error).toBe("unbound_local_history")
+    expect(mocks.bindLocal).not.toHaveBeenCalled()
+    expect(mocks.localOwner).not.toHaveBeenCalled()
+    await act(async () => { expect(await result.current.bindUnavailableConversation()).toBe(true) })
+    expect(mocks.bindLocal).toHaveBeenCalledTimes(1)
+    expect(mocks.bindLocal.mock.calls[0][0]).toBe("imported")
+    expect(resumeAfterBind).toHaveBeenCalledTimes(1)
+  })
+  it("retires a refused target after a different conversation is chosen", async () => {
+    const { result } = renderHook(() => useHistorySelection())
+    mocks.details.mockResolvedValue({ id: "imported" })
+    await act(async () => { await result.current.loadConversation({ historyId: "imported", resumeAfterBind: async () => true }) })
+    mocks.details.mockResolvedValue({ id: "replacement", local_owner_key: "owner" })
+    await act(async () => { await result.current.loadConversation({ historyId: "replacement" }) })
+    await act(async () => { expect(await result.current.bindUnavailableConversation()).toBe(false) })
+    expect(mocks.bindLocal).not.toHaveBeenCalled()
+    expect(result.current.owner).toMatchObject({ conversation_id: "replacement" })
+  })
+  it("does not bind a refused target after unmount", async () => {
+    mocks.details.mockResolvedValue({ id: "imported" })
+    const { result, unmount } = renderHook(() => useHistorySelection())
+    await act(async () => { await result.current.loadConversation({ historyId: "imported", resumeAfterBind: async () => true }) })
+    const bind = result.current.bindUnavailableConversation
+    unmount()
+    expect(await bind()).toBe(false)
+    expect(mocks.bindLocal).not.toHaveBeenCalled()
+  })
+})
 
 
 describe("acknowledged recovery controller", () => {
@@ -3079,4 +3181,34 @@ it("an older empty journal read cannot replace newer unresolved cold status", as
     expect(getServerChatSaveStatus('chat')).toBe('unconfirmed')
     expect(hook.result.current.recoveries).toHaveLength(1)
   } finally { release(); hook.unmount(); resetServerChatSaveStatus() }
+})
+describe("explicit imported consent retirement", () => {
+  it("clears pending local consent when the account changes before the click", async () => {
+    mocks.details.mockResolvedValue({ id: "imported" })
+    const resume = vi.fn(async () => true)
+    const { result } = renderHook(() => useHistorySelection())
+    await act(async () => { await result.current.loadConversation({ historyId: "imported", resumeAfterBind: resume }) })
+    act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed")))
+    await act(async () => { expect(await result.current.bindUnavailableConversation()).toBe(false) })
+    expect(mocks.bindLocal).not.toHaveBeenCalled()
+    expect(resume).not.toHaveBeenCalled()
+  })
+  it("does not offer local consent for a malformed native-source record", async () => {
+    mocks.details.mockResolvedValue({ id: "imported", message_source: "server" })
+    const { result } = renderHook(() => useHistorySelection())
+    await act(async () => { await result.current.loadConversation({ historyId: "imported", resumeAfterBind: async () => true }) })
+    expect(result.current.canBindUnavailable).toBe(false)
+    await act(async () => { expect(await result.current.bindUnavailableConversation()).toBe(false) })
+    expect(mocks.bindLocal).not.toHaveBeenCalled()
+  })
+  it("hides expired caller consent and does not bind it", async () => {
+    mocks.details.mockResolvedValue({ id: "imported" })
+    let current = true
+    const { result, rerender } = renderHook(() => useHistorySelection())
+    await act(async () => { await result.current.loadConversation({ historyId: "imported", isCurrent: () => current, resumeAfterBind: async () => true }) })
+    current = false; rerender()
+    expect(result.current.canBindUnavailable).toBe(false)
+    await act(async () => { expect(await result.current.bindUnavailableConversation()).toBe(false) })
+    expect(mocks.bindLocal).not.toHaveBeenCalled()
+  })
 })

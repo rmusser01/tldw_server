@@ -280,6 +280,11 @@ const OptionIndex = () => {
   // route (#2871); a true first run (no connection) still gets the wizard.
   const wizardRequired = isSetupStatusRequiringWizard(setupStatus)
   const connectionReady = phase === ConnectionPhase.CONNECTED
+  const setupBannerRequired =
+    wizardRequired &&
+    !(firstRunMetadata?.auth_mode === "multi_user" &&
+      firstRunMetadata.setup_completed &&
+      !firstRunMetadata.setup_required)
 
   if ((wizardRequired || (setupConnectionConfigured === false && !setupConnectionChecking)) && !connectionReady) {
     return (
@@ -357,7 +362,7 @@ const OptionIndex = () => {
           {handoffError}
         </p>
       ) : null}
-      {wizardRequired && connectionReady && !setupBannerDismissed ? (
+      {setupBannerRequired && connectionReady && !setupBannerDismissed ? (
         <div
           role="status"
           data-testid="resume-setup-banner"

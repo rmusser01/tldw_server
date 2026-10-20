@@ -1145,6 +1145,44 @@ class MessageStore:
             raise HistorySelectionError("stale_scope")
         return authority
 
+    def validate_history_admission(
+        self,
+        conversation_id: str,
+        reference: Mapping[str, Any],
+        *,
+        snapshot: HistorySelectionSnapshotV1,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any | None = None,
+    ) -> dict[str, Any]:
+        """Bind an unchanged accepted input to this full capture under its owner fence."""
+        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistoryAdmissionReferenceV1
+
+        binding = HistoryAdmissionReferenceV1.model_validate(reference).model_dump(mode="json")
+        namespace = self._history_owner_key(owner_client_id, owner_key)
+        if snapshot.owner_key != namespace or snapshot.conversation_id != conversation_id:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        transaction = nullcontext(conn) if conn is not None else self._db.transaction()
+        with transaction as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            self._validate_history_parent(
+                conversation_id, binding, owner_client_id=owner_client_id, owner_key=namespace, conn=active
+            )
+            fresh, _ = self._read_history_snapshot(
+                conversation_id, owner_client_id=owner_client_id, owner_key=namespace,
+                projection_id=snapshot.interpretation_status.get("projection_id"), conn=active,
+            )
+            # A row-first writer or metadata ABA must never label a different capture as validated.
+            if (
+                snapshot.source_digest != fresh.source_digest or snapshot.fences != fresh.fences
+                or snapshot.storage_context_digest != fresh.storage_context_digest
+            ):
+                raise HistorySelectionError("stale_source")
+            question = next((node for node in fresh.nodes if node["id"] == binding["input_message_id"]), None)
+            if question is None or question["role"] != "user":
+                raise HistorySelectionError("stale_parent")
+            return {"admission": binding, "input_revision": question["revision"]}
+
     def settle_history_admission(
         self,
         conversation_id: str,
@@ -1215,6 +1253,96 @@ class MessageStore:
                 conn=active,
             )
             self._write_history_authority(active, mid, result_authority)
+            return mid
+
+    def settle_selected_existing_input(
+        self,
+        conversation_id: str,
+        selection: Mapping[str, Any],
+        message: Mapping[str, Any],
+        *,
+        owner_client_id: str,
+        owner_key: str,
+        conn: Any | None = None,
+        require_unanswered: bool = False,
+    ) -> str:
+        """Add one alternative answer to an owner-selected existing user question."""
+        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistorySelectionV1
+
+        body = HistorySelectionV1.model_validate(selection).model_dump(mode="json")
+        data = dict(message)
+        if (body["owner_key"] != owner_key or body["conversation_id"] != conversation_id
+                or body["purpose"] != "send"):
+            raise HistorySelectionError("owner_conversation_mismatch")
+        if (body["cursor"]["kind"] != "after_message" or not body["messages"]
+                or body["cursor"]["message_id"] != body["messages"][-1]["id"]):
+            raise HistorySelectionError("invalid_selection")
+        question_id = body["messages"][-1]["id"]
+        if not data.get("id") or data.get("sender") != "assistant":
+            raise HistorySelectionError("invalid_settlement")
+        if data.get("conversation_id", conversation_id) != conversation_id:
+            raise HistorySelectionError("owner_conversation_mismatch")
+        if "parent_message_id" in data and data["parent_message_id"] != question_id:
+            raise HistorySelectionError("parent_mismatch")
+        intent = self._history_intent_digest(data)
+        with nullcontext(conn) if conn is not None else self._db.transaction() as active:
+            self._lock_history_owner(active, conversation_id, owner_client_id)
+            scope = dict(active.execute(
+                "SELECT scope_type, workspace_id FROM conversations WHERE id = ?", (conversation_id,)
+            ).fetchone())
+            existing = active.execute(
+                "SELECT conversation_id, history_admission_json, deleted, version FROM messages WHERE id = ?",
+                (data["id"],),
+            ).fetchone()
+            if existing is not None:
+                try:
+                    saved = json.loads(existing["history_admission_json"] or "null")
+                except (TypeError, ValueError):
+                    raise HistorySelectionError("message_id_conflict") from None
+                if (existing["conversation_id"] != conversation_id or existing["deleted"]
+                        or existing["version"] != 1 or not isinstance(saved, dict)
+                        or saved.get("selected_existing_input") != body
+                        or saved.get("intent_digest") != intent or saved.get("scope") != scope):
+                    raise HistorySelectionError("message_id_conflict")
+                fresh, _ = self._read_history_snapshot(
+                    conversation_id, owner_client_id=owner_client_id, owner_key=owner_key,
+                    projection_id=None, conn=active, selected_ids=(question_id,),
+                )
+                question = next((row for row in snapshot_to_wire(fresh)["nodes"] if row["id"] == question_id), None)
+                if (question is None or question["role"] != "user"
+                        or question["revision"] != body["messages"][-1]["revision"]):
+                    raise HistorySelectionError("stale_parent")
+                if self._history_message_state(
+                    conversation_id, data["id"], owner_client_id=owner_client_id,
+                    owner_key=owner_key, conn=active,
+                ) != saved.get("result_state_digest"):
+                    raise HistorySelectionError("message_id_conflict")
+                return data["id"]
+            fresh, content = self.validate_history_selection(
+                conversation_id, body, owner_client_id=owner_client_id,
+                owner_key=owner_key, conn=active,
+            )
+            if require_unanswered:
+                from tldw_Server_API.app.core.Chat.history_context import selected_unanswered_text_question
+                selected_unanswered_text_question(fresh, content, body)
+            question = next((row for row in fresh.nodes if row["id"] == question_id), None)
+            if question is None or question["role"] != "user":
+                raise HistorySelectionError("invalid_selection")
+            data.update(conversation_id=conversation_id, parent_message_id=question_id,
+                        client_id=owner_client_id)
+            mid = self.add_message(data, conn=active)
+            if data.get("tool_calls") is not None or data.get("extra_metadata") is not None:
+                self._add_message_metadata_with_conn(mid, data.get("tool_calls"), data.get("extra_metadata"), active)
+            authority = {
+                "version": 1, "interpretation": body["interpretation"], "settled": True,
+                "selected_existing_input": body, "intent_digest": intent, "scope": scope,
+            }
+            self._write_history_authority(active, mid, authority)
+            authority["result_state_digest"] = self._history_message_state(
+                conversation_id, mid, owner_client_id=owner_client_id,
+                owner_key=owner_key, conn=active,
+            )
+            self._write_history_authority(active, mid, authority)
             return mid
 
     def _next_message_order_timestamp(self) -> str:

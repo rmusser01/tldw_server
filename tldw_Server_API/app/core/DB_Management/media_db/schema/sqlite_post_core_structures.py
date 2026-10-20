@@ -58,8 +58,9 @@ def ensure_sqlite_visibility_columns(db: Any, conn: sqlite3.Connection) -> None:
             "version = version + 1, last_modified = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') "
             "WHERE owner_user_id IS NULL "
             "AND CAST(SUBSTR(client_id, 21) AS INTEGER) > 0 "
-            "AND client_id = 'media_ingest_worker:' || "
-            "CAST(CAST(SUBSTR(client_id, 21) AS INTEGER) AS TEXT);"
+            "AND client_id IN ('media_ingest_worker:' || "
+            "CAST(CAST(SUBSTR(client_id, 21) AS INTEGER) AS TEXT), "
+            "'webscraping_service_' || CAST(CAST(SUBSTR(client_id, 21) AS INTEGER) AS TEXT));"
         )
 
     if not statements:

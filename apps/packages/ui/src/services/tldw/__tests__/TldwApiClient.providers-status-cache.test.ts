@@ -92,3 +92,54 @@ describe("getProvidersStatus TTL cache", () => {
     expect(mocks.bgRequest).toHaveBeenCalledTimes(2)
   })
 })
+
+
+describe("provider status after a normal connection boundary", () => {
+  const configured = {
+    providers: [{ name: "openai", configured: true, requires_api_key: true }],
+    any_configured: true
+  }
+  const missing = {
+    providers: [{ name: "openai", configured: false, requires_api_key: true }],
+    any_configured: false
+  }
+  const changeServer = () => window.dispatchEvent(
+    new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } })
+  )
+
+  beforeEach(() => {
+    mocks.bgRequest.mockReset()
+  })
+
+  it("shows the new server's missing provider instead of a prior server's cached status", async () => {
+    mocks.bgRequest.mockResolvedValueOnce(configured).mockResolvedValueOnce(missing)
+    const { TldwApiClient } = await importClient()
+    const client = new TldwApiClient()
+
+    expect((await client.getProvidersStatus()).any_configured).toBe(true)
+    changeServer()
+
+    expect(await client.getProvidersStatus()).toEqual({
+      providers: [{ name: "openai", configured: false, requires_api_key: true }],
+      any_configured: false
+    })
+  })
+
+  it("rejects a retired server's pending result and retains the new server's response", async () => {
+    let resolveOld!: (value: unknown) => void
+    mocks.bgRequest.mockImplementationOnce(() => new Promise(resolve => {
+      resolveOld = resolve
+    })).mockResolvedValueOnce(missing)
+    const { TldwApiClient } = await importClient()
+    const client = new TldwApiClient()
+    const old = client.getProvidersStatus().catch(error => error)
+
+    changeServer()
+    const current = client.getProvidersStatus()
+    resolveOld(configured)
+
+    expect(await current).toEqual(missing)
+    expect(await old).toMatchObject({ status: 412 })
+    expect(await client.getProvidersStatus()).toEqual(missing)
+  })
+})

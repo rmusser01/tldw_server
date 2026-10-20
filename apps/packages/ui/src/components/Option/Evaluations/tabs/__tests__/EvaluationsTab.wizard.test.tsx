@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { ConfigProvider } from "antd"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { EvaluationsTab } from "../EvaluationsTab"
+import { DatasetsTab } from "../DatasetsTab"
 import { useEvaluationsStore } from "@/store/evaluations"
 
 const mocks = vi.hoisted(() => ({
@@ -25,6 +26,11 @@ vi.mock("../../hooks/useEvaluations", async (importOriginal) => ({
 }))
 vi.mock("../../hooks/useDatasets", () => ({
   useDatasetsList: () => ({ data: { data: { data: [] } }, isLoading: false }),
+  useCreateDataset: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useDeleteDataset: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useLoadDatasetSamples: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useCloseDatasetViewer: () => vi.fn(),
+  parseSamplesJson: vi.fn(),
 }))
 
 beforeEach(() => {
@@ -43,6 +49,7 @@ function checkedControl<T extends HTMLElement>(element: T, role: string, name: s
   expect(element).toHaveRole(role)
   expect(element).toHaveAccessibleName(name)
   expect(element).toBeVisible()
+  expect(element).toBeEnabled()
   expect(element.closest('[aria-hidden="true"]')).toBeNull()
   return element
 }
@@ -60,18 +67,40 @@ async function openExactMatch() {
       <EvaluationsTab />
     </ConfigProvider>
   )
-  await user.click(button(screen, "New evaluation"))
+  fireEvent.click(button(screen, "New evaluation"))
   const wizard = within(screen.getByRole("dialog", { name: "New evaluation" }))
   const nameInput = await waitFor(() => checkedControl(wizard.getByLabelText(/Name/, { selector: "input" }), "textbox", /Name/))
   fireEvent.change(nameInput, { target: { value: "exact_run" } })
   fireEvent.change(checkedControl(wizard.getByLabelText("Description", { selector: "textarea" }), "textbox", "Description"), { target: { value: "Two known outcomes" } })
-  await user.click(checkedControl(wizard.getByLabelText(/Evaluation type/, { selector: "input" }), "combobox", /Evaluation type/))
-  await user.click(screen.getByTitle("exact_match"))
+  fireEvent.mouseDown(checkedControl(wizard.getByLabelText(/Evaluation type/, { selector: "input" }), "combobox", /Evaluation type/))
+  const option = screen.getByTitle("exact_match")
+  await waitFor(() => expect(option).toBeVisible())
+  fireEvent.click(option)
   await user.click(button(wizard, "Next"))
   return { user, wizard }
 }
 
 describe("evaluation wizard preserved form state", () => {
+  it("binds the visible create key through regeneration and manual submission", async () => {
+    const { user, wizard } = await openExactMatch()
+    await user.click(wizard.getByRole("button", { name: /Advanced options/ }))
+    const input = wizard.getByPlaceholderText("Prevents duplicate create on retry")
+    const first = useEvaluationsStore.getState().evalIdempotencyKey
+    expect(first).not.toBe("")
+    expect(input).toHaveValue(first)
+    expect(wizard.getByLabelText("Idempotency key")).toBe(input)
+    await user.click(button(wizard, "Regenerate"))
+    const generated = useEvaluationsStore.getState().evalIdempotencyKey
+    expect(generated).not.toBe(first)
+    await waitFor(() => expect(input).toHaveValue(generated))
+    fireEvent.change(input, { target: { value: "manual-create-key" } })
+    await user.click(button(wizard, "Next"))
+    await user.click(button(wizard, "Create"))
+    await waitFor(() => expect(mocks.create).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: "manual-create-key",
+    })))
+  })
+
   it("retains exact-match configuration when fields unmount and steps are revisited", async () => {
     const { user, wizard } = await openExactMatch()
     const control = checkedControl(await wizard.findByLabelText("Case sensitive", { selector: "button" }), "switch", "Case sensitive")
@@ -120,5 +149,32 @@ describe("evaluation wizard preserved form state", () => {
         name: "owned", description: "Keep me", eval_type: "exact_match", metadata: { custom: { source: "owned" } }, eval_spec: { case_sensitive: true },
       }),
     }))
+  })
+})
+
+
+describe("retained evaluation workspace form labels", () => {
+  it.each([
+    ["New dataset", "New evaluation", "my_eval_run"],
+    ["New evaluation", "New dataset", "my_dataset"],
+  ])("labels the visible form after canceling %s then opening %s", async (firstTitle, secondTitle, placeholder) => {
+    const user = userEvent.setup()
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <EvaluationsTab />
+        <DatasetsTab />
+      </ConfigProvider>
+    )
+    await user.click(button(screen, firstTitle))
+    const firstDialog = screen.getByRole("dialog", { name: firstTitle })
+    await user.click(within(firstDialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(firstDialog).not.toBeVisible())
+    await user.click(button(screen, secondTitle))
+    const secondDialog = screen.getByRole("dialog")
+    const scope = within(secondDialog)
+    await waitFor(() => expect(scope.getByText(secondTitle, { selector: ".ant-modal-title" })).toBeVisible())
+    expect(scope.getByPlaceholderText(placeholder)).toHaveAccessibleName(/Name/)
+    expect(scope.getByLabelText("Description", { selector: "textarea" })).toHaveAccessibleName("Description")
+    expect(mocks.create).not.toHaveBeenCalled()
   })
 })

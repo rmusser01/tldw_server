@@ -106,6 +106,35 @@ export const isServicePromptRequestPath = (
   const requestMethod = String(method || "GET").toUpperCase()
   if (pathname === "/openapi.json") return requestMethod === "GET"
   if (pathname === "/api/v1/config/docs-info") return requestMethod === "GET"
+  if (pathname === "/api/v1/audio-studio/projects") return ["GET", "POST"].includes(requestMethod)
+  if (/^\/api\/v1\/audio-studio\/projects\/[^/]+$/.test(pathname)) return ["GET", "PATCH"].includes(requestMethod)
+  if (requestMethod === "GET" && (
+    ["/api/v1/audio-studio/providers", "/api/v1/audio-studio/workflows", "/api/v1/audio/providers", "/api/v1/audio/voices", "/api/v1/audio/voices/catalog"].includes(pathname) ||
+    /^\/api\/v1\/audio-studio\/projects\/[^/]+\/(?:jobs|artifacts)$/.test(pathname) ||
+    /^\/api\/v1\/audio-studio\/projects\/[^/]+\/artifacts\/[^/]+\/media$/.test(pathname)
+  )) return true
+  if (requestMethod === "PUT" && /^\/api\/v1\/audio-studio\/projects\/[^/]+\/(?:sections|tracks|clips)\/[^/]+$/.test(pathname)) return true
+  if (requestMethod === "POST" && (
+    /^\/api\/v1\/audio-studio\/projects\/[^/]+\/(?:generations|renders|exports)$/.test(pathname) ||
+    /^\/api\/v1\/audio-studio\/projects\/[^/]+\/jobs\/[^/]+\/cancel$/.test(pathname) ||
+    /^\/api\/v1\/audio-studio\/projects\/[^/]+\/artifacts\/[^/]+\/tickets$/.test(pathname)
+  )) return true
+  if (pathname === "/api/v1/workflows") {
+    return ["GET", "POST"].includes(requestMethod)
+  }
+  if (/^\/api\/v1\/workflows\/[1-9][0-9]*$/.test(pathname)) {
+    return requestMethod === "GET"
+  }
+  if (requestMethod === "POST" && (
+    pathname === "/api/v1/workflows/preflight" ||
+    /^\/api\/v1\/workflows\/[1-9][0-9]*\/(?:versions|run)$/.test(pathname) ||
+    /^\/api\/v1\/workflows\/runs\/[^/]+\/(?:pause|resume|cancel)$/.test(pathname) ||
+    /^\/api\/v1\/workflows\/runs\/[^/]+\/steps\/[^/]+\/(?:approve|reject)$/.test(pathname)
+  )) return true
+  if (requestMethod === "GET" && (
+    /^\/api\/v1\/workflows\/runs\/[^/]+(?:\/(?:steps|investigation))?$/.test(pathname) ||
+    /^\/api\/v1\/workflows\/runs\/[^/]+\/steps\/[^/]+\/attempts$/.test(pathname)
+  )) return true
   if (["PUT", "DELETE"].includes(requestMethod) && /^\/api\/v1\/media\/[0-9]+$/.test(pathname)) return true
   if (requestMethod === "PATCH" && /^\/api\/v1\/media\/[0-9]+\/keywords$/.test(pathname)) return true
   if (requestMethod === "POST" && pathname === "/api/v1/media/bulk/keyword-update") return true
@@ -133,12 +162,14 @@ export const isServicePromptRequestPath = (
   if (pathname === "/api/v1/chat/dictionaries") return requestMethod === "GET"
   if (pathname === "/api/v1/files/reference-images") return requestMethod === "GET"
   if (pathname === "/api/v1/files/create") return requestMethod === "POST"
+  if (requestMethod === "POST" && /^\/api\/v1\/media\/[0-9]+\/versions$/.test(pathname)) return true
   if (/^\/api\/v1\/workspaces\/[^/]+\/source-views$/.test(pathname))
     return ["GET", "POST"].includes(requestMethod)
   if (/^\/api\/v1\/workspaces\/[^/]+\/source-views\/[^/]+$/.test(pathname))
     return ["PATCH", "DELETE"].includes(requestMethod)
   if (pathname === "/api/v1/users/storage") return requestMethod === "GET"
   if (pathname === "/api/v1/users/me/profile") return ["GET", "PATCH"].includes(requestMethod)
+  if (pathname === "/api/v1/audio/transcriptions") return requestMethod === "POST"
   if (pathname === "/api/v1/feedback/explicit") return requestMethod === "POST"
   if (/^\/api\/v1\/web-clipper\/save\/?$/.test(pathname))
     return requestMethod === "POST"
@@ -201,6 +232,7 @@ export const isServicePromptRequestPath = (
   if (/^\/api\/v1\/chats\/[^/]+\/settings$/.test(pathname)) return ["GET", "PUT"].includes(requestMethod)
   if (requestMethod === "GET" && /^\/api\/v1\/chats\/[^/]+$/.test(pathname)) return true
   if (/^\/api\/v1\/flashcards\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(pathname)) return ["GET", "DELETE"].includes(requestMethod)
+  if (requestMethod === "PATCH" && /^\/api\/v1\/flashcards\/decks\/[1-9][0-9]*$/.test(pathname)) return true
   if (requestMethod === "GET") {
     return (
       pathname === "/api/v1/flashcards/decks" || /^\/api\/v1\/media\/[0-9]+$/.test(pathname) || pathname === "/api/v1/monitoring/alerts" ||

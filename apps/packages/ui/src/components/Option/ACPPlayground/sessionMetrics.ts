@@ -1,12 +1,11 @@
 import type { ACPSession } from "@/services/acp/types"
 
-const MESSAGE_UPDATE_TYPES = new Set(["text", "assistant_text", "user_text"])
+import { countACPUpdateMessages } from "@/services/acp/update-projection"
 
 export const getSessionMessageCount = (
   session: Pick<ACPSession, "updates" | "messageCount">
 ): number => {
-  const explicitMessageCount = session.updates.filter((update) => MESSAGE_UPDATE_TYPES.has(update.type)).length
-  const updatesMessageCount = explicitMessageCount > 0 ? explicitMessageCount : session.updates.length
+  const updatesMessageCount = countACPUpdateMessages(session.updates)
   const serverMessageCount = typeof session.messageCount === "number" ? session.messageCount : 0
   return Math.max(updatesMessageCount, serverMessageCount)
 }

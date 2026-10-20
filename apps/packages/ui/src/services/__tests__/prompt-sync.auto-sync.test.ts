@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getPromptStudioDefaults: vi.fn(),
   setPromptStudioDefaults: vi.fn(),
   listProjects: vi.fn(),
+  getProject: vi.fn(),
   createProject: vi.fn(),
   createPrompt: vi.fn(),
   updatePrompt: vi.fn(),
@@ -25,13 +26,22 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/services/prompt-studio-settings", () => ({
+  getPromptStudioDefaultsForOwner: (...args: unknown[]) =>
+    (mocks.getPromptStudioDefaults as (...args: unknown[]) => unknown)(...args),
   getPromptStudioDefaults: (...args: unknown[]) =>
     (mocks.getPromptStudioDefaults as (...args: unknown[]) => unknown)(...args),
   setPromptStudioDefaults: (...args: unknown[]) =>
     (mocks.setPromptStudioDefaults as (...args: unknown[]) => unknown)(...args)
 }))
 
+vi.mock("@/services/recipe-persistence-uncertainty", async original => ({
+  ...await original(),
+  resolveRecipePersistenceOwnerView: async () => ({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), authorizationRevision: "test-owner" })
+}))
+
 vi.mock("@/services/prompt-studio", () => ({
+  getProject: (...args: unknown[]) =>
+    (mocks.getProject as (...args: unknown[]) => unknown)(...args),
   listProjects: (...args: unknown[]) =>
     (mocks.listProjects as (...args: unknown[]) => unknown)(...args),
   createProject: (...args: unknown[]) =>
@@ -198,9 +208,16 @@ describe("prompt-sync auto-sync defaults", () => {
       autoSyncWorkspacePrompts: true
     }
     state.prompts.clear()
+    // Seed owned fixtures before each test takes its unchanged-data snapshot.
+    vi.spyOn(state.prompts, "set").mockImplementation((id, row) => {
+      if (!row.ownerId) row.ownerId = owner
+      return Map.prototype.set.call(state.prompts, id, row)
+    })
 
     mocks.getPromptStudioDefaults.mockReset()
     mocks.setPromptStudioDefaults.mockReset()
+    mocks.getProject.mockReset()
+    mocks.getProject.mockImplementation(async (id: number) => ({ ok: true, status: 200, data: { data: { id } } }))
     mocks.listProjects.mockReset()
     mocks.createProject.mockReset()
     mocks.createPrompt.mockReset()
@@ -237,18 +254,25 @@ describe("prompt-sync auto-sync defaults", () => {
         }
       }
     })
-    mocks.promptGet.mockImplementation(async (id: string) =>
-      state.prompts.get(id)
-    )
+    mocks.promptGet.mockImplementation(async (id: string) => state.prompts.get(id))
     mocks.promptUpdate.mockImplementation(
-      async (id: string, updates: Record<string, unknown>) => {
+      async (id: string, updates: Record<string, unknown> | ((row: Record<string, unknown>) => void)) => {
         const current = state.prompts.get(id)
-        if (!current) return
-        state.prompts.set(id, { ...current, ...updates })
+        if (!current) return 0
+        const next = { ...current }
+        if (typeof updates === "function") updates(next)
+        else Object.assign(next, updates)
+        state.prompts.set(id, next)
+        return 1
       }
     )
     mocks.promptWhere.mockImplementation((field: string) => ({
       equals: (value: unknown) => ({
+        filter: (predicate: (prompt: any) => boolean) => ({
+          first: async () => Array.from(state.prompts.values()).find(
+            prompt => prompt?.[field] === value && predicate(prompt)
+          )
+        }),
         first: async () => {
           for (const prompt of state.prompts.values()) {
             if (prompt?.[field] === value) return prompt
@@ -276,6 +300,93 @@ describe("prompt-sync auto-sync defaults", () => {
     expect(mocks.listProjects).not.toHaveBeenCalled()
   })
 
+  it.each([false, true])("C01 cached default missing is actionable without changing the target (existing=%s)", async existing => {
+    state.defaults.defaultProjectId = 42
+    mocks.getProject.mockResolvedValue({ ok: false, status: 404, error: "Project not found" })
+    mocks.listProjects.mockResolvedValue({ ok: true, data: { data: existing ? [{ id: 7, name: "Remaining" }] : [] } })
+    const { resolveAutoSyncProjectId } = await importPromptSync()
+    await expect(resolveAutoSyncProjectId(undefined, owner)).rejects.toThrow("Choose another default project")
+    expect(mocks.getProject).toHaveBeenCalledWith(42, { recipePersistence: { mode: "owner", expectedOwnerId: owner } })
+    expect(state.defaults.defaultProjectId).toBe(42)
+    expect(mocks.setPromptStudioDefaults).not.toHaveBeenCalled()
+    expect(mocks.listProjects).not.toHaveBeenCalled()
+    expect(mocks.createPrompt).not.toHaveBeenCalled()
+    expect(mocks.createProject).not.toHaveBeenCalled()
+  })
+
+  it("C01 cached default recovery cannot overwrite a choice during deferred project discovery", async () => {
+    state.defaults.defaultProjectId = 42
+    mocks.getProject.mockResolvedValue({ ok: false, status: 404 })
+    let listStarted!: () => void
+    let finishList!: (value: unknown) => void
+    const listing = new Promise<"listing">((resolve) => { listStarted = () => resolve("listing") })
+    mocks.listProjects.mockImplementation(() => {
+      listStarted()
+      return new Promise(resolve => { finishList = resolve })
+    })
+    const { resolveAutoSyncProjectId } = await importPromptSync()
+    const operation = resolveAutoSyncProjectId(undefined, owner).then(value => ({ value }), error => ({ error }))
+    const phase = await Promise.race([listing, operation])
+    state.defaults.defaultProjectId = 99
+    if (phase === "listing") finishList({ ok: true, data: { data: [] } })
+    const outcome = await operation
+    expect(state.defaults.defaultProjectId).toBe(99)
+    expect(outcome).toHaveProperty("error")
+    expect(mocks.createProject).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    { ok: false, status: 401, error: "Authentication required" },
+    { ok: false, status: 503, error: "Service unavailable" },
+    { ok: false, status: 409, error: "Prompt owner changed" },
+    { ok: true, status: 200, data: { data: { id: 43 } } },
+    { ok: true, status: 200, data: { success: false, error: "Read denied" } }
+  ])("C01 cached default refusal preserves settings and draft (%j)", async response => {
+    state.defaults.defaultProjectId = 42
+    const prompt = { id: "stale-default-draft", ownerId: owner, title: "Keep", content: "Keep exact local text", createdAt: 1, syncStatus: "local" }
+    state.prompts.set(prompt.id, prompt)
+    mocks.getProject.mockResolvedValue(response)
+    const { autoSyncPrompt } = await importPromptSync()
+    await expect(autoSyncPrompt(prompt.id, undefined, input)).rejects.toThrow()
+    expect(state.prompts.get(prompt.id)).toEqual(prompt)
+    expect(state.defaults.defaultProjectId).toBe(42)
+    expect(mocks.setPromptStudioDefaults).not.toHaveBeenCalled()
+    expect(mocks.listProjects).not.toHaveBeenCalled()
+    expect(mocks.createProject).not.toHaveBeenCalled()
+    expect(mocks.createPrompt).not.toHaveBeenCalled()
+  })
+
+  it("C01 cached default miss cannot overwrite a newer default selection", async () => {
+    state.defaults.defaultProjectId = 42
+    mocks.getProject.mockImplementation(async () => {
+      state.defaults.defaultProjectId = 99
+      return { ok: false, status: 404 }
+    })
+    const { resolveAutoSyncProjectId } = await importPromptSync()
+    await expect(resolveAutoSyncProjectId(undefined, owner)).rejects.toThrow("Choose another default project")
+    expect(state.defaults.defaultProjectId).toBe(99)
+    expect(mocks.setPromptStudioDefaults).not.toHaveBeenCalled()
+    expect(mocks.createProject).not.toHaveBeenCalled()
+  })
+
+  it("C01 cached default transport failure does not reset it", async () => {
+    state.defaults.defaultProjectId = 42
+    mocks.getProject.mockRejectedValue(new Error("Network unavailable"))
+    const { resolveAutoSyncProjectId } = await importPromptSync()
+    await expect(resolveAutoSyncProjectId(undefined, owner)).rejects.toThrow("Network unavailable")
+    expect(state.defaults.defaultProjectId).toBe(42)
+    expect(mocks.setPromptStudioDefaults).not.toHaveBeenCalled()
+    expect(mocks.createProject).not.toHaveBeenCalled()
+  })
+
+  it("C01 cached default validation leaves explicit project selection unchanged", async () => {
+    state.defaults.defaultProjectId = 42
+    const { resolveAutoSyncProjectId } = await importPromptSync()
+    await expect(resolveAutoSyncProjectId(9, owner)).resolves.toBe(9)
+    expect(mocks.getProject).not.toHaveBeenCalled()
+    expect(mocks.listProjects).not.toHaveBeenCalled()
+  })
+
   it("chooses and persists first available project when default is missing", async () => {
     mocks.listProjects.mockResolvedValue({
       data: { data: [{ id: 7, name: "Team prompts" }] }
@@ -284,8 +395,82 @@ describe("prompt-sync auto-sync defaults", () => {
 
     await expect(resolveAutoSyncProjectId()).resolves.toBe(7)
     expect(mocks.setPromptStudioDefaults).toHaveBeenCalledWith(
-      expect.objectContaining({ defaultProjectId: 7 })
+      expect.objectContaining({ defaultProjectId: 7 }),
+      owner
     )
+  })
+
+  it.each([
+    {
+      name: "auth rejection",
+      response: {
+        ok: false,
+        status: 401,
+        error: "Authentication required",
+        data: { detail: "Authentication required" }
+      },
+      error: "Authentication required"
+    },
+    {
+      name: "server failure",
+      response: {
+        ok: false,
+        status: 503,
+        error: "Project service unavailable",
+        data: { detail: "Project service unavailable" }
+      },
+      error: "Project service unavailable"
+    },
+    {
+      name: "malformed success",
+      response: {
+        ok: true,
+        status: 200,
+        data: { success: true, data: { detail: "Unexpected object" } }
+      },
+      error: "Invalid server project response"
+    },
+    {
+      name: "rejected envelope",
+      response: {
+        ok: true,
+        status: 200,
+        data: { success: false, error: "Project list denied", data: [] }
+      },
+      error: "Project list denied"
+    }
+  ])(
+    "reports $name without creating a project or changing the local draft",
+    async ({ response, error }) => {
+     const prompt = {
+        ownerId: owner,
+       id: "failed-list",
+        title: "Saved locally",
+        content: "Keep this draft",
+        is_system: false,
+        createdAt: 1,
+        updatedAt: 1,
+        syncStatus: "local"
+      }
+      state.prompts.set(prompt.id, prompt)
+      mocks.listProjects.mockResolvedValue(response)
+      const { autoSyncPrompt } = await importPromptSync()
+
+      await expect(autoSyncPrompt(prompt.id)).rejects.toThrow(error)
+      expect(state.prompts.get(prompt.id)).toEqual(prompt)
+      expect(mocks.createProject).not.toHaveBeenCalled()
+      expect(mocks.createPrompt).not.toHaveBeenCalled()
+    }
+  )
+
+  it("retains transport errors without creating a project", async () => {
+    mocks.listProjects.mockRejectedValue(new Error("Network unavailable"))
+    const { resolveAutoSyncProjectId } = await importPromptSync()
+
+    await expect(resolveAutoSyncProjectId()).rejects.toThrow(
+      "Network unavailable"
+    )
+    expect(mocks.createProject).not.toHaveBeenCalled()
   })
 
   it("auto-creates a sync project and syncs prompt when none exists", async () => {
@@ -308,7 +493,7 @@ describe("prompt-sync auto-sync defaults", () => {
     expect(mocks.createProject).toHaveBeenCalledTimes(1)
     expect(mocks.createPrompt).toHaveBeenCalledWith(
       expect.objectContaining({ project_id: 17, name: "Prompt" }),
-      { recipePersistence: { mode: "capture" } }
+      { recipePersistence: { mode: "owner", expectedOwnerId: owner } }
     )
     expect(state.prompts.get("local-1")).toEqual(
       expect.objectContaining({
@@ -352,8 +537,9 @@ describe("prompt-sync auto-sync defaults", () => {
       definition,
       projectScenario
     }) => {
-      const original = {
-        id: `invalid-local-auto-${projectScenario}-${name}`,
+     const original = {
+        ownerId: owner,
+       id: `invalid-local-auto-${projectScenario}-${name}`,
         title: "Invalid local recipe",
         name: "Invalid local recipe",
         content: "PRIVATE_LOCAL_AUTO_SYNC_SENTINEL",
@@ -448,8 +634,9 @@ describe("prompt-sync auto-sync defaults", () => {
     "quarantines invalid $operation response identity: $name",
     async ({ operation, outerVersion, definition }) => {
       const sentinel = "PRIVATE_AUTO_SYNC_SENTINEL"
-      const original = {
-        id: `invalid-auto-${operation}-${outerVersion}`,
+     const original = {
+        ownerId: owner,
+       id: `invalid-auto-${operation}-${outerVersion}`,
         title: "Good local recipe",
         name: "Good local recipe",
         content: "Safe local snapshot",
@@ -542,8 +729,9 @@ describe("prompt-sync auto-sync defaults", () => {
           { ok: false, status: 503, error: "Service unavailable" },
           { ok: true, status: 200, data: { success: true, data: null } }
         ]) {
-          const local = {
-            id: "standard-failure", title: "Prompt", content: "Unsynced local text",
+         const local = {
+            ownerId: owner,
+           id: "standard-failure", title: "Prompt", content: "Unsynced local text",
             user_prompt: "Unsynced local text", is_system: false, createdAt: 1,
             studioProjectId: 17, lastSyncedAt: 10, versionNumber: 1,
             syncStatus: operation === "create" ? "local" : "synced",
@@ -571,8 +759,9 @@ describe("prompt-sync auto-sync defaults", () => {
     { status: 409, detail: "Prompt with this name already exists in the project" },
     { status: 422, detail: [{ loc: ["body", "name"], msg: "Required", type: "missing" }] }
   ])("preserves known $status validation rejection handling", async (response) => {
-    const local = {
-      id: "known-rejection", title: "Prompt", content: "Local text", user_prompt: "Local text",
+   const local = {
+      ownerId: owner,
+     id: "known-rejection", title: "Prompt", content: "Local text", user_prompt: "Local text",
       is_system: false, createdAt: 1, serverId: 702, studioProjectId: 17,
       syncStatus: "conflict", lastSyncedAt: 10
     }
@@ -592,8 +781,9 @@ describe("prompt-sync auto-sync defaults", () => {
   it.each(["create", "update"] as const)(
     "retains pending-state behavior for transient $operation failures",
     async (operation) => {
-      const original = {
-        id: `transient-auto-${operation}`,
+     const original = {
+        ownerId: owner,
+       id: `transient-auto-${operation}`,
         title: "Transient prompt",
         name: "Transient prompt",
         content: "Safe local snapshot",
@@ -712,7 +902,7 @@ describe("prompt-sync auto-sync defaults", () => {
       expect.objectContaining({
         name: "Prompt Local"
       }),
-      { recipePersistence: { mode: "capture" } }
+      { recipePersistence: { mode: "owner", expectedOwnerId: owner } }
     )
     expect(state.prompts.get("local-keep-local")).toEqual(
       expect.objectContaining({
@@ -811,7 +1001,7 @@ describe("prompt-sync auto-sync defaults", () => {
         project_id: 17,
         name: "Prompt Keep Both"
       }),
-      { recipePersistence: { mode: "capture" } }
+      { recipePersistence: { mode: "owner", expectedOwnerId: owner } }
     )
     expect(state.prompts.get("local-keep-both")).toEqual(
       expect.objectContaining({
@@ -832,8 +1022,9 @@ describe("prompt-sync auto-sync defaults", () => {
   ])(
     "resolveConflict keep_both fails without mutation for an %s project id",
     async (_name, projectId) => {
-      const original: Record<string, unknown> = {
-        id: `keep-both-invalid-project-${_name}`,
+     const original: Record<string, unknown> = {
+        ownerId: owner,
+       id: `keep-both-invalid-project-${_name}`,
         title: "Prompt Keep Both",
         name: "Prompt Keep Both",
         content: "keep both content",
@@ -947,8 +1138,9 @@ describe("prompt-sync auto-sync defaults", () => {
       if (failure === "validation") {
         definition.schema_version = 1 as 2
       }
-      const original = {
-        id: `keep-both-${failure}`,
+     const original = {
+        ownerId: owner,
+       id: `keep-both-${failure}`,
         title: "Atomic Recipe",
         name: "Atomic Recipe",
         content: "Explain the task.",

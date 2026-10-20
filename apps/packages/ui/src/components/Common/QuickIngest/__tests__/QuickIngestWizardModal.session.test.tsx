@@ -1990,6 +1990,103 @@ describe("QuickIngestWizardModal session runtime", () => {
   }
   )
 
+  it("retries a blocked review navigation without locking the saved draft", async () => {
+    mocks.navigate.mockImplementationOnce(() => { throw new Error("Review navigation blocked") })
+    useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed",
+      presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
+      processingState: { status: "complete", perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
+      results: [{ id: "cedar", status: "ok", type: "document", data: { content: "Retained Cedar content", title: "Cedar" } }]
+    })
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await screen.findByText("Review navigation blocked")
+    fireEvent.click(screen.getByRole("button", { name: "Retry saving review drafts" }))
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(2))
+    expect(mocks.reviewDrafts.size).toBe(1)
+    expect([...mocks.reviewDrafts.values()][0].content).toBe("Retained Cedar content")
+  })
+
+  it("reserves pending review navigation and releases a failed handoff after reopening", async () => {
+    window.history.replaceState({}, "", "/sidepanel.html")
+    const opening = deferred<unknown>()
+    mocks.createTab.mockReturnValueOnce(opening.promise)
+    useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed",
+      presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
+      processingState: { status: "complete", perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
+      results: [{ id: "cedar", status: "ok", type: "document", data: { content: "Retained Cedar content", title: "Cedar" } }]
+    })
+    const onClose = vi.fn()
+    const view = render(<QuickIngestWizardModal open onClose={onClose} openRevision={0} />)
+    await waitFor(() => expect(mocks.createTab).toHaveBeenCalledTimes(1))
+    view.rerender(<QuickIngestWizardModal open={false} onClose={onClose} openRevision={0} />)
+    await act(async () => { view.rerender(<QuickIngestWizardModal open onClose={onClose} openRevision={1} />) })
+    expect(mocks.createTab).toHaveBeenCalledTimes(1)
+    await act(async () => { opening.reject(new Error("Workspace blocked")) })
+    view.rerender(<QuickIngestWizardModal open={false} onClose={onClose} openRevision={1} />)
+    view.rerender(<QuickIngestWizardModal open onClose={onClose} openRevision={2} />)
+    await waitFor(() => expect(mocks.createTab).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    expect(mocks.reviewDrafts.size).toBe(1)
+  })
+
+  it("keeps a newer review receipt when an old navigation fails", async () => {
+    window.history.replaceState({}, "", "/sidepanel.html")
+    const opening = deferred<unknown>()
+    mocks.createTab.mockReturnValueOnce(opening.promise)
+    const seed = { ...createEmptyQuickIngestSession(), currentStep: 5 as const, lifecycle: "completed" as const,
+      presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
+      processingState: { status: "complete" as const, perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
+      results: [{ id: "cedar", status: "ok" as const, type: "document" as const, data: { content: "First owned content", title: "Cedar" } }]
+    }
+    useQuickIngestSessionStore.getState().createDraftSession(seed)
+    const onClose = vi.fn()
+    const view = render(<QuickIngestWizardModal open onClose={onClose} openRevision={0} />)
+    await waitFor(() => expect(mocks.createTab).toHaveBeenCalledTimes(1))
+    act(() => { useQuickIngestSessionStore.getState().replaceWithNewDraft({ ...seed, id: createEmptyQuickIngestSession().id }) })
+    await waitFor(() => expect(mocks.createTab).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
+    await act(async () => { opening.reject(new Error("Old workspace blocked")) })
+    view.rerender(<QuickIngestWizardModal open={false} onClose={onClose} openRevision={0} />)
+    await act(async () => { view.rerender(<QuickIngestWizardModal open onClose={onClose} openRevision={1} />) })
+    expect(mocks.createTab).toHaveBeenCalledTimes(2)
+  })
+
+  it("publishes review handoff once per mounted session across wizard reopenings", async () => {
+    const first = useQuickIngestSessionStore.getState().createDraftSession({
+      ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed",
+      presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
+      processingState: { status: "complete", perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
+      results: [{ id: "cedar", status: "ok", type: "document", data: { content: "Owned Cedar content", title: "Cedar" } }]
+    })
+    const onClose = vi.fn()
+    const view = render(<QuickIngestWizardModal open onClose={onClose} openRevision={0} />)
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1))
+    view.rerender(<QuickIngestWizardModal open={false} onClose={onClose} openRevision={0} />)
+    await act(async () => { view.rerender(<QuickIngestWizardModal open onClose={onClose} openRevision={1} />) })
+    expect(mocks.navigate).toHaveBeenCalledTimes(1)
+    expect(mocks.reviewDrafts.size).toBe(1)
+    fireEvent.click(screen.getByRole("button", { name: "Start over" }))
+    await waitFor(() => expect(useQuickIngestSessionStore.getState().session?.id).not.toBe(first.id))
+    expect(useQuickIngestSessionStore.getState().session?.currentStep).toBe(1)
+    expect(mocks.reviewDrafts.size).toBe(1)
+  })
+
+  it("publishes review for a replacement session after a completed handoff", async () => {
+    const seed = {
+      ...createEmptyQuickIngestSession(), currentStep: 5 as const, lifecycle: "completed" as const,
+      presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },
+      processingState: { status: "complete" as const, perItemProgress: [], elapsed: 1, estimatedRemaining: 0 },
+      results: [{ id: "cedar", status: "ok" as const, type: "document" as const, data: { content: "Owned first content", title: "Cedar" } }]
+    }
+    useQuickIngestSessionStore.getState().createDraftSession(seed)
+    render(<QuickIngestWizardModal open onClose={vi.fn()} />)
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(1))
+    act(() => { useQuickIngestSessionStore.getState().replaceWithNewDraft({ ...seed, id: createEmptyQuickIngestSession().id,
+      results: [{ id: "second", status: "ok", type: "document", data: { content: "Owned second content", title: "Second" } }]
+    }) })
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledTimes(2))
+    expect([...mocks.reviewDrafts.values()].map(draft => draft.content)).toEqual(["Owned first content", "Owned second content"])
+  })
+
   it("reopens a completed batch after remount without overwriting reviewed edits", async () => {
     useQuickIngestSessionStore.getState().createDraftSession({ ...createEmptyQuickIngestSession(), currentStep: 5, lifecycle: "completed",
       presetConfig: { ...resolvePresetMap().quick, reviewBeforeStorage: true },

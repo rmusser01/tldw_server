@@ -37,6 +37,7 @@ from tldw_Server_API.app.core.Evaluations.recipes.rag_answer_quality_execution i
 )
 from tldw_Server_API.app.core.Evaluations.recipe_runs_jobs import (
     RECIPE_RUN_JOB_DOMAIN,
+    RECIPE_RUN_JOB_TYPE,
     parse_recipe_run_job_payload,
     recipe_run_queue,
 )
@@ -1253,7 +1254,7 @@ async def run_recipe_run_jobs_worker(stop_event: asyncio.Event | None = None) ->
         )
     logger.info("Recipe run Jobs worker starting: queue={} worker_id={}", cfg.queue, worker_id)
     try:
-        await sdk.run(handler=handle_recipe_run_job_async)
+        await sdk.run(handler=handle_recipe_run_job_async, job_type=RECIPE_RUN_JOB_TYPE)
     finally:
         if stop_task is not None:
             stop_task.cancel()

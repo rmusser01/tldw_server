@@ -1,4 +1,5 @@
 import React from "react"
+import { Modal } from "antd"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -265,6 +266,107 @@ describe("NotesManagerPage save state machine", { timeout: 60_000 }, () => {
 
   afterEach(() => {
     Reflect.deleteProperty(navigator, "clipboard")
+  })
+
+  it.each(["new", "save-and-new"])("protects the prior note while %s waits for its save refresh", async (action) => {
+    let release!: () => void
+    const refresh = new Promise<void>((resolve) => { release = resolve })
+    const createdNotes = new Map<number, Record<string, unknown>>()
+    mockBgRequest.mockImplementation(async (request: RequestInit) => {
+      const path = String(request.path || "")
+      const method = String(request.method || "GET").toUpperCase()
+      if (method === "GET" && /^\/api\/v1\/notes\/5\d$/.test(path)) {
+        const id = Number(path.split("/").at(-1))
+        if (id === 51) await refresh
+        return { ...createdNotes.get(id), metadata: { keywords: [] } }
+      }
+      const response = await serverResponds(request)
+      if (method === "POST" && path === "/api/v1/notes/" && "id" in response) createdNotes.set(Number(response.id), response)
+      return response
+    })
+    renderPage()
+    fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "Orchid note" } })
+    type("Orchid body")
+    fireEvent.click(screen.getByTestId(action === "new" ? "notes-save-button" : "notes-save-and-new-button"))
+    await waitFor(() => expect(requestsTo("GET", "/api/v1/notes/51")).toHaveLength(1))
+    if (action === "new") fireEvent.click(screen.getAllByRole("button", { name: "New note", exact: true })[0])
+    try {
+      expect(screen.getByPlaceholderText("Title")).toBeDisabled()
+      expect(screen.getByPlaceholderText(EDITOR_PLACEHOLDER)).toHaveAttribute("readonly")
+    } finally {
+      await act(async () => { release() })
+    }
+    await waitFor(() => expect(screen.getByPlaceholderText("Title")).toHaveValue(""))
+    expect(screen.getByPlaceholderText(EDITOR_PLACEHOLDER)).toHaveValue("")
+    expect(screen.getByPlaceholderText("Title")).not.toBeDisabled()
+    fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "Harbor note" } })
+    type("Harbor body")
+    fireEvent.click(screen.getByTestId("notes-save-button"))
+    await waitFor(() => expect(createdNotes.size).toBe(2))
+    await waitFor(() => expect(screen.getByTestId("notes-save-status")).toHaveAttribute("data-state", "saved"))
+    expect(createdNotes.get(51)).toMatchObject({ id: 51, title: "Orchid note", content: "Orchid body", version: 1 })
+    expect(createdNotes.get(52)).toMatchObject({ id: 52, title: "Harbor note", content: "Harbor body", version: 1 })
+    expect(requestsTo("PUT", "/api/v1/notes/51")).toHaveLength(0)
+  })
+
+  it("does not drain the next session draft when an old save refresh settles after logout", async () => {
+    let release!: () => void
+    const refresh = new Promise<void>((resolve) => { release = resolve })
+    mockBgRequest.mockImplementation(async (request: RequestInit) => {
+      if (request.method === "GET" && request.path === "/api/v1/notes/51") await refresh
+      return serverResponds(request)
+    })
+    renderPage()
+    fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "Old session note" } })
+    type("Old session body")
+    fireEvent.click(screen.getByTestId("notes-save-button"))
+    await waitFor(() => expect(requestsTo("GET", "/api/v1/notes/51")).toHaveLength(1))
+    fireEvent.click(screen.getAllByRole("button", { name: "New note", exact: true })[0])
+    try {
+      expect(screen.getByPlaceholderText("Title")).toBeDisabled()
+      act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })))
+      expect(screen.getByPlaceholderText("Title")).not.toBeDisabled()
+      fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "Next session draft" } })
+      type("Keep this next session body")
+    } finally {
+      await act(async () => { release() })
+    }
+    expect(requestsTo("POST", "/api/v1/notes/")).toHaveLength(1)
+    expect(screen.getByPlaceholderText("Title")).toHaveValue("Next session draft")
+    expect(screen.getByPlaceholderText(EDITOR_PLACEHOLDER)).toHaveValue("Keep this next session body")
+    expect(leaveGuard.current?.when).toBe(true)
+  })
+
+  it.each([{ status: 409, choice: "Discard my changes" }, { status: 422, choice: "Try saving again" }])("retires a pending new-draft confirmation on logout without clearing or saving the next session draft ($choice)", async ({ status, choice }) => {
+    let decision: Parameters<typeof Modal.confirm>[0] | undefined
+    const confirm = vi.spyOn(Modal, "confirm").mockImplementation(options => {
+      decision = options
+      return { destroy: vi.fn(), update: vi.fn() }
+    })
+    mockBgRequest.mockImplementation(async (request: RequestInit) => {
+      if (request.method === "PUT") throw { status, message: status === 409 ? "Version conflict" : "Invalid note" }
+      return serverResponds(request)
+    })
+    try {
+      renderPage()
+      await openSavedNote()
+      type("Old session edit")
+      fireEvent.click(screen.getAllByRole("button", { name: "New note", exact: true })[0])
+      await waitFor(() => expect(confirm).toHaveBeenCalledTimes(1))
+      expect(decision?.okText).toBe(choice)
+      act(() => window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })))
+      expect(screen.getByPlaceholderText("Title")).not.toBeDisabled()
+      fireEvent.change(screen.getByPlaceholderText("Title"), { target: { value: "Next session draft" } })
+      type("Keep this next session body")
+      await act(async () => { await decision?.onOk?.() })
+      expect(screen.getByPlaceholderText("Title")).toHaveValue("Next session draft")
+      expect(screen.getByPlaceholderText(EDITOR_PLACEHOLDER)).toHaveValue("Keep this next session body")
+      expect(leaveGuard.current?.when).toBe(true)
+      expect(requestsTo("POST", "/api/v1/notes/")).toHaveLength(0)
+    } finally {
+      await act(async () => { decision?.onCancel?.() })
+      confirm.mockRestore()
+    }
   })
 
   it("flushes an edit typed just before navigating away, then lets the navigation go (NS-01)", async () => {

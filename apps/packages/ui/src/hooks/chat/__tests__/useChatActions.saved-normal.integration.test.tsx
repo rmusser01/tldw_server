@@ -3369,5 +3369,32 @@ describe("saved normal Chat pipeline with autosave", () => {
       expect(copyScene).not.toHaveBeenCalled()
     })
   })
+  it.each(["pending", "failed"] as const)("B03 saved identity %s cannot dispatch as ordinary Chat", async boundary => {
+    mocks.withLoader = true
+    const metadata = deferred<ReturnType<typeof chatRagMethods.normalizeChatSummary>>()
+    const greeting = { id: "b03-greeting", role: "assistant", content: "What would you like to ask?" }
+    mocks.serverRows.set("b03-character", [greeting])
+    mocks.getChat.mockImplementation(() => boundary === "failed" ? Promise.reject(new Error("Metadata temporarily unavailable")) : metadata.promise)
+    useStoreMessageOption.setState({
+      historyId: null, serverChatId: "b03-character", serverChatMetaLoaded: false,
+      serverChatAssistantKind: null, serverChatAssistantId: null, serverChatCharacterId: null,
+      messages: [{ id: greeting.id, serverMessageId: greeting.id, role: "assistant", isBot: true,
+        name: "Archivist", message: greeting.content, sources: [] }],
+      history: [{ role: "assistant", content: greeting.content }]
+    })
+    const view = renderWorkspace(false, true)
+    try {
+      await waitFor(() => expect(mocks.getChat).toHaveBeenCalledWith("b03-character", expect.anything()))
+      await act(async () => { await view.result.current.actions.onSubmit({ message: "B03-RAW-742", image: "" }) })
+      expect(mocks.pageAssistModel).not.toHaveBeenCalled()
+      expect(mocks.streamMessage).not.toHaveBeenCalled()
+      expect(mocks.addChatMessage).not.toHaveBeenCalled()
+      expect(mocks.createChat).not.toHaveBeenCalled()
+      expect(useStoreMessageOption.getState().serverChatId).toBe("b03-character")
+    } finally {
+      metadata.resolve(chatRagMethods.normalizeChatSummary({ id: "b03-character", character_id: 3, scope_type: "global" }))
+      view.unmount()
+    }
+  })
 
 })

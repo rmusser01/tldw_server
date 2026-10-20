@@ -519,4 +519,113 @@ describe("useNotesGraphAuthorityScope", () => {
     await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2))
   })
 
+  it("recovers an initially unresolved owner after same-principal renewal", async () => {
+    const token = (suffix: string) => `test.${btoa(JSON.stringify({ sub: "7" }))}.${suffix}`
+    const canonicalConfig = config("https://notes.example.test", { accessToken: token("old") })
+    mocks.getCurrentUser
+      .mockRejectedValueOnce(new Error("Refresh transport unavailable"))
+      .mockResolvedValueOnce(activeUser(7))
+    const { result, rerender } = renderHook(
+      ({ config }) => useNotesGraphAuthorityScope({ config, loading: false }),
+      { initialProps: { config: canonicalConfig } }
+    )
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(1))
+    expect(result.current).toBeNull()
+
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", {
+      detail: { authorityChanged: false }
+    })))
+    rerender({ config: { ...canonicalConfig, accessToken: token("renewed") } })
+
+    await waitFor(() => expect(result.current).toBe(expectedScope("https://notes.example.test", 7)))
+    expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps an unresolved renewal guarded when verification returns an inactive owner", async () => {
+    const canonicalConfig = config("https://notes.example.test")
+    mocks.getCurrentUser
+      .mockRejectedValueOnce(new Error("Refresh transport unavailable"))
+      .mockResolvedValueOnce({ ...activeUser(7), is_active: false })
+    const { result } = renderHook(() =>
+      useNotesGraphAuthorityScope({ config: canonicalConfig, loading: false })
+    )
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(1))
+    expect(result.current).toBeNull()
+
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", {
+      detail: { authorityChanged: false }
+    })))
+
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2))
+    expect(result.current).toBeNull()
+  })
+
+  it("fences an unresolved renewal response after a different principal becomes current", async () => {
+    const token = (sub: number) => `test.${btoa(JSON.stringify({ sub: String(sub) }))}.fixture`
+    const canonicalConfig = config("https://notes.example.test", { accessToken: token(7) })
+    const oldRecovery = deferred<ReturnType<typeof activeUser>>()
+    mocks.getCurrentUser
+      .mockRejectedValueOnce(new Error("Refresh transport unavailable"))
+      .mockImplementationOnce(() => oldRecovery.promise)
+      .mockResolvedValueOnce(activeUser(8))
+    const { result, rerender } = renderHook(
+      ({ config }) => useNotesGraphAuthorityScope({ config, loading: false }),
+      { initialProps: { config: canonicalConfig } }
+    )
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(1))
+    act(() => window.dispatchEvent(new CustomEvent("tldw:config-updated", {
+      detail: { authorityChanged: false }
+    })))
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2))
+    expect(result.current).toBeNull()
+
+    rerender({ config: { ...canonicalConfig, accessToken: token(8) } })
+    await waitFor(() => expect(result.current).toBe(expectedScope("https://notes.example.test", 8)))
+    await act(async () => {
+      oldRecovery.resolve(activeUser(7))
+      await Promise.resolve()
+    })
+    expect(result.current).toBe(expectedScope("https://notes.example.test", 8))
+  })
+  it("recovers unresolved ownership on storage-only canonical token rotation", async () => {
+    const token = (suffix: string) => `test.${btoa(JSON.stringify({ sub: "7" }))}.${suffix}`
+    const canonicalConfig = config("https://notes.example.test", { accessToken: token("old") })
+    mocks.getCurrentUser
+      .mockRejectedValueOnce(new Error("Refresh transport unavailable"))
+      .mockResolvedValueOnce(activeUser(7))
+    const { result, rerender } = renderHook(
+      ({ config }) => useNotesGraphAuthorityScope({ config, loading: false }),
+      { initialProps: { config: canonicalConfig } }
+    )
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(1))
+    expect(result.current).toBeNull()
+
+    rerender({ config: { ...canonicalConfig, accessToken: token("renewed") } })
+
+    await waitFor(() => expect(result.current).toBe(expectedScope("https://notes.example.test", 7)))
+    expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2)
+  })
+
+  it("coalesces a batched renewal event and storage rotation into one owner recheck", async () => {
+    const token = (suffix: string) => `test.${btoa(JSON.stringify({ sub: "7" }))}.${suffix}`
+    const canonicalConfig = config("https://notes.example.test", { accessToken: token("old") })
+    const recovery = deferred<ReturnType<typeof activeUser>>()
+    mocks.getCurrentUser
+      .mockRejectedValueOnce(new Error("Refresh transport unavailable"))
+      .mockImplementationOnce(() => recovery.promise)
+    const { result, rerender } = renderHook(
+      ({ config }) => useNotesGraphAuthorityScope({ config, loading: false }),
+      { initialProps: { config: canonicalConfig } }
+    )
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(1))
+    act(() => {
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } }))
+      rerender({ config: { ...canonicalConfig, accessToken: token("renewed") } })
+    })
+    await waitFor(() => expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2))
+    await act(async () => { recovery.resolve(activeUser(7)); await Promise.resolve() })
+    expect(result.current).toBe(expectedScope("https://notes.example.test", 7))
+    expect(mocks.getCurrentUser).toHaveBeenCalledTimes(2)
+  })
+
 })

@@ -41,6 +41,7 @@ import {
   type ChunkingTemplateListResponse
 } from "@/services/chunking"
 import { bgRequest } from "@/services/background-proxy"
+import { downloadBlob } from "@/utils/download-blob"
 
 import { ChunkCardView } from "./ChunkCardView"
 import { ChunkInlineView } from "./ChunkInlineView"
@@ -439,6 +440,27 @@ export const ChunkingPlayground: React.FC<ChunkingPlaygroundProps> = ({
     buildChunkingOptions,
     t
   ])
+
+  const handleExport = useCallback(() => {
+    if (isLoading || !lastResponse?.chunks.length) return
+
+    try {
+      downloadBlob(
+        new Blob([JSON.stringify(lastResponse, null, 2)], {
+          type: "application/json"
+        }),
+        "chunking-result.json"
+      )
+      setError(null)
+    } catch {
+      setError(
+        t(
+          "settings:chunkingPlayground.exportFailed",
+          "Unable to download chunks. Please try again."
+        )
+      )
+    }
+  }, [isLoading, lastResponse, t])
 
   const resetToDefaults = useCallback(() => {
     const defaults = capabilities?.default_options ?? DEFAULT_CHUNKING_OPTIONS
@@ -1292,14 +1314,24 @@ export const ChunkingPlayground: React.FC<ChunkingPlaygroundProps> = ({
           ]}
         />
 
-        {chunks.length > 0 && (
-          <Text type="secondary">
-            {t("settings:chunkingPlayground.stats", "{{count}} chunks, avg {{avgSize}} chars", {
-              count: stats.count,
-              avgSize: stats.avgCharCount
-            })}
-          </Text>
-        )}
+        <Space wrap>
+          {chunks.length > 0 && (
+            <Text type="secondary">
+              {t("settings:chunkingPlayground.stats", "{{count}} chunks, avg {{avgSize}} chars", {
+                count: stats.count,
+                avgSize: stats.avgCharCount
+              })}
+            </Text>
+          )}
+          {!!lastResponse?.chunks.length && (
+            <Button
+              icon={<DownloadOutlined aria-hidden="true" />}
+              onClick={handleExport}
+              disabled={isLoading}>
+              {t("settings:chunkingPlayground.exportJson", "Export JSON")}
+            </Button>
+          )}
+        </Space>
       </div>
 
       {/* Error display */}

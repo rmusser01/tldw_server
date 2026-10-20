@@ -172,6 +172,7 @@ const retryInterruptedReply = async (view: PlaygroundView, server: ReturnType<ty
   const notice = await interruptionNotice("Interrupted")
   await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
   await waitFor(() => expect(server.completionRequests()).toHaveLength(before + 1), HARNESS_WAIT)
+  await act(async () => { await retryCompletion.current })
   await waitForChatIdle()
 }
 

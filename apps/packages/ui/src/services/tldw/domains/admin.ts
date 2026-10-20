@@ -1,223 +1,293 @@
-import { bgRequest } from "@/services/background-proxy"
-import { buildQuery } from "../client-utils"
+import { bgRequest } from "@/services/background-proxy";
+import { buildQuery } from "../client-utils";
 import type {
   AdminUserListResponse,
   AdminUserUpdateRequest,
   AdminUserCreateRequest,
   AdminUserSummary,
   AdminRole,
-} from "../TldwApiClient"
+  TldwConfig,
+} from "../TldwApiClient";
+
+type UserRolesResponse = { user_id: number; roles: AdminRole[] };
+type UserOverridesResponse = {
+  user_id: number;
+  overrides: Array<{ permission_id: number; permission_name: string; granted: boolean; expires_at?: string | null }>;
+};
+type UserEffectivePermissionsResponse = { user_id: number; permissions: string[] };
 
 export const adminMethods = {
   // ── Admin Users & Roles ──
 
-  async createAdminUser(payload: AdminUserCreateRequest): Promise<AdminUserSummary> {
+  async createAdminUser(
+    payload: AdminUserCreateRequest,
+  ): Promise<AdminUserSummary> {
     return await bgRequest<AdminUserSummary>({
       path: "/api/v1/admin/users",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
-  async listAdminUsers(params?: {
-    page?: number
-    limit?: number
-    role?: string
-    is_active?: boolean
-    search?: string
-  }): Promise<AdminUserListResponse> {
-    const query = buildQuery(params as Record<string, any>)
+  async listAdminUsers(
+    params?: {
+      page?: number;
+      limit?: number;
+      role?: string;
+      is_active?: boolean;
+      search?: string;
+    },
+    options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal },
+  ): Promise<AdminUserListResponse> {
+    const query = buildQuery(params as Record<string, any>);
     return await bgRequest<AdminUserListResponse>({
       path: `/api/v1/admin/users${query}`,
-      method: "GET"
-    })
+      method: "GET",
+      ...options,
+    });
   },
 
   async updateAdminUser(
     userId: number,
-    payload: AdminUserUpdateRequest
+    payload: AdminUserUpdateRequest,
+    options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal },
   ): Promise<{ message: string }> {
     return await bgRequest<{ message: string }>({
       path: `/api/v1/admin/users/${userId}`,
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+      ...options,
+    });
   },
 
   async resetAdminUserPassword(
     userId: number,
     payload: {
-      temporary_password: string
-      reason: string
-      force_password_change?: boolean
-    }
-  ): Promise<{ user_id: number; force_password_change: boolean; message: string }> {
+      temporary_password: string;
+      reason: string;
+      force_password_change?: boolean;
+    },
+  ): Promise<{
+    user_id: number;
+    force_password_change: boolean;
+    message: string;
+  }> {
     return await bgRequest<{
-      user_id: number
-      force_password_change: boolean
-      message: string
+      user_id: number;
+      force_password_change: boolean;
+      message: string;
     }>({
       path: `/api/v1/admin/users/${userId}/reset-password`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: {
         force_password_change: true,
-        ...payload
-      }
-    })
+        ...payload,
+      },
+    });
   },
 
-  async listAdminRoles(): Promise<AdminRole[]> {
+  async listAdminRoles(options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<AdminRole[]> {
     return await bgRequest<AdminRole[]>({
       path: "/api/v1/admin/roles",
-      method: "GET"
-    })
+      method: "GET",
+      ...options,
+    });
   },
 
-  async createAdminRole(
-    name: string,
-    description?: string
-  ): Promise<AdminRole> {
+  async createAdminRole(name: string,
+    description?: string, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<AdminRole> {
     return await bgRequest<AdminRole>({
       path: "/api/v1/admin/roles",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: { name, description }
-    })
+      body: { name, description },
+      ...options,
+    });
   },
 
-  async deleteAdminRole(roleId: number): Promise<{ message: string }> {
+  async deleteAdminRole(roleId: number, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<{ message: string }> {
     return await bgRequest<{ message: string }>({
       path: `/api/v1/admin/roles/${roleId}`,
-      method: "DELETE"
-    })
+      method: "DELETE",
+      ...options,
+    });
   },
 
   // ── Admin API Key Management ──
 
-  async listUserApiKeys(userId: number): Promise<any[]> {
+  async listUserApiKeys(
+    userId: number,
+    options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal },
+  ): Promise<any[]> {
     return await bgRequest<any[]>({
       path: `/api/v1/admin/users/${userId}/api-keys`,
-      method: "GET"
-    })
+      method: "GET",
+      ...options,
+    });
   },
 
-  async createUserApiKey(userId: number, payload: { name?: string; rate_limit?: number; allowed_ips?: string[] }): Promise<any> {
+  async createUserApiKey(
+    userId: number,
+    payload: { name?: string },
+    options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal },
+  ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/users/${userId}/api-keys`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+      ...options,
+    });
   },
 
-  async revokeUserApiKey(userId: number, keyId: number): Promise<{ message: string }> {
+  async revokeUserApiKey(
+    userId: number,
+    keyId: number,
+    options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal },
+  ): Promise<{ message: string }> {
     return await bgRequest<{ message: string }>({
       path: `/api/v1/admin/users/${userId}/api-keys/${keyId}`,
-      method: "DELETE"
-    })
+      method: "DELETE",
+      ...options,
+    });
   },
 
-  async updateUserApiKey(userId: number, keyId: number, payload: { rate_limit?: number; allowed_ips?: string[] }): Promise<any> {
+  async updateUserApiKey(
+    userId: number,
+    keyId: number,
+    payload: { rate_limit?: number; allowed_ips?: string[] },
+  ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/users/${userId}/api-keys/${keyId}`,
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
-  async rotateUserApiKey(userId: number, keyId: number): Promise<any> {
+  async rotateUserApiKey(
+    userId: number,
+    keyId: number,
+    options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal },
+  ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/users/${userId}/api-keys/${keyId}/rotate`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: {}
-    })
+      body: {},
+      ...options,
+    });
   },
 
   async listUserVirtualKeys(userId: number): Promise<any[]> {
     return await bgRequest<any[]>({
       path: `/api/v1/admin/users/${userId}/virtual-keys`,
-      method: "GET"
-    })
+      method: "GET",
+    });
   },
 
   async getApiKeyAuditLog(keyId: number): Promise<any[]> {
     return await bgRequest<any[]>({
       path: `/api/v1/admin/api-keys/${keyId}/audit-log`,
-      method: "GET"
-    })
+      method: "GET",
+    });
   },
 
   // ── Admin Maintenance ──
 
   async getMaintenanceState(): Promise<any> {
-    return await bgRequest<any>({ path: "/api/v1/admin/maintenance", method: "GET" })
+    return await bgRequest<any>({
+      path: "/api/v1/admin/maintenance",
+      method: "GET",
+    });
   },
 
-  async updateMaintenanceState(payload: { enabled?: boolean; message?: string; allowlist?: string[] }): Promise<any> {
+  async updateMaintenanceState(payload: {
+    enabled?: boolean;
+    message?: string;
+    allowlist?: string[];
+  }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/maintenance",
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async listFeatureFlags(): Promise<any[]> {
-    return await bgRequest<any[]>({ path: "/api/v1/admin/feature-flags", method: "GET" })
+    return await bgRequest<any[]>({
+      path: "/api/v1/admin/feature-flags",
+      method: "GET",
+    });
   },
 
-  async updateFeatureFlag(flagKey: string, payload: { enabled: boolean }): Promise<any> {
+  async updateFeatureFlag(
+    flagKey: string,
+    payload: { enabled: boolean },
+  ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/feature-flags/${encodeURIComponent(flagKey)}`,
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async deleteFeatureFlag(flagKey: string): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/feature-flags/${encodeURIComponent(flagKey)}`,
-      method: "DELETE"
-    })
+      method: "DELETE",
+    });
   },
 
   async listIncidents(): Promise<any[]> {
-    return await bgRequest<any[]>({ path: "/api/v1/admin/incidents", method: "GET" })
+    return await bgRequest<any[]>({
+      path: "/api/v1/admin/incidents",
+      method: "GET",
+    });
   },
 
-  async createIncident(payload: { title: string; severity?: string; description?: string }): Promise<any> {
+  async createIncident(payload: {
+    title: string;
+    severity?: string;
+    description?: string;
+  }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/incidents",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
-  async updateIncident(incidentId: number, payload: { status?: string; severity?: string; description?: string }): Promise<any> {
+  async updateIncident(
+    incidentId: number,
+    payload: { status?: string; severity?: string; description?: string },
+  ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/incidents/${incidentId}`,
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async deleteIncident(incidentId: number): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/incidents/${incidentId}`,
-      method: "DELETE"
-    })
+      method: "DELETE",
+    });
   },
 
   async listRotationRuns(): Promise<any[]> {
-    return await bgRequest<any[]>({ path: "/api/v1/admin/maintenance/rotation-runs", method: "GET" })
+    return await bgRequest<any[]>({
+      path: "/api/v1/admin/maintenance/rotation-runs",
+      method: "GET",
+    });
   },
 
   async createRotationRun(): Promise<any> {
@@ -225,51 +295,64 @@ export const adminMethods = {
       path: "/api/v1/admin/maintenance/rotation-runs",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: {}
-    })
+      body: {},
+    });
   },
 
   // ── Admin Monitoring & Alerting ──
 
   async listAlertRules(): Promise<any[]> {
-    return await bgRequest<any[]>({ path: "/api/v1/admin/monitoring/alert-rules", method: "GET" })
+    return await bgRequest<any[]>({
+      path: "/api/v1/admin/monitoring/alert-rules",
+      method: "GET",
+    });
   },
 
   async createAlertRule(payload: {
-    metric: string; operator: string; threshold: number;
-    duration_minutes: number; severity: string; enabled?: boolean
+    metric: string;
+    operator: string;
+    threshold: number;
+    duration_minutes: number;
+    severity: string;
+    enabled?: boolean;
   }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/monitoring/alert-rules",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async deleteAlertRule(ruleId: number): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/monitoring/alert-rules/${ruleId}`,
-      method: "DELETE"
-    })
+      method: "DELETE",
+    });
   },
 
-  async assignAlert(alertIdentity: string, payload: { assigned_to_user_id?: number | null }): Promise<any> {
+  async assignAlert(
+    alertIdentity: string,
+    payload: { assigned_to_user_id?: number | null },
+  ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/monitoring/alerts/${encodeURIComponent(alertIdentity)}/assign`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
-  async snoozeAlert(alertIdentity: string, payload: { until: string }): Promise<any> {
+  async snoozeAlert(
+    alertIdentity: string,
+    payload: { until: string },
+  ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/monitoring/alerts/${encodeURIComponent(alertIdentity)}/snooze`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async escalateAlert(alertIdentity: string): Promise<any> {
@@ -277,8 +360,8 @@ export const adminMethods = {
       path: `/api/v1/admin/monitoring/alerts/${encodeURIComponent(alertIdentity)}/escalate`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: {}
-    })
+      body: {},
+    });
   },
 
   async listAlertHistory(params?: { limit?: number }): Promise<any[]> {
@@ -287,12 +370,21 @@ export const adminMethods = {
   },
 
   async getSecurityAlertStatus(): Promise<any> {
-    return await bgRequest<any>({ path: "/api/v1/admin/security/alert-status", method: "GET" })
+    return await bgRequest<any>({
+      path: "/api/v1/admin/security/alert-status",
+      method: "GET",
+    });
   },
 
-  async getDashboardActivity(params?: { days?: number; granularity?: string }): Promise<any> {
-    const query = buildQuery(params as Record<string, any>)
-    return await bgRequest<any>({ path: `/api/v1/admin/activity${query}`, method: "GET" })
+  async getDashboardActivity(params?: {
+    days?: number;
+    granularity?: string;
+  }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>);
+    return await bgRequest<any>({
+      path: `/api/v1/admin/activity${query}`,
+      method: "GET",
+    });
   },
 
   // ── Admin Usage Analytics ──
@@ -319,11 +411,17 @@ export const adminMethods = {
   },
 
   async exportDailyUsageCsv(): Promise<string> {
-    return await bgRequest<string>({ path: "/api/v1/admin/usage/daily/export.csv", method: "GET" })
+    return await bgRequest<string>({
+      path: "/api/v1/admin/usage/daily/export.csv",
+      method: "GET",
+    });
   },
 
   async exportTopUsageCsv(): Promise<string> {
-    return await bgRequest<string>({ path: "/api/v1/admin/usage/top/export.csv", method: "GET" })
+    return await bgRequest<string>({
+      path: "/api/v1/admin/usage/top/export.csv",
+      method: "GET",
+    });
   },
 
   async getLlmUsage(params?: {
@@ -356,29 +454,44 @@ export const adminMethods = {
   },
 
   async getRouterAnalyticsStatus(params?: { range?: string }): Promise<any> {
-    const query = buildQuery(params as Record<string, any>)
-    return await bgRequest<any>({ path: `/api/v1/admin/router-analytics/status${query}`, method: "GET" })
+    const query = buildQuery(params as Record<string, any>);
+    return await bgRequest<any>({
+      path: `/api/v1/admin/router-analytics/status${query}`,
+      method: "GET",
+    });
   },
 
   async getRouterAnalyticsProviders(params?: { range?: string }): Promise<any> {
-    const query = buildQuery(params as Record<string, any>)
-    return await bgRequest<any>({ path: `/api/v1/admin/router-analytics/providers${query}`, method: "GET" })
+    const query = buildQuery(params as Record<string, any>);
+    return await bgRequest<any>({
+      path: `/api/v1/admin/router-analytics/providers${query}`,
+      method: "GET",
+    });
   },
 
   // ── Admin Organizations & Teams ──
 
-  async createOrg(payload: { name: string; slug?: string }): Promise<any> {
+  async createOrg(payload: { name: string; slug?: string }, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/orgs",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+      ...options,
+    });
   },
 
-  async listOrgs(params?: { search?: string; limit?: number; offset?: number }): Promise<any> {
-    const query = buildQuery(params as Record<string, any>)
-    return await bgRequest<any>({ path: `/api/v1/admin/orgs${query}`, method: "GET" })
+  async listOrgs(params?: {
+    search?: string;
+    limit?: number;
+    offset?: number;
+  }, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>);
+    return await bgRequest<any>({
+      path: `/api/v1/admin/orgs${query}`,
+      method: "GET",
+      ...options,
+    });
   },
 
   // `limit`/`offset` page server-side; the backend returns a plain array
@@ -386,162 +499,201 @@ export const adminMethods = {
   // OrgsTeamsPage's fallback-total paging).
   async listOrgMembers(
     orgId: number,
-    params?: { role?: string; status?: string; limit?: number; offset?: number }
+    params?: { role?: string; status?: string; limit?: number; offset?: number },
+    options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }
   ): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
-    return await bgRequest<any>({ path: `/api/v1/admin/orgs/${orgId}/members${query}`, method: "GET" })
+    return await bgRequest<any>({ path: `/api/v1/admin/orgs/${orgId}/members${query}`, method: "GET", ...options })
   },
 
-  async addOrgMember(orgId: number, payload: { user_id: number; role?: string }): Promise<any> {
+  async addOrgMember(orgId: number,
+    payload: { user_id: number; role?: string }, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/orgs/${orgId}/members`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+      ...options,
+    });
   },
 
-  async removeOrgMember(orgId: number, userId: number): Promise<any> {
+  async removeOrgMember(orgId: number, userId: number, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/orgs/${orgId}/members/${userId}`,
-      method: "DELETE"
-    })
+      method: "DELETE",
+      ...options,
+    });
   },
 
-  async updateOrgMemberRole(orgId: number, userId: number, payload: { role: string }): Promise<any> {
+  async updateOrgMemberRole(orgId: number,
+    userId: number,
+    payload: { role: string }, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/orgs/${orgId}/members/${userId}`,
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+      ...options,
+    });
   },
 
-  async createTeam(orgId: number, payload: { name: string }): Promise<any> {
+  async createTeam(orgId: number, payload: { name: string }, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/orgs/${orgId}/teams`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+      ...options,
+    });
   },
 
   // `limit`/`offset` page server-side; same missing-total caveat as
   // listOrgMembers above.
-  async listTeams(orgId: number, params?: { limit?: number; offset?: number }): Promise<any> {
+  async listTeams(orgId: number, params?: { limit?: number; offset?: number }, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
-    return await bgRequest<any>({ path: `/api/v1/admin/orgs/${orgId}/teams${query}`, method: "GET" })
+    return await bgRequest<any>({ path: `/api/v1/admin/orgs/${orgId}/teams${query}`, method: "GET", ...options })
   },
 
   // The current backend ignores paging params here (returns the full list),
   // but they are sent so server-side paging works once the endpoint adopts
   // limit/offset like its siblings.
-  async listTeamMembers(teamId: number, params?: { limit?: number; offset?: number }): Promise<any> {
+  async listTeamMembers(teamId: number, params?: { limit?: number; offset?: number }, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     const query = buildQuery(params as Record<string, any>)
-    return await bgRequest<any>({ path: `/api/v1/admin/teams/${teamId}/members${query}`, method: "GET" })
+    return await bgRequest<any>({ path: `/api/v1/admin/teams/${teamId}/members${query}`, method: "GET", ...options })
   },
 
-  async addTeamMember(teamId: number, payload: { user_id: number; role?: string }): Promise<any> {
+  async addTeamMember(teamId: number,
+    payload: { user_id: number; role?: string }, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/teams/${teamId}/members`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+      ...options,
+    });
   },
 
-  async removeTeamMember(teamId: number, userId: number): Promise<any> {
+  async removeTeamMember(teamId: number, userId: number, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/teams/${teamId}/members/${userId}`,
-      method: "DELETE"
-    })
+      method: "DELETE",
+      ...options,
+    });
   },
 
-  async updateTeamMemberRole(teamId: number, userId: number, payload: { role: string }): Promise<any> {
+  async updateTeamMemberRole(teamId: number,
+    userId: number,
+    payload: { role: string }, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/teams/${teamId}/members/${userId}`,
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+      ...options,
+    });
   },
 
   // ── Admin Data Operations ──
 
-  async listBackups(params?: { dataset?: string; user_id?: number }): Promise<any> {
-    const query = buildQuery(params as Record<string, any>)
-    return await bgRequest<any>({ path: `/api/v1/admin/backups${query}`, method: "GET" })
+  async listBackups(params?: {
+    dataset?: string;
+    user_id?: number;
+  }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>);
+    return await bgRequest<any>({
+      path: `/api/v1/admin/backups${query}`,
+      method: "GET",
+    });
   },
 
-  async createBackup(payload: { dataset: string; user_id?: number }): Promise<any> {
+  async createBackup(payload: {
+    dataset: string;
+    user_id?: number;
+  }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/backups",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
-  async restoreBackup(backupId: string): Promise<any> {
+  async restoreBackup(
+    backupId: string,
+    payload: { dataset: string; user_id?: number; confirm: true },
+  ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/backups/${encodeURIComponent(backupId)}/restore`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: {}
-    })
+      body: payload,
+    });
   },
 
   async listBackupSchedules(): Promise<any> {
-    return await bgRequest<any>({ path: "/api/v1/admin/backup-schedules", method: "GET" })
+    return await bgRequest<any>({
+      path: "/api/v1/admin/backup-schedules",
+      method: "GET",
+    });
   },
 
   async createBackupSchedule(payload: {
-    dataset: string
-    target_user_id?: number
-    frequency: "daily" | "weekly" | "monthly"
-    time_of_day: string
-    timezone?: string
-    retention_count: number
+    dataset: string;
+    target_user_id?: number;
+    frequency: "daily" | "weekly" | "monthly";
+    time_of_day: string;
+    timezone?: string;
+    retention_count: number;
   }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/backup-schedules",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async deleteBackupSchedule(scheduleId: number): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/backup-schedules/${scheduleId}`,
-      method: "DELETE"
-    })
+      method: "DELETE",
+    });
   },
 
-  async previewDsr(payload: { requester_identifier: string; request_type?: string; categories?: string[] }): Promise<any> {
+  async previewDsr(payload: {
+    requester_identifier: string;
+    request_type?: string;
+    categories?: string[];
+  }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/data-subject-requests/preview",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async createDsr(payload: {
-    requester_identifier: string; request_type: string;
-    categories?: string[]; client_request_id?: string; notes?: string
+    requester_identifier: string;
+    request_type: string;
+    categories?: string[];
+    client_request_id?: string;
+    notes?: string;
   }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/data-subject-requests",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async listDsrs(params?: { limit?: number; offset?: number }): Promise<any> {
-    const query = buildQuery(params as Record<string, any>)
-    return await bgRequest<any>({ path: `/api/v1/admin/data-subject-requests${query}`, method: "GET" })
+    const query = buildQuery(params as Record<string, any>);
+    return await bgRequest<any>({
+      path: `/api/v1/admin/data-subject-requests${query}`,
+      method: "GET",
+    });
   },
 
   async executeDsr(requestId: number): Promise<any> {
@@ -549,25 +701,34 @@ export const adminMethods = {
       path: `/api/v1/admin/data-subject-requests/${requestId}/execute`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: {}
-    })
+      body: {},
+    });
   },
 
   async listRetentionPolicies(): Promise<any> {
-    return await bgRequest<any>({ path: "/api/v1/admin/retention-policies", method: "GET" })
+    return await bgRequest<any>({
+      path: "/api/v1/admin/retention-policies",
+      method: "GET",
+    });
   },
 
-  async updateRetentionPolicy(policyKey: string, payload: { retention_days: number }): Promise<any> {
+  async updateRetentionPolicy(
+    policyKey: string,
+    payload: { retention_days: number },
+  ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/retention-policies/${encodeURIComponent(policyKey)}`,
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async listBundles(): Promise<any> {
-    return await bgRequest<any>({ path: "/api/v1/admin/backups/bundles", method: "GET" })
+    return await bgRequest<any>({
+      path: "/api/v1/admin/backups/bundles",
+      method: "GET",
+    });
   },
 
   async createBundle(payload: { datasets: string[] }): Promise<any> {
@@ -575,155 +736,223 @@ export const adminMethods = {
       path: "/api/v1/admin/backups/bundles",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async deleteBundle(bundleId: string): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/backups/bundles/${encodeURIComponent(bundleId)}`,
-      method: "DELETE"
-    })
+      method: "DELETE",
+    });
   },
 
   // ── Admin RBAC & Permissions ──
 
-  async listPermissions(): Promise<any[]> {
-    return await bgRequest<any[]>({ path: "/api/v1/admin/permissions", method: "GET" })
+  async listPermissions(options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any[]> {
+    return await bgRequest<any[]>({
+      path: "/api/v1/admin/permissions",
+      method: "GET",
+      ...options,
+    });
   },
 
-  async listPermissionCategories(): Promise<any[]> {
-    return await bgRequest<any[]>({ path: "/api/v1/admin/permissions/categories", method: "GET" })
+  async listPermissionCategories(options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any[]> {
+    return await bgRequest<any[]>({
+      path: "/api/v1/admin/permissions/categories",
+      method: "GET",
+      ...options,
+    });
   },
 
-  async getRolePermissionMatrix(): Promise<any> {
-    return await bgRequest<any>({ path: "/api/v1/admin/roles/matrix-boolean", method: "GET" })
+  async getRolePermissionMatrix(options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
+    return await bgRequest<any>({
+      path: "/api/v1/admin/roles/matrix",
+      method: "GET",
+      ...options,
+    });
   },
 
-  async listRolePermissions(roleId: number): Promise<any[]> {
-    return await bgRequest<any[]>({ path: `/api/v1/admin/roles/${roleId}/permissions`, method: "GET" })
+  async listRolePermissions(roleId: number, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any[]> {
+    return await bgRequest<any[]>({
+      path: `/api/v1/admin/roles/${roleId}/permissions`,
+      method: "GET",
+      ...options,
+    });
   },
 
-  async grantRolePermission(roleId: number, permissionId: number): Promise<any> {
+  async grantRolePermission(roleId: number,
+    permissionId: number, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/roles/${roleId}/permissions/${permissionId}`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: {}
-    })
+      body: {},
+      ...options,
+    });
   },
 
-  async revokeRolePermission(roleId: number, permissionId: number): Promise<any> {
+  async revokeRolePermission(roleId: number,
+    permissionId: number, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/roles/${roleId}/permissions/${permissionId}`,
-      method: "DELETE"
-    })
+      method: "DELETE",
+      ...options,
+    });
   },
 
-  async listUserRoles(userId: number): Promise<any[]> {
-    return await bgRequest<any[]>({ path: `/api/v1/admin/users/${userId}/roles`, method: "GET" })
+  async listUserRoles(userId: number, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<UserRolesResponse> {
+    return await bgRequest<UserRolesResponse>({
+      path: `/api/v1/admin/users/${userId}/roles`,
+      method: "GET",
+      ...options,
+    });
   },
 
-  async assignUserRole(userId: number, roleId: number): Promise<any> {
+  async assignUserRole(userId: number, roleId: number, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/users/${userId}/roles/${roleId}`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: {}
-    })
+      body: {},
+      ...options,
+    });
   },
 
-  async removeUserRole(userId: number, roleId: number): Promise<any> {
+  async removeUserRole(userId: number, roleId: number, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/users/${userId}/roles/${roleId}`,
-      method: "DELETE"
-    })
+      method: "DELETE",
+      ...options,
+    });
   },
 
-  async listUserOverrides(userId: number): Promise<any[]> {
-    return await bgRequest<any[]>({ path: `/api/v1/admin/users/${userId}/overrides`, method: "GET" })
+  async listUserOverrides(userId: number, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<UserOverridesResponse> {
+    return await bgRequest<UserOverridesResponse>({
+      path: `/api/v1/admin/users/${userId}/overrides`,
+      method: "GET",
+      ...options,
+    });
   },
 
-  async getUserEffectivePermissions(userId: number): Promise<any[]> {
-    return await bgRequest<any[]>({ path: `/api/v1/admin/users/${userId}/effective-permissions`, method: "GET" })
+  async getUserEffectivePermissions(userId: number, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<UserEffectivePermissionsResponse> {
+    return await bgRequest<UserEffectivePermissionsResponse>({
+      path: `/api/v1/admin/users/${userId}/effective-permissions`,
+      method: "GET",
+      ...options,
+    });
   },
 
-  async addUserOverride(userId: number, payload: { permission_id: number; effect: string }): Promise<any> {
+  async addUserOverride(userId: number,
+    payload: { permission_id: number; effect: "allow" | "deny" }, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/users/${userId}/overrides`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+      ...options,
+    });
   },
 
-  async deleteUserOverride(userId: number, permissionId: number): Promise<any> {
+  async deleteUserOverride(userId: number, permissionId: number, options?: { configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/users/${userId}/overrides/${permissionId}`,
-      method: "DELETE"
-    })
+      method: "DELETE",
+      ...options,
+    });
   },
 
   // ── Admin Billing ──
 
   async getBillingOverview(): Promise<any> {
-    return await bgRequest<any>({ path: "/api/v1/admin/billing/overview", method: "GET" })
+    return await bgRequest<any>({
+      path: "/api/v1/admin/billing/overview",
+      method: "GET",
+    });
   },
 
-  async listAllSubscriptions(params?: { status?: string; limit?: number; offset?: number }): Promise<any> {
-    const query = buildQuery(params as Record<string, any>)
-    return await bgRequest<any>({ path: `/api/v1/admin/billing/subscriptions${query}`, method: "GET" })
+  async listAllSubscriptions(params?: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>);
+    return await bgRequest<any>({
+      path: `/api/v1/admin/billing/subscriptions${query}`,
+      method: "GET",
+    });
   },
 
   async getUserSubscription(userId: number): Promise<any> {
-    return await bgRequest<any>({ path: `/api/v1/admin/billing/subscriptions/${userId}`, method: "GET" })
+    return await bgRequest<any>({
+      path: `/api/v1/admin/billing/subscriptions/${userId}`,
+      method: "GET",
+    });
   },
 
-  async overrideUserPlan(userId: number, payload: { plan_id: string; reason?: string }): Promise<any> {
+  async overrideUserPlan(
+    userId: number,
+    payload: { plan_id: string; reason?: string },
+  ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/billing/subscriptions/${userId}/override`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
-  async grantCredits(userId: number, payload: { amount: number; reason?: string }): Promise<any> {
+  async grantCredits(
+    userId: number,
+    payload: { amount: number; reason?: string },
+  ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/billing/subscriptions/${userId}/credits`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
   async listBillingEvents(params?: { limit?: number }): Promise<any> {
-    const query = buildQuery(params as Record<string, any>)
-    return await bgRequest<any>({ path: `/api/v1/admin/billing/events${query}`, method: "GET" })
+    const query = buildQuery(params as Record<string, any>);
+    return await bgRequest<any>({
+      path: `/api/v1/admin/billing/events${query}`,
+      method: "GET",
+    });
   },
 
   // ── Storage Quotas ──
 
   async getUserStorageQuota(userId: number): Promise<any> {
-    return await bgRequest<any>({ path: `/api/v1/admin/storage-quotas/users/${userId}`, method: "GET" })
+    return await bgRequest<any>({
+      path: `/api/v1/admin/storage-quotas/users/${userId}`,
+      method: "GET",
+    });
   },
 
-  async updateUserStorageQuota(userId: number, payload: { quota_mb: number | null }): Promise<any> {
+  async updateUserStorageQuota(
+    userId: number,
+    payload: { quota_mb: number | null },
+  ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/storage-quotas/users/${userId}`,
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: payload
-    })
+      body: payload,
+    });
   },
 
-  async getStorageQuotaSummary(params?: { limit?: number; offset?: number }): Promise<any> {
-    const query = buildQuery(params as Record<string, any>)
+  async getStorageQuotaSummary(params?: {
+    limit?: number;
+    offset?: number;
+  }): Promise<any> {
+    const query = buildQuery(params as Record<string, any>);
     return await bgRequest<any>({
       path: `/api/v1/admin/storage-quotas/summary${query}`,
-      method: "GET"
-    })
+      method: "GET",
+    });
   },
-}
+};
 
-export type AdminMethods = typeof adminMethods
+export type AdminMethods = typeof adminMethods;

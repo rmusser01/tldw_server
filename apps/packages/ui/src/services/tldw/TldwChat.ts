@@ -62,33 +62,9 @@ const coercePositiveTimeout = (
   return fallback
 }
 
-const hasReasoningProgress = (chunk: unknown): boolean => {
-  if (!chunk || typeof chunk !== "object") return false
-  const record = chunk as Record<string, unknown>
-  const reasoningDelta =
-    (record.choices as Array<Record<string, unknown>> | undefined)?.[0]?.delta &&
-    typeof (record.choices as Array<Record<string, unknown>>)[0]?.delta === "object"
-      ? (
-          (record.choices as Array<Record<string, unknown>>)[0]
-            ?.delta as Record<string, unknown>
-        )?.reasoning_content
-      : undefined
-  if (typeof reasoningDelta === "string" && reasoningDelta.length > 0) {
-    return true
-  }
-  const additionalKwargs =
-    typeof record.additional_kwargs === "object" &&
-    record.additional_kwargs !== null
-      ? (record.additional_kwargs as Record<string, unknown>)
-      : null
-  return Boolean(
-    typeof additionalKwargs?.reasoning_content === "string" &&
-      additionalKwargs.reasoning_content.length > 0
-  )
-}
-
+// The native Chat display withholds typed reasoning; only answer text is visible.
 const hasVisibleAssistantProgress = (chunk: unknown): boolean =>
-  extractTokenFromChunk(chunk).length > 0 || hasReasoningProgress(chunk)
+  extractTokenFromChunk(chunk).length > 0;
 
 const readErrorMessage = (error: unknown, fallback = "Aborted"): string => {
   const seen = new Set<unknown>()

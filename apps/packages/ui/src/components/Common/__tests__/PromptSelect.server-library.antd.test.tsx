@@ -26,6 +26,16 @@ import {
   HistorySelectionContext,
   useHistorySelection,
 } from "@/hooks/chat/useHistorySelection";
+vi.mock("@/hooks/usePromptLocalAuthority", () => ({
+  usePromptLocalAuthority: () => ({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), ready: true, boundaryKey: "server-library-fixture" })
+}))
+vi.mock("@/services/recipe-persistence-uncertainty", async original => ({
+  ...await original<typeof import("@/services/recipe-persistence-uncertainty")>(),
+  resolveRecipePersistenceOwnerView: async () => ({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), authorizationRevision: "server-library-fixture" })
+}))
+vi.mock("@/services/api-send", () => ({
+  apiSend: async (payload: any) => ({ ok: true, status: 200, data: await mocks.bgRequest(payload) })
+}))
 
 const mocks = vi.hoisted(() => ({
   bgRequest: vi.fn(),

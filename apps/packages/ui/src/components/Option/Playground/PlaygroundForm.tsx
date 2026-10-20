@@ -27,7 +27,8 @@ import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandM
 import { isFirefoxTarget } from "@/config/platform";
 import { STT_DEFAULTS } from "@/config/ui-constants";
 import { getDesignSystemState } from "@/design-system";
-import { generateID, getAllPrompts } from "@/db/dexie/helpers";
+import { generateID } from "@/db/dexie/helpers";
+import { usePromptInventory } from "@/hooks/usePromptInventory";
 import type {
   DocumentProcessingTurnMetadata,
   UploadedFile,
@@ -84,6 +85,7 @@ import { usePlaygroundSessionStore } from "@/store/playground-session";
 import { useHomeMilestoneScope } from "@/hooks/useHomeMilestoneScope";
 import { useMilestoneStore } from "@/store/milestones";
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig";
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority";
 import { useChatMoodBadgePreference } from "@/hooks/useChatMoodBadgePreference";
 import {
   resolveStickyComposerTextareaMaxHeight,
@@ -818,10 +820,8 @@ export const PlaygroundForm = ({
   const setActiveChatModelSettingsScope = useStoreChatModelSettings(
     (state) => state.setActiveSettingsScope,
   );
-  const { data: promptLibrary = [] } = useQuery({
-    queryKey: ["playgroundStartupPromptLibrary"],
-    queryFn: getAllPrompts,
-  });
+  const { data: promptLibrary = [] } = usePromptInventory("playgroundStartupPromptLibrary");
+  const startupPromptAuthority = usePromptLocalAuthority();
   const {
     voiceChatEnabled,
     setVoiceChatEnabled,
@@ -2309,7 +2309,11 @@ export const PlaygroundForm = ({
     }
   }, [captureSelectionFence, assistantOwnerIsCurrent])
 
+  const startupTemplateOwnerReady = startupPromptAuthority.ready || startupPromptAuthority.localOnlyReady;
   const promptTemplates = usePromptTemplates({
+    promptOwnerId: startupPromptAuthority.ownerId,
+    promptOwnerReady: startupTemplateOwnerReady,
+    promptOwnerBoundaryKey: startupPromptAuthority.boundaryKey,
     startupTemplatesRaw,
     setStartupTemplatesRaw,
     promptLibrary,
@@ -2349,6 +2353,7 @@ export const PlaygroundForm = ({
     handleSaveStartupTemplate,
     handleOpenStartupTemplatePreview,
     applyStartupTemplateBundle,
+    captureStartupTemplateGuard,
     handleDeleteStartupTemplate,
     handleTemplateSelect,
     promptSummaryLabel,
@@ -2445,7 +2450,7 @@ export const PlaygroundForm = ({
         getDesignSystemState("degraded")?.label ?? "",
       );
     }
-    return t("playground:composer.providerStatusHealthy", "Healthy");
+    return t("playground:composer.serverStatusConnected", "Server connected");
   }, [connectionUxState, isConnectionReady, t]);
   const isSessionDegraded = React.useMemo(
     () => !isConnectionReady || connectionUxState === "connected_degraded",
@@ -3781,9 +3786,13 @@ export const PlaygroundForm = ({
 
   const attachments = usePlaygroundAttachments({
     chatMode,
+    captureImageOwnership: () => captureDraftOwnership().isImageCurrent,
     setFieldValue: form.setFieldValue,
     handleFileUpload,
     notifyImageAttachmentDisabled,
+    notifyImageReadError: () => notificationApi.error({
+      message: t("playground:composer.invalidImage", "This image could not be opened. Choose a valid image file."),
+    }),
   });
   const {
     inputRef,
@@ -4496,6 +4505,7 @@ export const PlaygroundForm = ({
     serverChatSource,
     setServerChatSource,
     setServerChatVersion,
+    setServerChatMetaLoaded: useStoreMessageOption.getState().setServerChatMetaLoaded,
     setServerChatCharacterId,
     setServerChatAssistantKind,
     setServerChatAssistantId,
@@ -6547,6 +6557,7 @@ export const PlaygroundForm = ({
                 "attachments-summary",
                 <AttachmentsSummary
                   image={form.values.image}
+                  imageFilename={form.values.imageFilename}
                   documents={selectedDocuments}
                   files={uploadedFiles}
                   onRemoveImage={() => form.setFieldValue("image", "")}

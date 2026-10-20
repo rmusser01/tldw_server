@@ -444,6 +444,23 @@ describe('ViewMediaPage Stage 3 permalinks', () => {
     })
   })
 
+  it('shows failed permalink recovery before any record is selected', async () => {
+    const original = mocks.bgRequest.getMockImplementation()!
+    let failed = false
+    mocks.bgRequest.mockImplementation((request: { path?: string }) => {
+      if (request.path !== '/api/v1/media/999') return original(request)
+      if (!failed) { failed = true; return Promise.reject({ status: 404 }) }
+      return Promise.resolve({ media_id: 999, source: { title: 'Recovered Rowan' }, content: { text: 'Recovered Rowan source' } })
+    })
+    renderMediaPage('/media?id=999')
+    const notice = await screen.findByTestId('media-detail-fetch-error')
+    expect(notice).toHaveTextContent('no longer available')
+    expect(screen.getByTestId('location-search')).toHaveTextContent('?id=999')
+    fireEvent.click(screen.getByTestId('media-detail-fetch-retry'))
+    await waitFor(() => expect(screen.queryByTestId('media-detail-fetch-error')).not.toBeInTheDocument())
+    expect(screen.getByTestId('location-search')).toHaveTextContent('?id=999')
+  })
+
   it('retains the incoming source permalink throughout initial hydration', async () => {
     const observedSearches: string[] = []
     const HydratingMediaPage = () => {

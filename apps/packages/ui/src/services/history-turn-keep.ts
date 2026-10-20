@@ -30,7 +30,7 @@ import type {
   Message as StoredMessage
 } from "@/db/dexie/types"
 import type { Message } from "@/store/option"
-import { settleAcceptedAssistant } from "@/services/chat-history-selection"
+import { captureHistorySnapshot, settleAcceptedAssistant, settleSelectedExistingInput } from "@/services/chat-history-selection"
 import { beginServerChatWrite } from "@/store/server-chat-save-status"
 import type { HistoryViewSelectionV1 } from "@/types/history-selection"
 
@@ -172,7 +172,7 @@ const keep = async (
   const view = current.view
   const scope = current.bookmarkScope
   if (
-    current.status !== "ready" ||
+    (current.status !== "ready" && !entry.turn.existing_selection) ||
     !owner ||
     owner.kind === "unavailable" ||
     !view ||
@@ -188,7 +188,7 @@ const keep = async (
   if (
     listed.action !== undefined ||
     !listed.outcome ||
-    !listed.admission ||
+    (!listed.admission && !listed.existing_selection) ||
     listed.owner_key !== view.owner_key ||
     listed.conversation_id !== view.conversation_id ||
     entry.scope.profile_id !== scope.profile_id
@@ -200,18 +200,35 @@ const keep = async (
     (candidate) =>
       candidate.turn.operation_id === listed.operation_id &&
       candidate.scope.client_session_id === entry.scope.client_session_id
-  );
-  if (!isCurrent()) return skipped('view_changed');
-  if (!fresh?.turn.outcome || !fresh.turn.admission) return skipped('gone');
-  if (fresh.turn.action !== undefined) return skipped('explicit_action_requires_review');
-  const turn = fresh.turn;
-  if (turn.persistence === 'server' && !turn.settled_message_id)
-    return skipped('server_outcome_unknown');
-  const admission = turn.admission!;
-  const native = owner.kind === 'native';
-  const content = turn.result_text;
-  let resultId = admission.input_message_id;
-  const retained = isRetainedPartialReply(turn, owner.kind);
+  )
+  if (!isCurrent()) return skipped("view_changed")
+  if (!fresh?.turn.outcome || (!fresh.turn.admission && !fresh.turn.existing_selection)) return skipped("gone")
+  if (fresh.turn.action !== undefined || fresh.turn.roleplay_resume) return skipped("explicit_action_requires_review")
+  const turn = fresh.turn
+  if (turn.persistence === "server" && !turn.settled_message_id && !turn.existing_selection) return skipped("server_outcome_unknown")
+  const admission = turn.admission
+  const questionId = turn.existing_selection?.messages.at(-1)?.id ?? admission?.input_message_id
+  if (!questionId || (turn.existing_selection && questionId !== turn.input_id))
+    return skipped("invalid_selection")
+  if (turn.existing_selection && turn.outcome === "complete" &&
+      !turn.settled_message_id && !turn.settlement_payload)
+    return skipped("missing_history_recovery")
+  if (turn.existing_selection && !turn.settled_message_id && owner.kind === "native") {
+    try {
+      await captureHistorySnapshot(owner, {
+        ...view,
+        interpretation: { kind: "parent_graph_v1" },
+        cursor: { kind: "empty" }
+      }, "send", undefined, "tldw_history_existing_input_v1")
+      if (!isCurrent()) return skipped("view_changed")
+    } catch (error) {
+      return skipped(errorCode(error))
+    }
+  }
+  const native = owner.kind === "native"
+  const content = turn.result_text
+  let resultId = questionId
+  const retained = isRetainedPartialReply(turn, owner.kind)
   let settledByKeep = false
   if (turn.settled_message_id) {
     resultId = turn.settled_message_id
@@ -219,25 +236,30 @@ const keep = async (
     const generationInfo = native
       ? undefined
       : interruptionGenerationInfo(turn.outcome, turn.interruption_reason)
-    const reply: StoredMessage = {
-      id: turn.assistant_id,
-      history_id: owner.conversation_id,
-      role: "assistant",
-      name: turn.model_name || "Assistant",
-      content,
-      createdAt: turn.created_at,
-      images: [],
-      parent_message_id: admission.input_message_id,
-      ...(generationInfo ? { generationInfo } : {}),
-      ...(!native && turn.model_id ? { modelId: turn.model_id } : {})
-    }
+    const reply: StoredMessage = turn.existing_selection && turn.settlement_payload
+      ? structuredClone(turn.settlement_payload)
+      : {
+          id: turn.assistant_id,
+          history_id: owner.conversation_id,
+          role: "assistant",
+          name: turn.model_name || "Assistant",
+          content,
+          createdAt: turn.created_at,
+          images: [],
+          parent_message_id: questionId,
+          ...(generationInfo ? { generationInfo } : {}),
+          ...(!native && turn.model_id ? { modelId: turn.model_id } : {})
+      }
     try {
-      await settleAcceptedAssistant(owner, admission, reply)
+      if (turn.existing_selection)
+        await settleSelectedExistingInput(owner, turn.existing_selection, reply)
+      else
+        await settleAcceptedAssistant(owner, admission!, reply)
       settledByKeep = true
     } catch (error) {
       // An earlier attempt already wrote this reply (e.g. the page closed
       // before its record was cleared): follow it rather than write again.
-      if (errorCode(error) !== "message_id_conflict")
+      if (turn.existing_selection || errorCode(error) !== "message_id_conflict")
         return skipped(errorCode(error))
     }
     resultId = turn.assistant_id

@@ -10,6 +10,15 @@ import {
   servicePromptSingleUserApiKeyScopeMatches,
   servicePromptTargetsMatch
 } from "../service-prompt-scope-error"
+describe("B09 scoped analysis versions", () => {
+  it.each([
+    ["/api/v1/media/42/versions", "POST", true],
+    ["/api/v1/media/42/versions/2", "POST", false],
+    ["/api/v1/media/42/versions", "PUT", false],
+    ["/api/v1/media/a%2fb/versions", "POST", false],
+    ["/api/v1/media/../versions", "POST", false]
+  ])("bounds %s %s", (path, method, allowed) => expect(isServicePromptRequestPath(path, method)).toBe(allowed))
+})
 describe("Service Prompt scope policy", () => {
   it.each([
     ["/api/v1/config/docs-info", "GET", true],
@@ -497,3 +506,15 @@ describe("owned Persona transport: bounded setup scope", () => {
     expect(isServicePromptRequestPath(path, method)).toBe(allowed)
   })
 })
+
+// B05 captures a transcript upload's account, without broadening other audio operations.
+it.each([
+  ["/api/v1/audio/transcriptions", "POST", true],
+  ["/api/v1/audio/transcriptions", "GET", false],
+  ["/api/v1/audio/transcriptions/extra", "POST", false],
+  ["/api/v1/audio/translations", "POST", false],
+  ["/api/v1/audio/speech", "POST", false],
+  ["/api/v1/audio/../transcriptions", "POST", false],
+])("B05 scoped transcription path %s %s", (path, method, allowed) => {
+  expect(isServicePromptRequestPath(path, method)).toBe(allowed);
+});

@@ -7,6 +7,7 @@ import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import { tldwClient } from '@/services/tldw/TldwApiClient'
 import { createMemoryRouter, RouterProvider } from "react-router-dom"
 import { requestSettingsNavigation } from '@/utils/settings-return'
+import { apiSend } from "@/services/api-send"
 
 // Match the WebUI storage boundary, including same-tab and cross-tab watches.
 vi.mock("@plasmohq/storage", async () =>
@@ -43,6 +44,7 @@ beforeEach(async () => {
   storage = new Storage({ area: "local" })
   await storage.set("tldwConfig", signedIn)
   mocks.getConfig.mockReset().mockResolvedValue(signedIn)
+  vi.mocked(apiSend).mockReset()
   mocks.bgRequest.mockReset().mockResolvedValue({ paths: {} })
   mocks.testApiKey.mockReset().mockResolvedValue(true)
   mocks.saveManualSingleUserCredential.mockReset().mockResolvedValue("device")
@@ -316,4 +318,25 @@ it.each(["unmount", "foreign account ABA", "edited key"])("does not commit a vis
   await act(async () => { release(true) })
   expect(mocks.saveManualSingleUserCredential).not.toHaveBeenCalled()
   await waitFor(() => expect(saving).toHaveBeenLastCalledWith(false))
+})
+
+it.each([
+  ["", "Please enter the server URL"],
+  ["not a URL", "Please enter a valid URL"]
+])("does not leave connection progress active for invalid URL %s", async (url, validation) => {
+  mount()
+  await screen.findByText("Logged In", { exact: true })
+  vi.mocked(apiSend).mockResolvedValue({ ok: true, status: 200 })
+  fireEvent.click(screen.getByRole("button", { name: "Test Connection", exact: true }))
+  await screen.findByText("Core: reachable", { exact: true })
+  vi.mocked(apiSend).mockClear()
+  vi.mocked(tldwClient.updateConfig).mockClear()
+  fireEvent.change(screen.getByLabelText("Server URL", { exact: true }), { target: { value: url } })
+  fireEvent.click(screen.getByRole("button", { name: "Test Connection", exact: true }))
+  await screen.findByText(validation, { exact: true })
+  await waitFor(() => expect(screen.queryByText("Checking connection and RAG health…")).not.toBeInTheDocument())
+  expect(screen.queryByText("Core: checking…")).not.toBeInTheDocument()
+  expect(screen.getByText("Core: not checked yet")).toBeInTheDocument()
+  expect(apiSend).not.toHaveBeenCalled()
+  expect(tldwClient.updateConfig).not.toHaveBeenCalled()
 })

@@ -154,6 +154,10 @@ class EvaluationResponse(TimestampMixin, UUIDMixin):
     error_message: Optional[str] = Field(None, description="Error message if failed")
     tags: list[str] = Field(default_factory=list, description="Tags")
     completed_at: Optional[datetime] = Field(None, description="Completion timestamp")
+    test_case_ids: Optional[list[int]] = Field(None, description="Stored evaluated cases, when recorded")
+    test_run_ids: Optional[list[int]] = Field(None, description="Stored immutable execution IDs, when recorded")
+    model_configs: Optional[list[dict[str, Any]]] = Field(None, description="Recorded public model names and parameters")
+    aggregate_metrics: Optional[dict[str, Any]] = Field(None, description="Stored aggregate metrics")
 
     model_config = ConfigDict(from_attributes=True)
 

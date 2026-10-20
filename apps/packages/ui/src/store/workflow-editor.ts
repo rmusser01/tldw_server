@@ -75,6 +75,10 @@ interface CanvasState {
   nodes: WorkflowNode[]
   edges: WorkflowEdge[]
   workflowId: string | null
+  workflowVersion: number | null
+  savedCanvasKey: string | null
+  ownerScopeKey: string | null
+  viewRevision: number
   workflowName: string
   workflowDescription: string
   isDirty: boolean
@@ -86,6 +90,9 @@ interface UIState extends EditorUIState {
 }
 
 interface ExecutionState extends WorkflowRunState {
+  runWorkflowId: number | null
+  runWorkflowVersion: number | null
+  pendingRunSubmission: { key: string; idempotencyKey: string; inputs: Record<string, unknown> } | null
   isConnected: boolean
   runInvestigation: WorkflowRunInvestigation | null
   runInvestigationLoading: boolean
@@ -231,6 +238,10 @@ const initialCanvasState: CanvasState = {
   nodes: [],
   edges: [],
   workflowId: null,
+  workflowVersion: null,
+  savedCanvasKey: null,
+  ownerScopeKey: null,
+  viewRevision: 0,
   workflowName: "Untitled Workflow",
   workflowDescription: "",
   isDirty: false
@@ -253,7 +264,12 @@ const initialUIState: UIState = {
 
 const initialExecutionState: ExecutionState = {
   runId: null,
+  runWorkflowId: null,
+  runWorkflowVersion: null,
+  pendingRunSubmission: null,
   status: "idle",
+  startedAt: undefined,
+  completedAt: undefined,
   nodeStates: {},
   currentNodeId: undefined,
   pendingApproval: null,
@@ -577,6 +593,8 @@ export const useWorkflowEditorStore = createWithEqualityFn<WorkflowEditorState>(
 
       set({
         ...initialState,
+        ownerScopeKey: get().ownerScopeKey,
+        viewRevision: get().viewRevision + 1,
         nodes: [startNode, endNode],
         edges: []
       })
@@ -584,9 +602,13 @@ export const useWorkflowEditorStore = createWithEqualityFn<WorkflowEditorState>(
 
     loadWorkflow: (workflow) => {
       set({
+        ...initialExecutionState,
+        viewRevision: get().viewRevision + 1,
         nodes: workflow.nodes,
         edges: workflow.edges,
         workflowId: workflow.id || null,
+        workflowVersion: workflow.version || null,
+        savedCanvasKey: null,
         workflowName: workflow.name,
         workflowDescription: workflow.description || "",
         isDirty: false,
@@ -612,7 +634,6 @@ export const useWorkflowEditorStore = createWithEqualityFn<WorkflowEditorState>(
         }
       }
 
-      set({ isDirty: false })
       return workflow
     },
 
@@ -627,6 +648,8 @@ export const useWorkflowEditorStore = createWithEqualityFn<WorkflowEditorState>(
     clearCanvas: () => {
       get().pushHistory("Clear canvas")
       set({
+        ...initialExecutionState,
+        viewRevision: get().viewRevision + 1,
         nodes: [],
         edges: [],
         selectedNodeIds: [],
@@ -842,14 +865,14 @@ export const useWorkflowEditorStore = createWithEqualityFn<WorkflowEditorState>(
 
       try {
         const investigation = await getWorkflowInvestigation(runId)
-        if (get().runId && get().runId !== runId) return
+        if (get().runId !== runId) return
         set({
           runInvestigation: investigation,
           runInvestigationLoading: false,
           runInvestigationError: null
         })
       } catch (error) {
-        if (get().runId && get().runId !== runId) return
+        if (get().runId !== runId) return
         set({
           runInvestigation: null,
           runInvestigationLoading: false,

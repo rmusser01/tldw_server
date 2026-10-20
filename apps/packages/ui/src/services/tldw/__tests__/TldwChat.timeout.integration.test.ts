@@ -91,6 +91,51 @@ const serveStream = (
   return fetch
 }
 
+/** Continuous hidden reasoning must not count as the native final-answer display. */
+const serveThinkingStream = (reasoningFrame: string, visibleAt?: number) => {
+  const encoder = new TextEncoder();
+  let cleanup = () => {};
+  const fetch = vi.fn(async (_url: string, init: RequestInit) => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const thinking = setInterval(
+          () => controller.enqueue(encoder.encode(reasoningFrame)),
+          250,
+        );
+        const visible =
+          visibleAt === undefined
+            ? undefined
+            : setTimeout(() => {
+                controller.enqueue(
+                  encoder.encode(
+                    'data: {"choices":[{"delta":{"content":"Grounded answer"}}]}\n\n',
+                  ),
+                );
+              }, visibleAt);
+        cleanup = () => {
+          clearInterval(thinking);
+          clearTimeout(visible);
+          init.signal?.removeEventListener("abort", abort);
+        };
+        const abort = () => {
+          cleanup();
+          controller.error(new DOMException("Aborted", "AbortError"));
+        };
+        init.signal?.addEventListener("abort", abort, { once: true });
+      },
+      cancel() {
+        cleanup();
+      },
+    });
+    return new Response(body, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+  return fetch;
+};
+
 describe("Chat startup policy and diagnostics through browser transport", () => {
   beforeEach(async () => {
     vi.useFakeTimers()
@@ -224,4 +269,96 @@ describe("Chat startup policy and diagnostics through browser transport", () => 
     expect((await result).error).toMatchObject({ name: "AbortError" })
     expect(fetch).toHaveBeenCalledOnce()
   })
+
+
+  it.each([
+    [
+      "provider reasoning delta",
+      'data: {"choices":[{"delta":{"reasoning_content":"Private thinking"}}]}\n\n',
+    ],
+    [
+      "legacy reasoning metadata",
+      'data: {"additional_kwargs":{"reasoning_content":"Private thinking"}}\n\n',
+    ],
+  ])(
+    "keeps the visible-output startup deadline while receiving %s",
+    async (_label, frame) => {
+      Object.assign(storage.get("tldwConfig")!, {
+        chatStartupTimeoutMs: 2_000,
+        chatStreamIdleTimeoutMs: 10_000,
+      });
+      const fetch = serveThinkingStream(frame);
+      const stop = new AbortController();
+      const result = consume(new TldwChatService(), stop.signal);
+      try {
+        await vi.advanceTimersByTimeAsync(1_999);
+        expect(fetch.mock.calls[0][1].signal?.aborted).toBe(false);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(fetch.mock.calls[0][1].signal?.aborted).toBe(true);
+        expect((await result).error).toMatchObject({
+          name: "ChatStreamTimeoutError",
+          phase: "startup",
+          timeoutMs: 2_000,
+        });
+      } finally {
+        stop.abort();
+        await result;
+      }
+    },
+  );
+
+  it("keeps the visible-answer idle deadline while hidden reasoning continues", async () => {
+    Object.assign(storage.get("tldwConfig")!, {
+      chatStartupTimeoutMs: 2_000,
+      chatStreamIdleTimeoutMs: 1_000,
+    });
+    const fetch = serveThinkingStream(
+      'data: {"choices":[{"delta":{"reasoning_content":"Private thinking"}}]}\n\n',
+      0,
+    );
+    const stop = new AbortController();
+    const result = consume(new TldwChatService(), stop.signal);
+    try {
+      await vi.advanceTimersByTimeAsync(999);
+      expect(fetch.mock.calls[0][1].signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetch.mock.calls[0][1].signal?.aborted).toBe(true);
+      expect(await result).toMatchObject({
+        text: "Grounded answer",
+        error: {
+          name: "ChatStreamTimeoutError",
+          phase: "idle",
+          timeoutMs: 1_000,
+        },
+      });
+    } finally {
+      stop.abort();
+      await result;
+    }
+  });
+
+  it("allows visible content arriving after reasoning within its startup deadline", async () => {
+    Object.assign(storage.get("tldwConfig")!, {
+      chatStartupTimeoutMs: 2_000,
+      chatStreamIdleTimeoutMs: 1_000,
+    });
+    const fetch = serveThinkingStream(
+      'data: {"choices":[{"delta":{"reasoning_content":"Private thinking"}}]}\n\n',
+      1_500,
+    );
+    const stop = new AbortController();
+    const result = consume(new TldwChatService(), stop.signal);
+    try {
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(fetch.mock.calls[0][1].signal?.aborted).toBe(false);
+      stop.abort();
+      expect(await result).toMatchObject({
+        text: "Grounded answer",
+        error: { name: "AbortError" },
+      });
+    } finally {
+      stop.abort();
+      await result;
+    }
+  });
 })

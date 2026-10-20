@@ -282,7 +282,8 @@ describe("ServerAdminPage design-system states", () => {
 
     renderPage(<ServerAdminPage />)
 
-    expect(await screen.findByText("Empty")).toBeInTheDocument()
+    const budgetMessage = await screen.findByText("Select a user to inspect media ingestion limits and usage.")
+    expect(within(budgetMessage.closest("section") as HTMLElement).getByText("Empty")).toBeInTheDocument()
     expect(
       screen.getByText("Select a user to inspect media ingestion limits and usage.")
     ).toBeInTheDocument()

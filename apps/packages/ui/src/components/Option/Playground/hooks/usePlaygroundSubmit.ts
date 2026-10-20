@@ -1,5 +1,6 @@
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
+import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
 import { captureActorSceneSend, type ActorSceneSend } from "@/hooks/chat/actor-scene-source"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
@@ -215,6 +216,8 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   draftReadyRef.current = draftReady
   const sourceDraftRevision = useStoreMessageOption(state => state.chatDraftRevision)
 
+  const historySelection = useHistorySelectionContext()
+
   const submitFormRef = React.useRef<
     (options?: { ignorePinnedResults?: boolean }) => void
   >(() => undefined)
@@ -327,6 +330,16 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         }
       }
       if (activeSubmissionRef.current) return
+      if (historySelection?.getCurrent().status === "unsupported_history_capability") {
+        notificationApi.error({
+          message: t("playground:historyReview.unavailable", "Selected history unavailable"),
+          description: t(
+            "playground:historyReview.unsupportedDraftRetained",
+            "Review the selected conversation or start a new chat. Your draft is retained."
+          )
+        })
+        return
+      }
       const submission = Symbol("playground-submit")
       activeSubmissionRef.current = submission
       let documentPreparation: {
@@ -336,6 +349,13 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       } | null = null
       try {
       const draftOwnership = captureDraftOwnership()
+      if (!draftOwnership.isOwnerCurrent()) {
+        notificationApi.warning({
+          message: t("playground:composer.preparingChat", "Preparing chat"),
+          description: t("playground:composer.preparingChatDraftRetained", "Your draft is retained. Try Send again in a moment.")
+        })
+        return
+      }
       const historyIsCurrent = captureHistorySelection()
       const contextRevision = contextRevisionRef.current.revision
       const pageContextRevision = pageContextRevisionRef.current.revision
@@ -462,6 +482,19 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
             return
           }
           if (!validateSelectedChatModelsAvailability([normalizedSelectedModel])) {
+            return
+          }
+          if (
+            value.image.length > 0 &&
+            !compareModelsSupportCapability([String(selectedModel)], "vision")
+          ) {
+            form.setFieldError(
+              "message",
+              t(
+                "playground:composer.validationVisionInline",
+                "Image support is not confirmed for this model. Choose a model that supports images, or remove the attachment."
+              )
+            )
             return
           }
         } else if (
@@ -780,6 +813,10 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
           setLastSubmittedContext(currentContextSnapshot)
         },
         afterSend: (result) => {
+          const outcome = normalizeChatSubmitResult(result)
+          if (outcome.status === "failed" && outcome.restoreDraft) {
+            draftOwnership.restoreAfterReset?.(promptAssistAttemptId)
+          }
           if (draftOwnership.isOwnerCurrent() && isChatSubmitSuccess(normalizeChatSubmitResult(result as any))) {
             markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
             if (messageForModel && pageContextRevisionRef.current.revision === pageContextRevision) {

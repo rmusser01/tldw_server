@@ -422,6 +422,7 @@ const PlaygroundContent = () => {
     React.useState<ServerReadinessState>(null);
   const [routeCharacterRecovery, setRouteCharacterRecovery] =
     React.useState<MissingCharacterRecovery | null>(null);
+  const [pendingRouteCharacter, setPendingRouteCharacter] = React.useState<string | null>(null);
   const [routeCharacterRetryToken, setRouteCharacterRetryToken] =
     React.useState(0);
   const [applyCharacterRoute, setApplyCharacterRoute] = React.useState<ApplyCharacterRoute | null>(null);
@@ -566,6 +567,10 @@ const PlaygroundContent = () => {
     setRagMediaIds,
     stopStreamingRequest,
     regenerateLastMessage,
+    getRecoveryRetryContext,
+    retryRecoveredHistoryTurn,
+    getSavedQuestionReview,
+    retrySavedQuestion,
     effectiveAssistantState,
     selectedAssistant,
     setSelectedAssistant,
@@ -1016,6 +1021,7 @@ const PlaygroundContent = () => {
     routeCharacterIntentInFlightRef.current = null;
     routeCharacterIntentRequestRef.current += 1;
     setRouteCharacterRecovery(null);
+    setPendingRouteCharacter(null);
   }, [routeCharacterIntentSignature]);
 
   React.useEffect(() => {
@@ -1035,6 +1041,7 @@ const PlaygroundContent = () => {
     routeCharacterIntentAppliedRef.current = null;
     routeCharacterIntentInFlightRef.current = null;
     routeCharacterIntentRequestRef.current += 1;
+    setPendingRouteCharacter(null);
   }, [assistantSelectionMeta?.assistantKey]);
 
   React.useEffect(() => {
@@ -1055,6 +1062,7 @@ const PlaygroundContent = () => {
       return;
     const requestId = ++routeCharacterIntentRequestRef.current;
     routeCharacterIntentInFlightRef.current = routeCharacterIntentId;
+    setPendingRouteCharacter(routeCharacterIntentId);
     const ownerIsCurrent = assistantSelectionMeta?.isCurrent ?? (() => true);
     const sourceHref = window.location.href;
     const isCurrent = () =>
@@ -1100,8 +1108,10 @@ const PlaygroundContent = () => {
           setRouteCharacterRecovery({ id: routeCharacterIntentId, reason: 'load-error' });
       })
       .finally(() => {
-        if (routeCharacterIntentRequestRef.current === requestId)
+        if (routeCharacterIntentRequestRef.current === requestId) {
           routeCharacterIntentInFlightRef.current = null;
+          setPendingRouteCharacter(null);
+        }
       });
   }, [
     applyCharacterRoute,
@@ -2683,9 +2693,20 @@ const PlaygroundContent = () => {
     return null;
   }, [messages]);
   const regenerateSelectionState = historySelection.getCurrent();
+  const selectedRows = regenerateSelectionState.capture?.status === "captured"
+    ? regenerateSelectionState.capture.rows : [];
+  const selectedAnswer = selectedRows.at(-1);
+  const selectedQuestion = selectedRows.at(-2);
+  const selectedHistoryCanRegenerate =
+    regenerateSelectionState.status === "ready" &&
+    selectedAnswer?.role === "assistant" &&
+    selectedQuestion?.role === "user" &&
+    (regenerateSelectionState.view?.interpretation.kind === "legacy_linear_v1" ||
+      selectedAnswer.parent_id === selectedQuestion.id);
   const selectedHistoryBlocksRegeneration =
     regenerateSelectionState.status !== "idle" &&
-    !(temporaryChat && !regenerateSelectionState.owner);
+    !(temporaryChat && !regenerateSelectionState.owner) &&
+    !selectedHistoryCanRegenerate;
   const canRegenerateLastResponse =
     Boolean(latestAssistantMessage) && !selectedHistoryBlocksRegeneration;
   const emptyAssistantResponse = React.useMemo(() => {
@@ -3399,9 +3420,32 @@ const PlaygroundContent = () => {
       openServerSettingsFromCockpit,
     ],
   );
+  const routeCharacterLoading = Boolean(
+    routeCharacterIntentId && !routeCharacterIntentChatId &&
+    (pendingRouteCharacter === routeCharacterIntentId ||
+      (!routeCharacterRecovery && routeCharacterIntentAppliedRef.current !== routeCharacterIntentId))
+  );
   const characterChatSendBlocker = React.useMemo<PlaygroundSendBlocker | null>(
-    () =>
-      routeCharacterIntentId && !routeCharacterIntentChatId && routeCharacterIntentAppliedRef.current !== routeCharacterIntentId
+    () => {
+      if (characterWorkflowActive && routeCharacterLoading) {
+        return {
+          active: true,
+          disabled: true,
+          title: toText(t("playground:characterChatReadiness.loadingDraftRetained", "Loading character. Your draft is retained.")),
+          actionLabel: toText(t("playground:characterChatReadiness.loadingCharacter", "Loading character")),
+          onAction: () => {},
+        };
+      }
+      if (characterWorkflowActive && routeCharacterRecovery &&
+          routeCharacterRecovery.id === routeCharacterIntentId && !routeCharacterIntentChatId) {
+        return {
+          active: true,
+          title: toText(t("playground:characterChatReadiness.reloadDraftRetained", "Reload the selected character before sending. Your draft is retained.")),
+          actionLabel: toText(t("playground:characterChatReadiness.retryCharacter", "Retry character")),
+          onAction: retryRouteCharacterRecovery,
+        };
+      }
+      return       routeCharacterIntentId && !routeCharacterIntentChatId && routeCharacterIntentAppliedRef.current !== routeCharacterIntentId
         ? { active: true, title: t("playground:characterChatReadiness.routeSetupPending", "Finish character setup before sending."),
           actionLabel: t("playground:characterChatReadiness.character.action", "Choose character"), onAction: openCharacterSelectorFromReadiness }
         : !isSavedRoleplayConversation(historySelection) && characterWorkflowActive &&
@@ -3418,13 +3462,20 @@ const PlaygroundContent = () => {
                   "open-model-settings",
               ),
           }
-        : null,
+        : null;
+    },
     [
       historySelection, characterChatReadiness,
       characterChatReadinessCopy,
       characterWorkflowActive,
       handleCharacterChatReadinessAction,
       openCharacterSelectorFromReadiness, routeCharacterIntentChatId, routeCharacterIntentId, t,
+      routeCharacterLoading,
+      routeCharacterRecovery,
+      routeCharacterIntentId,
+      routeCharacterIntentChatId,
+      retryRouteCharacterRecovery,
+      t,
     ],
   );
   const openMcpSettingsFromCockpit = React.useCallback(() => {
@@ -4018,7 +4069,7 @@ const PlaygroundContent = () => {
             >
               <div className={`mx-auto w-full ${chatContentWidthClassName} pb-6`}>
                 <ChatErrorBoundary>
-                  <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
+                  <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={!compareActive && serverChatCharacterId ? getSavedQuestionReview : undefined} onRetrySavedQuestion={!compareActive && serverChatCharacterId ? retrySavedQuestion : undefined} onBind={() => void historySelection.bindUnavailableConversation()} />
                   <PlaygroundChat
                     scrollParentRef={containerRef}
                     navigationRef={chatTimelineRef}

@@ -32,7 +32,6 @@ import type { InputRef } from "antd"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   DEGRADED_STATE_LABEL,
-  READY_STATE_LABEL,
   getDesignSystemState
 } from "@/design-system"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -3117,10 +3116,7 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         getDesignSystemState("degraded")?.label ?? DEGRADED_STATE_LABEL
       )
     }
-    return t(
-      "playground:composer.providerStatusReady",
-      getDesignSystemState("ready")?.label ?? READY_STATE_LABEL
-    )
+    return t("playground:composer.serverStatusConnected", "Server connected")
   }, [connectionUxState, isConnectionReady, t])
   const connectionStatusWarning =
     !isConnectionReady || connectionUxState === "connected_degraded"

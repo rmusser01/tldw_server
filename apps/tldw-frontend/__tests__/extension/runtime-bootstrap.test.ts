@@ -115,8 +115,8 @@ describe("runtime-bootstrap chrome shim", () => {
     Object.defineProperty(window.navigator, "locks", {
       configurable: true,
       value: {
-        request: async (_name: string, work: () => unknown) => {
-          beforeManualSessionCredentialLock?.()
+        request: async (name: string, work: () => unknown) => {
+          if (name === "tldw:manual-session-credential") beforeManualSessionCredentialLock?.()
           return await work()
         }
       }
@@ -419,7 +419,8 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(readStoredValue("tldwCookieSessionConfig")).toEqual({
       authMode: "single-user",
       authSource: "cookie-session",
-      serverUrl: window.location.origin
+      serverUrl: window.location.origin,
+      verificationRevision: expect.any(String)
     })
     expect(readStoredValue("tldwConfig")).toEqual({
       authMode: "single-user",
@@ -671,7 +672,8 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(readStoredValue("tldwCookieSessionConfig")).toEqual({
       authMode: "single-user",
       authSource: "cookie-session",
-      serverUrl: window.location.origin
+      serverUrl: window.location.origin,
+      verificationRevision: expect.any(String)
     })
     expect(sessionStorage.getItem("tldwManualSessionApiKey")).toContain(
       "manual-session-key"

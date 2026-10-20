@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Any
+
+from tldw_Server_API.app.core.DB_Management.backends.postgres_sequence_maintenance import (
+    PostgresSequenceMaintenanceDB,
+    sync_owned_postgres_sequences,
+)
 
 from tldw_Server_API.app.core.DB_Management.backends.postgres_sequences import (
     PostgresSequenceBackend,
@@ -55,62 +60,12 @@ _MEDIA_SEQUENCE_COLUMNS = frozenset({
 })
 
 
-class PostgresSequenceMaintenanceDB(Protocol):
-    """Protocol for DB objects exposing a PostgreSQL backend."""
-
-    backend: PostgresSequenceBackend
-
-
 def sync_postgres_sequences(
     db: PostgresSequenceMaintenanceDB,
     conn: Any,
 ) -> None:
-    """Advance Media serials without reusing allocated IDs hidden by tenant RLS.
-
-    The schema owner calls this inside its existing migration transaction.
-    Only a temporary lock savepoint is rolled back; caller work is untouched.
-    PostgreSQL's nontransactional setval deliberately retains forward advances.
-    """
-
-    backend = db.backend
-    sequence_rows = backend.execute(
-        """
-        SELECT
-            sequence_ns.nspname AS sequence_schema,
-            seq.relname AS sequence_name,
-            tab.relname AS table_name,
-            col.attname AS column_name
-        FROM pg_class seq
-        JOIN pg_namespace sequence_ns ON sequence_ns.oid = seq.relnamespace
-        JOIN pg_depend dep ON dep.objid = seq.oid AND dep.deptype = 'a'
-        JOIN pg_class tab ON tab.oid = dep.refobjid
-        JOIN pg_namespace tab_ns ON tab_ns.oid = tab.relnamespace
-        JOIN pg_attribute col ON col.attrelid = tab.oid AND col.attnum = dep.refobjsubid
-        WHERE seq.relkind = 'S' AND tab_ns.nspname = 'public'
-        ORDER BY sequence_ns.nspname, seq.relname;
-        """,
-        connection=conn,
-    )
-
-    for row in sequence_rows.rows:
-        table_name = row.get("table_name")
-        column_name = row.get("column_name")
-        sequence_schema = row.get("sequence_schema", "public")
-        sequence_name = row.get("sequence_name")
-
-        if not table_name or not column_name or not sequence_name:
-            continue
-        if (table_name, column_name) not in _MEDIA_SEQUENCE_COLUMNS:
-            continue
-
-        advance_postgres_serial(
-            backend,
-            conn,
-            table_name=table_name,
-            column_name=column_name,
-            sequence_schema=sequence_schema,
-            sequence_name=sequence_name,
-        )
+    """Advance only Media serials, retaining the shared allocation/rollback contract."""
+    sync_owned_postgres_sequences(db, conn, _MEDIA_SEQUENCE_COLUMNS)
 
 
 __all__ = [

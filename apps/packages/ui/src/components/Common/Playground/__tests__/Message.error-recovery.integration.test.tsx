@@ -1950,3 +1950,32 @@ describe("preserved reply before recovery", () => {
     ).toBeNull()
   })
 })
+it("keeps nested reasoning tail out of the rendered final answer", async () => {
+  render(
+    <PlaygroundMessage
+      {...baseProps}
+      message="<think>outer <think>inner</think> tail</think>FINAL"
+    />,
+  );
+  expect((await screen.findByTestId("mock-markdown")).textContent).toBe(
+    "FINAL",
+  );
+});
+
+
+it("keeps orphan reasoning closing markup out of the rendered final answer", async () => {
+  render(
+    <PlaygroundMessage
+      {...baseProps}
+      message="<think>brief check</think>FINAL</think>"
+    />,
+  );
+  expect((await screen.findByTestId("mock-markdown")).textContent).toBe(
+    "FINAL",
+  );
+});
+
+it("offers honest recovery for only orphan reasoning markup", () => {
+  render(<PlaygroundMessage {...baseProps} message="</think>" />);
+  expect(screen.getByText(/No final answer/)).toBeInTheDocument();
+});

@@ -206,7 +206,7 @@ vi.mock("react-i18next", () => ({
 // behavior is exercised in PlaygroundForm.role-play-starter.integration.test.tsx.
 const routeApplyOutcome = vi.hoisted(() => ({ value: null as string | null }))
 vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
-  PlaygroundForm: ({ onDraftPresenceChange, onCharacterRouteApplyReady }: React.ComponentProps<typeof import("../PlaygroundForm").PlaygroundForm>) => {
+  PlaygroundForm: ({ onDraftPresenceChange, onCharacterRouteApplyReady, characterChatSendBlocker }: React.ComponentProps<typeof import("../PlaygroundForm").PlaygroundForm>) => {
     React.useEffect(() => {
       onCharacterRouteApplyReady?.(async (id: string, isCurrent: () => boolean) => {
         const character = await tldwClientState.getCharacter(id, { requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "account-a" } })
@@ -223,7 +223,7 @@ vi.mock("@/components/Option/Playground/PlaygroundForm", () => ({
       })
       return () => onCharacterRouteApplyReady?.(null)
     }, [onCharacterRouteApplyReady])
-    return <div data-testid="playground-form"><textarea aria-label="Composer draft" data-testid="composer-textarea"
+    return <div data-testid="playground-form">{characterChatSendBlocker?.active && ["Loading character", "Retry character"].includes(characterChatSendBlocker.actionLabel) && <button disabled={characterChatSendBlocker.disabled} onClick={characterChatSendBlocker.onAction}>{characterChatSendBlocker.actionLabel}</button>}<textarea aria-label="Composer draft" data-testid="composer-textarea"
       onChange={event => onDraftPresenceChange?.(event.currentTarget.value.trim().length > 0)} /></div>
   },
 }));
@@ -1467,8 +1467,50 @@ describe("Playground cockpit shell", () => {
     expect(tldwClientState.getCharacter).not.toHaveBeenCalled();
   });
 
-  it("offers recovery without inventing a character when route loading returns none", async () => {
+  it.each(["load", "publication"])("B02 blocks a stale library character until route hydration settles at %s", async (delay) => {
+    window.history.replaceState({}, "", "/chat?mode=character&characterId=delayed-character");
+    messageOptionState.value.selectedCharacter = { id: "delayed-character", name: "Stale library card" };
+    let release!: (value: { id: string; name: string }) => void;
+    const pending = new Promise<{ id: string; name: string }>((resolve) => { release = resolve; });
+    tldwClientState.getCharacter.mockImplementationOnce(() => delay === "load" ? pending : Promise.resolve({ id: "delayed-character", name: "Fresh library card" }));
+    messageOptionState.value.setSelectedCharacter = vi.fn(async (next) => {
+      if (delay === "publication") await pending;
+      messageOptionState.value.selectedCharacter = next;
+      messageOptionState.value.selectedAssistant = { kind: "character", id: String(next.id), name: next.name, metadata: { selectionMode: "tracked" } };
+    });
+    const { rerender } = render(<Playground />);
+    try {
+      await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalled());
+      expect(screen.getByRole("button", { name: "Loading character" })).toBeDisabled();
+      fireEvent.change(screen.getByTestId("composer-textarea"), { target: { value: "Keep this question." } });
+      expect(screen.getByTestId("composer-textarea")).toHaveValue("Keep this question.");
+    } finally {
+      await act(async () => { release({ id: "delayed-character", name: "Fresh library card" }); await pending; });
+    }
+    rerender(<Playground />);
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Loading character" })).not.toBeInTheDocument());
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("Keep this question.");
+  });
+
+  it("B02 offers character reload instead of Send after route hydration fails", async () => {
     window.history.replaceState({}, "", "/chat?mode=character&characterId=missing-character");
+    tldwClientState.getCharacter.mockRejectedValueOnce(new Error("temporary unavailable"));
+    render(<Playground />);
+    await screen.findByText("Character missing-character could not be loaded");
+    fireEvent.change(screen.getByTestId("composer-textarea"), { target: { value: "Keep this question." } });
+    const retry = screen.getByRole("button", { name: "Retry character" });
+    expect(retry).toBeEnabled();
+    fireEvent.click(retry);
+    await waitFor(() => expect(tldwClientState.getCharacter).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId("composer-textarea")).toHaveValue("Keep this question.");
+  });
+
+  it("uses a typed fallback when route character hydration returns no character", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat?mode=character&characterId=missing-character",
+    );
     tldwClientState.getCharacter.mockResolvedValueOnce(null);
     render(<Playground />);
     await screen.findByText("Character missing-character could not be loaded");

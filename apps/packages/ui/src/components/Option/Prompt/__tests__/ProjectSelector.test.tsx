@@ -56,6 +56,10 @@ vi.mock("antd", () => ({
   Modal: ({ open, children }: any) => (open ? <div>{children}</div> : null),
   Select: () => <div data-testid="project-select" />,
   Empty: ({ description }: any) => <div>{description}</div>,
+  Alert: ({ title, description }: {
+    title?: React.ReactNode
+    description?: React.ReactNode
+  }) => <div role="alert">{title}{description}</div>,
   Skeleton: () => <div>Loading</div>,
   Space: ({ children }: any) => <div>{children}</div>,
   Button: ({ children, onClick, disabled, loading, type }: any) => (
@@ -85,6 +89,21 @@ describe("ProjectSelector", () => {
       data: [],
       isLoading: false
     })
+  })
+
+  it("shows a project lookup failure without offering empty-list project creation", () => {
+    useQueryMock.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: new Error("Authentication required")
+    })
+
+    render(<ProjectSelector open onClose={vi.fn()} onSelect={vi.fn()} />)
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Authentication required")
+    expect(screen.queryByRole("button", { name: "Create project" })).not.toBeInTheDocument()
+    expect(screen.queryByPlaceholderText("Enter project name")).not.toBeInTheDocument()
+    expect(createProjectMock).not.toHaveBeenCalled()
   })
 
   it("creates a project inline from empty state and selects it", async () => {

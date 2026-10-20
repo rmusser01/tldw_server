@@ -93,6 +93,98 @@ const renderProviderStep = ({
 };
 
 describe("ProviderSetupStep", () => {
+
+  it.each(["", "   "])(
+    "rejects blank local URLs (%j) before validation or save",
+    async (blank) => {
+      const { onSaveProvider, onValidateProvider } = renderProviderStep();
+      fireEvent.click(screen.getByLabelText("Select Ollama"));
+      fireEvent.change(screen.getByLabelText(/default model/i), {
+        target: { value: "llama3.1" },
+      });
+      fireEvent.change(screen.getByLabelText(/ollama base url/i), {
+        target: { value: blank },
+      });
+
+      expect(screen.getByLabelText(/ollama base url/i)).toHaveValue(blank);
+      fireEvent.click(screen.getByRole("button", { name: /validate ollama/i }));
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        /ollama base url is required/i,
+      );
+      expect(onValidateProvider).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: /save providers/i }));
+      expect(onSaveProvider).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+    },
+  );
+
+  it("rejects a blank local URL after a working provider was saved", async () => {
+    const { onSaveProvider } = renderProviderStep();
+    fireEvent.click(screen.getByLabelText("Select Ollama"));
+    fireEvent.change(screen.getByLabelText(/default model/i), {
+      target: { value: "llama3.1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /validate ollama/i }));
+    await screen.findByText(/first chat verifies/i);
+    fireEvent.click(screen.getByRole("button", { name: /save providers/i }));
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled(),
+    );
+    expect(onSaveProvider).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByLabelText(/ollama base url/i), {
+      target: { value: "" },
+    });
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /save providers/i }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /ollama base url is required/i,
+    );
+    expect(onSaveProvider).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps an untouched local URL default when only the model is edited", async () => {
+    const { onValidateProvider } = renderProviderStep();
+    fireEvent.click(screen.getByLabelText("Select Ollama"));
+    fireEvent.change(screen.getByLabelText(/default model/i), {
+      target: { value: "llama3.1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /validate ollama/i }));
+
+    await waitFor(() =>
+      expect(onValidateProvider).toHaveBeenCalledWith(
+        expect.objectContaining({
+          base_url: "http://127.0.0.1:11434/v1",
+          model: "llama3.1",
+        }),
+      ),
+    );
+  });
+  it("restores a saved custom local endpoint while still requiring validation", async () => {
+    renderProviderStep({
+      initialSelection: {
+        provider: "ollama",
+        model: "llama3.1",
+        base_url: "http://127.0.0.1:8010/v1",
+      },
+    });
+    expect(screen.getByLabelText(/ollama base url/i)).toHaveValue(
+      "http://127.0.0.1:8010/v1",
+    );
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: /validate ollama/i }));
+    await screen.findByText(/first chat verifies/i);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /continue/i })).toBeEnabled(),
+    );
+    fireEvent.change(screen.getByLabelText(/ollama base url/i), {
+      target: { value: "" },
+    });
+    expect(screen.getByLabelText(/ollama base url/i)).toHaveValue("");
+    expect(screen.getByRole("button", { name: /continue/i })).toBeDisabled();
+  });
+
   it("lets users select multiple providers and saves every configured provider", async () => {
     const saveProvider = vi.fn().mockImplementation(async (payload) => ({
       provider_key: payload.provider_key,
@@ -869,6 +961,7 @@ describe("ProviderSetupStep", () => {
     expect(onContinue).toHaveBeenCalledWith({
       provider: "ollama",
       model: "manual-local-model",
+      base_url: "http://127.0.0.1:11434/v1",
       credential_configured: false,
     });
   });

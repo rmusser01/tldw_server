@@ -4,7 +4,7 @@ vi.mock("wxt/browser", () => ({ browser: { runtime: { id: null } } }))
 vi.mock("@/utils/safe-storage", () => ({ createSafeStorage: () => ({ get: boundary.get, set: vi.fn(), remove: vi.fn() }) }))
 vi.mock("@/services/tldw/runtime-auth-override", () => ({ getRuntimeSingleUserApiKeyOverride: () => null, isCookieSessionConfigInvalidated: () => false }))
 import type { FlashcardsRequestOptions } from "../flashcards"
-import { createDeck, createFlashcard, generateFlashcards, listDecks, createFlashcardsBulk, getFlashcard, deleteFlashcard } from "../flashcards"
+import { createDeck, updateDeck, createFlashcard, generateFlashcards, listDecks, createFlashcardsBulk, getFlashcard, deleteFlashcard } from "../flashcards"
 import { uploadFlashcardAsset } from "../flashcard-assets"
 import { mediaMethods } from "../tldw/domains/media"
 import { isServicePromptRequestPath } from "../tldw/service-prompt-scope-error"
@@ -14,6 +14,7 @@ const requestScope = { config: { serverUrl: "https://source.test", authMode: "mu
 const cardUuid = "bb4da9d8-1d8c-4ac0-960b-7ef644b37865"
 const asset = { name: "diagram.png", type: "image/png", arrayBuffer: async () => new Uint8Array([1, 2]).buffer } as File
 const operations = [
+  ["deck update", () => updateDeck(7, { name: "Private renamed deck", expected_version: 1 }, { requestScope })],
   ["decks list", () => listDecks({ workspace_id: "workspace", include_workspace_items: true }, { requestScope })],
   ["bulk", () => createFlashcardsBulk([{ front: "Occluded image", back: "Label", deck_id: 7 }], { requestScope })],
   ["asset", () => uploadFlashcardAsset(asset, { requestScope })],
@@ -115,4 +116,19 @@ describe("private Flashcards real outbound scope", () => {
   it.each(["/api/v1/media/search", "/api/v1/media/42/versions/0", "/api/v1/media/42/versions/7/extra", "/api/v1/media/%34%32", "/api/v1/media/42/"])("does not expand source GET to %s", path => {
     expect(isServicePromptRequestPath(path, "GET")).toBe(false)
   })
+})
+
+
+it("allows only canonical scoped deck PATCH paths", () => {
+  expect(isServicePromptRequestPath("/api/v1/flashcards/decks/7", "PATCH")).toBe(true)
+  for (const path of ["/api/v1/flashcards/decks/0", "/api/v1/flashcards/decks/07", "/api/v1/flashcards/decks/%37", "/api/v1/flashcards/decks/7/", "/api/v1/flashcards/decks/7/shares"]) {
+    expect(isServicePromptRequestPath(path, "PATCH")).toBe(false)
+  }
+})
+
+
+it("retains A06 canonical Media version reads in the captured scope", () => {
+  for (const path of ["/api/v1/media/42/versions", "/api/v1/media/42/versions/2"]) {
+    expect(isServicePromptRequestPath(path, "GET")).toBe(true)
+  }
 })

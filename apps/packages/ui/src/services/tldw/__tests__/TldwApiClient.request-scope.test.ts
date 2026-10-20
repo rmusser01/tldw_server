@@ -662,3 +662,14 @@ it.each(["getMessage", "editMessage"])("native %s refuses pre-aborted owner requ
   await expect(pending).rejects.toMatchObject({ name: "AbortError" })
   expect(mocks.bgRequest).not.toHaveBeenCalled()
 })
+it.each([[true, false], [false, false], [true, true], [false, true]])("preserves native greeting seed query and captured scope (enabled=%s, base=%s)", async (enabled, base) => {
+  const client = base ? new TldwApiClientBase() : new TldwApiClient()
+  const signal = new AbortController().signal
+  mocks.bgRequest.mockReset()
+  mocks.bgRequest.mockResolvedValueOnce({ id: "seeded-chat" })
+  await client.createChat({ character_id: 12 }, { requestScope, signal, seedFirstMessage: enabled, greetingStrategy: "alternate_index", alternateIndex: 2 } as Parameters<typeof client.createChat>[1])
+  expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+    path: `/api/v1/chats/?seed_first_message=${enabled}&greeting_strategy=alternate_index&alternate_index=2`,
+    method: "POST", body: { character_id: 12, scope_type: "global" }, abortSignal: signal, ...expectedScopeFields
+  }))
+})
