@@ -9,6 +9,8 @@ Currently includes:
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import functools
 import hashlib
 import hmac
 import json
@@ -17,7 +19,7 @@ import os
 import platform
 import re
 import unicodedata
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from typing import Any
 
 from tldw_Server_API.app.core.testing import is_truthy
@@ -123,6 +125,41 @@ async def run_tts_blocking_next(iterator: Iterator[Any], sentinel: Any) -> Any:
             return sentinel
 
     return await asyncio.to_thread(_next_item)
+
+
+@contextlib.asynccontextmanager
+async def hold_tts_engine(lock: asyncio.Lock) -> AsyncIterator[Callable[..., Awaitable[Any]]]:
+    """Hold a local TTS engine's lock, yielding ``run``, which makes one engine call on a worker thread.
+
+    ``asyncio.to_thread`` cannot stop a thread, so when the holder is cancelled mid-call (a client
+    disconnect), the lock passes to the next caller only once that call returns. Waiting for the
+    thread inside the cancelled holder does not work: anyio re-cancels the wait. A stream holds the
+    lock across chunks by pulling each one with ``await run(next, iterator, sentinel)``.
+    """
+    await lock.acquire()
+    last_call: asyncio.Future | None = None
+
+    async def run(func: Callable[..., Any], /, *args: Any, **kwargs: Any) -> Any:
+        nonlocal last_call
+        last_call = asyncio.ensure_future(run_tts_blocking_call(func, *args, **kwargs))
+        return await asyncio.shield(last_call)
+
+    try:
+        yield run
+    finally:
+        if last_call is None or last_call.done():
+            lock.release()
+        else:
+            # ponytail: a cancelled model load's result is discarded, so the next holder loads again
+            # (after it, not alongside it); store the model from the thread if that cost matters.
+            last_call.add_done_callback(functools.partial(_release_engine_lock, lock))
+
+
+def _release_engine_lock(lock: asyncio.Lock, call: asyncio.Future) -> None:
+    """Release a cancelled holder's engine lock once its engine call returns."""
+    lock.release()
+    if not call.cancelled():
+        call.exception()  # its caller is gone; don't let asyncio log the error as never retrieved
 
 
 def estimate_max_new_tokens(

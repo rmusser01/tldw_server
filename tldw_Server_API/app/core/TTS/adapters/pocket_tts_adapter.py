@@ -27,7 +27,7 @@ from ..tts_exceptions import (
     TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
-from ..utils import parse_bool
+from ..utils import hold_tts_engine, parse_bool
 
 #
 # Local Imports
@@ -314,8 +314,8 @@ class PocketTTSOnnxAdapter(TTSAdapter):
                     model=request.model or "pocket-tts-onnx",
                 )
 
-            async with self._engine_lock:
-                audio = await asyncio.to_thread(
+            async with hold_tts_engine(self._engine_lock) as run:
+                audio = await run(
                     self._engine.generate,  # type: ignore[union-attr]
                     request.text,
                     voice_path,
@@ -518,9 +518,8 @@ class PocketTTSOnnxAdapter(TTSAdapter):
 
         async def stream() -> AsyncGenerator[bytes, None]:
             sentinel = object()
-            loop = asyncio.get_running_loop()
             try:
-                async with self._engine_lock:
+                async with hold_tts_engine(self._engine_lock) as run:
                     generator = self._engine.stream(  # type: ignore[union-attr]
                         request.text,
                         voice_path,
@@ -530,9 +529,7 @@ class PocketTTSOnnxAdapter(TTSAdapter):
                         max_chunk_frames=max_chunk_frames,
                     )
                     while True:
-                        chunk = await loop.run_in_executor(
-                            None, lambda: next(generator, sentinel)
-                        )
+                        chunk = await run(next, generator, sentinel)
                         if chunk is sentinel:
                             break
                         data = self._convert_stream_chunk(chunk, normalizer, writer)
