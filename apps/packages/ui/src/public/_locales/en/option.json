@@ -6468,9 +6468,9 @@
     "message": "Could not add the note to this collection"
   },
   "notesSearch_taskChipLabel": {
-    "message": "Tasks"
+    "message": "Tasks {{done}}/{{total}}"
   },
   "notesSearch_taskChipTooltip": {
-    "message": "Checking a box updates the note text and your task list."
+    "message": "Open the list to check off tasks. Changes update the note text and your task list."
   }
 }

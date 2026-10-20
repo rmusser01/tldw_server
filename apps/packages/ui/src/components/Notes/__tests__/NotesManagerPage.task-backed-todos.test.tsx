@@ -70,7 +70,13 @@ vi.mock("react-i18next", () => ({
           }
     ) => {
       if (typeof defaultValueOrOptions === "string") return defaultValueOrOptions
-      if (defaultValueOrOptions?.defaultValue) return defaultValueOrOptions.defaultValue
+      const options = defaultValueOrOptions
+      if (options?.defaultValue) {
+        // Interpolate like i18next, so labels such as "Tasks {{done}}/{{total}}" render.
+        return options.defaultValue.replace(/\{\{(\w+)\}\}/g, (match, name: string) =>
+          name in options ? String(options[name]) : match
+        )
+      }
       return key
     }
   })

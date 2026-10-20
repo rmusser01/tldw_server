@@ -44,7 +44,8 @@ const TaskChecklistToggle: React.FC<TaskChecklistPreviewProps> = (props) => {
     <div className="flex flex-col gap-2" data-testid="notes-task-checklist-toggle">
       <Tooltip
         title={t("option:notesSearch.taskChipTooltip", {
-          defaultValue: "Checking a box updates the note text and your task list."
+          defaultValue:
+            "Open the list to check off tasks. Changes update the note text and your task list."
         })}
       >
         <button
@@ -56,7 +57,11 @@ const TaskChecklistToggle: React.FC<TaskChecklistPreviewProps> = (props) => {
           data-testid="notes-task-chip"
         >
           <ListChecks className="size-3.5" aria-hidden="true" />
-          {`${t("option:notesSearch.taskChipLabel", { defaultValue: "Tasks" })} ${done}/${total}`}
+          {t("option:notesSearch.taskChipLabel", {
+            defaultValue: "Tasks {{done}}/{{total}}",
+            done,
+            total
+          })}
         </button>
       </Tooltip>
       <div id={listId} hidden={!open}>

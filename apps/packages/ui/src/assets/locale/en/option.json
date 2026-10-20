@@ -1543,8 +1543,8 @@
     "moodboardAddOpenNoteAlreadyIn": "The open note is already in this collection",
     "moodboardAddOpenNoteSuccess": "Added to \"{{name}}\"",
     "moodboardAddOpenNoteError": "Could not add the note to this collection",
-    "taskChipLabel": "Tasks",
-    "taskChipTooltip": "Checking a box updates the note text and your task list."
+    "taskChipLabel": "Tasks {{done}}/{{total}}",
+    "taskChipTooltip": "Open the list to check off tasks. Changes update the note text and your task list."
   },
   "tts": {
     "playground": "TTS Playground"
