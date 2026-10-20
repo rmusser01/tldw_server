@@ -109,7 +109,9 @@ async def test_reserve_honours_the_fail_mode_when_redis_raises_connection_error(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("fail_mode", ["fail_open", "fail_closed", "fallback_memory"])
-async def test_renew_and_commit_survive_redis_raising_connection_error(fail_mode):
+async def test_renew_and_commit_survive_redis_raising_connection_error(fail_mode, monkeypatch):
+    # The RG conftest's test-only lease purge would drop the in-process lease for us; production never runs it.
+    monkeypatch.delenv("RG_TEST_PURGE_LEASES_BEFORE_RESERVE")
     rg = _governor({"jobs": {"max_concurrent": 1, "ttl_sec": 60}, "scopes": ["user"], "fail_mode": fail_mode}, ns=f"rg_down_lease_{fail_mode}")
     rg._client = InMemoryAsyncRedis()
     req = RGRequest(entity="user:x", categories={"jobs": {"units": 1}}, tags={"policy_id": "p"})
@@ -118,7 +120,10 @@ async def test_renew_and_commit_survive_redis_raising_connection_error(fail_mode
 
     rg._client = _redis_down_client()  # Redis goes away while the lease is held
     await rg.renew(handle, 60)
-    await rg.commit(handle)
+    await rg.commit(handle)  # the request ends: its only slot frees, with Redis still down
+    again, again_handle = await rg.reserve(req)
+
+    assert again.allowed and again_handle
 
 
 @pytest.mark.asyncio
