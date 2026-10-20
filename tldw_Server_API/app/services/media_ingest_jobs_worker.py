@@ -12,6 +12,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_requested
 from tldw_Server_API.app.api.v1.schemas.media_request_models import AddMediaForm
 from tldw_Server_API.app.core.Chunking.templates import TemplateClassifier
 from tldw_Server_API.app.core.config import settings
@@ -21,6 +22,7 @@ from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import create_media_database, get_media_by_id
 from tldw_Server_API.app.core.DB_Management.media_db.errors import ConflictError
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import (
     async_resolve_chunking_options_and_plan,
     apply_chunking_template_if_any,
@@ -32,6 +34,8 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
 )
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
+from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context, mark_llm_quota_prechecked
+from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_async, user_to_check
 from tldw_Server_API.app.core.Workspaces.status_projection import derive_workspace_source_media_status
 
 _MEDIA_DOMAIN = "media_ingest"
@@ -353,6 +357,35 @@ def _build_form_data(payload: dict[str, Any]) -> AddMediaForm:
     return AddMediaForm(**options)
 
 
+async def _admit_or_refuse_analysis(form_data: AddMediaForm) -> LLMQuotaExceededError | None:
+    """Check the owner's LLM quota once, before any work, when the job asks for analysis (TASK-13864).
+
+    Admitted, the rest of the job runs as an admitted request does (LLM usage accounting
+    spec §4a), so no refusal lands part-way through an item. Refused, the refusal is
+    returned and the job runs without analysis.
+    """
+    if not media_analysis_requested(form_data):
+        return None
+    user_id = user_to_check()
+    if user_id is None:
+        return None
+    try:
+        await check_user_async(user_id)
+    except LLMQuotaExceededError as refusal:
+        return refusal
+    mark_llm_quota_prechecked()
+    return None
+
+
+def _record_analysis_refusal(job_result: dict[str, Any], refusal: LLMQuotaExceededError) -> None:
+    """Say in the job's result why the stored item has no analysis (TASK-13638 Decision 3)."""
+    message = f"Analysis skipped: LLM quota exceeded ({refusal.category})."
+    job_result["warnings"] = [*(job_result.get("warnings") or []), message]
+    job_result["analysis_error"] = {"code": refusal.failure_code, "message": message}
+    if job_result.get("status") == "Success":
+        job_result["status"] = "Warning"
+
+
 def _create_db(user_id: str):
     db_path = DatabasePaths.get_media_db_path(user_id)
     # Media writes derive ownership from the same user identity as API writes.
@@ -479,7 +512,8 @@ async def _handle_job(job: dict[str, Any], jm: JobManager, progress: _ProgressSt
     if str(job.get("job_type") or "").lower() not in {_MEDIA_JOB_TYPE, _WORKSPACE_SOURCE_JOB_TYPE}:
         return await _handle_job_in_scope(job, jm, progress)
     user_id = _resolve_user_id(job)
-    with scoped_context(user_id=int(user_id), is_admin=False):
+    # llm_call_context(): an admission the job marks (TASK-13864) ends with the job, whoever calls the handler.
+    with scoped_context(user_id=int(user_id), is_admin=False), llm_call_context():
         return await _handle_job_in_scope(job, jm, progress)
 
 
@@ -541,6 +575,10 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
         progress.percent = 5.0
         progress.message = "prepare"
         jm.update_job_progress(job_id, progress_percent=progress.percent, progress_message=progress.message)
+
+        analysis_refusal = await _admit_or_refuse_analysis(form_data)
+        if analysis_refusal is not None:
+            form_data = form_data.model_copy(update={"perform_analysis": False})
 
         db = _create_db(user_id)
         db_path = getattr(db, "db_path_str", None) or getattr(db, "db_path", None) or ""
@@ -664,6 +702,8 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
             }
             if final_chunking_plan is not None:
                 job_result["chunking_plan"] = final_chunking_plan
+            if analysis_refusal is not None:
+                _record_analysis_refusal(job_result, analysis_refusal)
             _sync_collection_item_terminal_result(
                 user_id=user_id,
                 item_id=planned_item_id,
