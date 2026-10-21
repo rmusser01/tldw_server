@@ -219,7 +219,10 @@ def build_frozen_world_book_prompt_context(
     plan: FrozenWorldBookPlan,
 ) -> WorldBookPromptContext:
     """Compose the accepted catalog over the exact selected/current message text."""
-    from tldw_Server_API.app.core.Character_Chat.world_book_manager import WorldBookEntry, process_loaded_world_book_context
+    from tldw_Server_API.app.core.Character_Chat.world_book_manager import (
+        WorldBookEntry,
+        process_loaded_world_book_context,
+    )
 
     recent_text = build_recent_world_book_scan_text(messages)
     if not recent_text.strip():

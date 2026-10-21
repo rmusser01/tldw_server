@@ -1,5 +1,5 @@
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
-import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes"
+import type { NativeHistoryEditResend, NativeHistoryRegenerate, HistoryEditAndSendBoundary, HistoryRegenerateBoundary } from "@/types/chat-modes"
 import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./native-character-preflight"
 import { captureChatDraftSource } from "./chat-draft-transition"
 import { bindActorSceneAfterLoad, captureActorSceneSend, type ActorSceneSend } from "./actor-scene-source"
@@ -3518,6 +3518,8 @@ export const useChatActions = ({
     historyRetryAdmission,
     historyEditResend,
     historyRegenerate,
+    historyEditBoundary,
+    historyRegenerateBoundary,
     assertCurrent,
     historyRetryRecoveries
 ,
@@ -3564,6 +3566,8 @@ export const useChatActions = ({
     historyRetryAdmission?: HistoryAdmissionReferenceV1
     historyEditResend?: NativeHistoryEditResend
     historyRegenerate?: NativeHistoryRegenerate
+    historyEditBoundary?: HistoryEditAndSendBoundary
+    historyRegenerateBoundary?: HistoryRegenerateBoundary
     historyRetryRecoveries?: HistoryTurnRecoveryEntry[]
     historyRecoveryRetry?: boolean
     historyRecoveryRetryIsCurrent?: () => boolean
@@ -3826,6 +3830,14 @@ export const useChatActions = ({
       !isRegenerate && !isContinue && !compareModeActive && !turnUsesImageMode &&
       (turnResolvedSendMode === "plain" || turnResolvedSendMode === "overlay")
 
+    if ((historyEditBoundary || historyRegenerateBoundary) && (
+      historySelection?.getCurrent().owner?.kind !== "local" || temporaryChat ||
+      historyEditResend || historyRegenerate || isRegenerate ||
+      compareModeActive || isContinue || turnResolvedSendMode !== "plain" || replyActive ||
+      turnUsesImageMode || turnContextFiles.length || docs?.length || documentContext?.length ||
+      turnShouldUseRag || turnWebSearchEnabled || turnUploadedFiles.length ||
+      shouldConsumeSteering || turnDynamicUIRequest || turnUserMetadataExtra
+    )) return chatSubmitFailed("unsupported_history_action_context")
     let identityPreflightRefused = false
     try {
       if (
@@ -3833,6 +3845,7 @@ export const useChatActions = ({
         !greetingSeed &&
         !historyEditResend &&
         !historyRegenerate &&
+        !historyServerExistingInput &&
         !isRegenerate
       ) {
         const resumeSource = captureChatDraftSource(
@@ -4476,7 +4489,7 @@ export const useChatActions = ({
                 scope,
                 characterId: resolvedSelectedCharacter.id,
                 greetingSettings: chatSettings ?? undefined,
-                greetingIsCurrent: () => greetingSettingsKeyRef.current === greetingSettingsKey,
+                greetingIsCurrent: () => (!greetingIsCurrent || greetingIsCurrent()) && greetingSettingsKeyRef.current === greetingSettingsKey,
                 model: resolvedModel,
                 currentModel: getEffectiveSelectedModel(),
                 toolChoice: servicePromptChatModeParams.toolChoice,
@@ -4484,7 +4497,6 @@ export const useChatActions = ({
                 message,
                 image,
                 greetingSeed,
-                greetingIsCurrent,
                 historyEditResend,
                 setServerChatId,
                 setMessages,
@@ -4621,6 +4633,8 @@ export const useChatActions = ({
                     onResultFollow: consumeReplyTarget,
                     temporary: temporaryChat,
                     editResend: historyEditResend,
+                    editAndSend: historyEditBoundary,
+                    regenerate: historyRegenerateBoundary,
                     createServerChat:
                       resolvedSendMode === "plain" &&
                       !image &&

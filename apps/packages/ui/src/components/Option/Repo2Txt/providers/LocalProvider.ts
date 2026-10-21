@@ -185,7 +185,10 @@ export class LocalProvider extends BaseProvider {
         throw new Error(`Zip file entry not found: ${node.path}`)
       }
       const bytes = await new Promise<Uint8Array>((resolve, reject) => {
-        const stream = zipFile.internalStream("uint8array")
+        // JSZip implements entry streaming but omits it from JSZipObject's declaration.
+        const stream = (zipFile as JSZip.JSZipObject & {
+          internalStream(type: "uint8array"): JSZip.JSZipStreamHelper<Uint8Array>
+        }).internalStream("uint8array")
         const chunks: Uint8Array[] = []
         let size = 0
         const abort = () => {

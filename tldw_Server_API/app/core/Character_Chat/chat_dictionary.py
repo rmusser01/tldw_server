@@ -508,7 +508,7 @@ def process_dictionary_entries(
         raise InputError(f"Input text exceeds maximum length ({len(text)} > {MAX_CHAT_DICTIONARY_TEXT_LENGTH})")
     stats = {
         "replacements": 0, "iterations": 0, "entries_used": [],
-        "token_budget_exceeded": False, "token_budget_used": token_budget,
+        "token_budget_exceeded": False, "token_budget_used": token_budget,  # nosec B105 - Token-budget status flags contain no credentials.
     }
     if not entries:
         return text, stats

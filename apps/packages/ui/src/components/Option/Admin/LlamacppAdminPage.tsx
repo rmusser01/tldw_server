@@ -871,7 +871,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         setRegisteringPath(false)
       }
     },
-    [loadInventory, markAdminGuardFromError]
+    [loadInventory, markAdminMutationGuardFromError, request]
   )
 
   const handleRegisterAssetPath = React.useCallback(
@@ -897,7 +897,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         setRegisteringAssetPath(false)
       }
     },
-    [loadAssets, loadInventory]
+    [loadAssets, loadInventory, request]
   )
 
   const handlePreviewAssetFolder = React.useCallback(
@@ -921,7 +921,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         setPreviewingAssetFolder(false)
       }
     },
-    []
+    [request]
   )
 
   const handleImportAssetFolder = React.useCallback(
@@ -945,7 +945,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         setImportingAssetFolder(false)
       }
     },
-    [loadAssets]
+    [loadAssets, request]
   )
 
   const handleStartAssetDownload = React.useCallback(
@@ -968,7 +968,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         setStartingAssetDownload(false)
       }
     },
-    [loadAssetDownloads]
+    [loadAssetDownloads, request]
   )
 
   const handleCancelAssetDownload = React.useCallback(
@@ -991,7 +991,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         setCancelingAssetDownloadId(null)
       }
     },
-    [loadAssetDownloads]
+    [loadAssetDownloads, request]
   )
 
   const handleClearImportPreview = React.useCallback(() => {
@@ -1016,7 +1016,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         setProfileActionId(null)
       }
     },
-    [loadRuntimePlane, markAdminGuardFromError]
+    [loadRuntimePlane, markAdminMutationGuardFromError, request]
   )
 
   const handleUpdateProfile = React.useCallback(
@@ -1040,7 +1040,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         setProfileActionId(null)
       }
     },
-    [loadRuntimePlane, markAdminGuardFromError]
+    [loadRuntimePlane, markAdminMutationGuardFromError, request]
   )
 
   const handleDeleteProfile = React.useCallback(
@@ -1061,7 +1061,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         setProfileActionId(null)
       }
     },
-    [loadRuntimePlane, markAdminGuardFromError]
+    [loadRuntimePlane, markAdminMutationGuardFromError, request]
   )
 
   const handleStart = React.useCallback(async () => {
@@ -1081,12 +1081,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
     } finally {
       setActionLoading(false)
     }
-  }, [
-    selectedModelId,
-    markAdminGuardFromError,
-    loadStatus,
-    loadRuntimePlane
-  ])
+  }, [selectedModelId, request, loadStatus, loadRuntimePlane, markAdminMutationGuardFromError])
 
   const handleStartWithDefaults = React.useCallback(async () => {
     if (!selectedModelId) return
@@ -1104,12 +1099,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
     } finally {
       setActionLoading(false)
     }
-  }, [
-    selectedModelId,
-    markAdminGuardFromError,
-    loadStatus,
-    loadRuntimePlane
-  ])
+  }, [selectedModelId, request, loadStatus, loadRuntimePlane, markAdminMutationGuardFromError])
 
   const handleStop = React.useCallback(async () => {
     try {
@@ -1125,7 +1115,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
     } finally {
       setActionLoading(false)
     }
-  }, [markAdminGuardFromError, loadStatus, loadRuntimePlane])
+  }, [request, loadStatus, loadRuntimePlane, markAdminMutationGuardFromError])
 
   const handleUseInChat = React.useCallback(async () => {
     try {
@@ -1148,7 +1138,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
     } finally {
       setChatActionLoading(false)
     }
-  }, [markAdminGuardFromError])
+  }, [markAdminMutationGuardFromError, request])
 
   const runRuntimeAction = React.useCallback(
     async (
@@ -1168,7 +1158,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         setRuntimeActionProfileId(null)
       }
     },
-    [loadRuntimePlane, loadStatus, markAdminGuardFromError]
+    [loadRuntimePlane, loadStatus, markAdminMutationGuardFromError]
   )
 
   const handleStartProfile = React.useCallback(
@@ -1179,7 +1169,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         "Failed to start Llama.cpp runtime profile."
       )
     },
-    [runRuntimeAction]
+    [request, runRuntimeAction]
   )
 
   const handleStopProfile = React.useCallback(
@@ -1190,7 +1180,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         "Failed to stop Llama.cpp runtime profile."
       )
     },
-    [runRuntimeAction]
+    [request, runRuntimeAction]
   )
 
   const handlePauseProfile = React.useCallback(
@@ -1201,7 +1191,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         "Failed to pause Llama.cpp runtime profile."
       )
     },
-    [runRuntimeAction]
+    [request, runRuntimeAction]
   )
 
   const handleResumeProfile = React.useCallback(
@@ -1212,7 +1202,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         "Failed to resume Llama.cpp runtime profile."
       )
     },
-    [runRuntimeAction]
+    [request, runRuntimeAction]
   )
 
   const handleUseProfileInChat = React.useCallback(
@@ -1241,7 +1231,7 @@ const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwCo
         setRuntimeActionProfileId(null)
       }
     },
-    [markAdminGuardFromError]
+    [markAdminMutationGuardFromError, request]
   )
 
   const handleRuntimeUseInChat = React.useCallback(

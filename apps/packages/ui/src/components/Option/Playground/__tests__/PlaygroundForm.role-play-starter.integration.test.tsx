@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
-import { HistorySelectionProvider } from "@/hooks/chat/useHistorySelection"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { ConfigProvider } from "antd"
@@ -167,7 +166,6 @@ vi.mock("@/services/service-prompts", async importOriginal => ({
   ...await importOriginal<typeof import("@/services/service-prompts")>(),
   loadServicePromptSnapshot: nativeSetupFixture.snapshot
 }))
-const ownerGuardFixture = vi.hoisted(() => ({ capture: null as null | (() => () => boolean) }))
 const savedSetupFixture = vi.hoisted(() => ({ raw: "[]" }))
 const startupPreviewFixture = vi.hoisted(() => ({
   apply: null as null | (() => Promise<unknown>),
@@ -681,8 +679,6 @@ vi.mock("antd", async (original) => {
   return {
     ConfigProvider: actual.ConfigProvider,
     Button: ButtonComponent,
-    Drawer: ({ open, title, children, footer }: { open?: boolean; title?: React.ReactNode; children?: React.ReactNode; footer?: React.ReactNode }) => open ? <section role="dialog" aria-label={String(title)}>{children}{footer}</section> : null,
-    Skeleton: () => <span>Loading scene</span>,
     Checkbox: ({
       children,
       checked,
@@ -1131,7 +1127,7 @@ vi.mock("@/hooks/useDraftPersistence", async original => {
   const actual = await original<typeof import("@/hooks/useDraftPersistence")>()
   return { ...actual, useDraftPersistence: (...args: Parameters<typeof actual.useDraftPersistence>) => nativeSetupFixture.realDrafts
     ? actual.useDraftPersistence(...args)
-    : { draftSaved: false, draftReady: true, retainDraft: nativeSetupFixture.retain } }
+    : { draftSaved: false, draftReady: true, retainDraft: nativeSetupFixture.retain, flushDraft: vi.fn() } }
 })
 
 vi.mock("@/hooks/useSelectedCharacter", () => ({
@@ -7344,6 +7340,12 @@ describe("PlaygroundForm role-play starter", () => {
   })
 
   it.each(["principal", "authority", "equivalent"] as const)("fences the actual Drawer scene continuation at the %s boundary", async (boundary) => {
+    const f = prepareQualifiedSceneSource("fresh")
+    Object.assign(f.source, { serverChatAssistantKind: null, serverChatAssistantId: null, serverChatCharacterId: null })
+    sceneBucket.records.set(`actorSettings:owned:${f.target.key}`, {
+      value: { ...createDefaultActorSettings(), isEnabled: true, notes: "Prior account scene" },
+      updatedAt: 1730000000000
+    })
     nativeSetupFixture.realDrawer = true
     let finishScene!: () => void
     const pending = new Promise<boolean>(resolve => { finishScene = () => resolve(true) })
@@ -7353,9 +7355,12 @@ describe("PlaygroundForm role-play starter", () => {
     try {
       await user.click(screen.getByRole("button", { name: "Open role-play setup" }))
       const drawer = await screen.findByRole("dialog", { name: "Role-play setup" })
+      await waitFor(() => expect(within(drawer).getByRole("textbox", { name: "Scene notes" })).toHaveValue("Prior account scene"))
+      await user.clear(within(drawer).getByRole("textbox", { name: "Scene notes" }))
+      await user.type(within(drawer).getByRole("textbox", { name: "Scene notes" }), "Original account scene")
       await waitFor(() => expect(within(drawer).getByRole("button", { name: "Apply" })).not.toBeDisabled())
       await user.click(within(drawer).getByRole("button", { name: "Apply" }))
-      await waitFor(() => expect(saveActorSettingsMock).toHaveBeenCalledTimes(1))
+      await waitFor(() => expect(saveActorSettingsMock.mock.calls, JSON.stringify({ errors: nativeSetupFixture.error.mock.calls, text: drawer.textContent })).toHaveLength(1))
       const successor = { ...createDefaultActorSettings(), notes: "Successor account scene" }
       act(() => {
         useActorStore.setState({ settings: successor, preview: "Successor account preview", tokenCount: 77 })
@@ -7466,9 +7471,12 @@ describe("PlaygroundForm role-play starter", () => {
     const user = userEvent.setup()
     const onAction = vi.fn()
     onSubmitMock.mockResolvedValueOnce({ status: "submitted" } as never)
+    const { source } = prepareNativeSource()
+    source.selectedModel = "deepseek-chat"
+    Object.assign(source, { serverChatAssistantKind: null, serverChatAssistantId: null, serverChatCharacterId: null })
     selectedCharacterState.value = { id: "ada", name: "Ada Lovelace" }
     const blocker = { active: true, title: "Wait for the selected character. Your draft is retained.", actionLabel: phase === "loading" ? "Loading character" : "Retry character", disabled: phase === "loading", onAction }
-    const form = (blocked: typeof blocker | null) => <HistorySelectionProvider><PlaygroundForm droppedFiles={[]} characterChatSendBlocker={blocked} /></HistorySelectionProvider>
+    const form = (blocked: typeof blocker | null) => <PlaygroundForm droppedFiles={[]} characterChatSendBlocker={blocked} />
     const { rerender } = render(form(blocker))
     const composer = screen.getByTestId("composer-textarea")
     await user.type(composer, "Keep this B02 question.")
@@ -7485,8 +7493,14 @@ describe("PlaygroundForm role-play starter", () => {
     rerender(form(null))
     expect(onSubmitMock).not.toHaveBeenCalled()
     expect(composer).toHaveValue("Keep this B02 question.")
-    fireEvent.submit(composer.closest("form")!)
-    await waitFor(() => expect(onSubmitMock).toHaveBeenCalledTimes(1))
+    const send = within(screen.getByTestId("composer-inline-send-control")).getByRole("button", { name: "Send message", exact: true }) as HTMLButtonElement
+    const recoveredForm = (screen.getByTestId("composer-textarea") as HTMLTextAreaElement).form!
+    expect(send).toBeEnabled()
+    expect(send.type).toBe("submit")
+    expect(send.form).toBe(recoveredForm)
+    expect(recoveredForm.checkValidity()).toBe(true)
+    await user.click(send)
+    await waitFor(() => expect(onSubmitMock.mock.calls, JSON.stringify({ errors: nativeSetupFixture.error.mock.calls })).toHaveLength(1))
   })
 
   it("turns blocked character chat composer SEND into setup without dropping the draft", async () => {

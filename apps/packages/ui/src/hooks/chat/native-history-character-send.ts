@@ -31,6 +31,7 @@ import { captureActorSceneSend, captureBoundActorSceneTarget, bindActorSceneAfte
 import type { ServicePromptRequestScope } from "@/services/tldw/domains/service-prompts"
 import { loadServicePromptSnapshot } from "@/services/service-prompts"
 import { tldwModels } from "@/services/tldw/TldwModels"
+import { isAutoModelId, parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
 import {
   assertHistoryConversationTarget,
   captureHistorySnapshot,
@@ -58,11 +59,6 @@ import { extractStreamTransportInterruption } from "@/utils/extract-token-from-c
 import { consumeStreamingChunk } from "@/utils/streaming-chunks"
 
 import type { ChatSettingsRecord } from "@/types/chat-session-settings"
-import {
-  buildGreetingOptionsFromEntries,
-  collectGreetingEntries,
-  resolveGreetingSelection
-} from "@/utils/character-greetings"
 
 export type NativeHistoryExistingInput = { id: string; revision: string; isCurrent: () => boolean }
 
@@ -72,7 +68,6 @@ export type NativeHistoryCharacterSendParams = {
     ChatSettingsRecord,
     "greetingEnabled" | "greetingSelectionId" | "greetingsChecksum" | "useCharacterDefault"
   >
-  greetingIsCurrent?: () => boolean
   controller: HistorySelectionController
   /** An independent popup owns its draft and never binds the full composer. */
   privateDraft?: { handle: ChatDraftHandle; requestScope: ServicePromptRequestScope; isCurrent: () => boolean }
@@ -235,14 +230,35 @@ export const sendNativeHistoryCharacter = async (
   const actorSceneSend = params.actorSceneSend ?? await sceneCapture?.read()
   if (!actorSceneSend) throw new Error("actor_settings_unavailable")
   if (!actorSceneSend.isCurrent()) throw new Error("actor_settings_scope_changed")
-  const { model, provider, settings } = validateNativeCharacterConfiguration({
+  const configuration = {
     ...params,
     image: regenerate ? "" : params.image,
     settings: capturedSettings,
     temporary: params.temporary || params.historyId === "temp",
     clientToolCount: toolsState.tools.length,
     actorEnabled: actorSceneSend.scene.settings.isEnabled
-  })
+  }
+  let resolved: ReturnType<typeof validateNativeCharacterConfiguration>
+  try {
+    resolved = validateNativeCharacterConfiguration(configuration)
+  } catch (error) {
+    if (!(error instanceof Error) || error.message !== "native_history_explicit_model_provider_required") throw error
+    const model = parseProviderQualifiedModelSelection(params.model).modelId.replace(/^tldw:/, "").trim()
+    if (!model || isAutoModelId(model)) throw error
+    const catalog = await tldwModels.getModels(true, { requireFresh: true })
+    signal.throwIfAborted()
+    if (!params.originIsCurrent() || !actorSceneSend.isCurrent() || !draftIsCurrent() ||
+        useStoreChatModelSettings.getState() !== settingsState || useMcpToolsStore.getState() !== toolsState)
+      throw new Error("stale_selection")
+    const providers = new Set(catalog.filter(entry => entry.id === model).map(entry => {
+      const binding = parseProviderQualifiedModelSelection(`${entry.provider}:${model}`)
+      return binding.modelId === model ? binding.provider : undefined
+    }))
+    const provider = providers.size === 1 ? providers.values().next().value : undefined
+    if (!provider) throw error
+    resolved = validateNativeCharacterConfiguration({ ...configuration, settings: { ...capturedSettings, apiProvider: provider } })
+  }
+  const { model, provider, settings } = resolved
   if (!params.originIsCurrent()) throw new Error("stale_selection")
   if (initialOwner?.kind === "local")
     throw new Error("native_history_requires_server_owner")
@@ -251,6 +267,7 @@ export const sendNativeHistoryCharacter = async (
     signal,
     requestScope: actorSceneSend.requestScope
   })
+  const freshChat = !params.serverChatId && !params.historyId
   let greetingCommitted = false
   const authValid = () => !snapshot.scopeInvalidatedSignal.aborted
   if (!actorSceneSend.isCurrent() || chatDraftOwnerKey(actorSceneSend.requestScope) !== chatDraftOwnerKey(snapshot.requestScope) ||
@@ -514,7 +531,7 @@ export const sendNativeHistoryCharacter = async (
       originOwner.validate_lease()
     if (!preparingIsCurrent()) throw new Error("stale_selection")
     if (
-      !explicitAction &&
+      !explicitAction && !existing &&
       (isSavedRoleplayConversation(controller) ||
         privateHandle ||
         (creationHandle && owner.scope?.type !== "workspace"))

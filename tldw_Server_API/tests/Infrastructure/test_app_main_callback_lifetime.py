@@ -49,18 +49,18 @@ def test_registered_main_callbacks_release_the_retired_app(
         # These assertions guard cache admission for this causal regression,
         # rather than claim a general public FastAPI API contract.
         for endpoint in endpoints:
-            assert models._is_coroutine_callable(endpoint) is True
-            assert models._is_gen_callable(endpoint) is False
-            assert models._is_async_gen_callable(endpoint) is False
+            assert models._is_coroutine_callable(endpoint) is True  # nosec B101 - Pytest callback-lifetime/cache regression assertion.
+            assert models._is_gen_callable(endpoint) is False  # nosec B101 - Pytest callback-lifetime/cache regression assertion.
+            assert models._is_async_gen_callable(endpoint) is False  # nosec B101 - Pytest callback-lifetime/cache regression assertion.
     # A later real reload replaces process-global logging hooks. This app is
     # retired from both the import namespace and the active logger configuration.
     with app_main_isolated():
         replacement = reload_app_main()
-        assert replacement is not original
-        assert replacement is not baseline
+        assert replacement is not original  # nosec B101 - Pytest callback-lifetime/cache regression assertion.
+        assert replacement is not baseline  # nosec B101 - Pytest callback-lifetime/cache regression assertion.
     del retired
     gc.collect()
-    assert app_ref() is None, "registered control-plane callbacks retained the retired app"
+    assert app_ref() is None, "registered control-plane callbacks retained the retired app"  # nosec B101 - Pytest callback-lifetime/cache regression assertion.
 
 
 @pytest.mark.unit
@@ -74,4 +74,4 @@ async def test_api_metrics_preserves_its_existing_call_counter() -> None:
     name = "tldw_Server_API.app.main.api_metrics_calls_total"
     before = registry.get_metric_stats(name).get("sum", 0)
     await api_metrics()
-    assert registry.get_metric_stats(name).get("sum", 0) == before + 1
+    assert registry.get_metric_stats(name).get("sum", 0) == before + 1  # nosec B101 - Pytest callback-lifetime/cache regression assertion.

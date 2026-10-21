@@ -1,6 +1,5 @@
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
-import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
 import { captureActorSceneSend, type ActorSceneSend } from "@/hooks/chat/actor-scene-source"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
@@ -216,7 +215,6 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
   draftReadyRef.current = draftReady
   const sourceDraftRevision = useStoreMessageOption(state => state.chatDraftRevision)
 
-  const historySelection = useHistorySelectionContext()
 
   const submitFormRef = React.useRef<
     (options?: { ignorePinnedResults?: boolean }) => void

@@ -331,11 +331,11 @@ const ServerAdminWorkspace: React.FC<{ config: TldwConfig }> = ({ config }) => {
     void loadUsers(1, usersPageSize, role, active)
   }
 
-  const handleToggleUserActive = (user: AdminUserSummary, nextActive: boolean) => {
+  const handleToggleUserActive = React.useCallback((user: AdminUserSummary, nextActive: boolean) => {
     if (!config || updatingUserId !== null || nextActive === user.is_active) return
     setUserChangeError(null)
     setUserChange({ user, patch: { is_active: nextActive } })
-  }
+  }, [config, updatingUserId])
 
   const closeUserChange = () => {
     if (userChangeSubmitting.current) return
@@ -414,11 +414,11 @@ const ServerAdminWorkspace: React.FC<{ config: TldwConfig }> = ({ config }) => {
     [message, t]
   )
 
-  const handleChangeUserRole = (user: AdminUserSummary, role: string) => {
+  const handleChangeUserRole = React.useCallback((user: AdminUserSummary, role: string) => {
     if (!config || updatingUserId !== null || role === user.role || (role !== "user" && role !== "admin")) return
     setUserChangeError(null)
     setUserChange({ user, patch: { role } })
-  }
+  }, [config, updatingUserId])
 
   const handleCreateRole = async () => {
     try {
@@ -455,10 +455,10 @@ const ServerAdminWorkspace: React.FC<{ config: TldwConfig }> = ({ config }) => {
     [loadRoles]
   )
 
-  const userRoleOptions = [
+  const userRoleOptions = React.useMemo(() => [
     { label: "user", value: "user" },
     { label: "admin", value: "admin" }
-  ]
+  ], [])
 
   // Memoized table columns/options: rebuilding these arrays on every page
   // render re-rendered the (paged) users and roles tables even when nothing
@@ -550,14 +550,7 @@ const ServerAdminWorkspace: React.FC<{ config: TldwConfig }> = ({ config }) => {
       )
     }
     ],
-    [
-      t,
-      userRoleOptions,
-      updatingUserId,
-      handleChangeUserRole,
-      handleToggleUserActive,
-      handleResetUserPassword
-    ]
+    [t, updatingUserId, userRoleOptions, config, handleChangeUserRole, handleToggleUserActive, handleResetUserPassword]
   )
 
   const rolesColumns = React.useMemo(

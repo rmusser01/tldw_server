@@ -535,6 +535,7 @@ const h1 = vi.hoisted(() => ({
   wire: vi.fn(),
   recover: vi.fn(),
   dismiss: vi.fn(),
+  lookupRecoveries: vi.fn(),
   beforeModel: vi.fn(),
   read: vi.fn(),
   write: vi.fn()
@@ -543,11 +544,15 @@ vi.mock("@/hooks/chat/useHistorySelection", async (original) => ({
   ...(await original<any>()),
   useHistorySelectionContext: () => h1.controller
 }))
-vi.mock("@/db/dexie/history-selection", async (original) => ({
-  ...(await original<any>()),
-  saveHistoryTurnRecovery: h1.recover,
-  dismissHistoryTurnRecovery: h1.dismiss
-}))
+vi.mock("@/db/dexie/history-selection", async (original) => {
+  const actual = await original<any>()
+  return {
+    ...actual,
+    loadHistoryTurnRecoveries: (...args: unknown[]) => h1.lookupRecoveries(...args) ?? actual.loadHistoryTurnRecoveries(...args),
+    saveHistoryTurnRecovery: h1.recover,
+    dismissHistoryTurnRecovery: h1.dismiss
+  }
+})
 let nativeChatId = "tracked-chat-1"
 const createdNativeChat = (body: { id?: string; character_id?: number | string }) => {
   if (!body.id) throw new Error("fixture requires the reserved client chat ID")
@@ -729,6 +734,7 @@ beforeEach(async () => {
   vi.clearAllMocks()
   h1.recover.mockReset()
   h1.dismiss.mockReset()
+  h1.lookupRecoveries.mockReset()
   const { memory } = await import("@/hooks/chat/__tests__/local-history-fixture")
   memory.historySelections.rows.clear()
   await memory.userSettings.put({ id: "main", history_profile_id: "profile" })
@@ -1092,7 +1098,7 @@ it.each(["current", "model", "tool", "settings"])(
 it.each(["unchanged", "Prompt edit", "Prompt whitespace"])("mounted Sidepanel accepted unanswered recovery binds reviewed Pirate instructions (%s)", async contextCase => {
   const helpers = await import("@/db/dexie/helpers")
   const promptImplementation = vi.mocked(helpers.getPromptById).getMockImplementation()!
-  const recoveryImplementation = h1.loadRecoveries.getMockImplementation()!
+  const recoveryImplementation = h1.lookupRecoveries.getMockImplementation()!
   try {
   vi.mocked(helpers.getPromptById).mockResolvedValue({ id: "pirate", system_prompt: contextCase === "Prompt whitespace" ? "  Answer like a pirate.\n " : "Answer like a pirate." } as never)
   mocks.chatBaseState.selectedSystemPrompt = "pirate"
@@ -1128,9 +1134,10 @@ it.each(["unchanged", "Prompt edit", "Prompt whitespace"])("mounted Sidepanel ac
     created_at: 1, input_text: "old question", input_images: [], result_text: "", state: "accepted_unsent",
     admission: { version: 1, owner_key: "native-key", conversation_id: "tracked-chat-1", input_message_id: "u-old", input_message_revision: "r1", selection_digest: "accepted-selection" }
   } } as HistoryTurnRecoveryEntry
-  h1.loadRecoveries.mockResolvedValue([entry])
+  h1.lookupRecoveries.mockResolvedValue([entry])
   const { result } = renderHook(() => useMessage())
   render(<HistorySelectionReview selection={{ ...h1.controller, ...current, recoveries: [entry] }} getRetryContext={result.current.getRecoveryRetryContext} onRetryRecovery={result.current.retryRecoveredHistoryTurn} />)
+  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
   fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
   expect(await screen.findByText("Answer like a pirate.")).toBeVisible()
   expect(h1.wire).not.toHaveBeenCalled()
@@ -1152,12 +1159,12 @@ it.each(["unchanged", "Prompt edit", "Prompt whitespace"])("mounted Sidepanel ac
   expect(h1.dismiss).toHaveBeenCalledWith(entry.scope, expect.objectContaining({ conversation_id: "tracked-chat-1" }), "failed-normal", "completed")
   } finally {
     vi.mocked(helpers.getPromptById).mockImplementation(promptImplementation)
-    h1.loadRecoveries.mockImplementation(recoveryImplementation)
+    h1.lookupRecoveries.mockImplementation(recoveryImplementation)
   }
 })
 
 it.each(["", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAE/wH+J6m3XQAAAABJRU5ErkJggg=="])(
-  "sidepanel Regenerate forwards the selected question with original image %s without a second user write",
+  "sidepanel Regenerate preserves the selected question and original image %s through protected completion",
   async questionImage => {
   const original = [
     { id: "u-old", isBot: false, name: "You", message: "old question", images: questionImage ? [questionImage] : [], sources: [], parentMessageId: null },
@@ -1175,27 +1182,34 @@ it.each(["", "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ
     ...(request.required_capability === "tldw_history_existing_input_v1"
       ? { acknowledged_capability: "tldw_history_existing_input_v1" } : {})
   }))
+  h1.read.mockResolvedValue({ id: "u-old", conversation_id: nativeChatId, sender: "user", parent_message_id: null,
+    content: "old question", has_image: Boolean(questionImage), version: 1 })
+  const origin = h1.controller.getCurrent().view
+  h1.wire.mockImplementation(async function* () {
+    yield { tldw_history_admission_v1: { version: 1, owner_key: origin.owner_key, conversation_id: nativeChatId,
+      input_message_id: "u-old", input_message_revision: "1", selection_digest: "original-input",
+      originating_selection_revision: 0, messages: [] } }
+    yield { choices: [{ delta: { content: "Alternative answer" } }] }
+    yield { tldw_message_id: "alternative-answer", tldw_conversation_id: nativeChatId }
+  })
   const { result } = renderHook(() => useMessage())
   await act(async () => { await result.current.regenerateLastMessage() })
   expect(h1.capture).toHaveBeenCalledWith("tracked-chat-1", expect.objectContaining({
-    required_capability: "tldw_history_existing_input_v1",
-    view: expect.objectContaining({ cursor: { kind: "after_message", message_id: "u-old" } })
-  }), expect.any(Object))
+    view: expect.objectContaining({ cursor: { kind: "after_message", message_id: "a1" } })
+  }), expect.objectContaining({ includeNativeCompletion: true }))
   const providerRows = h1.wire.mock.calls[0][0].messages.filter((row: { role: string }) => row.role !== "system")
   expect(providerRows).toEqual(questionImage
     ? [{ role: "user", content: [
         { type: "text", text: "old question" },
-        { type: "image_url", image_url: { url: questionImage } }
+        { type: "image_url", image_url: { url: questionImage, detail: "auto" } }
       ] }]
     : [{ role: "user", content: "old question" }])
-  expect(h1.append.mock.calls.map(([, body]: [unknown, { role: string }]) => body.role))
-    .toEqual(["assistant"])
-  expect(h1.append.mock.calls[0][1]).toMatchObject({
-    parent_message_id: "u-old",
-    tldw_history_existing_input_v1: expect.objectContaining({
-      cursor: { kind: "after_message", message_id: "u-old" }
-    })
-  })
+  expect(h1.append).not.toHaveBeenCalled()
+  expect(h1.wire).toHaveBeenCalledOnce()
+  expect(h1.wire.mock.calls[0][0]).toMatchObject({ save_to_db: true, tldw_history_branch: true,
+    metadata: { tldw_regenerate_from_message_id: "a1" },
+    tldw_history_selection_v1: { messages: [{ id: "u-old", revision: "r1" }, { id: "a1", revision: "r2" }] } })
+  expect(h1.controller.followResult).toHaveBeenCalledWith(expect.objectContaining({ view_session_id: "origin" }), "alternative-answer", expect.any(Function))
   expect(mocks.setMessages.mock.calls.every(([rows]) =>
     !Array.isArray(rows) || original.every((row, index) => rows[index] === row)
   )).toBe(true)
@@ -3302,7 +3316,9 @@ describe("compact submission outcomes", () => {
       input_text: "next",
       state: "accepted_unsent"
     })
-    expect(h1.controller.followResult).not.toHaveBeenCalled()
+    expect(h1.controller.followResult).toHaveBeenCalledOnce()
+    expect(h1.controller.followResult).toHaveBeenCalledWith(expect.any(Object), h1.append.mock.calls[0][1].id)
+    expect(h1.append).toHaveBeenCalledOnce()
   })
 
   it.each([false, true])(
@@ -5748,9 +5764,11 @@ it.each(["character", "ordinary"])("B02 sidepanel saved-question dispatch is exp
     yield {tldw_message_id: "existing-answer", tldw_conversation_id: "tracked-chat-1"}
   })
   const {result} = renderHook(() => useMessage())
-  await act(async () => { await result.current.onSubmit({message: "old question", image: "",
+  let outcome: unknown
+  await act(async () => { outcome = await result.current.onSubmit({message: "old question", image: "",
     historyServerExistingInput: {id: "u-old", revision: "r1", isCurrent: () => true}} as any) })
   if (mode === "character") {
+    expect(outcome).toEqual({ status: "submitted" })
     expect(h1.wire).toHaveBeenCalledOnce()
     expect(h1.wire.mock.calls[0][0].messages).toEqual([])
     expect(h1.wire.mock.calls[0][0].tldw_history_server_existing_input_v1.messages).toEqual([{id: "u-old", revision: "r1"}])

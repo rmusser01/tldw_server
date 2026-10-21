@@ -345,6 +345,7 @@ it("accepted unanswered user recovery reviews reapplied prompt before retrying i
     getRetryContext: async () => context
   }} />)
   expect(screen.queryByRole("button", { name: "Retry saved question" })).toBeNull()
+  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
   fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
   expect(await screen.findByText(/Review or reapply the original System\/Prompt settings/)).toBeVisible()
   expect(screen.getByText("qwen")).toBeVisible()
@@ -361,6 +362,7 @@ it("an old no-prompt recovery requires explicit current-context confirmation and
   const context = { model: "qwen", systemPrompts: [], isCurrent: () => true }
   const retry = vi.fn(async () => ({ status: "failed" as const, errorMessage: "retry_context_changed" }))
   render(<HistorySelectionReview selection={selection} getRetryContext={async () => context} onRetryRecovery={retry} />)
+  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
   fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
   expect(await screen.findByText("No System/Prompt instruction is currently applied.")).toBeVisible()
   expect(retry).not.toHaveBeenCalled()
@@ -376,6 +378,7 @@ it.each(["server", "partial", "missing-admission"])("does not offer manual Retry
   else if (refusal === "partial") selection.recoveries[0].turn.result_text = "retained output"
   else selection.recoveries[0].turn.admission = undefined
   render(<HistorySelectionReview selection={selection} getRetryContext={async () => ({ model: "qwen", systemPrompts: [], isCurrent: () => true })} onRetryRecovery={vi.fn()} />)
+  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
   expect(screen.queryByRole("button", { name: "Review retry" })).toBeNull()
   expect(screen.getByRole("button", { name: "Copy recovered text" })).toBeVisible()
 })
@@ -1933,6 +1936,7 @@ it.each(["history_retry_input_changed", "request_config_scope_changed", "provide
   const context = { model: "qwen", systemPrompts: [], isCurrent: () => true }
   const retry = vi.fn(async () => ({ status: "failed" as const, errorMessage: reason }))
   render(<HistorySelectionReview selection={selection} getRetryContext={async () => context} onRetryRecovery={retry} />)
+  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
   fireEvent.click(screen.getByRole("button", { name: "Review retry" }))
   await screen.findByText("No System/Prompt instruction is currently applied.")
   fireEvent.click(screen.getByRole("button", { name: "Retry saved question" }))
@@ -1978,7 +1982,7 @@ it.each([false, true])("B02 reviews a saved question before explicit retry (stal
   let current = true
   const review = {id: "saved-user", revision: "r1", text: "My unanswered question", model: "llamacpp:qwen", isCurrent: () => current}
   const selected = {...controller(), status: "ready", owner: {kind: "native"}, settingsQualified: true,
-    capture: {rows: [{id: "saved-user", revision: "r1", role: "user"}], snapshot: {nodes: [{id: "saved-user", revision: "r1", role: "user"}]}},
+    capture: {status: "captured", rows: [{id: "saved-user", revision: "r1", role: "user"}], snapshot: {nodes: [{id: "saved-user", revision: "r1", role: "user"}]}},
     view: {cursor: {kind: "after_message", message_id: "saved-user"}}} as unknown as HistorySelectionController
   const retry = vi.fn(async () => ({status: "submitted" as const}))
   const getReview = vi.fn(async () => review)

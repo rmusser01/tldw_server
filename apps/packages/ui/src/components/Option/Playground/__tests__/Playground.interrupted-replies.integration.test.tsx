@@ -29,7 +29,6 @@ import {
   within,
   type PlaygroundView
 } from "./harness/playground-harness"
-import { act } from "@testing-library/react"
 import { getChatTurnSettlement } from "@/hooks/chat/abort-turn-cleanup"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { useConnectionStore } from "@/store/connection"
@@ -171,8 +170,10 @@ const retryInterruptedReply = async (view: PlaygroundView, server: ReturnType<ty
   const before = server.completionRequests().length
   const notice = await interruptionNotice("Interrupted")
   await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
+  let outcome: unknown
+  await act(async () => { outcome = await retryCompletion.current })
+  expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: "submitted" })
   await waitFor(() => expect(server.completionRequests()).toHaveLength(before + 1), HARNESS_WAIT)
-  await act(async () => { await retryCompletion.current })
   await waitForChatIdle()
 }
 
@@ -789,8 +790,15 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
         await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)
         await act(async () => { await retryCompletion.current })
         await waitForChatIdle()
-        // Completion and the existing recovery keep path each try the owner write.
-        expect(rejectedSettlements).toBe(2)
+        // A native owner may have committed despite a lost response: never replay an unknown write.
+        expect(rejectedSettlements).toBe(1)
+        const pending = (await getHarnessDb().historySelections.toArray())
+          .filter(row => row.conversation_id === "saved-chat")
+          .flatMap(row => Object.values<HistoryTurnRecovery>(row.pending_turns ?? {}))
+        expect(pending).toEqual(expect.arrayContaining([expect.objectContaining({
+          result_text: "Complete answer", state: "generated_unsaved"
+        })]))
+        expect(pending.find(turn => turn.result_text === "Complete answer")?.outcome).toBeUndefined()
         expect(await savedRecovery(operationId)).toMatchObject({ result_text: "Partial answer", outcome: "interrupted" })
         expect(serverRows(server, "saved-chat").map(row => row.content)).toEqual([
           "Saved question", "Saved answer", "Follow-up question"
@@ -801,7 +809,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
       }
     })
 
-    it("retires the original partial when recovery saves a reply after the first owner write fails", async () => {
+    it("retires the original partial after a deliberate second Retry acknowledges the owner write", async () => {
       const { server, view } = await openInterruptedSavedChat()
       const operationId = await partialRecoveryId()
       const serverFetch = server.fetch
@@ -822,6 +830,14 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
         const notice = await interruptionNotice("Interrupted")
         await view.user.click(within(notice).getByRole("button", { name: /retry/i }))
         await waitFor(() => expect(server.completionRequests()).toHaveLength(2), HARNESS_WAIT)
+        await act(async () => { await retryCompletion.current })
+        await waitForChatIdle()
+        expect(settlementAttempts).toBe(1)
+        expect(await savedRecovery(operationId)).toMatchObject({ result_text: "Partial answer", outcome: "interrupted" })
+        const retainedNotice = await interruptionNotice("Interrupted")
+        server.planCompletion({ reply: "Complete answer" })
+        await view.user.click(within(retainedNotice).getByRole("button", { name: /retry/i }))
+        await waitFor(() => expect(server.completionRequests()).toHaveLength(3), HARNESS_WAIT)
         await act(async () => { await retryCompletion.current })
         await waitForChatIdle()
         expect(settlementAttempts).toBe(2)
@@ -878,7 +894,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
           const selectedView = await savedView()
           let outcome: unknown
           await act(async () => { release.resolve(); outcome = await retryCompletion.current })
-          expect(outcome).toMatchObject({ status: "failed", errorMessage: "history_selection_changed" })
+          expect(outcome).toMatchObject({ status: "skipped", reason: "Retry source changed" })
           expect(selectionRequests()).toBe(before + (destination === "ABA" ? 2 : 1))
           expect(await savedView()).toEqual(selectedView)
           expect(recoveryDismissGate.calls).toBe(0)
@@ -909,7 +925,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
         })
         let outcome: unknown
         await act(async () => { release.resolve(); outcome = await retryCompletion.current })
-        expect(outcome).toMatchObject({ status: "failed", errorMessage: "history_selection_changed" })
+        expect(outcome).toMatchObject({ status: "skipped", reason: "Retry source changed" })
         expect(screen.queryByText("This chat changed before the reply could be retried. Send the question again.")).not.toBeInTheDocument()
         expect(recoveryDismissGate.calls).toBe(0)
         expect(server.completionRequests()).toHaveLength(1)
@@ -972,7 +988,7 @@ describe("Playground interrupted replies (#3104)", { timeout: 90_000 }, () => {
         const selectedView = await savedView()
         let outcome: unknown
         await act(async () => { release.resolve(); outcome = await retryCompletion.current })
-        expect(outcome).toMatchObject({ status: "failed", errorMessage: "history_selection_changed" })
+        expect(outcome).toMatchObject({ status: "skipped", reason: "Retry source changed" })
         expect(await savedView()).toEqual(selectedView)
         expect(screen.queryByText("invalid_history_retry")).not.toBeInTheDocument()
         expect(recoveryDismissGate.calls).toBe(0)

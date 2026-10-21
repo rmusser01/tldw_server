@@ -291,7 +291,7 @@ def test_external_llamacpp_cache_rechecks_credentials_endpoint_and_expiry(monkey
         assert probe.call_count == 4
         clock[0] += 31
         client.get("/api/v1/llm/providers")
-        assert probe.call_count == 6
+        assert probe.call_count == 6  # nosec B101 - Pytest provider-readiness regression assertion.
 
 
 def _provider(data: dict[str, object], name: str) -> dict[str, object]:

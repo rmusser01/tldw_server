@@ -1,4 +1,4 @@
-# ADR-068: Explicit PostgreSQL database recovery scope
+# ADR-079: Explicit PostgreSQL database recovery scope
 
 **Status:** Proposed
 **Date:** 2026-10-20

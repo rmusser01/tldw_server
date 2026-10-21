@@ -2353,7 +2353,6 @@ export const PlaygroundForm = ({
     handleSaveStartupTemplate,
     handleOpenStartupTemplatePreview,
     applyStartupTemplateBundle,
-    captureStartupTemplateGuard,
     handleDeleteStartupTemplate,
     handleTemplateSelect,
     promptSummaryLabel,
@@ -4356,7 +4355,6 @@ export const PlaygroundForm = ({
     [setMessages],
   );
 
-  const historySelection = useHistorySelectionContext();
   const { submitForm, submitFormRef, isPreparingDocuments } = usePlaygroundSubmit({
     historySelection,
     captureCompletionGuard,

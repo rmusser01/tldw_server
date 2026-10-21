@@ -163,7 +163,7 @@ const PermissionMatrixTab: React.FC<RbacProps> = ({ config, onGuardError }) => {
 
   // `permissions` must be derived before the loading early-return below so
   // filteredPermissions can be memoized without breaking the rules of hooks.
-  const permissions: Permission[] = matrix?.permissions ?? []
+  const permissions: Permission[] = React.useMemo(() => matrix?.permissions ?? [], [matrix?.permissions])
   // Recompute the category filter only when the matrix or the filter changes
   // (admin perf C-S3 / F16); the grid cells themselves are already O(1).
   const filteredPermissions = React.useMemo(
@@ -174,16 +174,18 @@ const PermissionMatrixTab: React.FC<RbacProps> = ({ config, onGuardError }) => {
     [permissions, selectedCategory]
   )
 
-  const roles = matrix?.roles ?? []
+  const roles = React.useMemo(() => matrix?.roles ?? [], [matrix?.roles])
   const grants = React.useMemo(() => new Set((matrix?.grants ?? []).map(grant => `${grant.role_id}:${grant.permission_id}`)), [matrix])
+  const matrixAction = useRef({ handleToggle, disabled: mutating || loading })
+  matrixAction.current = { handleToggle, disabled: mutating || loading }
   const roleColumns = React.useMemo(() => roles.map(role => ({
     title: role.name, key: `role-${role.id}`, width: 120, align: "center" as const,
     render: (_: any, record: Permission) => {
       const granted = grants.has(`${role.id}:${record.id}`)
-      return <Checkbox checked={granted} disabled={mutating || loading}
-        onChange={() => handleToggle(role.id, record.id, granted)} />
+      return <Checkbox checked={granted} disabled={matrixAction.current.disabled}
+        onChange={() => matrixAction.current.handleToggle(role.id, record.id, granted)} />
     }
-  })), [roles, grants, mutating, loading, handleToggle])
+  })), [roles, grants])
 
   if (!matrix) {
     if (matrixError && !loading) {
@@ -293,13 +295,13 @@ const RolesTab: React.FC<RbacProps> = ({ config, onGuardError }) => {
   const [createForm] = Form.useForm()
   const captureScope = useAdminRequestScope(config)
   const { runMutation, mutating } = useAdminMutation(captureScope, onGuardError)
-  const rolesRequest = useRef(0)
   const expandedRequest = useRef(new Map<number, number>())
   const [rolesError, setRolesError] = useState<string | null>(null)
   const [expandedErrors, setExpandedErrors] = useState<Record<number, string>>({})
   const [expandedPerms, setExpandedPerms] = useState<Record<number, any[]>>({})
 
-  const loadRoles = useCallback(async () => { await rolesQuery.refetch() }, [rolesQuery.refetch])
+  const { refetch: refetchRoles } = rolesQuery
+  const loadRoles = useCallback(async () => { await refetchRoles() }, [refetchRoles])
   useEffect(() => {
     setRolesError(null)
     if (rolesQuery.error) {
@@ -515,7 +517,6 @@ const UserPermissionWorkspace: React.FC<UserPermissionProps> = ({ config, onGuar
   const captureScope = useAdminRequestScope(config)
   const { runMutation, mutating } = useAdminMutation(captureScope, onGuardError)
   const dataRequest = useRef(0)
-  const metaRequest = useRef(0)
   const [unavailable, setUnavailable] = useState<string[]>([])
   const [metaUnavailable, setMetaUnavailable] = useState<string[]>([])
   const [metaLoading, setMetaLoading] = useState(true)
@@ -612,7 +613,9 @@ const UserPermissionWorkspace: React.FC<UserPermissionProps> = ({ config, onGuar
   // override table resolves names through the Map instead of scanning the
   // catalog with `.find` per row, and role options test membership in a Set
   // instead of `userRoles.some(...)` per option.
-  const loadMeta = useCallback(async () => { await Promise.all([rolesQuery.refetch(), permissionsQuery.refetch()]) }, [rolesQuery.refetch, permissionsQuery.refetch])
+  const { refetch: refetchRoles } = rolesQuery
+  const { refetch: refetchPermissions } = permissionsQuery
+  const loadMeta = useCallback(async () => { await Promise.all([refetchRoles(), refetchPermissions()]) }, [refetchRoles, refetchPermissions])
   useEffect(() => {
     const errors = [rolesQuery.error, permissionsQuery.error]
     errors.forEach(error => { if (error) onGuardError(error) })
@@ -950,7 +953,7 @@ const RbacEditorWorkspace = ({ config }: { config: TldwConfig }) => {
   const [guardError, setGuardError] = useState<string | null>(null)
   const guardRef = useRef(false)
 
-  const handleGuardError = useCallback((err: any) => {
+  const handleGuardError = useCallback((err: unknown) => {
     const guard = deriveAdminGuardFromError(err)
     if (guard && !guardRef.current) {
       guardRef.current = true

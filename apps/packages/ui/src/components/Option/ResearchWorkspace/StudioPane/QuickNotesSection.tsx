@@ -324,7 +324,6 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
 
   // Store actions
   const updateNoteTitle = useWorkspaceStore((s) => s.updateNoteTitle)
-  const updateNoteContent = useWorkspaceStore((s) => s.updateNoteContent)
   const updateNoteKeywords = useWorkspaceStore((s) => s.updateNoteKeywords)
   const setCurrentNote = useWorkspaceStore((s) => s.setCurrentNote)
   const clearCurrentNote = useWorkspaceStore((s) => s.clearCurrentNote)

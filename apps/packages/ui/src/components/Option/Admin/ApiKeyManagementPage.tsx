@@ -195,7 +195,8 @@ const ApiKeyManagementWorkspace = ({ config }: { config: TldwConfig }) => {
             loading={usersLoading}
             value={selectedUserId}
             onChange={(val) => setSelectedUserId(val)}
-            optionFilterProp="label"
+            onSearch={handleUserSearch}
+            filterOption={false}
             options={users.map((u: any) => ({
               value: u.id,
               label: `${u.username} (${u.email || t("settings:adminApiKeys.noEmail", "no email")})`
@@ -500,38 +501,6 @@ const UserApiKeys = ({
             </Space>
           </div>
         </Alert>
-      )}
-
-      {/* User selector */}
-      <Card size="small" style={{ marginBottom: 16 }}>
-        <Space>
-          <span>{t("settings:adminApiKeys.selectUser", "Select User:")}</span>
-          <Select
-            showSearch
-            placeholder={t("settings:adminApiKeys.searchUsers", "Search users...")}
-            style={{ width: 300 }}
-            loading={usersLoading}
-            value={selectedUserId}
-            onChange={(val) => setSelectedUserId(val)}
-            onSearch={handleUserSearch}
-            filterOption={false}
-            options={users.map((u: any) => ({
-              value: u.id,
-              label: `${u.username} (${u.email || t("settings:adminApiKeys.noEmail", "no email")})`,
-            }))}
-          />
-        </Space>
-      </Card>
-
-      {/* Pre-selection guidance (multi-user servers with several accounts) */}
-      {!selectedUserId && !usersLoading && !usersError && (
-        <Card size="small">
-          <p style={{ margin: 0, color: "var(--color-text-secondary, #888)" }}>
-            {users.length === 0
-              ? t("settings:adminApiKeys.noUsers", "No users were found on this server.")
-              : t("settings:adminApiKeys.selectUserHint", "Select a user above to view and manage their API keys.")}
-          </p>
-        </Card>
       )}
 
       {/* Keys table */}

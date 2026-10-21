@@ -770,9 +770,6 @@ export const chatRagMethods = {
     this: TldwApiClientCore,
     payload: Record<string, any>,
     options?: {
-      seedFirstMessage?: boolean
-      greetingStrategy?: "default" | "alternate_index"
-      alternateIndex?: number
       scope?: ChatScope
       signal?: AbortSignal
       requestScope?: ServicePromptRequestScope

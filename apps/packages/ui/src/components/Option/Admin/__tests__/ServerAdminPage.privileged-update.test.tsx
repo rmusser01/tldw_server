@@ -1,15 +1,30 @@
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query"
+import { createAdminQueryClient } from "../AdminQueryProvider"
 // @vitest-environment jsdom
 import React from "react"
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render as renderWithQueries, screen, waitFor, within } from "@testing-library/react"
 import { App, ConfigProvider } from "antd"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import ServerAdminPage from "../ServerAdminPage"
 import { adminMethods } from "@/services/tldw/domains/admin"
 
+
+const adminQueryClients: QueryClient[] = []
+const render = (ui: React.ReactElement) => {
+  const client = createAdminQueryClient()
+  adminQueryClients.push(client)
+  return renderWithQueries(ui, {
+    wrapper: ({ children }: React.PropsWithChildren) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  })
+}
+afterEach(() => adminQueryClients.splice(0).forEach(client => client.clear()))
+
 const mocks = vi.hoisted(() => ({
+  canonical: vi.fn(),
   getConfig: vi.fn(), getSystemStats: vi.fn(), listAdminUsers: vi.fn(),
   listAdminRoles: vi.fn(), getMediaIngestionBudgetDiagnostics: vi.fn(), request: vi.fn()
 }))
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({ useCanonicalConnectionConfig: mocks.canonical }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: mocks.request }))
 vi.mock("@/services/tldw/TldwApiClient", () => ({ tldwClient: {
   ...mocks,
@@ -38,6 +53,7 @@ const submit = (dialog: HTMLElement) => fireEvent.click(within(dialog).getByRole
 
 beforeEach(() => {
   vi.resetAllMocks()
+  mocks.canonical.mockReturnValue({ config: { serverUrl: "http://localhost:8000", authMode: "multi-user" }, authorityLoading: false })
   mocks.getConfig.mockResolvedValue({ serverUrl: "http://localhost:8000", authMode: "multi-user" })
   mocks.getSystemStats.mockResolvedValue({ users: {}, storage: {}, sessions: {} })
   mocks.listAdminUsers.mockResolvedValue(userPage())
@@ -144,6 +160,7 @@ describe("Admin privileged user updates", () => {
 
   it("supports single-user audit confirmation without inventing a password", async () => {
     mocks.getConfig.mockResolvedValue({ serverUrl: "http://localhost:8000", authMode: "single-user" })
+    mocks.canonical.mockReturnValue({ config: { serverUrl: "http://localhost:8000", authMode: "single-user" }, authorityLoading: false })
     render(<ConfigProvider theme={{ token: { motion: false } }}><App><ServerAdminPage /></App></ConfigProvider>)
     const dialog = await openActive()
     fill(dialog, reason, "")

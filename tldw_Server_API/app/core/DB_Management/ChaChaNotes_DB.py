@@ -108,9 +108,6 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (  #
     build_web_clipper_rls_sql,
     build_workspace_source_saved_view_rls_sql,
 )
-from tldw_Server_API.app.core.DB_Management.backends.postgres_sequences import (  # noqa: E402
-    advance_postgres_serial,
-)
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noqa: E402
     normalise_params,
     prepare_backend_many_statement,

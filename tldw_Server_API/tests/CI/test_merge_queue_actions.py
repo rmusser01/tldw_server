@@ -1836,16 +1836,16 @@ def test_no_scenario_dispatches_anything_but_the_license_and_the_kick(scenario):
 def test_only_a_leading_authenticated_queue_marker_consumes_an_attempt(author, prefix):
     marker = f"<!-- merge-queue:rebase-failed:{OLD} -->"
     gh = FakeGh([_node(1)], comments={1: [{"body": prefix + marker + "\nx", "author": author}]})
-    assert mq._marker(gh, 1, "rebase-failed", OLD) is None
-    assert mq.comment_once(gh, 1, "rebase-failed", OLD, "body", lambda m: None) is True
-    assert len([c for c in gh.calls if c[0] == "comment"]) == 1
+    assert mq._marker(gh, 1, "rebase-failed", OLD) is None  # nosec B101 - Pytest queue-authentication and departure regression assertion.
+    assert mq.comment_once(gh, 1, "rebase-failed", OLD, "body", lambda m: None) is True  # nosec B101 - Pytest queue-authentication and departure regression assertion.
+    assert len([c for c in gh.calls if c[0] == "comment"]) == 1  # nosec B101 - Pytest queue-authentication and departure regression assertion.
 
 
 def test_genuine_leading_graphql_bot_marker_deduplicates_and_retains_its_age():
     gh = FakeGh([_node(1)], comments={1: [(f"<!-- merge-queue:rebase-failed:{OLD} -->\nx", "2026-10-04T11:45:00Z")]})
-    assert mq._marker(gh, 1, "rebase-failed", OLD) is not None
-    assert mq.comment_once(gh, 1, "rebase-failed", OLD, "body", lambda m: None) is False
-    assert mq.marker_age(gh, 1, "rebase-failed", OLD, NOW).total_seconds() == 900
+    assert mq._marker(gh, 1, "rebase-failed", OLD) is not None  # nosec B101 - Pytest queue-authentication and departure regression assertion.
+    assert mq.comment_once(gh, 1, "rebase-failed", OLD, "body", lambda m: None) is False  # nosec B101 - Pytest queue-authentication and departure regression assertion.
+    assert mq.marker_age(gh, 1, "rebase-failed", OLD, NOW).total_seconds() == 900  # nosec B101 - Pytest queue-authentication and departure regression assertion.
 
 
 def test_failed_disarm_of_still_armed_front_never_advances_to_the_next_pr():
@@ -1854,5 +1854,5 @@ def test_failed_disarm_of_still_armed_front_never_advances_to_the_next_pr():
                 comments={1: [(f"<!-- merge-queue:rebase-failed:{OLD} -->\nx", "2026-10-04T11:45:00Z")]})
     with pytest.raises(mq.GhError):
         _run(gh)
-    assert ("disarm", "PR_1") in gh.calls
-    assert not any(c[0] in ("rebase", "disarm") and c[1] == "PR_2" for c in gh.calls)
+    assert ("disarm", "PR_1") in gh.calls  # nosec B101 - Pytest queue-authentication and departure regression assertion.
+    assert not any(c[0] in ("rebase", "disarm") and c[1] == "PR_2" for c in gh.calls)  # nosec B101 - Pytest queue-authentication and departure regression assertion.

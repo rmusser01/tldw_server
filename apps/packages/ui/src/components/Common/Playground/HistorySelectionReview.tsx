@@ -395,7 +395,6 @@ export function HistorySelectionReview({
   const [focusedId, setFocusedId] = React.useState<string | null>(null)
   const [failedKeep, setFailedKeep] = React.useState<string | null>(null)
   const [retryReview, setRetryReview] = React.useState<{ operation: string; context: HistoryRecoveryRetryContext } | null>(null)
-  const [retrying, setRetrying] = React.useState<string | null>(null)
   const [failedRetry, setFailedRetry] = React.useState<string | null>(null)
   const [retryRefusal, setRetryRefusal] = React.useState<string | null>(null)
   const trigger = React.useRef<HTMLButtonElement>(null)
@@ -756,6 +755,92 @@ export function HistorySelectionReview({
             </a>
           ))}
       </details>
+      {entry.turn.outcome === "complete" && entry.turn.existing_selection && !entry.turn.settled_message_id && (
+        <Button disabled={sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending}
+          loading={openingRecovery === entry.turn.operation_id}
+          onClick={async () => {
+            if (!mounted.current || !renderedSource.isCurrent() || !renderedSelectionIsCurrent()) return
+            const current = () => mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent()
+            setOpeningRecovery(entry.turn.operation_id)
+            setFailedKeep(null)
+            try {
+              const result = await keepHistoryTurnRecovery(selection, entry)
+              if (current() && result.status === "skipped") setFailedKeep(entry.turn.operation_id)
+            } catch {
+              if (current()) setFailedKeep(entry.turn.operation_id)
+            } finally {
+              if (mounted.current) setOpeningRecovery(value => value === entry.turn.operation_id ? null : value)
+            }
+          }}>
+          {text("keepRecovery", "Keep recovered reply")}
+        </Button>
+      )}
+      {failedKeep === entry.turn.operation_id && (
+        <p role="alert">{text("keepRecoveryFailed", "Could not keep this reply. The original recovery is retained for review.")}</p>
+      )}
+      {onRetryRecovery && getRetryContext && canRetryHistoryTurnRecovery(entry) && (
+        <>
+          <Button disabled={sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending} onClick={async () => {
+            const fence = selection.fence()
+                  const isCurrent = () => mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent() && fence()
+            setFailedRetry(null)
+            setRetryRefusal(null)
+            try {
+              const context = await getRetryContext()
+              if (isCurrent() && context.isCurrent())
+                setRetryReview({ operation: entry.turn.operation_id, context })
+            } catch {
+              if (isCurrent()) setFailedRetry(entry.turn.operation_id)
+            }
+          }}>
+            {text("reviewRetry", "Review retry")}
+          </Button>
+          {retryReview?.operation === entry.turn.operation_id && (
+            <section aria-label={text("reviewRetry", "Review retry")} className="my-2 rounded border p-3">
+              <p>{text("retryPromptReview", "This recovery cannot restore the original prompt settings. Review or reapply the original System/Prompt settings using the chat controls, then review this retry again. Retry uses the model and instructions shown below.")}</p>
+              <p>{text("retrySavedQuestion", "Saved question")}</p>
+              <pre className="whitespace-pre-wrap break-words">{entry.turn.input_text}</pre>
+              <p>{text("retryCurrentModel", "Current model")}</p>
+              <p>{retryReview.context.model}</p>
+              <p>{text("retryCurrentPrompt", "Current System/Prompt instructions")}</p>
+              {retryReview.context.systemPrompts.length
+                ? retryReview.context.systemPrompts.map((prompt, index) => <pre key={index} className="whitespace-pre-wrap break-words">{prompt}</pre>)
+                : <p>{text("retryNoPrompt", "No System/Prompt instruction is currently applied.")}</p>}
+              <Button disabled={sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending} onClick={async () => {
+                setRetrying(entry.turn.operation_id)
+                setFailedRetry(null)
+                setRetryRefusal(null)
+                try {
+                  const result = await onRetryRecovery(entry, { contextReviewed: true, context: retryReview.context })
+                  if (result.status !== "submitted") {
+                    setFailedRetry(entry.turn.operation_id)
+                    setRetryRefusal(result.status === "failed" && retryRefusalCodes.has(result.errorMessage || "") ? result.errorMessage! : null)
+                  }
+                  setRetryReview(null)
+                } catch {
+                  setFailedRetry(entry.turn.operation_id)
+                } finally {
+                  setRetrying(null)
+                }
+              }}>
+                {text("retrySavedQuestionAction", "Retry saved question")}
+              </Button>
+              <Button disabled={sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending} onClick={() => setRetryReview(null)}>
+                {text("cancel", "Cancel review")}
+              </Button>
+            </section>
+          )}
+        </>
+      )}
+      {failedRetry === entry.turn.operation_id && (
+        <div>
+          <p role="alert">{text("retryRecoveryFailed", "Could not retry this question. Review the current chat and prompt settings; the original recovery is retained for inspection.")}</p>
+          {retryRefusal && <details className="text-sm text-text-muted">
+            <summary>{text("retryDetails", "Retry details")}</summary>
+            <p>{retryRefusal}</p>
+          </details>}
+        </div>
+      )}
       <Button
         disabled={retrying !== null || recoveryAction?.pending || openingRecovery !== null}
         loading={recoveryAction?.pending && recoveryAction.action === "copy" && recoveryAction.operationId === entry.turn.operation_id}

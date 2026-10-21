@@ -3464,19 +3464,7 @@ const PlaygroundContent = () => {
           }
         : null;
     },
-    [
-      historySelection, characterChatReadiness,
-      characterChatReadinessCopy,
-      characterWorkflowActive,
-      handleCharacterChatReadinessAction,
-      openCharacterSelectorFromReadiness, routeCharacterIntentChatId, routeCharacterIntentId, t,
-      routeCharacterLoading,
-      routeCharacterRecovery,
-      routeCharacterIntentId,
-      routeCharacterIntentChatId,
-      retryRouteCharacterRecovery,
-      t,
-    ],
+    [historySelection, characterChatReadiness, characterChatReadinessCopy, characterWorkflowActive, handleCharacterChatReadinessAction, openCharacterSelectorFromReadiness, routeCharacterIntentChatId, routeCharacterIntentId, t, routeCharacterLoading, routeCharacterRecovery, retryRouteCharacterRecovery],
   );
   const openMcpSettingsFromCockpit = React.useCallback(() => {
     openMcpSettings({

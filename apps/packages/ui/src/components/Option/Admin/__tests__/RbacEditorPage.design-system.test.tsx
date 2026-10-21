@@ -1,10 +1,23 @@
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query"
+import { createAdminQueryClient } from "../AdminQueryProvider"
 // @vitest-environment jsdom
 
 import React from "react"
 import { ConfigProvider, Form } from "antd"
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render as renderWithQueries, screen, waitFor, within } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import RbacEditorPage from "../RbacEditorPage"
+
+
+const adminQueryClients: QueryClient[] = []
+const render = (ui: React.ReactElement) => {
+  const client = createAdminQueryClient()
+  adminQueryClients.push(client)
+  return renderWithQueries(ui, {
+    wrapper: ({ children }: React.PropsWithChildren) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  })
+}
+afterEach(() => adminQueryClients.splice(0).forEach(client => client.clear()))
 
 const apiMock = vi.hoisted(() => ({
   canonical: vi.fn(),
@@ -184,9 +197,9 @@ describe("RbacEditorPage design-system states", () => {
     await waitFor(() => expect(add).toBeEnabled())
     fireEvent.click(add)
     fireEvent.change(screen.getByLabelText("Select permission"), { target: { value: "91" } })
-    const grant = screen.getByRole("option", { name: "Grant", exact: true })
+    const grant = screen.getByRole("option", { name: "Grant" })
     fireEvent.change(screen.getByLabelText("Select effect"), { target: { value: grant.getAttribute("value") } })
-    fireEvent.click(screen.getByRole("button", { name: "OK", exact: true }))
+    fireEvent.click(screen.getByRole("button", { name: "OK" }))
     await waitFor(() => expect(apiMock.addUserOverride).toHaveBeenCalledWith(11, { permission_id: 91, effect: "allow" }, expect.objectContaining({ configSnapshot: testConfig(), abortSignal: expect.any(AbortSignal) })))
   })
 
@@ -205,25 +218,25 @@ describe("RbacEditorPage design-system states", () => {
     apiMock.assignUserRole.mockRejectedValueOnce(Object.assign(new Error("Role not found"), { status: 404 }))
     render(<ConfigProvider theme={{ token: { motion: false } }}><RbacEditorPage /></ConfigProvider>)
     await selectUser("11")
-    await screen.findByRole("cell", { name: "Saved role", exact: true })
+    await screen.findByRole("cell", { name: "Saved role" })
     const add = screen.getByRole("button", { name: /Add Role$/ })
     await waitFor(() => expect(add).toBeEnabled())
     fireEvent.click(add)
     let modal = screen.getByRole("dialog", { name: "Assign Role" })
     await waitFor(() => expect(modal).toBeVisible())
     fireEvent.change(within(modal).getByLabelText("Select a role"), { target: { value: "41" } })
-    fireEvent.click(within(modal).getByRole("button", { name: "OK", exact: true }))
+    fireEvent.click(within(modal).getByRole("button", { name: "OK" }))
     expect(await screen.findByText("Role not found")).toBeVisible()
     expect(screen.queryByText("Access Restricted")).not.toBeInTheDocument()
     await waitFor(() => expect(screen.getByRole("dialog", { name: "Assign Role" })).toBeVisible())
     modal = screen.getByRole("dialog", { name: "Assign Role" })
-    expect(screen.getByRole("cell", { name: "Saved role", exact: true })).toBeVisible()
+    expect(screen.getByRole("cell", { name: "Saved role" })).toBeVisible()
     expect(screen.getByText("media.search")).toBeVisible()
     apiMock.listUserRoles.mockResolvedValue({ user_id: 11, roles: [saved, replacement] })
-    await waitFor(() => expect(within(modal).getByRole("button", { name: "OK", exact: true })).toBeEnabled())
+    await waitFor(() => expect(within(modal).getByRole("button", { name: "OK" })).toBeEnabled())
     fireEvent.change(within(modal).getByLabelText("Select a role"), { target: { value: "42" } })
-    fireEvent.click(within(modal).getByRole("button", { name: "OK", exact: true }))
-    expect(await screen.findByRole("cell", { name: "Replacement role", exact: true })).toBeVisible()
+    fireEvent.click(within(modal).getByRole("button", { name: "OK" }))
+    expect(await screen.findByRole("cell", { name: "Replacement role" })).toBeVisible()
     expect(screen.queryByRole("dialog", { name: "Assign Role" })).not.toBeInTheDocument()
     expect(apiMock.assignUserRole.mock.calls.map(call => call.slice(0, 2))).toEqual([[11, 41], [11, 42]])
   })
@@ -238,7 +251,7 @@ describe("RbacEditorPage design-system states", () => {
     fireEvent.click(add)
     const modal = screen.getByRole("dialog", { name: "Assign Role" })
     fireEvent.change(within(modal).getByLabelText("Select a role"), { target: { value: "41" } })
-    fireEvent.click(within(modal).getByRole("button", { name: "OK", exact: true }))
+    fireEvent.click(within(modal).getByRole("button", { name: "OK" }))
     expect(await screen.findByText("Access Restricted")).toBeVisible()
     expect(screen.getByText("forbidden")).toBeVisible()
     expect(screen.queryByRole("dialog", { name: "Assign Role" })).not.toBeInTheDocument()
@@ -256,8 +269,8 @@ describe("RbacEditorPage design-system states", () => {
     fireEvent.click(add)
     let finish!: (value: unknown) => void
     vi.spyOn(form, "validateFields").mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
-    fireEvent.click(screen.getByRole("button", { name: "OK", exact: true }))
-    expect(screen.getByRole("button", { name: "Cancel", exact: true })).toBeDisabled()
+    fireEvent.click(screen.getByRole("button", { name: "OK" }))
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled()
     await act(async () => finish({ permission_id: 91, effect: "allow" }))
     await waitFor(() => expect(apiMock.addUserOverride).toHaveBeenCalledTimes(1))
   })

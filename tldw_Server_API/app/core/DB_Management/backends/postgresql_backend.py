@@ -402,10 +402,10 @@ class PostgreSQLConnectionPool(ConnectionPool):
             with suppress(*_POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS):
                 self._pool.close()
             return
-        # Close all tracked connections (both managed and currently free).
+        # Borrowers may be inside libpq on another thread; their return closes them.
         with self._fallback_lock:
             self._closed = True
-            connections = [*self._connections, *self._free]
+            connections = list(self._free)
             self._connections.clear()
             self._free.clear()
         seen_ids: set[int] = set()
@@ -925,8 +925,7 @@ class PostgreSQLBackend(DatabaseBackend):
             raise DatabaseError("psycopg2 is not installed")
 
         dsn = self.config.postgres_connection_string()
-        conn = psycopg.connect(dsn)
-        conn.row_factory = dict_row
+        conn = psycopg.connect(dsn, row_factory=dict_row)
         try:
             self._apply_scope_settings(conn)
         except _POSTGRES_BACKEND_NONCRITICAL_EXCEPTIONS as scope_exc:

@@ -59,13 +59,13 @@ describe("saved startup template owner boundary", () => {
     const raw = vi.mocked(state.setStartupTemplatesRaw).mock.calls[0][0]
     expect(parseStartupTemplateBundles(raw).filter(entry => entry.id === foreign.id || entry.id === ambiguous.id)).toEqual([foreign, ambiguous])
     rerender({ current: { ...state, startupTemplatesRaw: raw } })
-    expect(result.current.startupTemplates).toEqual([expect.objectContaining({ systemPrompt: "SHARED-LOCAL", selectedSystemPromptId: null, promptStudioPromptId: null, promptSource: "system-template" })])
+    expect(result.current.startupTemplates).toEqual([expect.objectContaining({ systemPrompt: kind === "startup" ? "SHARED-LOCAL" : "", selectedSystemPromptId: null, promptStudioPromptId: null, promptSource: kind === "startup" ? "system-template" : "none" })])
   })
-  it.each(["startup", "role-play"] as const)("retains authenticated local UUID and Studio identity on %s save", (kind) => {
+  it.each(["startup", "role-play"] as const)("preserves authenticated ownership and the %s prompt-copy contract", (kind) => {
     const state = ownedDeps("alice", { selectedSystemPrompt: "alice-local-uuid", promptLibrary: [{ id: "alice-local-uuid", ownerId: "alice", studioPromptId: 7, sourceSystem: "studio", title: "Alice", content: "ALICE-PRIVATE", is_system: true, createdAt: 1, updatedAt: 1 }] })
     const { result } = renderHook(() => usePromptTemplates(state))
     act(() => kind === "startup" ? result.current.handleSaveStartupTemplate() : result.current.handleSaveRolePlaySetup({ name: "Alice role", rolePlay: { source: "role-play-setup", identity: null, behavior: null, scene: null, generation: null, context: null } }))
-    expect(parseStartupTemplateBundles(vi.mocked(state.setStartupTemplatesRaw).mock.calls[0][0])[0]).toMatchObject({ ownerId: "alice", selectedSystemPromptId: "alice-local-uuid", promptStudioPromptId: 7, promptSource: "prompt-studio" })
+    expect(parseStartupTemplateBundles(vi.mocked(state.setStartupTemplatesRaw).mock.calls[0][0])[0]).toMatchObject({ ownerId: "alice", selectedSystemPromptId: kind === "startup" ? "alice-local-uuid" : null, promptStudioPromptId: kind === "startup" ? 7 : null, promptSource: kind === "startup" ? "prompt-studio" : "none", systemPrompt: kind === "startup" ? "ALICE-PRIVATE" : "" })
   })
   it("rejects save until configured owner resolves", () => {
     const state = ownedDeps("alice", { promptOwnerReady: false })

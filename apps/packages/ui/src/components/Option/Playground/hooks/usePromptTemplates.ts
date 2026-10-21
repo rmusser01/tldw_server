@@ -161,7 +161,8 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
     const retire = () => {
       scope.revision++;
       scope.retired = true;
-      setStartupTemplatePreview(null);
+      previewRef.current = null;
+      setPreviewEntry(null);
       setStartupTemplateDraftName("");
       refreshBoundary(value => value + 1);
     };
@@ -390,20 +391,7 @@ export function usePromptTemplates(deps: UsePromptTemplatesDeps) {
         )
       )
     },
-    [
-      currentPresetKey,
-      persistStartupTemplates,
-      ragPinnedResults,
-      selectedCharacter,
-      selectedModel,
-      setModeAnnouncement,
-      startupTemplateNameFallback,
-      allStartupTemplates,
-      promptOwnerId,
-      promptOwnerReady,
-      systemPrompt,
-      t,
-    ],
+    [currentPresetKey, persistStartupTemplates, ragPinnedResults, selectedCharacter, selectedModel, setModeAnnouncement, startupTemplateNameFallback, allStartupTemplates, promptOwnerId, promptOwnerReady, t],
   );
 
   const handleOpenStartupTemplatePreview = React.useCallback(

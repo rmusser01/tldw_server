@@ -35,7 +35,7 @@ const renderEditorForm = (overrides: {
 
   const Harness = () => {
     const [form] = Form.useForm()
-    formRef = form
+    React.useLayoutEffect(() => { formRef = form }, [form])
     return (
       <CharacterEditorForm
         t={t}

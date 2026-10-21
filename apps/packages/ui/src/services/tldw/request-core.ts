@@ -348,6 +348,7 @@ export const resolveTldwRequestPlan = async (
         normalizedPath: string | undefined;
         isAbsolute: boolean;
         sameOriginAbsoluteUrl: boolean;
+        samePageOriginRequest: boolean;
         hostedMode: boolean;
         cookieSession: boolean;
         url: string;
@@ -505,6 +506,7 @@ export const resolveTldwRequestPlan = async (
       normalizedPath,
       isAbsolute,
       sameOriginAbsoluteUrl,
+      samePageOriginRequest: (!isAbsolute && transport?.kind === "same-origin") || samePageOriginAbsoluteUrl,
       hostedMode,
       cookieSession,
       url,
@@ -804,6 +806,7 @@ const performTldwRequest = async (
     fetchFn,
     normalizedPath,
     sameOriginAbsoluteUrl,
+    samePageOriginRequest,
     hostedMode,
     cookieSession,
     url: resolvedUrl,
@@ -922,8 +925,7 @@ const performTldwRequest = async (
     !recipeSnapshot &&
     noAuth &&
     isUnsafeMethod(method) &&
-    ((!isAbsolute && transport?.kind === "same-origin") ||
-      samePageOriginAbsoluteUrl)
+    samePageOriginRequest
   ) {
     for (const key of Object.keys(h)) {
       if (key.toLowerCase() === "x-csrf-token") delete h[key];

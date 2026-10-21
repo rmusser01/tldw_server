@@ -3250,11 +3250,11 @@ export class TldwApiClientBase {
   }
 
   // Admin / diagnostics helpers
-  async getSystemStats(options?: { timeoutMs?: number }): Promise<any> {
+  async getSystemStats(options?: { timeoutMs?: number; configSnapshot?: TldwConfig; abortSignal?: AbortSignal }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/stats",
       method: "GET",
-      timeoutMs: options?.timeoutMs
+      ...options
     })
   }
 
@@ -6023,9 +6023,6 @@ export class TldwApiClientBase {
   async createChat(
     payload: Record<string, any>,
     options?: {
-      seedFirstMessage?: boolean
-      greetingStrategy?: "default" | "alternate_index"
-      alternateIndex?: number
       scope?: ChatScope
       signal?: AbortSignal
       requestScope?: ServicePromptRequestScope

@@ -33,7 +33,6 @@ from fastapi.responses import FileResponse, StreamingResponse
 from loguru import logger
 from pydantic import BaseModel, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, require_expected_user, RequirePermission, RequireRole, TokenScopeGuard, User
 
 from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import get_audit_service_for_user
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
@@ -42,6 +41,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     TokenScopeGuard,
     User,
     get_request_user,
+    require_expected_user,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
     build_cursor_pagination_meta,

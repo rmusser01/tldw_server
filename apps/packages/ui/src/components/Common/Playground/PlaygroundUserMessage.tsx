@@ -5,7 +5,7 @@ import React from "react"
 import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
 import { useTranslation } from "react-i18next"
 import { EditMessageForm } from "./EditMessageForm"
-import { Tooltip } from "antd"
+import { Popover, Tooltip } from "antd"
 import {
   CheckIcon,
   CopyIcon,

@@ -131,6 +131,7 @@ export function useKeepInterruptedHistoryTurns({
     (entry: HistoryTurnRecoveryEntry) =>
       isHistoryTurnLive(entry.turn.operation_id) ||
       (entry.turn.action === undefined &&
+        !entry.turn.existing_selection &&
         !entry.turn.roleplay_resume &&
         (entry.turn.persistence !== 'server' ||
           messages.some((message) => message.id === entry.turn.settled_message_id)) &&

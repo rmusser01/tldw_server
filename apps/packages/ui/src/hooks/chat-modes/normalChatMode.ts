@@ -1,3 +1,4 @@
+import { canonicalHistoryJson } from "@/db/dexie/history-selection"
 import { captureChatDispatchSource } from "@/hooks/chat/chat-dispatch-source"
 import type { ActorSceneSend } from "@/hooks/chat/actor-scene-source"
 import type {
@@ -8,6 +9,8 @@ import { captureChatDraftLoad, captureChatDraftSource } from "@/hooks/chat/chat-
 import { NativeHistoryBranchChoice, NativeHistoryBranchRefusal, NativeHistoryEditRefusal } from "@/hooks/chat/native-character-preflight"
 import type {
   HistorySendTurn,
+  HistoryEditAndSendBoundary,
+  HistoryRegenerateBoundary,
   NativeHistoryEditResend
 } from "@/types/chat-modes"
 import type { HistoryAdmissionReferenceV1 } from "@/types/history-selection"
@@ -39,7 +42,6 @@ import {
   wasChatTurnStoppedByUser
 } from "@/hooks/chat/abort-turn-cleanup"
 import { buildFriendlyErrorMessage, decodeChatErrorPayload } from "@/utils/chat-error-message"
-import { useStoreChatModelSettings } from "@/store/model"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { resolveChatToolRequest } from "@/utils/chat-tools"
 import { systemPromptForNonRagOption } from "~/services/tldw-server"
@@ -65,7 +67,6 @@ import type { ActorSceneRead } from "@/services/actor-settings"
 import { bindActorSceneAfterLoad } from "@/hooks/chat/actor-scene-source"
 import { buildActorPrompt, maybeInjectActorMessage, shouldInjectActorForTemplates } from "@/utils/actor"
 import { removeReasoning } from "@/libs/reasoning"
-import { decodeChatErrorPayload } from "@/utils/chat-error-message"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { linkServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { getSearchSettings } from "@/services/search"
@@ -212,6 +213,8 @@ type NormalChatModeParams = {
      */
     retryAdmission?: HistoryAdmissionReferenceV1
     editResend?: NativeHistoryEditResend
+    editAndSend?: HistoryEditAndSendBoundary
+    regenerate?: HistoryRegenerateBoundary
     retryRecoveries?: HistoryTurnRecoveryEntry[]
     /** The source instruction block explicitly reviewed for this recovery retry. */
     reviewedSystemPrompts?: string[]
@@ -849,6 +852,7 @@ const captureNormalHistoryTurn = async (
     const scope = params.scope ? structuredClone(params.scope) : undefined
     let localId = params.historyId
     let serverId = params.serverChatId
+    let createdNativeChat: Awaited<ReturnType<typeof tldwClient.createChat>> | undefined
     const toolsState = useMcpToolsStore.getState()
     const toolRequest = resolveChatToolRequest({
       tools: toolsState.chatTools ?? toolsState.tools,
@@ -886,6 +890,7 @@ const captureNormalHistoryTurn = async (
       // The recovery record keeps a late ACK even when this view can no longer bind.
       if (!originIsCurrent() || !preparationIsCurrent()) throw new Error("stale_selection")
       serverId = created.id
+      createdNativeChat = created
     }
     if (!localId && !serverId) {
       const created = await saveHistory(
@@ -1052,6 +1057,26 @@ const captureNormalHistoryTurn = async (
           params.setHistoryId(mirrorId, { preserveServerChatId: true })
         )
         publish("serverChatId", serverId, () => params.setServerChatId?.(serverId!))
+        if (createdNativeChat?.id === serverId) {
+          const createdChat = { ...createdNativeChat }
+          const { resolveServerChatAssistantIdentity } = await import("@/hooks/chat/useServerChatLoader")
+          const { readSavedRoleplayPresentation } = await import("@/services/tldw/roleplay-resume")
+          const identity = resolveServerChatAssistantIdentity(createdChat)
+          const store = useStoreMessageOption.getState()
+          // H1 already owns this new chat, so its background loader will not adopt it again.
+          for (const publishMetadata of [
+            () => store.setServerChatCharacterId(identity.characterId),
+            () => store.setServerChatAssistantKind(identity.assistantKind),
+            () => store.setServerChatAssistantId(identity.assistantId),
+            () => store.setServerChatPersonaMemoryMode(identity.personaMemoryMode),
+            () => store.setServerChatRoleplaySetup(readSavedRoleplayPresentation(createdChat)),
+            () => store.setServerChatMetaLoaded(true)
+          ]) {
+            if (!mirrorIsCurrent()) throw new Error("stale_selection")
+            publishMetadata()
+          }
+          if (!mirrorIsCurrent()) throw new Error("stale_selection")
+        }
         localId = mirrorId
         targetHistoryId = mirrorId
       }
@@ -1106,6 +1131,28 @@ const captureNormalHistoryTurn = async (
   const originalCapture = current.capture
   const originView = structuredClone(current.view)
   const editResend = params.historySelection!.editResend
+  const editAndSend = params.historySelection!.editAndSend
+  const regenerate = params.historySelection!.regenerate
+  if ((editAndSend || regenerate) && (current.owner.kind !== "local" || editResend))
+    throw new Error("unsupported_history_action")
+  if (editAndSend && (
+    current.owner !== editAndSend.owner ||
+    !editAndSend.originIsCurrent() ||
+    canonicalHistoryJson(originView) !== canonicalHistoryJson(editAndSend.originView) ||
+    !current.capture.rows.some((row) =>
+      row.id === editAndSend.targetId && row.role === "user"
+    )
+  )) throw new Error("stale_selection")
+  if (regenerate && (
+    current.owner !== regenerate.owner || !regenerate.originIsCurrent() ||
+    canonicalHistoryJson(originView) !== canonicalHistoryJson(regenerate.originView) ||
+    current.capture.rows.at(-1)?.id !== regenerate.answerId ||
+    current.capture.rows.at(-2)?.id !== regenerate.questionId ||
+    current.capture.rows.at(-2)?.role !== "user" ||
+    current.capture.rows.at(-2)?.revision !== regenerate.questionRevision ||
+    (originView.interpretation.kind === "parent_graph_v1" &&
+      current.capture.rows.at(-1)?.parent_id !== regenerate.questionId)
+  )) throw new Error("stale_selection")
   const branchIntent = current.owner.kind === "native" && !editResend &&
     controller.takeBranchIntent?.(current.view) === true
   const view = editResend
@@ -1115,7 +1162,11 @@ const captureNormalHistoryTurn = async (
         current.capture,
         editResend
       )
-    : structuredClone(originView)
+    : regenerate
+      ? { ...originView, cursor: { kind: "after_message" as const, message_id: regenerate.questionId } }
+      : editAndSend
+        ? { ...originView, cursor: { kind: "before_message" as const, message_id: editAndSend.targetId } }
+        : structuredClone(originView)
   const retryAdmission = params.historySelection!.retryAdmission
   if (retryAdmission &&
     (retryAdmission.owner_key !== view.owner_key || retryAdmission.conversation_id !== view.conversation_id ||
@@ -1150,6 +1201,8 @@ const captureNormalHistoryTurn = async (
   const canUpdateView = () => {
     const now = controller.getCurrent().view
     return (
+      (!editAndSend || editAndSend.originIsCurrent()) &&
+      (!regenerate || regenerate.originIsCurrent()) &&
       draftIsCurrent() && acceptDraftBind?.isCurrent() !== false && selectionCurrent() && controller.getCurrent().owner === originalOwner &&
       !!now &&
       now.owner_key === originView.owner_key &&
@@ -1170,6 +1223,13 @@ const captureNormalHistoryTurn = async (
     editOriginIsCurrent() && editResend?.isCurrent() !== false
   const capture = await captureHistorySnapshot(owner, view, "send", signal)
   if (capture.status !== "captured") throw new Error(capture.code)
+  if (regenerate && (capture.rows.at(-1)?.id !== regenerate.questionId ||
+      capture.rows.at(-1)?.role !== "user" ||
+      capture.rows.at(-1)?.revision !== regenerate.questionRevision ||
+      capture.selected_content.at(-1)?.message !== message ||
+      canonicalHistoryJson(capture.selected_content.at(-1)?.images ?? []) !==
+        canonicalHistoryJson(image ? [image] : [])))
+    throw new Error("stale_selection")
   if (!canUpdateView()) throw new Error("stale_selection")
   if (editResend) {
     if (!editPreparationIsCurrent()) throw new Error("stale_selection")
@@ -1240,7 +1300,7 @@ const captureNormalHistoryTurn = async (
     ...(turn.existingSelection && turn.selection
       ? { existing_selection: structuredClone(turn.selection) }
       : {}),
-    ...(settlementPayload ? { settlement_payload: structuredClone(settlementPayload) } : {}),
+    ...(settlementPayload ? { settlement_payload: structuredClone(settlementPayload), outcome: "complete" as const } : {}),
     ...extra
   })
   // A server chat holds the question once it is admitted; until the reply is
@@ -1273,10 +1333,11 @@ const captureNormalHistoryTurn = async (
     owner,
     capture,
     ...(retryAdmission ? { retryAdmission } : {}),
+    ...(regenerate ? { existingSelection: true } : {}),
     ...(owner.kind === "native" ? { historyBranch: Boolean(editResend || branchIntent) } : {}),
     ...(editResend ? { historyEdit: Object.freeze({ version: 1 as const, message_id: editResend.message_id, message_revision: editResend.message_revision }) } : {}),
     currentView: () =>
-      editResend
+      (editResend || editAndSend || regenerate)
         ? canUpdateView()
           ? view
           : null
@@ -1533,7 +1594,7 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
     if (servicePromptSnapshot?.scopeInvalidatedSignal.aborted || executionSignal.aborted)
       return chatSubmitFailed("Request cancelled")
     if (params.historySelection) {
-      if (isRegenerate) throw new Error("unsupported_history_action")
+      if (isRegenerate && !params.historySelection.regenerate) throw new Error("unsupported_history_action")
       const originalOwner = params.historySelection.controller.getCurrent().owner
       if (originalOwner?.kind === "native" && mode.id !== "normal")
         throw new Error("unsupported_history_action_context")
@@ -1588,31 +1649,34 @@ export const runChatModeWithHistory = async <TParams extends ChatModeParamsBase 
       )
         throw new Error("unsupported_history_native_result_metadata")
       const selectedParent = historyTurn.capture.rows.at(-1)?.id ?? null
+      const regenerate = params.historySelection.regenerate
       if (
         params.userParentMessageId &&
         params.userParentMessageId !== selectedParent
       )
         throw new Error("unsupported_history_reply_target")
       historyTurn.clientManagedContext = params.historyForModel !== undefined
-      messages = displayMessages
+      if (!regenerate) messages = displayMessages
       params = {
         ...params,
         historyTurn,
-        ...(params.historySelection?.editResend
+        ...((params.historySelection?.editResend || params.historySelection?.editAndSend)
           ? { setMessages: () => {}, setHistory: () => {} }
           : {}),
         // A retry shows and settles under the question it reasks.
         ...(historyTurn.retryAdmission
           ? { userMessageId: historyTurn.retryAdmission.input_message_id }
           : {}),
-        userParentMessageId: selectedParent,
-        historyForModel: selected as ChatHistory,
+        ...(regenerate ? { userMessageId: regenerate.questionId } : {}),
+        userParentMessageId: regenerate ? (historyTurn.capture.rows.at(-1)?.parent_id ?? null) : selectedParent,
+        assistantParentMessageId: regenerate?.questionId,
+        historyForModel: (regenerate ? selected.slice(0, -1) : selected) as ChatHistory,
         historyId:
           historyTurn.owner.kind === "local"
             ? historyTurn.owner.conversation_id
             : params.historyId
       }
-      history = selected as ChatHistory
+      history = (regenerate ? selected.slice(0, -1) : selected) as ChatHistory
     }
     const resolvedImage =
       image.length > 0

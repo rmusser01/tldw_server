@@ -4534,8 +4534,8 @@ async def test_generation_api_keeps_event_loop_responsive_during_recipe_capture(
             release.set()
 
     assert response.status_code == 202
-    assert entered.is_set()
-    assert release_observed == [True]
+    assert entered.is_set()  # nosec B101 - Pytest event-loop release and cleanup regression assertion.
+    assert release_observed == [True]  # nosec B101 - Pytest event-loop release and cleanup regression assertion.
 
 
 def test_generation_api_enqueues_parent_job(

@@ -362,8 +362,8 @@ def test_run_adhoc_requires_workflows_scope_like_saved_run(workflow_accounts):
         },
     )
 
-    assert saved_resp.status_code == 403, saved_resp.json()
-    assert adhoc_resp.status_code == 403, adhoc_resp.json()
+    assert saved_resp.status_code == 403, saved_resp.json()  # nosec B101 - Pytest workflow recovery regression assertion.
+    assert adhoc_resp.status_code == 403, adhoc_resp.json()  # nosec B101 - Pytest workflow recovery regression assertion.
 
 
 def test_run_adhoc_rejects_virtual_key_excluded_by_endpoint_allowlist(workflow_accounts):
@@ -394,7 +394,7 @@ def test_run_adhoc_rejects_virtual_key_excluded_by_endpoint_allowlist(workflow_a
         },
     )
 
-    assert adhoc_resp.status_code == 403, adhoc_resp.json()
+    assert adhoc_resp.status_code == 403, adhoc_resp.json()  # nosec B101 - Pytest workflow recovery regression assertion.
 
 
 def test_adhoc_limits_and_validation(client_with_workflows_db: TestClient):

@@ -276,7 +276,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     useActorStore.getState().reset()
     useStoreMessageOption.getState().startNewChatDraft(false)
     vi.mocked(saveActorSettingsForChat).mockReset().mockResolvedValue(true)
-    vi.mocked(resolveSelectedSystemPromptContent).mockReset().mockImplementation(async id => id ? "Selected template instructions" : "")
+    vi.mocked(resolveSelectedSystemPromptContent).mockReset().mockImplementation(async id => id ? await (inputs.templateRead?.() ?? inputs.templateText) : "")
   })
 
   it.each([false, true])("forwards only native close completion and unmounts the editor (drawer=%s)", async useDrawer => {
@@ -651,11 +651,11 @@ describe("Conversation prompt editor through real model settings Save", () => {
     inputs.settingsRead = () => new Promise(resolve => { finish = resolve })
     inputs.character = { id: "42", name: "Late loaded character" }
     view.rerender(
-      <ConfigProvider theme={{ token: { motion: false } }}>
-        <QueryClientProvider client={client}>
+      <QueryClientProvider client={client}>
+        <ConfigProvider theme={{ token: { motion: false } }}>
           <CurrentChatModelSettings open setOpen={view.close} />
-        </QueryClientProvider>
-      </ConfigProvider>
+        </ConfigProvider>
+      </QueryClientProvider>
     )
     await waitFor(() => expect(finish).toBeTypeOf("function"))
     await act(async () => { finish({ temperature: 0.7 }) })
@@ -965,13 +965,20 @@ describe("Conversation prompt editor through real model settings Save", () => {
     await client.prefetchQuery({ queryKey: ["fetchModelConfig2", true, null], queryFn: getAllModelSettings })
     let finish!: (value: string) => void
     inputs.selectedSystemPrompt = "pirate-template"
-    inputs.templateRead = () => new Promise(resolve => { finish = resolve })
     const view = await mountSettings(undefined, client)
+    await waitFor(() => expect(view.editor).toHaveValue(inputs.templateText))
+    inputs.templateRead = () => new Promise(resolve => { finish = resolve })
+    fireEvent.click(screen.getByRole("button", { name: "Reset to template" }))
+    await waitFor(() => expect(finish).toBeTypeOf("function"))
     if (boundary === "typed edit") fireEvent.change(view.editor, { target: { value: "Newer user instruction" } })
     else act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
     await act(async () => { finish("Retired private instruction"); await Promise.resolve() })
-    expect(view.editor).toHaveValue(boundary === "typed edit" ? "Newer user instruction" : "")
-    expect(useStoreChatModelSettings.getState().systemPrompt).toBe(boundary === "typed edit" ? "Newer user instruction" : undefined)
+    if (boundary === "typed edit") expect(view.editor).toHaveValue("Newer user instruction")
+    else {
+      expect(view.close).toHaveBeenCalledWith(false)
+      expect(screen.queryByPlaceholderText("Enter System Prompt")).not.toBeInTheDocument()
+    }
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBeUndefined()
     view.unmount()
     client.clear()
   })
@@ -1148,7 +1155,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     })
     expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument()
     expect(saveActorSettingsForChat).not.toHaveBeenCalled()
-    expect(close).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledWith(false)
     expect(useStoreChatModelSettings.getState().systemPrompt).toBeUndefined()
     act(() => useStoreMessageOption.getState().startNewChatDraft(false))
     fireEvent.click(await screen.findByRole("button", { name: /^save$/i }))

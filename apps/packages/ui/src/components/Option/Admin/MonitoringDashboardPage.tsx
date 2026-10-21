@@ -503,7 +503,7 @@ const MonitoringDashboardPage: React.FC = () => {
     void loadAlertRules()
     void loadAlertHistory()
     void loadActivity()
-    setLastRefreshRequestedAt(new Date())
+    setLastRefreshedAt(new Date())
     void tldwClient.getCurrentUserProfile().then(
       (profile: CurrentUserProfile) => {
         const profileId =

@@ -1,12 +1,11 @@
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import { captureActorSceneSend, type ActorSceneSend } from "@/hooks/chat/actor-scene-source";
-import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes";
+import type { NativeHistoryEditResend, NativeHistoryRegenerate, HistoryEditAndSendBoundary, HistoryRegenerateBoundary } from "@/types/chat-modes";
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition";
 import { usePlaygroundSessionStore } from "@/store/playground-session";
 import { chatDraftOwnerKey } from "@/hooks/useChatDraftOwner";
 import type { GreetingSeed } from "@/utils/character-greetings";
 import { createEditMessage, createNativeDeleteMessage, historyFromVisibleMessages } from "@/hooks/handlers/messageHandlers";
-import { chatSubmitFailed, chatSubmitSubmitted } from "./chat/chat-action-utils";
 import {
   captureLocalMutationOwner,
   chatSubmitFailed,
@@ -2705,6 +2704,8 @@ export const useMessage = () => {
     greetingIsCurrent,
     historyEditResend,
     historyRegenerate,
+    historyEditBoundary,
+    historyRegenerateBoundary,
     assertCurrent,
   }: {
     message: string;
@@ -2742,6 +2743,8 @@ export const useMessage = () => {
     greetingIsCurrent?: () => boolean;
     historyEditResend?: NativeHistoryEditResend;
     historyRegenerate?: NativeHistoryRegenerate;
+    historyEditBoundary?: HistoryEditAndSendBoundary;
+    historyRegenerateBoundary?: HistoryRegenerateBoundary;
     assertCurrent?: () => void;
   }, beginResponse: () => boolean) => {
     if (historyServerExistingInput && (temporaryChat || isRegenerate || !historyServerExistingInput.isCurrent())) return chatSubmitFailed("unsupported_history_action_context");
@@ -2887,6 +2890,7 @@ export const useMessage = () => {
       !greetingSeed &&
       !historyEditResend &&
       !historyRegenerate &&
+      !historyServerExistingInput &&
       !isRegenerate
     ) {
       const activity = useStoreMessageOption.getState()
@@ -2967,6 +2971,13 @@ export const useMessage = () => {
         }
       }
     }
+    if ((historyEditBoundary || historyRegenerateBoundary) && (
+      historySelection?.getCurrent().owner?.kind !== "local" || temporaryChat ||
+      historyEditResend || historyRegenerate || isRegenerate ||
+      contextSendMode !== "plain" || image || uploadedFiles?.length || docs?.length ||
+      messageType || hasExplicitImageBackend || imageBackendCandidates.length ||
+      resolvedChatMode !== "normal" || (requestOverrides?.webSearch ?? webSearch)
+    )) return chatSubmitFailed("unsupported_history_action_context");
     const selectedLocalContextTurn = selectedHistoryTurn && currentHistorySelection?.owner?.kind === "local" &&
       (contextSendMode === "plain" || contextSendMode === "overlay");
     const alternateHistorySelection = historySelection && !temporaryChat && !isRegenerate &&
@@ -3726,6 +3737,8 @@ export const useMessage = () => {
                       onResultFollow: consumeReplyTarget,
                       temporary: temporaryChat,
                       editResend: historyEditResend,
+                      editAndSend: historyEditBoundary,
+                      regenerate: historyRegenerateBoundary,
                       createServerChat:
                         !image &&
                         !(chatHistory || messages).length && !(memory || history).length &&
@@ -3773,7 +3786,6 @@ export const useMessage = () => {
                 actorSettings: actorSceneSend.scene.settings
               }
             );
-            if (historyRecoveryRetry) return normalResult;
           }
         } else if (resolvedChatMode === "vision") {
           return await visionChatMode(

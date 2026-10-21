@@ -9,11 +9,6 @@ from tldw_Server_API.app.core.DB_Management.backends.postgres_sequence_maintenan
     sync_owned_postgres_sequences,
 )
 
-from tldw_Server_API.app.core.DB_Management.backends.postgres_sequences import (
-    PostgresSequenceBackend,
-    advance_postgres_serial,
-)
-
 # Owned serial columns from Media's core, claims/collections, data-table and
 # email schema DDL. Shared PostgreSQL schemas also contain other modules' tables.
 # The real Media-only schema inventory test guards this list against omissions.

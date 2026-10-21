@@ -1,11 +1,24 @@
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query"
+import { createAdminQueryClient } from "../AdminQueryProvider"
 // @vitest-environment jsdom
 import React from "react"
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render as renderWithQueries, screen, waitFor, within } from "@testing-library/react"
 import { App, ConfigProvider } from "antd"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import ServerAdminPage from "../ServerAdminPage"
 import { adminMethods } from "@/services/tldw/domains/admin"
 import type { TldwConfig } from "@/services/tldw/TldwApiClient"
+
+
+const adminQueryClients: QueryClient[] = []
+const render = (ui: React.ReactElement) => {
+  const client = createAdminQueryClient()
+  adminQueryClients.push(client)
+  return renderWithQueries(ui, {
+    wrapper: ({ children }: React.PropsWithChildren) => <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  })
+}
+afterEach(() => adminQueryClients.splice(0).forEach(client => client.clear()))
 
 const mocks = vi.hoisted(() => ({ canonical: vi.fn(), getConfig: vi.fn(), users: vi.fn(), get: vi.fn(), fetch: vi.fn() }))
 vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({ useCanonicalConnectionConfig: mocks.canonical }))

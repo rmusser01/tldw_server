@@ -1,6 +1,6 @@
 # C09 explicit PostgreSQL database recovery
 
-Task: TASK-13260.278.18.83.45. Frozen523ef3 plus unpublished WIP; no Git/publication. ADR required: yes, proposed ADR-068; ADR-020 retains backend/path ownership and ADR-059 task editing.
+Task: TASK-13260.278.18.83.45. Frozen523ef3 plus unpublished WIP; no Git/publication. ADR required: yes, proposed ADR-079; ADR-020 retains backend/path ownership and ADR-059 task editing.
 
 ## Approved scope and exclusions
 

@@ -27,6 +27,14 @@ export type NativeHistoryRegenerate = NativeHistoryEditResend & {
   input_message_revision: string
 }
 
+/** A local selected input branches without changing its original transcript. */
+export type HistoryEditAndSendBoundary = {
+  targetId: string
+  owner: HistoryOwnerV1
+  originView: HistoryViewSelectionV1
+  originIsCurrent: () => boolean
+}
+
 export type HistoryRegenerateBoundary = {
   answerId: string
   questionId: string
