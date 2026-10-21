@@ -53,7 +53,6 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
     SemanticJobsError,
 )
 from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
-    emit_semantic_audit_event,
     record_semantic_build_metrics,
     record_semantic_cancellation,
     record_semantic_denial,
@@ -68,6 +67,7 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndex
 from tldw_Server_API.app.core.Notes_Graph.semantic_vectors import (
     create_semantic_vector_store,
 )
+from tldw_Server_API.app.services.notes_semantic_audit import emit_semantic_audit_event
 
 
 def build_worker_config(*, worker_id: str) -> WorkerConfig:

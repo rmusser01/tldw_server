@@ -20,7 +20,6 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
 )
 
 from .semantic_observability import (
-    emit_semantic_audit_event,
     record_semantic_cleanup_retry,
     record_semantic_dsr_metrics,
 )
@@ -122,9 +121,14 @@ def _metric(*, status: str, backend: str, error_code: str) -> None:
         logger.bind(error_code=error_code).debug("Notes semantic erasure cleanup requires retry")
 
 
-async def _audit(*, owner_user_id: str, status: str, reason: str) -> None:
+async def _audit(
+    *, owner_user_id: str, status: str, reason: str,
+    emitter: Callable[..., Awaitable[None]] | None,
+) -> None:
     try:
-        await emit_semantic_audit_event(
+        if emitter is None:
+            raise RuntimeError("Notes semantic erasure audit emitter is not configured")
+        await emitter(
             owner_user_id=owner_user_id,
             dataset_id="all",
             event="dsr_cleanup",
@@ -153,6 +157,7 @@ class SemanticErasureCoordinator:
         *,
         db: Any,
         vector_store_factory: VectorStoreFactory | None = None,
+        audit_emitter: Callable[..., Awaitable[None]] | None = None,
         settings: SemanticIndexSettings = DEFAULT_SEMANTIC_INDEX_SETTINGS,
         timeout_seconds: float = 30.0,
         poll_interval_seconds: float = 0.05,
@@ -191,6 +196,7 @@ class SemanticErasureCoordinator:
         self._store = db.note_semantic_store
         self._owner_user_id = str(self._store.owner_user_id)
         self._vector_store_factory = vector_store_factory
+        self._audit_emitter = audit_emitter
         self._settings = settings
         self._timeout_seconds = float(timeout_seconds)
         self._poll_interval_seconds = float(poll_interval_seconds)
@@ -445,6 +451,7 @@ class SemanticErasureCoordinator:
                 owner_user_id=self._owner_user_id,
                 status="success",
                 reason="none",
+                emitter=self._audit_emitter,
             )
         )
         return SemanticErasureResult(
@@ -506,6 +513,7 @@ class SemanticErasureCoordinator:
                 owner_user_id=self._owner_user_id,
                 status="failed",
                 reason=reason,
+                emitter=self._audit_emitter,
             )
         )
         raise error

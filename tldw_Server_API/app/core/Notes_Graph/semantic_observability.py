@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from threading import Lock
@@ -682,6 +682,7 @@ async def emit_semantic_audit_event(
     target_note_id: str | None = None,
     counts: Mapping[str, int] | None = None,
     audit_service: Any | None = None,
+    audit_service_factory: Callable[[str], Awaitable[Any]] | None = None,
 ) -> None:
     """Write one content-free semantic event through the durable audit service."""
 
@@ -696,11 +697,9 @@ async def emit_semantic_audit_event(
     if not isinstance(dataset_id, str) or not dataset_id:
         raise SemanticObservationError("notes_semantic_observation_dataset_invalid")
     if audit_service is None:
-        from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import (
-            get_or_create_audit_service_for_user_id_optional,
-        )
-
-        audit_service = await get_or_create_audit_service_for_user_id_optional(owner_user_id)
+        if audit_service_factory is None:
+            raise SemanticObservationError("notes_semantic_audit_service_required")
+        audit_service = await audit_service_factory(owner_user_id)
     from tldw_Server_API.app.core.Audit.unified_audit_service import (
         AuditContext,
         AuditEventCategory,

@@ -49,6 +49,60 @@ from tldw_Server_API.app.services.startup_study_privilege_jobs_pollers import (
 NOW = datetime(2026, 8, 30, 12, 0, tzinfo=timezone.utc)
 
 
+@pytest.mark.asyncio
+async def test_semantic_audit_adapter_resolves_owner_and_flushes_durably(monkeypatch):
+    from tldw_Server_API.app.api.v1.API_Deps import Audit_DB_Deps
+    from tldw_Server_API.app.services import notes_semantic_audit
+
+    owners = []
+    events = []
+    flushes = []
+
+    class AuditService:
+        async def log_event(self, **fields):
+            events.append(fields)
+
+        async def flush(self, *, raise_on_failure=False):
+            flushes.append(raise_on_failure)
+
+    async def resolve(owner):
+        owners.append(owner)
+        return AuditService()
+
+    monkeypatch.setattr(Audit_DB_Deps, "get_or_create_audit_service_for_user_id_optional", resolve)
+    await notes_semantic_audit.emit_semantic_audit_event(
+        owner_user_id="owner-a",
+        dataset_id="notes",
+        event="generation_publication",
+        status="success",
+    )
+
+    assert owners == ["owner-a"]
+    assert len(events) == 1
+    assert events[0]["context"].user_id == "owner-a"
+    assert events[0]["action"] == "notes_semantic.generation_publication"
+    assert events[0]["resource_id"] == "notes"
+    assert flushes == [True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", [{"owner_user_id": ""}, {"dataset_id": ""}, {"event": "unknown"}])
+async def test_semantic_audit_adapter_rejects_invalid_event_before_resolution(monkeypatch, invalid):
+    from tldw_Server_API.app.api.v1.API_Deps import Audit_DB_Deps
+    from tldw_Server_API.app.core.Notes_Graph.semantic_observability import SemanticObservationError
+    from tldw_Server_API.app.services import notes_semantic_audit
+
+    resolver = AsyncMock()
+    monkeypatch.setattr(Audit_DB_Deps, "get_or_create_audit_service_for_user_id_optional", resolver)
+    fields = {"owner_user_id": "owner-a", "dataset_id": "notes", "event": "generation_publication", "status": "success"}
+    fields.update(invalid)
+
+    with pytest.raises(SemanticObservationError):
+        await notes_semantic_audit.emit_semantic_audit_event(**fields)
+
+    resolver.assert_not_awaited()
+
+
 def _context(*, sidecar_mode: bool) -> WorkerLifecycleContext:
     return WorkerLifecycleContext(
         app=object(),

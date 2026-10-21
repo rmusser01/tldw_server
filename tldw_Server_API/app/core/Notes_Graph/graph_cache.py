@@ -12,7 +12,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.notes_graph import NoteGraphRequest
+from tldw_Server_API.app.core.Notes_Graph.graph_models import NoteGraphRequest
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import (
     DEFAULT_SEMANTIC_INDEX_SETTINGS,
 )

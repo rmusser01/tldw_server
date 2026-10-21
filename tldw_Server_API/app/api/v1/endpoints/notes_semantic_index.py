@@ -45,7 +45,6 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_api import (
     build_notes_semantic_api,
 )
 from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
-    emit_semantic_audit_event,
     record_semantic_denial,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
@@ -53,6 +52,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     NotesLinkSyncInactiveDatasetError,
     resolve_notes_link_dataset_authority,
 )
+from tldw_Server_API.app.services.notes_semantic_audit import emit_semantic_audit_event
 
 SEMANTIC_ERROR_MESSAGES = {
     "notes_semantic_active_generation_required": "An active semantic generation is required.",

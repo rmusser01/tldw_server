@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from tldw_Server_API.app.api.v1.schemas.notes_graph import NoteGraphResponse
+from tldw_Server_API.app.core.Notes_Graph.graph_models import NoteGraphResponse
 
 
 def to_cytoscape(graph: NoteGraphResponse) -> dict[str, Any]:

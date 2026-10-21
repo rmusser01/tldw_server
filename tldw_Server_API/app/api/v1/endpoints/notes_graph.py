@@ -63,9 +63,6 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_api import (
     load_semantic_settings,
     resolve_semantic_capabilities,
 )
-from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
-    emit_semantic_audit_event,
-)
 from tldw_Server_API.app.core.Notes_Graph.semantic_projector import (
     SemanticGraphProjector,
     SemanticProjectionError,
@@ -81,6 +78,9 @@ from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     NotesLinkVersionConflictError,
     resolve_notes_link_coordinator,
     resolve_notes_link_dataset_authority,
+)
+from tldw_Server_API.app.services.notes_semantic_audit import (
+    emit_semantic_audit_event,
 )
 
 

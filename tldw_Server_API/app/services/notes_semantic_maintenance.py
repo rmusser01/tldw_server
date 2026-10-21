@@ -34,12 +34,12 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
 from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
     aggregate_semantic_health_snapshots,
     deserialize_semantic_health_snapshots,
-    emit_semantic_audit_event,
     record_semantic_aggregate_metrics,
     record_semantic_cleanup_retry,
     serialize_semantic_health_snapshots,
 )
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
+from tldw_Server_API.app.services.notes_semantic_audit import emit_semantic_audit_event
 from tldw_Server_API.app.services.notes_semantic_index_worker import (
     build_production_runtime,
 )

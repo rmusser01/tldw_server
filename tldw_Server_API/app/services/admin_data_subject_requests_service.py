@@ -514,6 +514,7 @@ def _build_notes_semantic_erasure_coordinator(user_id: int):
     from tldw_Server_API.app.core.Notes_Graph.semantic_erasure import (
         SemanticErasureCoordinator,
     )
+    from tldw_Server_API.app.services.notes_semantic_audit import emit_semantic_audit_event
 
     path = DatabasePaths.get_chacha_db_path(user_id)
     db = CharactersRAGDB(
@@ -524,6 +525,7 @@ def _build_notes_semantic_erasure_coordinator(user_id: int):
     try:
         return SemanticErasureCoordinator(
             db=db,
+            audit_emitter=emit_semantic_audit_event,
             settings=load_semantic_settings(),
             close_database_on_exit=True,
         )

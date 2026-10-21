@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -207,6 +208,10 @@ async def test_notes_erasure_builder_releases_constructor_thread_connection(
 
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
     from tldw_Server_API.app.services import admin_data_subject_requests_service as service
+    from tldw_Server_API.app.services import notes_semantic_audit
+
+    audit_emitter = AsyncMock()
+    monkeypatch.setattr(notes_semantic_audit, "emit_semantic_audit_event", audit_emitter)
 
     path = tmp_path / "ChaChaNotes.db"
     seed = CharactersRAGDB(path, client_id="7", config=ConfigParser())
@@ -226,6 +231,13 @@ async def test_notes_erasure_builder_releases_constructor_thread_connection(
     assert constructor_connection is None
     result = await coordinator.erase()
     assert result.deleted_notes == 1
+    audit_emitter.assert_awaited_once_with(
+        owner_user_id="7",
+        dataset_id="all",
+        event="dsr_cleanup",
+        status="success",
+        reason="none",
+    )
 
 
 @pytest.mark.asyncio

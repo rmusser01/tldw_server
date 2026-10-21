@@ -332,15 +332,28 @@ async def test_erasure_fences_cleans_and_purges_only_semantic_state(
         events.append(f"backend:{backend_name}")
         return vectors
 
+    audit_events = []
+
+    async def capture_audit(**fields):
+        audit_events.append(fields)
+
     result = await SemanticErasureCoordinator(
         db=db,
         vector_store_factory=_vectors_for_backend,
+        audit_emitter=capture_audit,
         timeout_seconds=1,
     ).erase()
 
     assert result.datasets == 1
     assert result.cleaned_generations == 1
     assert result.deleted_notes == 1
+    assert audit_events == [{
+        "owner_user_id": OWNER_ID,
+        "dataset_id": "all",
+        "event": "dsr_cleanup",
+        "status": "success",
+        "reason": "none",
+    }]
     assert events[0] == "fence"
     assert f"backend:{backend}" in events
     assert events.index(f"delete_ids:{generation.id}") < events.index("finalize")
@@ -632,15 +645,13 @@ async def test_vector_backend_failure_is_bounded_and_retains_retry_identity(
     generation = _create_resolved_generation(db)
 
     observations: list[tuple[str, str, str]] = []
-    audits: list[tuple[str, str]] = []
+    audits: list[tuple[str, str, str, str, str]] = []
     monkeypatch.setattr(
         "tldw_Server_API.app.core.Notes_Graph.semantic_erasure._metric",
         lambda *, status, backend, error_code: observations.append((status, backend, error_code)),
     )
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.Notes_Graph.semantic_erasure._audit",
-        lambda *, owner_user_id, status, reason: audits.append((status, reason)),
-    )
+    async def capture_audit(*, owner_user_id, dataset_id, event, status, reason):
+        audits.append((owner_user_id, dataset_id, event, status, reason))
 
     async def _vectors_for_backend(_backend_name: str):
         return FailingVectors([])
@@ -649,6 +660,7 @@ async def test_vector_backend_failure_is_bounded_and_retains_retry_identity(
         await SemanticErasureCoordinator(
             db=db,
             vector_store_factory=_vectors_for_backend,
+            audit_emitter=capture_audit,
             timeout_seconds=1,
         ).erase()
 
@@ -658,7 +670,7 @@ async def test_vector_backend_failure_is_bounded_and_retains_retry_identity(
     assert db.note_semantic_store.has_pending_cleanup(DATASET_ID) is True
     assert db.note_store.get_note_by_id(NOTE_ID) is not None
     assert observations == [("failed", "chromadb", "backend_unavailable")]
-    assert audits == [("failed", "backend_unavailable")]
+    assert audits == [(OWNER_ID, "all", "dsr_cleanup", "failed", "backend_unavailable")]
     with db.transaction() as conn:
         work = conn.execute(
             "SELECT claim_state,claim_token FROM note_semantic_work WHERE "
@@ -670,9 +682,14 @@ async def test_vector_backend_failure_is_bounded_and_retains_retry_identity(
     retry = await SemanticErasureCoordinator(
         db=db,
         vector_store_factory=lambda _backend: RecordingVectors([]),
+        audit_emitter=capture_audit,
         timeout_seconds=1,
     ).erase()
     assert retry.deleted_notes == 1
+    assert audits == [
+        (OWNER_ID, "all", "dsr_cleanup", "failed", "backend_unavailable"),
+        (OWNER_ID, "all", "dsr_cleanup", "success", "none"),
+    ]
 
 
 @pytest.mark.asyncio

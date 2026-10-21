@@ -13,7 +13,11 @@ from typing import Any, cast
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.notes_graph import (
+from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
+    SemanticProjectionChunk,
+)
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+from tldw_Server_API.app.core.Notes_Graph.graph_models import (
     EdgeType,
     GraphEdge,
     GraphNode,
@@ -24,10 +28,6 @@ from tldw_Server_API.app.api.v1.schemas.notes_graph import (
     SemanticExcerptPair,
     SemanticGraphStatus,
 )
-from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
-    SemanticProjectionChunk,
-)
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
 
 from .graph_cache import GraphCache, SemanticGraphQueryIdentity
 from .graph_service import (

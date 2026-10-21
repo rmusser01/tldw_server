@@ -13,14 +13,6 @@ from datetime import datetime, timezone
 
 from loguru import logger
 
-from tldw_Server_API.app.api.v1.schemas.notes_graph import (
-    EdgeType,
-    GraphEdge,
-    GraphLimits,
-    GraphNode,
-    NoteGraphRequest,
-    NoteGraphResponse,
-)
 from tldw_Server_API.app.core.DB_Management.chacha.note_graph_projection_store import (
     NoteGraphProjectionStore,
     ProjectionStatus,
@@ -30,6 +22,14 @@ from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     InputError,
 )
 from tldw_Server_API.app.core.Notes_Graph.graph_cache import GraphCache
+from tldw_Server_API.app.core.Notes_Graph.graph_models import (
+    EdgeType,
+    GraphEdge,
+    GraphLimits,
+    GraphNode,
+    NoteGraphRequest,
+    NoteGraphResponse,
+)
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import (
     DEFAULT_SEMANTIC_INDEX_SETTINGS,
 )
