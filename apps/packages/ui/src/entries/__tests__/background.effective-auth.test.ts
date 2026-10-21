@@ -387,7 +387,7 @@ describe("background effective extension auth", () => {
     expect(storageState.persistent.get("tldwConfig")).toEqual(config)
   })
 
-  it("preserves a rejected scoped refresh with a malformed matching org ID without invalidating credentials", async () => {
+  it("invalidates a rejected scoped refresh without overwriting its raw malformed-org config", async () => {
     const config = {
       serverUrl: "https://api.example.test",
       authMode: "multi-user",
@@ -427,9 +427,22 @@ describe("background effective extension auth", () => {
       "/api/v1/service-prompts/chat.rag.answer",
       "/api/v1/auth/refresh"
     ])
-    expect(storageState.persistent).toEqual(persistentBefore)
+    const { refreshSessionInvalidationKey, resolveEffectiveTldwConfig } =
+      await import("@/services/tldw/single-user-credential")
+    const { createSafeStorage } = await import("@/utils/safe-storage")
+    const marker = refreshSessionInvalidationKey(
+      config as unknown as import("@/services/tldw/TldwApiClient").TldwConfig
+    )
+    expect(marker).toMatch(/^tldwInvalidRefreshSession:[a-f0-9]{64}$/)
+    expect(storageState.persistent).toEqual(new Map([...persistentBefore, [marker, true]]))
     expect(storageState.session).toEqual(sessionBefore)
-    expect(storageState.set).not.toHaveBeenCalled()
+    expect(storageState.set).toHaveBeenCalledExactlyOnceWith(marker, true)
+    const effective = await resolveEffectiveTldwConfig({
+      persistent: createSafeStorage({ area: "local" }),
+      session: createSafeStorage({ area: "session" })
+    })
+    expect(effective).not.toHaveProperty("accessToken")
+    expect(effective).not.toHaveProperty("refreshToken")
   })
 
   it("invalidates a rejected scoped worker refresh in shared effective credentials", async () => {
@@ -2810,6 +2823,7 @@ describe("background effective extension auth", () => {
     ["/api/v1/media/ingest-web-content", "POST"],
     ["/api/v1/web-clipper/925871f6-30fa-470b-a2c4-2272051f2373", "GET"],
     ["/api/v1/web-clipper/clip%20with%20spaces/", "GET"],
+    ["/api/v1/media/71/versions", "POST"],
     ["/api/v1/media/71/versions?include_content=true", "GET"],
     ["/api/v1/media/71/versions?include_content=true&limit=10&page=2", "GET"],
     ["/api/v1/media/71/versions/7?include_content=true", "GET"],
@@ -2838,7 +2852,9 @@ describe("background effective extension auth", () => {
       storageState.persistent.delete("tldwCookieSessionConfig")
       const body =
         method === "POST"
-          ? { urls: ["https://example.com/story"], credential_free: true }
+          ? path === "/api/v1/media/71/versions"
+            ? { content: "New version text" }
+            : { urls: ["https://example.com/story"], credential_free: true }
           : undefined
       const fetchSpy = vi.fn(
         async (_input: RequestInfo | URL, _init?: RequestInit) =>
@@ -2878,7 +2894,7 @@ describe("background effective extension auth", () => {
   it.each([
     ["/api/v1/media/ingest-web-content", "GET"],
     ["/api/v1/media/ingest-web-content/extra", "POST"],
-    ["/api/v1/media/71/versions", "POST"],
+    ["/api/v1/media/71/versions/7", "POST"],
     ["/api/v1/media/71/versions/0", "GET"],
     ["/api/v1/media/71/versions/advanced", "GET"],
     ["/api/v1/media/71/versions/7/metadata", "GET"],

@@ -505,9 +505,7 @@ type ExistingPullReconciliation =
   | { safe: true }
   | { safe: false; error: string }
 
-/** Copy server content first, but keep the durable recipe lock until the
- * application-wide authority proves that every exact-ID marker is reconciled.
- */
+/** Hold exact recipe authority before copying content through the synced commit. */
 async function updateExistingFromServer(
   local: LocalPrompt,
   serverPrompt: ServerPrompt,
@@ -525,8 +523,26 @@ async function updateExistingFromServer(
     localIdentity.promptSchemaVersion === 2 ||
     updateFields.promptSchemaVersion === 2
 
+  const ownerId =
+    ownership?.dispatch.state === "dispatched"
+      ? ownership.dispatch.actualOwnerId
+      : null
+  const updateOwnedRow = (fields: Partial<LocalPrompt>, expected: LocalPrompt) =>
+    db.prompts.update(local.id, current => {
+      assertPromptOwnedBy(current, ownerId)
+      if (
+        current.serverId !== expected.serverId ||
+        current.studioProjectId !== expected.studioProjectId ||
+        current.studioPromptId !== expected.studioPromptId ||
+        current.promptFormat !== expected.promptFormat ||
+        current.promptSchemaVersion !== expected.promptSchemaVersion
+      )
+        throw new PromptOwnershipError("Prompt identity changed during reconciliation")
+      Object.assign(current, fields)
+    })
+
   if (!isRecipe) {
-    if ((await db.prompts.update(local.id, updateFields)) === 0)
+    if ((await updateOwnedRow(updateFields, local)) === 0)
       throw new Error("Local prompt disappeared during reconciliation")
     await clearReconciledOwner(ownership)
     return { safe: true }
@@ -536,18 +552,6 @@ async function updateExistingFromServer(
   const copiedFields = { ...updateFields }
   delete copiedFields.syncStatus
   delete copiedFields.lastSyncedAt
-  if (
-    (await db.prompts.update(local.id, {
-      ...copiedFields,
-      syncStatus: "error"
-    })) === 0
-  )
-    throw new Error("Local prompt disappeared during reconciliation")
-
-  const ownerId =
-    ownership?.dispatch.state === "dispatched"
-      ? ownership.dispatch.actualOwnerId
-      : null
   if (!ownerId)
     return { safe: false, error: "Recipe pull owner is unavailable" }
 
@@ -560,6 +564,9 @@ async function updateExistingFromServer(
       reconciliationOperationId
     )
   } catch {
+    await finishRecipePersistenceReconciliation(
+      local.id, ownerId, reconciliationOperationId, false
+    ).catch(() => undefined)
     return {
       safe: false,
       error: "Recipe uncertainty authority is unavailable"
@@ -568,12 +575,15 @@ async function updateExistingFromServer(
   if (!reconciled)
     return { safe: false, error: "Recipe has an unresolved operation" }
 
+  const copied = { ...local, ...copiedFields, syncStatus: "error" as const }
   try {
+    if ((await updateOwnedRow({ ...copiedFields, syncStatus: "error" }, local)) === 0)
+      throw new Error("Local prompt disappeared during reconciliation")
     if (
-      (await db.prompts.update(local.id, {
+      (await updateOwnedRow({
         syncStatus: "synced",
         lastSyncedAt: reconciledAt
-      })) === 0
+      }, copied)) === 0
     )
       throw new Error("Local prompt disappeared during reconciliation")
   } catch (error) {
@@ -601,10 +611,10 @@ async function updateExistingFromServer(
     // restoration is best effort: its failure must not skip authority cleanup.
     try {
       if (
-        (await db.prompts.update(local.id, {
+        (await updateOwnedRow({
           syncStatus: "error",
           lastSyncedAt: null
-        })) === 0
+        }, copied)) === 0
       )
         throw new Error("Local prompt disappeared during reconciliation")
     } catch {
@@ -1123,7 +1133,11 @@ export async function pullFromStudio(
   try {
     const ownerId = await resolvePromptOwnerId(expectedOwnerId)
     if (!ownerId) throw new Error("Prompt owner is unavailable")
-    if (existingLocalId) assertPromptOwnedBy(await db.prompts.get(existingLocalId), ownerId)
+    const requestedLocal = existingLocalId
+      ? await db.prompts.get(existingLocalId)
+      : undefined
+    if (existingLocalId) assertPromptOwnedBy(requestedLocal, ownerId)
+    const capturedLocal = requestedLocal ? { ...requestedLocal } : undefined
     const response = await getServerPrompt(serverId, {
       recipePersistence: { mode: "owner", expectedOwnerId: ownerId }
     })
@@ -1156,7 +1170,7 @@ export async function pullFromStudio(
 
     // Update existing local prompt
     if (existingLocalId) {
-      const local = await db.prompts.get(existingLocalId)
+      const local = capturedLocal
       if (local) {
         recipeOwnership = dispatch
           ? { localId: existingLocalId, dispatch }

@@ -14,7 +14,7 @@ ADR required: no. Fixture, documentation publication and baseline-location corre
 **Goal**: Fix new test-quality offenses with actual body/state/output assertions and appropriate real boundary fixtures; refresh only moved conditional-predicate locations after verifying unchanged semantics/counts.
 **Success Criteria**: No new or worse quality offenses; no added tenant predicate baseline allowances.
 **Tests**: Scope and test-quality ratchets, affected test modules and touched-scope lint/Bandit.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage 3: Publish and finish integration
 **Goal**: Publish reviewed fixes through normal hooks and get the final head merged into dev.
@@ -45,8 +45,12 @@ The11further quality-file violations are cleared without baseline changes. Added
 
 The shared composer now counts an explicit image setter mutation once: it updates the existing previous-image ref before the layout fallback. Sequential drops retain the second image while reset/raw-setValues/restore invalidation and synchronous owner/ABA/latest-read fences remain. Model Playground's local-input fixture mocks its current catalog boundary; Setup asserts both the exact safe progress payload and captured request scope. All146affected image/account/recovery/draft/Model cases pass; focused Setup1passes19deselected. All3changedUI files have0ESLint diagnostics; TypeScript-only Bandit is not applicable. Independent connected source review supports this scope.
 
+## Fifth repair batch
+
+Recipe Pull now acquires the existing exact reconciliation lease before copying content and validates captured owner/link/schema at each actual local mutation. Denied reconciliation preserves the exact original row; acquired write/release failures retain scoped evidence. Eleven new concurrent owner/link/schema replacement controls reproduced red before repair. Direct/extension settlement observers execute the real mutator once and hold its acknowledgement. The final recipe/uncertainty/structured/auto-sync cohort passes1182/1182. The preceding auth/structured/auto-sync cohort passes1206/1206; those cohorts overlap and are not one combined run. Auth tests preserve raw credentials/session state, require the documented opaque boolean invalidation marker and withheld effective tokens, and cover collection versionsPOST positively with itemPOST denied. Four UI ESLint scopes add0diagnostics (background10 inherited); no Python scope for Bandit. Independent connected review is clear for this batch. No new ADR: this restores the existing exact-authority ownership contract without changing APIs, persistence schema or architecture rules.
+
 ## Remaining work
 
-The remaining36known frontend failures are background auth2, recipe persistence10, Sidepanel4 and OpenUI20; no edits to these4files yet. Extension bootstrap remains pending. Diagnose and run focused affected cases instead of replaying the573-case cohort. Current-head CI must qualify final source including the three locally unavailable PostgreSQL-tool scenarios. Quality baselines remain unchanged and the global ratchet passed before this frontend-only batch. Review exact current-head job logs as they finish.
+Sidepanel4 and OpenUI20 known frontend failures remain; extension bootstrap remains pending. Diagnose focused affected cases instead of replaying the573-case cohort. Current-head CI must qualify final source including the three locally unavailable PostgreSQL-tool scenarios. Quality baselines remain unchanged and the global ratchet passed before the frontend-only batches. Review exact current-head job logs as they finish.
 
-Auto-merge is disabled. Latest published head24ebe1933d is OPEN and behind currentdev; dev was fetched for inspection only. MERGE_QUEUE was verified absent; check again before final integration. The10-minute watch remains active until verified merge into dev. Main UAT worktree/runtime and older paused heartbeat remain untouched. Broader runtime/UAT/release acceptance remains outside these CI results.
+Auto-merge is disabled. Latest verified published headdd87e42e4a is OPEN and behind currentdev; dev was fetched for inspection only. MERGE_QUEUE was verified absent; check again before final integration. The10-minute watch remains active until verified merge into dev. Main UAT worktree/runtime and older paused heartbeat remain untouched. Broader runtime/UAT/release acceptance remains outside these CI results.
