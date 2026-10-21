@@ -118,6 +118,7 @@ vi.mock("@/db/dexie/chat", () => ({
 }));
 vi.mock("@/db/dexie/history-selection", () => ({
   ensureLocalProfileId: async () => "profile",
+  bindUnboundLocalHistory: async () => { throw new Error("Unexpected local binding in owned cockpit fixture") },
   getLocalHistoryOwner: async (id: string) => ({ kind: "local", profile_id: "profile", owner_key: "local-owner", conversation_id: id }),
   loadHistoryTurnRecoveries: async () => [],
   dismissHistoryTurnRecovery: async () => {},

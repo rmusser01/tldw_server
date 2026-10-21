@@ -1538,7 +1538,9 @@ describe("Playground coordinator integration", () => {
     await setOwnedAssistant({ kind: "character", id: "4", name: "Cedar", metadata: { selectionMode: "tracked" } })
     useStoreMessageOption.setState({ serverChatId: null, historyId: null, messages: [], history: [], serverChatMetaLoaded: false, serverChatCharacterId: null, serverChatAssistantKind: null, serverChatAssistantId: null, temporaryChat: false, streaming: false, isProcessing: false })
     tldwClientState.getChat.mockImplementation(async (id: string) => id === "ordinary" ? { id, title: "Ordinary saved chat", source: "webui-chat", scope_type: "global" } : { id, title: id === "cedar" ? "Cedar chat" : "Robot chat", character_id: id === "cedar" ? 4 : 5, assistant_kind: "character", assistant_id: id === "cedar" ? "4" : "5", source: "webui-character-chat", scope_type: "global" })
-    tldwClientState.listChatMessages.mockImplementation(async (id: string) => [{ id: `${id}-answer`, role: "assistant", content: id === "cedar" ? "Cedar answer" : id === "ordinary" ? "Ordinary answer" : "BEEP BOOP", version: 1 }])
+    for (const id of ["cedar", "ordinary", "robot"]) {
+      setFixtureTranscript(id, [{ id: `${id}-answer`, role: "assistant", content: id === "cedar" ? "Cedar answer" : id === "ordinary" ? "Ordinary answer" : "BEEP BOOP", version: 1 }])
+    }
     tldwClientState.getCharacter.mockImplementation(async (id: string | number) => ({ id: Number(id), name: Number(id) === 4 ? "Cedar" : "Robot" }))
     window.history.replaceState({}, "", "/chat?mode=character&characterId=4&chatId=cedar")
     const view = render(<><Playground /><SavedChatSelection ordinary={ordinary} /></>)
