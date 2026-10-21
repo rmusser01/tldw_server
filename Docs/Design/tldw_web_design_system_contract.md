@@ -456,6 +456,13 @@ proof surface.
 
 ### Stage 5: Migration Queue
 
+Non-product-state token, color, radius, and layout reporting is specified in
+[Repository-Wide Design-System Drift Reporting](../superpowers/specs/2026-10-20-design-system-drift-reporting-design.md).
+That proposed reporter scans existing and new UI code with advisory findings;
+it is not implemented by the spec and does not change current required guards.
+See proposed [ADR-079](../ADR/079-advisory-ui-design-drift-reporting.md) for the
+nonblocking policy and the separate decision required before enforcement.
+
 Prioritize later migrations:
 
 1. Chat and Playground
