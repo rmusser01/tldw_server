@@ -163,6 +163,7 @@ from tldw_Server_API.app.core.AuthNZ.websocket_session_auth import (
     cookie_websocket_rejection_code,
     resolve_single_user_cookie_websocket,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import (
     CharactersRAGDB,
     CharactersRAGDBError,
@@ -8875,7 +8876,7 @@ async def persona_stream(
 
         async def _get_saved_wake_phrases_for_session(session_id: str) -> list[str]:
             runtime_context = await asyncio.to_thread(
-                _load_persona_policy_rules_for_session,
+                chacha_operation(independent=True)(_load_persona_policy_rules_for_session),
                 persona_scope_db,
                 session_id=session_id,
                 user_id=authenticated_user_id,
@@ -8886,7 +8887,7 @@ async def persona_stream(
             if not runtime_persona_id or persona_scope_db is None:
                 return []
             profile = await asyncio.to_thread(
-                persona_scope_db.get_persona_profile,
+                chacha_operation(independent=True)(persona_scope_db.get_persona_profile),
                 runtime_persona_id,
                 user_id=authenticated_user_id,
                 include_deleted=False,
@@ -8962,7 +8963,7 @@ async def persona_stream(
                 if not persona_live_voice_registry.is_preparing(**key, token=token):
                     return
                 context = await asyncio.to_thread(
-                    _load_persona_policy_rules_for_session, persona_scope_db,
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session), persona_scope_db,
                     session_id=session_id, user_id=authenticated_user_id,
                 )
                 if not context.get("session_exists") or context.get("session_terminal"):
@@ -10258,7 +10259,7 @@ async def persona_stream(
                     return
                 _ensure_current_turn(session_id)
                 current_context = await asyncio.to_thread(
-                    _load_persona_policy_rules_for_session, persona_scope_db,
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session), persona_scope_db,
                     session_id=session_id, user_id=authenticated_user_id,
                 )
                 if not current_context.get("session_exists") or current_context.get("session_terminal"):
@@ -10539,7 +10540,7 @@ async def persona_stream(
                 session_id = _normalize_ws_identifier(msg.get("session_id"), fallback="")
                 client_message_id = _bounded_client_message_id(msg.get("client_message_id"))
                 runtime_context = await asyncio.to_thread(
-                    _load_persona_policy_rules_for_session, persona_scope_db,
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session), persona_scope_db,
                     session_id=session_id, user_id=authenticated_user_id,
                 )
                 if not session_id or not runtime_context.get("session_exists") or runtime_context.get("session_terminal"):
@@ -10756,7 +10757,7 @@ async def persona_stream(
                     )
                     continue
                 runtime_context = await asyncio.to_thread(
-                    _load_persona_policy_rules_for_session, persona_scope_db,
+                    chacha_operation(independent=True)(_load_persona_policy_rules_for_session), persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
                 )
