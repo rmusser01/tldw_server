@@ -161,6 +161,7 @@ def test_resolved_google_list_uses_one_pinned_batch_request_without_redirects(
             "api_key": "trusted-key",
             "base_url": "https://pinned-google.example/v1",
             "credentials_resolved": True,
+            "_require_native_http": True,
             "_runtime_base_url_override": runtime_base_url_override_provenance(),
         }
     )
@@ -244,6 +245,7 @@ def test_resolved_google_scalar_uses_nested_dimension_config(
             "api_key": "trusted-key",
             "base_url": "https://pinned-google.example/v1",
             "credentials_resolved": True,
+            "_require_native_http": True,
             "_runtime_base_url_override": runtime_base_url_override_provenance(),
         }
     )
@@ -308,6 +310,7 @@ def test_resolved_google_probe_omits_dimension_config(
             "api_key": "trusted-key",
             "base_url": "https://pinned-google.example/v1",
             "credentials_resolved": True,
+            "_require_native_http": True,
             "_runtime_base_url_override": runtime_base_url_override_provenance(),
         }
     )["data"]
@@ -410,6 +413,7 @@ def test_resolved_google_request_rejects_redirect_without_replaying_note_text(
                 "api_key": "trusted-key",
                 "base_url": "https://pinned-google.example/v1",
                 "credentials_resolved": True,
+                "_require_native_http": True,
                 "_runtime_base_url_override": runtime_base_url_override_provenance(),
             }
         )
@@ -463,6 +467,7 @@ def test_resolved_google_batch_error_never_fans_out_to_per_input_calls(
                 "api_key": "trusted-key",
                 "base_url": "https://pinned-google.example/v1",
                 "credentials_resolved": True,
+                "_require_native_http": True,
                 "_runtime_base_url_override": runtime_base_url_override_provenance(),
             }
         )
@@ -796,6 +801,7 @@ def test_resolved_google_auth_failure_never_retries_with_query_key(
                 "api_key": "trusted-key",
                 "base_url": "https://google-compatible.example/v1",
                 "credentials_resolved": True,
+                "_require_native_http": True,
                 "_runtime_base_url_override": runtime_base_url_override_provenance(),
             }
         )

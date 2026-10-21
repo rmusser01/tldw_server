@@ -97,7 +97,7 @@ class HuggingFaceEmbeddingsAdapter(EmbeddingsProvider):
         credentials_resolved = request.get("credentials_resolved") is True
 
         # Native HTTP path via centralized client (mock-friendly)
-        if credentials_resolved or self._use_native_http():
+        if request.get("_require_native_http") is True or self._use_native_http():
             base_url = resolve_runtime_embedding_base_url(request, provider=self.name)
             try:
                 model_path = encode_huggingface_model_path(model)

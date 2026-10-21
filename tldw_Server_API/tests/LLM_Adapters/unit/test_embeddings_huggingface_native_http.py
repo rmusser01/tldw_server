@@ -190,6 +190,7 @@ def test_resolved_huggingface_request_forces_pinned_native_client_without_redire
             "api_key": "trusted-key",
             "base_url": "https://pinned-hf.example/models",
             "credentials_resolved": True,
+            "_require_native_http": True,
             "_runtime_base_url_override": runtime_base_url_override_provenance(),
         }
     )
@@ -246,6 +247,7 @@ def test_resolved_huggingface_request_rejects_redirect_without_replaying_note_te
                 "api_key": "trusted-key",
                 "base_url": "https://pinned-hf.example/models",
                 "credentials_resolved": True,
+                "_require_native_http": True,
                 "_runtime_base_url_override": runtime_base_url_override_provenance(),
             }
         )

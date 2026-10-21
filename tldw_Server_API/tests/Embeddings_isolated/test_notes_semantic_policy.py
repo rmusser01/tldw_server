@@ -178,6 +178,7 @@ async def test_executor_resolves_only_explicit_durable_credentials_without_reque
     ]
     assert executor.execution_identity().model_revision == "response-revision"
     assert adapter.requests[0]["base_url"] == "https://api.openai.com/v1"
+    assert adapter.requests[0]["_require_native_http"] is True
     assert is_runtime_base_url_override(adapter.requests[0]["_runtime_base_url_override"])
 
 
@@ -256,7 +257,7 @@ async def test_executor_request_is_accepted_by_real_provider_adapter(
             OpenAIEmbeddingsAdapter,
         )
 
-        monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_OPENAI", "1")
+        monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_OPENAI", "0")
 
         def fetch(**kwargs: object) -> Response:
             captured.append(kwargs)
@@ -271,7 +272,7 @@ async def test_executor_request_is_accepted_by_real_provider_adapter(
             GoogleEmbeddingsAdapter,
         )
 
-        monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", "1")
+        monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_GOOGLE", "0")
         monkeypatch.setattr(module, "create_client", lambda **_kwargs: Client())
         adapter = GoogleEmbeddingsAdapter()
         model = "text-embedding-004"
@@ -281,7 +282,7 @@ async def test_executor_request_is_accepted_by_real_provider_adapter(
             HuggingFaceEmbeddingsAdapter,
         )
 
-        monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_HUGGINGFACE", "1")
+        monkeypatch.setenv("LLM_EMBEDDINGS_NATIVE_HTTP_HUGGINGFACE", "0")
         monkeypatch.setattr(module, "create_client", lambda **_kwargs: Client())
         adapter = HuggingFaceEmbeddingsAdapter()
         model = "sentence-transformers/all-MiniLM-L6-v2"

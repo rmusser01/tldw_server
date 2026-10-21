@@ -14,7 +14,10 @@ import yaml
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig, DatabaseError
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
-from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import SemanticDimensionState
+from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
+    SemanticDimensionState,
+    SemanticIndexingError,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
 from tldw_Server_API.app.core.Notes_Graph.semantic_vectors import (
@@ -143,6 +146,7 @@ async def test_pgvector_schema_and_reusable_contract(
     db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
     generation_id = _generation(db)
     other_owner_db = None
+    other_dataset_db = None
     role_name = f"notes_semantic_vectors_{uuid4().hex[:8]}"
     role_created = False
     settings = SemanticIndexSettings(pgvector_allowed_dimensions=frozenset({DIMENSIONS}))
@@ -158,7 +162,20 @@ async def test_pgvector_schema_and_reusable_contract(
             _skip_or_fail_unavailable_pgvector(exc)
 
         other_generation = _additional_generation(db, DATASET_ID)
-        other_dataset_generation = _generation(db, "dataset-b")
+        with pytest.raises(SemanticIndexingError, match="^notes_semantic_dataset_authority_conflict$"):
+            _generation(db, "dataset-b")
+        other_dataset_db = CharactersRAGDB(
+            ":memory:",
+            client_id="owner-c",
+            backend=backend,
+        )
+        other_dataset_generation = _generation(other_dataset_db, "dataset-b")
+        other_dataset_store = await create_semantic_vector_store(
+            "pgvector",
+            authority=other_dataset_db.note_semantic_store,
+            postgres_backend=backend,
+            settings=settings,
+        )
         other_owner_db = CharactersRAGDB(
             ":memory:",
             client_id="owner-b",
@@ -175,7 +192,7 @@ async def test_pgvector_schema_and_reusable_contract(
             (store, DATASET_ID, generation_id),
             (
                 (store, DATASET_ID, other_generation),
-                (store, "dataset-b", other_dataset_generation),
+                (other_dataset_store, "dataset-b", other_dataset_generation),
                 (other_owner_store, DATASET_ID, other_owner_generation),
             ),
             dimensions=DIMENSIONS,
@@ -325,6 +342,20 @@ async def test_pgvector_schema_and_reusable_contract(
                 connection=connection,
             ).rows == [{"vector_id": "rls-vector"}]
             backend.execute(
+                "SELECT set_config('app.current_dataset_id', ?, true)",
+                ("dataset-b",),
+                connection=connection,
+            )
+            assert backend.execute(
+                f"SELECT vector_id FROM {ident(table)}",  # nosec B608 - allowlisted table.
+                connection=connection,
+            ).rows == []
+            backend.execute(
+                "SELECT set_config('app.current_dataset_id', ?, true)",
+                (DATASET_ID,),
+                connection=connection,
+            )
+            backend.execute(
                 "SELECT set_config('app.current_user_id', ?, true)",
                 ("owner-b",),
                 connection=connection,
@@ -352,6 +383,8 @@ async def test_pgvector_schema_and_reusable_contract(
                 )
         if other_owner_db is not None:
             other_owner_db.close_all_connections()
+        if other_dataset_db is not None:
+            other_dataset_db.close_all_connections()
         db.close_all_connections()
         backend.get_pool().close_all()
 

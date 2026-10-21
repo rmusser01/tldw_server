@@ -104,7 +104,7 @@ class GoogleEmbeddingsAdapter(EmbeddingsProvider):
             type(dimensions) is not int or dimensions <= 0
         ):
             raise ValueError("Embeddings: 'dimensions' must be a positive integer")
-        if credentials_resolved or self._use_native_http():
+        if request.get("_require_native_http") is True or self._use_native_http():
             base = resolve_runtime_embedding_base_url(request, provider=self.name) or self._base_url()
             try:
                 model_path = encode_google_model_path(model)

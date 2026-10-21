@@ -274,6 +274,7 @@ class NotesEmbeddingExecutor:
             "api_key": credentials.api_key,
             "app_config": app_config,
             "credentials_resolved": True,
+            "_require_native_http": True,
             "base_url": resolved_base_url,
             "_runtime_base_url_override": runtime_base_url_override_provenance(),
         }
