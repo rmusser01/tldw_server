@@ -10,6 +10,7 @@ from typing import Any
 
 import httpx
 
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.exceptions import PersonaConversationError
 
 
@@ -87,7 +88,8 @@ async def complete_persona_turn(
         PersonaConversationError: Chat admission or completion is unavailable.
     """
     profile = await asyncio.to_thread(
-        profile_store.get_persona_profile,
+        # Join the caller's ChaCha operation, or own this read outside one (a WebSocket turn).
+        chacha_operation()(profile_store.get_persona_profile),
         persona_id,
         user_id=user_id,
         include_deleted=False,
