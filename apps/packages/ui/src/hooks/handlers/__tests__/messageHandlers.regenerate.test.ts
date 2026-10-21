@@ -1,3 +1,4 @@
+import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { describe, expect, it, vi } from "vitest"
 import { useStoreMessageOption, type ChatHistory, type Message } from "@/store/option"
 import type { ActorSceneSend } from "@/hooks/chat/actor-scene-source"
@@ -243,6 +244,7 @@ describe("createRegenerateLastMessage", () => {
         { id: "selected-assistant", revision: "answer-revision", message: "Hi", images: [] }
       ]
     }
+    const originalStore = useStoreMessageOption.getState()
     const originIsCurrent = vi.fn(() => true)
     const regenerate = createRegenerateLastMessage({
       validateBeforeSubmitFn: () => true,
@@ -252,23 +254,36 @@ describe("createRegenerateLastMessage", () => {
         { id: "selected-assistant", parentMessageId: "user", isBot: true, name: "Assistant", message: "Hi", sources: [] }
       ],
       setHistory, setMessages, onSubmit, beforeSubmit,
+      captureSourceFence: () => captureChatDraftSource().isCurrent,
       historySelection: {
         getCurrent: () => ({ status: "ready", owner, view, capture }),
         fence: () => originIsCurrent
       } as unknown as NonNullable<Parameters<typeof createRegenerateLastMessage>[0]["historySelection"]>
     })
-    await expect(regenerate()).resolves.toEqual({ status: "submitted" })
-    expect(onSubmit).toHaveBeenCalledOnce()
-    expect(onSubmit).toHaveBeenCalledWith({
-      message: "Hello", image: "",
-      historyRegenerateBoundary: {
-        answerId: "selected-assistant", questionId: "user", questionRevision: "question-revision",
-        owner, originView: view, originIsCurrent
-      }
-    })
-    expect(beforeSubmit).not.toHaveBeenCalled()
-    expect(setHistory).not.toHaveBeenCalled()
-    expect(setMessages).not.toHaveBeenCalled()
+    try {
+      await expect(regenerate()).resolves.toEqual({ status: "submitted" })
+      expect(onSubmit).toHaveBeenCalledOnce()
+      expect(onSubmit).toHaveBeenCalledWith({
+        message: "Hello", image: "",
+        historyRegenerateBoundary: {
+          answerId: "selected-assistant", questionId: "user", questionRevision: "question-revision",
+          owner, originView: view, originIsCurrent: expect.any(Function)
+        }
+      })
+      expect(beforeSubmit).not.toHaveBeenCalled()
+      expect(setHistory).not.toHaveBeenCalled()
+      expect(setMessages).not.toHaveBeenCalled()
+      const submittedOriginIsCurrent = onSubmit.mock.calls[0][0].historyRegenerateBoundary.originIsCurrent
+      expect(submittedOriginIsCurrent()).toBe(true)
+      originIsCurrent.mockReturnValue(false)
+      expect(submittedOriginIsCurrent()).toBe(false)
+      originIsCurrent.mockReturnValue(true)
+      expect(submittedOriginIsCurrent()).toBe(true)
+      useStoreMessageOption.getState().startNewChatDraft(false)
+      expect(submittedOriginIsCurrent()).toBe(false)
+    } finally {
+      useStoreMessageOption.setState(originalStore, true)
+    }
   })
 
   it("removes the latest assistant turn and resubmits the previous user turn", async () => {

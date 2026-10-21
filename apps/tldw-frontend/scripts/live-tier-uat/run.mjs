@@ -1146,7 +1146,8 @@ export function resolveExtensionBuild({
       command: "bun",
       args: ["run", "build:chrome:prod"],
       cwd: extensionRoot,
-      env: safeEnv(baseEnv, baseEnvKeys),
+      // Rollup's production bundle exceeds Node's default heap during rendering.
+      env: { ...safeEnv(baseEnv, baseEnvKeys), NODE_OPTIONS: "--max-old-space-size=6144" },
     },
   }
 }

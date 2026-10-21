@@ -528,6 +528,7 @@ const snapshot = (text = "ALICE TRANSCRIPT"): SidepanelChatSnapshot => ({
 it("mounted shared Sidepanel keeps a stale completed Regenerate through the guarded service", async () => {
   io.user = "alice"
   io.data.clear()
+  io.write.mockReset().mockImplementation(async (key, value) => { io.data.set(key, value) })
   io.read.mockImplementation(async key => io.data.get(key))
   io.scope.mockImplementation(async () => ({
     requestScope: { config: { serverUrl: "http://chat.test", authMode: "multi-user" }, userId: "alice" },
@@ -2941,7 +2942,9 @@ describe.each([
   it("retains the active tab on same-owner rotation and a failed focus recheck", async () => {
     io.data.set(storedKey("alice"), tabsState())
     render(<Route />)
+    await waitFor(() => expect(useSidepanelChatTabsStore.getState().activeTabId).toBe("alice-one"))
     fireEvent.click(await screen.findByRole("button", { name: "alice two" }))
+    await screen.findByText("alice inactive")
     io.scope.mockRejectedValueOnce(new Error("offline"))
     act(() => {
       window.dispatchEvent(
