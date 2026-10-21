@@ -40,11 +40,11 @@ def jobs_manager(tmp_path: Path) -> JobManager:
     return JobManager(path)
 
 
-def _binding(db: CalendarDatabase) -> ExternalCalendarBindingRow:
+def _binding(db: CalendarDatabase, owner_user_id: int = 1) -> ExternalCalendarBindingRow:
     """Create an owner-scoped hourly binding without needing provider credentials."""
-    calendar = db.create_calendar(tenant_id="default", owner_user_id=1, org_id=None, name="Imported", timezone="UTC")
+    calendar = db.create_calendar(tenant_id="default", owner_user_id=owner_user_id, org_id=None, name="Imported", timezone="UTC")
     account = db.create_external_account(
-        tenant_id="default", user_id=1, provider="caldav", display_name="Read-only provider", secret_ref=None,
+        tenant_id="default", user_id=owner_user_id, provider="caldav", display_name="Read-only provider", secret_ref=None,
     )
     return db.create_external_binding(
         account_id=account.id, calendar_id=calendar.id,
@@ -317,6 +317,39 @@ async def test_scheduler_preserves_scan_bound_windows_hourly_and_manual_cadence(
     assert jobs_manager.count_jobs(domain="calendar") == 1
     assert len(calendar_db.list_sync_events(binding_id=first.id)) == 1
     assert all(calendar_db.list_sync_events(binding_id=row.id) == [] for row in [manual, future, second])
+
+
+@pytest.mark.asyncio
+async def test_periodic_runner_survives_legacy_interval_overflow_and_queues_later_owner(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A legacy interval cannot stop the shared runner when an owner's quota refuses dispatch."""
+    manual = _binding(calendar_db)
+    calendar_db.update_external_binding(manual.id, sync_interval_minutes=None)
+    job = CalendarService(db=calendar_db, job_manager=jobs_manager).trigger_binding_sync(
+        actor_user_id=1, binding_id=manual.id,
+    )
+    blocked = _binding(calendar_db)
+    calendar_db.update_external_binding(blocked.id, sync_interval_minutes=10_000_000_000)
+    healthy = _binding(calendar_db, owner_user_id=2)
+    for binding in (blocked, healthy):
+        calendar_db.update_binding_sync_state(binding.id, next_scan_at="2026-06-10T11:00:00+00:00")
+    monkeypatch.setenv("JOBS_QUOTA_MAX_QUEUED_CALENDAR_USER_1", "1")
+    stop = asyncio.Event()
+    scan = scheduler.queue_due_calendar_sync_jobs
+
+    async def scan_once(**kwargs: Any) -> Any:
+        try:
+            return await scan(now=_SCAN_AT, **kwargs)
+        finally:
+            stop.set()
+
+    monkeypatch.setattr(scheduler, "queue_due_calendar_sync_jobs", scan_once)
+    await scheduler.run_calendar_sync_scheduler(stop, db=calendar_db, job_manager=jobs_manager, interval_seconds=0.01)
+    assert jobs_manager.count_jobs(domain="calendar", owner_user_id="2") == 1
+    assert jobs_manager.get_job(job.job_id)["status"] == "queued"
+    assert calendar_db.get_sync_admission(blocked.id) is not None
+    assert calendar_db.get_external_binding(blocked.id).next_scan_at == datetime.max.replace(tzinfo=timezone.utc).isoformat()
 
 
 @pytest.mark.asyncio

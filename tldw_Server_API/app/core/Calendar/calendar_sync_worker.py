@@ -552,11 +552,15 @@ def _next_scan_at(binding: ExternalCalendarBindingRow, synced_at: str) -> str | 
     """Compute the next UTC scan time only for a positive polling interval.
 
     Return None for manual-only null intervals and legacy nonpositive intervals.
+    Saturate unrepresentable legacy intervals at the latest supported UTC instant.
     """
     if binding.sync_interval_minutes is None or binding.sync_interval_minutes <= 0:
         return None
     parsed = datetime.fromisoformat(synced_at.replace("Z", "+00:00"))
-    return (parsed + timedelta(minutes=int(binding.sync_interval_minutes))).astimezone(timezone.utc).isoformat()
+    try:
+        return (parsed.astimezone(timezone.utc) + timedelta(minutes=int(binding.sync_interval_minutes))).isoformat()
+    except OverflowError:
+        return datetime.max.replace(tzinfo=timezone.utc).isoformat()
 
 
 def _utcnow_iso() -> str:
