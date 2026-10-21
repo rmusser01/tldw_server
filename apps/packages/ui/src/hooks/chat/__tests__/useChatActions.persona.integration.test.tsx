@@ -390,6 +390,9 @@ describe("useChatActions persona integration", () => {
       source: undefined,
       external_ref: undefined
     }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: expect.any(AbortSignal) })
+    if (!temporaryChat) {
+      expect(createChatMock.mock.calls[0][1].signal).toBe(servicePromptSnapshot.scopeSignal)
+    }
     expect(options.setServerChatId).toHaveBeenCalledWith("persona-chat-1", { preserveTemporaryChat: temporaryChat })
     expect(useStoreMessageOption.getState().temporaryChat).toBe(temporaryChat)
     expect(normalChatModeMock).toHaveBeenCalledOnce()
@@ -1201,6 +1204,25 @@ describe("useChatActions persona integration", () => {
     expect(ragModeMock).not.toHaveBeenCalled()
   })
 
+  it("retains the draft until an existing Persona identity is loaded", async () => {
+    const options = {
+      ...createHookOptions(), serverChatId: "persona-chat-existing",
+      serverChatAssistantKind: "persona" as const, serverChatAssistantId: "garden-helper",
+      serverChatMetaLoaded: false
+    }
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => {
+      expect(await result.current.onSubmit({ message: "Keep this draft", image: "" })).toMatchObject({
+        status: "failed", restoreDraft: true
+      })
+    })
+    expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(false)
+    expect(options.ensureServerChatHistoryId).not.toHaveBeenCalled()
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(normalChatModeMock).not.toHaveBeenCalled()
+    expect(options.setServerChatId).not.toHaveBeenCalled()
+  })
+
   it("reuses an existing global conversation through inference and local persistence", async () => {
     let capturedParams:
       | {
@@ -1234,6 +1256,7 @@ describe("useChatActions persona integration", () => {
       ...createHookOptions(),
       selectedAssistant: null,
       serverChatId: "existing-global-chat",
+      serverChatMetaLoaded: true,
       serverChatTitle: "Existing global chat"
     }
     const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
@@ -1255,7 +1278,7 @@ describe("useChatActions persona integration", () => {
     )
   })
 
-  it("does not forward stale character state into the first persona send", async () => {
+  it("does not let a draft Persona silently replace a loaded character identity", async () => {
     const options = {
       ...createHookOptions(),
       serverChatId: "character-chat-1",
@@ -1274,60 +1297,31 @@ describe("useChatActions persona integration", () => {
     const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
 
     await act(async () => {
-      await result.current.onSubmit({
-        message: "Hello persona",
-        image: ""
+      expect(await result.current.onSubmit({ message: "Hello persona", image: "" })).toMatchObject({
+        status: "failed", restoreDraft: true
       })
     })
 
-    expect(options.setServerChatId).toHaveBeenCalledWith(null)
-    expect(options.setServerChatCharacterId).toHaveBeenCalledWith(null)
-    expect(options.setServerChatAssistantKind).toHaveBeenCalledWith(null)
-    expect(options.setServerChatAssistantId).toHaveBeenCalledWith(null)
-    expect(options.setServerChatPersonaMemoryMode).toHaveBeenCalledWith(null)
-    expect(options.setServerChatMetaLoaded).toHaveBeenCalledWith(false)
-    expect(options.setServerChatTitle).toHaveBeenCalledWith(null)
-    expect(options.setServerChatState).toHaveBeenCalledWith("in-progress")
-    expect(options.setServerChatVersion).toHaveBeenCalledWith(null)
-    expect(options.setServerChatTopic).toHaveBeenCalledWith(null)
-    expect(options.setServerChatClusterId).toHaveBeenCalledWith(null)
-    expect(options.setServerChatSource).toHaveBeenCalledWith(null)
-    expect(options.setServerChatExternalRef).toHaveBeenCalledWith(null)
-    expect(createChatMock).toHaveBeenCalledWith({
-      assistant_kind: "persona",
-      assistant_id: "garden-helper",
-      persona_memory_mode: "read_only",
-      state: "in-progress",
-      topic_label: undefined,
-      cluster_id: undefined,
-      source: undefined,
-      external_ref: undefined
-    }, { scope: undefined, requestScope: servicePromptSnapshot.requestScope, signal: servicePromptSnapshot.scopeSignal })
-    expect(options.setServerChatAssistantKind).toHaveBeenLastCalledWith("persona")
-    expect(options.setServerChatAssistantId).toHaveBeenLastCalledWith(
-      "garden-helper"
-    )
-    expect(normalChatModeMock).toHaveBeenCalledWith(
-      "Hello persona",
-      "",
-      false,
-      [],
-      [],
-      expect.any(AbortSignal),
-      expect.objectContaining({
-        assistantIdentity: {
-          name: "Garden Helper",
-          avatarUrl: undefined
-        },
-        serverChatId: "persona-chat-1"
-      })
-    )
+    expect(useStoreMessageOption.getState()).toMatchObject({
+      serverChatId: "character-chat-1", serverChatCharacterId: 42,
+      serverChatAssistantKind: "character", serverChatMetaLoaded: true
+    })
+    for (const key of [
+      "setServerChatId", "setServerChatCharacterId", "setServerChatAssistantKind",
+      "setServerChatAssistantId", "setServerChatPersonaMemoryMode", "setServerChatMetaLoaded",
+      "setServerChatTitle", "setServerChatState", "setServerChatVersion", "setServerChatTopic",
+      "setServerChatClusterId", "setServerChatSource", "setServerChatExternalRef"
+    ] as const) expect(options[key]).not.toHaveBeenCalled()
+    expect(createChatMock).not.toHaveBeenCalled()
+    expect(normalChatModeMock).not.toHaveBeenCalled()
+    expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
   })
 
   it("keeps persona routing ahead of character fallback when persona chats carry a character id", async () => {
     const options = {
       ...createHookOptions(),
       serverChatId: "persona-chat-existing",
+      serverChatMetaLoaded: true,
       serverChatAssistantKind: "persona" as const,
       serverChatAssistantId: "garden-helper",
       serverChatCharacterId: "char-shadow",

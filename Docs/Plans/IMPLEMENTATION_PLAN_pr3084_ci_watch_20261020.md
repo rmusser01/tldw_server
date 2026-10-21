@@ -136,3 +136,13 @@ Two original Compare snapshot regressions exposed incomplete positive fixtures: 
 Causal red was2original failures plus2passing New/same-ID replacement controls with73excluded. The final complete cohort passes77/77, including every original assertion and both replacement controls. ESLint adds0diagnostics across source22/22 and test2/2 inherited findings; PythonBandit is inapplicable. Independent connected root/final reviews are clear. This restores the existing captured-identity contract without a new durable architecture rule, API, schema, dependency or quality allowance; no new ADR is needed. Normal configured checks precede publication.
 
 Other valid CI failures, final-head required statuses, trusted expanded-summary disposition and verified merge remain open.
+
+## Qualified Persona fixture ownership repair
+
+Compare root batch115f35eb4f5594fd85e7dbcb34595b0f0601b2fa was safely published and GitHub read back OPEN/dev with auto-merge disabled. All current review threads are resolved; no new human PR comment supplies the pending summary disposition.
+
+The shared SDK Scene fixture now copies the supplied metadata-loaded flag into real core state. Existing-conversation Persona positives explicitly declare loaded identity, while a new unloaded-identity control retains the draft and refuses dispatch. The obsolete implicit character-to-Persona test contradicted canonical saved identity: the real picker detaches before replacement. It now proves refusal without clearing or dispatch. All13original clearing oracles remain at the real reset-helper boundary, with all resets ordered before creation. Fresh SDK positives retain the exact new-Persona payload, final identity, provider parameters and saved-turn signal identity. Production identity guards remain untouched.
+
+The connected run was83passed35failed/118: all27Persona and48reset-helper cases passed; exact saved-signal positives subsequently2passed25excluded. Actual Form detachment1passed220excluded. The three sibling SDK files also fail35/43 using the exact pre-edit fixture, with every failure name identical; this introduces no sibling regression and does not qualify that scope. Three changed TS files report0lint diagnostics; PythonBandit is inapplicable. Independent connected final review is clear. No new architecture rule, dependency, schema or baseline is introduced; no new ADR is needed. Normal configured checks precede publication.
+
+The35sibling failures and other remaining CI scopes, final-head statuses, summary disposition and normal verified merge remain open.
