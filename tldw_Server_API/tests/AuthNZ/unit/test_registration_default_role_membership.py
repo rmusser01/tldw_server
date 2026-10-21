@@ -261,7 +261,7 @@ async def test_registration_hash_keeps_event_loop_responsive(tmp_path, monkeypat
     import asyncio
     import threading
 
-    service, _db_path = _make_service(tmp_path)
+    service, db_path = _make_service(tmp_path)
     original_hash = service.password_service.hash_password
     loop = asyncio.get_running_loop()
     released = threading.Event()
@@ -283,3 +283,4 @@ async def test_registration_hash_keeps_event_loop_responsive(tmp_path, monkeypat
         released.set()
     # The controlled hash can observe loop progress only when it runs off-loop.
     assert release_observed == [True]  # nosec B101
+    assert _role_memberships(db_path, "responsive-registration") == ["user"]  # nosec B101 - Loop progress must still complete real registration.

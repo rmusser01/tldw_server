@@ -179,8 +179,11 @@ async def test_mutation_and_visibility_denials_do_not_start_discovery(runtime, m
     runtime.app.dependency_overrides[get_auth_principal] = lambda: _principal(admin=admin, configure=configure)
     server_id = "missing" if admin else "uat-smoke"
     action = "validate" if owner == 2 else "refresh-discovery"
+    before = await runtime.repo.get_external_server("uat-smoke")
     response = await runtime.client.post(f"{BASE}/{server_id}/{action}")
     assert response.status_code == status  # nosec B101 - pytest behavioral oracle, not a runtime guard.
+
+    assert await runtime.repo.get_external_server("uat-smoke") == before  # nosec B101 - Rejected discovery must preserve the managed server row.
 
 
 @pytest.mark.parametrize(("enabled", "source", "superseded"), [
@@ -191,8 +194,11 @@ async def test_unavailable_rows_refuse_before_transport(runtime, monkeypatch, en
         raise AssertionError("Unavailable row must not start a transport")
     monkeypatch.setattr(manager_mod, "build_transport_adapter", unexpected_adapter)
     await _save(runtime, enabled=enabled, source=source, superseded=superseded)
+    before = await runtime.repo.get_external_server("uat-smoke")
     response = await runtime.client.post(f"{BASE}/uat-smoke/refresh-discovery")
     assert response.status_code == 409  # nosec B101 - pytest behavioral oracle, not a runtime guard.
+
+    assert await runtime.repo.get_external_server("uat-smoke") == before  # nosec B101 - Rejected discovery must preserve the managed server row.
 
 
 async def test_same_server_requests_reconcile_serially(runtime, monkeypatch):

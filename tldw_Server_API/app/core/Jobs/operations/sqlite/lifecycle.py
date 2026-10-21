@@ -165,8 +165,8 @@ def _candidate_sql(
         sql += " AND job_type = ?"
         params.append(command.job_type)
     elif command.job_types is not None:
-        sql += f" AND job_type IN ({', '.join('?' for _ in command.job_types)})"
-        params.extend(command.job_types)
+        sql += " AND job_type IN (SELECT value FROM json_each(?))"
+        params.append(json.dumps(command.job_types))
 
     if command.tie_break == "fifo":
         tie_direction = "ASC"
@@ -187,8 +187,8 @@ def _candidate_sql(
             scheduled_sql += " AND job_type=?"
             scheduled_params.append(command.job_type)
         elif command.job_types is not None:
-            scheduled_sql += f" AND job_type IN ({', '.join('?' for _ in command.job_types)})"
-            scheduled_params.extend(command.job_types)
+            scheduled_sql += " AND job_type IN (SELECT value FROM json_each(?))"
+            scheduled_params.append(json.dumps(command.job_types))
         scheduled_sql += " LIMIT 1"
         tie_direction = "ASC" if conn.execute(scheduled_sql, scheduled_params).fetchone() else "DESC"
 

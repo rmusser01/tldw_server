@@ -122,6 +122,10 @@ def test_evaluation_cookie_never_overrides_explicit_headers(evaluation_cookie_cl
     response = client.get(path, headers=headers)
 
     assert response.status_code == 401, response.text  # nosec B101 - pytest header precedence assertion.
+    code = "invalid_credentials" if (
+        headers.get("X-API-KEY") == "invalid-key" or headers.get("Authorization") == "Bearer invalid-key"
+    ) else "missing_credentials"
+    assert response.json()["detail"]["error"]["code"] == code  # nosec B101 - Preserve structured authentication refusal.
 
 
 @pytest.mark.parametrize("path", [RECIPES, DATASETS])
@@ -145,6 +149,10 @@ def test_evaluation_retains_primary_key_and_bearer_without_cookie(evaluation_coo
     for path in (RECIPES, DATASETS):
         response = client.get(path, headers={header: value})
         assert response.status_code == 200, response.text  # nosec B101 - pytest explicit authentication assertion.
+        if path == RECIPES:
+            assert "summarization_quality" in {item["recipe_id"] for item in response.json()}  # nosec B101 - Real recipe registry.
+        else:
+            assert response.json()["data"] == []  # nosec B101 - Isolated owner dataset list.
 
 
 def test_evaluation_cookie_dataset_write_retains_csrf_and_owner(evaluation_cookie_client):
@@ -179,6 +187,12 @@ def test_evaluation_cookie_retains_read_permission_gate(evaluation_cookie_client
     response = client.get(path)
 
     assert response.status_code == (200 if can_read else 403), response.text  # nosec B101 - pytest claim-based permission assertion.
+    if not can_read:
+        assert response.json() == {"detail": "Permission denied: missing evals.read"}  # nosec B101 - Verify RBAC refusal.
+    elif path == RECIPES:
+        assert "summarization_quality" in {item["recipe_id"] for item in response.json()}  # nosec B101 - Read permission reaches the registry.
+    else:
+        assert response.json()["data"] == []  # nosec B101 - Read permission preserves owner isolation.
 
 
 def test_evaluation_cookie_read_permission_does_not_allow_manage(evaluation_cookie_client, monkeypatch):
@@ -191,6 +205,7 @@ def test_evaluation_cookie_read_permission_does_not_allow_manage(evaluation_cook
     response = client.post(DATASETS, json=DATASET_BODY, headers=headers)
 
     assert response.status_code == 403, response.text  # nosec B101 - pytest distinct manage permission assertion.
+    assert response.json() == {"detail": "Permission denied: missing evals.manage"}  # nosec B101 - Read cannot elevate to manage.
 
 
 def test_evaluation_other_cookie_name_is_not_a_candidate(evaluation_cookie_client):

@@ -94,3 +94,12 @@ def test_matching_and_absent_scope_headers_keep_existing_reads(scoped_routes, ex
     headers = {} if expected is None else {"X-TLDW-Expected-User-ID": expected}
     response = scoped_routes[0].get(path, headers=headers)
     assert response.status_code == 200, response.text  # nosec B101 # pytest verifies account scope admission and preservation.
+    payload = response.json()
+    if path == "/api/v1/prompt-studio/projects":
+        assert [row["name"] for row in payload["projects"]] == ["Bob project"]  # nosec B101 - Real account-owned projects.
+    elif path == "/api/v1/prompt-studio/prompts/get/1":
+        assert payload["data"]["user_prompt"] == "BOB CONTENT"  # nosec B101 - Real account-owned studio prompt.
+    elif path == "/api/v1/prompts":
+        assert [row["name"] for row in payload["items"]] == ["Bob private"]  # nosec B101 - Real account-owned library list.
+    else:
+        assert payload["user_prompt"] == "BOB CONTENT"  # nosec B101 - Real account-owned library prompt.

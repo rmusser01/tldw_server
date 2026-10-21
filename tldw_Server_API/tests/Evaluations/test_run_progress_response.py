@@ -459,8 +459,8 @@ async def test_service_cancel_cleanup_keeps_first_terminal_record(real_owned_run
     original_update = type(service.db).update_run_status
     cancelled_records = []
     webhook = AsyncMock()
-    monkeypatch.setattr(service, "enable_webhooks", True)
-    monkeypatch.setattr(service, "webhook_manager", SimpleNamespace(send_webhook=webhook))
+    service.enable_webhooks = True
+    service.webhook_manager = SimpleNamespace(send_webhook=webhook)
 
     async def pending_example(**_kwargs):
         entered.set()

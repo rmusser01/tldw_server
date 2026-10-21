@@ -121,6 +121,7 @@ def test_cookie_dictionary_validation_requires_csrf(chat_cookie_client):
     response = client.post(VALIDATE_PATH, json=VALID_DICTIONARY)
 
     assert response.status_code == 403, response.text  # nosec B101
+    assert response.json() == {"detail": "CSRF token validation failed"}  # nosec B101 - Verify the actual CSRF refusal.
 
 
 @pytest.mark.parametrize("session_state", ["absent", "invalid", "expired", "revoked", "wrong_type"])
@@ -163,6 +164,10 @@ def test_share_guard_never_falls_back_from_explicit_headers(chat_cookie_client, 
     response = client.get(_share_path(conversation), headers=headers)
 
     assert response.status_code == 401, response.text  # nosec B101
+    detail = "Could not validate credentials" if (
+        headers.get("X-API-KEY") == "invalid-key" or headers.get("Authorization") == "Bearer invalid-key"
+    ) else "Not authenticated (provide Bearer token or X-API-KEY)"
+    assert response.json() == {"detail": detail}  # nosec B101 - Explicit credentials cannot fall back to cookies.
 
 
 @pytest.mark.parametrize("header", ["X-API-KEY", "Authorization"])
@@ -174,10 +179,11 @@ def test_share_route_retains_explicit_primary_key_authentication(chat_cookie_cli
     response = client.get(_share_path(conversation), headers={header: value})
 
     assert response.status_code == 200, response.text  # nosec B101
+    assert response.json() == {"conversation_id": conversation, "links": []}  # nosec B101 - Return only the authenticated owner conversation.
 
 
 @pytest.mark.parametrize("claim", ["admin-role", "wildcard-permission", "boolean-only"])
-def test_cookie_guard_requires_verified_bypass_claims(chat_cookie_client, monkeypatch, claim):
+def test_cookie_guard_accepts_canonical_owner_independently_of_bypass_claims(chat_cookie_client, monkeypatch, claim):
     client, api_key, _db, conversation, owner = chat_cookie_client
     _authenticate(client, api_key)
     user = User_DB_Handling.User(
@@ -189,11 +195,11 @@ def test_cookie_guard_requires_verified_bypass_claims(chat_cookie_client, monkey
 
     response = client.get(_share_path(conversation))
 
-    expected = 401 if claim == "boolean-only" else 200
-    assert response.status_code == expected, response.text  # nosec B101
+    assert response.status_code == 200, response.text  # nosec B101 - A canonical cookie is ordinary identity, not a bypass.
+    assert response.json() == {"conversation_id": conversation, "links": []}  # nosec B101 - Canonical owner identity retains storage ownership.
 
 
-def test_cookie_guard_respects_disabled_admin_bypass(chat_cookie_client):
+def test_cookie_guard_accepts_canonical_session_with_admin_bypass_disabled(chat_cookie_client):
     client, api_key, _db, _conversation, _owner = chat_cookie_client
 
     @client.app.get("/api/test/no-bypass", dependencies=[
@@ -205,7 +211,8 @@ def test_cookie_guard_respects_disabled_admin_bypass(chat_cookie_client):
     _authenticate(client, api_key)
     response = client.get("/api/test/no-bypass")
 
-    assert response.status_code == 401, response.text  # nosec B101
+    assert response.status_code == 200, response.text  # nosec B101
+    assert response.json() == {"ok": True}  # nosec B101 - Ordinary session auth remains separate from admin bypass.
 
 
 @pytest.mark.parametrize("boundary", ["foreign-owner", "global-as-workspace", "workspace-as-global",
@@ -233,6 +240,10 @@ def test_cookie_share_routes_retain_owner_and_scope_fences(chat_cookie_client, b
     response = client.get(_share_path(conversation), params=params)
 
     assert response.status_code == expected, response.text  # nosec B101
+    if expected == 200:
+        assert response.json() == {"conversation_id": conversation, "links": []}  # nosec B101 - Exact workspace ownership.
+    else:
+        assert response.json() == {"detail": "Forbidden for this conversation" if expected == 403 else "Conversation not found"}  # nosec B101 - Owner and scope refusals stay distinct.
 
 
 def test_cookie_share_revocation_requires_csrf_and_preserves_settings(chat_cookie_client):
@@ -268,6 +279,7 @@ def test_share_guard_uses_configured_cookie_name(chat_cookie_client, monkeypatch
     response = client.get(_share_path(conversation))
 
     assert response.status_code == 200, response.text  # nosec B101
+    assert response.json() == {"conversation_id": conversation, "links": []}  # nosec B101 - Return only the authenticated owner conversation.
 
 
 @pytest.mark.parametrize("constraint", ["allowed", "scope", "endpoint", "method", "path", "revoked"])

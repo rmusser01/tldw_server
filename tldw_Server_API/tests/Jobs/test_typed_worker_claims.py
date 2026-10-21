@@ -33,6 +33,9 @@ AB_TYPES = ("embeddings_abtest_run", "embeddings_abtest_cleanup")
 def jobs(request, tmp_path, monkeypatch):
     """Use the canonical fixture-owned DB and both existing acquisition modes."""
     backend, single = request.param
+    monkeypatch.delenv("EVALUATIONS_JOBS_QUEUE", raising=False)
+    monkeypatch.delenv("EVALS_JOBS_QUEUE", raising=False)
+    monkeypatch.delenv("EVALUATIONS_RECIPE_RUN_JOBS_QUEUE", raising=False)
     monkeypatch.setenv("JOBS_SQLITE_SINGLE_UPDATE_ACQUIRE", str(int(single)))
     monkeypatch.setenv("JOBS_PG_SINGLE_UPDATE_ACQUIRE", str(int(single)))
     monkeypatch.setenv("JOBS_ENFORCE_LEASE_ACK", "1")
@@ -99,9 +102,6 @@ async def test_actual_entrypoint_never_leases_foreign_jobs(jobs, monkeypatch, ow
 
     monkeypatch.setattr(module, manager_name, lambda: jobs)
     monkeypatch.setattr(module, handler_name, business_operation)
-    monkeypatch.delenv("EVALUATIONS_JOBS_QUEUE", raising=False)
-    monkeypatch.delenv("EVALS_JOBS_QUEUE", raising=False)
-    monkeypatch.delenv("EVALUATIONS_RECIPE_RUN_JOBS_QUEUE", raising=False)
     await asyncio.wait_for(entrypoint(stop), timeout=5)
     assert observed == expected  # nosec B101 - pytest real worker routing assertion.
     assert processing == [1] * len(wanted)  # nosec B101 - pytest one serial lease assertion.
@@ -117,6 +117,16 @@ def test_scalar_unfiltered_and_singleton_set_contracts(jobs, filters, expected):
     create(jobs, "wanted", priority=5)
     claimed = acquire(jobs, **filters)
     assert claimed["job_type"] == expected  # nosec B101 - pytest compatible public selection assertion.
+
+
+@pytest.mark.parametrize("kind", ["single'quote", 'double"quote', "comma,kind", "back\\slash", "日本語"])
+def test_allowed_set_matches_literal_job_types(jobs, kind):
+    """Type membership binds escaped values without broadening the claim."""
+    foreign = create(jobs, kind + "-other", priority=1)
+    wanted = create(jobs, kind, priority=5)
+    claimed = acquire(jobs, job_types=(kind, "not-present"))
+    assert claimed["id"] == wanted["id"]  # nosec B101 - Escaped type values remain literal members.
+    assert jobs.get_job(foreign["id"])["status"] == "queued"  # nosec B101 - No broader claim or write.
 
 
 @pytest.mark.parametrize("tie", ["fifo", "lifo"])

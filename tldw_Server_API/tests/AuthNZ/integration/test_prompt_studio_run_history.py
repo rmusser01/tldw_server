@@ -148,6 +148,9 @@ def test_history_rejects_out_of_bounds_page_sizes(history_accounts, per_page):
     response = context.client.get(ROOT + "/test-cases/runs", headers=context.headers,
         params={"project_id": context.project["id"], "per_page": per_page})
     assert response.status_code == 422, response.text  # nosec B101 - pytest contract
+    assert [(item["loc"], item["type"]) for item in response.json()["detail"]] == [  # nosec B101 - The pagination bound itself must reject the request.
+        (["query", "per_page"], "greater_than_equal" if per_page == 0 else "less_than_equal")
+    ]
 
 
 @pytest.mark.parametrize("operation", ["list", "detail", "evaluation"])
@@ -229,6 +232,7 @@ def test_saved_history_read_compatible_with_optional_matching_owner_header(histo
 def test_history_requires_real_authentication(history_accounts, path):
     response = history_accounts.client.get(ROOT + path)
     assert response.status_code == 401, response.text  # nosec B101 - pytest contract
+    assert response.json() == {"detail": "Not authenticated (provide Bearer token or X-API-KEY)"}  # nosec B101 - No private history without authentication.
 
 
 @pytest.mark.parametrize("configs", ["malformed-json", ["not-a-model"], 12])

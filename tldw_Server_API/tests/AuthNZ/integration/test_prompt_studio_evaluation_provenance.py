@@ -117,6 +117,7 @@ def test_list_keeps_optional_matching_expected_owner_compatibility(history_accou
 def test_list_requires_real_authentication(history_accounts):
     response = history_accounts.client.get(ROOT + "/evaluations", params={"project_id": history_accounts.project["id"]})
     assert response.status_code == 401, response.text  # nosec B101 - pytest contract
+    assert response.json() == {"detail": "Not authenticated (provide Bearer token or X-API-KEY)"}  # nosec B101 - No private history without authentication.
 
 
 def test_projection_preserves_existing_exact_offset_pagination(history_accounts):

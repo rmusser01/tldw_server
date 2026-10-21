@@ -57,6 +57,8 @@ def test_prompt_projects_reject_missing_or_invalid_credentials(prompt_cookie_cli
     response = client.get(PROJECTS_PATH + suffix, headers=headers)
 
     assert response.status_code == 401, response.text  # nosec B101
+    detail = "Invalid or missing API Key" if credentials == "invalid-header" else "Not authenticated (provide Bearer token or X-API-KEY)"
+    assert response.json() == {"detail": detail}  # nosec B101 - Preserve credential precedence and omit private projects.
 
 
 def test_cookie_project_write_requires_csrf_and_retains_owner(prompt_cookie_client):

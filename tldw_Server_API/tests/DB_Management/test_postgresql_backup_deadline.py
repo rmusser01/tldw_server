@@ -115,8 +115,9 @@ def test_non_timeout_tool_failure_still_terminates_and_reaps_child(monkeypatch, 
             calls.append(("terminate", self.pid))
 
     monkeypatch.setattr(backups.subprocess, "Popen", lambda *a, **kw: Child())
-    with pytest.raises(failure_type):
+    with pytest.raises(failure_type) as failure:
         backups._run_postgres_tool(["/fixture/pg_restore"], env={}, timeout_seconds=3)
+    assert str(failure.value) == "controlled communication failure"  # nosec B101 - Preserve the original tool failure after reaping.
     assert calls == [("wait", 3), ("terminate", 12345), ("wait", 15)]  # nosec B101 -- exceptional unwinding cannot drop an active child.
 
 

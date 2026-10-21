@@ -5,7 +5,7 @@
 **Backfilled from:** not backfilled
 **Decision owner:** Human requester chose whole database, including all users and Jobs, during C09
 **Related task:** TASK-13260.278.18.83.45
-**Related spec/plan:** Docs/Design/2026-10-20-c09-postgresql-database-recovery.md; [C09 selected closure](../Plans/IMPLEMENTATION_PLAN_uat_all_fixes_20261006.md#c09-health-backup-restore-and-maintenance-selected-closure)
+**Related spec/plan:** Docs/Design/2026-10-20-c09-postgresql-database-recovery.md; [C09 selected closure](https://github.com/rmusser01/tldw_server/blob/14fa8c4a78da39af70df02c15fb2921356d7d200/Docs/Plans/IMPLEMENTATION_PLAN_uat_all_fixes_20261006.md#c09-health-backup-restore-and-maintenance-selected-closure)
 
 ## Decision
 

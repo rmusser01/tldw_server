@@ -85,6 +85,8 @@ def test_prompt_library_rejects_missing_invalid_and_explicit_bad_credentials(pro
     response = client.get(PROMPTS_PATH, params=LIST_PARAMS, headers=headers)
 
     assert response.status_code == 401, response.text  # nosec B101
+    detail = "Missing authentication token" if credentials in {"absent", "invalid-cookie"} else "Invalid authentication token"
+    assert response.json() == {"detail": detail}  # nosec B101 - Reject explicit bad credentials instead of returning prompt content.
 
 
 def test_prompt_library_rejects_revoked_cookie(prompt_library_client):
