@@ -472,23 +472,29 @@ _DROPPED_CHECKOUTS: queue.SimpleQueue[tuple[Any, Any]] = queue.SimpleQueue()
 
 
 class _LegacyCheckout:
-    """Close a legacy PostgreSQL checkout, and queue it for return, when its thread-local slot is dropped.
+    """Queue a legacy PostgreSQL checkout for return when its thread-local slot is dropped.
 
     Outside a ChaCha operation each thread keeps its checkout in the handle's
     ``threading.local``. The slot is dropped when the thread exits, which CPython
-    does at once, or when the handle is collected, which needs the cyclic garbage
-    collector because the handle's stores hold it. psycopg's ``Connection.__del__``
-    skips pooled connections, so without this the checkout and its pool slot are lost.
-    The connection is closed at once, so a session the thread left in a transaction
-    does not keep its locks and snapshot until the queued return is made.
+    does at once and on that thread, or on whichever thread drops the handle's
+    ``threading.local``: a collection (the handle's stores hold it, so only the
+    cyclic garbage collector frees it) or ``close_all_connections()``. psycopg's
+    ``Connection.__del__`` skips pooled connections, so without this the checkout
+    and its pool slot are lost.
+
+    On its owning thread the guard also closes the connection, so a session that
+    thread left in a transaction does not keep its locks and snapshot until the
+    queued return is made. Any other thread only queues it: the owner may still be
+    inside libpq on that connection, and finishing it there would free it in use.
     """
 
-    __slots__ = ("backend", "conn", "pid")
+    __slots__ = ("backend", "conn", "pid", "thread_id")
 
     def __init__(self, conn: Any, backend: Any) -> None:
         self.conn = conn
         self.backend = backend
         self.pid = os.getpid()
+        self.thread_id = threading.get_ident()
 
     def disarm(self) -> None:
         """The checkout was returned or closed explicitly."""
@@ -500,9 +506,11 @@ class _LegacyCheckout:
             if self.conn is None or os.getpid() != self.pid:
                 return  # disarmed, or a forked child: the parent still owns this session
             try:
-                # Ends the server session now (PQfinish). psycopg's close() takes no lock
-                # and makes no pool call, because these pools do not set close_returns.
-                self.conn.close()
+                if threading.get_ident() == self.thread_id:
+                    # The owner's own slot, typically at its exit: nothing else is using the
+                    # connection, so end the session now (PQfinish). psycopg's close() takes no
+                    # lock and makes no pool call, because these pools do not set close_returns.
+                    self.conn.close()
             finally:
                 # Lock-free: a collection can run this on any thread, even one holding the
                 # pool's own lock, so the pool's bookkeeping waits for _return_dropped_checkouts().

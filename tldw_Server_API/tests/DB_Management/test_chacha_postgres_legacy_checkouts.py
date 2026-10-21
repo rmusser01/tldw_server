@@ -217,3 +217,45 @@ def test_a_guard_finalized_at_interpreter_teardown_never_raises(monkeypatch):
     del guard
 
     assert unraisable == []
+
+
+def test_a_guard_dropped_off_its_owning_thread_queues_without_closing(monkeypatch):
+    """The owner may be inside libpq on that connection; finishing it from here would free it under the owner."""
+    dropped = queue.SimpleQueue()
+    monkeypatch.setattr(chacha_module, "_DROPPED_CHECKOUTS", dropped)
+    conn = SimpleNamespace(closed=False)
+    conn.close = lambda: setattr(conn, "closed", True)
+    armed = []
+    _run_in_plain_thread(lambda: armed.append(chacha_module._LegacyCheckout(conn, "backend")))
+
+    armed.clear()  # this thread, not the owner, drops the guard
+
+    assert [(backend, queued.closed) for backend, queued in [dropped.get_nowait()]] == [("backend", False)]
+
+
+def test_a_live_threads_checkout_stays_open_through_close_all_connections(ledger_backend, tmp_path):
+    """close_all_connections() drops every thread's slot on the calling thread.
+
+    Another live thread may be inside libpq on its checkout, so that connection must stay open
+    until its own thread is done; the next drain then hands it to the closed pool, which closes it.
+    """
+    db = CharactersRAGDB(tmp_path / "live.db", client_id="1", backend=ledger_backend)
+    db.close_connection()
+    ready, release, seen = threading.Event(), threading.Event(), []
+
+    def owner():
+        db.execute_query("SELECT count(*) AS n FROM character_cards")
+        conn = db._local.conn
+        ready.set()
+        release.wait(timeout=30)
+        seen.append((conn, conn.closed))
+
+    worker = threading.Thread(target=owner)
+    worker.start()
+    ready.wait(timeout=30)
+    db.close_all_connections()  # a caller-owned pool: it is closed, and every slot is dropped here
+    release.set()
+    worker.join()
+    db.close_connection()  # the next ChaCha call drains the queued checkout
+
+    assert [(was_closed, conn.closed) for conn, was_closed in seen] == [(False, True)]
