@@ -43,6 +43,7 @@ export const useOriginalSdkSceneFixture = (
       selectedModel: options.selectedModel ?? store.getState().selectedModel,
       toolChoice: options.toolChoice,
       serverChatAssistantKind: options.serverChatAssistantKind,
+      serverChatMetaLoaded: options.serverChatMetaLoaded,
       serverChatCharacterId: options.serverChatCharacterId
     })
     for (const key of ["setHistoryId", "setServerChatId"] as const) {

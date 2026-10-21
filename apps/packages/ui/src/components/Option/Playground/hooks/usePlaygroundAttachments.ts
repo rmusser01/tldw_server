@@ -7,12 +7,14 @@ import { useComposerAttachments } from "@/components/Chat/composer/hooks/useComp
 export interface UsePlaygroundAttachmentsDeps {
   /** Chat mode - images disabled in RAG mode */
   chatMode: string
+  captureImageOwnership: () => () => boolean
   /** Form helpers */
   setFieldValue: (field: string, value: any) => void
   /** File upload handler from useMessageOption */
   handleFileUpload: (file: File) => Promise<unknown>
   /** Notification for disabled image */
   notifyImageAttachmentDisabled: () => void
+  notifyImageReadError?: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -30,19 +32,24 @@ export interface UsePlaygroundAttachmentsDeps {
 export function usePlaygroundAttachments(deps: UsePlaygroundAttachmentsDeps) {
   const {
     chatMode,
+    captureImageOwnership,
     setFieldValue,
     handleFileUpload,
-    notifyImageAttachmentDisabled
+    notifyImageAttachmentDisabled,
+    notifyImageReadError
   } = deps
 
   return useComposerAttachments({
     chatMode,
+    captureImageOwnership,
     setImageField: (base64) => setFieldValue("image", base64),
+    onImageAccepted: (file) => setFieldValue("imageFilename", file.name),
     onDocumentUpload: async (file) => {
       await handleFileUpload(file)
     },
     ragBlocksImages: true,
     onImageBlockedInRagMode: notifyImageAttachmentDisabled,
+    onImageReadError: notifyImageReadError,
     onUnsupportedType: (file) => {
       console.error("File type not supported:", file.type)
     }

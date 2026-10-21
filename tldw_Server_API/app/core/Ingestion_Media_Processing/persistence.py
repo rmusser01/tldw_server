@@ -279,7 +279,9 @@ async def _record_media_ingestion_bytes_ledger_entry(
 MEDIA_CONCURRENT_KEY = "limits.media_concurrent_jobs"
 
 
-async def _enforce_and_record_media_bytes(user_id: Any, total_uploaded_bytes: int) -> None:
+async def _enforce_and_record_media_bytes(
+    user_id: Any, total_uploaded_bytes: int, *, op_id: str | None = None,
+) -> None:
     """Refuse an upload past the user's daily MB (429); otherwise count it (spec 2 §4).
 
     A non-numeric ``user_id`` skips the check and records nothing per-user
@@ -288,7 +290,7 @@ async def _enforce_and_record_media_bytes(user_id: Any, total_uploaded_bytes: in
     When the user has a limit, the admission check and the ledger write are
     one atomic operation (``ResourceDailyLedger.add_if_within_daily_cap``), so
     two concurrent uploads cannot both pass against the same remaining daily
-    allowance.
+    allowance. A supplied durable job operation ID makes worker retries idempotent.
     """
     if total_uploaded_bytes <= 0:
         return
@@ -296,7 +298,7 @@ async def _enforce_and_record_media_bytes(user_id: Any, total_uploaded_bytes: in
     if quota_uid is None:
         return
     uid = str(quota_uid)
-    op_id = f"media-ingestion-bytes:user:{uid}:{uuid4().hex}"
+    op_id = op_id or f"media-ingestion-bytes:user:{uid}:{uuid4().hex}"
 
     limit_mb = await quota_checks.user_quota(quota_uid, "limits.media_ingest_mb_per_day")
     if limit_mb is None:

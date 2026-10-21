@@ -102,3 +102,7 @@ describe("DataOpsPage stable row keys (C-S5)", () => {
     ])
   })
 })
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({ config: { serverUrl: "https://admin-fixture.example.test", authMode: "single-user", apiKey: "fixture-only" }, authorityLoading: false, loading: false })
+}))

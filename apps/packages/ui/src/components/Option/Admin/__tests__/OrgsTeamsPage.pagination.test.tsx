@@ -125,7 +125,7 @@ describe("OrgsTeamsPage server-side pagination (admin perf B-S3)", () => {
       expect(apiMock.listOrgMembers).toHaveBeenCalledWith(1, {
         limit: 20,
         offset: 0
-      })
+      }, capturedAdminScope)
     })
 
     // The table footer surfaces the server-reported total (250 members).
@@ -138,10 +138,16 @@ describe("OrgsTeamsPage server-side pagination (admin perf B-S3)", () => {
       expect(apiMock.listOrgMembers).toHaveBeenLastCalledWith(1, {
         limit: 20,
         offset: 20
-      })
+      }, capturedAdminScope)
     })
     // Page 2 rows render (users 21..40), not a re-slice of page 1.
     expect(await screen.findByText("user_21")).toBeInTheDocument()
     expect(screen.queryByText("user_1")).not.toBeInTheDocument()
   })
 })
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({ config: { serverUrl: "https://admin-fixture.example.test", authMode: "single-user", apiKey: "fixture-only" }, authorityLoading: false, loading: false })
+}))
+
+const capturedAdminScope = expect.objectContaining({ configSnapshot: expect.objectContaining({ serverUrl: "https://admin-fixture.example.test", authMode: "single-user" }), abortSignal: expect.any(AbortSignal) })

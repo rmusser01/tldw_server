@@ -19,7 +19,7 @@ it('keeps earlier Note recovery across successive batches and retains only faile
     .mockResolvedValueOnce({ mediaCount: 1, noteCount: 1, restoreNotes: secondRestore })
   const selection: React.ComponentProps<typeof MediaBulkToolbar>['selection'] = {
     bulkSelectedItems: [{ kind: 'note', id: 'note-1', title: 'Note', raw: {} }],
-    bulkKeywordsDraft: '', setBulkKeywordsDraft: vi.fn(), handleBulkAddKeywords: vi.fn(), handleBulkDelete: deleteSelection,
+    bulkKeywordsDraft: '', setBulkKeywordsDraft: vi.fn(), handleBulkAddKeywords: vi.fn(), handleBulkRemoveKeywords: vi.fn(), handleBulkDelete: deleteSelection,
     collectionDraftName: '', setCollectionDraftName: vi.fn(), handleAddSelectionToCollection: vi.fn(), handleOpenSelectionInMultiReview: vi.fn(),
     bulkExportFormat: 'json', setBulkExportFormat: vi.fn(), handleBulkExport: vi.fn(), handleSelectAllVisibleItems: vi.fn(), handleClearBulkSelection: vi.fn()
   }
@@ -38,4 +38,20 @@ it('keeps earlier Note recovery across successive batches and retains only faile
   expect(firstRestore).toHaveBeenCalledTimes(2)
   expect(secondRestore).toHaveBeenCalledTimes(1)
   expect(screen.getByRole('button', { name: 'Open Trash' })).toBeInTheDocument()
+})
+
+
+it('exposes the named-tag removal action beside Add tags', () => {
+  const removeTags = vi.fn()
+  const selection = {
+    bulkSelectedItems: [{ kind: 'media' as const, id: 1, title: 'Rowan', raw: {} }],
+    bulkKeywordsDraft: 'named-tag', setBulkKeywordsDraft: vi.fn(), handleBulkAddKeywords: vi.fn(), handleBulkRemoveKeywords: removeTags, handleBulkDelete: vi.fn(),
+    collectionDraftName: '', setCollectionDraftName: vi.fn(), handleAddSelectionToCollection: vi.fn(), handleOpenSelectionInMultiReview: vi.fn(),
+    bulkExportFormat: 'json' as const, setBulkExportFormat: vi.fn(), handleBulkExport: vi.fn(), handleSelectAllVisibleItems: vi.fn(), handleClearBulkSelection: vi.fn()
+  }
+  const t = ((_key: string, options: { defaultValue?: string }) => options?.defaultValue || _key) as React.ComponentProps<typeof MediaBulkToolbar>['t']
+  render(<MemoryRouter><MediaBulkToolbar selection={selection} t={t} /></MemoryRouter>)
+  fireEvent.click(screen.getByText('Tags, collections and export'))
+  fireEvent.click(screen.getByRole('button', { name: 'Remove tags' }))
+  expect(removeTags).toHaveBeenCalledOnce()
 })

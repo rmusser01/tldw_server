@@ -8,8 +8,10 @@ import re
 import shutil
 import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
+from fastapi import HTTPException
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.media_processing_deps import media_analysis_requested
@@ -29,6 +31,7 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.chunking_options import
     prepare_chunking_options_dict,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.persistence import (
+    _enforce_and_record_media_bytes,
     process_batch_media,
     process_document_like_item,
 )
@@ -571,6 +574,22 @@ async def _handle_job_in_scope(job: dict[str, Any], jm: JobManager, progress: _P
             status="processing",
             latest_job_id=latest_job_id,
         )
+
+        if source_kind == "file":
+            job_uuid = str(job.get("uuid") or "").strip()
+            if not job_uuid:
+                raise MediaIngestJobError("Missing upload job identity", failure_code="media_ingest_missing_identity")
+            try:
+                await _enforce_and_record_media_bytes(
+                    user_id, Path(str(source)).stat().st_size,
+                    op_id=f"media-ingestion-job:{user_id}:{job_uuid}",
+                )
+            except HTTPException as exc:
+                if exc.status_code == 429:
+                    raise MediaIngestJobError(
+                        str(exc.detail), failure_code="media_ingest_daily_quota_exceeded",
+                    ) from exc
+                raise
 
         progress.percent = 5.0
         progress.message = "prepare"

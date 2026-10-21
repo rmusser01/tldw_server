@@ -46,17 +46,14 @@ vi.mock("@/hooks/useConnectionState", () => ({
 vi.mock("@/hooks/useHomeMilestoneScope", () => ({
   useHomeMilestoneScope: () => "synthetic-owner",
 }));
-vi.mock("@/services/tldw/TldwApiClient", async (original) => {
-  const actual = await original<typeof import("@/services/tldw/TldwApiClient")>();
-  return {
-    isActiveCookieSessionConfig: actual.isActiveCookieSessionConfig,
-    tldwClient: {
-      getConfig: mocks.getConfig,
-      initialize: mocks.initialize,
-      getModels: mocks.getModels,
-    },
-  };
-});
+vi.mock("@/services/tldw/TldwApiClient", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/tldw/TldwApiClient")>()),
+  tldwClient: {
+    getConfig: mocks.getConfig,
+    initialize: mocks.initialize,
+    getModels: mocks.getModels,
+  },
+}));
 vi.mock("@/services/tldw", () => ({
   tldwModels: { getChatModels: mocks.models },
 }));

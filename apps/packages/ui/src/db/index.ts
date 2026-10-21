@@ -118,6 +118,7 @@ type Webshare = {
 }
 
 type Prompt = {
+  ownerId?: string | null
   id: string
   title: string
   content: string

@@ -138,6 +138,7 @@ class OptimizationResponse(TimestampMixin, UUIDMixin):
     """Optimization response model"""
     id: int
     project_id: int
+    name: Optional[str] = None
     initial_prompt_id: int
     optimized_prompt_id: Optional[int]
     optimizer_type: str

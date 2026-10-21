@@ -111,3 +111,29 @@ def test_fail_job_without_quarantine_keeps_retrying_postgres(monkeypatch, jobs_p
         )
     stored = jm.get_job(int(job["id"])) or {}
     assert (stored["status"], stored["retry_count"], stored["failure_streak_count"]) == (expected_status, 2, 2)
+
+
+@pytest.mark.parametrize(
+    "configured, backoff, first_failure_quarantined",
+    [
+        (None, 0, False),
+        ("1", 0, False),
+        ("1", 10, True),
+        ("2", 10, False),
+    ],
+)
+def test_retry_quarantine_cutoff_preserves_postgres_test_policy(
+    monkeypatch,
+    jobs_pg_dsn,
+    configured,
+    backoff,
+    first_failure_quarantined,
+):
+    """PostgreSQL retains its zero-backoff test exemption even with an explicit cutoff."""
+    monkeypatch.setenv("TEST_MODE", "true")
+    if configured is None:
+        monkeypatch.delenv("JOBS_QUARANTINE_THRESHOLD", raising=False)
+    else:
+        monkeypatch.setenv("JOBS_QUARANTINE_THRESHOLD", configured)
+    manager = JobManager(None, backend="postgres", db_url=jobs_pg_dsn)
+    assert (manager.retry_quarantine_threshold(backoff_seconds=backoff) <= 1) is first_failure_quarantined  # nosec B101 - pytest regression assertion.

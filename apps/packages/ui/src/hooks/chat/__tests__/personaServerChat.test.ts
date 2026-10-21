@@ -467,6 +467,15 @@ describe("ensurePersonaServerChat", () => {
     expect(setters.setServerChatAssistantId.mock.calls[0]).toEqual([null])
     expect(setters.setServerChatPersonaMemoryMode.mock.calls[0]).toEqual([null])
     expect(setters.setServerChatMetaLoaded.mock.calls[0]).toEqual([false])
+    expect(setters.setServerChatState.mock.calls[0]).toEqual(["in-progress"])
+    expect(setters.setServerChatVersion.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatTopic.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatClusterId.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatSource.mock.calls[0]).toEqual([null])
+    expect(setters.setServerChatExternalRef.mock.calls[0]).toEqual([null])
+    for (const setter of Object.values(setters)) {
+      expect(setter.mock.invocationCallOrder[0]).toBeLessThan(createChat.mock.invocationCallOrder[0])
+    }
     expect(createChat).toHaveBeenCalledWith(
       {
         assistant_kind: "persona",

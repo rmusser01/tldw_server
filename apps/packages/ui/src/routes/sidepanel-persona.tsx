@@ -74,6 +74,7 @@ import {
   type SetupHandoffState,
   type SetupHandoffFocusRequest,
   type SetupLiveDetourState,
+  type SetupLiveAttempt,
   type SidepanelPersonaProps,
   DEFAULT_PERSONA_ID,
   buildTurnDetectionValuesFromSavedDefaults,
@@ -190,6 +191,7 @@ const SidepanelPersona = ({
   const liveVoiceControllerRef = React.useRef<any>(null)
   const setupWizardAwaitingLiveResponseRef = React.useRef(false)
   const setupWizardLastLiveTextRef = React.useRef("")
+  const setupLiveAttemptRef = React.useRef<SetupLiveAttempt | null>(null)
 
   const [catalog, setCatalog] = React.useState<PersonaInfo[]>([])
   const [selectedPersonaId, setSelectedPersonaId] =
@@ -494,6 +496,7 @@ const SidepanelPersona = ({
     activeTabRef,
     setupWizardAwaitingLiveResponseRef,
     setupWizardLastLiveTextRef,
+    setupLiveAttemptRef,
   })
 
   // ── Analytics hook ──
@@ -587,6 +590,7 @@ const SidepanelPersona = ({
     setupLiveDetour: setupOrch.setupLiveDetour,
     setupWizardAwaitingLiveResponseRef,
     setupWizardLastLiveTextRef,
+    setupLiveAttemptRef,
     clearSetupStepError: setupOrch.clearSetupStepError,
     setPendingPlan,
     pendingPlan,
@@ -719,6 +723,8 @@ const SidepanelPersona = ({
     emitSetupAnalyticsEvent,
     liveVoiceController,
     personaId: String(livePersonaId || "").trim(),
+    setupPersonaId: selectedPersonaId,
+    activeSessionPersonaId,
     personaSetupWizardCurrentStep: setupOrch.personaSetupWizard.currentStep,
     personaSetupWizardIsSetupRequired: setupOrch.personaSetupWizard.isSetupRequired,
     resolvedApprovalSnapshot,
@@ -735,6 +741,8 @@ const SidepanelPersona = ({
     activeTabRef,
     setupWizardAwaitingLiveResponseRef,
     setupWizardLastLiveTextRef,
+    setupLiveAttemptRef,
+    wsRef,
   })
   handleIncomingPayloadRef.current = handleIncomingPayload
 

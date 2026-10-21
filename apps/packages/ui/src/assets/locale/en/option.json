@@ -838,6 +838,7 @@
     "health": {
       "title": "ACP System Health",
       "runnerBinary": "Runner Binary",
+      "runnerStatus": "Runner status",
       "agentStatus": "Agent Status",
       "apiKeys": "API Keys",
       "unavailableTitle": "Health check unavailable",
@@ -1867,6 +1868,11 @@
     "preview": "Prompt preview"
   },
   "flashcards": {
+    "editDeck": "Edit deck",
+    "deckSelectionChanged": "Deck selection changed. Reopen the editor.",
+    "deckName": "Deck name",
+    "deckUpdated": "Deck updated.",
+    "deckUpdateFailed": "Failed to update deck.",
     "studyPackJobAccepted": "Study pack request accepted. Waiting for a status update.",
     "studyPackJobQueued": "Study pack queued. Waiting for generation to start.",
     "studyPackJobRunning": "Creating your study pack.",

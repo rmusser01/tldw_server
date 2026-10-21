@@ -210,8 +210,7 @@ const EXTRA_PAGES: PageEntry[] = [
   {
     path: "/claims-review",
     name: "Claims Review",
-    category: "workspace",
-    skip: "Legacy redirect alias covered by the route metadata contract."
+    category: "workspace"
   },
   { path: "/integrations", name: "Integrations", category: "workspace" },
   { path: "/scheduled-tasks", name: "Scheduled Tasks", category: "workspace" },

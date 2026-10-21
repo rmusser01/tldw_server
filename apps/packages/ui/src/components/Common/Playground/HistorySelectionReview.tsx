@@ -8,10 +8,22 @@ import { isHiddenBySelfOrAncestor } from "@/utils/focus-return"
 import { Button } from "@/components/Common/Button"
 import { RecoveryCallout, StatePanel } from "@/components/ui/state"
 import type { HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { keepHistoryTurnRecovery } from "@/services/history-turn-keep"
+import { canRetryHistoryTurnRecovery, type HistoryRecoveryRetryContext } from "@/services/history-turn-retry"
+import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils"
 import type { HistoryCursorV1 } from "@/types/history-selection"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import React from "react"
 import { useTranslation } from "react-i18next"
+
+// Never expose arbitrary provider/transport exception text in recovery details.
+const retryRefusalCodes = new Set([
+  "retry_context_changed", "retry_prompt_unavailable", "retry_context_review_required",
+  "history_retry_in_progress", "history_recovery_not_retryable", "history_selection_not_ready",
+  "request_config_scope_changed", "owner_conversation_mismatch", "history_selection_changed",
+  "history_recovery_changed", "invalid_history_retry", "history_retry_input_changed",
+  "history_recovery_retry_not_submitted", "history_recovery_retry_failed"
+])
 
 const forkCopy = {
   prepared: [
@@ -45,7 +57,11 @@ export function HistorySelectionReview({
   selection,
   onExpand,
   onBind,
-  hideRecovery
+  hideRecovery,
+  getRetryContext,
+  onRetryRecovery,
+  getSavedQuestionReview,
+  onRetrySavedQuestion
 }: {
   selection: HistorySelectionController
   onExpand?: () => void
@@ -54,6 +70,13 @@ export function HistorySelectionReview({
   hideRecovery?: (
     entry: NonNullable<HistorySelectionController["recoveries"]>[number]
   ) => boolean
+  getSavedQuestionReview?: () => Promise<import("@/services/history-turn-retry").SavedQuestionReview>
+  onRetrySavedQuestion?: (review: import("@/services/history-turn-retry").SavedQuestionReview) => Promise<ChatSubmitResult>
+  getRetryContext?: () => Promise<HistoryRecoveryRetryContext>
+  onRetryRecovery?: (
+    entry: NonNullable<HistorySelectionController["recoveries"]>[number],
+    review: { contextReviewed: boolean; context: HistoryRecoveryRetryContext }
+  ) => Promise<ChatSubmitResult>
 }) {
   const { t } = useTranslation("playground")
   const text = (key: string, fallback: string) =>
@@ -363,10 +386,17 @@ export function HistorySelectionReview({
       setOpenRecoveryError(null)
     }
   })
+  const [savedQuestionReview, setSavedQuestionReview] = React.useState<import("@/services/history-turn-retry").SavedQuestionReview | null>(null)
+  const [savedQuestionBusy, setSavedQuestionBusy] = React.useState(false)
+  const [savedQuestionError, setSavedQuestionError] = React.useState(false)
   const [expanded, setExpanded] = React.useState(false)
   const [included, setIncluded] = React.useState<string[]>([])
   const [cursor, setCursor] = React.useState<HistoryCursorV1>({ kind: "empty" })
   const [focusedId, setFocusedId] = React.useState<string | null>(null)
+  const [failedKeep, setFailedKeep] = React.useState<string | null>(null)
+  const [retryReview, setRetryReview] = React.useState<{ operation: string; context: HistoryRecoveryRetryContext } | null>(null)
+  const [failedRetry, setFailedRetry] = React.useState<string | null>(null)
+  const [retryRefusal, setRetryRefusal] = React.useState<string | null>(null)
   const trigger = React.useRef<HTMLButtonElement>(null)
   const scroller = React.useRef<HTMLDivElement>(null)
   const errorRegion = React.useRef<HTMLDivElement>(null)
@@ -432,7 +462,15 @@ export function HistorySelectionReview({
     setIncluded([])
     setCursor({ kind: "empty" })
     setFocusedId(null)
+    setFailedKeep(null)
   }, [reviewOwner])
+  React.useEffect(() => {
+    setRetryReview(null)
+    setSavedQuestionReview(null)
+    setSavedQuestionError(false)
+    setFailedRetry(null)
+    setRetryRefusal(null)
+  }, [reviewOwner, selection.view?.view_session_id, selection.view?.selection_revision])
   React.useEffect(() => {
     if (stale && expanded && !selection.freshnessConflict)
       errorRegion.current?.focus()
@@ -681,6 +719,7 @@ export function HistorySelectionReview({
         </>
       )}
       {entry.turn.recovery_storage === "memory" && <p role="alert">{text("recoveryStorageFull", "Local storage could not keep all recovered text. Some text is retained in this window only; copy it before closing or reloading.")}</p>}
+      {entry.turn.failure_reason && <p role="alert">{entry.turn.failure_reason}</p>}
       <details>
         <summary>
           {text("inspectRecovery", "Inspect original input and result")}
@@ -716,6 +755,92 @@ export function HistorySelectionReview({
             </a>
           ))}
       </details>
+      {entry.turn.outcome === "complete" && entry.turn.existing_selection && !entry.turn.settled_message_id && (
+        <Button disabled={sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending}
+          loading={openingRecovery === entry.turn.operation_id}
+          onClick={async () => {
+            if (!mounted.current || !renderedSource.isCurrent() || !renderedSelectionIsCurrent()) return
+            const current = () => mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent()
+            setOpeningRecovery(entry.turn.operation_id)
+            setFailedKeep(null)
+            try {
+              const result = await keepHistoryTurnRecovery(selection, entry)
+              if (current() && result.status === "skipped") setFailedKeep(entry.turn.operation_id)
+            } catch {
+              if (current()) setFailedKeep(entry.turn.operation_id)
+            } finally {
+              if (mounted.current) setOpeningRecovery(value => value === entry.turn.operation_id ? null : value)
+            }
+          }}>
+          {text("keepRecovery", "Keep recovered reply")}
+        </Button>
+      )}
+      {failedKeep === entry.turn.operation_id && (
+        <p role="alert">{text("keepRecoveryFailed", "Could not keep this reply. The original recovery is retained for review.")}</p>
+      )}
+      {onRetryRecovery && getRetryContext && canRetryHistoryTurnRecovery(entry) && (
+        <>
+          <Button disabled={sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending} onClick={async () => {
+            const fence = selection.fence()
+                  const isCurrent = () => mounted.current && renderedSource.isCurrent() && renderedSelectionIsCurrent() && fence()
+            setFailedRetry(null)
+            setRetryRefusal(null)
+            try {
+              const context = await getRetryContext()
+              if (isCurrent() && context.isCurrent())
+                setRetryReview({ operation: entry.turn.operation_id, context })
+            } catch {
+              if (isCurrent()) setFailedRetry(entry.turn.operation_id)
+            }
+          }}>
+            {text("reviewRetry", "Review retry")}
+          </Button>
+          {retryReview?.operation === entry.turn.operation_id && (
+            <section aria-label={text("reviewRetry", "Review retry")} className="my-2 rounded border p-3">
+              <p>{text("retryPromptReview", "This recovery cannot restore the original prompt settings. Review or reapply the original System/Prompt settings using the chat controls, then review this retry again. Retry uses the model and instructions shown below.")}</p>
+              <p>{text("retrySavedQuestion", "Saved question")}</p>
+              <pre className="whitespace-pre-wrap break-words">{entry.turn.input_text}</pre>
+              <p>{text("retryCurrentModel", "Current model")}</p>
+              <p>{retryReview.context.model}</p>
+              <p>{text("retryCurrentPrompt", "Current System/Prompt instructions")}</p>
+              {retryReview.context.systemPrompts.length
+                ? retryReview.context.systemPrompts.map((prompt, index) => <pre key={index} className="whitespace-pre-wrap break-words">{prompt}</pre>)
+                : <p>{text("retryNoPrompt", "No System/Prompt instruction is currently applied.")}</p>}
+              <Button disabled={sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending} onClick={async () => {
+                setRetrying(entry.turn.operation_id)
+                setFailedRetry(null)
+                setRetryRefusal(null)
+                try {
+                  const result = await onRetryRecovery(entry, { contextReviewed: true, context: retryReview.context })
+                  if (result.status !== "submitted") {
+                    setFailedRetry(entry.turn.operation_id)
+                    setRetryRefusal(result.status === "failed" && retryRefusalCodes.has(result.errorMessage || "") ? result.errorMessage! : null)
+                  }
+                  setRetryReview(null)
+                } catch {
+                  setFailedRetry(entry.turn.operation_id)
+                } finally {
+                  setRetrying(null)
+                }
+              }}>
+                {text("retrySavedQuestionAction", "Retry saved question")}
+              </Button>
+              <Button disabled={sendInProgress || retrying !== null || openingRecovery !== null || recoveryAction?.pending} onClick={() => setRetryReview(null)}>
+                {text("cancel", "Cancel review")}
+              </Button>
+            </section>
+          )}
+        </>
+      )}
+      {failedRetry === entry.turn.operation_id && (
+        <div>
+          <p role="alert">{text("retryRecoveryFailed", "Could not retry this question. Review the current chat and prompt settings; the original recovery is retained for inspection.")}</p>
+          {retryRefusal && <details className="text-sm text-text-muted">
+            <summary>{text("retryDetails", "Retry details")}</summary>
+            <p>{retryRefusal}</p>
+          </details>}
+        </div>
+      )}
       <Button
         disabled={retrying !== null || recoveryAction?.pending || openingRecovery !== null}
         loading={recoveryAction?.pending && recoveryAction.action === "copy" && recoveryAction.operationId === entry.turn.operation_id}
@@ -764,6 +889,36 @@ export function HistorySelectionReview({
         <p className="mb-2 text-sm text-text-muted">{text("savedRoleplaySetup", "Saved roleplay setup")}: {savedSetup.name}
           {savedSetup.provider && savedSetup.model ? ` · ${savedSetup.provider} / ${savedSetup.model}` : ""}.
           {" "}{text("savedRoleplaySetupHelp", "This conversation keeps its saved character and settings.")}</p>
+      )}
+      {getSavedQuestionReview && onRetrySavedQuestion && selection.status === "ready" &&
+        selection.owner?.kind === "native" && selection.settingsQualified &&
+        selection.capture?.status === "captured" && selection.capture.rows.at(-1)?.role === "user" && (
+        <div className="mb-3 rounded border p-3">
+          <Button disabled={savedQuestionBusy} onClick={async () => {
+            setSavedQuestionBusy(true)
+            setSavedQuestionError(false)
+            try { setSavedQuestionReview(await getSavedQuestionReview()) }
+            catch { setSavedQuestionError(true) }
+            finally { setSavedQuestionBusy(false) }
+          }}>{text("reviewSavedQuestion", "Review saved question")}</Button>
+          {savedQuestionReview && <div role="group" aria-label={text("savedQuestionReview", "Saved question review")}>
+            <p>{text("savedQuestionExplanation", "Answer this saved question using the selected model and saved character context. This does not send another copy of your question. Earlier uncertain attempts remain available for inspection.")}</p>
+            <pre className="whitespace-pre-wrap break-words">{savedQuestionReview.text}</pre>
+            <p>{savedQuestionReview.model}</p>
+            <Button disabled={savedQuestionBusy} onClick={async () => {
+              if (!savedQuestionReview.isCurrent()) { setSavedQuestionError(true); return }
+              setSavedQuestionBusy(true)
+              setSavedQuestionError(false)
+              try {
+                const result = await onRetrySavedQuestion(savedQuestionReview)
+                if (result.status !== "submitted") setSavedQuestionError(true)
+                else setSavedQuestionReview(null)
+              } catch { setSavedQuestionError(true) }
+              finally { setSavedQuestionBusy(false) }
+            }}>{text("retrySavedQuestion", "Retry saved question")}</Button>
+          </div>}
+          {savedQuestionError && <p role="alert">{text("savedQuestionRefused", "Could not retry. Review the saved question again after checking the model, connection and conversation.")}</p>}
+        </div>
       )}
       {selection.forkOperationsError && (
         <p role="alert">
@@ -935,7 +1090,7 @@ export function HistorySelectionReview({
         <RecoveryCallout
           state="unavailable"
           title={text("unavailable", "Selected history unavailable")}
-          message={text(
+          message={selection.error === "unbound_local_history" ? text("localBindingMessage", "This imported local conversation has no trusted owner. Use it on this browser to connect it to this browser profile, then review its history before continuing.") : text(
             "unavailableMessage",
             "You can still read this conversation. A supported, verified history owner is required to continue from a selection."
           )}
@@ -945,9 +1100,9 @@ export function HistorySelectionReview({
               : undefined
           }
           primaryAction={
-            selection.error === "unbound_server_mirror" && onBind
+            (selection.error === "unbound_server_mirror" || selection.error === "unbound_local_history") && selection.canBindUnavailable && onBind
               ? {
-                  label: text("bind", "Connect this conversation"),
+                  label: selection.error === "unbound_local_history" ? text("bindLocal", "Use this local conversation") : text("bind", "Connect this conversation"),
                   onClick: onBind
                 }
               : undefined

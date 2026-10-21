@@ -429,6 +429,9 @@ beforeEach(() => {
         }
         return Response.json(stateFor(target.origin))
       }
+      if (target.pathname === "/api/v1/setup/first-run/state" && method === "POST") {
+        return Response.json(stateFor(target.origin))
+      }
       if (target.pathname === "/api/v1/setup/first-run/metadata")
         return Response.json(metadataFor(target.origin, metadataAuthMode))
       if (target.pathname === "/api/v1/auth/refresh" && method === "POST") {
@@ -599,6 +602,16 @@ describe.each(["direct", "extension"] as const)(
         credential_configured: true,
         model: "original-model"
       })
+      const progressWrites = wires.filter((request) =>
+        new URL(request.url).pathname === "/api/v1/setup/first-run/state" && request.method === "POST"
+      )
+      expect(progressWrites).toHaveLength(1)
+      expect(progressWrites[0].body).toMatchObject({ step: "providers", data: {
+        default_provider: "openai", default_model: "original-model",
+        default_provider_credential_configured: true
+      } })
+      expect(progressWrites[0].headers.has("X-API-KEY")).toBe(false)
+      expect(JSON.stringify(progressWrites[0].body)).not.toContain(payload.api_key)
       expect(JSON.stringify(response)).not.toContain(payload.api_key)
       expect(mounted.result.current.state).toEqual(
         stateFor(originalConfig.serverUrl)

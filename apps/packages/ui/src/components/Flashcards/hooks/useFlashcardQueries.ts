@@ -797,9 +797,19 @@ export function useUpdateDeckMutation() {
 
   return useMutation({
     mutationKey: ["flashcards:deck:update"],
-    mutationFn: (params: { deckId: number; update: DeckUpdate }) =>
-      updateDeck(params.deckId, params.update),
-    onSuccess: (deck) => {
+    mutationFn: async (params: { deckId: number; update: DeckUpdate; requestOptions?: FlashcardsRequestOptions }) => {
+      params.requestOptions?.signal?.throwIfAborted()
+      const deck = params.requestOptions
+        ? await updateDeck(params.deckId, params.update, params.requestOptions)
+        : await updateDeck(params.deckId, params.update)
+      params.requestOptions?.signal?.throwIfAborted()
+      return deck
+    },
+    onSuccess: (deck, params) => {
+      if (params.requestOptions?.requestScope) {
+        invalidateFlashcardsQueries(qc)
+        return
+      }
       qc.getQueriesData<Deck[]>({ queryKey: ["flashcards:decks"] }).forEach(([queryKey, current]) => {
         if (!current) return
         const params = queryKey[1] as UseFlashcardQueriesOptions | undefined

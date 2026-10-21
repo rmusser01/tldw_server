@@ -1344,7 +1344,7 @@ export const CharacterListContent: React.FC<CharacterListContentProps> = (props)
                               "settings:manageCharacters.confirm.delete",
                               {
                                 defaultValue:
-                                  "Are you sure you want to delete this character? It will be soft-deleted and can be undone for 10 seconds."
+                                  "Move this character to Trash? You can restore it later."
                               }
                             ),
                             okText: t("common:delete", { defaultValue: "Delete" }),

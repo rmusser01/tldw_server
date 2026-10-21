@@ -10,8 +10,8 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
-    ACPGovernanceDeniedError,
     ACPGovernanceCoordinator,
+    ACPGovernanceDeniedError,
     ACPRunnerClient,
     SessionWebSocketRegistry,
 )
@@ -19,6 +19,33 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import ACPMessa
 from tldw_Server_API.app.services.acp_runtime_policy_service import (
     ACPRuntimePolicySnapshot,
 )
+from tldw_Server_API.tests.AuthNZ.integration.test_single_user_cookie_session import (
+    _mint,
+)
+from tldw_Server_API.tests.AuthNZ.integration.test_single_user_cookie_session import (
+    single_user_cookie_client as single_user_cookie_client,
+)
+
+
+@pytest.fixture
+def governance_paths(tmp_path, monkeypatch):
+    """Opt-in functional paths for only the two real-cookie API controls."""
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
+    monkeypatch.setenv("SYSTEM_LOG_FILE_PATH", str(tmp_path / "system.log"))
+    monkeypatch.setenv("MONITORING_ALERTS_DB", str(tmp_path / "alerts.db"))
+    monkeypatch.setenv("ACP_SESSIONS_DB_PATH", str(tmp_path / "sessions.db"))
+    monkeypatch.setenv("JOBS_DB_PATH", str(tmp_path / "jobs.db"))
+
+
+def _cookie_governance_client(fixture):
+    """Adapt the official cookie fixture without overriding auth dependencies."""
+    from tldw_Server_API.app.api.v1.endpoints import agent_client_protocol
+    from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
+    client, api_key = fixture
+    if not any(route.path == "/api/v1/acp/sessions/prompt" for route in iter_served_routes(client.app.routes)):
+        client.app.include_router(agent_client_protocol.router, prefix="/api/v1")
+    assert _mint(client, api_key).status_code == 200  # nosec B101 # real cookie setup precondition
+    return client
 
 pytestmark = pytest.mark.unit
 
@@ -84,7 +111,7 @@ class _PromptGovernanceDeniedRunner:
             "rollout_mode": "enforce",
         }
 
-    async def prompt(self, session_id: str, prompt: list[dict[str, Any]]) -> dict[str, Any]:
+    async def prompt(self, session_id: str, prompt: list[dict[str, Any]], *, on_native_text=None) -> dict[str, Any]:
         raise ACPGovernanceDeniedError(governance={
             "action": "deny",
             "status": "deny",
@@ -109,7 +136,7 @@ class _PromptGovernanceShadowDeniedRunner(_PromptGovernanceDeniedRunner):
             "rollout_mode": "shadow",
         }
 
-    async def prompt(self, session_id: str, prompt: list[dict[str, Any]]) -> dict[str, Any]:
+    async def prompt(self, session_id: str, prompt: list[dict[str, Any]], *, on_native_text=None) -> dict[str, Any]:
         return {"stopReason": "end", "detail": "shadow-allowed"}
 
 
@@ -151,15 +178,18 @@ def prompt_governance_shadow_denied_runner(monkeypatch):
 
 
 def test_prompt_denied_by_governance_returns_blocked_error(
-    client_user_only,
+    governance_paths,
+    single_user_cookie_client,
     prompt_governance_denied_runner,
 ):
+    client_user_only = _cookie_governance_client(single_user_cookie_client)
     response = client_user_only.post(
         "/api/v1/acp/sessions/prompt",
         json={
             "session_id": "session-gov-prompt",
             "prompt": [{"role": "user", "content": "ship this change"}],
         },
+        headers={"X-CSRF-Token": client_user_only.cookies["csrf_token"]},
     )
 
     assert response.status_code == 403
@@ -169,15 +199,18 @@ def test_prompt_denied_by_governance_returns_blocked_error(
 
 
 def test_prompt_shadow_deny_governance_is_not_blocked_at_endpoint(
-    client_user_only,
+    governance_paths,
+    single_user_cookie_client,
     prompt_governance_shadow_denied_runner,
 ):
+    client_user_only = _cookie_governance_client(single_user_cookie_client)
     response = client_user_only.post(
         "/api/v1/acp/sessions/prompt",
         json={
             "session_id": "session-gov-shadow",
             "prompt": [{"role": "user", "content": "ship this change"}],
         },
+        headers={"X-CSRF-Token": client_user_only.cookies["csrf_token"]},
     )
 
     assert response.status_code == 200
@@ -187,7 +220,7 @@ def test_prompt_shadow_deny_governance_is_not_blocked_at_endpoint(
 
 
 @pytest.mark.asyncio
-async def test_permission_request_uses_single_unified_approval_path(monkeypatch):
+async def test_permission_request_uses_single_unified_approval_path(monkeypatch, admitted_permission_prompt):
     client = _new_runner_client_for_permissions()
     session_id = "session-gov-auto"
 
@@ -248,6 +281,7 @@ async def test_permission_request_uses_single_unified_approval_path(monkeypatch)
 
     monkeypatch.setattr(client, "_broadcast_to_session", _fake_broadcast)
 
+    await admitted_permission_prompt(client, session_id)
     response = await client._handle_request(
         ACPMessage(
             jsonrpc="2.0",
@@ -265,7 +299,7 @@ async def test_permission_request_uses_single_unified_approval_path(monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_permission_request_uses_runtime_policy_snapshot_authority(monkeypatch):
+async def test_permission_request_uses_runtime_policy_snapshot_authority(monkeypatch, admitted_permission_prompt):
     client = _new_runner_client_for_permissions()
     session_id = "session-policy-prompt"
 
@@ -315,6 +349,7 @@ async def test_permission_request_uses_runtime_policy_snapshot_authority(monkeyp
 
     monkeypatch.setattr(client, "_broadcast_to_session", _fake_broadcast)
 
+    await admitted_permission_prompt(client, session_id)
     response = await client._handle_request(
         ACPMessage(
             jsonrpc="2.0",
@@ -335,7 +370,7 @@ async def test_permission_request_uses_runtime_policy_snapshot_authority(monkeyp
 
 
 @pytest.mark.asyncio
-async def test_permission_request_governance_deny_enforced_blocks_runtime_allow(monkeypatch):
+async def test_permission_request_governance_deny_enforced_blocks_runtime_allow(monkeypatch, admitted_permission_prompt):
     client = _new_runner_client_for_permissions()
 
     async def _fake_snapshot(
@@ -370,6 +405,7 @@ async def test_permission_request_governance_deny_enforced_blocks_runtime_allow(
     monkeypatch.setattr(client, "_get_runtime_policy_snapshot", _fake_snapshot, raising=False)
     monkeypatch.setattr(client, "check_permission_governance", _fake_check_permission_governance, raising=False)
 
+    await admitted_permission_prompt(client, "session-governance-deny")
     response = await client._handle_request(
         ACPMessage(
             jsonrpc="2.0",
@@ -399,7 +435,7 @@ async def test_permission_request_governance_deny_enforced_blocks_runtime_allow(
 
 
 @pytest.mark.asyncio
-async def test_permission_request_governance_require_approval_prompts_runtime_allow(monkeypatch):
+async def test_permission_request_governance_require_approval_prompts_runtime_allow(monkeypatch, admitted_permission_prompt):
     client = _new_runner_client_for_permissions()
     session_id = "session-governance-prompt"
 
@@ -450,6 +486,7 @@ async def test_permission_request_governance_require_approval_prompts_runtime_al
     monkeypatch.setattr(client, "check_permission_governance", _fake_check_permission_governance, raising=False)
     monkeypatch.setattr(client, "_broadcast_to_session", _fake_broadcast)
 
+    await admitted_permission_prompt(client, session_id)
     response = await client._handle_request(
         ACPMessage(
             jsonrpc="2.0",
@@ -471,7 +508,7 @@ async def test_permission_request_governance_require_approval_prompts_runtime_al
 
 
 @pytest.mark.asyncio
-async def test_denied_tool_from_runtime_snapshot_returns_denied_without_prompt(monkeypatch):
+async def test_denied_tool_from_runtime_snapshot_returns_denied_without_prompt(monkeypatch, admitted_permission_prompt):
     client = _new_runner_client_for_permissions()
 
     async def _fake_snapshot(
@@ -502,6 +539,7 @@ async def test_denied_tool_from_runtime_snapshot_returns_denied_without_prompt(m
 
     monkeypatch.setattr(client, "check_permission_governance", _fake_check_permission_governance, raising=False)
 
+    await admitted_permission_prompt(client, "session-policy-deny")
     response = await client._handle_request(
         ACPMessage(
             jsonrpc="2.0",
@@ -600,7 +638,7 @@ async def test_runtime_policy_snapshot_refresh_is_singleflight(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_governance_require_approval_plus_batch_tier_creates_one_prompt(monkeypatch):
+async def test_governance_require_approval_plus_batch_tier_creates_one_prompt(monkeypatch, admitted_permission_prompt):
     client = _new_runner_client_for_permissions()
     session_id = "session-gov-batch"
 
@@ -662,6 +700,7 @@ async def test_governance_require_approval_plus_batch_tier_creates_one_prompt(mo
 
     monkeypatch.setattr(client, "_broadcast_to_session", _fake_broadcast)
 
+    await admitted_permission_prompt(client, session_id)
     response = await client._handle_request(
         ACPMessage(
             jsonrpc="2.0",
@@ -718,12 +757,12 @@ async def test_prompt_shadow_rollout_deny_is_not_blocked(monkeypatch):
 
     monkeypatch.setattr(client, "check_prompt_governance", _fake_check_prompt_governance, raising=False)
 
-    async def _fake_call(method: str, payload: dict[str, Any]) -> ACPMessage:
+    async def _fake_call(method: str, payload: dict[str, Any], *, timeout_sec: float | None = None) -> ACPMessage:
         assert method == "session/prompt"
         assert payload["sessionId"] == "session-shadow"
         return ACPMessage(jsonrpc="2.0", id="acp-shadow", result={"stopReason": "end"})
 
-    client._client = SimpleNamespace(call=_fake_call)
+    client._client = SimpleNamespace(call=_fake_call, rpc_timeout_sec=60)
 
     response = await client.prompt(
         "session-shadow",

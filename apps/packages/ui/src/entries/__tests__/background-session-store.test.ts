@@ -92,12 +92,13 @@ describe("background-session-store serialization", () => {
 
   it("persists to and rehydrates from an injected storage area", async () => {
     const area = createMemoryArea()
-    const written = {
+    const written: PersistedSessionState = {
       ingestSessions: {
         "ingest-9": { funnelId: "ingest-9", status: "running", jobIds: [7] }
       },
       pendingAuthReplay: ["ingest-9"],
-      quickIngestSessions: []
+      quickIngestSessions: [],
+      quickIngestBatches: []
     }
 
     await writePersistedSessionState(written, area)

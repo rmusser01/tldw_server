@@ -18,11 +18,13 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.config import (
     load_acp_runner_config,
 )
 from tldw_Server_API.app.core.Agent_Client_Protocol.hardening import (
+    ACP_STREAM_BUFFER_MAX_BYTES,
     bounded_session_update_payload,
     make_session_update_queue,
     validate_acp_session_launch_inputs,
 )
 from tldw_Server_API.app.core.Agent_Client_Protocol.permission_tiers import determine_permission_tier
+from tldw_Server_API.app.core.Agent_Client_Protocol.prompt_utils import normalize_prompt_content
 from tldw_Server_API.app.core.Agent_Client_Protocol.stdio_client import (
     ACPMessage,
     ACPResponseError,
@@ -182,6 +184,45 @@ def _resolve_runtime_permission_outcome(
         "policy_snapshot_fingerprint": snapshot.policy_snapshot_fingerprint,
         "provenance_summary": dict(snapshot.policy_provenance_summary or {}),
     }
+
+
+@dataclass
+class ActivePrompt:
+    """Own permission futures until this prompt's actual call settles."""
+    cancelled: bool = False
+    permission_ids: set[str] = field(default_factory=set)
+    task: asyncio.Task[ACPMessage] | None = None
+    stop_task: asyncio.Task[None] | None = None
+    on_native_text: Callable[[str], None] | None = None
+    source_client: Any = None
+    native_text: list[str] = field(default_factory=list)
+    native_bytes: int = 0
+    native_overflow: bool = False
+    capture_closed: bool = False
+
+    def close_native_capture(self) -> None:
+        """Stop capture synchronously when the actual prompt reply is read."""
+        self.capture_closed = True
+
+    def capture_native_text(self, text: str) -> None:
+        """Bound exact native text only for callers requesting a transcript."""
+        if self.capture_closed or self.on_native_text is None or not text or self.native_overflow:
+            return
+        self.native_bytes += len(text.encode("utf-8"))
+        if self.native_bytes > ACP_STREAM_BUFFER_MAX_BYTES:
+            self.native_overflow = True
+            self.native_text.clear()
+        else:
+            self.native_text.append(text)
+
+    def publish_native_text(self, result: Any) -> None:
+        """Publish once after actual successful, uncancelled RPC settlement."""
+        if self.cancelled or (isinstance(result, dict) and result.get("stopReason") == "cancelled"):
+            return
+        if self.native_overflow:
+            raise ACPResponseError("Native assistant response exceeded ACP stream buffer limit")
+        if self.on_native_text is not None and self.native_text:
+            self.on_native_text("".join(self.native_text))
 
 
 @dataclass
@@ -541,6 +582,7 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         self._client.set_request_handler(self._handle_request)
         self._updates: dict[str, deque[dict[str, Any]]] = defaultdict(make_session_update_queue)
         self._session_owners: dict[str, int] = {}
+        self._active_prompts: dict[str, ActivePrompt] = {}
         self._agent_capabilities: dict[str, Any] = {}
         # WebSocket registry per session
         self._ws_registry: dict[str, SessionWebSocketRegistry] = {}
@@ -655,6 +697,7 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
             raise ACPResponseError("Missing sessionId in response")
         if user_id is not None:
             self._session_owners[str(session_id)] = int(user_id)
+            self._client._register_permission_session(str(session_id))
         return session_id
 
     async def list_agents(self) -> dict[str, Any]:
@@ -831,25 +874,130 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         )
         return payload
 
-    async def prompt(self, session_id: str, prompt: list[dict[str, Any]]) -> dict[str, Any]:
-        governance = await self.check_prompt_governance(session_id, prompt)
-        if self._governance.is_denied_with_enforcement(governance):
-            raise ACPGovernanceDeniedError(governance=governance or {})
+    async def prompt(
+        self, session_id: str, prompt: list[dict[str, Any]], *,
+        on_native_text: Callable[[str], None] | None = None,
+    ) -> dict[str, Any]:
+        if session_id in self._active_prompts:
+            raise ACPResponseError("A prompt is already active for this session")
+        wire_prompt = normalize_prompt_content(prompt)
+        operation = ActivePrompt(on_native_text=on_native_text)
+        self._active_prompts[session_id] = operation
+        try:
+            governance = await self.check_prompt_governance(session_id, prompt)
+            if self._governance.is_denied_with_enforcement(governance):
+                raise ACPGovernanceDeniedError(governance=governance or {})
+            if operation.cancelled:
+                raise ACPResponseError("Prompt cancelled before dispatch")
+            operation.task = asyncio.create_task(self._run_prompt_rpc(session_id, operation, wire_prompt))
+            operation.task.add_done_callback(self._observe_prompt_rpc)
+            try:
+                if self._client.rpc_timeout_sec > 0:
+                    response = await asyncio.wait_for(
+                        asyncio.shield(operation.task), timeout=self._client.rpc_timeout_sec,
+                    )
+                else:
+                    response = await asyncio.shield(operation.task)
+            except asyncio.TimeoutError as exc:
+                await self._stop_interrupted_prompt(session_id, operation)
+                raise ACPResponseError("ACP call timed out waiting for session/prompt", code=-32000) from exc
+            except asyncio.CancelledError:
+                await self._stop_interrupted_prompt(session_id, operation)
+                raise
+            return response.result or {}
+        finally:
+            # Once dispatched, only the actual RPC task may release admission.
+            # A caller deadline/cancellation cannot establish downstream settlement.
+            if operation.task is None:
+                await self._finish_prompt_operation(session_id, operation)
 
-        response = await self._client.call(
-            "session/prompt",
-            {
-                "sessionId": session_id,
-                "prompt": prompt,
-            },
-        )
-        return response.result or {}
+    async def _run_prompt_rpc(
+        self, session_id: str, operation: ActivePrompt, prompt: list[dict[str, Any]],
+    ) -> ACPMessage:
+        try:
+            if operation.cancelled:
+                raise ACPResponseError("Prompt cancelled before dispatch")
+            response = await self._client.call(
+                "session/prompt", {"sessionId": session_id, "prompt": prompt}, timeout_sec=0,
+                on_response_received=operation.close_native_capture,
+            )
+            if operation.cancelled and not (
+                isinstance(response.result, dict) and response.result.get("stopReason") == "cancelled"
+            ):
+                raise ACPResponseError("ACP prompt cancelled before its reply settled")
+            if self._active_prompts.get(session_id) is operation:
+                operation.publish_native_text(response.result)
+            return response
+        finally:
+            await self._finish_prompt_operation(session_id, operation)
+
+    async def _finish_prompt_operation(self, session_id: str, operation: ActivePrompt) -> None:
+        await self._retire_prompt_permissions(session_id, operation)
+        if operation.stop_task is not None:
+            await asyncio.gather(operation.stop_task, return_exceptions=True)
+        if self._active_prompts.get(session_id) is operation:
+            try:
+                # Browser backpressure must not retain a completed RPC's admission.
+                async with asyncio.timeout(1):
+                    await self._broadcast_to_session(session_id, {
+                        "type": "prompt_settled", "session_id": session_id,
+                    })
+            except TimeoutError:
+                logger.warning("ACP prompt settlement notification timed out for session {}", session_id)
+            finally:
+                if self._active_prompts.get(session_id) is operation:
+                    self._active_prompts.pop(session_id, None)
+
+    @staticmethod
+    def _observe_prompt_rpc(task: asyncio.Task[ACPMessage]) -> None:
+        # An interrupted caller no longer awaits this task, but its actual RPC
+        # response/error remains owned and must be observed through settlement.
+        if not task.cancelled():
+            task.exception()
+
+    async def _stop_interrupted_prompt(self, session_id: str, operation: ActivePrompt) -> None:
+        if self._active_prompts.get(session_id) is not operation:
+            return
+        try:
+            await self.cancel(session_id)
+        except _ACP_GOVERNANCE_NONCRITICAL_EXCEPTIONS:
+            # Transport failure does not prove settlement or replace the caller's
+            # original timeout/cancellation. The owned RPC drains on reply/EOF.
+            logger.warning("ACP interrupted prompt Stop could not be sent")
+
+    async def _retire_prompt_permissions(self, session_id: str, operation: ActivePrompt) -> None:
+        """Cancel only this operation's futures before Stop or close is sent."""
+        operation.cancelled = True
+        async with self._ws_registry_lock:
+            registry = self._ws_registry.get(session_id)
+            for request_id in operation.permission_ids:
+                pending = registry.pending_permissions.pop(request_id, None) if registry else None
+                if pending is not None and pending.future is not None and not pending.future.done():
+                    pending.future.set_result({"outcome": "cancelled"})
+            operation.permission_ids.clear()
 
     async def cancel(self, session_id: str) -> None:
+        operation = self._active_prompts.get(session_id)
+        if operation is None:
+            return
+        # Register the Stop before yielding. Actual RPC settlement then retains
+        # this operation's admission until its bound control send has finished.
+        operation.cancelled = True
+        if operation.stop_task is None:
+            operation.stop_task = asyncio.create_task(self._send_operation_stop(session_id, operation))
+        await asyncio.shield(operation.stop_task)
+
+    async def _send_operation_stop(self, session_id: str, operation: ActivePrompt) -> None:
+        await self._retire_prompt_permissions(session_id, operation)
         await self._client.notify("session/cancel", {"sessionId": session_id})
 
     async def close_session(self, session_id: str) -> None:
+        operation = self._active_prompts.get(session_id)
+        await self.cancel(session_id)
         await _call_session_close_with_fallback(self._client, session_id)
+        await self._client._unregister_permission_session(session_id)
+        if operation is not None and operation.task is not None:
+            await asyncio.gather(operation.task, return_exceptions=True)
         self._updates.pop(session_id, None)
         self._session_owners.pop(str(session_id), None)
         self._clear_runtime_policy_session_state(session_id)
@@ -874,7 +1022,12 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         return int(owner) == int(user_id)
 
     async def shutdown(self) -> None:
+        operations = list(self._active_prompts.items())
+        for session_id, operation in operations:
+            await self._retire_prompt_permissions(session_id, operation)
         await self._client.close()
+        await asyncio.gather(*(operation.task for _, operation in operations if operation.task is not None),
+                             return_exceptions=True)
 
     # -------------------------------------------------------------------------
     # WebSocket Registry Management
@@ -950,6 +1103,12 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         if not pending:
             logger.warning("Permission request {} not found for session {}", request_id, session_id)
             return False
+        operation = self._active_prompts.get(session_id)
+        if operation is None or operation.cancelled or request_id not in operation.permission_ids:
+            if pending.future is not None and not pending.future.done():
+                pending.future.set_result({"outcome": "cancelled"})
+            return False
+        operation.permission_ids.discard(request_id)
 
         # Handle batch approval tier
         if approved and batch_approve_tier:
@@ -979,14 +1138,32 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
         if not session_id:
             return
 
+        update = params.get("update")
+        update = update if isinstance(update, dict) else {}
+        kind = update.get("sessionUpdate") or params.get("type", "unknown")
+        if kind == "agent_message_chunk":
+            operation = self._active_prompts.get(session_id)
+            if operation is None or operation.cancelled or operation.capture_closed or operation.task is None or operation.task.done():
+                return
+            content = update.get("content")
+            if isinstance(content, dict) and content.get("type") == "text" and isinstance(content.get("text"), str):
+                operation.capture_native_text(content["text"])
+
         # Queue update for polling clients
         self._updates[str(session_id)].append(bounded_session_update_payload(params))
 
         # Broadcast to WebSocket clients
+        operation = self._active_prompts.get(session_id)
+        prompt_active = bool(
+            operation is not None
+            and operation.task is not None and not operation.task.done()
+            and not operation.capture_closed
+        )
         update_message = {
             "type": "update",
             "session_id": session_id,
-            "update_type": params.get("type", "unknown"),
+            "update_type": kind,
+            "prompt_active": prompt_active,
             "data": params,
         }
         await self._broadcast_to_session(session_id, update_message)
@@ -997,6 +1174,9 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
 
         params = msg.params or {}
         session_id = params.get("sessionId", "")
+        operation = self._active_prompts.get(session_id)
+        if operation is None or operation.cancelled:
+            return ACPMessage(jsonrpc="2.0", id=msg.id, result={"outcome": {"outcome": "cancelled"}})
         tool_name = params.get("tool", {}).get("name", "unknown")
         tool_arguments = params.get("tool", {}).get("input", {})
 
@@ -1021,6 +1201,8 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
             runtime_outcome=runtime_outcome,
             governance=governance,
         )
+        if self._active_prompts.get(session_id) is not operation or operation.cancelled:
+            return ACPMessage(jsonrpc="2.0", id=msg.id, result={"outcome": {"outcome": "cancelled"}})
 
         if permission_outcome["action"] == "deny":
             outcome_payload: dict[str, Any] = {
@@ -1073,9 +1255,12 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
 
         # Register pending permission
         async with self._ws_registry_lock:
+            if self._active_prompts.get(session_id) is not operation or operation.cancelled:
+                return ACPMessage(jsonrpc="2.0", id=msg.id, result={"outcome": {"outcome": "cancelled"}})
             if session_id not in self._ws_registry:
                 self._ws_registry[session_id] = SessionWebSocketRegistry(session_id=session_id)
             self._ws_registry[session_id].pending_permissions[request_id] = pending
+            operation.permission_ids.add(request_id)
 
         # Broadcast permission request to WebSocket clients
         permission_message = {
@@ -1132,11 +1317,29 @@ class ACPRunnerClient(ACPRuntimePolicySupportMixin):
                 id=msg.id,
                 result={"outcome": {"outcome": "cancelled"}},
             )
+        finally:
+            operation.permission_ids.discard(request_id)
+            async with self._ws_registry_lock:
+                registry = self._ws_registry.get(session_id)
+                if registry is not None and registry.pending_permissions.get(request_id) is pending:
+                    registry.pending_permissions.pop(request_id, None)
 
 
 _runner_client: ACPRunnerClient | None = None
 _runner_lock = asyncio.Lock()
 _sandbox_client: Any | None = None
+
+
+def get_existing_runner_client() -> Any | None:
+    """Return the configured running client without creating a runtime."""
+    from tldw_Server_API.app.core.Agent_Client_Protocol.config import load_acp_sandbox_config
+
+    try:
+        sandbox_config = load_acp_sandbox_config()
+    except _ACP_GOVERNANCE_NONCRITICAL_EXCEPTIONS:
+        return None
+    client = _sandbox_client if sandbox_config and sandbox_config.enabled else _runner_client
+    return client if client is not None and client.is_running else None
 
 
 async def get_runner_client() -> ACPRunnerClient:

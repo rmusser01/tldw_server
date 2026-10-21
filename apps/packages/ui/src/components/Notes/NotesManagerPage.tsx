@@ -48,7 +48,8 @@ import {
   useNotesWikilinkRename,
   type NoteRenamedEvent,
 } from "@/components/Notes/hooks"
-import type { NotesLeaveGuardState } from "@/components/Notes/hooks/useNotesEditorState"
+import type { NotesLeaveGuardState, NotesOwnedRequestOptions } from "@/components/Notes/hooks/useNotesEditorState"
+import { deriveSingleUserApiKeyCredentialScope } from '@/services/chat-surface-scope'
 import type { NoteListItem } from "@/components/Notes/notes-manager-types"
 import { parseWikilinkHref } from "@/components/Notes/wikilinks"
 import { clearSetting, getSetting } from "@/services/settings/registry"
@@ -166,14 +167,17 @@ type NotePath = `/api/v1/notes/${string}`
 
 const notePath = (noteId: string): NotePath => `/api/v1/notes/${encodeURIComponent(noteId)}`
 
-const fetchNote = (noteId: string) => bgRequest<unknown>({ path: notePath(noteId), method: 'GET' })
+const fetchNote = (noteId: string, ownedRequest: NotesOwnedRequestOptions) =>
+  bgRequest<unknown>({ ...ownedRequest, path: notePath(noteId), method: 'GET' })
 
 /** Replace a note's tags, guarded by its version (the server returns 409 on mismatch). */
-const patchNoteTags = (noteId: string, expectedVersion: number, tags: string[]) =>
+const patchNoteTags = (noteId: string, expectedVersion: number, tags: string[], ownedRequest: NotesOwnedRequestOptions) =>
   bgRequest<unknown>({
+    ...ownedRequest,
     path: `${notePath(noteId)}?expected_version=${expectedVersion}`,
     method: 'PATCH',
     headers: {
+      ...ownedRequest.headers,
       'Content-Type': 'application/json',
       'expected-version': String(expectedVersion)
     },
@@ -358,10 +362,17 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     onNoteRenamed: (event) => noteRenamedRef.current(event),
   })
   const [hasActiveDraft, setHasActiveDraft] = React.useState(false)
+  const [preparingDraft, setPreparingDraft] = React.useState(false)
+  const preparingDraftRef = React.useRef<ReturnType<typeof ed.captureNoteMutation> | null>(null)
+  const retireDraftTransition = React.useCallback(() => {
+    preparingDraftRef.current = null
+    setPreparingDraft(false)
+  }, [])
   const resetEditorToEmptyState = React.useCallback(() => {
+    retireDraftTransition()
     setHasActiveDraft(false)
     ed.resetEditor()
-  }, [ed.resetEditor])
+  }, [ed.resetEditor, retireDraftTransition])
   const selectedAuthorityEvidenceRef = React.useRef<{
     noteId: string
     authorityScope: string
@@ -399,16 +410,24 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [notesGraphAuthorityScope, resetEditorToEmptyState])
   React.useEffect(() => {
     const resetOnLogout = (event: Event) => {
+      retireDraftTransition()
       if ((event as CustomEvent).detail?.kind !== 'logout') return
       selectedAuthorityEvidenceRef.current = null
       lastVerifiedAuthorityScopeRef.current = null
       resetEditorToEmptyState()
     }
-    window.addEventListener('tldw:auth-principal-changed', resetOnLogout)
-    return () => {
-      window.removeEventListener('tldw:auth-principal-changed', resetOnLogout)
+    const retireOnConfigChange = (event: Event) => {
+      const detail = (event as CustomEvent<{ authorityChanged?: boolean; refreshSessionInvalidated?: boolean }>).detail
+      if (detail?.authorityChanged !== false || detail.refreshSessionInvalidated) retireDraftTransition()
     }
-  }, [resetEditorToEmptyState])
+    window.addEventListener('tldw:auth-principal-changed', resetOnLogout)
+    window.addEventListener('tldw:config-updated', retireOnConfigChange)
+    return () => {
+      preparingDraftRef.current = null
+      window.removeEventListener('tldw:auth-principal-changed', resetOnLogout)
+      window.removeEventListener('tldw:config-updated', retireOnConfigChange)
+    }
+  }, [resetEditorToEmptyState, retireDraftTransition])
   const startDraftSession = React.useCallback(() => {
     setHasActiveDraft(true)
     ed.resetEditor()
@@ -1036,23 +1055,33 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   // ---- Handlers remaining in component ----
 
   const handleNewNote = React.useCallback(async (templateId?: string) => {
-    const ok = await ed.confirmDiscardIfDirty()
-    if (!ok) return
-    if (list.listMode !== 'active') list.setListMode('active')
-    if (isMobileViewport) setMobileSidebarOpen(false)
-    startDraftSession()
-    const template = NOTE_TEMPLATES.find((entry) => entry.id === templateId)
-    if (template) {
-      ed.setTitle(template.title)
-      ed.setContent(template.content)
-      ed.setIsDirty(true)
-      ed.setSaveIndicator('dirty')
-      message.success(`Applied template: ${template.label}`)
+    if (preparingDraftRef.current) return
+    const transition = ed.captureNoteMutation()
+    preparingDraftRef.current = transition
+    setPreparingDraft(true)
+    try {
+      const ok = await ed.confirmDiscardIfDirty()
+      if (!ok || preparingDraftRef.current !== transition || !transition.isOwnerCurrent()) return
+      if (list.listMode !== 'active') list.setListMode('active')
+      if (isMobileViewport) setMobileSidebarOpen(false)
+      startDraftSession()
+      const template = NOTE_TEMPLATES.find((entry) => entry.id === templateId)
+      if (template) {
+        ed.setTitle(template.title)
+        ed.setContent(template.content)
+        ed.setIsDirty(true)
+        ed.setSaveIndicator('dirty')
+        message.success(`Applied template: ${template.label}`)
+      }
+      setTimeout(() => {
+        ed.titleInputRef.current?.focus()
+      }, 0)
+    } finally {
+      if (preparingDraftRef.current === transition) retireDraftTransition()
     }
-    setTimeout(() => {
-      ed.titleInputRef.current?.focus()
-    }, 0)
   }, [
+    ed.captureNoteMutation,
+    retireDraftTransition,
     ed.confirmDiscardIfDirty,
     ed.setContent,
     ed.setIsDirty,
@@ -1067,15 +1096,25 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   ])
 
   const saveAndStartNew = React.useCallback(async () => {
-    const saved = await ed.saveNote()
-    if (!saved) return
-    if (list.listMode !== 'active') list.setListMode('active')
-    if (isMobileViewport) setMobileSidebarOpen(false)
-    startDraftSession()
-    window.setTimeout(() => {
-      ed.titleInputRef.current?.focus()
-    }, 0)
+    if (preparingDraftRef.current) return
+    const transition = ed.captureNoteMutation()
+    preparingDraftRef.current = transition
+    setPreparingDraft(true)
+    try {
+      const saved = await ed.saveNote()
+      if (!saved || preparingDraftRef.current !== transition || !transition.isOwnerCurrent()) return
+      if (list.listMode !== 'active') list.setListMode('active')
+      if (isMobileViewport) setMobileSidebarOpen(false)
+      startDraftSession()
+      window.setTimeout(() => {
+        ed.titleInputRef.current?.focus()
+      }, 0)
+    } finally {
+      if (preparingDraftRef.current === transition) retireDraftTransition()
+    }
   }, [
+    ed.captureNoteMutation,
+    retireDraftTransition,
     ed.saveNote,
     ed.titleInputRef,
     isMobileViewport,
@@ -1242,8 +1281,57 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     [confirmDanger, ed, message]
   )
 
+  // Mutations and their retained Undo callbacks belong to the original owner.
+  const latestEditorRef = React.useRef(ed)
+  latestEditorRef.current = ed
+  const captureNoteMutation = ed.captureNoteMutation
+  type MutationOwner = ReturnType<typeof ed.captureNoteMutation> & { refetch: typeof list.refetch }
+  const beginNoteMutation = React.useCallback((original?: MutationOwner) => {
+    if (original && !original.isOwnerCurrent()) {
+      throw new Error('The note owner changed. Reopen the note and try again.')
+    }
+    const captured = captureNoteMutation()
+    const config = original?.config ?? captured.config
+    const scope = original?.scope ?? captured.scope
+    const controller = new AbortController()
+    const unregister = captured.register(controller)
+    const isOwnerCurrent = () => captured.isOwnerCurrent() && (!original || original.isOwnerCurrent())
+    const isCurrent = () => !controller.signal.aborted && isOwnerCurrent()
+    const requireCurrent = () => {
+      if (!isCurrent()) throw new Error('The note owner changed. Reopen the note and try again.')
+    }
+    return {
+      ...captured, config, scope, isOwnerCurrent, isCurrent, requireCurrent,
+      get editRevision() { return captured.editRevision },
+      refetch: original?.refetch ?? list.refetch,
+      requestOptions: async (): Promise<NotesOwnedRequestOptions> => {
+        requireCurrent()
+        if (!config || !scope) throw new Error('The note owner is unavailable.')
+        const user = await tldwAuth.getCurrentUser()
+        requireCurrent()
+        if (!user?.is_active || user.id == null || createNotesGraphAuthorityScope(config.serverUrl, user.id) !== scope) {
+          controller.abort()
+          throw new Error('The note owner changed. Reopen the note and try again.')
+        }
+        return {
+          servicePromptConfig: {
+            serverUrl: config.serverUrl, authMode: config.authMode, authSource: config.authSource,
+            orgId: config.orgId, expectedUserId: user.id,
+            expectedSingleUserApiKeyScope: config.authMode === 'single-user'
+              ? deriveSingleUserApiKeyCredentialScope('single-user', config.apiKey) : undefined,
+          },
+          headers: { 'X-TLDW-Expected-User-ID': String(user.id) },
+          abortSignal: controller.signal,
+        }
+      },
+      release: () => { controller.abort(); unregister() },
+    }
+  }, [captureNoteMutation, list.refetch])
+  type NoteMutation = ReturnType<typeof beginNoteMutation>
+
   // Delete note
-  const lookupDeletedNoteVersion = React.useCallback(async (noteId: string) => {
+  const lookupDeletedNoteVersion = React.useCallback(async (noteId: string, operation: NoteMutation, ownedRequest: NotesOwnedRequestOptions) => {
+    operation.requireCurrent()
     if (list.listMode === 'trash' && Array.isArray(list.data)) {
       const existing = list.data.find((note) => String(note.id) === noteId)
       if (existing?.version != null) {
@@ -1255,9 +1343,11 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       let pagesChecked = 0
       while (pagesChecked < TRASH_LOOKUP_MAX_PAGES) {
         const res = await bgRequest<any>({
+          ...ownedRequest,
           path: `/api/v1/notes/trash?limit=${TRASH_LOOKUP_PAGE_SIZE}&offset=${offset}` as any,
           method: 'GET' as any
         })
+        operation.requireCurrent()
         const items = Array.isArray(res?.items) ? res.items : Array.isArray(res) ? res : []
         const match = items.find((item: any) => String(item?.id) === noteId)
         const version = toNoteVersion(match)
@@ -1273,37 +1363,47 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       }
       return null
     } catch {
+      operation.requireCurrent()
       return null
     }
   }, [list.data, list.listMode])
 
   const showDeleteUndoToast = React.useCallback(
-    (noteId: string) => {
+    (noteId: string, original: MutationOwner) => {
       const toastKey = `notes-delete-${noteId}`
       const handleUndo = async () => {
+        if (!original.isOwnerCurrent()) return
+        const operation = beginNoteMutation(original)
         if (typeof (message as any).destroy === 'function') {
           ;(message as any).destroy(toastKey)
         }
         try {
-          const resolvedVersion = await lookupDeletedNoteVersion(noteId)
+          const ownedRequest = await operation.requestOptions()
+          const resolvedVersion = await lookupDeletedNoteVersion(noteId, operation, ownedRequest)
+          operation.requireCurrent()
           if (resolvedVersion == null) {
             message.warning('Undo unavailable. Open Trash to restore this note.')
             return
           }
           await bgRequest<any>({
+            ...ownedRequest,
             path: `/api/v1/notes/${encodeURIComponent(noteId)}/restore?expected_version=${encodeURIComponent(
               String(resolvedVersion)
             )}` as any,
             method: 'POST' as any
           })
+          operation.requireCurrent()
           message.success('Note restored')
           list.setListMode('active')
           list.setPage(1)
-          await list.refetch()
-          await ed.loadDetail(noteId)
+          await operation.refetch()
+          operation.requireCurrent()
+          if (operation.isEditorCurrent()) {
+            await latestEditorRef.current.loadDetail(noteId, ownedRequest, operation.editRevision)
+          }
         } catch {
-          message.warning('Undo failed. Open Trash to restore this note manually.')
-        }
+          if (operation.isCurrent()) message.warning('Undo failed. Open Trash to restore this note manually.')
+        } finally { operation.release() }
       }
 
       if (typeof (message as any).open === 'function') {
@@ -1329,16 +1429,18 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       }
       message.success('Note deleted')
     },
-    [ed, list, lookupDeletedNoteVersion, message]
+    [beginNoteMutation, list, lookupDeletedNoteVersion, message]
   )
 
-  const countInboundDeleteReferences = React.useCallback(async (noteId: string) => {
+  const countInboundDeleteReferences = React.useCallback(async (noteId: string, operation: NoteMutation, ownedRequest: NotesOwnedRequestOptions) => {
     try {
       const encodedId = encodeURIComponent(noteId)
       const graph = await bgRequest<any>({
+        ...ownedRequest,
         path: `/api/v1/notes/${encodedId}/neighbors?edge_types=manual,wikilink,backlink&max_nodes=120&max_edges=240` as any,
         method: 'GET' as any
       })
+      operation.requireCurrent()
       const edges = Array.isArray(graph?.edges) ? graph.edges : []
       const inbound = new Set<string>()
       for (const edge of edges) {
@@ -1353,6 +1455,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       }
       return inbound.size
     } catch {
+      operation.requireCurrent()
       return 0
     }
   }, [])
@@ -1361,21 +1464,24 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     const target = id ?? ed.selectedId
     if (target == null) { message.warning('No note selected'); return }
     const targetId = String(target)
-    const inboundReferenceCount = await countInboundDeleteReferences(targetId)
-    const warningSuffix =
-      inboundReferenceCount > 0
-        ? `\n\nThis note is referenced by ${inboundReferenceCount} other note${
-            inboundReferenceCount === 1 ? '' : 's'
-          }. Deleting it will break those links.`
-        : ''
-    const ok = await confirmDanger({
-      title: 'Please confirm',
-      content: `Delete this note?${warningSuffix}`,
-      okText: 'Delete',
-      cancelText: 'Cancel'
-    })
-    if (!ok) return
+    const operation = beginNoteMutation()
     try {
+      const ownedRequest = await operation.requestOptions()
+      const inboundReferenceCount = await countInboundDeleteReferences(targetId, operation, ownedRequest)
+      operation.requireCurrent()
+      const warningSuffix =
+        inboundReferenceCount > 0
+          ? `\n\nThis note is referenced by ${inboundReferenceCount} other note${
+              inboundReferenceCount === 1 ? '' : 's'
+            }. Deleting it will break those links.`
+          : ''
+      const ok = await confirmDanger({
+        title: 'Please confirm',
+        content: `Delete this note?${warningSuffix}`,
+        okText: 'Delete',
+        cancelText: 'Cancel'
+      })
+      if (!ok || !operation.isCurrent()) return
       let expectedVersion: number | null = null
       if (ed.selectedId != null && String(ed.selectedId) === targetId) {
         expectedVersion = ed.selectedVersion
@@ -1386,10 +1492,11 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       }
       if (expectedVersion == null) {
         try {
-          const detail = await bgRequest<any>({ path: `/api/v1/notes/${target}` as any, method: 'GET' as any })
+          const detail = await fetchNote(targetId, ownedRequest)
+          operation.requireCurrent()
           expectedVersion = toNoteVersion(detail)
         } catch (e: any) {
-          message.error(e?.message || 'Could not verify note version')
+          if (operation.isCurrent()) message.error(e?.message || 'Could not verify note version')
           return
         }
       }
@@ -1398,23 +1505,26 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         return
       }
       await bgRequest<any>({
+        ...ownedRequest,
         path: `/api/v1/notes/${target}?expected_version=${encodeURIComponent(
           String(expectedVersion)
         )}` as any,
         method: 'DELETE' as any,
-        headers: { "expected-version": String(expectedVersion) }
+        headers: { ...ownedRequest.headers, "expected-version": String(expectedVersion) }
       })
-      ed.removeRecentNotes([targetId])
-      showDeleteUndoToast(targetId)
-      if (ed.selectedId != null && String(ed.selectedId) === targetId) resetEditorToEmptyState()
-      await list.refetch()
+      operation.requireCurrent()
+      latestEditorRef.current.removeRecentNotes([targetId])
+      showDeleteUndoToast(targetId, operation)
+      if (operation.isEditorCurrent() && ed.selectedId != null && String(ed.selectedId) === targetId) resetEditorToEmptyState()
+      await operation.refetch()
     } catch (e: any) {
+      if (!operation.isCurrent()) return
       if (ed.isVersionConflictError(e)) {
-        ed.handleVersionConflict(target)
+        if (operation.isEditorCurrent()) ed.handleVersionConflict(target)
       } else {
         message.error(String(e?.message || '') || 'Operation failed')
       }
-    }
+    } finally { operation.release() }
   }
 
   const restoreNote = async (id: string | number, version?: number) => {
@@ -1429,231 +1539,284 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       message.error('Missing version; reload trash and try again')
       return
     }
+    const operation = beginNoteMutation()
     try {
+      const ownedRequest = await operation.requestOptions()
       const restored = await bgRequest<any>({
+        ...ownedRequest,
         path: `/api/v1/notes/${encodeURIComponent(target)}/restore?expected_version=${encodeURIComponent(
           String(expectedVersion)
         )}` as any,
         method: 'POST' as any
       })
+      operation.requireCurrent()
       message.success('Note restored')
       list.setListMode('active')
       list.setPage(1)
-      await list.refetch()
+      await operation.refetch()
+      operation.requireCurrent()
       const restoredId = String(restored?.id || target)
-      await ed.loadDetail(restoredId)
+      if (operation.isEditorCurrent()) {
+        await latestEditorRef.current.loadDetail(restoredId, ownedRequest, operation.editRevision)
+      }
     } catch (error: any) {
+      if (!operation.isCurrent()) return
       if (ed.isVersionConflictError(error)) {
         message.error('Restore conflict. Refresh trash and retry.')
       } else {
         message.error(String(error?.message || 'Could not restore note'))
       }
-    }
+    } finally { operation.release() }
   }
 
   // Bulk operations
   const deleteSelectedBulk = React.useCallback(async () => {
-    if (list.selectedBulkNotes.length === 0) {
+    const targets = list.selectedBulkNotes.slice()
+    if (targets.length === 0) {
       message.info('No selected notes to delete')
       return
     }
-    const okToLeave = await ed.confirmDiscardIfDirty()
-    if (!okToLeave) return
-    const confirmed = await confirmDanger({
-      title: 'Delete selected notes?',
-      content: `Delete ${list.selectedBulkNotes.length} selected notes? This moves them to trash.`,
-      okText: 'Delete selected',
-      cancelText: 'Cancel'
-    })
-    if (!confirmed) return
+    const operation = beginNoteMutation()
+    try {
+      const okToLeave = await ed.confirmDiscardIfDirty(operation.acceptSavedDraft)
+      if (!okToLeave || !operation.isCurrent() || !operation.isEditorCurrent()) return
+      const confirmed = await confirmDanger({
+        title: 'Delete selected notes?',
+        content: `Delete ${targets.length} selected notes? This moves them to trash.`,
+        okText: 'Delete selected',
+        cancelText: 'Cancel'
+      })
+      if (!confirmed || !operation.isCurrent()) return
+      const ownedRequest = await operation.requestOptions()
 
-    let deleted = 0
-    let failed = 0
-    const deletedIds = new Set<string>()
+      let deleted = 0
+      let failed = 0
+      const deletedIds = new Set<string>()
 
-    for (const note of list.selectedBulkNotes) {
-      const noteId = String(note.id)
-      const expectedVersion = await ed.getExpectedVersionForNoteId(noteId)
-      if (expectedVersion == null) { failed += 1; continue }
-      try {
-        await bgRequest<any>({
-          path: `/api/v1/notes/${encodeURIComponent(noteId)}?expected_version=${encodeURIComponent(
-            String(expectedVersion)
-          )}` as any,
-          method: 'DELETE' as any,
-          headers: { 'expected-version': String(expectedVersion) }
-        })
-        deleted += 1
-        deletedIds.add(noteId)
-      } catch { failed += 1 }
-    }
-
-    if (deleted > 0) {
-      message.success(`Deleted ${deleted} selected note${deleted === 1 ? '' : 's'}`)
-      ed.removeRecentNotes(Array.from(deletedIds))
-      if (ed.selectedId != null && deletedIds.has(String(ed.selectedId))) {
-        resetEditorToEmptyState()
+      for (const note of targets) {
+        const noteId = String(note.id)
+        try {
+          operation.requireCurrent()
+          const editor = latestEditorRef.current
+          let expectedVersion = operation.isEditorCurrent() && editor.selectedId != null && String(editor.selectedId) === noteId
+            ? editor.selectedVersion : null
+          if (expectedVersion == null && typeof note.version === 'number' && Number.isFinite(note.version)) {
+            expectedVersion = note.version
+          }
+          if (expectedVersion == null) {
+            const detail = await fetchNote(noteId, ownedRequest)
+            operation.requireCurrent()
+            expectedVersion = toNoteVersion(detail)
+          }
+          if (expectedVersion == null) { failed += 1; continue }
+          await bgRequest<any>({
+            ...ownedRequest,
+            path: `/api/v1/notes/${encodeURIComponent(noteId)}?expected_version=${encodeURIComponent(
+              String(expectedVersion)
+            )}` as any,
+            method: 'DELETE' as any,
+            headers: { ...ownedRequest.headers, 'expected-version': String(expectedVersion) }
+          })
+          operation.requireCurrent()
+          deleted += 1
+          deletedIds.add(noteId)
+        } catch {
+          operation.requireCurrent()
+          failed += 1
+        }
       }
-      list.setBulkSelectedIds((current) => current.filter((id) => !deletedIds.has(id)))
-      await list.refetch()
-    }
-    if (failed > 0) {
-      message.warning(`${failed} selected note${failed === 1 ? '' : 's'} failed to delete`)
-    }
-  }, [confirmDanger, ed, list, message])
 
-  // Undo runs from a toast after later renders, so read the live editor/list.
-  const latestEditorRef = React.useRef(ed)
-  latestEditorRef.current = ed
-  const latestListRef = React.useRef(list)
-  latestListRef.current = list
+      if (deleted > 0) {
+        message.success(`Deleted ${deleted} selected note${deleted === 1 ? '' : 's'}`)
+        const editor = latestEditorRef.current
+        editor.removeRecentNotes(Array.from(deletedIds))
+        if (operation.isEditorCurrent() && editor.selectedId != null && deletedIds.has(String(editor.selectedId))) {
+          resetEditorToEmptyState()
+        }
+        list.setBulkSelectedIds((current) => current.filter((id) => !deletedIds.has(id)))
+        await operation.refetch()
+        operation.requireCurrent()
+      }
+      if (failed > 0) {
+        message.warning(`${failed} selected note${failed === 1 ? '' : 's'} failed to delete`)
+      }
+    } catch (error) {
+      if (operation.isCurrent()) message.error(error instanceof Error ? error.message : 'Operation failed')
+    } finally { operation.release() }
+  }, [beginNoteMutation, confirmDanger, ed, list, message, resetEditorToEmptyState])
 
-  const refreshAfterBulkTagChange = React.useCallback(async (noteIds: readonly string[]) => {
-    await latestListRef.current.refetch()
+  const refreshAfterBulkTagChange = React.useCallback(async (noteIds: readonly string[], operation: NoteMutation, ownedRequest: NotesOwnedRequestOptions) => {
+    operation.requireCurrent()
+    const editorSnapshot = latestEditorRef.current.captureNoteMutation()
+    await operation.refetch()
+    operation.requireCurrent()
     const editor = latestEditorRef.current
     if (
       editor.selectedId != null &&
-      !editor.isDirty &&
+      !editor.isDirty && editorSnapshot.isEditorCurrent() &&
       noteIds.includes(String(editor.selectedId))
     ) {
-      await editor.loadDetail(editor.selectedId)
+      await editor.loadDetail(editor.selectedId, ownedRequest, editorSnapshot.editRevision)
+      operation.requireCurrent()
     }
   }, [])
 
   const undoBulkTagAdd = React.useCallback(
-    async (snapshots: readonly BulkTagUndoSnapshot[]) => {
-      const restoredIds: string[] = []
-      const skipped: string[] = []
-      const failed: string[] = []
-      for (const snapshot of snapshots) {
-        const editor = latestEditorRef.current
-        if (editor.isDirty && editor.selectedId != null && String(editor.selectedId) === snapshot.noteId) {
-          // The open note's next save would re-apply the editor's tags.
-          skipped.push(snapshot.label)
-          continue
-        }
-        try {
-          const current = await fetchNote(snapshot.noteId)
-          // Content edits bump the version; tag-only edits do not, so compare tags too.
-          if (
-            toNoteVersion(current) !== snapshot.appliedVersion ||
-            !tagSetsMatch(extractKeywords(current), snapshot.appliedTags)
-          ) {
+    async (snapshots: readonly BulkTagUndoSnapshot[], original: MutationOwner) => {
+      const operation = beginNoteMutation(original)
+      try {
+        const ownedRequest = await operation.requestOptions()
+        const restoredIds: string[] = []
+        const skipped: string[] = []
+        const failed: string[] = []
+        for (const snapshot of snapshots) {
+          operation.requireCurrent()
+          const editor = latestEditorRef.current
+          if (editor.isDirty && editor.selectedId != null && String(editor.selectedId) === snapshot.noteId) {
+            // The open note's next save would re-apply the editor's tags.
             skipped.push(snapshot.label)
             continue
           }
-          await patchNoteTags(snapshot.noteId, snapshot.appliedVersion, snapshot.previousTags)
-          restoredIds.push(snapshot.noteId)
-        } catch (error) {
-          if (latestEditorRef.current.isVersionConflictError(error)) skipped.push(snapshot.label)
-          else failed.push(snapshot.label)
+          try {
+            const current = await fetchNote(snapshot.noteId, ownedRequest)
+            operation.requireCurrent()
+            const currentEditor = latestEditorRef.current
+            // Content edits bump the version; tag-only edits do not, so compare tags too.
+            if (
+              (currentEditor.isDirty && currentEditor.selectedId != null && String(currentEditor.selectedId) === snapshot.noteId) ||
+              toNoteVersion(current) !== snapshot.appliedVersion ||
+              !tagSetsMatch(extractKeywords(current), snapshot.appliedTags)
+            ) {
+              skipped.push(snapshot.label)
+              continue
+            }
+            await patchNoteTags(snapshot.noteId, snapshot.appliedVersion, snapshot.previousTags, ownedRequest)
+            operation.requireCurrent()
+            restoredIds.push(snapshot.noteId)
+          } catch (error) {
+            operation.requireCurrent()
+            if (latestEditorRef.current.isVersionConflictError(error)) skipped.push(snapshot.label)
+            else failed.push(snapshot.label)
+          }
         }
-      }
-      if (restoredIds.length > 0) await refreshAfterBulkTagChange(restoredIds)
-      if (skipped.length > 0 || failed.length > 0) {
-        // useUndoNotification reports a thrown error as the undo outcome.
-        const parts = [`Restored tags on ${formatNoteCount(restoredIds.length)}.`]
-        if (skipped.length > 0) {
-          parts.push(`Skipped ${formatBulkNoteLabels(skipped)}: changed after the tags were added.`)
+        if (restoredIds.length > 0) await refreshAfterBulkTagChange(restoredIds, operation, ownedRequest)
+        operation.requireCurrent()
+        if (skipped.length > 0 || failed.length > 0) {
+          // useUndoNotification reports a thrown error as the undo outcome.
+          const parts = [`Restored tags on ${formatNoteCount(restoredIds.length)}.`]
+          if (skipped.length > 0) {
+            parts.push(`Skipped ${formatBulkNoteLabels(skipped)}: changed after the tags were added.`)
+          }
+          if (failed.length > 0) parts.push(`Could not restore ${formatBulkNoteLabels(failed)}.`)
+          throw new Error(parts.join(' '))
         }
-        if (failed.length > 0) parts.push(`Could not restore ${formatBulkNoteLabels(failed)}.`)
-        throw new Error(parts.join(' '))
-      }
+      } finally { operation.release() }
     },
-    [refreshAfterBulkTagChange]
+    [beginNoteMutation, refreshAfterBulkTagChange]
   )
 
   const addTagsToSelectedBulk = React.useCallback(async () => {
-    const targets = list.selectedBulkNotes
+    const targets = list.selectedBulkNotes.slice()
     if (targets.length === 0) {
       message.info('No selected notes to update')
       return
     }
-    const okToLeave = await ed.confirmDiscardIfDirty()
-    if (!okToLeave) return
-    const picked = await promptBulkAddTags(modal, {
-      noteCount: targets.length,
-      suggestions: kw.availableKeywords,
-      renderSuggestionLabel: (tag) =>
-        kw.renderKeywordLabelWithFrequency(tag, {
-          includeCount: true,
-          testIdPrefix: 'notes-bulk-add-tags-option-label'
-        }),
-      t
-    })
-    if (picked == null) return
-    const additions = normalizeTagList(picked)
-    if (additions.length === 0) {
-      message.warning('Choose at least one tag to add')
-      return
-    }
-
-    const snapshots: BulkTagUndoSnapshot[] = []
-    const alreadyTagged: string[] = []
-    const conflicted: string[] = []
-    const failed: string[] = []
-    const partiallyTagged: string[] = []
-    for (const note of targets) {
-      const noteId = String(note.id)
-      const label = toBulkNoteLabel(note)
-      try {
-        // List rows can be stale and tag-only edits keep the note version, so
-        // merge with the server's current tags rather than the cached row.
-        const current = await fetchNote(noteId)
-        const version = toNoteVersion(current)
-        if (version == null) {
-          failed.push(label)
-          continue
-        }
-        const previousTags = normalizeTagList(extractKeywords(current))
-        const nextTags = mergeTagLists(previousTags, additions)
-        if (nextTags.length === previousTags.length) {
-          alreadyTagged.push(label)
-          continue
-        }
-        const updated = await patchNoteTags(noteId, version, nextTags)
-        snapshots.push({
-          noteId,
-          label,
-          previousTags,
-          appliedTags: hasInlineKeywords(updated) ? normalizeTagList(extractKeywords(updated)) : nextTags,
-          appliedVersion: toNoteVersion(updated) ?? version
-        })
-        if (toKeywordSyncWarning(updated)) partiallyTagged.push(label)
-      } catch (error) {
-        if (ed.isVersionConflictError(error)) conflicted.push(label)
-        else failed.push(label)
-      }
-    }
-
-    if (snapshots.length > 0) {
-      await refreshAfterBulkTagChange(snapshots.map((snapshot) => snapshot.noteId))
-      showUndoNotification({
-        title: `Added ${formatTagSummary(additions)} to ${formatNoteCount(snapshots.length)}`,
-        description: 'Existing tags were kept.',
-        duration: 10,
-        onUndo: () => undoBulkTagAdd(snapshots)
+    const operation = beginNoteMutation()
+    try {
+      const okToLeave = await ed.confirmDiscardIfDirty(operation.acceptSavedDraft)
+      if (!okToLeave || !operation.isCurrent() || !operation.isEditorCurrent()) return
+      const picked = await promptBulkAddTags(modal, {
+        noteCount: targets.length,
+        suggestions: kw.availableKeywords,
+        renderSuggestionLabel: (tag) =>
+          kw.renderKeywordLabelWithFrequency(tag, {
+            includeCount: true,
+            testIdPrefix: 'notes-bulk-add-tags-option-label'
+          }),
+        t
       })
-    }
-    if (alreadyTagged.length > 0) {
-      message.info(
-        `${alreadyTagged.length} selected note${alreadyTagged.length === 1 ? '' : 's'} already had ${
-          additions.length === 1 ? 'this tag' : 'these tags'
-        }`
-      )
-    }
-    const problems: string[] = []
-    if (conflicted.length > 0) {
-      problems.push(
-        `Tags were not added to ${formatBulkNoteLabels(conflicted)}: changed on the server. Refresh and try again.`
-      )
-    }
-    if (failed.length > 0) problems.push(`Could not add tags to ${formatBulkNoteLabels(failed)}.`)
-    if (partiallyTagged.length > 0) {
-      problems.push(`Some tags could not be attached to ${formatBulkNoteLabels(partiallyTagged)}.`)
-    }
-    if (problems.length > 0) message.warning(problems.join(' '))
-  }, [ed, kw, list, message, modal, refreshAfterBulkTagChange, showUndoNotification, t, undoBulkTagAdd])
+      if (picked == null || !operation.isCurrent()) return
+      const additions = normalizeTagList(picked)
+      if (additions.length === 0) {
+        message.warning('Choose at least one tag to add')
+        return
+      }
+
+      const snapshots: BulkTagUndoSnapshot[] = []
+      const alreadyTagged: string[] = []
+      const conflicted: string[] = []
+      const failed: string[] = []
+      const partiallyTagged: string[] = []
+      const ownedRequest = await operation.requestOptions()
+      for (const note of targets) {
+        const noteId = String(note.id)
+        const label = toBulkNoteLabel(note)
+        try {
+          operation.requireCurrent()
+          // List rows can be stale and tag-only edits keep the note version, so
+          // merge with the server's current tags rather than the cached row.
+          const current = await fetchNote(noteId, ownedRequest)
+          operation.requireCurrent()
+          const version = toNoteVersion(current)
+          if (version == null) {
+            failed.push(label)
+            continue
+          }
+          const previousTags = normalizeTagList(extractKeywords(current))
+          const nextTags = mergeTagLists(previousTags, additions)
+          if (nextTags.length === previousTags.length) {
+            alreadyTagged.push(label)
+            continue
+          }
+          const updated = await patchNoteTags(noteId, version, nextTags, ownedRequest)
+          operation.requireCurrent()
+          snapshots.push({
+            noteId,
+            label,
+            previousTags,
+            appliedTags: hasInlineKeywords(updated) ? normalizeTagList(extractKeywords(updated)) : nextTags,
+            appliedVersion: toNoteVersion(updated) ?? version
+          })
+          if (toKeywordSyncWarning(updated)) partiallyTagged.push(label)
+        } catch (error) {
+          operation.requireCurrent()
+          if (ed.isVersionConflictError(error)) conflicted.push(label)
+          else failed.push(label)
+        }
+      }
+
+      if (snapshots.length > 0) {
+        await refreshAfterBulkTagChange(snapshots.map((snapshot) => snapshot.noteId), operation, ownedRequest)
+        operation.requireCurrent()
+        showUndoNotification({
+          title: `Added ${formatTagSummary(additions)} to ${formatNoteCount(snapshots.length)}`,
+          description: 'Existing tags were kept.',
+          duration: 10,
+          onUndo: () => undoBulkTagAdd(snapshots, operation)
+        })
+      }
+      if (alreadyTagged.length > 0) {
+        message.info(
+          `${alreadyTagged.length} selected note${alreadyTagged.length === 1 ? '' : 's'} already had ${
+            additions.length === 1 ? 'this tag' : 'these tags'
+          }`
+        )
+      }
+      const problems: string[] = []
+      if (conflicted.length > 0) {
+        problems.push(
+          `Tags were not added to ${formatBulkNoteLabels(conflicted)}: changed on the server. Refresh and try again.`
+        )
+      }
+      if (failed.length > 0) problems.push(`Could not add tags to ${formatBulkNoteLabels(failed)}.`)
+      if (partiallyTagged.length > 0) {
+        problems.push(`Some tags could not be attached to ${formatBulkNoteLabels(partiallyTagged)}.`)
+      }
+      if (problems.length > 0) message.warning(problems.join(' '))
+    } catch (error) {
+      if (operation.isCurrent()) message.error(error instanceof Error ? error.message : 'Operation failed')
+    } finally { operation.release() }
+  }, [beginNoteMutation, ed, kw, list, message, modal, refreshAfterBulkTagChange, showUndoNotification, t, undoBulkTagAdd])
 
   // Editor input handlers
   const handleEditorChange = React.useCallback(
@@ -2808,7 +2971,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         showEmptyState={showEditorEmptyState}
         title={ed.title}
         content={ed.content}
-        editorDisabled={editorDisabled || ed.loadingSelection}
+        editorDisabled={editorDisabled || ed.loadingSelection || preparingDraft}
         isDirty={ed.isDirty}
         isOnline={isOnline}
         loadingDetail={ed.loadingDetail}

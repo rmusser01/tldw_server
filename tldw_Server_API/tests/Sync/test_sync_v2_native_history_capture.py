@@ -455,6 +455,32 @@ def test_capture_admit_and_settle_emit_one_applied_envelope_each(
         )
 
 
+def test_regenerate_existing_question_publishes_only_the_new_assistant(
+    client: TestClient,
+    sync_service: SyncV2Service,
+    chacha_db: CharactersRAGDB,
+) -> None:
+    _send_turn(client)
+    selection = _selection(client, CHAT_ID, {"kind": "after_message", "message_id": INPUT_ID})
+    before = _log(sync_service)
+    question = chacha_db.get_message_by_id(INPUT_ID)
+    body = {"id": "regenerated-assistant", "role": "assistant", "content": "another answer",
+            "tldw_history_existing_input_v1": selection}
+    written = client.post(f"/api/v1/chats/{CHAT_ID}/messages", json=body)
+    assert written.status_code == 201, written.text  # nosec B101 # pytest contract assertion
+    assert written.json()["id"] == "regenerated-assistant"  # nosec B101 # pytest contract assertion
+    assert _log(sync_service) == before + [  # nosec B101 # pytest contract assertion
+        ("chat.message", "append", "regenerated-assistant", "applied")
+    ]
+    assert chacha_db.get_message_by_id(INPUT_ID) == question  # nosec B101 # pytest contract assertion
+    assert chacha_db.get_message_by_id("regenerated-assistant")["parent_message_id"] == INPUT_ID  # nosec B101 # pytest contract assertion
+    replay = client.post(f"/api/v1/chats/{CHAT_ID}/messages", json=body)
+    assert replay.status_code == 201, replay.text  # nosec B101 # pytest contract assertion
+    assert _log(sync_service) == before + [  # nosec B101 # pytest contract assertion
+        ("chat.message", "append", "regenerated-assistant", "applied")
+    ]
+
+
 def test_second_turn_extends_the_first_and_is_published_in_order(
     client: TestClient,
     sync_service: SyncV2Service,

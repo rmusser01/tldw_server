@@ -13,6 +13,7 @@ Promote to autouse only if the guard surfaces a real leak on a lane.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable, Iterator
 
 import pytest
 from loguru import logger
@@ -61,3 +62,22 @@ async def reset_embeddings_singletons():
     await _reset_embeddings_singletons()
     yield
     await _reset_embeddings_singletons()
+
+
+@pytest.fixture
+def restart_audio_ledger_caches() -> Iterator[Callable[[], None]]:
+    """Own real ledger caches across restart simulations without leaking closed pools."""
+    from tldw_Server_API.app.core.Usage import audio_quota, quota_checks
+
+    original = (audio_quota._daily_ledger, audio_quota._audio_minutes_legacy_backfill_done, quota_checks._cached_ledger)
+
+    def restart() -> None:
+        audio_quota._daily_ledger = None
+        audio_quota._audio_minutes_legacy_backfill_done = False
+        quota_checks.reset_ledger_cache()
+
+    restart()
+    try:
+        yield restart
+    finally:
+        audio_quota._daily_ledger, audio_quota._audio_minutes_legacy_backfill_done, quota_checks._cached_ledger = original

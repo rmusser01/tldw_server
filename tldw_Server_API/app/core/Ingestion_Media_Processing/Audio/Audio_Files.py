@@ -52,7 +52,10 @@ from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcripti
     ConversionError as TranscriptionConversionError,
 )
 from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import redact_url_for_log
-from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import resolve_safe_local_path
+from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (
+    is_explicit_local_model_path,
+    resolve_safe_local_path,
+)
 from tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib import extract_metadata
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
 from tldw_Server_API.app.core.Metrics.metrics_logger import log_counter, log_histogram
@@ -228,6 +231,18 @@ def check_transcription_model_status(model_name: str) -> dict[str, Any]:
     if provider == "parakeet":
         resolved_model = requested_model or parsed_model or "parakeet-standard"
         resolved_variant = (variant or "standard").strip().lower()
+        if resolved_variant == "onnx":
+            model_reference = str((get_stt_config() or {}).get("parakeet_onnx_model_id", "")).strip()
+            if is_explicit_local_model_path(model_reference) and not Path(model_reference).expanduser().is_dir():
+                return {
+                    "available": False,
+                    "usable": False,
+                    "provider": "parakeet",
+                    "model": resolved_model,
+                    "variant": resolved_variant,
+                    "on_demand": False,
+                    "message": "The configured local Parakeet ONNX model directory is not available.",
+                }
         return {
             "available": True,
             "usable": True,

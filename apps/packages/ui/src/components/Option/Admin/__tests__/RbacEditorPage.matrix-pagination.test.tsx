@@ -36,6 +36,8 @@ const buildMatrix = (
     name: `permission-${index + 1}`,
     category: index % 2 === 0 ? "media" : "chat"
   })),
+  grants: [],
+  total_roles: roles.length,
   grid: {}
 })
 
@@ -130,7 +132,7 @@ describe("RbacEditorPage matrix pagination (C-S4)", () => {
     fireEvent.click(checkbox)
 
     await waitFor(() => {
-      expect(apiMock.grantRolePermission).toHaveBeenCalledWith(1, 1)
+      expect(apiMock.grantRolePermission).toHaveBeenCalledWith(1, 1, capturedAdminScope)
     })
     // While the grant is pending, the checkbox is disabled via the closure's
     // latest-value ref read — the memoized columns are NOT rebuilt for this.
@@ -142,3 +144,9 @@ describe("RbacEditorPage matrix pagination (C-S4)", () => {
     })
   })
 })
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({ config: { serverUrl: "https://admin-fixture.example.test", authMode: "single-user", apiKey: "fixture-only" }, authorityLoading: false, loading: false })
+}))
+
+const capturedAdminScope = expect.objectContaining({ configSnapshot: expect.objectContaining({ serverUrl: "https://admin-fixture.example.test", authMode: "single-user" }), abortSignal: expect.any(AbortSignal) })

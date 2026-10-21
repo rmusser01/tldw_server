@@ -29,6 +29,7 @@ import {
   rejectPendingHistoryConfirmation,
   markPendingHistoryConfirmationDispatched,
   settleLocalAcceptedAssistant,
+  settleLocalSelectedExistingInput,
   type HistoryOperationOptions,
   type LocalHistoryOwnerV1
 } from "@/db/dexie/history-selection"
@@ -153,6 +154,16 @@ const content = revision
     extra_metadata: z.record(z.string(), z.unknown()).nullable().optional()
   })
   .strict()
+const admissionReferenceSchema = z
+  .object({
+    version: z.literal(1),
+    owner_key: str,
+    conversation_id: str,
+    input_message_id: str,
+    input_message_revision: str,
+    selection_digest: str
+  })
+  .strict()
 const capturedSchema = z
   .object({
     native_completion_v1: z
@@ -164,6 +175,8 @@ const capturedSchema = z
       .strict()
       .optional(),
     status: z.literal("captured"),
+    acknowledged_capability: z.enum(["tldw_history_existing_input_v1", "tldw_history_server_existing_input_v1"]).optional(),
+    validated_admission: z.object({ admission: admissionReferenceSchema, input_revision: str }).strict().optional(),
     snapshot,
     rows: z.array(node),
     selected_content: z.array(content),
@@ -181,6 +194,7 @@ const failureSchema = z
       "unsupported_history_capability"
     ]),
     code: str,
+    acknowledged_capability: z.enum(["tldw_history_existing_input_v1", "tldw_history_server_existing_input_v1"]).optional(),
     snapshot,
     view: viewSchema
   })
@@ -203,16 +217,6 @@ const confirmationSchema = z
 const projectionSchema = confirmationSchema
   .extend({ projection_digest: str, created_at: str })
   .strict()
-const admissionReferenceSchema = z
-  .object({
-    version: z.literal(1),
-    owner_key: str,
-    conversation_id: str,
-    input_message_id: str,
-    input_message_revision: str,
-    selection_digest: str
-  })
-  .strict()
 const admissionSchema = admissionReferenceSchema
   .extend({
     messages: z.array(revision),
@@ -226,7 +230,7 @@ const parse = <T>(schema: z.ZodType<T>, value: unknown): T => {
 // A live captured owner object is the capability handshake. No durable identity registry.
 const nativeCapabilities = new WeakMap<
   NativeHistoryOwnerV1,
-  { owner_key: string; captured: boolean }
+  { owner_key: string; captured: boolean; existingInput: boolean }
 >()
 const assertOwnerLease = (
   owner: HistoryOwnerV1,
@@ -299,11 +303,15 @@ export const captureHistorySnapshot = async (
   owner: HistoryOwnerV1,
   view: HistoryCaptureRequestV1["view"],
   purpose: "send" | "fork",
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  requiredCapability?: "tldw_history_existing_input_v1" | "tldw_history_server_existing_input_v1",
+  acceptedInputAdmission?: HistoryAdmissionReferenceV1
 ): Promise<HistoryCaptureResultV1> => {
   assertOwnerLease(owner, { signal })
   if (owner.kind === "unavailable") return fail(owner.code)
   if (owner.kind === "local") {
+    if (requiredCapability === "tldw_history_server_existing_input_v1") fail("unsupported_history_capability")
+    if (acceptedInputAdmission) fail("invalid_history_retry")
     if (!view.owner_key) fail("owner_conversation_mismatch")
     return freeze(
       await captureLocalHistorySnapshot(
@@ -319,7 +327,15 @@ export const captureHistorySnapshot = async (
     (owner.owner_key && view.owner_key !== owner.owner_key)
   )
     fail("owner_conversation_mismatch")
-  const request = structuredClone({ view, purpose })
+  if (acceptedInputAdmission && (
+    purpose !== "send" || requiredCapability || view.cursor.kind !== "after_message" ||
+    view.cursor.message_id !== acceptedInputAdmission.input_message_id
+  )) fail("invalid_history_retry")
+  const request = structuredClone({
+    view, purpose,
+    ...(requiredCapability ? { required_capability: requiredCapability } : {}),
+    ...(acceptedInputAdmission ? { accepted_input_admission: acceptedInputAdmission } : {})
+  })
   let response: unknown
   try {
     response = await tldwClient.captureHistorySelection(
@@ -332,11 +348,15 @@ export const captureHistorySnapshot = async (
     )
   } catch (error) {
     assertOwnerLease(owner, { signal })
-    if ([404, 405, 501].includes(Number((error as any)?.status)))
+    if ([404, 405, 501].includes(Number((error as { status?: unknown } | null)?.status)) ||
+        (requiredCapability && Number((error as { status?: unknown } | null)?.status) === 422))
       fail("unsupported_history_capability")
     throw error
   }
   assertOwnerLease(owner, { signal })
+  if (requiredCapability && (!response || typeof response !== "object" ||
+      (response as Record<string, unknown>).acknowledged_capability !== requiredCapability))
+    fail("unsupported_history_capability")
   const result: HistoryCaptureResultV1 = parse(
     captureSchema,
     response
@@ -381,13 +401,23 @@ export const captureHistorySnapshot = async (
     )
       fail("native_completion_capability_mismatch")
     bindSelectedHistoryContent(result.rows, result.selected_content)
+    if (acceptedInputAdmission) {
+      const proof = result.validated_admission
+      const question = result.rows.at(-1)
+      if (!proof || canonicalHistoryJson(proof.admission) !== canonicalHistoryJson(acceptedInputAdmission) ||
+          !question || question.role !== "user" || question.id !== proof.admission.input_message_id ||
+          question.revision !== proof.input_revision)
+        fail("invalid_admission_capture")
+    } else if (result.validated_admission) fail("invalid_admission_capture")
   }
   const previous = nativeCapabilities.get(owner)
   if (previous && previous.owner_key !== result.view.owner_key)
     fail("owner_conversation_mismatch")
   nativeCapabilities.set(owner, {
     owner_key: result.view.owner_key,
-    captured: result.status === "captured" || previous?.captured === true
+    captured: result.status === "captured" || previous?.captured === true,
+    existingInput: (requiredCapability === "tldw_history_existing_input_v1" && result.acknowledged_capability === requiredCapability) ||
+      previous?.existingInput === true
   })
   return freeze(result)
 }
@@ -1280,6 +1310,40 @@ export const settleAcceptedAssistant = async (
     {
       ...nativeHistoryMessagePayload(input),
       tldw_history_admission_v1: historyAdmissionReference(admission)
+    },
+    nativeOptions(owner, opts?.signal)
+  )
+  if (response.id !== input.id) fail("invalid_history_settlement")
+  return response
+}
+
+export const settleSelectedExistingInput = async (
+  owner: HistoryOwnerV1,
+  selection: HistorySelectionV1,
+  input: Message,
+  opts?: HistoryOperationOptions
+): Promise<Message | { id: string }> => {
+  selection = structuredClone(selection)
+  input = structuredClone(input)
+  assertOwnerLease(owner, opts)
+  if (owner.kind === "unavailable") return fail(owner.code)
+  const questionId = selection.messages.at(-1)?.id
+  if (
+    !questionId || selection.purpose !== "send" ||
+    selection.cursor.kind !== "after_message" ||
+    selection.cursor.message_id !== questionId ||
+    selectionDigest(selection) !== selection.selection_digest ||
+    input.history_id !== owner.conversation_id || input.role !== "assistant"
+  ) fail("invalid_selection")
+  if (owner.kind === "local")
+    return settleLocalSelectedExistingInput(owner, selection, input, localOptions(owner, opts))
+  assertNativeBinding(owner, selection)
+  if (!nativeCapabilities.get(owner)?.existingInput) fail("unsupported_history_capability")
+  const response = await tldwClient.addChatMessage(
+    owner.conversation_id,
+    {
+      ...nativeHistoryMessagePayload(input),
+      tldw_history_existing_input_v1: selection
     },
     nativeOptions(owner, opts?.signal)
   )

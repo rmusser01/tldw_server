@@ -105,6 +105,11 @@ export type NativeCompletionCapabilityV1 = {
 export type HistorySelectionCaptureV1 = {
   readonly native_completion_v1?: NativeCompletionCapabilityV1
   readonly status: "captured"
+  readonly acknowledged_capability?: "tldw_history_existing_input_v1" | "tldw_history_server_existing_input_v1"
+  readonly validated_admission?: {
+    readonly admission: HistoryAdmissionReferenceV1
+    readonly input_revision: string
+  }
   readonly snapshot: HistorySelectionSnapshotV1
   readonly rows: readonly HistoryNodeV1[]
   readonly selected_content: readonly HistorySelectedContentV1[]
@@ -113,6 +118,7 @@ export type HistorySelectionCaptureV1 = {
   readonly storage_context_digest: string
 }
 export type HistoryCaptureResultV1 = HistorySelectionCaptureV1 | (HistoryResolutionFailureV1 & {
+  readonly acknowledged_capability?: "tldw_history_existing_input_v1" | "tldw_history_server_existing_input_v1"
   readonly snapshot: HistorySelectionSnapshotV1
   readonly view: HistoryViewSelectionV1
 })
@@ -121,6 +127,8 @@ export type HistoryCaptureResultV1 = HistorySelectionCaptureV1 | (HistoryResolut
 export type HistoryCaptureRequestV1 = {
   readonly view: Omit<HistoryViewSelectionV1, "owner_key"> & { readonly owner_key?: string | null }
   readonly purpose: "send" | "fork"
+  readonly required_capability?: "tldw_history_existing_input_v1" | "tldw_history_server_existing_input_v1"
+  readonly accepted_input_admission?: HistoryAdmissionReferenceV1
 }
 
 export type PreparedHistoryContextV1 = {

@@ -86,6 +86,17 @@ export type ComposerPromptAssistMutation =
       attemptId: number
     }
 
+export type ComposerDraftOwnership = {
+  isCurrent: () => boolean
+  isOwnerCurrent: () => boolean
+  normalizeMessage: (message: string) => boolean
+  restoreAfterReset?: (attemptId: number) => void
+}
+
+type ComposerImageDraftOwnership = ComposerDraftOwnership & { isImageCurrent: () => boolean }
+
+type ComposerFormValues = { message: string; image: string; imageFilename: string }
+
 export interface UseComposerTextResult {
   creationRecovery: { active: ChatCreationRecovery | null; unavailable: boolean; copyInputRequired: boolean }
   retainCurrentDraft: () => Promise<boolean>
@@ -94,7 +105,7 @@ export interface UseComposerTextResult {
   listRetainedDrafts: () => Promise<ChatDraftRecoveryListing>
   copyRetainedDraft: (draft: RecoveredChatDraft, surfaceKey: string, destination?: Extract<ChatDraftAddress, { kind: "fresh" }>) => Promise<boolean>
   /** The underlying `useSimpleForm` instance. Callers can use `getInputProps("message")`. */
-  form: ReturnType<typeof useSimpleForm<{ message: string; image: string }>>
+  form: ReturnType<typeof useSimpleForm<ComposerFormValues>>
   /** Input changes excluding acknowledged draft hydration; edits and Undo retire setup. */
   getSetupInputRevision: () => number
   /** Monotonic signal that advances once for each committed message change. */
@@ -109,6 +120,8 @@ export interface UseComposerTextResult {
   markPromptAssistAttemptSaved: (attemptId: number, acknowledgedDelivery?: boolean) => void
   /** Most recently completed owner attempt, or null before the first completion. */
   promptAssistSavedAttemptId: number | null
+  /** Capture the verified owner and exact committed message/image revision. */
+  captureDraftOwnership: () => ComposerImageDraftOwnership
   /** Convenience setter for the message field. */
   setMessageValue: (value: string) => void
   /** Focuses the textarea (no-op on mobile to avoid unwanted keyboard pop-up). */
@@ -154,9 +167,42 @@ export function useComposerText(
     draftEnabled = true
   } = options
 
-  const form = useSimpleForm<{ message: string; image: string }>({
-    initialValues: { message: "", image: "" }
+  const imageRevisionRef = React.useRef(0)
+  const rawForm = useSimpleForm<ComposerFormValues>({
+    initialValues: { message: "", image: "", imageFilename: "" }
   })
+  const previousImageRef = React.useRef(rawForm.values.image)
+  const {
+    setValues: setRawValues,
+    setFieldValue: setRawFieldValue,
+    reset: resetRawForm
+  } = rawForm
+  const setComposerFieldValue = React.useCallback(
+    (field: keyof ComposerFormValues, value: string) => {
+      if (field === "image") {
+        imageRevisionRef.current++
+        previousImageRef.current = value
+        // Every image replacement/removal must retire its old display name.
+        setRawValues({ image: value, imageFilename: "" })
+      } else {
+        setRawFieldValue(field, value)
+      }
+    },
+    [setRawValues, setRawFieldValue]
+  )
+  const resetComposer = React.useCallback(() => {
+    imageRevisionRef.current++
+    resetRawForm()
+  }, [resetRawForm])
+  const form = React.useMemo(
+    () => ({
+      ...rawForm,
+      setFieldValue: setComposerFieldValue,
+      reset: resetComposer
+    }),
+    [rawForm, setComposerFieldValue, resetComposer]
+  )
+
   const { getValues, getRevision, reset, setValues } = form
   const draftHydrationChangesRef = React.useRef(0)
   const getSetupInputRevision = React.useCallback(
@@ -191,8 +237,6 @@ export function useComposerText(
   const [restoreAttemptId, setRestoreAttemptId] = React.useState<number | null>(
     null
   )
-  const imageRevisionRef = React.useRef(0)
-  const previousImageRef = React.useRef(form.values.image)
   React.useLayoutEffect(() => {
     if (previousImageRef.current !== form.values.image) {
       previousImageRef.current = form.values.image
@@ -200,11 +244,27 @@ export function useComposerText(
     }
   }, [form.values.image])
   const previousMessageRef = React.useRef(form.values.message)
+  const draftValuesRef = React.useRef(form.values)
+  const draftRevisionRef = React.useRef(0)
   const nextPromptAssistAttemptIdRef = React.useRef(0)
   const pendingPromptAssistResetRef = React.useRef<{
     attemptId: number
     fromValue: string
   } | null>(null)
+  const formValues = form.values
+  const setFormMessage = form.setFieldValue
+  const resetDraftRef = React.useRef<{ attemptId: number; revision: number; imageRevision: number; values: ComposerFormValues } | null>(null)
+  const [restoreReset, setRestoreReset] = React.useState<{ attemptId: number; ownerIsCurrent: () => boolean } | null>(null)
+
+  React.useLayoutEffect(() => {
+    if (
+      !Object.is(draftValuesRef.current.message, formValues.message) ||
+      !Object.is(draftValuesRef.current.image, formValues.image)
+    ) {
+      draftValuesRef.current = formValues
+      draftRevisionRef.current++
+    }
+  }, [formValues])
 
   React.useLayoutEffect(() => {
     if (Object.is(previousMessageRef.current, form.values.message)) return
@@ -298,6 +358,46 @@ export function useComposerText(
       restoreWithMetadata?.("", undefined)
     }
   })
+
+  React.useLayoutEffect(() => {
+    if (!restoreReset) return
+    setRestoreReset(null)
+    const reset = resetDraftRef.current
+    if (!reset || reset.attemptId !== restoreReset.attemptId ||
+        reset.revision !== draftRevisionRef.current || reset.imageRevision !== imageRevisionRef.current ||
+        !restoreReset.ownerIsCurrent() ||
+        formValues.message !== "" || formValues.image !== "") return
+    resetDraftRef.current = null
+    draftValuesRef.current = { ...reset.values }
+    draftRevisionRef.current++
+    imageRevisionRef.current++
+    setRawValues(reset.values)
+  }, [restoreReset, formValues, setRawValues])
+
+  const captureDraftOwnership = React.useCallback((): ComposerImageDraftOwnership => {
+    let revision = draftRevisionRef.current
+    const imageRevision = imageRevisionRef.current
+    const isOwnerCurrent = isCurrent
+    const valuesAreCurrent =
+      Object.is(draftValuesRef.current.message, formValues.message) &&
+      Object.is(draftValuesRef.current.image, formValues.image)
+    const isDraftCurrent = () =>
+      valuesAreCurrent && isOwnerCurrent() && draftRevisionRef.current === revision
+    return {
+      isCurrent: isDraftCurrent,
+      isOwnerCurrent,
+      isImageCurrent: () => isOwnerCurrent() && imageRevisionRef.current === imageRevision,
+      restoreAfterReset: attemptId => setRestoreReset({ attemptId, ownerIsCurrent: isOwnerCurrent }),
+      normalizeMessage: (message) => {
+        if (!isDraftCurrent()) return false
+        if (Object.is(draftValuesRef.current.message, message)) return true
+        draftValuesRef.current = { ...draftValuesRef.current, message }
+        revision = ++draftRevisionRef.current
+        setFormMessage("message", message)
+        return true
+      }
+    }
+  }, [formValues, isCurrent, setFormMessage])
 
   const markPromptAssistAttemptSaved = React.useCallback(
     (attemptId: number, acknowledgedDelivery = false) => setSavedAttempt({ id: attemptId, acknowledgedDelivery }), []
@@ -634,6 +734,8 @@ export function useComposerText(
   const beginPromptAssistReset = React.useCallback(() => {
     flushDraft()
     const attemptId = ++nextPromptAssistAttemptIdRef.current
+    draftValuesRef.current = { message: "", image: "", imageFilename: "" }
+    draftRevisionRef.current++
     const current = useStoreMessageOption.getState()
     let originalMetadata: DraftMetadataObject | undefined
     try {
@@ -662,7 +764,7 @@ export function useComposerText(
             messageRevision:
               promptAssistMutation.revision + Number(form.values.message !== ""),
             imageRevision:
-              imageRevisionRef.current + Number(form.values.image !== "")
+              imageRevisionRef.current + 1 + Number(form.values.image !== "")
           }
         : null
     stopInputRestore.current = null
@@ -672,6 +774,7 @@ export function useComposerText(
       fromValue: form.values.message
     }
     reset()
+    resetDraftRef.current = { attemptId, revision: draftRevisionRef.current, imageRevision: imageRevisionRef.current, values: { ...form.values } }
     return attemptId
   }, [
     form,
@@ -907,6 +1010,7 @@ export function useComposerText(
     restorePromptAssistAttempt,
     markPromptAssistAttemptSaved,
     promptAssistSavedAttemptId,
+    captureDraftOwnership,
     setMessageValue,
     textAreaFocus,
     captureCompletionGuard,

@@ -46,6 +46,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     User,
     check_rate_limit,
     get_request_user,
+    require_expected_user,
     verify_jwt_and_fetch_user,
 )
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
@@ -3901,6 +3902,7 @@ async def get_persona_profile(
     response_model=PersonaProfileResponse,
     tags=["persona"],
     status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_expected_user)],
 )
 async def update_persona_profile(
     persona_id: str,
@@ -7288,7 +7290,7 @@ async def update_persona_live_voice_session_analytics(
     response_model=VoiceCommandListResponse,
     tags=["persona"],
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(check_rate_limit)],
+    dependencies=[Depends(check_rate_limit), Depends(require_expected_user)],
 )
 async def list_persona_voice_commands(
     persona_id: str,
@@ -7701,7 +7703,7 @@ async def dry_run_persona_voice_command(
     response_model=list[PersonaConnectionResponse],
     tags=["persona"],
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(check_rate_limit)],
+    dependencies=[Depends(check_rate_limit), Depends(require_expected_user)],
 )
 async def list_persona_connections(
     persona_id: str,

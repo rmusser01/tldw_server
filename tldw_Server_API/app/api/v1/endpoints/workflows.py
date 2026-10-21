@@ -41,6 +41,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
     TokenScopeGuard,
     User,
     get_request_user,
+    require_expected_user,
 )
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import (
     build_cursor_pagination_meta,
@@ -1366,7 +1367,8 @@ def _demote_preflight_issues_to_warnings(issues: list[dict[str, Any]]) -> list[d
     return warnings
 
 
-@router.post("", response_model=WorkflowDefinitionResponse, status_code=201)
+@router.post("", response_model=WorkflowDefinitionResponse, status_code=201,
+             dependencies=[Depends(require_expected_user)])
 async def create_definition(
     body: WorkflowDefinitionCreate,
     current_user: User = Depends(get_request_user),
@@ -1426,7 +1428,8 @@ async def create_definition(
     )
 
 
-@router.get("", response_model=list[WorkflowDefinitionResponse])
+@router.get("", response_model=list[WorkflowDefinitionResponse],
+            dependencies=[Depends(require_expected_user)])
 async def list_definitions(
     current_user: User = Depends(get_request_user),
     db: WorkflowsDatabase = Depends(_get_db),
@@ -1444,7 +1447,7 @@ async def list_definitions(
 @router.post(
     "/preflight",
     response_model=WorkflowPreflightResponse,
-    dependencies=[Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
+    dependencies=[Depends(require_expected_user), Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
 )
 async def preflight_definition(
     body: WorkflowPreflightRequest,
@@ -1472,7 +1475,8 @@ async def preflight_definition(
 ## get_definition moved below '/runs*' routes to avoid path shadowing
 
 
-@router.post("/{workflow_id}/versions", response_model=WorkflowDefinitionResponse, status_code=201)
+@router.post("/{workflow_id}/versions", response_model=WorkflowDefinitionResponse, status_code=201,
+             dependencies=[Depends(require_expected_user)])
 async def create_new_version(
     workflow_id: int,
     body: WorkflowDefinitionCreate,
@@ -1666,7 +1670,7 @@ import contextlib
 @router.post(
     "/{workflow_id}/run",
     response_model=WorkflowRunResponse,
-    dependencies=[Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="workflows.run_saved", count_as="run"))],
+    dependencies=[Depends(require_expected_user), Depends(TokenScopeGuard("workflows", require_if_present=True, endpoint_id="workflows.run_saved", count_as="run"))],
 )
 async def run_saved(
     workflow_id: int,
@@ -2291,6 +2295,7 @@ async def run_adhoc(
     "/runs/{run_id}",
     response_model=WorkflowRunResponse,
     dependencies=[
+        Depends(require_expected_user),
         Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
 )
@@ -3386,7 +3391,7 @@ async def get_chunker_options():
 @router.get(
     "/runs/{run_id}/investigation",
     response_model=WorkflowRunInvestigationResponse,
-    dependencies=[Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
+    dependencies=[Depends(require_expected_user), Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
 )
 async def get_run_investigation(
     run_id: str,
@@ -3407,7 +3412,7 @@ async def get_run_investigation(
 @router.get(
     "/runs/{run_id}/steps",
     response_model=WorkflowRunStepsResponse,
-    dependencies=[Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
+    dependencies=[Depends(require_expected_user), Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
 )
 async def get_run_steps(
     run_id: str,
@@ -3428,7 +3433,7 @@ async def get_run_steps(
 @router.get(
     "/runs/{run_id}/steps/{step_id}/attempts",
     response_model=WorkflowStepAttemptsResponse,
-    dependencies=[Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
+    dependencies=[Depends(require_expected_user), Depends(RequirePermission(WORKFLOWS_RUNS_READ))],
 )
 async def get_step_attempts(
     run_id: str,
@@ -3451,6 +3456,7 @@ async def get_step_attempts(
 @router.post(
     "/runs/{run_id}/{action}",
     dependencies=[
+        Depends(require_expected_user),
         Depends(RequirePermission(WORKFLOWS_RUNS_CONTROL)),
     ],
 )
@@ -4241,6 +4247,7 @@ async def retry_run(
 @router.get(
     "/{workflow_id}",
     dependencies=[
+        Depends(require_expected_user),
         Depends(RequirePermission(WORKFLOWS_RUNS_READ)),
     ],
 )
@@ -4287,6 +4294,7 @@ class HumanReviewPayload(BaseModel):
 @router.post(
     "/runs/{run_id}/steps/{step_id}/approve",
     dependencies=[
+        Depends(require_expected_user),
         Depends(RequirePermission(WORKFLOWS_RUNS_CONTROL)),
     ],
 )
@@ -4354,6 +4362,7 @@ async def approve_step(
 @router.post(
     "/runs/{run_id}/steps/{step_id}/reject",
     dependencies=[
+        Depends(require_expected_user),
         Depends(RequirePermission(WORKFLOWS_RUNS_CONTROL)),
     ],
 )

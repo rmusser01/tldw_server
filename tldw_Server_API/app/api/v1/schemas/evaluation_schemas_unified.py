@@ -327,6 +327,13 @@ class RunProgress(BaseModel):
     current_sample: Optional[int] = None
     estimated_completion: Optional[int] = None
 
+    @model_validator(mode="after")
+    def _derive_missing_percentage(self) -> "RunProgress":
+        """Derive omitted percentages from validated sample counts."""
+        if "percent_complete" not in self.model_fields_set and self.total_samples > 0:
+            self.percent_complete = min(self.completed_samples, self.total_samples) * 100 / self.total_samples
+        return self
+
 
 class RunResponse(BaseModel):
     """Run response"""

@@ -162,7 +162,7 @@ describe("ApiKeyManagementPage remote user search (admin perf B-S3)", () => {
     await waitFor(() => {
       expect(apiMock.listAdminUsers).toHaveBeenCalled()
     })
-    expect(apiMock.listAdminUsers).toHaveBeenCalledWith({ limit: 20 })
+    expect(apiMock.listAdminUsers).toHaveBeenCalledWith({ limit: 20 }, capturedAdminScope)
     apiMock.listAdminUsers.mock.calls.forEach((call) => {
       expect(call[0]?.limit).not.toBe(100)
     })
@@ -199,7 +199,7 @@ describe("ApiKeyManagementPage remote user search (admin perf B-S3)", () => {
       expect(apiMock.listAdminUsers).toHaveBeenCalledWith({
         search: "ad",
         limit: 20
-      })
+      }, capturedAdminScope)
     })
 
     // Second burst resolves fast while the first is still in flight.
@@ -212,7 +212,7 @@ describe("ApiKeyManagementPage remote user search (admin perf B-S3)", () => {
     expect(apiMock.listAdminUsers).toHaveBeenLastCalledWith({
       search: "ada",
       limit: 20
-    })
+    }, capturedAdminScope)
 
     // The slow "ad" response lands late and must NOT overwrite ada's options.
     resolveSlowSearch({
@@ -224,3 +224,9 @@ describe("ApiKeyManagementPage remote user search (admin perf B-S3)", () => {
     expect(screen.getByText("ada (ada@example.com)")).toBeInTheDocument()
   })
 })
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({ config: { serverUrl: "https://admin-fixture.example.test", authMode: "multi-user", accessToken: "fixture.eyJzdWIiOiIxIn0.signature" }, authorityLoading: false, loading: false })
+}))
+
+const capturedAdminScope = expect.objectContaining({ configSnapshot: expect.objectContaining({ serverUrl: "https://admin-fixture.example.test", authMode: "multi-user" }), abortSignal: expect.any(AbortSignal) })

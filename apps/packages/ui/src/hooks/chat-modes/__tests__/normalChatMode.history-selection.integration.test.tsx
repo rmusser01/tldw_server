@@ -1,12 +1,16 @@
 import { storageOriginal, spyOnStorageGet, spyOnStorageSet } from "@/hooks/chat/__tests__/native-plasmo-storage-fixture"
-import { act, renderHook, waitFor } from "@testing-library/react"
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react"
 import { invalidateServerChatHistory as refreshServerChatHistory } from "@/services/query-client"
 import { createElement, useContext, useEffect, useLayoutEffect, useMemo, useState, type PropsWithChildren } from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { MemoryRouter } from "react-router-dom"
 import { App } from "antd"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import React from "react"
+import i18n from "i18next"
+import { initReactI18next } from "react-i18next"
 import type { ChatTldwOptions } from "@/models/ChatTldw"
+import { ChatStreamTimeoutError } from "@/services/tldw/chat-timeouts"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import * as servicePrompts from "@/services/service-prompts"
 import { dismissHistoryTurnRecovery, loadHistoryTurnRecoveries } from "@/db/dexie/history-selection"
@@ -34,7 +38,10 @@ const storage = vi.hoisted(() => {
     toArray: () => Promise<Row[]>
     where: (field: string) => { equals: (value: unknown) => Collection }
   }> = {}
-  const control = { beforeHistoryAdd: undefined as (() => Promise<void>) | undefined }
+  const control = {
+    beforeHistoryAdd: undefined as (() => Promise<void>) | undefined,
+    beforeMessageAdd: undefined as (() => Promise<void>) | undefined
+  }
   for (const name of ["chatHistories", "messages", "userSettings", "sessionFiles", "compareStates", "historySelections", "historyProjections", "forkOperations", "modelNickname", "prompts"]) {
     const rows = new Map<string, Row>()
     const key = (row: Row) => JSON.stringify(name === "historySelections"
@@ -52,6 +59,7 @@ const storage = vi.hoisted(() => {
       get: async id => structuredClone(rows.get(JSON.stringify(id))),
       add: async row => {
         if (name === "chatHistories") await control.beforeHistoryAdd?.()
+        if (name === "messages") await control.beforeMessageAdd?.()
         if (rows.has(key(row))) throw new Error("duplicate")
         rows.set(key(row), structuredClone(row))
       },
@@ -99,7 +107,7 @@ vi.mock("@/services/service-prompts", async original => ({
 }))
 vi.mock("~/services/tldw-server", async original => ({
   ...await original<typeof import("~/services/tldw-server")>(),
-  systemPromptForNonRagOption: async () => ""
+  systemPromptForNonRagOption: preparation.defaultPrompt
 }))
 vi.mock("@/models", async () => {
   const { ChatTldw } = await import("@/models/ChatTldw")
@@ -113,9 +121,10 @@ vi.mock("@/models", async () => {
   } }
 })
 
-const preparation = vi.hoisted(() => ({ beforeModel: vi.fn(), multimodal: false, realFactory: false }))
+const preparation = vi.hoisted(() => ({ beforeModel: vi.fn(), defaultPrompt: vi.fn(async () => ""), multimodal: false, realFactory: false }))
 
 import { normalChatMode } from "../normalChatMode"
+import { createEditMessage } from "@/hooks/handlers/messageHandlers"
 import { protectedEditRequestSchema } from "@/services/__tests__/history-edit-fixture"
 import { useChatActions } from "@/hooks/chat/useChatActions"
 import { useServerChatHistoryId } from "@/hooks/chat/useServerChatHistoryId"
@@ -130,6 +139,7 @@ import type { ChatDocuments } from "@/models/ChatTypes"
 import type { UploadedFile } from "@/db/dexie/types"
 import { HistorySelectionContext, useHistorySelection } from "@/hooks/chat/useHistorySelection"
 import { keepHistoryTurnRecovery } from "@/services/history-turn-keep"
+import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
 import { PageAssistDatabase } from "@/db/dexie/chat"
 import { formatSelectedHistory, saveHistory, saveMessage } from "@/db/dexie/helpers"
 import { saveMessageOnSuccess, saveMessageOnError } from "@/hooks/chat-helper"
@@ -140,6 +150,18 @@ import { tldwChat, tldwModels } from "@/services/tldw"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import type { HistoryLoadReceipt, HistorySelectionController } from "@/hooks/chat/useHistorySelection"
 import type { HistorySelectionCaptureV1 } from "@/types/history-selection"
+import * as historyService from "@/services/chat-history-selection"
+import {
+  ensureLocalProfileId,
+  saveHistoryBookmark,
+  saveHistoryTurnRecovery
+} from "@/db/dexie/history-selection"
+import { resetHistoryTurnRegistry } from "@/services/history-turn-keep"
+import { loadHistoryRecoveryRetryContext, retryHistoryTurnRecovery } from "@/services/history-turn-retry"
+import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
+import type { HistoryAdmissionReferenceV1 } from "@/types/history-selection"
+import { resolveHistorySelection } from "@/utils/history-selection"
+import type { HistoryEditAndSendBoundary, HistoryRegenerateBoundary } from "@/types/chat-modes"
 import { useStoreChatModelSettings } from "@/store/model"
 import { useMcpToolsStore } from "@/store/mcp-tools"
 import { useStoreMessageOption } from "@/store/option"
@@ -162,7 +184,6 @@ import { createDefaultActorSettings } from "@/types/actor"
 import { useActorStore } from "@/store/actor"
 import { captureCurrentActorSceneTarget } from "@/hooks/chat/actor-scene-source"
 import { captureChatDraftLoad } from "@/hooks/chat/chat-draft-transition"
-import { resolveHistorySelection } from "@/utils/history-selection"
 import { setTitleGenEnabled } from "@/services/title"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
@@ -202,6 +223,20 @@ const send = (
     toolChoice?: Parameters<typeof normalChatMode>[6]["toolChoice"]
     fixedOverrides?: boolean
     setServerChatId?: (id: string) => void
+    selectedSystemPrompt?: string
+    model?: string
+    userMessageId?: string
+    assistantMessageId?: string
+    editAndSend?: HistoryEditAndSendBoundary
+    regenerate?: HistoryRegenerateBoundary
+    assistantMessageType?: string
+    modelIdOverride?: string
+    messages?: Parameters<typeof normalChatMode>[3]
+    history?: Parameters<typeof normalChatMode>[4]
+    retryAdmission?: HistoryAdmissionReferenceV1
+    retryRecoveries?: HistoryTurnRecoveryEntry[]
+    reviewedSystemPrompts?: string[]
+    setStreaming?: Parameters<typeof normalChatMode>[6]["setStreaming"]
     saveOnSuccess?: typeof saveMessageOnSuccess
     surface?: "playground" | "sidepanel"
   } = {}
@@ -209,8 +244,8 @@ const send = (
   const params: Parameters<typeof normalChatMode>[6] = {
     actorScene: options.actorScene,
     actorSettings: options.actorScene?.settings,
-    selectedModel: "test",
-    selectedSystemPrompt: "",
+    selectedModel: options.model ?? "test",
+    selectedSystemPrompt: options.selectedSystemPrompt ?? "",
     useOCR: false,
     currentChatModelSettings: {},
     servicePromptSnapshot:
@@ -227,8 +262,15 @@ const send = (
       ...(options.sourceIsCurrent
         ? { sourceIsCurrent: options.sourceIsCurrent }
         : {}),
-      createServerChat: Boolean(options.setServerChatId)
+      createServerChat: Boolean(options.setServerChatId),
+      ...(options.editAndSend ? { editAndSend: options.editAndSend } : {}),
+      ...(options.regenerate ? { regenerate: options.regenerate } : {}),
+      ...(options.retryAdmission ? { retryAdmission: options.retryAdmission } : {}),
+      ...(options.retryRecoveries ? { retryRecoveries: options.retryRecoveries } : {}),
+      ...(options.reviewedSystemPrompts ? { reviewedSystemPrompts: options.reviewedSystemPrompts } : {})
     },
+    assistantMessageType: options.assistantMessageType,
+    modelIdOverride: options.modelIdOverride,
     historyId: options.historyId ?? null,
     serverChatId: options.serverChatId,
     setServerChatId: options.setServerChatId,
@@ -237,19 +279,19 @@ const send = (
     setMessages: () => {},
     setHistory: () => {},
     setIsProcessing: () => {},
-    setStreaming: () => {},
+    setStreaming: options.setStreaming ?? (() => {}),
     setAbortController: () => {},
     saveMessageOnSuccess: options.saveOnSuccess ?? saveMessageOnSuccess,
     saveMessageOnError,
-    userMessageId: "first-user",
-    assistantMessageId: "first-answer"
+    userMessageId: options.userMessageId ?? "first-user",
+    assistantMessageId: options.assistantMessageId ?? "first-answer"
   }
   return normalChatMode(
     options.message ?? "First question",
     options.image ?? "",
     false,
-    [],
-    [],
+    options.messages ?? [],
+    options.history ?? [],
     new AbortController().signal,
     params
   )
@@ -267,7 +309,20 @@ const emptyServerCapture = (request: Parameters<typeof tldwClient.captureHistory
   } as never
 }
 
-beforeEach(() => {
+// Real mounted controller + Keep + review; only tables and remote transport
+// use doubles. This is component evidence, not browser/IndexedDB acceptance.
+const MountedRecoveryReview = ({ publish }: {
+  publish: (controller: HistorySelectionController) => void
+}) => {
+  const [messages, setMessages] = React.useState<import("@/store/option").Message[]>([])
+  const controller = useHistorySelection({ onCapture: capture => setMessages(formatSelectedHistory(capture).messages) })
+  const hideRecovery = useKeepInterruptedHistoryTurns({ selection: controller, messages, setMessages })
+  publish(controller)
+  return <HistorySelectionReview selection={controller} hideRecovery={hideRecovery} />
+}
+
+beforeEach(async () => {
+  await i18n.use(initReactI18next).init({ lng: "en", resources: {} })
   newServerId = "new-server"
   vi.restoreAllMocks()
   localStorage.clear()
@@ -300,10 +355,13 @@ beforeEach(() => {
   })
   Object.values(storage.tables).forEach((table) => table.rows.clear())
   storage.control.beforeHistoryAdd = undefined
+  storage.control.beforeMessageAdd = undefined
   prompt.scope.userId = "alice"
   preparation.beforeModel.mockReset()
   preparation.multimodal = false
   preparation.realFactory = false
+  preparation.defaultPrompt.mockReset().mockResolvedValue("")
+  resetHistoryTurnRegistry()
   useStoreChatModelSettings.getState().reset()
   useMcpToolsStore.setState({ toolsLoading: false, healthState: "unknown" })
   useStoreMessageOption.setState({ selectedModel: "test", toolChoice: "none" })
@@ -740,6 +798,150 @@ describe("fresh Compare original scene through real H1 first bind", () => {
     }
   })
 })
+
+it.each([
+  { retryFails: false, reopen: true },
+  { retryFails: true, reopen: true },
+  { retryFails: false, reopen: false },
+  { retryFails: true, reopen: false }
+].flatMap(variant => [
+  { ...variant, startupTimeout: false },
+  { ...variant, startupTimeout: true }
+]))("accepted unanswered native recovery keeps original identity, failure guidance and reviewed Pirate context (retry fails: $retryFails, reopened: $reopen, startup timeout: $startupTimeout)", async ({ retryFails, reopen, startupTimeout }) => {
+  const question = "Tell me about the weather today."
+  const pirate = "Answer like a pirate."
+  await storage.tables.prompts.add({ id: "pirate", title: "Pirate", system_prompt: pirate, content: "" })
+  const rows: Array<{ id: string; role: string; content: string; parent_message_id: string | null }> = []
+  vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+  vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => {
+    const view = { ...request.view, owner_key: "server-owner" }
+    const nodes = rows.map(row => ({ id: row.id, role: row.role, parent_id: row.parent_message_id, revision: `sha256:${row.id}-state`, settled: true }))
+    const snap = { version: 1 as const, owner_key: view.owner_key, conversation_id: newServerId, nodes,
+      fences: { conversation: "1", history: String(rows.length), settings: "1" }, source_digest: "source",
+      storage_context_digest: "storage", interpretation_status: { kind: "parent_graph_v1" as const } }
+    const resolved = resolveHistorySelection(snap, view, "send", "")
+    if (resolved.status !== "ready") throw new Error(resolved.code)
+    return { status: "captured", purpose: request.purpose, view, snapshot: snap, rows: resolved.rows,
+      selected_content: resolved.rows.map(node => ({ id: node.id, revision: node.revision, message: rows.find(row => row.id === node.id)!.content, images: [] })),
+      ...(request.accepted_input_admission ? { validated_admission: {
+        admission: request.accepted_input_admission, input_revision: resolved.rows.at(-1)!.revision
+      } } : {}),
+      storage_context_digest: "storage" } as never
+  })
+  const writes = vi.spyOn(tldwClient, "addChatMessage").mockImplementation(async (_id, body) => {
+    rows.push({ id: body.id!, role: body.role, content: body.content!, parent_message_id: body.parent_message_id ?? null })
+    const selection = body.tldw_history_selection_v1
+    return { id: body.id, ...(selection ? { tldw_history_admission_v1: { version: 1, owner_key: "server-owner", conversation_id: newServerId,
+      input_message_id: body.id, input_message_revision: "1", selection_digest: selection.selection_digest,
+      messages: selection.messages, originating_selection_revision: selection.selection_revision } } : {}) } as never
+  })
+  vi.mocked(tldwChat.streamMessage).mockImplementationOnce(async function* () {
+    yield await Promise.reject(startupTimeout ? new ChatStreamTimeoutError("startup", 120_000) : new Error("provider unavailable; private diagnostic must not enter recovery"))
+  })
+  const original = renderHook(() => useHistorySelection())
+  await act(async () => { expect((await send(original.result.current, { setServerChatId: vi.fn(publishFixtureServerChatId), message: question, selectedSystemPrompt: "pirate" })).status).toBe("failed") })
+  let reopened = original
+  if (reopen) {
+    await act(async () => { await original.result.current.choose({ kind: "after_message", message_id: "first-user" }) })
+    const reference = original.result.current.getReference()!
+    original.unmount()
+    resetHistoryTurnRegistry()
+    reopened = renderHook(() => useHistorySelection())
+    await act(async () => { await reopened.result.current.loadConversation({ serverChatId: newServerId }, reference) })
+  }
+  const current = reopened.result.current.getCurrent()
+  const entry = (await loadHistoryTurnRecoveries(current.bookmarkScope!, current.view!))[0]
+  expect(entry.turn).toMatchObject({ state: "accepted_unsent", input_id: "first-user", input_text: question, result_text: "" })
+  const guidance = startupTimeout
+    ? "The model did not start responding in time. Retry, or adjust Chat startup timeout in Settings → tldw server → Advanced timeouts."
+    : "Something went wrong while talking to your tldw server. Try again in a moment, or open Health & diagnostics to inspect server health."
+  const review = render(<HistorySelectionReview selection={reopened.result.current} />)
+  expect(screen.getByRole("alert").textContent).toBe(guidance)
+  review.unmount()
+  const withoutPrompt = await loadHistoryRecoveryRetryContext({ model: "qwen", selectedSystemPrompt: "" }, () => true)
+  expect(withoutPrompt.systemPrompts).toEqual([])
+  const reviewed = await loadHistoryRecoveryRetryContext({ model: "qwen", selectedSystemPrompt: "pirate" }, () => true)
+  useStoreMessageOption.setState({ selectedModel: "qwen" })
+  vi.mocked(tldwChat.streamMessage).mockImplementation(async function* () {
+    if (retryFails) throw new Error("second provider failure")
+    yield "Arrr, this source has no current weather forecast."
+  })
+  let retry!: Awaited<ReturnType<typeof retryHistoryTurnRecovery>>
+  await act(async () => { retry = await retryHistoryTurnRecovery(reopened.result.current, entry, { contextReviewed: true, context: reviewed }, submission =>
+    send(reopened.result.current, { model: "qwen", selectedSystemPrompt: "pirate", message: submission.message, assistantMessageId: "retried-answer",
+      historyId: useStoreMessageOption.getState().historyId, serverChatId: newServerId,
+      retryAdmission: submission.historyRetryAdmission, retryRecoveries: submission.historyRetryRecoveries,
+      reviewedSystemPrompts: submission.historyRecoveryRetrySystemPrompts,
+      originIsCurrent: submission.historyRecoveryRetryIsCurrent })) })
+  expect(retry).toMatchObject({ status: retryFails ? "failed" : "submitted" })
+  expect(rows.filter(row => row.role === "user")).toEqual([{ id: "first-user", role: "user", content: question, parent_message_id: null }])
+  expect(vi.mocked(tldwChat.streamMessage)).toHaveBeenCalledTimes(2)
+  const wire = vi.mocked(tldwChat.streamMessage).mock.calls[1][1]!.preparedRequest!
+  expect(wire).toMatchObject({ model: "qwen", save_to_db: false })
+  expect(wire.messages).toEqual([{ role: "system", content: pirate }, { role: "user", content: question }])
+  expect(writes.mock.calls.filter(([, body]) => body.role === "user")).toHaveLength(1)
+  const latest = reopened.result.current.getCurrent()
+  const recoveries = await loadHistoryTurnRecoveries(latest.bookmarkScope!, latest.view!)
+  if (retryFails) {
+    expect(rows.filter(row => row.role === "assistant")).toEqual([])
+    expect(recoveries.some(candidate => candidate.turn.operation_id === entry.turn.operation_id)).toBe(true)
+  } else {
+    expect(writes.mock.calls[1][1]).toMatchObject({ role: "assistant", parent_message_id: "first-user", tldw_history_admission_v1: entry.turn.admission })
+    expect(recoveries).toEqual([])
+  }
+  reopened.unmount()
+})
+
+it.each(["saved Prompt edit", "saved Prompt delete", "default change", "default delete"])(
+  "refuses %s after context reread and before Retry preparation", async change => {
+    const selectedSystemPrompt = change.startsWith("saved") ? "pirate" : ""
+    const reviewedInstruction = "Answer like a pirate."
+    if (selectedSystemPrompt)
+      await storage.tables.prompts.add({ id: "pirate", system_prompt: reviewedInstruction, content: "" })
+    else preparation.defaultPrompt.mockResolvedValue(reviewedInstruction)
+    const mounted = renderHook(() => useHistorySelection())
+    let historyId = ""
+    vi.mocked(tldwChat.streamMessage).mockImplementationOnce(async function* () {
+      yield await Promise.reject(new Error("provider unavailable"))
+    })
+    await act(async () => {
+      expect((await send(mounted.result.current, { selectedSystemPrompt, setHistoryId: id => { publishFixtureHistoryId(id); historyId = id } })).status).toBe("failed")
+      await mounted.result.current.choose({ kind: "after_message", message_id: "first-user" })
+    })
+    const current = mounted.result.current.getCurrent()
+    const entry = (await loadHistoryTurnRecoveries(current.bookmarkScope!, current.view!))[0]
+    const originalUser = (await savedMessages()).find(row => row.role === "user")
+    const source = { model: "test", selectedSystemPrompt }
+    const reviewed = await loadHistoryRecoveryRetryContext(source, () => true)
+    const reread = vi.fn(() => loadHistoryRecoveryRetryContext(source, () => true))
+    const actualCapture = historyService.captureHistorySnapshot
+    vi.spyOn(historyService, "captureHistorySnapshot").mockImplementationOnce(async (...args) => {
+      const capture = await actualCapture(...args)
+      expect(reread).toHaveBeenCalledOnce()
+      if (change === "saved Prompt edit")
+        await storage.tables.prompts.update("pirate", { system_prompt: "Unreviewed instructions" })
+      else if (change === "saved Prompt delete") storage.tables.prompts.rows.delete(JSON.stringify("pirate"))
+      else preparation.defaultPrompt.mockResolvedValue(change === "default delete" ? "" : "Unreviewed instructions")
+      return capture
+    })
+    vi.mocked(tldwChat.streamMessage).mockClear()
+    let retry!: Awaited<ReturnType<typeof retryHistoryTurnRecovery>>
+    await act(async () => {
+      retry = await retryHistoryTurnRecovery(mounted.result.current, entry, { contextReviewed: true, context: reviewed }, submission =>
+        send(mounted.result.current, { historyId, selectedSystemPrompt, message: submission.message,
+          retryAdmission: submission.historyRetryAdmission, retryRecoveries: submission.historyRetryRecoveries,
+          reviewedSystemPrompts: submission.historyRecoveryRetrySystemPrompts,
+          originIsCurrent: submission.historyRecoveryRetryIsCurrent }), reread)
+    })
+    expect(retry).toMatchObject({ status: "failed", errorMessage: selectedSystemPrompt && change.endsWith("delete") ? "retry_prompt_unavailable" : "retry_context_changed" })
+    expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
+    expect(await savedMessages()).toEqual([originalUser])
+    const latest = mounted.result.current.getCurrent()
+    expect(latest.view!.cursor).toEqual({ kind: "after_message", message_id: "first-user" })
+    expect((await loadHistoryTurnRecoveries(latest.bookmarkScope!, latest.view!)).find(candidate => candidate.turn.operation_id === entry.turn.operation_id)).toEqual(entry)
+    mounted.unmount()
+  }
+)
 
 describe("normal Chat owned history creation and H1 admission", () => {
   it.each(["native", "local"] as const)(
@@ -1221,6 +1423,84 @@ describe("normal Chat owned history creation and H1 admission", () => {
     reopened.unmount()
   })
 
+  it("reload after native settlement follows the saved final reply instead of its partial checkpoint", async () => {
+    const stopped = new AbortController()
+    const scoped = { ...snapshot(), scopeSignal: stopped.signal }
+    const rows: Array<{ id: string; role: string; content: string; parent_message_id: string | null }> = []
+    const create = vi.spyOn(tldwClient, "createChat").mockImplementation(createdServerChat)
+    vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => {
+      const view = { ...request.view, owner_key: "server-owner" }
+      const nodes = rows.map(row => ({ id: row.id, role: row.role, parent_id: row.parent_message_id, revision: "1", settled: true }))
+      const cursor = view.cursor
+      const selected = cursor.kind === "after_message"
+        ? rows.slice(0, rows.findIndex(row => row.id === cursor.message_id) + 1)
+        : []
+      return {
+        status: "captured", purpose: request.purpose, view,
+        snapshot: { version: 1, owner_key: view.owner_key, conversation_id: newServerId, nodes,
+          fences: { conversation: "1", history: "1", settings: "1" }, source_digest: "source",
+          storage_context_digest: "storage", interpretation_status: { kind: "parent_graph_v1" } },
+        rows: nodes.slice(0, selected.length),
+        selected_content: selected.map(row => ({ id: row.id, revision: "1", message: row.content, images: [] })),
+        storage_context_digest: "storage"
+      } as never
+    })
+    const append = vi.spyOn(tldwClient, "addChatMessage").mockImplementation(async (_id, body) => {
+      rows.push({ id: body.id!, role: body.role, content: body.content!, parent_message_id: body.parent_message_id ?? null })
+      const selection = body.tldw_history_selection_v1
+      return { id: body.id, ...(selection ? { tldw_history_admission_v1: {
+        version: 1, owner_key: "server-owner", conversation_id: newServerId, input_message_id: body.id,
+        input_message_revision: "1", selection_digest: selection.selection_digest,
+        messages: selection.messages, originating_selection_revision: selection.selection_revision
+      } } : {}) } as never
+    })
+    const mounted = renderHook(() => useHistorySelection())
+    vi.mocked(tldwChat.streamMessage).mockImplementationOnce(async function* () {
+      yield "Partial answer"
+      await waitFor(async () => {
+        const current = mounted.result.current.getCurrent()
+        const [entry] = await loadHistoryTurnRecoveries(current.bookmarkScope!, current.view!)
+        expect(entry.turn.result_text).toBe("Partial answer")
+      })
+      yield " fully saved"
+    })
+    const follow = mounted.result.current.followResult
+    let release!: () => void
+    const held = new Promise<void>(resolve => { release = resolve })
+    const following = vi.spyOn(mounted.result.current, "followResult")
+      .mockImplementationOnce(async (...args) => { await held; return follow(...args) })
+    let action!: ReturnType<typeof send>
+    act(() => { action = send(mounted.result.current, { setServerChatId: publishFixtureServerChatId, snapshot: scoped }) })
+    let reopened: ReturnType<typeof render> | undefined
+    try {
+      await waitFor(() => expect(following).toHaveBeenCalledOnce())
+      expect(create).toHaveBeenCalledOnce()
+      expect(rows.at(-1)).toMatchObject({ id: "first-answer", content: "Partial answer fully saved" })
+      const current = mounted.result.current.getCurrent()
+      const [entry] = await loadHistoryTurnRecoveries(current.bookmarkScope!, current.view!)
+      expect(entry.turn).toMatchObject({
+        outcome: "complete", settled_message_id: "first-answer"
+      })
+      const reference = mounted.result.current.getReference()!
+      mounted.unmount()
+      resetHistoryTurnRegistry()
+      let controller!: HistorySelectionController
+      reopened = render(<MountedRecoveryReview publish={next => { controller = next }} />)
+      await act(async () => { await controller.loadConversation({ serverChatId: newServerId }, reference) })
+      await waitFor(() => expect(controller.getCurrent().view?.cursor).toEqual({ kind: "after_message", message_id: "first-answer" }))
+      const capture = controller.getCurrent().capture
+      expect(capture?.status === "captured" && capture.selected_content.at(-1)?.message).toBe("Partial answer fully saved")
+      expect(await loadHistoryTurnRecoveries(current.bookmarkScope!, current.view!)).toEqual([])
+      expect(append).toHaveBeenCalledTimes(2)
+      expect(vi.mocked(tldwChat.streamMessage)).toHaveBeenCalledOnce()
+    } finally {
+      release()
+      await act(async () => { await action })
+      reopened?.unmount()
+      mounted.unmount()
+    }
+  })
+
   it("dispatches explicit model and tool overrides despite unrelated global selector changes", async () => {
     const mounted = renderHook(() => useHistorySelection())
     const created = await saveHistory("Saved", false, "web-ui", undefined, undefined, snapshot().requestScope)
@@ -1313,6 +1593,497 @@ describe("normal Chat owned history creation and H1 admission", () => {
     expect(dispatched).not.toHaveProperty("conversation_id")
   })
 
+  it.each(["receipt", "settlement"] as const)("Regenerate keeps the exact generated local assistant payload when the %s acknowledgement is lost", async (lost) => {
+    const mounted = renderHook(() => useHistorySelection())
+    let historyId = ""
+    await act(async () => {
+      expect(await send(mounted.result.current, { setHistoryId: id => { publishFixtureHistoryId(id); historyId = id } }))
+        .toEqual({ status: "submitted" })
+    })
+    const originals = await savedMessages()
+    const origin = mounted.result.current.getCurrent()
+    if (origin.owner?.kind !== "local" || !origin.view ||
+        origin.capture?.status !== "captured" || !origin.bookmarkScope)
+      throw new Error("missing_local_regenerate_capture")
+    const display = formatSelectedHistory(origin.capture)
+    const boundary: HistoryRegenerateBoundary = {
+      answerId: "first-answer", questionId: "first-user",
+      questionRevision: origin.capture.rows.at(-2)!.revision,
+      owner: origin.owner, originView: origin.view,
+      originIsCurrent: mounted.result.current.fence()
+    }
+    vi.mocked(tldwChat.streamMessage).mockImplementationOnce(async function* () {
+      yield "Alternative answer"
+    })
+    const realSettlement = historyService.settleSelectedExistingInput
+    const settlement = vi.spyOn(historyService, "settleSelectedExistingInput")
+    if (lost === "settlement") settlement.mockImplementationOnce(async (...args) => {
+      await realSettlement(...args)
+      throw new Error("settlement acknowledgement lost")
+    })
+    let beforeWrite: Array<Record<string, unknown>> = []
+    storage.control.beforeMessageAdd = async () => {
+      beforeWrite = structuredClone([...storage.tables.historySelections.rows.values()])
+    }
+    const lostAck = vi.fn(async (data: Parameters<typeof saveMessageOnSuccess>[0]) => {
+      if (lost === "settlement") return saveMessageOnSuccess(data)
+      const turn = data.historyTurn
+      if (!turn?.complete) throw new Error("missing_history_turn")
+      const complete = turn.complete
+      turn.complete = async () => {
+        turn.complete = complete
+        throw new Error("settlement acknowledgement lost")
+      }
+      try {
+        return await saveMessageOnSuccess(data)
+      } finally {
+        turn.complete = complete
+      }
+    })
+    await act(async () => {
+      const result = await send(mounted.result.current, {
+        historyId, message: "First question", messages: display.messages,
+        history: display.history, regenerate: boundary,
+        assistantMessageId: "alternative-answer",
+        assistantMessageType: "alternative-kind", modelIdOverride: "variant-model",
+        saveOnSuccess: lostAck
+      })
+      if (lost === "settlement") {
+        expect(result).toEqual({ status: "failed", errorMessage: "settlement acknowledgement lost" })
+        const [retained] = await loadHistoryTurnRecoveries(origin.bookmarkScope, origin.view)
+        expect(retained.turn).toMatchObject({ outcome: "complete", assistant_id: "alternative-answer",
+          settlement_payload: { id: "alternative-answer", content: "Alternative answer" } })
+        expect(await keepHistoryTurnRecovery(mounted.result.current, retained)).toMatchObject({ status: "kept" })
+      } else expect(result).toEqual({ status: "submitted" })
+    })
+    const written = (await savedMessages()).find(row => row.id === "alternative-answer")
+    expect(written).toMatchObject({
+      id: "alternative-answer", role: "assistant", parent_message_id: "first-user",
+      content: "Alternative answer", modelId: "variant-model", messageType: "alternative-kind"
+    })
+    expect((await savedMessages()).filter(row => originals.some(original => original.id === row.id)))
+      .toEqual(originals)
+    expect((await savedMessages()).filter(row => row.role === "user")).toHaveLength(1)
+    expect(lostAck).toHaveBeenCalledOnce()
+    const before = beforeWrite.flatMap(row =>
+      Object.values((row.pending_turns ?? {}) as Record<string, unknown>))
+      .find((turn): turn is Record<string, unknown> =>
+        !!turn && typeof turn === "object" && (turn as Record<string, unknown>).assistant_id === "alternative-answer")
+    expect(before).toMatchObject({
+      settlement_payload: {
+        id: "alternative-answer", role: "assistant", content: "Alternative answer",
+        parent_message_id: "first-user", modelId: "variant-model",
+        messageType: "alternative-kind", metadataExtra: {},
+        reasoning_time_taken: expect.any(Number)
+      }
+    })
+    // An acknowledged settlement needs only receipt recovery, never a second write.
+    expect(settlement).toHaveBeenCalledTimes(lost === "settlement" ? 2 : 1)
+    expect(settlement.mock.calls[0][2]).toEqual(before?.settlement_payload)
+    expect(settlement.mock.calls[0][2].id).toBe("alternative-answer")
+    if (lost === "settlement") {
+      expect(settlement.mock.calls[1][1]).toEqual(settlement.mock.calls[0][1])
+      expect(settlement.mock.calls[1][2]).toEqual(settlement.mock.calls[0][2])
+    }
+    expect(await loadHistoryTurnRecoveries(origin.bookmarkScope, origin.view)).toEqual([])
+    expect((await savedMessages()).find(row => row.id === "alternative-answer")).toEqual(written)
+    expect(vi.mocked(tldwChat.streamMessage)).toHaveBeenCalledTimes(2)
+    mounted.unmount()
+  })
+
+  it("streaming ends before history selection completes, so callers must await the action", async () => {
+    const mounted = renderHook(() => useHistorySelection())
+    let historyId = ""
+    await act(async () => {
+      await send(mounted.result.current, { setHistoryId: id => { publishFixtureHistoryId(id); historyId = id } })
+    })
+    const origin = mounted.result.current.getCurrent()
+    if (!origin.view || !origin.bookmarkScope) throw new Error("missing_history_view")
+    const follow = mounted.result.current.followResult
+    let releaseFollow!: () => void
+    const held = new Promise<void>(resolve => { releaseFollow = resolve })
+    const followSpy = vi.spyOn(mounted.result.current, "followResult")
+      .mockImplementationOnce(async (...args) => {
+        await held
+        return follow(...args)
+      })
+    const streaming = vi.fn()
+    let completed = false
+    let action!: ReturnType<typeof send>
+    act(() => {
+      action = send(mounted.result.current, {
+        historyId, message: "Second question", userMessageId: "second-user",
+        assistantMessageId: "second-answer", setStreaming: streaming
+      }).then(result => { completed = true; return result })
+    })
+    try {
+      await waitFor(() => expect(followSpy).toHaveBeenCalledOnce())
+      expect(streaming).toHaveBeenLastCalledWith(false)
+      expect(completed).toBe(false)
+      expect((await loadHistoryTurnRecoveries(origin.bookmarkScope, origin.view))).toHaveLength(1)
+    } finally {
+      releaseFollow()
+      await act(async () => { await action })
+    }
+    expect(completed).toBe(true)
+    expect(await loadHistoryTurnRecoveries(origin.bookmarkScope, origin.view)).toEqual([])
+    expect(mounted.result.current.getCurrent().capture).toMatchObject({
+      status: "captured", rows: [
+        { id: "first-user" }, { id: "first-answer" },
+        { id: "second-user" }, { id: "second-answer" }
+      ]
+    })
+    mounted.unmount()
+  })
+
+  it("Regenerate reload during an unresolved settlement keeps the complete exact reply without generating again", async () => {
+    const originalPage = renderHook(() => useHistorySelection())
+    let historyId = ""
+    await act(async () => { await send(originalPage.result.current, { setHistoryId: id => { publishFixtureHistoryId(id); historyId = id } }) })
+    const originalRows = await savedMessages()
+    const origin = originalPage.result.current.getCurrent()
+    if (origin.owner?.kind !== "local" || !origin.view ||
+        origin.capture?.status !== "captured" || !origin.bookmarkScope)
+      throw new Error("missing_local_regenerate_capture")
+    const display = formatSelectedHistory(origin.capture)
+    const reference = originalPage.result.current.getReference()
+    const boundary: HistoryRegenerateBoundary = {
+      answerId: "first-answer", questionId: "first-user",
+      questionRevision: origin.capture.rows.at(-2)!.revision,
+      owner: origin.owner, originView: origin.view,
+      originIsCurrent: originalPage.result.current.fence()
+    }
+    vi.mocked(tldwChat.streamMessage).mockImplementationOnce(async function* () { yield "Complete before settlement" })
+    let rejectOldSettlement!: (error: Error) => void
+    const held = new Promise<never>((_resolve, reject) => { rejectOldSettlement = reject })
+    const settle = vi.spyOn(historyService, "settleSelectedExistingInput")
+      .mockImplementationOnce(async () => held)
+    let oldSend!: ReturnType<typeof send>
+    act(() => {
+      oldSend = send(originalPage.result.current, {
+        historyId, messages: display.messages, history: display.history,
+        regenerate: boundary, assistantMessageId: "reload-alternative",
+        assistantMessageType: "reload-kind", modelIdOverride: "reload-model"
+      })
+    })
+    let reloaded: ReturnType<typeof render> | undefined
+    try {
+      await waitFor(() => expect(settle).toHaveBeenCalledOnce())
+      const [durable] = await loadHistoryTurnRecoveries(origin.bookmarkScope, origin.view)
+      expect(durable.turn).toMatchObject({
+        outcome: "complete", result_text: "Complete before settlement",
+        assistant_id: "reload-alternative",
+        settlement_payload: {
+          id: "reload-alternative", content: "Complete before settlement",
+          parent_message_id: "first-user", modelId: "reload-model", messageType: "reload-kind"
+        }
+      })
+      // Model process loss: the old owner wait remains unresolved while a
+      // new page sees only the durable record and a fresh live-turn registry.
+      originalPage.unmount()
+      resetHistoryTurnRegistry()
+      let controller!: HistorySelectionController
+      reloaded = render(<MountedRecoveryReview publish={next => { controller = next }} />)
+      await act(async () => { await controller.loadConversation({ historyId }, reference) })
+      await waitFor(() => expect(settle).toHaveBeenCalledTimes(2))
+      expect(settle.mock.calls[1][1]).toEqual(settle.mock.calls[0][1])
+      expect(settle.mock.calls[1][2]).toEqual(settle.mock.calls[0][2])
+      await waitFor(() => expect(controller.recoveries).toEqual([]))
+      const rows = await savedMessages()
+      expect(rows.filter(row => originalRows.some(original => original.id === row.id))).toEqual(originalRows)
+      expect(rows.filter(row => row.id === "reload-alternative")).toHaveLength(1)
+      expect(rows.filter(row => row.role === "user")).toHaveLength(1)
+      expect(vi.mocked(tldwChat.streamMessage)).toHaveBeenCalledTimes(2)
+    } finally {
+      reloaded?.unmount()
+      originalPage.unmount()
+      rejectOldSettlement(new Error("Original page no longer exists"))
+      await act(async () => { await oldSend })
+    }
+  })
+
+  it.each(["saved", "refused"])("mounted Regenerate recovery from stale native ancestry remains safe when replay is %s", async replay => {
+    const scope = { profile_id: await ensureLocalProfileId(), client_session_id: "reviewed-client" }
+    const savedView = {
+      view_session_id: "reviewed-view", owner_key: "server-owner",
+      conversation_id: "legacy-server",
+      interpretation: { kind: "legacy_linear_v1" as const, projection_id: "reviewed" },
+      cursor: { kind: "after_message" as const, message_id: "legacy-question" },
+      selection_revision: 3
+    }
+    const source = {
+      version: 1 as const, owner_key: "server-owner", conversation_id: "legacy-server",
+      fences: { conversation: "3", history: "3", settings: "1" },
+      nodes: [
+        { id: "legacy-question", revision: "1", role: "user", parent_id: null,
+          legacy_projection_id: "reviewed", settled: true },
+        { id: "original-answer", revision: "1", role: "assistant", parent_id: null,
+          legacy_projection_id: "reviewed", settled: true }
+      ],
+      source_digest: "reviewed-source", storage_context_digest: "reviewed-storage",
+      interpretation_status: {
+        kind: "legacy_linear_v1" as const, projection_id: "reviewed",
+        ordered_path_ids: ["legacy-question", "original-answer"]
+      }
+    }
+    const resolved = resolveHistorySelection(source as never, savedView, "send", "prepared-original")
+    if (resolved.status !== "ready") throw new Error(`invalid_reviewed_fixture:${resolved.code}`)
+    const originalSelection = resolved.selection
+    const assistant = {
+      id: "retained-alternative", history_id: "legacy-server", role: "assistant" as const,
+      name: "Original model", content: "Retained alternative", createdAt: 7,
+      images: [], parent_message_id: "legacy-question"
+    }
+    await saveHistoryBookmark(scope, savedView)
+    await saveHistoryTurnRecovery(scope, savedView, {
+      operation_id: "retained-regenerate", origin_view: savedView,
+      selection_digest: originalSelection.selection_digest,
+      request_context_digest: originalSelection.request_context_digest,
+      owner_key: "server-owner", conversation_id: "legacy-server",
+      input_id: "legacy-question", assistant_id: assistant.id,
+      created_at: assistant.createdAt, input_text: "Legacy question", input_images: [],
+      result_text: assistant.content, state: "generated_unsaved", outcome: "complete",
+      existing_selection: originalSelection, settlement_payload: assistant
+    } as Parameters<typeof saveHistoryTurnRecovery>[2])
+    const capture = vi.spyOn(tldwClient, "captureHistorySelection")
+      .mockImplementation(async (_id, request) => {
+        if (request.view.interpretation.kind === "legacy_linear_v1")
+          throw Object.assign(new Error("History selection changed"), {
+            status: 409,
+            details: { detail: { status: "stale_selection", code: "stale_projection" } }
+          })
+        if (request.required_capability !== "tldw_history_existing_input_v1" ||
+            request.view.cursor.kind !== "empty")
+          throw new Error("unexpected_capability_probe")
+        return {
+          status: "legacy_review_required", code: "legacy_review_required",
+          acknowledged_capability: "tldw_history_existing_input_v1",
+          snapshot: { ...source, interpretation_status: { kind: "legacy_review_required" } },
+          view: { ...request.view, owner_key: "server-owner" }
+        } as never
+      })
+    const settle = vi.spyOn(tldwClient, "addChatMessage")
+      .mockImplementation(async (id, body) => {
+        expect(id).toBe("legacy-server")
+        expect(body).toMatchObject({
+          id: assistant.id, role: "assistant", content: assistant.content,
+          parent_message_id: "legacy-question",
+          tldw_history_existing_input_v1: originalSelection
+        })
+        if (replay === "refused") throw new Error("history_operation_conflict")
+        return { id: assistant.id } as never
+      })
+    const confirm = vi.spyOn(tldwClient, "confirmHistoryProjection")
+    let controller!: HistorySelectionController
+    const mounted = render(<MountedRecoveryReview publish={next => { controller = next }} />)
+    await act(async () => {
+      await controller.loadConversation({ serverChatId: "legacy-server" }, {
+        ...scope, owner_key: "server-owner", conversation_id: "legacy-server"
+      })
+    })
+    await waitFor(() => expect(settle).toHaveBeenCalledOnce())
+    if (replay === "saved") {
+      await waitFor(() => expect(controller.recoveries).toEqual([]))
+      expect(await loadHistoryTurnRecoveries(scope, savedView)).toEqual([])
+      expect(screen.queryByText("Turn needs review")).not.toBeInTheDocument()
+    } else {
+      expect(await screen.findByText("Turn needs review")).toBeInTheDocument()
+      expect(screen.getByText(assistant.content)).toBeInTheDocument()
+      expect(controller.getCurrent()).toMatchObject({
+        status: "stale_selection", settingsQualified: true,
+        view: { interpretation: savedView.interpretation, cursor: savedView.cursor }
+      })
+      expect((await loadHistoryTurnRecoveries(scope, savedView))[0].turn)
+        .toMatchObject({ existing_selection: originalSelection, settlement_payload: assistant })
+      fireEvent.click(screen.getByRole("button", { name: "Keep recovered reply" }))
+      await waitFor(() => expect(settle).toHaveBeenCalledTimes(2))
+      expect(await screen.findByText("Could not keep this reply. The original recovery is retained for review."))
+        .toBeInTheDocument()
+      expect(await loadHistoryTurnRecoveries(scope, savedView)).toHaveLength(1)
+      expect(screen.getByText("Turn needs review")).toBeInTheDocument()
+    }
+    expect(capture.mock.calls.some(([, request]) =>
+      request.required_capability === "tldw_history_existing_input_v1" &&
+      request.view.interpretation.kind === "parent_graph_v1" &&
+      request.view.cursor.kind === "empty")).toBe(true)
+    expect(confirm).not.toHaveBeenCalled()
+    expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
+    mounted.unmount()
+  })
+
+  it("Regenerate Keep refuses a held capability acknowledgement after same-owner navigation", async () => {
+    const scope = { profile_id: await ensureLocalProfileId(), client_session_id: "held-regenerate" }
+    const savedView = {
+      view_session_id: "held-view", owner_key: "server-owner", conversation_id: "new-server",
+      interpretation: { kind: "parent_graph_v1" as const },
+      cursor: { kind: "after_message" as const, message_id: "question" },
+      selection_revision: 2
+    }
+    const source = {
+      version: 1 as const, owner_key: "server-owner", conversation_id: "new-server",
+      fences: { conversation: "2", history: "2", settings: "1" },
+      nodes: [
+        { id: "question", revision: "q1", role: "user", parent_id: null, settled: true },
+        { id: "original-answer", revision: "a1", role: "assistant", parent_id: "question", settled: true }
+      ],
+      source_digest: "held-source", storage_context_digest: "held-storage",
+      interpretation_status: { kind: "parent_graph_v1" as const }
+    }
+    const selected = resolveHistorySelection(source as never, savedView, "send", "prepared-original")
+    if (selected.status !== "ready") throw new Error(`invalid_held_fixture:${selected.code}`)
+    const assistant = {
+      id: "held-alternative", history_id: "new-server", role: "assistant" as const,
+      name: "Original model", content: "Held alternative", createdAt: 7,
+      images: [], parent_message_id: "question"
+    }
+    await saveHistoryBookmark(scope, savedView)
+    await saveHistoryTurnRecovery(scope, savedView, {
+      operation_id: "held-regenerate", origin_view: savedView,
+      selection_digest: selected.selection.selection_digest,
+      request_context_digest: selected.selection.request_context_digest,
+      owner_key: "server-owner", conversation_id: "new-server",
+      input_id: "question", assistant_id: assistant.id,
+      created_at: assistant.createdAt, input_text: "Original question", input_images: [],
+      result_text: assistant.content, state: "generated_unsaved", outcome: "complete",
+      existing_selection: selected.selection, settlement_payload: assistant
+    } as Parameters<typeof saveHistoryTurnRecovery>[2])
+    let heldView: typeof savedView | null = null
+    let release!: (response: unknown) => void
+    const held = new Promise<unknown>(resolve => { release = resolve })
+    vi.spyOn(tldwClient, "captureHistorySelection").mockImplementation(async (_id, request) => {
+      if (request.required_capability === "tldw_history_existing_input_v1") {
+        heldView = request.view as typeof savedView
+        return await held as never
+      }
+      const view = { ...request.view, owner_key: source.owner_key }
+      const resolved = resolveHistorySelection(source as never, view, "send", "")
+      if (resolved.status !== "ready") throw new Error(`invalid_capture_fixture:${resolved.code}`)
+      return {
+        status: "captured", purpose: "send", snapshot: source, view,
+        rows: resolved.rows,
+        selected_content: resolved.rows.map(row => ({
+          id: row.id, revision: row.revision,
+          message: row.id === "question" ? "Original question" : "Original answer", images: []
+        })),
+        storage_context_digest: source.storage_context_digest
+      } as never
+    })
+    const settle = vi.spyOn(tldwClient, "addChatMessage")
+      .mockResolvedValue({ id: assistant.id } as never)
+    const mounted = renderHook(() => useHistorySelection())
+    await act(async () => {
+      await mounted.result.current.loadConversation({ serverChatId: "new-server" }, {
+        ...scope, owner_key: "server-owner", conversation_id: "new-server"
+      })
+    })
+    await waitFor(() => expect(mounted.result.current.recoveries).toHaveLength(1))
+    const owner = mounted.result.current.getCurrent().owner
+    const keeping = keepHistoryTurnRecovery(mounted.result.current, mounted.result.current.recoveries[0])
+    const acknowledgement = () => ({
+      status: "legacy_review_required", code: "legacy_review_required",
+      acknowledged_capability: "tldw_history_existing_input_v1",
+      snapshot: { ...source, interpretation_status: { kind: "legacy_review_required" } },
+      view: heldView
+    })
+    try {
+      await waitFor(() => expect(heldView).not.toBeNull())
+      await act(async () => {
+        expect(await mounted.result.current.choose({ kind: "after_message", message_id: "original-answer" }))
+          .toBe(true)
+      })
+      expect(mounted.result.current.getCurrent().owner).toBe(owner)
+      if (owner?.kind !== "native") throw new Error("missing_native_owner")
+      expect(owner.validate_lease()).toBe(true)
+      release(acknowledgement())
+      expect(await keeping).toMatchObject({ status: "skipped", reason: "view_changed" })
+      expect(settle).not.toHaveBeenCalled()
+      expect(await loadHistoryTurnRecoveries(scope, savedView)).toHaveLength(1)
+      expect(mounted.result.current.getCurrent().view?.cursor)
+        .toEqual({ kind: "after_message", message_id: "original-answer" })
+      expect(vi.mocked(tldwChat.streamMessage)).not.toHaveBeenCalled()
+    } finally {
+      release(acknowledgement())
+      await keeping.catch(() => undefined)
+      mounted.unmount()
+    }
+  })
+
+  it("edits a selected local user through a real detached capture while preserving its original pair", async () => {
+    const mounted = renderHook(() => useHistorySelection())
+    let historyId = ""
+    await act(async () => {
+      expect(await send(mounted.result.current, { setHistoryId: id => { publishFixtureHistoryId(id); historyId = id } })).toEqual({ status: "submitted" })
+    })
+    const originalRows = await savedMessages()
+    const origin = mounted.result.current.getCurrent()
+    expect(origin.owner?.kind).toBe("local")
+    if (origin.capture?.status !== "captured") throw new Error("missing_local_capture")
+    const projected = formatSelectedHistory(origin.capture)
+    expect(projected.messages[0].metadataExtra).toMatchObject({
+      sender_name: "You", sender_role: "user", local_history: expect.any(Object)
+    })
+    const edit = createEditMessage({
+      messages: projected.messages, history: projected.history,
+      setMessages: vi.fn(), setHistory: vi.fn(), historyId,
+      historySelection: mounted.result.current,
+      validateBeforeSubmitFn: () => true,
+      onSubmit: ({ message, historyEditBoundary }) => send(mounted.result.current, {
+        historyId, message, userMessageId: "edited-user",
+        assistantMessageId: "edited-answer", editAndSend: historyEditBoundary
+      })
+    })
+    await act(async () => {
+      await edit(0, "Edited question", true, true)
+    })
+    const requests = vi.mocked(tldwChat.streamMessage).mock.calls
+    expect(requests).toHaveLength(2)
+    expect(requests[1][1]?.preparedRequest?.messages?.filter(({ role }: { role: string }) => role !== "system")).toEqual([
+      { role: "user", content: "Edited question" }
+    ])
+    const rows = await savedMessages()
+    expect(rows.filter(row => originalRows.some(original => original.id === row.id))).toEqual(originalRows)
+    expect(rows.find(row => row.id === "edited-user")).toMatchObject({
+      role: "user", content: "Edited question", parent_message_id: null
+    })
+    expect(rows.find(row => row.id === "edited-answer")).toMatchObject({
+      role: "assistant", parent_message_id: "edited-user"
+    })
+    mounted.unmount()
+  })
+
+  it.each([
+    ["unknown metadata", { metadataExtra: { unrecognized: true } }],
+    ["generation details", { generationInfo: { model: "test" } }],
+    ["measured zero reasoning", { reasoning_time_taken: 0 }]
+  ])("refuses a selected local user with %s from its real capture", async (_name, patch) => {
+    const mounted = renderHook(() => useHistorySelection())
+    let historyId = ""
+    await act(async () => {
+      expect(await send(mounted.result.current, { setHistoryId: id => { publishFixtureHistoryId(id); historyId = id } })).toEqual({ status: "submitted" })
+    })
+    await storage.tables.messages.update("first-user", patch)
+    await act(async () => {
+      expect(await mounted.result.current.refresh()).toBe(true)
+    })
+    const origin = mounted.result.current.getCurrent()
+    if (origin.capture?.status !== "captured") throw new Error("missing_local_capture")
+    const projected = formatSelectedHistory(origin.capture)
+    const onSubmit = vi.fn()
+    const edit = createEditMessage({
+      messages: projected.messages, history: projected.history,
+      setMessages: vi.fn(), setHistory: vi.fn(), historyId,
+      historySelection: mounted.result.current,
+      validateBeforeSubmitFn: () => true, onSubmit
+    })
+    await act(async () => {
+      await expect(edit(0, "Edited question", true, true)).rejects.toThrow("unsupported_history_edit_and_send:first-user")
+    })
+    expect(onSubmit).not.toHaveBeenCalled()
+    expect(vi.mocked(tldwChat.streamMessage)).toHaveBeenCalledTimes(1)
+    expect((await savedMessages()).map(row => row.id)).toEqual(["first-user", "first-answer"])
+    mounted.unmount()
+  })
+
   it("rereads separately supplied ownership while public and import writes discard supplied authority", async () => {
     const created = await saveHistory("Scoped", false, "web-ui", undefined, undefined, snapshot().requestScope)
     expect((await new PageAssistDatabase().getHistoryInfo(created.id)).server_scope_key).toBe(ACCOUNT)
@@ -1331,8 +2102,9 @@ describe("normal Chat owned history creation and H1 admission", () => {
       : await saveHistory("Foreign", false, "web-ui", undefined, undefined, { ...snapshot().requestScope, userId: "bob" })
     const mounted = renderHook(() => useHistorySelection())
     await act(async () => { await mounted.result.current.loadConversation({ historyId: row.id }) })
-    expect(mounted.result.current.error).toBe("owner_conversation_mismatch")
-    await act(async () => { await expect(send(mounted.result.current, { historyId: row.id })).rejects.toThrow("owner_conversation_mismatch") })
+    const refusal = ownership === "missing" ? "unbound_local_history" : "owner_conversation_mismatch"
+    expect(mounted.result.current.error).toBe(refusal)
+    await act(async () => { await expect(send(mounted.result.current, { historyId: row.id })).rejects.toThrow(refusal) })
     expect(await savedMessages()).toEqual([])
   })
 
@@ -2846,6 +3618,8 @@ describe("real full and compact Scene consumers across persistence and steering"
           expect(consumer.selection.getCurrent().view?.cursor).toEqual({ kind: "after_message", message_id: "canonical-reply-1" })
         }
         if (boundary === "two turns") {
+          // This hook-only consumer omits the page's saved-identity loader.
+          act(() => useStoreMessageOption.setState({ serverChatMetaLoaded: true, serverChatLoadState: "loaded" }))
           await act(async () => { expect(normalizeChatSubmitResult(await consumer.mounted.result.current.onSubmit({ message: "  Second literal question  ", image: "" }))).toEqual({ status: "submitted" }) })
           const request = vi.mocked(tldwChat.streamMessage).mock.calls[1][1].preparedRequest!
           expect(request).toMatchObject({ save_to_db: true, conversation_id: newServerId })
@@ -6120,3 +6894,23 @@ it.each(["unsupported", "changed", "uncertain"])(
     }
   }
 )
+it.each(["navigation", "selection"])("a no-output provider failure does not move a newer %s", async boundary => {
+  const mounted = renderHook(() => useHistorySelection())
+  vi.mocked(tldwChat.streamMessage).mockImplementationOnce(async function* () {
+    if (boundary === "navigation") mounted.result.current.reset()
+    else await mounted.result.current.choose({ kind: "empty" })
+    yield await Promise.reject(new Error("provider unavailable"))
+  })
+
+  try {
+    await act(async () => {
+      expect((await send(mounted.result.current)).status).toBe("failed")
+    })
+    const current = mounted.result.current.getCurrent()
+    expect(current.view?.cursor ?? null).toEqual(boundary === "navigation" ? null : { kind: "empty" })
+    expect((await savedMessages()).filter(row => row.role === "user")).toHaveLength(1)
+    expect((await savedMessages()).filter(row => row.role === "assistant")).toHaveLength(0)
+  } finally {
+    mounted.unmount()
+  }
+})

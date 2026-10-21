@@ -405,7 +405,7 @@ describe("useChatActions overlay integration", () => {
         historyId: null,
         serverChatId: "server-chat-42",
         serverChatTitle: "Saved identity",
-        serverChatCharacterId: "saved-character",
+        serverChatCharacterId: null,
         serverChatVersion: 7,
         serverChatMetaLoaded: true
       })
@@ -431,7 +431,8 @@ describe("useChatActions overlay integration", () => {
       Object.assign(options, {
         historyId: null,
         serverChatId: "server-chat-42",
-        serverChatCharacterId: "saved-character",
+        serverChatCharacterId: null,
+        serverChatMetaLoaded: true,
         setHistoryId: store.getState().setHistoryId
       })
       options.ensureServerChatHistoryId.mockImplementationOnce(async (_id, _title, _signal, _snapshot, scene) => {
@@ -462,6 +463,7 @@ describe("useChatActions overlay integration", () => {
       })
       try {
         await waitFor(() => expect(saveLocalSuccessMock).toHaveBeenCalledOnce())
+        store.setState({ serverChatCharacterId: "saved-character" })
         if (retired) {
           store.getState().startNewChatDraft()
           store.setState({ historyId: "newer-local-history" })
@@ -486,6 +488,24 @@ describe("useChatActions overlay integration", () => {
       }
     }
   )
+
+  it("refuses an overlay send against an already loaded character identity", async () => {
+    const options = {
+      ...createHookOptions(), serverChatId: "server-chat-42",
+      serverChatCharacterId: "saved-character", serverChatMetaLoaded: true
+    }
+    const { result } = renderHook(() => useChatActions(options as Parameters<typeof useChatActions>[0]))
+    await act(async () => {
+      expect(await result.current.onSubmit({ message: "Retain this draft", image: "" })).toMatchObject({
+        status: "failed", restoreDraft: true
+      })
+    })
+    expect(normalChatModeMock).not.toHaveBeenCalled()
+    expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+    expect(options.setServerChatId).not.toHaveBeenCalled()
+    expect(options.setServerChatCharacterId).not.toHaveBeenCalled()
+    expect(options.setServerChatMetaLoaded).not.toHaveBeenCalled()
+  })
 
   it("reconciles scratch overlay settings only when a send links a new server conversation", async () => {
     const options = createHookOptions()

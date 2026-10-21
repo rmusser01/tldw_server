@@ -391,7 +391,9 @@ class RegistrationService:
                     raise InvalidRegistrationCodeError("Registration code required")
 
                 # Hash the password
-                password_hash = self.password_service.hash_password(password)
+                password_hash = await asyncio.to_thread(
+                    self.password_service.hash_password, password
+                )
 
                 # Generate UUID
                 user_uuid = str(uuid4())

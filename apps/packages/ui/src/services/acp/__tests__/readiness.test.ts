@@ -243,3 +243,34 @@ describe("ACP readiness normalization", () => {
     )
   })
 })
+
+
+describe("live C04 execution readiness", () => {
+  it.each(["error", "not_running"])("refuses a healthy executable with a %s runner probe", (status) => {
+    const health = normalizeACPHealthStatus({
+      runner: { status: "ok" },
+      runner_probe: { status, detail: "Check runner_cwd before dispatch" },
+      agents: [{ status: "available", is_configured: true, api_key_set: true }]
+    })
+    expect(health?.runner).toBe(status === "not_running" ? "unavailable" : "error")
+    expect(health?.details).toContain("runner_cwd")
+    expect(buildACPSetupIssues(health).map((issue) => issue.code)).toContain("runner_unavailable")
+  })
+
+  it("does not count an installed CLI with a missing adapter as a configured agent", () => {
+    const health = normalizeACPHealthStatus({
+      runner: { status: "ok" },
+      runner_probe: { status: "ok" },
+      agents: [{ status: "available", is_configured: false, api_key_set: true }]
+    })
+    expect(health?.agent).toBe("unavailable")
+    expect(buildACPSetupIssues(health).map((issue) => issue.code)).toContain("agent_unavailable")
+  })
+
+  it("preserves legacy structured readiness without probe or configured fields", () => {
+    expect(normalizeACPHealthStatus({
+      runner: { status: "ok" },
+      agents: [{ status: "available", api_key_set: true }]
+    })).toMatchObject({ runner: "ok", agent: "available", api_keys: "ok" })
+  })
+})

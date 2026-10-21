@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { existsSync, readFileSync } from "node:fs"
-import { resolve } from "node:path"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import {
   buildStepRegistry,
   humanizeStepType,
@@ -17,8 +18,10 @@ import { STEP_ICON_COMPONENTS } from "../step-icons"
 import type { WorkflowStepSchema, StepCategory } from "@/types/workflow-editor"
 
 const BACKEND_REGISTRY_CANDIDATE_PATHS = [
-  resolve(process.cwd(), "../../../tldw_Server_API/app/core/Workflows/registry.py"),
-  resolve(process.cwd(), "tldw_Server_API/app/core/Workflows/registry.py")
+  path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    "../../../../../../../tldw_Server_API/app/core/Workflows/registry.py"
+  )
 ]
 
 const loadBackendStepTypes = (): string[] => {

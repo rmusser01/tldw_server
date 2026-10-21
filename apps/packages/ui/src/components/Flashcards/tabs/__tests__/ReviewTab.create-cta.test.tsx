@@ -1,3 +1,4 @@
+import type { Flashcard } from "@/services/flashcards"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
@@ -165,7 +166,7 @@ if (!(globalThis as any).ResizeObserver) {
   }
 }
 
-const createReviewCard = (overrides: Record<string, unknown> = {}) => ({
+const createReviewCard = (overrides: Partial<Flashcard> = {}): Flashcard => ({
   uuid: "active-card-1",
   deck_id: 11,
   front: "Question",
@@ -186,6 +187,7 @@ const createReviewCard = (overrides: Record<string, unknown> = {}) => ({
   version: 1,
   model_type: "basic",
   reverse: false,
+  queue_state: "review",
   ...overrides
 })
 
@@ -675,11 +677,12 @@ describe("ReviewTab create CTA visibility", () => {
     } as ReturnType<typeof useDecksQuery>)
     vi.mocked(useHasCardsQuery).mockReturnValue({ data: true } as ReturnType<typeof useHasCardsQuery>)
     const card = createReviewCard({ front: "Global due question" })
+    type ReviewQueryFixture = Pick<ReturnType<typeof useReviewQuery>, "data" | "isLoading" | "isFetching" | "refetch">
     const setReviewQuery = (loading: boolean) => {
-      vi.mocked(useReviewQuery).mockReturnValue({
+      vi.mocked<(...args: Parameters<typeof useReviewQuery>) => ReviewQueryFixture>(useReviewQuery).mockReturnValue({
         data: card, isLoading: loading, isFetching: loading,
-        refetch: vi.fn().mockResolvedValue(undefined),
-      } as ReturnType<typeof useReviewQuery>)
+        refetch: vi.fn<ReturnType<typeof useReviewQuery>["refetch"]>().mockResolvedValue(undefined),
+      })
     }
     setReviewQuery(false)
     const props = {
@@ -690,7 +693,7 @@ describe("ReviewTab create CTA visibility", () => {
     for (const loading of [true, false]) {
       setReviewQuery(loading)
       rerender(<ReviewTab {...props} />)
-      const button = await screen.findByRole("button", { name: "Review all due", exact: true })
+      const button = await screen.findByRole("button", { name: "Review all due" })
       expect(button).toHaveAttribute("aria-busy", String(loading))
       if (loading) expect(button).toBeDisabled()
       else {

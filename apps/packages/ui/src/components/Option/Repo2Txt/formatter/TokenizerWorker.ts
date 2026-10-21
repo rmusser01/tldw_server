@@ -22,7 +22,7 @@ const estimateTokens = (text: string): number => {
   const trimmed = normalized.trim()
   if (!trimmed) return 0
   try {
-    return encode(trimmed).length
+    return encode(normalized).length
   } catch {
     return trimmed.split(/\s+/).length
   }
@@ -89,8 +89,9 @@ export class TokenizerWorker {
     reject: RejectHandler
   ) {
     const timeoutId = setTimeout(() => {
-      this.handlers.delete(id)
-      reject(new Error(`Tokenizer worker request timed out after ${REQUEST_TIMEOUT_MS}ms`))
+      this.failPendingRequests(
+        `Tokenizer worker request timed out after ${REQUEST_TIMEOUT_MS}ms`
+      )
     }, REQUEST_TIMEOUT_MS)
     this.handlers.set(id, {
       handle,
@@ -134,7 +135,9 @@ export class TokenizerWorker {
           this.handlers.delete(id)
         }
         reject(
-          error instanceof Error ? error : new Error("Failed to post tokenize request")
+          error instanceof Error
+            ? error
+            : new Error("Failed to post tokenize request")
         )
       }
     })
@@ -207,6 +210,7 @@ export class TokenizerWorker {
   terminate(): void {
     for (const [, pending] of this.handlers) {
       clearTimeout(pending.timeoutId)
+      pending.reject(new DOMException("Cancelled", "AbortError"))
     }
     this.worker?.terminate()
     this.worker = null

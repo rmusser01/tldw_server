@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.Chat.history_selection_schemas import (
     NativeForkContextV1,
     NormalForkInputV1,
     ParentGraphInterpretationV1,
+    ValidatedHistoryAdmissionV1,
     _wire_array,
 )
 
@@ -89,5 +90,6 @@ __all__ = [
     "LegacyProjectionConfirmEnvelopeV1",
     "LegacyHistoryProjectionV1",
     "HistoryAdmissionReferenceV1",
+    "ValidatedHistoryAdmissionV1",
     "HistoryAdmissionV1",
 ]

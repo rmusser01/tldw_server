@@ -278,3 +278,43 @@ def test_persona_dialogue_tree_recipe_report_merges_missing_trace_refs() -> None
         {"target_id": "persona-1", "artifact_id": "trace-existing", "case_id": "case-a"},
         {"target_id": "persona-1", "artifact_id": "trace-missing", "case_id": "case-b"},
     ]
+
+
+@pytest.mark.parametrize("kind", ["persona", "character"])
+@pytest.mark.parametrize(
+    ("container", "alias"),
+    [
+        ("explicit_list", False),
+        ("explicit_object", False),
+        ("explicit_list", True),
+        ("explicit_object", True),
+        ("direct", False),
+        ("direct", True),
+        ("list", False),
+        ("list", True),
+    ],
+)
+def test_persona_optional_target_normalization_remains_valid_and_idempotent(
+    kind: str, container: str, alias: bool
+) -> None:
+    recipe = get_builtin_recipe_registry().get_recipe("persona_dialogue_tree_robustness")
+    payload = {"id": f"{kind}-only", "name": "Rowan"}
+    key = f"{kind}_target" if alias else kind
+    if container == "explicit_list":
+        run_config = {"targets": [{key: payload}]}
+    elif container == "explicit_object":
+        run_config = {"targets": {key: payload}}
+    elif container == "list":
+        list_key = f"{kind}_targets" if alias else f"{kind}s"
+        run_config = {list_key: [payload]}
+    else:
+        run_config = {key: payload}
+
+    normalized = recipe.normalize_run_config(run_config)
+    validation = recipe.validate_dataset(_scenario_dataset(), run_config=normalized)
+
+    assert validation["valid"] is True, validation["errors"]  # nosec B101 - pytest contract assertion
+    assert normalized["targets"] == [  # nosec B101 - pytest contract assertion
+        {"target_id": f"{kind}-only", kind: payload}
+    ]
+    assert recipe.normalize_run_config(normalized) == normalized  # nosec B101 - pytest contract assertion

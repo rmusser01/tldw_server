@@ -198,6 +198,21 @@ describe("audio readiness helpers", () => {
     )
   })
 
+  it.each(["pockettts", "pocket_tts"])("marks configured PocketTTS ready for %s", (provider) => {
+    const items = buildTtsReadinessItems({
+      provider,
+      hasAudio: true,
+      providersInfo: {
+        providers: { pocket_tts: { provider_name: "PocketTTS", formats: ["wav"] } },
+        voices: {}
+      }
+    })
+
+    expect(items).toContainEqual(expect.objectContaining({
+      id: `${provider}-provider`, label: "PocketTTS", state: "ready"
+    }))
+  })
+
   it("builds TTS readiness that flags missing ElevenLabs credentials", () => {
     const items = buildTtsReadinessItems({
       provider: "elevenlabs",

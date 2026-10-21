@@ -692,6 +692,10 @@ jobs:
           - name: admin-bundle-ops
             paths: >-
               tldw_Server_API/tests/Admin/test_bundle_ops.py
+              tldw_Server_API/tests/Admin/test_bundle_restore_backends.py
+              tldw_Server_API/tests/Admin/test_bundle_restore_postgres.py
+              tldw_Server_API/tests/Admin/test_postgresql_bundle_permissions.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_bundle.py
           - name: admin-byok-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_byok_service_sanitizers.py
@@ -707,6 +711,11 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
               tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
+              tldw_Server_API/tests/Admin/test_backup_storage_scope.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_archive.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_recovery_live.py
+              tldw_Server_API/tests/Admin/test_postgresql_offline_recovery.py
+              tldw_Server_API/tests/Admin/test_postgresql_restore_interruption.py
           - name: admin-conflicts-data-admin
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_c*.py
@@ -1494,6 +1503,7 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
               tldw_Server_API/tests/Claims/test_claims_cluster*.py
               tldw_Server_API/tests/Claims/test_claims_compat_types.py
+              tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
           - name: product-claims-engine
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
@@ -1562,6 +1572,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
               tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
+              tldw_Server_API/tests/Evaluations/test_run_progress_response.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -1657,6 +1668,8 @@ jobs:
               tldw_Server_API/tests/Workflows/test_orphan_requeue_*.py
               tldw_Server_API/tests/Workflows/test_workflows_map_substeps_*.py
               tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
+              tldw_Server_API/tests/Workflows/test_scheduled_workflow_execution.py
+              tldw_Server_API/tests/Workflows/test_workflow_expected_user.py
               tldw_Server_API/tests/Workflows/test_workflow_stress.py
               tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
           - name: product-workflows-api
@@ -1917,6 +1930,7 @@ jobs:
       - name: Install pg client and wait for PG
         uses: ./.github/actions/wait-for-postgres
         with:
+          client-version: ${{ contains(fromJSON('["admin-backup-core", "admin-bundle-ops"]'), matrix.shard.name) && '18' || '' }}
           host: 127.0.0.1
           port: ${{ job.services.postgres.ports['5432'] }}
           user: tldw_user
@@ -2366,6 +2380,10 @@ jobs:
           - name: admin-bundle-ops
             paths: >-
               tldw_Server_API/tests/Admin/test_bundle_ops.py
+              tldw_Server_API/tests/Admin/test_bundle_restore_backends.py
+              tldw_Server_API/tests/Admin/test_bundle_restore_postgres.py
+              tldw_Server_API/tests/Admin/test_postgresql_bundle_permissions.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_bundle.py
           - name: admin-byok-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_byok_service_sanitizers.py
@@ -2381,6 +2399,11 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
               tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
+              tldw_Server_API/tests/Admin/test_backup_storage_scope.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_archive.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_recovery_live.py
+              tldw_Server_API/tests/Admin/test_postgresql_offline_recovery.py
+              tldw_Server_API/tests/Admin/test_postgresql_restore_interruption.py
           - name: admin-conflicts-data-admin
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_c*.py
@@ -3171,6 +3194,7 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
               tldw_Server_API/tests/Claims/test_claims_cluster*.py
               tldw_Server_API/tests/Claims/test_claims_compat_types.py
+              tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
           - name: product-claims-engine
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
@@ -3239,6 +3263,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
               tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
+              tldw_Server_API/tests/Evaluations/test_run_progress_response.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -3332,6 +3357,8 @@ jobs:
               tldw_Server_API/tests/Workflows/test_orphan_requeue_*.py
               tldw_Server_API/tests/Workflows/test_workflows_map_substeps_*.py
               tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
+              tldw_Server_API/tests/Workflows/test_scheduled_workflow_execution.py
+              tldw_Server_API/tests/Workflows/test_workflow_expected_user.py
               tldw_Server_API/tests/Workflows/test_workflow_stress.py
               tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
           - name: product-workflows-api
@@ -3585,6 +3612,7 @@ jobs:
       - name: Install pg client and wait for PG
         uses: ./.github/actions/wait-for-postgres
         with:
+          client-version: ${{ contains(fromJSON('["admin-backup-core", "admin-bundle-ops"]'), matrix.shard.name) && '18' || '' }}
           host: 127.0.0.1
           port: ${{ job.services.postgres.ports['5432'] }}
           user: tldw_user
@@ -3879,6 +3907,10 @@ jobs:
           - name: admin-bundle-ops
             paths: >-
               tldw_Server_API/tests/Admin/test_bundle_ops.py
+              tldw_Server_API/tests/Admin/test_bundle_restore_backends.py
+              tldw_Server_API/tests/Admin/test_bundle_restore_postgres.py
+              tldw_Server_API/tests/Admin/test_postgresql_bundle_permissions.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_bundle.py
           - name: admin-byok-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_byok_service_sanitizers.py
@@ -3894,6 +3926,11 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
               tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
+              tldw_Server_API/tests/Admin/test_backup_storage_scope.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_archive.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_recovery_live.py
+              tldw_Server_API/tests/Admin/test_postgresql_offline_recovery.py
+              tldw_Server_API/tests/Admin/test_postgresql_restore_interruption.py
           - name: admin-conflicts-data-admin
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_c*.py
@@ -4684,6 +4721,7 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
               tldw_Server_API/tests/Claims/test_claims_cluster*.py
               tldw_Server_API/tests/Claims/test_claims_compat_types.py
+              tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
           - name: product-claims-engine
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
@@ -4752,6 +4790,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
               tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
+              tldw_Server_API/tests/Evaluations/test_run_progress_response.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -4845,6 +4884,8 @@ jobs:
               tldw_Server_API/tests/Workflows/test_orphan_requeue_*.py
               tldw_Server_API/tests/Workflows/test_workflows_map_substeps_*.py
               tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
+              tldw_Server_API/tests/Workflows/test_scheduled_workflow_execution.py
+              tldw_Server_API/tests/Workflows/test_workflow_expected_user.py
               tldw_Server_API/tests/Workflows/test_workflow_stress.py
               tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
           - name: product-workflows-api
@@ -5303,6 +5344,10 @@ jobs:
           - name: admin-bundle-ops
             paths: >-
               tldw_Server_API/tests/Admin/test_bundle_ops.py
+              tldw_Server_API/tests/Admin/test_bundle_restore_backends.py
+              tldw_Server_API/tests/Admin/test_bundle_restore_postgres.py
+              tldw_Server_API/tests/Admin/test_postgresql_bundle_permissions.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_bundle.py
           - name: admin-byok-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_byok_service_sanitizers.py
@@ -5318,6 +5363,11 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
               tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
+              tldw_Server_API/tests/Admin/test_backup_storage_scope.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_archive.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_recovery_live.py
+              tldw_Server_API/tests/Admin/test_postgresql_offline_recovery.py
+              tldw_Server_API/tests/Admin/test_postgresql_restore_interruption.py
           - name: admin-conflicts-data-admin
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_c*.py
@@ -6108,6 +6158,7 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
               tldw_Server_API/tests/Claims/test_claims_cluster*.py
               tldw_Server_API/tests/Claims/test_claims_compat_types.py
+              tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
           - name: product-claims-engine
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
@@ -6176,6 +6227,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
               tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
+              tldw_Server_API/tests/Evaluations/test_run_progress_response.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -6269,6 +6321,8 @@ jobs:
               tldw_Server_API/tests/Workflows/test_orphan_requeue_*.py
               tldw_Server_API/tests/Workflows/test_workflows_map_substeps_*.py
               tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
+              tldw_Server_API/tests/Workflows/test_scheduled_workflow_execution.py
+              tldw_Server_API/tests/Workflows/test_workflow_expected_user.py
               tldw_Server_API/tests/Workflows/test_workflow_stress.py
               tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
           - name: product-workflows-api
@@ -6718,6 +6772,10 @@ jobs:
           - name: admin-bundle-ops
             paths: >-
               tldw_Server_API/tests/Admin/test_bundle_ops.py
+              tldw_Server_API/tests/Admin/test_bundle_restore_backends.py
+              tldw_Server_API/tests/Admin/test_bundle_restore_postgres.py
+              tldw_Server_API/tests/Admin/test_postgresql_bundle_permissions.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_bundle.py
           - name: admin-byok-core
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_byok_service_sanitizers.py
@@ -6733,6 +6791,11 @@ jobs:
               tldw_Server_API/tests/Admin/test_admin_backup_*.py
               tldw_Server_API/tests/Admin/test_admin_backups_cache.py
               tldw_Server_API/tests/Admin/test_backup_schedules_repo.py
+              tldw_Server_API/tests/Admin/test_backup_storage_scope.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_archive.py
+              tldw_Server_API/tests/Admin/test_postgresql_database_recovery_live.py
+              tldw_Server_API/tests/Admin/test_postgresql_offline_recovery.py
+              tldw_Server_API/tests/Admin/test_postgresql_restore_interruption.py
           - name: admin-conflicts-data-admin
             paths: >-
               tldw_Server_API/tests/Admin/test_admin_c*.py
@@ -7523,6 +7586,7 @@ jobs:
               tldw_Server_API/tests/Claims/test_claims_budget_guard.py
               tldw_Server_API/tests/Claims/test_claims_cluster*.py
               tldw_Server_API/tests/Claims/test_claims_compat_types.py
+              tldw_Server_API/tests/Claims/test_claims_title_abbreviations.py
           - name: product-claims-engine
             paths: >-
               tldw_Server_API/tests/Claims/test_claims_dashboard_analytics.py
@@ -7591,6 +7655,7 @@ jobs:
               tldw_Server_API/tests/Evaluations/test_proposition_evaluations.py
               tldw_Server_API/tests/Evaluations/test_rag_*.py
               tldw_Server_API/tests/Evaluations/test_rate_limits_view_resolver.py
+              tldw_Server_API/tests/Evaluations/test_run_progress_response.py
               tldw_Server_API/tests/Evaluations/test_security.py
               tldw_Server_API/tests/Evaluations/test_synthetic_eval_service.py
               tldw_Server_API/tests/Evaluations/test_unified_evaluation_service_strict_audit.py
@@ -7684,6 +7749,8 @@ jobs:
               tldw_Server_API/tests/Workflows/test_orphan_requeue_*.py
               tldw_Server_API/tests/Workflows/test_workflows_map_substeps_*.py
               tldw_Server_API/tests/Workflows/test_workflow_attempt_failures.py
+              tldw_Server_API/tests/Workflows/test_scheduled_workflow_execution.py
+              tldw_Server_API/tests/Workflows/test_workflow_expected_user.py
               tldw_Server_API/tests/Workflows/test_workflow_stress.py
               tldw_Server_API/tests/Workflows/test_workflows_scheduler.py
           - name: product-workflows-api

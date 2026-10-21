@@ -22,6 +22,25 @@ from tldw_Server_API.app.core.Character_Chat.modules.character_prompt_presets im
 )
 from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
 
+
+def selected_unanswered_text_question(
+    snapshot: Any, content: tuple[dict[str, Any], ...], selection: dict[str, Any],
+) -> dict[str, Any]:
+    """Require the exact canonical unanswered text input for a new answer intent."""
+    cursor = selection["cursor"]
+    question = content[-1] if content else None
+    node = next((item for item in snapshot.nodes if question and item["id"] == question["id"]), None)
+    if (selection["purpose"] != "send" or cursor["kind"] != "after_message"
+            or question is None or cursor["message_id"] != question["id"]
+            or node is None or node["role"] != "user"):
+        raise HistorySelectionError("invalid_existing_input")
+    if question["images"]:
+        raise HistorySelectionError("unsupported_history_context_existing_input_assets")
+    if any(item["role"] == "assistant" and item.get("parent_id") == question["id"] for item in snapshot.nodes):
+        raise HistorySelectionError("existing_input_already_answered")
+    return question
+
+
 # These settings select already materialized values or carry identity/readiness
 # metadata. Other saved prompt effects need a dedicated, faithful projector.
 _SUPPORTED_SETTINGS = {
@@ -45,6 +64,9 @@ _SUPPORTED_SETTINGS = {
     "greetingSelectionId",
     "useCharacterDefault",
     "memoryScope",
+    "chat_dictionary_id",
+    "chat_dictionary_ids",
+    "conversationContext",
 }
 
 
@@ -120,6 +142,19 @@ def project_history_context(
     """
     conversation = state["conversation"]
     settings = state.get("settings") or {}
+    from tldw_Server_API.app.core.Character_Chat.frozen_dictionary_context import (
+        assigned_dictionary_ids,
+        validate_frozen_dictionary_plan,
+        without_dictionary_assignment,
+    )
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+
+    try:
+        dictionary_ids = assigned_dictionary_ids(settings)
+    except InputError as exc:
+        raise HistorySelectionError("unsupported_history_context_dictionaries") from exc
+    if "conversationContext" in without_dictionary_assignment(settings):
+        _unsupported("saved_settings")
     materialized = state.get("materialized_settings")
     if "roleplayBehaviorV1" in settings and materialized is None:
         _unsupported("invalid_materialized_behavior")
@@ -135,11 +170,23 @@ def project_history_context(
         if snapshot.get("status") != "valid" or base != expected_base:
             _unsupported("materialized_binding")
     values = (materialized or {}).get("values", {})
+    dictionary_plan = None
+    if dictionary_ids or "dictionaries" in values:
+        try:
+            dictionary_plan = validate_frozen_dictionary_plan(values.get("dictionaries"), dictionary_ids)
+            catalog_owner = state.get("dictionary_catalog_owner")
+            if catalog_owner is not None and (
+                dictionary_plan.get("catalog_owner") != catalog_owner
+                or conversation.get("client_id") != catalog_owner
+            ):
+                raise InputError("Saved dictionary plan lacks current catalog ownership.")
+        except InputError as exc:
+            raise HistorySelectionError("unsupported_history_context_dictionaries") from exc
     controls = values.get("behavior_controls", {})
     if set(controls.get("applied_overrides", {})) - _SUPPORTED_SETTINGS:
         _unsupported("behavior_controls")
     if (
-        controls.get("prompt_context")
+        without_dictionary_assignment(controls.get("prompt_context") or {})
         or controls.get("pinned_message_ids")
         or controls.get("auto_summary", {}).get("enabled")
         or controls.get("auto_summary", {}).get("summary")
@@ -150,7 +197,7 @@ def project_history_context(
     note_bookkeeping = {"enabled", "exclude_from_prompt", "gm_only", "position"}
     if note_active and any(value for key, value in author_note.items() if key not in note_bookkeeping):
         _unsupported("author_note")
-    for effect in ("assistant_overlay", "world_books", "memory", "greeting"):
+    for effect in ("assistant_overlay", "memory", "greeting"):
         if values.get(effect):
             _unsupported(effect)
     kind = conversation.get("assistant_kind")
@@ -178,9 +225,15 @@ def project_history_context(
         _unsupported("source_identity")
     if settings.get("participantCharacterIds", [int(expected_id)]) != [int(expected_id)]:
         _unsupported("participants")
-    for effect in ("world_books", "exemplars", "default_memory"):
+    for effect in ("exemplars", "default_memory"):
         if participant.get(effect):
             _unsupported(effect)
+    from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import build_frozen_world_book_plan
+
+    try:
+        world_book_plan = build_frozen_world_book_plan(participant.get("world_books", []), values.get("world_books", []))
+    except (ValueError, TypeError, KeyError) as exc:
+        raise HistorySelectionError("unsupported_history_context_world_books") from exc
     defaults = participant.get("generation_defaults") or {}
     if set(defaults) - {"source", "sampling"}:
         _unsupported("generation_defaults")
@@ -203,6 +256,9 @@ def project_history_context(
             "assistant_kind": kind or "character",
             "assistant_id": str(expected_id),
             "history_sampling": deepcopy(sampling),
+            **({"history_dictionary_plan": dictionary_plan} if dictionary_plan is not None else {}),
+            **({"history_world_book_plan": world_book_plan}
+               if participant.get("world_books") or values.get("world_books") else {}),
         },
     )
 

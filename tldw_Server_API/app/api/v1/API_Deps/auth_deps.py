@@ -1635,6 +1635,19 @@ async def require_expected_user(
     )
 
 
+async def require_expected_user_if_present(
+    request: Request,
+    expected_user_id: str | None = Header(
+        default=None,
+        alias="X-TLDW-Expected-User-ID",
+        description="Authenticated user ID observed when the request scope was loaded.",
+    ),
+) -> None:
+    """Assert an explicitly captured account without changing legacy auth seams."""
+    if expected_user_id is not None:
+        await require_expected_user(expected_user_id, await get_auth_principal(request))
+
+
 def require_permissions(
     *permissions: str,
     detail: Any | None = None,
@@ -2578,7 +2591,15 @@ def require_token_scope(
                     principal = ctx.principal
             except _AUTH_DEPS_NONCRITICAL_EXCEPTIONS:
                 principal = None
-            if principal is None and credentials:
+            if principal is None and (
+                credentials
+                or (
+                    request.headers.get("Authorization") is None
+                    and request.headers.get("X-API-KEY") is None
+                    and getattr(request, "cookies", None)
+                    and request.cookies.get(get_settings().SINGLE_USER_SESSION_COOKIE_NAME)
+                )
+            ):
                 try:
                     resolver = get_auth_principal
                     try:

@@ -9,8 +9,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("../TldwApiClient", () => ({
   tldwClient: {
-    initialize: (...args: unknown[]) => mocks.initialize(...args),
-    getConfig: (...args: unknown[]) => mocks.getConfig(...args),
+    initialize: () => mocks.initialize(),
+    getConfig: () => mocks.getConfig(),
     createChatCompletion: (...args: unknown[]) =>
       mocks.createChatCompletion(...args),
     streamChatCompletion: (...args: unknown[]) =>

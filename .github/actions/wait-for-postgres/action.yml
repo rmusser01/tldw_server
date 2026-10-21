@@ -15,6 +15,10 @@ inputs:
     description: "Install postgresql-client on Linux"
     required: false
     default: 'true'
+  client-version:
+    description: "Optional PostgreSQL major version for backup/restore tools"
+    required: false
+    default: ''
 runs:
   using: "composite"
   steps:
@@ -38,6 +42,32 @@ runs:
         source "${{ github.action_path }}/../apt-bounded.sh"
         apt_bounded update "${apt_opts[@]}"
         apt_bounded install -y --no-install-recommends "${apt_opts[@]}" postgresql-client
+
+    - name: Select versioned client (Linux)
+      if: runner.os == 'Linux' && inputs.install-client == 'true' && inputs.client-version != ''
+      shell: bash
+      env:
+        PG_CLIENT_VERSION: ${{ inputs.client-version }}
+      run: |
+        if [[ ! "$PG_CLIENT_VERSION" =~ ^[0-9]+$ ]]; then
+          echo "Invalid PostgreSQL client major version" >&2; exit 1
+        fi
+        client_bin="/usr/lib/postgresql/$PG_CLIENT_VERSION/bin"
+        if [ ! -x "$client_bin/pg_dump" ] || [ ! -x "$client_bin/pg_restore" ]; then
+          # Ubuntu's default client can be older than the service's backup format.
+          source /etc/os-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl --fail --show-error --connect-timeout 20 --max-time 60 \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $VERSION_CODENAME-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          source "${{ github.action_path }}/../apt-bounded.sh"
+          apt_bounded update "${apt_opts[@]}"
+          apt_bounded install -y --no-install-recommends "${apt_opts[@]}" "postgresql-client-$PG_CLIENT_VERSION"
+        fi
+        "$client_bin/pg_dump" --version
+        "$client_bin/pg_restore" --version
+        echo "$client_bin" >> "$GITHUB_PATH"
 
     - name: Wait for Postgres
       shell: bash

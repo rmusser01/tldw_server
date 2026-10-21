@@ -225,6 +225,18 @@ async def validate_local_openai_endpoint(
         if callable(close):
             close()
 
+    selected_model = (payload.model or "").strip()
+    if selected_model and selected_model not in model_ids:
+        return SetupProviderValidationResponse(
+            provider_key=payload.provider_key,
+            status=VALIDATION_STATUS_FAILED,
+            failure_category="model_unavailable",
+            message="The selected model is unavailable. Select a discovered model or switch provider.",
+            models=model_ids,
+            validation_level="live_non_generative",
+            can_gate_first_chat=False,
+        )
+
     return SetupProviderValidationResponse(
         provider_key=payload.provider_key,
         status=VALIDATION_STATUS_READY,
