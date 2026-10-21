@@ -264,8 +264,14 @@ def test_close_all_connections_leaves_a_live_threads_checkout_to_that_thread(led
     assert (queued_while_owner_lives, [(was_closed, conn.closed) for conn, was_closed in seen]) == (0, [(False, True)])
 
 
-def test_a_drain_leaves_a_checkout_queued_while_its_owner_thread_lives(monkeypatch):
-    """A checkout dropped off its owning thread goes back to the pool only once that thread has exited."""
+@pytest.mark.parametrize("drop", ["refcount", "cyclic-gc"])
+def test_a_drain_leaves_a_checkout_queued_while_its_owner_thread_lives(monkeypatch, drop):
+    """A checkout dropped off its owning thread goes back to the pool only once that thread has exited.
+
+    A handle is cyclic garbage, so it is usually the collector that drops the guard, and the
+    collector clears weak references inside the garbage before any finalizer runs.
+    """
+    gc.collect()  # earlier tests' garbage must not land in this test's queue
     dropped = queue.SimpleQueue()
     monkeypatch.setattr(chacha_module, "_DROPPED_CHECKOUTS", dropped)
     returned = []
@@ -274,8 +280,14 @@ def test_a_drain_leaves_a_checkout_queued_while_its_owner_thread_lives(monkeypat
     conn.close = lambda: setattr(conn, "closed", True)
     armed, ready, release = [], threading.Event(), threading.Event()
 
+    def arm():  # leaves no reference to the guard in the owner's frame
+        holder = [chacha_module._LegacyCheckout(conn, backend)]
+        if drop == "cyclic-gc":
+            holder.append(holder)  # a cycle, as a handle and its stores make
+        armed.append(holder)
+
     def owner():
-        armed.append(chacha_module._LegacyCheckout(conn, backend))
+        arm()
         ready.set()
         release.wait(timeout=30)
 
@@ -283,6 +295,7 @@ def test_a_drain_leaves_a_checkout_queued_while_its_owner_thread_lives(monkeypat
     worker.start()
     ready.wait(timeout=30)
     armed.clear()  # dropped here, off the owner's thread, while the owner lives
+    gc.collect()
     chacha_module._return_dropped_checkouts()
     while_owner_lives = (list(returned), conn.closed, dropped.qsize())
     release.set()
@@ -310,3 +323,31 @@ def test_a_forked_childs_drain_forgets_the_parents_queued_checkouts(monkeypatch)
     chacha_module._return_dropped_checkouts()  # the child drains
 
     assert (queued_in_parent, returned, conn.closed, dropped.qsize()) == (1, [], False, 0)
+
+
+def test_a_collected_handle_leaves_its_live_threads_checkout_out_of_the_pool(ledger_backend, tmp_path):
+    """A handle dies as cyclic garbage, on whichever thread collects it; a live thread's checkout stays with it."""
+    holder = [CharactersRAGDB(tmp_path / "gc.db", client_id="1", backend=ledger_backend)]
+    holder[0].close_connection()
+    ready, release, kept = threading.Event(), threading.Event(), []
+
+    def owner():
+        handle = holder[0]
+        handle.execute_query("SELECT count(*) AS n FROM character_cards")
+        kept.append(handle._local.conn)  # the raw connection outlives the handle
+        del handle
+        ready.set()
+        release.wait(timeout=30)
+
+    worker = threading.Thread(target=owner)
+    worker.start()
+    ready.wait(timeout=30)
+    holder.clear()
+    gc.collect()  # the handle, its threading.local and the owner's slot die here, on this thread
+    chacha_module._return_dropped_checkouts()
+    while_owner_lives = (_outstanding(ledger_backend), kept[0].closed)
+    release.set()
+    worker.join()
+    chacha_module._return_dropped_checkouts()
+
+    assert (while_owner_lives, _outstanding(ledger_backend)) == ((1, False), 0)

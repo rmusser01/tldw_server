@@ -49,7 +49,6 @@ import threading  # noqa: E402
 import time  # noqa: E402
 import unicodedata  # noqa: E402
 import uuid  # noqa: E402
-import weakref  # noqa: E402
 from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from configparser import ConfigParser  # noqa: E402
@@ -483,16 +482,23 @@ class _LegacyCheckout:
       that thread, or that thread's own collection of the handle), the guard closes
       the connection, so a session left in a transaction does not keep its locks and
       snapshot, and queues it so the pool gets its slot back.
-    - Dropped on any other thread (the handle collected or evicted elsewhere), it
-      only queues the checkout, with a reference to its owner thread. The owner may
+    - Dropped on any other thread (the handle collected elsewhere), it only queues
+      the checkout, with a strong reference to its owner ``Thread``. The owner may
       be inside libpq on that connection: psycopg's C generators keep the raw
       ``PGconn*`` across yields and call libpq without the GIL, so closing or
       returning it from another thread would free it in use.
-      ``_return_dropped_checkouts`` keeps such an entry queued until the owner has
-      exited. A thread never seen to exit (a ``_DummyThread``, for one) keeps its
-      entry, and the pool slot, for good; dev lost that slot anyway.
+      ``_return_dropped_checkouts`` keeps such an entry queued while the owner
+      ``is_alive()``. The reference is strong because a handle is cyclic garbage,
+      and the collector clears weak references inside garbage before any
+      finalizer runs (bpo-38006). So a collected handle used on a long-lived
+      thread (the main thread, an executor thread) holds its pool slot until that
+      thread exits, and a thread never seen to exit (a ``_DummyThread``) holds it
+      for good; dev lost those slots anyway.
     - ``close_all_connections()`` keeps the ``threading.local`` on PostgreSQL, so it
-      never drops another thread's slot.
+      never drops another thread's slot. Another live thread's session then stays
+      open, idle in a transaction if it left one, and keeps serving that thread
+      until the thread closes it or exits; dev ended an idle one. That only
+      happens in tests and shutdown, on a caller's own pool.
     - Each entry records the pid that queued it. A forked child inherits a copy of
       the queue, and its drain forgets the parent's entries untouched: they are the
       parent's sockets.
@@ -503,7 +509,7 @@ class _LegacyCheckout:
     def __init__(self, conn: Any, backend: Any) -> None:
         self.conn = conn
         self.backend = backend
-        self.owner = weakref.ref(threading.current_thread())
+        self.owner = threading.current_thread()  # strong: see the class docstring
         self.pid = os.getpid()
         self.thread_id = threading.get_ident()
 
@@ -553,9 +559,8 @@ def _return_dropped_checkouts() -> None:
         backend, conn, owner, pid = entry
         if pid != os.getpid():
             continue  # the parent's socket: neither return nor close it here
-        thread = owner() if owner is not None else None
         try:
-            owner_alive = thread is not None and thread.is_alive()
+            owner_alive = owner is not None and owner.is_alive()
         except AssertionError:  # a stopped _DummyThread asserts instead of answering
             owner_alive = False
         if owner_alive:
