@@ -96,6 +96,29 @@ def test_binding_patch_rejects_null_required_fields(calendar_api_client, field: 
     assert getattr(db.get_external_binding(original.id), field) == getattr(original, field)
 
 
+@pytest.mark.parametrize("operation", ["create", "patch"])
+@pytest.mark.parametrize("minutes,expected_status", [(5_328_000, 200), (5_328_001, 422), (10_000_000_000, 422)])
+def test_binding_interval_has_bounded_create_and_patch_contract(calendar_api_client, operation, minutes, expected_status) -> None:
+    """The existing ten-year scan-policy horizon also bounds polling cadence."""
+    client, db, _reminders = calendar_api_client
+    calendar, item = _create_provider_item(db)
+    binding = db.get_external_binding(item.external_binding_id)
+    if operation == "create":
+        result = client.post("/api/v1/calendar/external/bindings", json={
+            "account_id": binding.account_id, "calendar_id": calendar.id,
+            "remote_calendar_id": "bounded-cadence", "sync_interval_minutes": minutes,
+        })
+        assert result.status_code == (201 if expected_status == 200 else expected_status), result.text
+        bindings = db.list_external_bindings_for_account(binding.account_id)
+        assert len(bindings) == (2 if expected_status == 200 else 1)
+    else:
+        result = client.patch(f"/api/v1/calendar/external/bindings/{binding.id}", json={"sync_interval_minutes": minutes})
+        assert result.status_code == expected_status, result.text
+        assert db.get_external_binding(binding.id).sync_interval_minutes == (
+            minutes if expected_status == 200 else binding.sync_interval_minutes
+        )
+
+
 def test_binding_patch_allows_manual_only_interval_and_preserves_omitted_fields(calendar_api_client) -> None:
     """Null interval selects manual-only sync without clearing required policy."""
     client, db, _reminders = calendar_api_client

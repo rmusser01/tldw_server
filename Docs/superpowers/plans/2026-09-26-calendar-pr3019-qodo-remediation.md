@@ -189,6 +189,28 @@ https://github.com/rmusser01/tldw_server/pull/3019#pullrequestreview-5594003361
    the final delta alongside the unchanged full-range review. Hosted CI and the
    unwaived live-provider/human-rationale gates remain required.
 
+Published `59ee290323998ffae380fa6f296fa20d5dd87d72`. Full independent review
+verified the preceding repairs but reproduced polling-interval overflow below.
+CI `39529871149`, backend `39529871130` and license `39529948369` remain queued;
+these runs do not establish hosted success or source approval.
+
+### Polling Interval Overflow
+
+1. **Regressions (Complete):** Eight failing cases and three positive controls
+   cover create/PATCH bounds, legacy persisted integers, UTC limit arithmetic,
+   and a two-owner real-quota periodic runner. All eleven now pass.
+2. **Repair (Complete):** Bound new intervals to 3,700 days, matching existing
+   binding scan-policy bounds. The shared next-scan helper saturates dates beyond
+   the UTC datetime range, preserving legacy values without terminating success,
+   failure bookkeeping or the shared scheduler. No migration or new ADR needed.
+3. **Verification (Complete):** Calendar/scheduled-task/test-quality 609 pass;
+   boundary contracts 80 pass; OpenAPI, Ruff, normal hooks and whitespace pass.
+   Bandit on three changed sources: zero findings/errors. Unchanged frontend
+   retains independent evidence.
+4. **Exact-head closure (In Progress):** Commit, request focused independent
+   closure against the already-reviewed full range, then publish one new CI
+   candidate. All external merge gates remain unwaived.
+
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.
 **Success Criteria:** Streamed responses stop at a byte limit; XML/ICS are bounded before parsing; synchronous provider calls run off the event loop; API and worker reuse scoped credential resolution; a deleted account or failed scan does not stop later polling; diagnostics contain safe context and stack locations without secrets.

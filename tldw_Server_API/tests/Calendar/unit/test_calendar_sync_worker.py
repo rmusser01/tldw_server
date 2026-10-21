@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -30,6 +31,19 @@ from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize("minutes,finished_at,expected", [
+    (10_000_000_000, "2026-06-05T17:00:00+00:00", "9999-12-31T23:59:59.999999+00:00"),
+    (2**63 - 1, "2026-06-05T17:00:00+00:00", "9999-12-31T23:59:59.999999+00:00"),
+    (60, "9999-12-31T23:30:00+00:00", "9999-12-31T23:59:59.999999+00:00"),
+    (60, "2026-06-05T17:00:00-07:00", "2026-06-06T01:00:00+00:00"),
+])
+def test_next_scan_handles_persisted_interval_overflow(minutes: int, finished_at: str, expected: str) -> None:
+    """Retry bookkeeping saturates beyond representable UTC dates without losing normal cadence."""
+    from tldw_Server_API.app.core.Calendar.calendar_sync_worker import _next_scan_at
+
+    assert _next_scan_at(SimpleNamespace(sync_interval_minutes=minutes), finished_at) == expected
 
 
 @pytest.mark.asyncio

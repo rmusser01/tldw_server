@@ -14,6 +14,7 @@ from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas im
 from tldw_Server_API.app.core.Calendar.constants import (
     CALENDAR_SOURCE_OWNER_LINKED_PROJECTION,
     DEFAULT_SYNC_INTERVAL_MINUTES,
+    MAX_SYNC_INTERVAL_MINUTES,
 )
 from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
 from tldw_Server_API.app.core.Calendar.recurrence import LocalRecurrenceRule
@@ -638,7 +639,7 @@ class ExternalCalendarBindingCreateRequest(BaseModel):
     remote_calendar_id: str = Field(..., min_length=1, max_length=500)
     remote_display_name: str | None = None
     sync_enabled: bool = True
-    sync_interval_minutes: int | None = Field(default=DEFAULT_SYNC_INTERVAL_MINUTES, ge=1)
+    sync_interval_minutes: int | None = Field(default=DEFAULT_SYNC_INTERVAL_MINUTES, ge=1, le=MAX_SYNC_INTERVAL_MINUTES)
     lookback_days: int = Field(default=90, ge=0, le=3700)
     lookahead_days: int = Field(default=365, ge=0, le=3700)
     provider_capabilities: dict[str, Any] | None = None
@@ -650,7 +651,7 @@ class ExternalCalendarBindingUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sync_enabled: bool | None = None
-    sync_interval_minutes: int | None = Field(default=None, ge=1)
+    sync_interval_minutes: int | None = Field(default=None, ge=1, le=MAX_SYNC_INTERVAL_MINUTES)
     lookback_days: int | None = Field(default=None, ge=0, le=3700)
     lookahead_days: int | None = Field(default=None, ge=0, le=3700)
     provider_capabilities: dict[str, Any] | None = None
