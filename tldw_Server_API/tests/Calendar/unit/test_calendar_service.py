@@ -25,6 +25,22 @@ from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase,
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.parametrize(("original", "edit", "expected"), [
+    ("2026-11-01T01:30:00-08:00", "2026-11-01T01:45", "2026-11-01T01:45:00-08:00"),
+    ("2026-11-01T09:30:00Z", "2026-11-01T01:45", "2026-11-01T01:45:00-08:00"),
+    ("2026-10-31T09:00:00-07:00", "2026-11-02T09:00", "2026-11-02T09:00:00-08:00"),
+])
+def test_rereview_time_edit_preserves_original_fold_without_freezing_dst_offset(
+    calendar_db: CalendarDatabase, original: str, edit: str, expected: str,
+) -> None:
+    """A repeated-hour edit retains its original instant lineage; later dates still use their own DST offset."""
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Fold", timezone="America/Los_Angeles")
+    item = service.create_item(actor_user_id=1, calendar_id=calendar.id, kind="event", title="Fold", start_at=original)
+    updated = service.update_item(actor_user_id=1, item_id=item.id, start_at=edit)
+    assert updated.start_at == expected
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("view_kind", ["agenda", "week"])
 @pytest.mark.parametrize(("partial", "errors"), [(True, []), (True, ["reminder_tasks_unavailable"]), (False, ["reminder_tasks_unavailable"])])

@@ -33,6 +33,7 @@ import {
 } from "@/services/calendar"
 
 interface CalendarSyncSettingsProps {
+  authorityKey: string
   calendars: CalendarResponse[]
   onChanged?: () => void | Promise<void>
 }
@@ -62,11 +63,6 @@ const DEFAULT_ACCOUNT_DRAFT: AccountDraft = {
 const DEFAULT_LOOKBACK_DAYS = 30
 const DEFAULT_LOOKAHEAD_DAYS = 120
 
-const queryKeys = {
-  accounts: ["calendar", "external", "accounts"] as const,
-  bindings: ["calendar", "external", "bindings"] as const
-}
-
 const metadataValue = (
   account: ExternalCalendarAccountResponse,
   key: string
@@ -90,11 +86,21 @@ const bindingKey = (accountId: number, remoteCalendarId: string): string =>
 const normalizeNumber = (value: number | null, fallback: number): number =>
   typeof value === "number" && Number.isFinite(value) ? Math.round(value) : fallback
 
-export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
+export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = (props) =>
+  <CalendarSyncWorkspace key={props.authorityKey} {...props} />
+
+const CalendarSyncWorkspace: React.FC<CalendarSyncSettingsProps> = ({
+  authorityKey,
   calendars,
   onChanged
 }) => {
   const queryClient = useQueryClient()
+  const active = React.useRef(true)
+  React.useEffect(() => { active.current = true; return () => { active.current = false } }, [])
+  const queryKeys = {
+    accounts: ["calendar", authorityKey, "external", "accounts"] as const,
+    bindings: ["calendar", authorityKey, "external", "bindings"] as const
+  }
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [accountDraft, setAccountDraft] = useState<AccountDraft>(DEFAULT_ACCOUNT_DRAFT)
   const [discoveredByAccount, setDiscoveredByAccount] = useState<
@@ -110,7 +116,7 @@ export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
   const accounts = accountsQuery.data?.items ?? []
 
   const bindingsQuery = useQuery({
-    queryKey: queryKeys.bindings,
+    queryKey: [...queryKeys.bindings, accounts.map((account) => account.id)],
     queryFn: async () => {
       const entries = await Promise.all(
         accounts.map(async (account) => {
@@ -141,8 +147,9 @@ export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
   }
 
   const notifyChanged = async () => {
+    if (!active.current) return
     await invalidateSyncQueries()
-    await onChanged?.()
+    if (active.current) await onChanged?.()
   }
 
   const addAccountMutation = useMutation({
@@ -164,12 +171,13 @@ export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
       })
     },
     onSuccess: async () => {
+      if (!active.current) return
       setDrawerOpen(false)
       setAccountDraft(DEFAULT_ACCOUNT_DRAFT)
       await notifyChanged()
     },
     onError: (error: Error) => {
-      message.error(error.message || "Unable to add CalDAV account")
+      if (active.current) message.error(error.message || "Unable to add CalDAV account")
     }
   })
 
@@ -179,6 +187,7 @@ export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
       return { accountId, items: response.items }
     },
     onSuccess: ({ accountId, items }) => {
+      if (!active.current) return
       setDiscoveredByAccount((current) => ({
         ...current,
         [accountId]: items
@@ -196,7 +205,7 @@ export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
       })
     },
     onError: (error: Error) => {
-      message.error(error.message || "Unable to discover remote calendars")
+      if (active.current) message.error(error.message || "Unable to discover remote calendars")
     }
   })
 
@@ -228,7 +237,7 @@ export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
       await notifyChanged()
     },
     onError: (error: Error) => {
-      message.error(error.message || "Unable to bind remote calendar")
+      if (active.current) message.error(error.message || "Unable to bind remote calendar")
     }
   })
 
@@ -239,7 +248,7 @@ export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
       await notifyChanged()
     },
     onError: (error: Error) => {
-      message.error(error.message || "Unable to queue calendar sync")
+      if (active.current) message.error(error.message || "Unable to queue calendar sync")
     }
   })
 
@@ -249,7 +258,7 @@ export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
       await notifyChanged()
     },
     onError: (error: Error) => {
-      message.error(error.message || "Unable to revoke CalDAV account")
+      if (active.current) message.error(error.message || "Unable to revoke CalDAV account")
     }
   })
 
@@ -259,7 +268,7 @@ export const CalendarSyncSettings: React.FC<CalendarSyncSettingsProps> = ({
       await notifyChanged()
     },
     onError: (error: Error) => {
-      message.error(error.message || "Unable to delete CalDAV account")
+      if (active.current) message.error(error.message || "Unable to delete CalDAV account")
     }
   })
 

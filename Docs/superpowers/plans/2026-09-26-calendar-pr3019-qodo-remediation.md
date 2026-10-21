@@ -131,6 +131,32 @@ full-PR hooks pass; Ruff pass; Bandit zero findings/errors; shard coverage 5,145
 files with zero newly uncovered files. These are local results, not hosted CI
 or independent source approval.
 
+### Independent Re-review Follow-Up
+
+Full re-review of `8096e315836dc64c49eac7394d85fa4370d91072`:
+https://github.com/rmusser01/tldw_server/pull/3019#pullrequestreview-5593885698
+IR2-IR5 are independently verified closed. IR1 needed preservation of the second
+repeated-hour fold. The reviewer also reproduced delegated Tasks permission
+bypass (P1), cross-connection Calendar state reuse (P2), and null PATCH required
+fields returning 500 (P3). These block technical source approval until fixed.
+
+1. **Regressions (Complete):** Ten backend cases and three connection-switch
+   cases reproduced the gaps; positive authorized cases also remain covered.
+2. **Repairs (Complete):** Reuse canonical Tasks permission checks, retain local
+   Calendar reads independently, and enforce Tasks control quota for delegated
+   creation. Key workspace/caches/drafts to the existing credential-free
+   connection authority; retire old callbacks/multi-step mutations on unmount.
+   Preserve original fold in backend temporal edits without freezing later-date
+   DST offsets. Reject explicit null for nonnullable PATCH fields.
+3. **Verification (Complete):** Calendar/scheduled-task/test-quality592 pass;
+   French/Paris frontend140 pass; route/workflow/task/import contracts80 pass;
+   TypeScript, canonical OpenAPI and Ruff pass. Shared authority23 pass;
+   Bandit zero findings/errors; normal full-PR hooks pass.
+4. **Publication and exact-head review (In Progress):** Publish with an exact
+   8096 old-head lease, then rerun CI and independent requesting-code-review.
+   No hosted success, live-provider smoke, human rationale or source approval is
+   claimed by these local results.
+
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.
 **Success Criteria:** Streamed responses stop at a byte limit; XML/ICS are bounded before parsing; synchronous provider calls run off the event loop; API and worker reuse scoped credential resolution; a deleted account or failed scan does not stop later polling; diagnostics contain safe context and stack locations without secrets.

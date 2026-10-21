@@ -252,6 +252,14 @@ class CalendarItemUpdateRequest(BaseModel):
     metadata: dict[str, Any] | None = None
     recurrence: CalendarRecurrenceRequest | None = None
 
+    @model_validator(mode="after")
+    def reject_null_required_fields(self) -> CalendarItemUpdateRequest:
+        """Omission preserves existing values; explicit null cannot clear required columns."""
+        for name in ("kind", "title", "all_day", "status"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"Calendar {name} cannot be null")
+        return self
+
     def service_updates(self) -> dict[str, Any]:
         """Return supplied scalar updates with JSON storage keys; handle recurrence separately."""
         updates = self.model_dump(exclude_unset=True, exclude={"recurrence"})
