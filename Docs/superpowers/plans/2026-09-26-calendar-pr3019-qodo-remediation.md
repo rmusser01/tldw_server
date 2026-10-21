@@ -16,6 +16,38 @@
 - Do not invent a human Change summary or bypass required checks or merge policy.
 - Reply to each Qodo thread with the verified disposition and commit; obtain a fresh review after fixes.
 
+## Approved CI Follow-Up (2026-10-20)
+
+ADR required: no. This restores the existing core import direction, isolated
+AuthNZ test setup and lifecycle inventory contracts (Docs/Architecture.md and
+Docs/ADR/021-services-lifecycle-startup-and-shutdown.md); it changes no API fields.
+
+1. **Current-dev integration (Complete):** Rebase onto
+   `e1ca22f2986554f85a7f9473104bfd3e984b95ae`, retaining upstream quota and
+   Calendar SQLite RLS exemptions. Preserve the dirty publication note and
+   Calendar shard coverage; normalize both PR-owned task records with backlog-py.
+2. **Four shard fixes (Complete):** Move unchanged scheduled-task models into
+   core with compatible API exports; use the isolated fixture's direct PostgreSQL
+   setup connection; filter privilege pagination to a seeded resource; include
+   Calendar workers in fixed inventories/factory mocks. Reproduce before fixes.
+3. **Local verification (Complete):** Run Python 3.12 Calendar, scheduled-task API,
+   AuthNZ PostgreSQL, privilege and startup tests; frontend/TypeScript, applicable
+   CI contracts, shard guard, Ruff, Bandit and normal hooks. Record actual results.
+4. **Publication (In Progress):** Push with an explicit lease against the verified
+   remote head, inspect CI on the published commit and request one new full Qodo
+   review. Provider smoke and human-authored what-and-why rationale remain gates.
+
+Local Python 3.12 evidence: Calendar/scheduled-task/permission unit scope 585 pass;
+real PostgreSQL and privilege scope 49 pass; worker/startup scope 87 pass;
+CI workflow/task/RLS contracts 115 pass; additional required ratchets 33 pass and
+the full test-quality ratchet passes after strengthening existing assertions and
+using real isolated SQLite quota persistence. French/Paris frontend 128 pass,
+TypeScript and canonical OpenAPI checks pass. Bandit reports zero findings/errors;
+shard guard reports 5,145 files with no newly uncovered files. No test-quality
+baseline or guard was weakened. Hosted exact-head checks remain mandatory.
+Final real-quota API/startup rerun: 144 pass. Normal hooks pass over the entire
+PR merge-base diff, including the new shared models and canonical task records.
+
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.
 **Success Criteria:** Streamed responses stop at a byte limit; XML/ICS are bounded before parsing; synchronous provider calls run off the event loop; API and worker reuse scoped credential resolution; a deleted account or failed scan does not stop later polling; diagnostics contain safe context and stack locations without secrets.

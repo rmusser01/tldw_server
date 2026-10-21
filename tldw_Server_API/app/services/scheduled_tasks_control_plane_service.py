@@ -12,11 +12,6 @@ from tldw_Server_API.app.api.v1.schemas.reminders_schemas import (
     ReminderTaskCreateRequest,
     ReminderTaskUpdateRequest,
 )
-from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas import (
-    ScheduledTask,
-    ScheduledTaskDeleteResponse,
-    ScheduledTaskListResponse,
-)
 from tldw_Server_API.app.core.DB_Management.Collections_DB import CollectionsDatabase, ReminderTaskRow
 from tldw_Server_API.app.core.DB_Management.Scheduled_Tasks_DB import DefinitionRow, ScheduledTasksDatabase
 from tldw_Server_API.app.core.DB_Management.schema_once import ensure_once
@@ -25,6 +20,11 @@ from tldw_Server_API.app.core.Personalization.companion_activity import (
     record_reminder_task_created,
     record_reminder_task_deleted,
     record_reminder_task_updated,
+)
+from tldw_Server_API.app.core.Scheduled_Tasks.control_plane_models import (
+    ScheduledTask,
+    ScheduledTaskDeleteResponse,
+    ScheduledTaskListResponse,
 )
 from tldw_Server_API.app.services.reminders_scheduler import get_reminders_scheduler
 

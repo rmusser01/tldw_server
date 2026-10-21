@@ -10,9 +10,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dateutil import parser as date_parser
 
-from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas import (
-    ScheduledTaskListResponse,
-)
 from tldw_Server_API.app.core.Calendar.calendar_service import CalendarService
 from tldw_Server_API.app.core.Calendar.constants import (
     CALENDAR_SOURCE_OWNER_LINKED_PROJECTION,
@@ -32,6 +29,9 @@ from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
     CalendarItemRow,
     CalendarLinkRow,
     CalendarRecurrenceRow,
+)
+from tldw_Server_API.app.core.Scheduled_Tasks.control_plane_models import (
+    ScheduledTaskListResponse,
 )
 from tldw_Server_API.app.services.scheduled_tasks_control_plane_service import (
     ScheduledTasksControlPlaneService,

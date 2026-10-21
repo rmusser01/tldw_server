@@ -28,7 +28,8 @@ class _Connection:
     async def fetch(self, query: str, tables: list[str]) -> list[dict[str, str]]:
         """Record the actual query caller without replacing the DB helper."""
         frame = inspect.currentframe()
-        assert frame is not None and frame.f_back is not None
+        if frame is None or frame.f_back is None:
+            raise RuntimeError("Cannot inspect migration query provenance")
         self.query_modules.append(str(frame.f_back.f_globals["__name__"]))
         del frame
         self.calls.append((query, tables))

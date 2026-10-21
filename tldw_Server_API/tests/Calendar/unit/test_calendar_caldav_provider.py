@@ -235,12 +235,13 @@ def test_timezone_productivity_guard_does_not_scan_to_year_9999(
         original(self, year, month)
 
     monkeypatch.setattr(rrule._iterinfo, "rebuild", counted_rebuild)
-    with pytest.raises(CalendarValidationError):
+    with pytest.raises(CalendarValidationError) as exc_info:
         caldav_module.validate_provider_timezones(
             f"BEGIN:VTIMEZONE\nTZID:Custom/Never\nBEGIN:STANDARD\nDTSTART:{start}\n"
             "TZOFFSETFROM:+0100\nTZOFFSETTO:+0100\nRRULE:FREQ=YEARLY;BYMONTH=2;BYMONTHDAY=30\n"
             "END:STANDARD\nEND:VTIMEZONE"
         )
+    assert "VTIMEZONE" in str(exc_info.value)
     assert years == [], f"{len(years)} year scans ending at {years[-1]}"
 
 
@@ -542,9 +543,10 @@ def test_default_transport_rejects_dns_targets_denied_by_egress_policy(monkeypat
     )
     provider = CalDavProvider()
 
-    with pytest.raises(CalendarValidationError, match="outbound network policy"):
+    with pytest.raises(CalendarValidationError, match="outbound network policy") as exc_info:
         provider._request("OPTIONS", "https://calendar.example.test/dav/", username="user", password="secret")
 
+    assert str(exc_info.value) == "CalDAV server URL is blocked by outbound network policy"
     assert requested == []
 
 
