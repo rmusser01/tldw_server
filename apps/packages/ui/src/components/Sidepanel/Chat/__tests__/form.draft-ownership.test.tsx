@@ -15,9 +15,8 @@ describe("Sidepanel Form draft ownership", () => {
     const fixture = await mountDisconnected();
     try {
       expect(screen.getByTestId("chat-input")).toBeInTheDocument();
-      expect(
-        screen.getByRole("button", { name: "Queue request" }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+      expect(screen.queryByRole("button", { name: "Queue request" })).not.toBeInTheDocument();
     } finally {
       await fixture.cleanup();
     }
@@ -43,6 +42,7 @@ describe("Sidepanel Form draft ownership", () => {
       );
       fireEvent.click(screen.getByRole("button", { name: "Send message" }));
       await waitFor(() => expect(fixture.provider).toHaveBeenCalledTimes(1));
+      expect(screen.getByRole("button", { name: "Queue request" })).toBeInTheDocument();
       expect(screen.getByTestId("chat-input")).toHaveValue("");
       let outcomes: PromiseSettledResult<void>[] = [];
       await act(async () => {

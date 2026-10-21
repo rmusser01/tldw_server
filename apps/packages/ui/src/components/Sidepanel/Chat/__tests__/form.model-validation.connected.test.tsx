@@ -256,9 +256,12 @@ describe("sidebar model validation in the real Form", () => {
       });
       expect(useConnectionStore.getState().state.isConnected).toBe(false);
       expect(useConnectionStore.getState().state.offlineBypass).toBe(false);
-      expect(screen.getByTestId("chat-input")).toHaveAttribute("readonly");
+      expect(screen.getByTestId("chat-input")).not.toHaveAttribute("readonly");
+      expect(screen.getByTestId("chat-input")).not.toBeDisabled();
       expect(screen.getByTestId("chat-input")).toHaveValue("keep my draft");
-      fireEvent.click(screen.getByRole("button", { name: "Queue request" }));
+      const send = screen.getByRole("button", { name: "Send message" });
+      expect(send).toBeDisabled();
+      fireEvent.click(send);
       expect(useStoreMessageOption.getState().queuedMessages).toEqual([]);
       expect(fixture.provider).not.toHaveBeenCalled();
     } finally {

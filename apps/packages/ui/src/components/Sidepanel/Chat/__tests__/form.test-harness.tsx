@@ -10,6 +10,10 @@ import { useUiModeStore, type UiMode } from "@/store/ui-mode";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import { tldwModels } from "@/services/tldw";
 import { SidepanelForm } from "../form";
+import { HistorySelectionProvider } from "@/hooks/chat/useHistorySelection";
+import { conversationDraftKey } from "@/utils/chat-draft-address";
+import { chatDraftOwnerKey } from "@/utils/chat-draft-owner";
+import { resolveRecipeRequestSnapshot } from "@/services/tldw/recipe-request-snapshot";
 
 const offline = vi.hoisted(() => ({
   capabilities: [] as Promise<never>[],
@@ -38,11 +42,25 @@ export const deferred = <T,>() => {
   return { promise, resolve };
 };
 
+const fixtureScope = () => ({
+  config: {
+    serverUrl: "http://localhost:8000",
+    authMode: "multi-user" as const,
+    authSource: "manual" as const,
+  },
+  userId: ready.account,
+});
+
 export const persistedDraft = (draftKey: string): unknown => {
-  const key = Array.from({ length: localStorage.length }, (_, index) =>
-    localStorage.key(index),
-  ).find((entry) => entry?.startsWith(`registry:draft:${draftKey}:owner:`));
-  return key ? JSON.parse(localStorage.getItem(key) || "null")?.value : null;
+  const address = useStoreMessageOption.getState().chatDraftAddress;
+  if (!address) return null;
+  const key = `registry:draft:${conversationDraftKey(draftKey, address)}:owner:${chatDraftOwnerKey(fixtureScope())}`;
+  const durable = localStorage.getItem(key);
+  const pinned = sessionStorage.getItem(key);
+  if (pinned !== null && pinned !== "null" && pinned !== durable) return null;
+  const raw = pinned ?? durable;
+  const value = JSON.parse(raw || "null")?.value;
+  return typeof value === "string" ? value : value?.content ?? null;
 };
 export const persistedReadyDraft = () =>
   persistedDraft("sidepanel-ownership-ready");
@@ -95,8 +113,8 @@ export const mountDisconnected = async () => {
   });
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => {
-      ready.unexpected.push("fetch");
+    vi.fn(async (input: RequestInfo | URL) => {
+      ready.unexpected.push(`fetch ${new URL(input instanceof Request ? input.url : String(input), window.location.href).pathname}`);
       throw new Error("External fetch is disabled in this Form fixture");
     }),
   );
@@ -142,10 +160,10 @@ export const mountDisconnected = async () => {
   try {
     view = render(
       <QueryClientProvider client={queryClient}>
-        <SidepanelForm
+        <HistorySelectionProvider><SidepanelForm
           dropedFile={undefined}
           draftKey="sidepanel-ownership-smoke"
-        />
+        /></HistorySelectionProvider>
       </QueryClientProvider>,
     );
     return { cleanup, provider };
@@ -161,18 +179,16 @@ vi.mock(
     import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage"),
 );
 
+vi.mock("@plasmohq/storage/hook", () =>
+  import("../../../../../../../tldw-frontend/extension/shims/plasmo-storage-hook"),
+);
+vi.mock("wxt/browser", () =>
+  import("../../../../../../../tldw-frontend/extension/shims/wxt-browser"),
+);
+
 vi.mock("@/services/service-prompts", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/services/service-prompts")>()),
-  resolveServicePromptScope: async () => ({
-    scopeKey: ready.account,
-    userId: ready.account,
-    config: {
-      serverUrl: "http://localhost:8000",
-      authMode: "multi-user",
-      authSource: "manual",
-      orgId: null,
-    },
-  }),
+  resolveServicePromptScope: async () => ({ scopeKey: ready.account, ...fixtureScope() }),
 }));
 
 vi.mock("@/hooks/useSimpleForm", async (importOriginal) => {
@@ -323,16 +339,20 @@ export const mountReady = async ({
   const originalSessionStorage = storageSnapshot(sessionStorage);
   localStorage.clear();
   sessionStorage.clear();
-  localStorage.setItem(
-    "tldwConfig",
-    JSON.stringify({
-      serverUrl: "http://localhost:8000",
-      authMode: "multi-user",
-      authSource: "manual",
-      accessToken: `test.${btoa(JSON.stringify({ sub: "alice" }))}.signature`,
-      refreshToken: "synthetic-refresh",
-    }),
-  );
+  const config = {
+    serverUrl: "http://localhost:8000",
+    authMode: "multi-user",
+    authSource: "manual",
+    accessToken: `test.${btoa(JSON.stringify({ sub: "alice" }))}.signature`,
+    refreshToken: "synthetic-refresh",
+  };
+  localStorage.setItem("tldwConfig", JSON.stringify(config));
+  const { snapshot } = resolveRecipeRequestSnapshot({
+    config,
+    path: "/api/v1/prompts/",
+    method: "POST",
+  });
+  const principalUrl = new URL("api/v1/auth/me", snapshot.effectiveBase).href;
   const originalConnection = useConnectionStore.getState();
   const originalMessage = useStoreMessageOption.getState();
   const originalUiMode = useUiModeStore.getState();
@@ -360,8 +380,23 @@ export const mountReady = async ({
   });
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () => {
-      ready.unexpected.push("fetch");
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(
+        input instanceof Request ? input.url : String(input),
+        window.location.href,
+      );
+      if (
+        mode === "pro" &&
+        url.href === principalUrl &&
+        init?.method === "GET" &&
+        init.body === undefined &&
+        new Headers(init.headers).get("Authorization") ===
+          `Bearer ${config.accessToken}` &&
+        init.credentials === snapshot.credentials
+      ) {
+        return Response.json({ id: "alice", username: "alice", is_active: true });
+      }
+      ready.unexpected.push(`fetch ${url.pathname}`);
       throw new Error("Unexpected external fetch in ready Sidepanel fixture");
     }),
   );
@@ -399,10 +434,10 @@ export const mountReady = async ({
   let view: ReturnType<typeof render> | undefined;
   const formElement = () => (
     <QueryClientProvider client={queryClient}>
-      <SidepanelForm
+      <HistorySelectionProvider><SidepanelForm
         dropedFile={undefined}
         draftKey="sidepanel-ownership-ready"
-      />
+      /></HistorySelectionProvider>
     </QueryClientProvider>
   );
   const cleanup = async () => {

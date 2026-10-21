@@ -204,3 +204,14 @@ Palette fixtures now provide their resolved synthetic owner and owner-stamped ro
 Backup's real Popconfirm preparation needed the opening event to settle inside awaited async act before the original visibility assertion. The candidate geometry shim did not resolve it and was removed. All original22restore/overwrite/cancel/exact-scope/invalid-metadata/refusal/admin-guard cases pass in one final complete run; lint0/0. Independent final connected review is clear across these four test paths, excluding Sidepanel WIP. Six configured path checks precede safe fast-forward publication.
 
 Fresh exact0f361 hosted diagnostics retain further frontend/coverage failures; its UX job failed Playwright browser-download DNS before tests. No required-gate dispatch or infrastructure allowance is added. Sidepanel fixtures, other valid current CI failures, seven final-head required statuses, trusted summary disposition and verified normal merge remain open.
+
+
+## Connected owner fixture completion
+
+Nineteenth batch26c5cdc1e01db5b9faf21f951e8f7ad88f5f20c9 was safely published/read back OPEN/dev/unarmed after all six configured path checks passed. Five owned generated Next build directories from stopped isolated runs were removed; external reports and shared dependencies remain.
+
+The human directly approved the pending disconnected-composer contract correction. Its original retained text, disabled Send and zero queue/provider assertions remain, while the single obsolete readonly assertion now checks editable input. The real Sidepanel harness supplies H1/storage and captured Alice transport prerequisites without bypassing ownership. All25draft/model cases pass in one final cohort. This approval does not answer the separate expanded-summary question.
+
+Composer's missing shared-local inventory fixture now uses the real ownership predicate and deleted filter, preserving intended unowned/unlinked recipe data and all persistence-owner/credential/uncertainty assertions. All69composer cases pass; the unchanged Kanban owner-lifetime file also passes all15cases in the same84case run, so no speculative Kanban fix is added. Notes UX receives the same matching synthetic canonical config/active user/real graph hash as existing Notes fixtures; all5original cases pass, including tag retention and added expected-user/version header checks. These84,25and5cohorts are separate runs, not one114case pass.
+
+No production guard, API, architecture rule, dependency or allowance changes. No new ADR or PythonBandit scope is needed. Final lint, connected review and seven configured path checks precede publication. Further valid CI failures, final-head required statuses, trusted expanded-summary disposition and verified normal merge remain open.
