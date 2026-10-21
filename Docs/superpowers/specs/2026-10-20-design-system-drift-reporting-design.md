@@ -1,7 +1,7 @@
 # Repository-Wide Design-System Drift Reporting
 
 Date: 2026-10-20
-Status: Draft for written-spec review; direction approved in conversation
+Status: Reviewed; owner requested implementation planning after review fixes
 Task: TASK-45.44.16
 Public tracker: https://github.com/rmusser01/tldw_server/issues/1673
 Parent epic: https://github.com/rmusser01/tldw_server/issues/1655
