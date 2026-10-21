@@ -346,8 +346,8 @@ Package command:
 **Consumes:** CLI and report contract from Stage 4. **Produces:** a nonrequired
 `UI Design-System Drift Report` job, complete JSON artifact, and job summary.
 
-- [ ] **1. Add workflow contract coverage first.** Extend the existing ordinary-workflow inventory test for the new filename and its exact direct-trigger digest. Add a YAML-structure test asserting the report job is advisory, honors license admission, checks out the PR head with `persist-credentials: false`, and uploads artifacts after scan failure. Verify the new expectations fail before adding the workflow. Do not weaken any existing inventory/security assertions.
-- [ ] **2. Add the workflow using current admission conventions.** Trigger `pull_request` for `dev`/`main` on all four UI roots, `apps/bun.lock`, and this workflow; also allow `workflow_dispatch`. Use the same exact inert `admission` and `await_license` job shapes as the existing UI workflows, with the new workflow filename. Keep `workflow_run` absent. The report job needs those admission jobs and uses their existing allow/skip predicate; it has `continue-on-error: true`, a 20-minute timeout, read-only permissions, and no downstream required consumer.
+- [x] **1. Add workflow contract coverage first.** Extend the existing ordinary-workflow inventory test for the new filename and its exact direct-trigger digest. Add a YAML-structure test asserting the report job is advisory, honors license admission, checks out the PR head with `persist-credentials: false`, and uploads artifacts after scan failure. Verify the new expectations fail before adding the workflow. Do not weaken any existing inventory/security assertions.
+- [x] **2. Add the workflow using current admission conventions.** Trigger `pull_request` for `dev`/`main` on all four UI roots, `apps/bun.lock`, and this workflow; also allow `workflow_dispatch`. Use the same exact inert `admission` and `await_license` job shapes as the existing UI workflows, with the new workflow filename. Keep `workflow_run` absent. The report job needs those admission jobs and uses their existing allow/skip predicate; it has `continue-on-error: true`, a 20-minute timeout, read-only permissions, and no downstream required consumer.
 
 Use the pinned checkout action already enforced by the CI contract, Node 24,
 Bun 1.3.2, and `bun install --frozen-lockfile` from `apps/`. Checkout the PR head
@@ -382,8 +382,8 @@ new digest with its existing `_trigger` and sorted compact JSON serialization;
 leave existing digests unchanged. No license-first path-registry entry is needed
 for this direct PR/manual-only workflow because it does not use `workflow_run`.
 
-- [ ] **3. Establish green and document use.** Run the focused reporter tests, the two existing license-first test modules, and actionlint on the new workflow. Document the package command, temp output, four roots, metadata, limitations, exceptions, zero blocking, and migration review procedure in the main contract. Link the spec/ADR; describe the reporter as implemented only after the command and tests pass.
-- [ ] **4. Run the final checks and record results.** Commands from the package directory:
+- [x] **3. Establish green and document use.** Run the focused reporter tests, the two existing license-first test modules, and actionlint on the new workflow. Document the package command, temp output, four roots, metadata, limitations, exceptions, zero blocking, and migration review procedure in the main contract. Link the spec/ADR; describe the reporter as implemented only after the command and tests pass.
+- [x] **4. Run the final checks and record results.** Commands from the package directory:
 
 ```sh
 bunx vitest run src/design-system/__tests__/drift-tokens.test.ts src/design-system/__tests__/drift-rules.test.ts src/design-system/__tests__/drift-report.test.ts src/design-system/__tests__/drift-cli.test.ts src/design-system/__tests__/product-state-guard.test.ts --maxWorkers=1
@@ -431,8 +431,11 @@ Execution task: TASK-13894. Dependencies installed from the frozen lockfile with
 no lockfile changes. Latest full focused run: token44, rules57, report15, CLI19
 and existing guard54 tests pass (189 total); two CI contract modules pass113 tests. Scoped TypeScript compilation
 passes. Pinned frontend ESLint exits0 with the existing Next pages-directory
-advisory. Scoped CLI and analyzer re-reviews have no remaining findings. Stage5
-publication and hosted CI/review remain pending.
+advisory. Scoped CLI and analyzer re-reviews have no remaining findings.
+[Draft PR #3294](https://github.com/rmusser01/tldw_server/pull/3294) is published
+against `dev`; issue #1673 and epic #1655 link its progress. Stage5 remains
+In Progress until hosted CI/review and the human Change summary merge gate are
+settled; retain this plan during that delivery phase.
 
 Reviewed corrections include atomic report-file replacement (verified hard-link
 overwrite regression), explicit errors for unavailable sparse source, and unknown

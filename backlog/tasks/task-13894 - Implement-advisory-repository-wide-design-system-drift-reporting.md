@@ -1,7 +1,7 @@
 ---
 id: TASK-13894
 title: Implement advisory repository-wide design-system drift reporting
-status: In Progress
+status: Done
 labels:
 - design-system
 - webui
@@ -17,10 +17,10 @@ Implement the reviewed five-stage plan for repo-wide advisory token/color/radius
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Four UI roots are scanned with syntax-aware rules and scoped definitions
-- [ ] #2 Reports preserve findings/exceptions/provenance and distinguish incomplete scans
-- [ ] #3 CI is advisory and respects existing license-first contracts
-- [ ] #4 Focused tests, report sample review, lint and touched-scope Bandit are recorded
+- [x] #1 Four UI roots are scanned with syntax-aware rules and scoped definitions
+- [x] #2 Reports preserve findings/exceptions/provenance and distinguish incomplete scans
+- [x] #3 CI is advisory and respects existing license-first contracts
+- [x] #4 Focused tests, report sample review, lint and touched-scope Bandit are recorded
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -32,19 +32,21 @@ Final review: CLI/report scoped re-review found no remaining findings; independe
 Additional validation:169 focused tests pass (token44/rules37/report15/CLI19/existing guard54),113 CI contract tests pass, new-test scoped tsc passes, actionlint1.7.12 passes, all script node --check passes,7 nonempty surface/rule sample locations exactly match source, local document links pass. Bandit baseline238 findings vs current233 all-low findings, zero scan errors and zero findings on added lines; reports /tmp/bandit_design_system_drift_stage5_base.json and /tmp/bandit_design_system_drift_reporting.json. Current scan after narrow vendor exclusion:3,643 analyzed files,2,249 token/radius findings and1,976 layout candidates,986 coverage diagnostics,0 error diagnostics. These are advisory measurements, not enforced thresholds. Pending3 final rule-review fixes will require fresh counts/tests before PR publication.
 Fresh post-fix matrix181 focused tests passes;113 CI contracts remain valid. Whole-repo report at fb15f10ed2 is complete/clean,3,643 analyzed files,2,249 token/radius plus1,976 layout candidates,992 coverage diagnostics,0 errors. Three original rule-review holes now reproduced correctly; scoped re-review found1 additional spread-order false positive where a later semantic CVA variants property overwrites an earlier literal spread. Worker is adding minimal overwrite-order regressions and fix. CLI/report re-review remains clean. Core stages committed independently; CI/docs publication pending final scoped rule re-review.
 Final verification after all review corrections:189 focused tests pass (44 token,57 rule,15 report,19 CLI,54 existing guard);113 CI contracts pass. Scoped tsc, pinned ESLint, script syntax checks, actionlint and diff checks pass. Existing Node localStorage and Next pages-directory advisories remain. Original review findings and residual CVA overwrite order have passing RED/GREEN regressions; final CLI and rule scoped re-reviews report no findings. Required product-state guard/baseline, tokens, product components, lockfile and required workflows are unchanged. Draft PR/public-tracker publication is next; hosted Actions/full application/browser suites have not been run locally.
+Published draft PR https://github.com/rmusser01/tldw_server/pull/3294 against dev. Issue #1673 now links the spec/plan/ADR and verified progress; epic #1655 guard row is In Progress with PR #3294. Clean source report at7b4cd63336:3,643 analyzed files,2,249 token/radius findings,1,976 layout candidates,992 coverage diagnostics,zero errors. Local implementation and scoped reviews complete; hosted Actions, human Change summary and merge remain public delivery gates. Full app/browser suites not run; existing localStorage/Next advisories and baseline Bandit findings explicitly documented. Plan retained because public delivery/review is not complete.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented repository-wide advisory design-system drift reporting in draft PR #3294: static surface-specific token authority, four syntax-aware rules, exact definition scopes, visible intentional/stale exceptions, deterministic JSON/summary, reliable Git provenance and safe atomic report output. Added independent nonrequired CI reporting and migration guidance without changing product UI, tokens, existing guards, dependencies or required gates. Verified189 focused tests and113 CI tests, scoped TypeScript/ESLint, Node syntax, actionlint, document/task checks and zero new Bandit findings on added lines. All identified review issues have regression coverage and clean scoped re-reviews. Issues #1673/#1655 updated; hosted CI and requester-authored Change summary remain pending before merge.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
