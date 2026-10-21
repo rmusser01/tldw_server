@@ -54,10 +54,10 @@ of the PR diff:
 
 Scan `.js`, `.jsx`, `.ts`, `.tsx`, `.mjs`, `.cjs`, and `.css` files for supported
 styling syntax. Classify each file as product source, token/configuration
-definition, test/fixture, tooling, or generated output. Report discovered and
-analyzed file counts by root, plus excluded counts by reason. An empty source
-root, missing expected root, unreadable file, or parse failure makes the scan
-incomplete and appears in diagnostics.
+definition, mixed definition/product source, test/fixture, tooling, or generated
+output. Report discovered and analyzed file counts by root, plus excluded counts
+by reason. An empty source root, missing expected root, unreadable file, or parse
+failure makes the scan incomplete and appears in diagnostics.
 
 Exclude dependencies, build/cache/coverage output, vendor code, source maps,
 tests, fixtures, snapshots, and tooling scripts from product-drift totals.
@@ -66,8 +66,17 @@ Do not traverse symlinks or other worktrees. Backend templates, static HTML,
 MDX, and runtime-generated styles are outside v1 syntax coverage; state this
 limitation in each report instead of implying exhaustive UI conformance.
 
-Tailwind configuration and known token/theme definition files are inspected as
-definitions and reported separately. They are not counted as product violations.
+Select tracked files and untracked files not excluded by Git ignore rules within
+the four roots, then apply the source/exclusion rules above. Report the included
+untracked source-file count. Ignored local/generated files are outside the scan.
+
+Exempt only recognized token/theme declarations or exported definition objects
+and the relevant Tailwind configuration properties, recording their exact paths
+and syntactic scope. Report those definitions separately from product findings.
+Do not exempt a whole file because it contains definitions. For example, token
+declarations in `tailwind-shared.css` are definitions, while its
+`.animated-gradient-border` and `.shimmer-text` rules remain product styling
+eligible for findings. Apply the same distinction to mixed TypeScript files.
 Neither `components/ui/**` nor `design-system/**` receives a blanket exemption.
 Product styling added under those roots remains eligible for findings.
 
@@ -88,7 +97,7 @@ presence does not exempt adjacent product CSS or whole component directories.
 
 | Rule | Detect in supported styling locations | Classification |
 | --- | --- | --- |
-| `literal-color` | Hex and functional color literals in CSS declarations, static inline style values, or arbitrary color utilities. | Token-review finding. |
+| `literal-color` | Hex, functional, and named CSS color literals in CSS declarations, static inline style values, or arbitrary color utilities. | Token-review finding. |
 | `palette-color` | Direct Tailwind palette colors, including neutral palettes, variants, opacity modifiers, and standalone black/white. | Token-review finding. |
 | `custom-radius` | Arbitrary radius utilities or literal CSS/inline radius declarations outside the current documented scale for that surface. | Radius-review finding. |
 | `layout-value` | Arbitrary spacing, gap, dimensions, inset, z-index, or grid-template utilities and explicit corresponding CSS/inline declarations. | Context-dependent review candidate. |
@@ -99,6 +108,9 @@ static branches and template fragments conservatively. Never execute imports,
 Tailwind config, application code, or user-authored theme content to scan it.
 Use a CSS parser for declarations and a bracket-aware utility splitter so
 variants, quotes, colons, and spaces inside arbitrary values remain intact.
+Also inspect Tailwind `@apply` at-rule arguments with that same utility scanner;
+for example, `@apply bg-red-500 rounded-[13px]` produces palette-color and
+custom-radius findings. Preserve the source locations of individual utilities.
 The implementation plan must identify installed parsers before choosing them.
 
 Do not flag unrelated prose, API payload colors, URL fragments, ordinary numeric
@@ -106,9 +118,12 @@ props, or arbitrary strings as styling. Dynamic expressions that cannot be
 resolved statically produce coverage diagnostics rather than fabricated findings.
 
 Semantic CSS-variable references, inherited/current colors, transparent values,
-and standard spacing/layout utilities are allowed. Radius values already on the
-surface's documented scale are allowed; an exact literal duplicate of a token
-may receive a token suggestion but must not be mislabeled off-scale.
+CSS-wide keywords, and standard spacing/layout utilities are allowed. Recognize
+named colors only in color-valued positions, including shorthand declarations;
+`style={{ color: "red" }}` is a finding, while unrelated strings remain excluded.
+Radius values already on the surface's documented scale are allowed; an exact
+literal duplicate of a token may receive a token suggestion but must not be
+mislabeled off-scale.
 
 For colors and radii, report a suggested existing token only when the mapping
 is supported by the surface's definitions. A color's numeric similarity cannot
@@ -155,6 +170,16 @@ repository-relative path, one-based line/column, value, classification, reason,
 and optional token suggestion. Sort deterministically by path, location, and
 rule; omit wall-clock timestamps from deterministic finding content.
 
+Report source provenance as `sourceCommit`, `dirtySource`, and
+`untrackedSourceFileCount`. `sourceCommit` is the checked-out HEAD, not a claim
+that working files equal that commit. Set `dirtySource` when any scanned input
+differs from HEAD, including staged/unstaged edits, deletions, included untracked
+source files, and changes to the verifier, token/configuration inputs, or
+exception manifest. Changes only to unrelated files or generated report output
+do not affect it. Show the dirty indicator in the human summary; a dirty report
+cannot be reproduced from its commit SHA alone. Failure to establish provenance
+is an incomplete-scan diagnostic, not an assumed clean state.
+
 Console and CI summaries may be capped, but must state how many entries were
 omitted and point to the complete JSON artifact. Avoid dumping source lines,
 user data, or full style objects into reports; report only relevant values.
@@ -176,7 +201,8 @@ triggered for relevant source, token/config, verifier, and workflow changes, plu
 manual dispatch. Each invocation scans all four roots. Keep report execution and
 artifact upload separate so an incomplete scan can still publish diagnostics.
 Use advisory job behavior and always-attempt artifact publication; publish the
-commit SHA to distinguish stale reports. No comment bot or extra service.
+commit SHA and dirty indicator to distinguish stale or locally modified reports.
+No comment bot or extra service.
 
 Do not connect this command to production builds, required aggregate jobs,
 pre-commit hooks, or branch-protection requirements. The existing required
@@ -184,8 +210,9 @@ product-state guard and build token-sync checks keep their behavior.
 
 Update the main design-system contract with the report's scope and advisory
 status, plus usage guidance for migration tasks. Those tasks should cite the
-source SHA and specific findings, explain intentional exceptions, and record
-appropriate visual QA under the existing checklist when changing rendered UI.
+source SHA, dirty indicator, and specific findings, explain intentional
+exceptions, and record appropriate visual QA under the existing checklist when
+changing rendered UI.
 
 Future enforcement requires an explicit owner decision, demonstrated rule
 accuracy, reviewed exceptions/debt treatment, and a separate change to the ADR
@@ -197,6 +224,10 @@ Focused verifier tests must exercise all four roots, each rule, variants and
 arbitrary-value parsing, CSS and inline styles, unrelated strings, dynamic
 coverage diagnostics, semantic values, differing admin tokens, canonical-root
 components, intentional/stale/ambiguous exceptions, and deterministic sorting.
+Include mixed CSS and TypeScript definition/product files, named colors and
+allowed keywords, and semantic/advisory `@apply` cases. Verify clean, staged,
+unstaged, deleted, untracked, and ignored source handling, plus unrelated-file and
+report-output edits that must not mark source dirty.
 CLI checks must verify findings exit 0, scan errors exit 1, and incomplete
 reports cannot look clean. A workflow review verifies no required-job/build
 dependency and artifact publication after scan failure.
