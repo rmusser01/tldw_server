@@ -320,3 +320,33 @@ A separate current-head admin-reset-backups job119384338261 fails before tests b
 Current0a66 final frontend-required job119421588630 fails only the two fresh-input restoration cases;2,453other cases pass. The unchanged complete file reproduces2failures/12passes locally. The real composer initializes message, image and imageFilename, merges partial values, and captures/restores the complete form. Both fixture objects omitted the existing empty filename.
 
 The minimal repair adds imageFilename:"" to those two objects. Exact whole-form equality, metadata restoration, address retirement, null chat IDs, no unresolved registry storage and no Chat request checks remain unchanged. Complete candidate14/14passes with WebUI V8; the configured local report shows0percent and does not qualify aggregate coverage. ESLint0/0; independent final connected review clear. Normal three-path hooks precede publication. No production, timeout, dependency, architecture rule or allowance change; no new ADR or PythonBandit scope. Seven actual final-head required statuses/currentdev/reviews and verified normal merge remain open.
+
+
+## Prompt Studio waits for visible canonical results
+
+Current eba7 frontend-unit4/8 job119447691000 fails one canonical-answer visibility check while1,017other shared cases and54WebUI cases pass. The original findByText observes badge presence before the immediate visibility assertion. Installed dialog preparation still runs with motion:false, and AntD applies opacity0 until that preparation clears. The unchanged full15-case file passes locally, so no local red is claimed.
+
+The minimal one-line correction waits for the original exact1ungraded badge visibility assertion with the unchanged default timeout. Exact twoanswers,0.00s,noPass and all provider/refusal contracts remain. Complete candidate15/15passes in the owning normal UI runtime; ESLint0/0 and independent connected review clear. No production, mock, dependency, allowance or architecture rule change; no new ADR or PythonBandit scope. Normal configured path checks precede publication. Remaining current-head outcomes are collected before another necessary push; actual hosted closure, all seven final-head statuses and verified normal merge remain open.
+
+
+## Media filter completion observes rows and count together
+
+The same eba7 frontend-unit5/8 job119447690934 fails only the final total2 check after cached unfiltered rows[1,2] return;1,295other shared cases and9WebUI cases pass. The actual query key restores its initial cached rows immediately, while the separate local total updates in the asynchronous refetch. The unchanged complete18-case file passes locally, so no local red is claimed.
+
+Both original exact final assertions now run together in the existing default waitFor, requiring rows[1,2] and total2 in the same observation. No assertion, timeout, production, cache or mock contract changes. Complete candidate18/18passes in the normal owning UI runtime; ESLint0/0 and independent connected proposal review clear. These18 and the separate Studio15 are not one33-case green run. Four-path normal hooks and final source review precede publication. No new ADR, PythonBandit scope, dependency or allowance. Remaining actual hosted outcomes are collected before a grouped necessary push; final-head required statuses/currentdev/normal merge remain open.
+
+
+## Runtime log timeout uses an isolated real held lock
+
+Current eba7 core-server-smoke job119452793948 fails only the runtime log timeout refusal;227other cases pass. Its fixture created a plain lock before reload/settings/config and enabled queued writes before switching the lock implementation. Stale-file expiry and queued-writer interference are source-supported risks; the hosted log does not prove which occurred. The unchanged complete logging file passes21/21 locally.
+
+The test now sets the same env timeout0.2 before lazily requesting the existing isolated fallback fixture, acquires a real outer holder, then times the inner contender using its configured default timeout. Original RuntimeError and elapsed<0.5 remain; all original assertion ASTs are identical. The shared fixture, production lock and stale recovery remain unchanged. Complete candidate21/21passes under Python3.12/retained pytest9.0.3. Compile passes, Ruff0/0; Bandit59/59 has no new finding class/count or scan error. Global test-quality ratchet passes unchanged baseline. Independent final connected review clear; five-path hooks precede publication. No new ADR, dependency or allowance. The three separate full-file results Studio15/Media18/Logging21 are not one54-case run, and actual hosted closure/final required gates remain open.
+
+
+## Character tests use the real application style context
+
+The final eba7 shared-coverage13/16 job119447691464 passes all3,180assertions with1skip but exits124 at the900second process deadline before coverage finishes. Its Character first-use104-case file takes855.828seconds. This is not coverage acceptance. A native style-cost profile finds414getComputedStyle calls use8,993.65ms of a9,558ms greeting case. Temporary instrumentation is removed exactly. An initial motion-disabled wrapper yields33.765s versus33.315s for three matched V8 cases and is rejected.
+
+Both real app surfaces already use StyleProvider hashPriorityhigh; the isolated fixture used cssinjs defaultlow :where selectors. Its minimal RTL wrapper now supplies the exact production style context across initial renders and rerenders. Native motion, lazy held forms, real drawers, style/accessibility checks, all assertions and every timeout remain. The same three V8 cases pass in17.759s versus33.315s, a scoped single comparison. Complete final Character104/104passes under V8 in209.40stest/222.95swall; this local full-file time is not a controlled comparison with the hosted shard. ESLint122/122 inherited, zero new findings. Independent connected review clear. No new dependency, architecture rule, production behavior, quality/coverage allowance or deadline change; no new ADR.
+
+The grouped batch has four separately qualified complete files: Studio15, Media18, Logging21 and Character104, not one158-case green run. Six-path normal configured checks precede publication. All seven actual final-head statuses, actual hosted budget closure, current-dev/review/queue verification and normal merge remain required. Broader live UAT stays open.

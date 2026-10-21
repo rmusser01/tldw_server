@@ -276,9 +276,9 @@ describe("Media search filter cache identity", () => {
       expect(result.current.results.map((item) => item.id)).toEqual([1]),
     )
     act(() => result.current.resetAllFilters())
-    await waitFor(() =>
-      expect(result.current.results.map((item) => item.id)).toEqual([1, 2]),
-    )
-    expect(result.current.activeTotalCount).toBe(2)
+    await waitFor(() => {
+      expect(result.current.results.map((item) => item.id)).toEqual([1, 2])
+      expect(result.current.activeTotalCount).toBe(2)
+    })
   })
 })

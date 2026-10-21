@@ -166,7 +166,7 @@ describe("Prompt Studio canonical targets and run contracts", () => {
     runData = { results: [{ ...run, actual: { response: "Dr. Mira Vale" }, execution_time_ms: 0 }] }
     mount("run"); await selectRunPrompt()
     fireEvent.click(screen.getByRole("button", { name: "Run Tests" }))
-    expect(await screen.findByText("1 ungraded")).toBeVisible()
+    await waitFor(() => expect(screen.getByText("1 ungraded")).toBeVisible())
     expect(screen.getAllByText("Dr. Mira Vale")).toHaveLength(2)
     expect(screen.getByText("0.00s")).toBeVisible()
     expect(screen.queryByText("Pass")).not.toBeInTheDocument()

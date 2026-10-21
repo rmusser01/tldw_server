@@ -1,11 +1,12 @@
 import { createDefaultActorSettings } from "@/types/actor"
+import { StyleProvider } from "@ant-design/cssinjs"
 import React from "react"
 import { ConfigProvider } from "antd"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import {
   act,
   fireEvent,
-  render,
+  render as renderUI,
   screen,
   waitFor,
   within
@@ -17,6 +18,13 @@ import { ensureLocalStorageApi } from "./testUtils"
 
 const OWNED_DEFAULT_KEY = `${DEFAULT_CHARACTER_STORAGE_KEY}:owner:${"a".repeat(64)}`
 const TEMPLATE_CHOOSER_SEEN_KEY = "characters-template-chooser-seen"
+
+// Match the application's style context for native AntD controls.
+const render = (ui: React.ReactElement) => renderUI(ui, {
+  wrapper: ({ children }) => (
+    <StyleProvider hashPriority="high">{children}</StyleProvider>
+  )
+})
 
 const {
   useQueryMock,
