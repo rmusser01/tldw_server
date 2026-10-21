@@ -50,10 +50,9 @@ async def test_saved_testbot_instruction_reaches_first_ollama_system_message(
     model = "qwen2.5:0.5b"
     endpoint = "http://127.0.0.1:11434"
     app_config = {"ollama_api": {"api_url": endpoint, "model": model}}
-    # Isolate configuration and inventory inputs; use the real model binding checks.
+    # Configured models participate in the real inventory and model binding checks.
     monkeypatch.setattr(character_conversation_factory, "ensure_app_config", lambda: deepcopy(app_config))
     monkeypatch.setattr(chat_service, "load_comprehensive_config", lambda: deepcopy(app_config))
-    monkeypatch.setattr(chat_service, "list_provider_models", lambda _provider: [model])
 
     character_id = chacha_db.add_character_card({
         "name": "E2E-TestBot",
@@ -162,7 +161,7 @@ async def test_saved_testbot_instruction_reaches_first_ollama_system_message(
     assert captured[0]["payload"]["model"] == model  # nosec B101
     assert captured[0]["payload"]["stream"] is True  # nosec B101
     assert captured[0]["payload"]["messages"] == [  # nosec B101
-        {"role": "system", "content": "You are E2E-TestBot.\n\n" + instruction},
+        {"role": "system", "content": "You are E2E-TestBot.\n" + instruction},
         {"role": "assistant", "content": [{"type": "text", "text": "BEEP BOOP."}]},
         {"role": "user", "content": [{"type": "text", "text": "Hello"}]},
     ]

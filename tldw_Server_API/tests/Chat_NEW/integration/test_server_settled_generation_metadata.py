@@ -604,23 +604,28 @@ def test_b02_legacy_pre_stream_failure_keeps_http_error(settled_api, monkeypatch
     assert "private-upstream-b02-legacy-marker" not in response.text  # nosec B101 - Provider internals stay private.
 
 
-def test_b02_admitted_preparation_failure_refunds_and_records_failure(settled_api, monkeypatch):
-    """Receipt delivery cannot turn a failed reserved request into accounting success."""
+@pytest.fixture
+def governed_settled_api(settled_api, monkeypatch):
+    """Run real token accounting against an isolated deterministic memory governor."""
     from types import SimpleNamespace
-    from unittest.mock import AsyncMock, Mock
 
+    from tldw_Server_API.app.core.Resource_Governance.governor import MemoryResourceGovernor
+
+    client, db, cid, headers = settled_api
+    policy = {"tokens": {"per_min": 10000, "burst": 1}, "scopes": ["user"]}
+    governor = MemoryResourceGovernor(policies={"chat.default": policy}, time_source=lambda: 0)
+    monkeypatch.setattr(client.app.state, "rg_governor", governor, raising=False)
+    monkeypatch.setattr(client.app.state, "rg_policy_loader", SimpleNamespace(get_policy=lambda _policy: policy), raising=False)
+    monkeypatch.setenv("RG_ENABLED", "1")
+    return client, db, cid, headers, governor
+
+
+def test_b02_admitted_preparation_failure_refunds_and_records_failure(governed_settled_api, monkeypatch):
+    """Receipt delivery cannot turn a failed reserved request into accounting success."""
     from tldw_Server_API.app.api.v1.endpoints import chat
     from tldw_Server_API.app.core.exceptions import ChatConfigurationError
 
-    client, db, cid, headers = settled_api
-    governor = SimpleNamespace(
-        reserve=AsyncMock(return_value=(SimpleNamespace(allowed=True, retry_after=None, details={}), "b02-reserved")),
-        commit=AsyncMock(),
-    )
-    monkeypatch.setattr(client.app.state, "rg_governor", governor, raising=False)
-    monkeypatch.setattr(client.app.state, "rg_policy_loader", SimpleNamespace(get_policy=lambda _policy: {}), raising=False)
-    monkeypatch.setenv("RG_ENABLED", "1")
-    monkeypatch.setattr(chat, "get_rate_limiter", lambda: None)
+    client, db, cid, headers, governor = governed_settled_api
     metrics = chat.get_chat_metrics()
     original_track = metrics.track_request
     exits = []
@@ -638,12 +643,20 @@ def test_b02_admitted_preparation_failure_refunds_and_records_failure(settled_ap
 
     monkeypatch.setattr(metrics, "track_request", ObserveRequestExit)
 
+    reservations = []
+
     def fail_preparation(*_args, **_kwargs):
+        reservations.extend(governor._handles.values())
         raise ChatConfigurationError("private-b02-configuration-marker", provider="openai")
 
     monkeypatch.setattr(chat, "apply_prompt_templating", fail_preparation)
-    provider = Mock(side_effect=AssertionError("preparation failure must not call provider"))
-    monkeypatch.setattr(chat, "perform_chat_api_call", provider)
+    provider_calls = []
+
+    def unexpected_provider(*args, **kwargs):
+        provider_calls.append((args, kwargs))
+        raise AssertionError("preparation failure must not call provider")
+
+    monkeypatch.setattr(chat, "perform_chat_api_call", unexpected_provider)
     selection = _selection(client, cid, headers, "b02-reserved-preparation")
     response = client.post(
         "/api/v1/chat/completions", headers=headers,
@@ -652,8 +665,11 @@ def test_b02_admitted_preparation_failure_refunds_and_records_failure(settled_ap
     assert response.status_code == 200, response.text  # nosec B101 - Native admission is still delivered.
     assert len(db.get_messages_for_conversation(cid)) == 1  # nosec B101 - Retain exactly the admitted question.
     assert _frames(response)[0]["tldw_history_admission_v1"]["conversation_id"] == cid  # nosec B101 - Authentic owner receipt.
-    provider.assert_not_called()
-    governor.reserve.assert_awaited_once()
-    governor.commit.assert_awaited_once_with("b02-reserved", actuals={"tokens": 0})
+    assert provider_calls == []  # nosec B101 - Failed preparation never enters provider dispatch.
+    reservation, = reservations
+    assert reservation.categories["tokens"] > 0  # nosec B101 - The real admission reserved a positive token budget.
+    assert reservation.state == "finalized"  # nosec B101 - Failed preparation finalized its real reservation.
+    balance = asyncio.run(governor.peek_with_policy(reservation.entity, ["tokens"], reservation.policy_id))
+    assert balance["tokens"]["remaining"] == 10000  # nosec B101 - Zero actual usage returns every reserved token.
     assert len(exits) == 1 and exits[0][0] is not None  # nosec B101 - Actual request metrics see failure, not success.
     assert "private-b02-configuration-marker" not in response.text  # nosec B101 - Accounting carries only sanitized failure data.

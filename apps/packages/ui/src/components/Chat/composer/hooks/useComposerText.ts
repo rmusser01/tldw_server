@@ -763,7 +763,7 @@ export function useComposerText(
             messageRevision:
               promptAssistMutation.revision + Number(form.values.message !== ""),
             imageRevision:
-              imageRevisionRef.current + Number(form.values.image !== "")
+              imageRevisionRef.current + 1 + Number(form.values.image !== "")
           }
         : null
     stopInputRestore.current = null

@@ -783,7 +783,6 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       const result = await dispatch(payload, {
         beforeSend: () => {
           promptAssistAttemptId = beginPromptAssistReset()
-          form.reset()
           if (activeSubmissionRef.current === submission) activeSubmissionRef.current = null
           clearSelectedDocuments()
           clearUploadedFiles()
@@ -822,7 +821,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
             if (messageForModel && pageContextRevisionRef.current.revision === pageContextRevision) {
               clearImportedSidepanelContext?.()
             }
-          } else {
+          } else if (outcome.status === "skipped" || (outcome.status === "failed" && outcome.restoreDraft)) {
             restorePromptAssistAttempt(promptAssistAttemptId)
           }
         },

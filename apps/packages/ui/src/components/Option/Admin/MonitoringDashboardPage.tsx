@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   AutoComplete,
   Card,
@@ -35,7 +36,7 @@ import {
   type SandboxAdminRuntimeDiagnosticsItem,
   type SandboxAdminRuntimeDiagnosticsResponse
 } from "@/services/tldw/TldwApiClient"
-import { useSystemStats } from "@/services/tldw/adminQueries"
+import { adminKeys, useSystemStats } from "@/services/tldw/adminQueries"
 import { getDesignSystemState } from "@/design-system"
 
 /** Format a stat value for display — handles objects, arrays, booleans, numbers */
@@ -237,8 +238,9 @@ const MonitoringDashboardPage: React.FC = () => {
   // System overview state. System stats are shared admin reference data
   // (B-S4/F11): the query hook dedupes fetches with the other admin
   // surfaces inside the stale window; security status stays page-local.
+  const queryClient = useQueryClient()
   const systemStatsQuery = useSystemStats()
-  const systemStats = (systemStatsQuery.data as DashboardRecord | null) ?? null
+  const systemStats = systemStatsQuery.isError ? null : (systemStatsQuery.data as DashboardRecord | null) ?? null
   const statsLoading = systemStatsQuery.isFetching
   const statsError = systemStatsQuery.error ? sanitizeAdminErrorMessage(systemStatsQuery.error, "System statistics unavailable") : null
   const [securityStatus, setSecurityStatus] = useState<DashboardRecord | null>(null)
@@ -462,8 +464,12 @@ const MonitoringDashboardPage: React.FC = () => {
   // Live datasets (system stats + security status) — cheap, polled by auto-refresh.
   // The stats refetch is forced (it bypasses the shared stale window) so the
   // B-S2 polling contract keeps seeing fresh numbers on every tick.
-  // `refetch` is observer-stable, so this callback doesn't churn the timers.
-  const refetchSystemStats = systemStatsQuery.refetch
+  const queryRefetchSystemStats = systemStatsQuery.refetch
+  const refetchSystemStats = useCallback(() => {
+    // Replace even an initial pending fetch; existing waiters follow the new generation.
+    void queryClient.cancelQueries({ queryKey: adminKeys.systemStats, exact: true }, { silent: true, revert: false })
+    return queryRefetchSystemStats()
+  }, [queryClient, queryRefetchSystemStats])
   const refreshLive = useCallback(() => {
     void refetchSystemStats()
     void loadSecurityStatus()
@@ -859,7 +865,7 @@ const MonitoringDashboardPage: React.FC = () => {
               title={t("settings:adminMonitoring.systemStatsUnavailable", "System statistics unavailable")}
               message={statsError}
               role="alert"
-              primaryAction={{ label: t("common:retry", "Retry"), onClick: () => void systemStatsQuery.refetch() }}
+              primaryAction={{ label: t("common:retry", "Retry"), onClick: () => void refetchSystemStats() }}
             />
           )}
           {securityError && (

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from copy import deepcopy
 from types import SimpleNamespace
 
+import httpx
 import pytest
+import pytest_asyncio
 from fastapi import HTTPException
 from starlette.requests import Request
 
@@ -682,27 +684,40 @@ async def test_saved_lore_preview_preserves_storage_read_failure(frozen_chat, mo
     assert failure.value.detail == "An unexpected error occurred while generating prompt preview"  # nosec B101 - response must retain the existing generic error contract.
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("frozen_chat", ["sqlite", "postgres"], indirect=True)
-@pytest.mark.parametrize("mode", ["saved", "foreign", "string", "integer", "null"])
-async def test_saved_lore_preview_http_boundary(frozen_chat, mode):
-    import httpx
+@pytest_asyncio.fixture
+async def frozen_chat_http(frozen_chat) -> AsyncIterator[tuple[httpx.AsyncClient, SimpleNamespace]]:
+    """Own the real scoped route app and client for the read-only HTTP boundaries."""
     from fastapi import FastAPI
 
     from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-    from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import router
+    from tldw_Server_API.app.api.v1.endpoints.character_chat_sessions import router as sessions_router
+    from tldw_Server_API.app.api.v1.endpoints.characters_endpoint import router as characters_router
     from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
 
+    principal = SimpleNamespace(id=1)
     app = FastAPI()
-    app.include_router(router, prefix="/api/v1/chats")
+    app.include_router(sessions_router, prefix="/api/v1/chats")
+    app.include_router(characters_router, prefix="/api/v1/characters")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: frozen_chat.db
-    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=2 if mode == "foreign" else 1)
+    app.dependency_overrides[get_request_user] = lambda: principal
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
+            yield client, principal
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frozen_chat", ["sqlite", "postgres"], indirect=True)
+@pytest.mark.parametrize("mode", ["saved", "foreign", "string", "integer", "null"])
+async def test_saved_lore_preview_http_boundary(frozen_chat, frozen_chat_http, mode):
+    client, principal = frozen_chat_http
+    principal.id = 2 if mode == "foreign" else 1
     value = {"string": "true", "integer": 1, "null": None}.get(mode, True)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-        response = await client.post(
-            f"/api/v1/chats/{frozen_chat.conversation_id}/prompt-preview",
-            json={"saved_native_lore": value, "append_user_message": QUESTION},
-        )
+    response = await client.post(
+        f"/api/v1/chats/{frozen_chat.conversation_id}/prompt-preview",
+        json={"saved_native_lore": value, "append_user_message": QUESTION},
+    )
     expected = 200 if mode == "saved" else 403 if mode == "foreign" else 422
     assert response.status_code == expected, response.text  # nosec B101 - real route parsing/owner guard must reject coercion and foreign access.
     if mode == "saved":
@@ -713,20 +728,11 @@ async def test_saved_lore_preview_http_boundary(frozen_chat, mode):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("frozen_chat", ["sqlite", "postgres"], indirect=True)
-async def test_world_book_catalog_db_read_failure_never_becomes_empty(frozen_chat, monkeypatch):
+async def test_world_book_catalog_db_read_failure_never_becomes_empty(frozen_chat, frozen_chat_http, monkeypatch):
     """A controlled DB read failure must remain HTTP500 and recover without data loss."""
-    import httpx
-    from fastapi import FastAPI
-
-    from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
-    from tldw_Server_API.app.api.v1.endpoints.characters_endpoint import router
-    from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import get_request_user
     from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDBError
 
-    app = FastAPI()
-    app.include_router(router, prefix="/api/v1/characters")
-    app.dependency_overrides[get_chacha_db_for_user] = lambda: frozen_chat.db
-    app.dependency_overrides[get_request_user] = lambda: SimpleNamespace(id=1)
+    client, _principal = frozen_chat_http
     original = frozen_chat.db.execute_query
     failures = []
 
@@ -736,20 +742,15 @@ async def test_world_book_catalog_db_read_failure_never_becomes_empty(frozen_cha
             raise CharactersRAGDBError("Controlled catalog database read unavailable")
         return original(query, *args, **kwargs)
 
-    try:
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
-            with monkeypatch.context() as fault:
-                fault.setattr(frozen_chat.db, "execute_query", unavailable)
-                failed = await client.get("/api/v1/characters/world-books")
-            assert failures == [True]  # nosec B101 - The actual catalog database-read boundary was exercised.
-            assert failed.status_code == 500  # nosec B101 - A DB failure cannot become a successful empty catalog.
-            assert "world_books" not in failed.json()  # nosec B101 - Never return an empty catalog payload for a failed read.
-            recovered = await client.get("/api/v1/characters/world-books")
-            assert recovered.status_code == 200  # nosec B101 - The same real store recovers after the fault is removed.
-            payload = recovered.json()
-            assert payload["total"] == 1  # nosec B101 - Failed reads must not mutate persisted catalog contents.
-            assert payload["world_books"][0]["id"] == frozen_chat.book_id  # nosec B101 - The original owner-bound book is retained.
-            assert payload["world_books"][0]["entry_count"] == 1  # nosec B101 - The original enabled entry remains counted.
-    finally:
-        app.dependency_overrides.clear()
-        frozen_chat.db.close_all_connections()
+    with monkeypatch.context() as fault:
+        fault.setattr(frozen_chat.db, "execute_query", unavailable)
+        failed = await client.get("/api/v1/characters/world-books")
+    assert failures == [True]  # nosec B101 - The actual catalog database-read boundary was exercised.
+    assert failed.status_code == 500  # nosec B101 - A DB failure cannot become a successful empty catalog.
+    assert "world_books" not in failed.json()  # nosec B101 - Never return an empty catalog payload for a failed read.
+    recovered = await client.get("/api/v1/characters/world-books")
+    assert recovered.status_code == 200  # nosec B101 - The same real store recovers after the fault is removed.
+    payload = recovered.json()
+    assert payload["total"] == 1  # nosec B101 - Failed reads must not mutate persisted catalog contents.
+    assert payload["world_books"][0]["id"] == frozen_chat.book_id  # nosec B101 - The original owner-bound book is retained.
+    assert payload["world_books"][0]["entry_count"] == 1  # nosec B101 - The original enabled entry remains counted.

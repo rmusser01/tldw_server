@@ -12,6 +12,8 @@ import type { UploadedFile } from "@/db/dexie/types";
 import type { ChatSubmitResult } from "@/hooks/chat/chat-action-utils";
 import { useSlashCommands } from "@/hooks/playground/useSlashCommands";
 import { useStoreChatModelSettings } from "@/store/model";
+import { useStoreMessageOption } from "@/store/option";
+import { conversationDraftKey } from "@/utils/chat-draft-address";
 import { createSidepanelChatHandoff } from "@/services/sidepanel-chat-handoff";
 import { useSidepanelChatHandoffImport } from "../hooks/useSidepanelChatHandoffImport";
 import { usePlaygroundSubmit } from "../hooks/usePlaygroundSubmit";
@@ -69,6 +71,7 @@ vi.mock("@/services/background-proxy", async (importOriginal) => ({
 
 type Input = {
   draftEnabled?: boolean;
+  draftReady?: boolean;
   visionSupported?: boolean;
   selectedModel?: string;
   webSearch?: boolean;
@@ -121,8 +124,14 @@ describe("Playground send owns only its captured composer draft", () => {
           input.webSearch ?? false,
         );
         const [chatMode, setChatMode] = React.useState("normal");
+        const historySelection = useHistorySelectionContext()!;
+        const draftAddress = useStoreMessageOption(state => state.chatDraftAddress);
+        const draftRevision = useStoreMessageOption(state => state.chatDraftRevision);
         const composer = useComposerText({
-          draftKey: "tldw:playgroundChatDraft:ownership-test",
+          draftKey: draftAddress
+            ? conversationDraftKey("tldw:playgroundChatDraft:ownership-test", draftAddress)
+            : "tldw:playgroundChatDraft:ownership-test",
+          draftAddress: draftAddress ?? undefined,
           tabScopedDraft: true,
           draftEnabled: input.draftEnabled,
           textareaRef,
@@ -132,6 +141,10 @@ describe("Playground send owns only its captured composer draft", () => {
         );
         const navigate = useNavigate();
         const handoff = useSidepanelChatHandoffImport({
+          ready: composer.draftReady,
+          destinationKey: JSON.stringify([composer.draftOwnerKey, draftAddress, draftRevision]),
+          captureGuard: composer.captureCompletionGuard,
+          getDraftRevision: composer.form.getRevision,
           draftValue: composer.form.values.message,
           setMessageValue: composer.setMessageValue,
           t,
@@ -153,7 +166,11 @@ describe("Playground send owns only its captured composer draft", () => {
             };
           },
         };
-        const historySelection = useHistorySelectionContext()!;
+        const openUIRevision = React.useRef({ value: input.openUIRequestMode, revision: 0 });
+        if (openUIRevision.current.value !== input.openUIRequestMode) {
+          openUIRevision.current = { value: input.openUIRequestMode, revision: openUIRevision.current.revision + 1 };
+        }
+        const renderedOpenUIRevision = openUIRevision.current.revision;
         const slash = useSlashCommands({
           chatMode,
           setChatMode,
@@ -168,8 +185,14 @@ describe("Playground send owns only its captured composer draft", () => {
         const submit = usePlaygroundSubmit({
           form,
           beginPromptAssistReset: composer.beginPromptAssistReset,
+          restorePromptAssistAttempt: composer.restorePromptAssistAttempt,
+          draftReady: input.draftReady ?? composer.draftReady,
+          historySelection,
           markPromptAssistAttemptSaved: composer.markPromptAssistAttemptSaved,
           captureDraftOwnership: composer.captureDraftOwnership,
+          captureCompletionGuard: input.draftReady === true
+            ? () => composer.isDraftOwnerCurrent
+            : composer.captureCompletionGuard,
           captureHistorySelection: historySelection.fence,
           isSending: input.isSending ?? false,
           isConnectionReady: true,
@@ -202,7 +225,11 @@ describe("Playground send owns only its captured composer draft", () => {
             ? handoff.removeImportedContext
             : clearImportedSidepanelContext,
           sendMessage,
-          clearOpenUIRequestMode,
+          clearOpenUIRequestMode: () => {
+            if (openUIRevision.current.revision !== renderedOpenUIRevision) return;
+            openUIRevision.current.revision++;
+            clearOpenUIRequestMode();
+          },
           clearSelectedDocuments,
           clearUploadedFiles,
           textAreaFocus: composer.textAreaFocus,
@@ -212,7 +239,7 @@ describe("Playground send owns only its captured composer draft", () => {
           queueSubmission,
           validateSelectedChatModelsAvailability: () => true,
           compareModelsSupportCapability: (models, capability) => compareModelsSupportCapability(models, capability, buildCompareModelMetaById([{ model: "ready-model", capabilities: input.visionSupported === false ? [] : ["vision"] }, { ...visionModel, capabilities: input.visionSupported === false ? [] : ["vision"] }])),
-          notificationApi: { error: vi.fn(), warning: warnNotReady },
+          notificationApi: { error: vi.fn(), warning: warnNotReady, info: vi.fn() },
           t,
         });
         return {
@@ -224,6 +251,8 @@ describe("Playground send owns only its captured composer draft", () => {
           chatMode,
           navigate,
           importedContext: handoff.importedContext,
+          handoffConflict: handoff.conflict,
+          insertHandoffDraft: handoff.insertHandoffDraft,
           promptSummary: systemPrompt ? "System prompt" : null,
         };
       },
@@ -241,6 +270,8 @@ describe("Playground send owns only its captured composer draft", () => {
     localStorage.clear();
     sessionStorage.clear();
     useStoreChatModelSettings.getState().reset();
+    useStoreMessageOption.setState({ historyId: null, serverChatId: null });
+    useStoreMessageOption.getState().startNewChatDraft(false);
     services.account = "alice";
     services.scopeBarrier = null;
     warnNotReady.mockReset();
@@ -261,7 +292,7 @@ describe("Playground send owns only its captured composer draft", () => {
   it.each([true, false])("B02 reports unresolved ownership without losing or automatically sending the draft (persistence=%s)", async draftEnabled => {
     const owner = deferred<void>();
     services.scopeBarrier = owner.promise;
-    const view = mount({ draftEnabled });
+    const view = mount({ draftEnabled, draftReady: true });
     try {
       act(() => view.result.current.composer.setMessageValue("Hello."));
       act(() => view.result.current.submit.submitForm());
@@ -536,6 +567,8 @@ describe("Playground send owns only its captured composer draft", () => {
       await waitFor(() =>
         expect(view.result.current.composer.draftReady).toBe(true),
       );
+      await waitFor(() => expect(view.result.current.handoffConflict).not.toBeNull());
+      await act(async () => { await view.result.current.insertHandoffDraft(); });
       await waitFor(() =>
         expect(view.result.current.composer.form.values.message).toBe(
           "first imported question",
@@ -548,6 +581,8 @@ describe("Playground send owns only its captured composer draft", () => {
       await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1));
       expect(view.result.current.composer.form.values.message).toBe("");
       act(() => view.result.current.navigate(`/chat?handoff=${second.id}`));
+      await waitFor(() => expect(view.result.current.handoffConflict).not.toBeNull());
+      await act(async () => { await view.result.current.insertHandoffDraft(); });
       await waitFor(() =>
         expect(view.result.current.composer.form.values.message).toBe(
           "second imported question",

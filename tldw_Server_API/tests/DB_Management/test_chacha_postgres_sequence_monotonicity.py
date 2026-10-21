@@ -44,7 +44,7 @@ def allocate(conn):
 
 
 def test_public_character_create_uses_id_above_hidden_seed_and_survives_reopen(
-    sequence_db, single_user_cookie_client, pg_database_config,
+    sequence_db, single_user_cookie_client, pg_database_config, monkeypatch,
 ):
     db = sequence_db
     client, api_key = single_user_cookie_client
@@ -66,9 +66,8 @@ def test_public_character_create_uses_id_above_hidden_seed_and_survives_reopen(
         assert seed == [{"id": 1, "name": "Default Assistant", "client_id": "system_init"}]  # nosec B101 - actual retained bootstrap source
     finally:
         admin.get_pool().close_all()
-    old = client.app.dependency_overrides.get(get_chacha_db_for_user)
-    client.app.dependency_overrides[get_chacha_db_for_user] = lambda: db
-    try:
+    with monkeypatch.context() as overrides:
+        overrides.setitem(client.app.dependency_overrides, get_chacha_db_for_user, lambda: db)
         response = client.post("/api/v1/characters/", headers=headers,
                                json={"name": "Public sequence recovery", "system_prompt": "Keep this instruction."})
         assert response.status_code == 201, (state, response.text)  # nosec B101 - actual public creation
@@ -83,11 +82,6 @@ def test_public_character_create_uses_id_above_hidden_seed_and_survives_reopen(
             assert other.get_character_card_by_id(first) is None  # nosec B101 - owner fences retained
         finally:
             other.close_connection()
-    finally:
-        if old is None:
-            client.app.dependency_overrides.pop(get_chacha_db_for_user, None)
-        else:
-            client.app.dependency_overrides[get_chacha_db_for_user] = old
 
 
 def test_rolled_back_allocation_is_never_reused_for_an_empty_tenant(sequence_db):

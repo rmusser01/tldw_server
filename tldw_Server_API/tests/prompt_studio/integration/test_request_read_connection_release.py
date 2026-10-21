@@ -3,7 +3,6 @@
 from contextlib import nullcontext
 
 import pytest
-from cachetools import LRUCache
 
 from tldw_Server_API.app.api.v1.API_Deps import prompt_studio_deps as deps
 
@@ -13,10 +12,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.postgres]
 @pytest.mark.parametrize("handler_fails", [False, True], ids=["normal", "handler-error"])
 def test_request_lease_releases_read_before_next_tenant(pg_restricted_backend, tmp_path, monkeypatch, handler_fails):
     """Real repository reads cannot pin schema locks past their request lease."""
-    cache = LRUCache(maxsize=4)
-    monkeypatch.setattr(deps, "_db_instances_cache", cache)
-    monkeypatch.setattr(deps, "_active_db_leases", {})
-    monkeypatch.setattr(deps, "_pending_db_close", {})
+    deps.shutdown_prompt_studio_deps()
     monkeypatch.setattr(
         deps,
         "_get_prompt_studio_db_path_for_user",
@@ -45,5 +41,4 @@ def test_request_lease_releases_read_before_next_tenant(pg_restricted_backend, t
             second_borrowed = second.get_connection().raw_connection
         assert second_borrowed.info.transaction_status.name == "IDLE"  # nosec B101 - Causal request-scope ownership assertion.
     finally:
-        for db in cache.values():
-            db.close_connection()
+        deps.shutdown_prompt_studio_deps()

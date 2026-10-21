@@ -2421,9 +2421,10 @@ export const SidepanelForm = ({
           textAreaFocus()
         },
         afterSend: (result) => {
+          const outcome = normalizeChatSubmitResult(result)
           if (
             promptAssistAttemptId !== null &&
-            isChatSubmitSuccess(normalizeChatSubmitResult(result))
+            isChatSubmitSuccess(outcome)
           ) {
             markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
             // Legacy void outcomes can include a swallowed failure.
@@ -2433,7 +2434,8 @@ export const SidepanelForm = ({
               setContextFiles(current => current === contextFiles ? [] : current)
               if (knowledgeMentionRevision.current === submittedKnowledgeMentionRevision) setKnowledgeMentionActive(false)
             }
-          } else if (promptAssistAttemptId !== null) {
+          } else if (promptAssistAttemptId !== null &&
+            (outcome.status === "skipped" || (outcome.status === "failed" && outcome.restoreDraft))) {
             restorePromptAssistAttempt(promptAssistAttemptId)
           }
         },

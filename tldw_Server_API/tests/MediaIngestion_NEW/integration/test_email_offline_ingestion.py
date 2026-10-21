@@ -107,16 +107,6 @@ def offline_client(tmp_path, monkeypatch):
     monkeypatch.setattr(socket.socket, "connect_ex", forbidden("socket.socket.connect_ex"))
     monkeypatch.setattr(socket, "getaddrinfo", forbidden("socket.getaddrinfo"))
 
-    class _UnlimitedQuota:
-        """Quota is outside this harness; the synthetic user has no AuthNZ row."""
-
-        async def initialize(self) -> None:
-            return None
-
-        async def check_quota(self, *_args, **_kwargs):
-            return True, {}
-
-    monkeypatch.setattr(storage_quota_service, "get_storage_quota_service", _UnlimitedQuota)
     monkeypatch.setenv("TEST_MODE", "true")
     monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "users"))
     monkeypatch.setitem(persistence.settings, "EMAIL_NATIVE_PERSIST_ENABLED", True)
@@ -275,25 +265,6 @@ def test_offline_guard_reports_boundary_and_caller_without_arguments(offline_cli
     assert private_input not in diagnostic  # nosec B101 - pytest verifies input privacy.
 
 
-def test_offline_upload_does_not_initialize_authnz_accounting(offline_client, monkeypatch):
-    """A cold upload keeps AuthNZ quota and ledger bootstrap outside this harness."""
-    from tldw_Server_API.app.core.DB_Management.Resource_Daily_Ledger import ResourceDailyLedger
-
-    quota_lookup = AsyncMock(return_value=None)
-    ledger_initialize = AsyncMock(side_effect=AssertionError("AuthNZ accounting is outside the offline harness"))
-    monkeypatch.setattr(persistence, "_media_ingestion_daily_ledger", None)
-    monkeypatch.setattr(persistence.quota_checks, "user_quota", quota_lookup)
-    monkeypatch.setattr(ResourceDailyLedger, "initialize", ledger_initialize)
-
-    upload(offline_client, "synthetic.eml", synthetic_message(701).as_bytes())
-
-    assert {  # nosec B101 - pytest rejects AuthNZ accounting bootstrap in the focused offline harness.
-        "quota_lookups": quota_lookup.await_count,
-        "ledger_initializations": ledger_initialize.await_count,
-    } == {"quota_lookups": 0, "ledger_initializations": 0}
-
-
-
 def synthetic_message(number: int, *, html_only: bool = False, same_body: bool = False) -> EmailMessage:
     """Build synthetic MIME mail, optionally reproducing TASK-13250's collision."""
     message = EmailMessage()
@@ -338,10 +309,10 @@ def search(client, query: str):
     return response.json()["items"]
 
 
-def test_offline_upload_does_not_enter_authnz_pool(
+def test_cold_offline_upload_does_not_enter_authnz_accounting(
     offline_client: TestClient, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Daily accounting cannot bootstrap AuthNZ in the native email harness."""
+    """One quota-enabled cold upload cannot enter any AuthNZ accounting boundary."""
     from tldw_Server_API.app.core.AuthNZ import database
     from tldw_Server_API.app.core.DB_Management import Resource_Daily_Ledger
     from tldw_Server_API.app.core.Usage import quota_resolver
@@ -349,6 +320,10 @@ def test_offline_upload_does_not_enter_authnz_pool(
     monkeypatch.setenv("USAGE_QUOTAS_ENABLED", "true")
     quota_resolver.invalidate_all()
     monkeypatch.setattr(persistence, "_media_ingestion_daily_ledger", None)
+    quota_lookup = AsyncMock(return_value=None)
+    ledger_initialize = AsyncMock(side_effect=AssertionError("AuthNZ accounting is outside the offline harness"))
+    monkeypatch.setattr(persistence.quota_checks, "user_quota", quota_lookup)
+    monkeypatch.setattr(Resource_Daily_Ledger.ResourceDailyLedger, "initialize", ledger_initialize)
     pool_entry = AsyncMock(side_effect=RuntimeError("AuthNZ is outside the offline email harness"))
     monkeypatch.setattr(database, "get_db_pool", pool_entry)
     monkeypatch.setattr(Resource_Daily_Ledger, "get_db_pool", pool_entry)
@@ -361,6 +336,10 @@ def test_offline_upload_does_not_enter_authnz_pool(
     assert detail.json()["media"]["id"] == result["db_id"]
     assert detail.json()["body_text"] == "Uniquequartz synthetic body 77."
     pool_entry.assert_not_called()
+    assert {  # nosec B101 - No lookup or ledger initialization may be swallowed by the offline upload.
+        "quota_lookups": quota_lookup.await_count,
+        "ledger_initializations": ledger_initialize.await_count,
+    } == {"quota_lookups": 0, "ledger_initializations": 0}
 
 
 @pytest.mark.parametrize("same_body", [False, True])
