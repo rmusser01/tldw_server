@@ -1506,3 +1506,33 @@ the task-format ratchet on the exact historical Chunker TASK-13215 record.
 Canonical preview changes only section markers/order, preserving all record
 content and identity. Its mutation remains unapproved; no historical record
 was modified. Do not weaken the ratchet or treat the required check as passed.
+
+### Historical Record Formatting Approval (2026-10-20)
+
+The requester explicitly approved formatting-only normalization of
+`backlog/tasks/task-13215 - Implement-Chunker-hierarchical-subsystem-refactor.md`
+after clarification that content, ID and location remain unchanged and nothing
+is deleted or archived. This resolves only that exact-path formatting exception;
+broader historical archiving remains unapproved.
+
+Used the repository's `backlog-py task normalize` under accepted ADR-059.
+No new ADR is required: this applies the existing editor decision without
+changing architecture. The formatter merges duplicate implementation-notes
+sections and moves the existing Definition of Done block to canonical order.
+An independent preservation check confirms the exact canonical transformation,
+byte-identical frontmatter, identical substantive-line counts and idempotence.
+No production code, tests, unrelated records or main-checkout files changed.
+
+Fresh local verification against pinned base `c95e41fc62`: the ratchet first
+failed solely for this record (one failed, three passed), then the complete
+ratchet and parser test files passed all 12 cases, with 20 existing warnings in
+1.09s. Logs: `/tmp/task13422_historical_format_red_20261020.txt` and
+`/tmp/task13422_historical_format_green_20261020.txt`. Exact-path canonical
+checks and `git diff --check` pass. Bandit and the full Chunking suite were not
+rerun for this tracking-only change; prior code-verification evidence above
+is historical, not a fresh current-head claim.
+
+The local formatting blocker is corrected. Remote CI is not yet rechecked,
+and no rebase, push, review-thread resolution or merge is claimed. The prior
+network-permission block remains uncleared by this narrow approval; keep the
+follow-up paused until permission is restored. TASK-13422 remains In Progress.

@@ -55,25 +55,11 @@ Approved Task 6 only: add direct grouping tests and observe missing-module RED; 
 
 ## Implementation Notes
 
-<!-- SECTION:NOTES:BEGIN -->
+<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 This record supersedes the colliding active TASK-13113 after rebasing onto origin/dev introduced the unrelated completed TASK-13113 record for PR 2808. The approved design and detailed implementation plan remain unchanged. 2026-09-07 Task 1 baseline reconciliation: refreshed origin/dev at 01b516d4805ddf5eb7cddac35a11ef0e062facc5; the required scoped diff from 4958cfed65d3c6e9baa43ea47e2b155fed204e13 through current origin/dev across tldw_Server_API/app/core/Chunking and tldw_Server_API/tests/Chunking was empty, so no approved hierarchy/process_text contract was affected. Rebased the isolated branch without conflicts. The focused baseline suite collected 92 tests and completed with 91 passed, 1 skipped, 0 failures, and 196 warnings in 3.01s. Environmental output was limited to the existing no-.env fallback to config.txt, legacy single-user API-key warning, isolated test database fallback, and emitted OpenTelemetry spans. No production files were edited; Bandit is not applicable to this documentation/tracking-only task. Tracking reconciliation completed on 2026-09-07: Backlog allocated TASK-13215, the official CLI archived the old active implementation TASK-13113 without modifying the unrelated completed PR-2808 TASK-13113, and the approved spec, implementation plan, and completed TASK-13112 design record now reference TASK-13215.
 
 2026-09-07 second baseline reconciliation: origin/dev was e3174f1ad9f6dd0b11e4ecb20d48c1c4090d3bfe; the required scoped diff from 01b516d4805ddf5eb7cddac35a11ef0e062facc5 through current origin/dev across tldw_Server_API/app/core/Chunking and tldw_Server_API/tests/Chunking was empty. Rebasing preserved the five workstream commits, including the completed Task 1 commit now at fa93165f7b, and produced the required 0/5 branch relationship. The exact focused seven-file suite collected 92 tests and completed with 91 passed, 1 skipped, 0 failures, and 196 warnings in 1.86s. Environmental output remained limited to the existing no-.env fallback to config.txt, legacy single-user API-key warning, isolated test database fallback, and emitted OpenTelemetry spans. No production files were edited; Task 1 checkboxes remain complete.
-<!-- SECTION:NOTES:END -->
 
-## Definition of Done
-<!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
-<!-- DOD:END -->
-
-## Implementation Notes
-
-<!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 2026-09-07 Task 2 contract freeze completed. Added tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py, tldw_Server_API/tests/Chunking/test_hierarchy_malformed_contracts.py, and tldw_Server_API/tests/Chunking/test_hierarchical_spans.py (29 test functions, 54 collected cases) and updated only Task 2 in Docs/superpowers/plans/2026-08-24-chunker-hierarchical-subsystem-refactor.md. Focused pytest: 54 passed, 0 failed, 119 warnings in 1.35s. Ruff: All checks passed. Black --check: 3 files would be left unchanged. git diff --check: exit 0 with no output. Bandit on the three pytest files reported only the expected B101 assert-use rule (57 low-severity findings, 0 medium/high); rerun excluding B101 completed with 0 findings and 0 errors. Self-review confirmed deterministic instance fakes prevent leaf, rewrite, LLM, or external calls; every temporary Loguru sink is removed in finally; metadata fixtures are read-only and preserve the identities under test; malformed/span expectations match the observed unextracted baseline. No baseline discrepancy was found and no production code was changed.
 2026-09-07 Task 2 specification-review correction: acceptance criterion #2 remains unchanged in wording but is now unchecked because it also includes import boundaries, which belong to Task 3 and have not been implemented. Task 2's characterization portion is complete and its implementation-plan checkboxes remain accurately checked; this tracking correction does not start Task 3. Strengthened the Task 2 tests to record sanitize_output truthiness before method resolution, cover sanitize_output removal on the semantic rewrite branch as well as metadata and ordinary branches, and assert identity for template and method_options forwarded by the public flat wrapper.
 Task 2 specification-review verification: focused three-file suite collected 56 cases and completed with 56 passed, 0 failed, and 123 warnings in 1.17s. Ruff reported All checks passed. Black --check reported all 3 files would be left unchanged. Bandit excluding the expected pytest B101 assertion rule completed with 0 findings and 0 errors. git diff --check exited 0 with no output. The change scope contains only tldw_Server_API/tests/Chunking/test_hierarchy_refactor_contracts.py and this official TASK-13215 record; no production file or Task 3 file changed.
@@ -134,3 +120,13 @@ Gates: Ruff passed for all 3 touched Python files after fixing one test import-o
 Baseline concern, deliberately unchanged: weighted overlap uses element count rather than consumed weight and can retain an overlap-only tail, unlike element-window grouping. Existing warning/config diagnostics remain; missing-module RED also emitted closed-stream Loguru diagnostics. Commit subject: refactor: extract hierarchical grouping. TASK-13215 remains In Progress for later Tasks 7-8 and external review; no overall finalization claimed.
 2026-10-02 Task 7 implementer starts at HEAD 3e34078eef78111633a210cda4a476baa25abbeb, origin/dev pinned at 86e287fee7bfa1a1588639232e35db3666851ded. User reports Tasks 5 and 6 specification and independent quality reviews approved. Scope restricted to the exact six Task 7 Python paths, Task 7 plan section, and this record. Test-first direct missing-flatten-module RED precedes extraction; preserve permissive traversal, aliasing, validation order, package catches, and public composition. No main checkout changes, fetch/rebase/push, or Task 8 work.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
+
+## Definition of Done
+<!-- DOD:BEGIN -->
+- [ ] #1 Acceptance criteria completed
+- [ ] #2 Tests or verification recorded
+- [ ] #3 Documentation updated when relevant
+- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [ ] #5 Final summary added
+- [ ] #6 Known skips or blockers documented
+<!-- DOD:END -->
