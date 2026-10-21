@@ -587,7 +587,6 @@ jobs:
               tldw_Server_API/tests/Agent_Orchestration
               tldw_Server_API/tests/Chat_Workflows
               tldw_Server_API/tests/Notes_Graph
-              tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Slides              tldw_Server_API/tests/Text2SQL
               tldw_Server_API/tests/wizard
           - name: gap-verified-6
@@ -1757,6 +1756,7 @@ jobs:
               tldw_Server_API/tests/Services/test_media_*.py
               tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
               tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
+              tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -2261,7 +2261,6 @@ jobs:
               tldw_Server_API/tests/Agent_Orchestration
               tldw_Server_API/tests/Chat_Workflows
               tldw_Server_API/tests/Notes_Graph
-              tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Slides              tldw_Server_API/tests/Text2SQL
               tldw_Server_API/tests/wizard
           - name: gap-verified-6
@@ -3433,6 +3432,7 @@ jobs:
               tldw_Server_API/tests/Services/test_media_*.py
               tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
               tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
+              tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -4945,6 +4945,7 @@ jobs:
               tldw_Server_API/tests/Services/test_media_*.py
               tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
               tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
+              tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -6368,6 +6369,7 @@ jobs:
               tldw_Server_API/tests/Services/test_media_*.py
               tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
               tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
+              tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
@@ -7782,6 +7784,7 @@ jobs:
               tldw_Server_API/tests/Services/test_media_*.py
               tldw_Server_API/tests/Services/test_notes_graph_projection_worker.py
               tldw_Server_API/tests/Services/test_notes_graph_suggestions_workers.py
+              tldw_Server_API/tests/Services/test_notes_semantic_workers.py
               tldw_Server_API/tests/Services/test_outputs_*.py
               tldw_Server_API/tests/Services/test_persona_*.py
               tldw_Server_API/tests/Services/test_placeholder_*.py
