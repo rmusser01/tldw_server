@@ -9017,7 +9017,7 @@ async def persona_stream(
             if persona_scope_db is None or not authenticated_user_id:
                 return None
             try:
-                runtime_context = _load_persona_policy_rules_for_session(
+                runtime_context = chacha_operation(independent=True)(_load_persona_policy_rules_for_session)(
                     persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
@@ -9089,7 +9089,7 @@ async def persona_stream(
             )
             persona_live_summary_sessions_seen.add(session_id)
             try:
-                persona_scope_db.upsert_persona_live_voice_session_summary(
+                chacha_operation(independent=True)(persona_scope_db.upsert_persona_live_voice_session_summary)(
                     user_id=user_id_int,
                     persona_id=persona_id_value,
                     session_id=session_id,
@@ -9126,7 +9126,7 @@ async def persona_stream(
             if not persona_id_value:
                 return
             try:
-                record_persona_live_voice_event(
+                chacha_operation(independent=True)(record_persona_live_voice_event)(
                     persona_scope_db,
                     user_id=user_id_int,
                     persona_id=persona_id_value,
@@ -9415,7 +9415,7 @@ async def persona_stream(
                 allowed_tools_effective.append(str(resolved_name))
             if allowed_tools_effective:
                 audit_metadata["allowed_tools"] = allowed_tools_effective
-            scope_metadata = _load_persona_scope_metadata_for_session(
+            scope_metadata = chacha_operation(independent=True)(_load_persona_scope_metadata_for_session)(
                 persona_scope_db,
                 session_id=session_id,
                 user_id=authenticated_user_id,
@@ -9948,7 +9948,7 @@ async def persona_stream(
                     ignored_fields=forbidden_client_fields,
                 )
 
-            runtime_context = _load_persona_policy_rules_for_session(
+            runtime_context = chacha_operation(independent=True)(_load_persona_policy_rules_for_session)(
                 persona_scope_db,
                 session_id=session_id,
                 user_id=authenticated_user_id,
@@ -10067,7 +10067,7 @@ async def persona_stream(
                         "last_turn_type": turn_type,
                     },
                 )
-            _ = _persist_persona_session_preferences(
+            _ = chacha_operation(independent=True)(_persist_persona_session_preferences)(
                 persona_scope_db,
                 session_id=session_id,
                 user_id=authenticated_user_id,
@@ -10136,7 +10136,7 @@ async def persona_stream(
                 )
             persona_state_hints: dict[str, str] = {}
             if use_persona_state_context and state_context_allowed_by_mode:
-                persona_state_hints = _load_persona_state_hints_for_runtime(
+                persona_state_hints = chacha_operation(independent=True)(_load_persona_state_hints_for_runtime)(
                     persona_scope_db,
                     user_id=authenticated_user_id,
                     persona_id=runtime_persona_id,
@@ -10609,7 +10609,7 @@ async def persona_stream(
                         message="Invalid session_id normalized to a safe identifier.",
                         reason_code="SESSION_ID_NORMALIZED",
                     )
-                runtime_context = _load_persona_policy_rules_for_session(
+                runtime_context = chacha_operation(independent=True)(_load_persona_policy_rules_for_session)(
                     persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
@@ -10826,7 +10826,7 @@ async def persona_stream(
                         message="Start voice to prepare the selected speech services before recording.",
                     )
                     continue
-                runtime_context = _load_persona_policy_rules_for_session(
+                runtime_context = chacha_operation(independent=True)(_load_persona_policy_rules_for_session)(
                     persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
@@ -11067,7 +11067,7 @@ async def persona_stream(
                 max_tool_steps = _get_persona_max_tool_steps()
                 approved_step_indices = sorted(set(approved_step_indices))[:max_tool_steps]
 
-                runtime_context = _load_persona_policy_rules_for_session(
+                runtime_context = chacha_operation(independent=True)(_load_persona_policy_rules_for_session)(
                     persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
@@ -11112,7 +11112,7 @@ async def persona_stream(
                             user_id=connection_user_id,
                             preferences={"session_policy_rules": session_policy_rules},
                         )
-                    _ = _persist_persona_session_preferences(
+                    _ = chacha_operation(independent=True)(_persist_persona_session_preferences)(
                         persona_scope_db,
                         session_id=session_id,
                         user_id=authenticated_user_id,
@@ -11289,7 +11289,7 @@ async def persona_stream(
                 why = str(pending_retry.get("why") or "").strip() or None
                 description = str(pending_retry.get("description") or "").strip() or None
 
-                runtime_context = _load_persona_policy_rules_for_session(
+                runtime_context = chacha_operation(independent=True)(_load_persona_policy_rules_for_session)(
                     persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
@@ -11364,7 +11364,7 @@ async def persona_stream(
                 )
             else:
                 session_id = _normalize_ws_identifier(msg.get("session_id"), fallback=default_session_id)
-                runtime_context = _load_persona_policy_rules_for_session(
+                runtime_context = chacha_operation(independent=True)(_load_persona_policy_rules_for_session)(
                     persona_scope_db,
                     session_id=session_id,
                     user_id=authenticated_user_id,
