@@ -1074,7 +1074,7 @@ def _admitted_native_provider_error_response(
     async def failed_stream():
         for frame in encoded:
             yield frame
-        yield "data: [DONE]\n\n"
+        yield sse_done()
 
     return StreamingResponse(failed_stream(), media_type="text/event-stream")
 

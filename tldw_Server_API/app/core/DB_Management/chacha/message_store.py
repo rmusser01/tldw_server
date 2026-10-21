@@ -1156,7 +1156,7 @@ class MessageStore:
         conn: Any | None = None,
     ) -> dict[str, Any]:
         """Bind an unchanged accepted input to this full capture under its owner fence."""
-        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistoryAdmissionReferenceV1
+        from tldw_Server_API.app.core.Chat.history_selection_schemas import HistoryAdmissionReferenceV1
 
         binding = HistoryAdmissionReferenceV1.model_validate(reference).model_dump(mode="json")
         namespace = self._history_owner_key(owner_client_id, owner_key)
@@ -1267,7 +1267,7 @@ class MessageStore:
         require_unanswered: bool = False,
     ) -> str:
         """Add one alternative answer to an owner-selected existing user question."""
-        from tldw_Server_API.app.api.v1.schemas.history_selection_schemas import HistorySelectionV1
+        from tldw_Server_API.app.core.Chat.history_selection_schemas import HistorySelectionV1
 
         body = HistorySelectionV1.model_validate(selection).model_dump(mode="json")
         data = dict(message)

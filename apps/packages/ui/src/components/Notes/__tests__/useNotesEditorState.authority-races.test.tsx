@@ -4,13 +4,18 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useNotesEditorState, type UseNotesEditorStateDeps } from '../hooks/useNotesEditorState'
 
+import { createNotesGraphAuthorityScope } from '../hooks/useNotesGraphAuthorityScope'
+
+const connectionConfig = { serverUrl: 'https://notes.example.test', authMode: 'multi-user' as const }
+const aliceScope = createNotesGraphAuthorityScope(connectionConfig.serverUrl, 1)
+const bobScope = createNotesGraphAuthorityScope(connectionConfig.serverUrl, 2)
 const mocks = vi.hoisted(() => ({ request: vi.fn(), tasks: vi.fn(), activity: vi.fn(), error: vi.fn() }))
 vi.mock('@/services/background-proxy', () => ({ bgRequest: mocks.request }))
 vi.mock('@/services/notes-tasks', () => ({
   listNoteTasks: mocks.tasks, listTaskActivity: mocks.activity,
   markTaskActivityRead: vi.fn(), setNoteTaskStatus: vi.fn()
 }))
-vi.mock('@/services/tldw/TldwAuth', () => ({ tldwAuth: { getCurrentUser: vi.fn(async () => null) } }))
+vi.mock('@/services/tldw/TldwAuth', () => ({ tldwAuth: { getCurrentUser: vi.fn(async () => ({ id: 1, is_active: true })) } }))
 vi.mock('@/services/settings/registry', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/services/settings/registry')>(),
   getSetting: vi.fn(async () => null), setSetting: vi.fn(async () => undefined), clearSetting: vi.fn()
@@ -26,7 +31,7 @@ const deferred = <T,>() => {
 const renderEditor = () => {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const deps: UseNotesEditorStateDeps = {
-    authorityScope: 'alice', isOnline: false, isMobileViewport: false,
+    authorityScope: aliceScope, connectionConfig, isOnline: false, isMobileViewport: false,
     message: { error: mocks.error } as unknown as UseNotesEditorStateDeps['message'],
     confirmDanger: vi.fn(async () => true), queryClient, t: (key) => key,
     listMode: 'active', setListMode: vi.fn(), data: [], refetch: vi.fn(async () => undefined),
@@ -35,8 +40,11 @@ const renderEditor = () => {
     setEditorKeywords: vi.fn(), keywordSuggestionReturnFocusRef: { current: null },
     setKeywordSuggestionOptions: vi.fn(), setKeywordSuggestionSelection: vi.fn(), editorDisabled: false
   }
-  return renderHook(({ scope }) => useNotesEditorState({ ...deps, authorityScope: scope }), {
-    initialProps: { scope: 'alice' },
+  return renderHook(({ scope }) => {
+    const [keywords, setKeywords] = React.useState<string[]>([])
+    return useNotesEditorState({ ...deps, authorityScope: scope, editorKeywords: keywords, setEditorKeywords: setKeywords })
+  }, {
+    initialProps: { scope: aliceScope },
     wrapper: ({ children }) => <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   })
 }
@@ -92,8 +100,8 @@ describe('Notes editor authority races', () => {
     const view = renderEditor()
     let loading!: Promise<boolean>
     act(() => { loading = view.result.current.loadDetail('old') })
-    view.rerender({ scope: 'bob' })
-    view.rerender({ scope: 'alice' })
+    view.rerender({ scope: bobScope })
+    view.rerender({ scope: aliceScope })
     await act(async () => { await view.result.current.loadDetail('new') })
     await act(async () => {
       old.resolve({ id: 'old', title: 'Stale note', content: 'Stale content' })
@@ -108,7 +116,7 @@ describe('Notes editor authority races', () => {
     const view = renderEditor()
     act(() => { void view.result.current.loadDetail('old') })
     expect(view.result.current.loadingDetail).toBe(true)
-    view.rerender({ scope: 'bob' })
+    view.rerender({ scope: bobScope })
     expect(view.result.current.loadingDetail).toBe(false)
     await act(async () => { old.resolve({ id: 'old' }) })
   })
@@ -188,7 +196,7 @@ describe('Notes editor authority races', () => {
     const view = renderEditor()
     let loading!: Promise<boolean>
     act(() => { loading = view.result.current.loadDetail('old') })
-    view.rerender({ scope: 'bob' })
+    view.rerender({ scope: bobScope })
     act(() => { void view.result.current.loadDetail('new') })
     await act(async () => { old.reject(new Error('Old failure')); await loading })
     expect({ errors: mocks.error.mock.calls, loading: view.result.current.loadingDetail }).toEqual({ errors: [], loading: true })
@@ -203,12 +211,14 @@ describe('Notes editor authority races', () => {
     const view = renderEditor()
     let loading!: Promise<boolean>
     await act(async () => { loading = view.result.current.loadDetail('old') })
-    view.rerender({ scope: 'bob' })
-    view.rerender({ scope: 'alice' })
+    await waitFor(() => expect(mocks.tasks).toHaveBeenCalledWith('old', { limit: 500 }, expect.any(Object)))
+    view.rerender({ scope: bobScope })
+    view.rerender({ scope: aliceScope })
     await act(async () => { await view.result.current.loadDetail('new') })
     await act(async () => { old.resolve({ tasks: [{ id: 'stale-task' }], reconciliation: null }); await loading })
     expect(view.result.current.noteTasks.map((task) => task.id)).toEqual(['current-task'])
     expect(mocks.activity).not.toHaveBeenCalledWith({ note_id: 'old', limit: 50 })
+    expect(mocks.activity.mock.calls.some(([params]) => params.note_id === 'old')).toBe(false)
   })
 
   it.each(['resolve', 'reject'] as const)('ignores delayed activity %s after Alice → Bob → Alice', async (settle) => {
@@ -219,8 +229,9 @@ describe('Notes editor authority races', () => {
     const view = renderEditor()
     let loading!: Promise<boolean>
     await act(async () => { loading = view.result.current.loadDetail('old') })
-    view.rerender({ scope: 'bob' })
-    view.rerender({ scope: 'alice' })
+    await waitFor(() => expect(mocks.activity).toHaveBeenCalledWith({ note_id: 'old', limit: 50 }, expect.any(Object)))
+    view.rerender({ scope: bobScope })
+    view.rerender({ scope: aliceScope })
     await act(async () => { await view.result.current.loadDetail('new') })
     await act(async () => {
       if (settle === 'resolve') old.resolve({ events: [{ id: 'stale-event', note_id: 'old' }] })

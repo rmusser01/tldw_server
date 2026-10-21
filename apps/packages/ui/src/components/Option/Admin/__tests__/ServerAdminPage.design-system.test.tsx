@@ -136,7 +136,7 @@ describe("ServerAdminPage design-system states", () => {
   const docsUrl = "https://github.com/rmusser01/tldw_server#documentation--resources"
 
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     apiMock.getConfig.mockReset()
     mockMatchMedia()
     resolveBaseAdminCalls()
@@ -144,6 +144,7 @@ describe("ServerAdminPage design-system states", () => {
   })
 
   afterEach(() => {
+    adminQueryClients.splice(0).forEach(client => client.clear())
     vi.restoreAllMocks()
   })
 

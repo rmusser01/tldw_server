@@ -44,7 +44,7 @@ def test_real_restore_timeout_rolls_back_then_accepts_legitimate_retry(
         return real_tool(command, **kwargs)
 
     monkeypatch.setattr(DB_Backups, "_run_postgres_tool", with_progress)
-    directory = tmp_path / "interruption-backup"
+    directory = tmp_path / "backups" / "interruption-backup"
     completed = False
     try:
         # The source is fast; only COPY into this exact disposable target pauses.
@@ -62,6 +62,7 @@ def test_real_restore_timeout_rolls_back_then_accepts_legitimate_retry(
         source.get_pool().close_all()
         target.get_pool().close_all()
         dump = create_postgres_backup(source, backup_dir=str(directory), label="postgresql", timeout_seconds=15)
+        assert Path(dump).is_file()  # nosec B101 - Reach the real restore with an admitted archive.
         assert_postgres_database_offline(target.config, timeout_seconds=15)
         with pytest.raises(PostgresToolTimeout) as interrupted:
             restore_postgres_backup(target, dump_file=dump, timeout_seconds=1)

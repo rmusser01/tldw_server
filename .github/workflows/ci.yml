@@ -1930,6 +1930,7 @@ jobs:
       - name: Install pg client and wait for PG
         uses: ./.github/actions/wait-for-postgres
         with:
+          client-version: ${{ contains(fromJSON('["admin-backup-core", "admin-bundle-ops"]'), matrix.shard.name) && '18' || '' }}
           host: 127.0.0.1
           port: ${{ job.services.postgres.ports['5432'] }}
           user: tldw_user
@@ -3611,6 +3612,7 @@ jobs:
       - name: Install pg client and wait for PG
         uses: ./.github/actions/wait-for-postgres
         with:
+          client-version: ${{ contains(fromJSON('["admin-backup-core", "admin-bundle-ops"]'), matrix.shard.name) && '18' || '' }}
           host: 127.0.0.1
           port: ${{ job.services.postgres.ports['5432'] }}
           user: tldw_user

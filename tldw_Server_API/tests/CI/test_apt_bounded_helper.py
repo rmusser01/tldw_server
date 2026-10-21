@@ -158,3 +158,30 @@ def test_action_preflight_normalizes_active_apt_mirrors(tmp_path: Path, action: 
             assert path.read_text(encoding="utf-8") == normalized
         assert not (sources_dir / "microsoft.list").exists()
         assert (sources_dir / "unrelated.list").read_text(encoding="utf-8") == "https://example.com/ubuntu\n"
+
+
+@pytest.mark.parametrize("version", ["18", "18;exit 0"])
+def test_requested_pg_tools_are_selected_despite_existing_readiness_client(tmp_path: Path, version: str) -> None:
+    """A preinstalled older readiness client cannot bypass the requested backup tools."""
+    action = yaml.safe_load((HELPER.parent / "wait-for-postgres/action.yml").read_text())
+    script = next(step["run"] for step in action["runs"]["steps"] if step["name"] == "Select versioned client (Linux)")
+    client_root = tmp_path / "postgresql"
+    client_bin = client_root / "18/bin"
+    client_bin.mkdir(parents=True)
+    for name in ("pg_dump", "pg_restore"):
+        tool = client_bin / name
+        tool.write_text("#!/bin/sh\necho PostgreSQL 18\n")
+        tool.chmod(0o755)
+    github_path = tmp_path / "github-path"
+    script = script.replace("/usr/lib/postgresql", str(client_root))
+    result = subprocess.run(  # nosec B603 - Run the trusted repository action in isolated fixture paths.
+        ["/bin/bash", "-e", "-c", script],
+        env={"PATH": "/usr/bin:/bin", "PG_CLIENT_VERSION": version, "GITHUB_PATH": str(github_path)},
+        capture_output=True, text=True, timeout=10,
+    )
+    if version == "18":
+        assert result.returncode == 0, result.stdout + result.stderr  # nosec B101 - Client selection must succeed.
+        assert github_path.read_text().strip() == str(client_bin)  # nosec B101 - Later jobs must use the matching tools.
+    else:
+        assert result.returncode != 0  # nosec B101 - Refuse shell syntax in the requested major.
+        assert not github_path.exists()  # nosec B101 - Rejected input cannot change downstream PATH.

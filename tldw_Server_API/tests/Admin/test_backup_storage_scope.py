@@ -445,8 +445,8 @@ def test_direct_pg_connection_forwards_the_shared_effective_conninfo(monkeypatch
 
     transport_error = ConnectionError("controlled no-network boundary")
 
-    def transport_boundary(dsn):
-        seen.append(dsn)
+    def transport_boundary(dsn, *, row_factory):
+        seen.append((dsn, row_factory))
         raise transport_error
 
     monkeypatch.setattr(postgresql_backend, "PSYCOPG2_AVAILABLE", True)
@@ -454,4 +454,4 @@ def test_direct_pg_connection_forwards_the_shared_effective_conninfo(monkeypatch
     with pytest.raises(ConnectionError, match="controlled no-network boundary") as failure:
         postgresql_backend.PostgreSQLBackend(config).connect()
     assert failure.value is transport_error  # nosec B101 -- preserve the actual transport failure instead of masking it.
-    assert seen == [expected]  # nosec B101 -- actual direct-connect caller must forward the same effective target.
+    assert seen == [(expected, postgresql_backend.dict_row)]  # nosec B101 -- actual direct-connect caller must forward the same effective target.

@@ -70,6 +70,13 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: apiMock
 }))
 
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({
+    config: { serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" },
+    authorityLoading: false
+  })
+}))
+
 vi.mock("@/components/Common/PageShell", () => ({
   PageShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>
 }))
