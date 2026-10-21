@@ -182,3 +182,12 @@ Cold-session fixture exports the current local binding dependency with an explic
 Initial complete48+21history cohort passes69/69. Independent review identified an invalid fixture cursor/missing session ID hidden by existing any; corrected to a typed HistoryLoadReceipt view with a fixed session and after_message/image-question. The exact consent case passes again1with20excluded. This qualifies69unique cases across full/focused runs, not one final69green run. Initial ESLint14/14and17/17 inherited,0new; final typed-file lint and configured checks precede publication. No production logic, architecture rule, dependency or baseline changes; no new ADR or PythonBandit scope. Connected final receipt review precedes commit.
 
 Preparation batch caa155f739b828ebcfc822ff802cbbf91898d00c is committed locally. Connected Sidepanel harness remains WIP and readonly disposition is pending. Fresh b299 UX Smoke log119203461533 confirms the obsolete final blanket selected-history Regenerate-disabled expectation; it requires contract-preserving qualification. Other final-head gates and verified merge remain open.
+
+
+## Prompt component fixture qualification
+
+The published head2b53466117be1770e4fdb84abca0297292e24244 contains the reviewed preparation/history batches and was read back OPEN/dev/unarmed. Three remaining Prompt regressions reproduce on that source.
+
+ProjectSelector unit setup now supplies a fixed authenticated owner, verifies the exact existing owner policy alongside the original create payload/onSelect/invalidation, and adds an unavailable-owner refusal. PromptSelect UX setup follows the existing server-library fixture with matching authority/resolver/transport and owned local data; its original local/server-list assertions remain. The clean-save/Back regression now proves its old create editor has detached and clicks the current saved-ID editor; original no-confirm/closed/library assertions remain. No production or durable architecture rule changes; no new ADR is needed.
+
+All5focused cases pass: complete3ProjectSelector plus1server-library and1clean-save, with80other PromptBody cases excluded. ESLint9/9,0/0,20/20 inherited,0new. PythonBandit is inapplicable. Independent connected review and normal configured checks precede publication. Separate Sidepanel readonly and live smoke qualification remain open, as do final-head statuses, trusted expanded-summary disposition and verified merge.

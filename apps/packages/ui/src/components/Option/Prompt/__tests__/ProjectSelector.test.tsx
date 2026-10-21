@@ -7,6 +7,10 @@ import { ProjectSelector } from "../ProjectSelector"
 const createProjectMock = vi.fn()
 const invalidateQueriesMock = vi.fn()
 const useQueryMock = vi.fn()
+const authority = vi.hoisted(() => ({ ownerId: `recipe-owner:sha256:${"a".repeat(64)}` as string | null, ready: true }))
+vi.mock("@/hooks/usePromptLocalAuthority", () => ({
+  usePromptLocalAuthority: () => authority
+}))
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -82,6 +86,8 @@ vi.mock("antd", () => ({
 
 describe("ProjectSelector", () => {
   beforeEach(() => {
+    authority.ownerId = `recipe-owner:sha256:${"a".repeat(64)}`
+    authority.ready = true
     createProjectMock.mockReset()
     invalidateQueriesMock.mockReset()
     useQueryMock.mockReset()
@@ -104,6 +110,18 @@ describe("ProjectSelector", () => {
     expect(screen.queryByRole("button", { name: "Create project" })).not.toBeInTheDocument()
     expect(screen.queryByPlaceholderText("Enter project name")).not.toBeInTheDocument()
     expect(createProjectMock).not.toHaveBeenCalled()
+  })
+
+  it("refuses project creation while its authenticated owner is unavailable", async () => {
+    authority.ownerId = null
+    authority.ready = false
+    const user = userEvent.setup()
+    const onSelect = vi.fn()
+    render(<ProjectSelector open onClose={vi.fn()} onSelect={onSelect} />)
+    await user.type(screen.getByPlaceholderText("Enter project name"), "Unowned project")
+    await user.click(screen.getByRole("button", { name: "Create project" }))
+    expect(createProjectMock).not.toHaveBeenCalled()
+    expect(onSelect).not.toHaveBeenCalled()
   })
 
   it("creates a project inline from empty state and selects it", async () => {
@@ -137,7 +155,9 @@ describe("ProjectSelector", () => {
       expect(createProjectMock).toHaveBeenCalledWith(
         expect.objectContaining({
           name: "My Sync Project"
-        })
+        }),
+        undefined,
+        { recipePersistence: { mode: "owner", expectedOwnerId: authority.ownerId } }
       )
       expect(onSelect).toHaveBeenCalledWith(42)
     })
