@@ -43,6 +43,7 @@ const graphPayload = (): NotesGraphResponse => ({
   all_notes_note_cap: 100,
   all_notes_eligible: true,
   suggestions_authorized: true,
+  manual_link_authorized: false,
 });
 
 describe("Notes graph identities at the API boundary", () => {
@@ -66,9 +67,12 @@ describe("Notes graph identities at the API boundary", () => {
         id: "connected",
         rows: [
           {
-            id: "tag-edge",
+            id: "edge:tag-edge",
             group: "connected",
             edgeType: "tag_membership",
+            edgeIds: ["tag-edge"],
+            edgeTypes: ["tag_membership"],
+            edges: [{ ...graphPayload().edges[0], source: "note:alpha" }],
             counterpart: { id: "tag:amber", label: "tag:amber" },
             suggestion: null,
           },
