@@ -65,6 +65,8 @@ from tldw_Server_API.app.core.AuthNZ.permissions import (
     CALENDAR_READ,
     CALENDAR_SYNC,
     CALENDAR_WRITE,
+    TASKS_CONTROL,
+    TASKS_READ,
 )
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Calendar.calendar_service import CalendarService
@@ -162,6 +164,19 @@ def _user_id(current_user: User) -> int:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "invalid_user_id", "message": "Calendar API requires a numeric user id"},
         ) from exc
+
+
+async def _scheduled_tasks_visible(principal: AuthPrincipal, requested: bool) -> bool:
+    """Keep local Calendar reads available without granting access to Scheduled Tasks."""
+    if not requested:
+        return False
+    try:
+        await RequirePermission(TASKS_READ)(principal)
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_403_FORBIDDEN:
+            raise
+        return False
+    return True
 
 
 def _tenant_id(current_user: User) -> str:
@@ -609,7 +624,7 @@ async def get_calendar_agenda(
             end_at=end_at,
             filters=CalendarViewFilters(
                 calendar_ids=calendar_ids,
-                include_scheduled_tasks=include_scheduled_tasks,
+                include_scheduled_tasks=await _scheduled_tasks_visible(_principal, include_scheduled_tasks),
                 include_provider_tombstones=False,
             ),
         )
@@ -648,7 +663,7 @@ async def get_calendar_week(
             timezone=timezone,
             filters=CalendarViewFilters(
                 calendar_ids=calendar_ids,
-                include_scheduled_tasks=include_scheduled_tasks,
+                include_scheduled_tasks=await _scheduled_tasks_visible(_principal, include_scheduled_tasks),
                 include_provider_tombstones=False,
             ),
         )
@@ -857,12 +872,12 @@ async def copy_calendar_item(
     "/reminders",
     response_model=CalendarReminderResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True))],
+    dependencies=[Depends(rbac_rate_limit("calendar.write", per_user=True)), Depends(rbac_rate_limit("tasks.control"))],
 )
 async def create_calendar_reminder(
     payload: CalendarReminderCreateRequest,
     current_user: User = Depends(get_request_user),
-    _principal: AuthPrincipal = Depends(RequirePermission(CALENDAR_WRITE)),  # noqa: B008
+    _principal: AuthPrincipal = Depends(RequirePermission(CALENDAR_WRITE, TASKS_CONTROL)),  # noqa: B008
     service: CalendarService = Depends(get_calendar_service),
     scheduled_tasks_service: ScheduledTasksControlPlaneService = Depends(get_scheduled_tasks_service),
 ) -> CalendarReminderResponse:

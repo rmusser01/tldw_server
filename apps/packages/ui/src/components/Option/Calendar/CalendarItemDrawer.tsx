@@ -95,6 +95,8 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
   onClose,
   onSaved
 }) => {
+  const active = React.useRef(true)
+  React.useEffect(() => { active.current = true; return () => { active.current = false } }, [])
   const [kind, setKind] = React.useState<CalendarItemKind>("event")
   const [calendarId, setCalendarId] = React.useState<number | null>(null)
   const [title, setTitle] = React.useState("")
@@ -189,15 +191,16 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
       setLinks((current) => current.filter((link) => link.id !== linkId))
       await onSaved()
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "Unable to remove link")
+      if (active.current) message.error(error instanceof Error ? error.message : "Unable to remove link")
     } finally {
       setSaving(false)
     }
   }
 
   const refreshAndClose = async () => {
+    if (!active.current) return
     await onSaved()
-    onClose()
+    if (active.current) onClose()
   }
 
   const handleSave = async () => {
@@ -287,27 +290,27 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
 
       await refreshAndClose()
     } catch (error: any) {
-      message.error(error?.message || "Unable to save calendar item")
+      if (active.current) message.error(error?.message || "Unable to save calendar item")
     } finally {
       setSaving(false)
     }
   }
 
   const saveLocalContext = async (currentTags: string[], shouldSaveTags: boolean) => {
-    if (!item?.calendar_item_id) return
+    if (!item?.calendar_item_id || !active.current) return
 
     if (shouldSaveTags) {
       await updateCalendarLocalTags(item.calendar_item_id, { tags: currentTags })
     }
 
-    if (annotation.trim()) {
+    if (active.current && annotation.trim()) {
       await createCalendarAnnotation(item.calendar_item_id, {
         body: annotation.trim(),
         tags: []
       })
     }
 
-    if (linkLabel.trim() || linkUrl.trim()) {
+    if (active.current && (linkLabel.trim() || linkUrl.trim())) {
       await createCalendarLink(item.calendar_item_id, {
         target_type: "note",
         target_id: linkUrl.trim() || linkLabel.trim(),
@@ -330,7 +333,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
       })
       await refreshAndClose()
     } catch (error: any) {
-      message.error(error?.message || "Unable to delete calendar item")
+      if (active.current) message.error(error?.message || "Unable to delete calendar item")
     } finally {
       setSaving(false)
     }
@@ -345,7 +348,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
       })
       await refreshAndClose()
     } catch (error: any) {
-      message.error(error?.message || "Unable to copy calendar item")
+      if (active.current) message.error(error?.message || "Unable to copy calendar item")
     } finally {
       setSaving(false)
     }

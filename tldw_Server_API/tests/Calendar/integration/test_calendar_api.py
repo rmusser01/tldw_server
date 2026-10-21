@@ -34,6 +34,57 @@ from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 pytestmark = pytest.mark.integration
 
 
+@pytest.mark.parametrize("view", ["agenda", "week"])
+@pytest.mark.parametrize("tasks_allowed", [False, True])
+def test_rereview_calendar_projections_require_tasks_read(
+    calendar_api_client, view: str, tasks_allowed: bool,
+) -> None:
+    """Calendar access alone must not reveal another module's restricted projections."""
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+
+    client, _db, reminders = calendar_api_client
+    calendar = _create_calendar(client)
+    _create_event(client, calendar["id"])
+    reminders.tasks = [ScheduledTask(id="restricted", primitive="reminder_task", title="Restricted task",
+                                    status="scheduled", enabled=True, next_run_at="2026-06-05T17:00:00Z", edit_mode="native")]
+    principal = AuthPrincipal(kind="api_key", user_id=1, api_key_id=99,
+                              permissions=["calendar.read", "calendar.write"] + (["tasks.read"] if tasks_allowed else []))
+    client.app.dependency_overrides[auth_deps.get_auth_principal] = lambda: principal
+    params = {"start_at": "2026-06-01", "end_at": "2026-06-08"} if view == "agenda" else {"week_start": "2026-06-01", "timezone": "UTC"}
+    result = client.get(f"/api/v1/calendar/views/{view}", params=params)
+    assert result.status_code == 200, result.text
+    assert "Planning" in result.text
+    assert ("Restricted task" in result.text) is tasks_allowed
+
+
+@pytest.mark.parametrize("tasks_allowed", [False, True])
+def test_rereview_calendar_reminder_requires_tasks_control(calendar_api_client, tasks_allowed: bool) -> None:
+    """Delegated reminder creation cannot bypass the owning module's permission."""
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+
+    client, _db, reminders = calendar_api_client
+    calendar = _create_calendar(client)
+    item = _create_event(client, calendar["id"])
+    principal = AuthPrincipal(kind="api_key", user_id=1, api_key_id=99,
+                              permissions=["calendar.read", "calendar.write"] + (["tasks.control"] if tasks_allowed else []))
+    client.app.dependency_overrides[auth_deps.get_auth_principal] = lambda: principal
+    result = client.post("/api/v1/calendar/reminders", json={"calendar_item_id": item["id"], "title": "Restricted reminder",
+                         "schedule_kind": "one_time", "run_at": "2027-06-05T17:00:00Z"})
+    assert result.status_code == (201 if tasks_allowed else 403), result.text
+    assert len(reminders.calls) == (1 if tasks_allowed else 0)
+
+
+@pytest.mark.parametrize("field", ["kind", "title", "all_day", "status"])
+def test_rereview_patch_rejects_null_nonnullable_fields(calendar_api_client, field: str) -> None:
+    """Explicit null is invalid while omitted nonnullable fields stay unchanged."""
+    client, db, _reminders = calendar_api_client
+    calendar = _create_calendar(client)
+    item = _create_event(client, calendar["id"])
+    result = client.patch(f"/api/v1/calendar/items/{item['id']}", json={field: None})
+    assert result.status_code == 422, result.text
+    assert getattr(db.get_item(item["id"]), field) == item[field]
+
+
 @pytest.fixture()
 async def calendar_rate_limit_pool(tmp_path: Path) -> AsyncIterator[DatabasePool]:
     """Exercise catalog/database quota precedence against real isolated storage."""
@@ -484,6 +535,11 @@ async def test_caldav_api_provider_calls_run_off_event_loop(
 class _ReminderServiceStub:
     def __init__(self) -> None:
         self.calls: list[tuple[int, Any]] = []
+        self.tasks: list[ScheduledTask] = []
+
+    async def list_tasks(self, *, user_id: int):
+        from tldw_Server_API.app.core.Scheduled_Tasks.control_plane_models import ScheduledTaskListResponse
+        return ScheduledTaskListResponse(items=self.tasks, total=len(self.tasks))
 
     async def create_reminder(self, *, user_id: int, payload: Any) -> ScheduledTask:
         self.calls.append((user_id, payload))

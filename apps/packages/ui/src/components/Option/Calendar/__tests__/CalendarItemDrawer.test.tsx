@@ -132,6 +132,21 @@ const renderDrawer = (
   )
 
 describe("CalendarItemDrawer", () => {
+  it("does not continue context mutations after its authority workspace unmounts", async () => {
+    const user = userEvent.setup()
+    let finishUpdate: (value: unknown) => void = () => {}
+    mocks.updateCalendarItem.mockImplementationOnce(() => new Promise((resolve) => { finishUpdate = resolve }))
+    const onSaved = vi.fn()
+    const view = renderDrawer(localItem, { onSaved })
+    await user.type(screen.getByRole("textbox", { name: "Annotation" }), "Old owner draft")
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+    await waitFor(() => expect(mocks.updateCalendarItem).toHaveBeenCalled())
+    view.unmount()
+    await act(async () => { finishUpdate({ id: 7 }) })
+    expect(mocks.createCalendarAnnotation).not.toHaveBeenCalled()
+    expect(mocks.createCalendarLink).not.toHaveBeenCalled()
+    expect(onSaved).not.toHaveBeenCalled()
+  })
   it("independent review: displays offset timestamps in the item's editing timezone", async () => {
     const user = userEvent.setup()
     renderDrawer({ ...localItem, metadata: { timezone: "America/Los_Angeles" } })

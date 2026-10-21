@@ -5,6 +5,8 @@ import { useQuery } from "@tanstack/react-query"
 import { useNavigate } from "react-router-dom"
 import { RecoveryCallout, buildCapabilityState } from "@/components/ui/state"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
+import type { TldwConfig } from "@/services/tldw/TldwApiClient"
 import {
   createCalendar,
   getCalendarAgenda,
@@ -60,9 +62,16 @@ const sourceFilterForItem = (
 }
 
 export const CalendarPage: React.FC = () => {
+  const { config, loading, authorityLoading } = useCanonicalConnectionConfig()
+  if (!config || (authorityLoading ?? loading)) return <div role="status" aria-label="Loading Calendar connection"><Spin /></div>
+  const authorityKey = deriveConnectionAuthorityId(config)
+  return <CalendarWorkspace key={authorityKey} connectionConfig={config} authorityKey={authorityKey} />
+}
+
+const CalendarWorkspace: React.FC<{ connectionConfig: TldwConfig; authorityKey: string }> = ({ connectionConfig, authorityKey }) => {
   const navigate = useNavigate()
-  const { config: connectionConfig, loading: connectionConfigLoading } =
-    useCanonicalConnectionConfig()
+  const active = React.useRef(true)
+  React.useEffect(() => { active.current = true; return () => { active.current = false } }, [])
   const [calendarSupported, setCalendarSupported] = useState<boolean | null>(null)
   const [selectedCalendarIds, setSelectedCalendarIds] = useState<number[] | null>(null)
   const [selectedSources, setSelectedSources] =
@@ -107,8 +116,6 @@ export const CalendarPage: React.FC = () => {
   }, [])
 
   React.useEffect(() => {
-    if (connectionConfigLoading) return
-
     const serverUrl = connectionConfig?.serverUrl?.trim()
     if (!serverUrl) {
       setCalendarSupported(true)
@@ -144,10 +151,10 @@ export const CalendarPage: React.FC = () => {
     return () => {
       cancelled = true
     }
-  }, [connectionConfig?.serverUrl, connectionConfigLoading])
+  }, [connectionConfig.serverUrl])
 
   const calendarsQuery = useQuery({
-    queryKey: ["calendar", "calendars"],
+    queryKey: ["calendar", authorityKey, "calendars"],
     queryFn: listCalendars,
     enabled: calendarSupported === true
   })
@@ -167,6 +174,7 @@ export const CalendarPage: React.FC = () => {
   const agendaQuery = useQuery({
     queryKey: [
       "calendar",
+      authorityKey,
       "agenda",
       agendaStart.toISOString(),
       agendaEnd.toISOString(),
@@ -186,7 +194,7 @@ export const CalendarPage: React.FC = () => {
   })
 
   const weekQuery = useQuery({
-    queryKey: ["calendar", "week", localDate(weekStart), selectedCalendarQueryIds],
+    queryKey: ["calendar", authorityKey, "week", localDate(weekStart), selectedCalendarQueryIds],
     queryFn: () =>
       getCalendarWeek({
         week_start: localDate(weekStart),
@@ -253,6 +261,7 @@ export const CalendarPage: React.FC = () => {
   }
 
   const refreshViews = async () => {
+    if (!active.current) return
     await Promise.all([
       calendarsQuery.refetch(),
       agendaQuery.refetch(),
@@ -275,7 +284,7 @@ export const CalendarPage: React.FC = () => {
       setSelectedCalendarIds(null)
       await refreshViews()
     } catch (error) {
-      message.error(error instanceof Error ? error.message : "Unable to create calendar")
+      if (active.current) message.error(error instanceof Error ? error.message : "Unable to create calendar")
     } finally {
       setCreatingCalendar(false)
     }
@@ -328,7 +337,6 @@ export const CalendarPage: React.FC = () => {
     : null
 
   const loading =
-    connectionConfigLoading ||
     calendarSupported === null ||
     calendarsQuery.isLoading ||
     agendaQuery.isLoading ||
@@ -421,7 +429,7 @@ export const CalendarPage: React.FC = () => {
       {calendarSupported === false ? null : (
         <div className="flex flex-col gap-4">
           {view === "sync" ? (
-            <CalendarSyncSettings calendars={calendars} onChanged={refreshViews} />
+            <CalendarSyncSettings authorityKey={authorityKey} calendars={calendars} onChanged={refreshViews} />
           ) : (
             <div className="flex flex-col gap-4 md:flex-row md:items-start">
               <CalendarFilterRail

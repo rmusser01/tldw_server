@@ -252,6 +252,21 @@ class CalendarService:
         self._raise_if_provider_owned(item)
         self._assert_calendar_access(actor_user_id, item.calendar_id, "write")
         if {"kind", "start_at", "end_at", "due_at", "timezone", "all_day"} & updates.keys():
+            try:
+                zone = ZoneInfo(updates.get("timezone", item.timezone) or "UTC")
+                for name in ("start_at", "end_at", "due_at"):
+                    value, original = updates.get(name), getattr(item, name)
+                    if not value or not original or "T" not in value:
+                        continue
+                    moment = date_parser.isoparse(value)
+                    if moment.tzinfo is not None:
+                        continue
+                    previous = date_parser.isoparse(original)
+                    # Retain repeated-hour lineage without freezing the offset on later DST dates.
+                    fold = previous.astimezone(zone).fold if previous.tzinfo is not None else 0
+                    updates[name] = moment.replace(tzinfo=zone, fold=fold).isoformat()
+            except (TypeError, ValueError, ZoneInfoNotFoundError) as exc:
+                raise CalendarValidationError("Calendar times must use valid ISO timestamps and an IANA timezone") from exc
             self._validate_item_time(
                 kind=str(updates.get("kind", item.kind)),
                 start_at=updates.get("start_at", item.start_at),

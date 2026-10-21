@@ -93,7 +93,7 @@ const renderSettings = (onChanged = vi.fn()) => {
   })
   return render(
     <QueryClientProvider client={queryClient}>
-      <CalendarSyncSettings calendars={calendars} onChanged={onChanged} />
+      <CalendarSyncSettings authorityKey="test-authority" calendars={calendars} onChanged={onChanged} />
     </QueryClientProvider>
   )
 }
@@ -116,6 +116,23 @@ const fillAccountDraft = async (
 }
 
 describe("CalendarSyncSettings", () => {
+  it("retires cached accounts and credential drafts when authority changes", async () => {
+    const user = userEvent.setup()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const tree = (authorityKey: string) => <QueryClientProvider client={queryClient}>
+      <CalendarSyncSettings authorityKey={authorityKey} calendars={calendars} />
+    </QueryClientProvider>
+    const view = render(tree("owner-A"))
+    expect(await screen.findByText(account.display_name)).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: "Add CalDAV account" }))
+    await user.type(screen.getByLabelText("Password"), "private-old-password")
+    mocks.listCalDavAccounts.mockClear()
+    mocks.listCalDavAccounts.mockResolvedValue({ items: [], total: 0 })
+    view.rerender(tree("owner-B"))
+    await waitFor(() => expect(mocks.listCalDavAccounts).toHaveBeenCalled())
+    expect(screen.queryByText(account.display_name)).toBeNull()
+    expect(screen.queryByDisplayValue("private-old-password")).toBeNull()
+  })
   beforeEach(() => {
     for (const mock of Object.values(mocks)) {
       mock.mockReset()

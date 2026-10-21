@@ -179,6 +179,56 @@ const renderPage = () => {
 }
 
 describe("CalendarPage", () => {
+  it.each(["server", "principal", "org"])("retires private items and drafts when connection %s changes", async (change) => {
+    const user = userEvent.setup()
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const tree = () => <MemoryRouter><QueryClientProvider client={queryClient}><CalendarPage /></QueryClientProvider></MemoryRouter>
+    const view = render(tree())
+    expect(await screen.findByText("Paper review")).toBeTruthy()
+    await user.click(screen.getByRole("button", { name: "New item" }))
+    await user.type(screen.getByRole("textbox", { name: "Title" }), "Private old draft")
+    mocks.listCalendars.mockClear()
+    mocks.getCalendarAgenda.mockClear()
+    mocks.listCalendars.mockResolvedValue({ items: [], total: 0 })
+    mocks.getCalendarAgenda.mockResolvedValue({ items: [] })
+    mocks.getCalendarWeek.mockResolvedValue({ items: [] })
+    mocks.useCanonicalConnectionConfig.mockReturnValue({ config: {
+      serverUrl: change === "server" ? "https://other-server.example" : "http://127.0.0.1:8000",
+      apiKey: change === "principal" ? "other-principal" : "test-key", authMode: "single-user",
+      orgId: change === "org" ? 42 : null
+    }, loading: false, authorityLoading: false })
+    view.rerender(tree())
+    await waitFor(() => expect(mocks.listCalendars).toHaveBeenCalled())
+    expect(screen.queryByText("Paper review")).toBeNull()
+    expect(screen.queryByDisplayValue("Private old draft")).toBeNull()
+  })
+
+  it("does not fetch or expose cached Calendar data while authority is unresolved", async () => {
+    mocks.useCanonicalConnectionConfig.mockReturnValue({ config: { serverUrl: "http://127.0.0.1:8000", apiKey: "test-key", authMode: "single-user" },
+      loading: false, authorityLoading: true })
+    renderPage()
+    await act(async () => { await Promise.resolve() })
+    expect(mocks.listCalendars).not.toHaveBeenCalled()
+    expect(mocks.getCalendarAgenda).not.toHaveBeenCalled()
+    expect(screen.queryByText("Paper review")).toBeNull()
+  })
+
+  it("ignores an old authority's delayed agenda response", async () => {
+    let resolveOld: (value: { items: typeof agendaItems }) => void = () => {}
+    mocks.getCalendarAgenda.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const tree = () => <MemoryRouter><QueryClientProvider client={queryClient}><CalendarPage /></QueryClientProvider></MemoryRouter>
+    const view = render(tree())
+    await waitFor(() => expect(mocks.getCalendarAgenda).toHaveBeenCalled())
+    mocks.getCalendarAgenda.mockResolvedValue({ items: [{ ...agendaItems[0], title: "New owner item" }] })
+    mocks.useCanonicalConnectionConfig.mockReturnValue({ config: { serverUrl: "http://127.0.0.1:8000", apiKey: "other-owner", authMode: "single-user" },
+      loading: false, authorityLoading: false })
+    view.rerender(tree())
+    expect(await screen.findByText("New owner item")).toBeTruthy()
+    await act(async () => { resolveOld({ items: agendaItems }) })
+    expect(screen.queryByText("Paper review")).toBeNull()
+    expect(screen.getByText("New owner item")).toBeTruthy()
+  })
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ["Date"] })
     vi.setSystemTime(new Date("2026-06-05T12:00:00Z"))
