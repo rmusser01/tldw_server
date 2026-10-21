@@ -9,10 +9,16 @@ import { usePromptPaletteCommands } from "../usePromptPaletteCommands"
 import { CommandPaletteHost } from "@/components/Common/CommandPaletteHost"
 
 const mocks = vi.hoisted(() => ({
+  ownerId: `recipe-owner:sha256:${"a".repeat(64)}`,
   getAllPrompts: vi.fn(),
   searchPromptsServer: vi.fn()
 }))
-vi.mock("@/db/dexie/helpers", () => ({ getAllPrompts: () => mocks.getAllPrompts() }))
+vi.mock("@/hooks/usePromptLocalAuthority", () => ({
+  usePromptLocalAuthority: () => ({ ownerId: mocks.ownerId, ready: true })
+}))
+vi.mock("@/db/dexie/helpers", () => ({
+  getAllPrompts: (ownerId?: string | null) => mocks.getAllPrompts(ownerId)
+}))
 vi.mock("@/services/prompts-api", () => ({
   searchPromptsServer: (...args: unknown[]) => mocks.searchPromptsServer(...args)
 }))
@@ -28,7 +34,7 @@ vi.mock("@/hooks/keyboard/useShortcutConfig", () => ({
 const STUDIO_UUID = "123e4567-e89b-12d3-a456-426614174001"
 const IMPORT_UUID = "123e4567-e89b-12d3-a456-426614174002"
 const record = (overrides: Partial<Prompt> = {}): Prompt => ({
-  id: STUDIO_UUID, title: "Pirate", name: "Pirate", content: "Say ARRR.",
+  id: STUDIO_UUID, ownerId: mocks.ownerId, title: "Pirate", name: "Pirate", content: "Say ARRR.",
   system_prompt: "Say ARRR.", user_prompt: "Explain why water wet.",
   is_system: true, createdAt: 1, keywords: ["nautical"],
   author: "Captain", details: "Sailing helper", ...overrides
@@ -205,6 +211,16 @@ describe("prompt palette hydrated inventory", () => {
     expect(screen.getAllByRole("button").map((button) => button.textContent)).toEqual(["Favorite", "Recent"])
     fireEvent.click(screen.getByRole("button", { name: "Favorite" }))
     expect(screen.getByTestId("location")).toHaveTextContent(`/prompts?edit=${STUDIO_UUID}`)
+  })
+
+  it("does not expose another owner's inventory despite a matching search", async () => {
+    mocks.getAllPrompts.mockResolvedValue([record({ ownerId: `recipe-owner:sha256:${"b".repeat(64)}` })])
+    mount("Pirate")
+    await waitFor(() => expect(mocks.getAllPrompts).toHaveBeenCalledWith(mocks.ownerId))
+    await waitFor(() => expect(clients.at(-1)!.isFetching()).toBe(0))
+    expect(screen.queryAllByRole("button")).toHaveLength(0)
+    expect(screen.getByTestId("location")).toHaveTextContent("/home")
+    expect(mocks.searchPromptsServer).not.toHaveBeenCalled()
   })
 
   it("does not hydrate or offer commands when disabled", async () => {

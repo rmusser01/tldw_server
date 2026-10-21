@@ -1,6 +1,8 @@
 import AxeBuilder from "@axe-core/playwright";
-import { readStore } from "../../../extension/tests/e2e/utils/history-selection";
+import { choose, readStore } from "../../../extension/tests/e2e/utils/history-selection";
+import type { ServerChatMessage } from "../../../packages/ui/src/services/tldw/TldwApiClient";
 import type { HistoryBookmark } from "../../../packages/ui/src/db/dexie/types";
+import type { HistorySelectionCaptureV1 } from "../../../packages/ui/src/types/history-selection";
 /**
  * /chat cockpit real-server parity checks.
  *
@@ -3316,15 +3318,24 @@ test.describe('/chat cockpit real-server parity', () => {
     await expect(regenerateControl).toBeDisabled();
 
     const prompt = `Cockpit streaming controls proof ${Date.now()}: reply with a concise numbered list.`;
+    let selectedPrompt = prompt;
     const completionAttempt = page.waitForRequest(
       (request) => isChatCompletionRequest(page, request),
       { timeout: 90_000 }
     );
 
+    const completionResponse = completionAttempt.then(hit => hit.response());
     await page.getByTestId('chat-input').fill(prompt);
     await page.getByRole('button', { name: /send message/i }).click();
     const completionRequest = await completionAttempt;
-    await assertProviderQualifiedPayload(page, completionRequest);
+    // Short replies are held before HTTP headers; qualify saved input without waiting for output.
+    const originalChatId = completionRequest.postDataJSON().conversation_id ?? completionRequest.postDataJSON().tldw_history_selection_v1?.conversation_id;
+    expect(typeof originalChatId).toBe('string');
+    const messagesPath = `/api/v1/chats/${originalChatId}/messages?include_metadata=true&render_placeholders=false`;
+    await expect.poll(async () => {
+      const saved = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+      return saved.status === 200 && saved.body.messages.some(row => row.sender === 'user' && row.content === prompt);
+    }, { timeout: 30_000 }).toBe(true);
 
     const runtimeStop = runtimeInspector.getByRole('button', { name: 'Stop generation' });
     const messageStop = page.getByRole('button', { name: /Stop streaming response/i }).first();
@@ -3334,6 +3345,7 @@ test.describe('/chat cockpit real-server parity', () => {
     ];
     const stopControl = await waitForFirstAvailableControl(stopCandidates, 15_000);
 
+    let clickedStopControl: ControlCandidate | null = null;
     if (!stopControl) {
       const note =
         'No streaming stop control became observable before the provider response completed.';
@@ -3346,8 +3358,7 @@ test.describe('/chat cockpit real-server parity', () => {
       }
       await assertChatCompletionRenderedOrRecoverable(page);
     } else {
-      const clickedStopControl =
-        (await clickFirstAvailableControl([stopControl, ...stopCandidates])) ?? null;
+      clickedStopControl = await clickFirstAvailableControl([stopControl, ...stopCandidates]);
       if (!clickedStopControl && expectStreamingControlEvidence) {
         throw new Error(
           `Streaming stop control "${stopControl.label}" appeared but disappeared before it could be clicked.`
@@ -3360,26 +3371,42 @@ test.describe('/chat cockpit real-server parity', () => {
       await expect(runtimeStop).toBeDisabled({ timeout: 30_000 });
     }
 
+    await assertProviderQualifiedPayload(page, completionRequest);
+    const admittedResponse = await completionResponse;
+    if (admittedResponse) {
+      expect(admittedResponse.status(), admittedResponse.status() === 200
+        ? 'Initial completion must succeed unless Stop aborts it'
+        : await admittedResponse.text()).toBe(200);
+    } else {
+      expect(clickedStopControl).not.toBeNull();
+    }
     await expect(runtimeStop).toBeDisabled({ timeout: 30_000 });
     await expect(messageStop).toBeHidden({ timeout: 30_000 });
     const assistantMessages = page
       .getByRole('log', { name: /chat messages/i })
       .locator("article[aria-label*='Assistant message']");
-    if ((await assistantMessages.count()) === 0) {
-      // Stopping before the first token correctly removes the empty assistant
-      // stub. Complete another turn so the history gate has a response to gate.
-      await expect(regenerateControl).toBeDisabled();
-      await expect(
-        runtimeInspector.getByText('Regenerate becomes available after an assistant response.')
-      ).toBeVisible();
+    const stopped = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+    expect(stopped.status).toBe(200);
+    const stoppedQuestion = stopped.body.messages.find(row => row.sender === 'user' && row.content === prompt);
+    expect(stoppedQuestion).toBeDefined();
+    const savedStoppedAnswer = stopped.body.messages.find(row => row.sender === 'assistant' &&
+      row.parent_message_id === stoppedQuestion!.id && row.content.trim());
+    const emptyResponse = (await assistantMessages.count()) === 0;
+    if (emptyResponse || !savedStoppedAnswer) {
+      // Unsaved partial text is readable, but cannot authorize a saved-history branch.
+      if (emptyResponse) {
+        await expect(regenerateControl).toBeDisabled();
+        await expect(
+          runtimeInspector.getByText('Regenerate becomes available after an assistant response.')
+        ).toBeVisible();
+      }
       // Stop may precede the server settlement receipt; reload the saved history before a new turn.
-      const originalChatId = completionRequest.postDataJSON().conversation_id ?? completionRequest.postDataJSON().tldw_history_selection_v1?.conversation_id;
-      expect(typeof originalChatId).toBe('string');
       const originalRecoveries = ((await readStore(page, 'historySelections')) as HistoryBookmark[])
         .filter(row => row.conversation_id === originalChatId).flatMap(row => Object.values(row.pending_turns ?? {}));
       const stoppedInput = originalRecoveries.find(turn => turn.input_text === prompt);
       expect(stoppedInput).toBeDefined();
-      await expect(page.getByText('The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.', { exact: true })).toBeVisible();
+      if (emptyResponse) await expect(page.getByText('The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.', { exact: true })).toBeVisible();
+      else expect(stoppedInput!.result_text.trim()).not.toBe('');
       const automaticTurnAttempts: string[] = [];
       const observeAutomaticTurn = (hit: Request) => {
         if (hit.method() !== 'POST') return;
@@ -3398,10 +3425,34 @@ test.describe('/chat cockpit real-server parity', () => {
         await page.getByRole('button', { name: 'Review conversation history', exact: true }).click();
         const savedSource = page.getByRole('list', { name: 'Complete source messages', exact: true });
         await expect(savedSource).toBeVisible();
-        const continueAfterSaved = savedSource.locator('[data-history-message-id]').last()
-          .getByRole('button', { name: 'Continue after this message', exact: true });
-        await expect(continueAfterSaved).toBeEnabled();
-        await continueAfterSaved.click();
+        const reloaded = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+        expect(reloaded.status).toBe(200);
+        const lateAnswer = reloaded.body.messages.find(row => row.sender === 'assistant' && row.parent_message_id === stoppedQuestion!.id && row.content.trim());
+        const captureBoundary = async (id: string): Promise<HistorySelectionCaptureV1> => {
+          const captured = page.waitForResponse(response => response.request().method() === 'POST' &&
+            new URL(response.url()).pathname === `/api/v1/chat/conversations/${originalChatId}/history/selection` &&
+            response.request().postDataJSON()?.view?.cursor?.message_id === id && response.status() === 200);
+          const continueAfterSaved = savedSource.locator(`[data-history-message-id="${escapeCssAttrValue(id)}"]`)
+            .getByRole('button', { name: 'Continue after this message', exact: true });
+          await expect(continueAfterSaved).toBeEnabled();
+          await continueAfterSaved.click();
+          const boundary: HistorySelectionCaptureV1 = await (await captured).json();
+          expect(boundary).toMatchObject({ status: 'captured', view: { conversation_id: originalChatId,
+            cursor: { kind: 'after_message', message_id: id } } });
+          return boundary;
+        };
+        let boundaryId = lateAnswer?.id ?? stoppedQuestion!.id;
+        let boundary = await captureBoundary(boundaryId);
+        const lateChildren = boundary.snapshot.nodes.filter(node => node.parent_id === boundaryId);
+        if (lateChildren.length) {
+          // A stopped reply can settle between the API read and this captured manifest.
+          expect(boundaryId).toBe(stoppedQuestion!.id);
+          expect(lateChildren).toHaveLength(1);
+          expect(lateChildren[0]).toMatchObject({ role: 'assistant', settled: true });
+          boundaryId = lateChildren[0].id;
+          boundary = await captureBoundary(boundaryId);
+        }
+        expect(boundary.snapshot.nodes.filter(node => node.parent_id === boundaryId)).toEqual([]);
         await page.getByRole('button', { name: 'Cancel review', exact: true }).click();
         await expect(page.locator("article[data-role='user']").filter({ hasText: prompt })).toHaveCount(1);
         await expect(page.getByRole('button', { name: /send message/i })).toBeEnabled();
@@ -3410,18 +3461,86 @@ test.describe('/chat cockpit real-server parity', () => {
         page.removeListener('request', observeAutomaticTurn);
       }
       const followUpCompletion = waitForChatCompletionAttempt(page, 90_000);
-      await page.getByTestId('chat-input').fill('Reply with one short sentence to verify the saved-history regeneration gate.');
+      selectedPrompt = 'Reply with one short sentence to verify the saved-history regeneration gate.';
+      await page.getByTestId('chat-input').fill(selectedPrompt);
       await page.getByRole('button', { name: /send message/i }).click();
       const followUpResponse = await followUpCompletion;
       expect(followUpResponse.status()).toBeLessThan(400);
       await assertProviderQualifiedPayload(page, followUpResponse);
       await waitForStreamComplete(page, 60_000);
     }
-    await expect(assistantMessages.last()).toBeVisible();
-    await expect(regenerateControl).toBeDisabled({ timeout: 30_000 });
-    await expect(runtimeInspector.getByText('Regeneration is unavailable for selected history.')).toBeVisible();
+    await expect.poll(async () => {
+      const saved = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+      const question = saved.body.messages.find(row => row.sender === 'user' && row.content === selectedPrompt);
+      return saved.status === 200 && Boolean(question && saved.body.messages.some(row =>
+        row.sender === 'assistant' && row.parent_message_id === question.id && row.content.trim()));
+    }, { timeout: 30_000 }).toBe(true);
+    const chatId = originalChatId;
+    const canonical = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+    expect(canonical.status).toBe(200);
+    const originals = canonical.body.messages;
+    const question = originals.find(row => row.sender === 'user' && row.content === selectedPrompt)!;
+    const answer = originals.find(row => row.sender === 'assistant' && row.parent_message_id === question.id)!;
+    const answerId = answer.id;
+    expect(answer).toMatchObject({ sender: 'assistant', conversation_id: chatId });
+    expect(answer.content.trim()).not.toBe('');
+    expect(question).toMatchObject({ sender: 'user', content: selectedPrompt });
+    const selectedResponse = page.waitForResponse(response => response.request().method() === 'POST' &&
+      new URL(response.url()).pathname === `/api/v1/chat/conversations/${chatId}/history/selection` &&
+      response.request().postDataJSON()?.view?.cursor?.message_id === answerId && response.status() === 200);
+    await choose(page, answerId);
+    const selected = await (await selectedResponse).json();
+    expect(selected).toMatchObject({ status: 'captured', view: { conversation_id: chatId,
+      cursor: { kind: 'after_message', message_id: answerId } } });
+    expect(selected.view.owner_key).toBe(selected.snapshot.owner_key);
+    expect(selected.rows.slice(-2)).toMatchObject([
+      { id: question.id, role: 'user' },
+      { id: answerId, role: 'assistant', parent_id: question.id, settled: true },
+    ]);
+    await expect.poll(async () => ((await readStore(page, 'historySelections')) as HistoryBookmark[]).some(row =>
+      row.conversation_id === chatId && row.owner_key === selected.view.owner_key &&
+      row.view.cursor.kind === 'after_message' && row.view.cursor.message_id === answerId)).toBe(true);
+    const unsent = 'UNSENT next question must survive Regenerate';
+    await page.getByTestId('chat-input').fill(unsent);
+    await expect(regenerateControl).toBeEnabled();
+    const calls = captureAllApiCalls(page);
+    try {
+      const regeneration = waitForChatCompletionAttempt(page, 90_000);
+      await regenerateControl.click();
+      const response = await regeneration;
+      expect(response.status()).toBeLessThan(400);
+      await assertProviderQualifiedPayload(page, response);
+      const payload = response.request().postDataJSON();
+      expect(payload).toMatchObject({ conversation_id: chatId, save_to_db: true, tldw_history_branch: true,
+        metadata: { tldw_regenerate_from_message_id: answerId },
+        tldw_history_selection_v1: { conversation_id: chatId, owner_key: selected.view.owner_key,
+          cursor: { kind: 'after_message', message_id: answerId } } });
+      expect(payload.messages.at(-1)).toMatchObject({ role: 'user', content: question.content });
+      await expect.poll(async () => {
+        const saved = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+        const added = saved.body.messages.filter(row => !originals.some(old => old.id === row.id));
+        return saved.status === 200 && added.length === 1 && added[0].sender === 'assistant' &&
+          added[0].parent_message_id === question.id && Boolean(added[0].content.trim());
+      }, { timeout: 60_000 }).toBe(true);
+      await expect(runtimeStop).toBeDisabled({ timeout: 30_000 });
+      const after = await apiGet<{ messages: ServerChatMessage[] }>(request, messagesPath);
+      expect(after.status).toBe(200);
+      expect(after.body.messages.filter(row => originals.some(old => old.id === row.id))).toEqual(originals);
+      const alternatives = after.body.messages.filter(row => !originals.some(old => old.id === row.id));
+      expect(alternatives).toEqual([expect.objectContaining({ sender: 'assistant', parent_message_id: question.id })]);
+      expect(alternatives[0].content.trim()).not.toBe('');
+      await expect(assistantMessages.last()).toHaveAttribute('data-server-message-id', alternatives[0].id);
+      expect(after.body.messages.filter(row => row.sender === 'user')).toEqual(originals.filter(row => row.sender === 'user'));
+      await expect(page.getByTestId('chat-input')).toHaveValue(unsent);
+      const requests = await calls.stop();
+      expect(requests.filter(call => call.method === 'POST' && new URL(call.url).pathname === new URL(response.url()).pathname)).toHaveLength(1);
+      expect(requests.filter(call => call.method === 'POST' && new URL(call.url).pathname === `/api/v1/chats/${chatId}/messages` &&
+        (call.requestBody as { role?: unknown } | null)?.role === 'user')).toEqual([]);
+    } finally {
+      await calls.stop();
+    }
     await page.screenshot({
-      path: testInfo.outputPath('chat-cockpit-regenerate-selected-history-gated.png'),
+      path: testInfo.outputPath('chat-cockpit-regenerate-selected-history-branch.png'),
       fullPage: true,
     });
   });

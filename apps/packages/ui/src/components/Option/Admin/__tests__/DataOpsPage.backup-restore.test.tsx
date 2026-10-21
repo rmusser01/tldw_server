@@ -1,5 +1,5 @@
 import React from "react"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { ConfigProvider, message } from "antd"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import DataOpsPage from "../DataOpsPage"
@@ -26,7 +26,7 @@ const mount = async () => {
   return screen.getByText(String(backup.dataset ?? "unknown"), { selector: ".ant-tag" }).closest("tr")!
 }
 const openConfirmation = async (row: HTMLElement) => {
-  fireEvent.click(within(row).getByRole("button", { name: /Restore$/ }))
+  await act(async () => { fireEvent.click(within(row).getByRole("button", { name: /Restore$/ })) })
   return await waitFor(() => {
     const button = screen.getAllByRole("button", { name: /Restore$/ }).find((candidate) => candidate.closest(".ant-popover"))
     expect(button).toBeVisible()
