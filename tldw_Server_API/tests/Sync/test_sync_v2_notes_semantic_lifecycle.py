@@ -353,6 +353,11 @@ def test_notes_json_api_round_trip_omits_server_local_semantic_state(tmp_path: P
             "keywords",
             "folders",
             "keyword_sync",
+            "knowledge_provenance",
+            "knowledge_provenance_reconciliation",
+            "knowledge_provenance_version",
+            "knowledge_provenance_hash",
+            "knowledge_provenance_state",
         }
         assert exported_note["title"] == "Exported Note"
         assert exported_note["content"] == "Exported body"

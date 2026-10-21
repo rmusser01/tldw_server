@@ -21,6 +21,7 @@ from tldw_Server_API.app.core.Sync.v2.notes_link_coordinator import (
     NotesLinkDatasetConflictError,
     NotesLinkSyncInactiveDatasetError,
 )
+from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 
 def test_semantic_api_error_uses_shared_core_exception() -> None:
@@ -190,7 +191,7 @@ def test_all_seven_routes_are_nested_and_main_status_has_no_history(client) -> N
     }
     actual = {
         (method, route.path)
-        for route in app.routes
+        for route in iter_served_routes(app.routes)
         for method in getattr(route, "methods", set())
         if "semantic-index" in route.path
     }

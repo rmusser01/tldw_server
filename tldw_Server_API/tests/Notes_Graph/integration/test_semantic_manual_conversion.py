@@ -66,7 +66,10 @@ def _activate_notes_link_sync(
     note_ids: tuple[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    store = SyncV2Store(SyncDatabase(sqlite_path=tmp_path / "sync.db", user_id="1"))
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
+    monkeypatch.delenv("SYNC_V2_DATABASE_URL", raising=False)
+    monkeypatch.delenv("SYNC_V2_SQLITE_PATH", raising=False)
+    store = SyncV2Store(SyncDatabase(user_id="1"))
     registry = SyncAdapterRegistry(
         [StaticSyncAdapter(domain=domain) for domain in M1_SYNC_DOMAINS] + [NotesLinkDomainAdapter()]
     )

@@ -1,4 +1,4 @@
-"""SQLite schema-v65 contracts for Notes semantic-index persistence."""
+"""SQLite schema-v82 contracts for Notes semantic-index persistence."""
 
 from __future__ import annotations
 
@@ -38,18 +38,18 @@ def _initialize(path: Path) -> CharactersRAGDB:
     return CharactersRAGDB(str(path), client_id="owner-a")
 
 
-def _prepare_v64_database(path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 64)
+def _prepare_v81_database(path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 81)
     db = _initialize(path)
     db.close_all_connections()
 
 
-def test_sqlite_v65_fresh_schema_has_semantic_tables_constraints_and_indexes(
+def test_sqlite_v82_fresh_schema_has_semantic_tables_constraints_and_indexes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db_path = tmp_path / "chacha-v65-fresh.sqlite"
-    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
+    db_path = tmp_path / "chacha-v82-fresh.sqlite"
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 82)
     db = _initialize(db_path)
     db.close_all_connections()
 
@@ -72,7 +72,7 @@ def test_sqlite_v65_fresh_schema_has_semantic_tables_constraints_and_indexes(
         }
         generation_fks = list(conn.execute("PRAGMA foreign_key_list(note_semantic_note_state)"))
 
-        assert _version(conn) == 65
+        assert _version(conn) == 82
         assert tables >= _TABLES
         assert {
             "owner_user_id",
@@ -112,10 +112,10 @@ def test_sqlite_v65_fresh_schema_has_semantic_tables_constraints_and_indexes(
             )
 
 
-def test_sqlite_v65_config_dimension_identity_check_preserves_disabled_states(
+def test_sqlite_v82_config_dimension_identity_check_preserves_disabled_states(
     tmp_path: Path,
 ) -> None:
-    db_path = tmp_path / "chacha-v65-config-dimensions.sqlite"
+    db_path = tmp_path / "chacha-v82-config-dimensions.sqlite"
     db = _initialize(db_path)
     db.close_all_connections()
 
@@ -165,13 +165,13 @@ def test_sqlite_v65_config_dimension_identity_check_preserves_disabled_states(
         ("resolved", 768, ""),
     ),
 )
-def test_sqlite_v65_generation_dimension_identity_check(
+def test_sqlite_v82_generation_dimension_identity_check(
     tmp_path: Path,
     dimension_state: str,
     dimensions: int | None,
     compatibility_hash: str | None,
 ) -> None:
-    db_path = tmp_path / f"chacha-v65-generation-dimensions-{dimension_state}-{dimensions}.sqlite"
+    db_path = tmp_path / f"chacha-v82-generation-dimensions-{dimension_state}-{dimensions}.sqlite"
     db = _initialize(db_path)
     db.close_all_connections()
 
@@ -198,8 +198,8 @@ def test_sqlite_v65_generation_dimension_identity_check(
             )
 
 
-def test_sqlite_v65_rejects_raw_content_and_chunk_fingerprints(tmp_path: Path) -> None:
-    db_path = tmp_path / "chacha-v65-fingerprints.sqlite"
+def test_sqlite_v82_rejects_raw_content_and_chunk_fingerprints(tmp_path: Path) -> None:
+    db_path = tmp_path / "chacha-v82-fingerprints.sqlite"
     db = _initialize(db_path)
     db.close_all_connections()
 
@@ -267,13 +267,13 @@ def test_sqlite_v65_rejects_raw_content_and_chunk_fingerprints(tmp_path: Path) -
         ("delete_generation", None, None),
     ),
 )
-def test_sqlite_v65_requires_generation_identity_for_all_work_kinds(
+def test_sqlite_v82_requires_generation_identity_for_all_work_kinds(
     tmp_path: Path,
     kind: str,
     note_id: str | None,
     dirty_generation: int | None,
 ) -> None:
-    db_path = tmp_path / f"chacha-v65-work-{kind}.sqlite"
+    db_path = tmp_path / f"chacha-v82-work-{kind}.sqlite"
     db = _initialize(db_path)
     db.close_all_connections()
 
@@ -291,13 +291,13 @@ def test_sqlite_v65_requires_generation_identity_for_all_work_kinds(
         )
 
 
-def test_sqlite_v64_to_v65_upgrade_creates_semantic_schema(
+def test_sqlite_v81_to_v82_upgrade_creates_semantic_schema(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db_path = tmp_path / "chacha-v64-upgrade.sqlite"
-    _prepare_v64_database(db_path, monkeypatch)
-    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
+    db_path = tmp_path / "chacha-v81-upgrade.sqlite"
+    _prepare_v81_database(db_path, monkeypatch)
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 82)
     db = _initialize(db_path)
     db.close_all_connections()
 
@@ -306,22 +306,22 @@ def test_sqlite_v64_to_v65_upgrade_creates_semantic_schema(
             str(row[0])
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
-        assert _version(conn) == 65
+        assert _version(conn) == 82
         assert tables >= _TABLES
 
 
-def test_sqlite_v65_rolls_back_partial_ddl_and_preserves_v64(
+def test_sqlite_v82_rolls_back_partial_ddl_and_preserves_v81(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db_path = tmp_path / "chacha-v65-rollback.sqlite"
-    _prepare_v64_database(db_path, monkeypatch)
+    db_path = tmp_path / "chacha-v82-rollback.sqlite"
+    _prepare_v81_database(db_path, monkeypatch)
     injected_sql = (
-        CharactersRAGDB._MIGRATION_SQL_V64_TO_V65
+        CharactersRAGDB._MIGRATION_SQL_V81_TO_V82
         + "\nTHIS IS AN INJECTED MIGRATION FAILURE;"
     )
-    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
-    monkeypatch.setattr(CharactersRAGDB, "_MIGRATION_SQL_V64_TO_V65", injected_sql)
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 82)
+    monkeypatch.setattr(CharactersRAGDB, "_MIGRATION_SQL_V81_TO_V82", injected_sql)
 
     with pytest.raises(CharactersRAGDBError):
         _initialize(db_path)
@@ -331,5 +331,5 @@ def test_sqlite_v65_rolls_back_partial_ddl_and_preserves_v64(
             str(row[0])
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
-        assert _version(conn) == 64
+        assert _version(conn) == 81
         assert not (tables & _TABLES)

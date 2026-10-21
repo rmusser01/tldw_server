@@ -7,7 +7,7 @@ import pytest
 
 from tldw_Server_API.app.core.AuthNZ.migrations import (
     get_authnz_migrations,
-    migration_097_seed_notes_graph_semantic_manage_permission,
+    migration_103_seed_notes_graph_semantic_manage_permission,
 )
 from tldw_Server_API.app.core.AuthNZ.permissions import (
     NOTES_GRAPH_READ,
@@ -62,15 +62,16 @@ def test_semantic_manage_permission_is_catalogued_for_single_user_defaults() -> 
     assert NOTES_GRAPH_SEMANTIC_MANAGE in Settings().SINGLE_USER_DEFAULT_PERMISSIONS
 
 
-def test_migration_097_grants_semantic_management_to_approved_roles() -> None:
+def test_migration_103_grants_semantic_management_to_approved_roles() -> None:
     with closing(sqlite3.connect(":memory:")) as conn:
         _create_rbac_schema(conn)
 
-        migration_097_seed_notes_graph_semantic_manage_permission(conn)
-        migration_097_seed_notes_graph_semantic_manage_permission(conn)
+        migration_103_seed_notes_graph_semantic_manage_permission(conn)
+        migration_103_seed_notes_graph_semantic_manage_permission(conn)
 
         assert _semantic_grants(conn) == {"admin", "user", "moderator"}
-    assert get_authnz_migrations()[-1].version == 97
+    registered = {migration.version: migration for migration in get_authnz_migrations()}
+    assert registered[103].up is migration_103_seed_notes_graph_semantic_manage_permission
 
 
 def test_migration_097_rollback_reapply_preserves_revoked_mappings(tmp_path) -> None:
@@ -82,7 +83,7 @@ def test_migration_097_rollback_reapply_preserves_revoked_mappings(tmp_path) -> 
         Migration(
             97,
             "Seed Notes graph semantic management permission",
-            migration_097_seed_notes_graph_semantic_manage_permission,
+            migration_103_seed_notes_graph_semantic_manage_permission,
         )
     )
 

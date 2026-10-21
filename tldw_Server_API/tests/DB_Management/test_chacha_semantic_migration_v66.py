@@ -1,4 +1,4 @@
-"""SQLite schema-v66 contracts for durable semantic vector cleanup authority."""
+"""SQLite schema-v83 contracts for durable semantic vector cleanup authority."""
 
 from __future__ import annotations
 
@@ -69,10 +69,10 @@ def _assert_cleanup_schema(conn: sqlite3.Connection) -> None:
     assert "note_semantic_generations" not in foreign_tables
 
 
-def test_sqlite_v66_fresh_schema_has_durable_cleanup_ledger(
+def test_sqlite_v83_fresh_schema_has_durable_cleanup_ledger(
     tmp_path: Path,
 ) -> None:
-    db_path = tmp_path / "semantic-v66-fresh.sqlite"
+    db_path = tmp_path / "semantic-v83-fresh.sqlite"
 
     _initialize(db_path)
 
@@ -98,12 +98,12 @@ def test_sqlite_v66_fresh_schema_has_durable_cleanup_ledger(
             )
 
 
-def test_sqlite_v65_to_v66_upgrade_preserves_semantic_rows(tmp_path: Path, monkeypatch) -> None:
-    db_path = tmp_path / "semantic-v65-upgrade.sqlite"
-    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
+def test_sqlite_v82_to_v83_upgrade_preserves_semantic_rows(tmp_path: Path, monkeypatch) -> None:
+    db_path = tmp_path / "semantic-v82-upgrade.sqlite"
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 82)
     _initialize(db_path)
     with sqlite3.connect(db_path) as conn:
-        assert _version(conn) == 65
+        assert _version(conn) == 82
         assert conn.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
             (_TABLE,),
@@ -119,11 +119,11 @@ def test_sqlite_v65_to_v66_upgrade_preserves_semantic_rows(tmp_path: Path, monke
         )
         conn.commit()
 
-    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 66)
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 83)
     _initialize(db_path)
 
     with sqlite3.connect(db_path) as conn:
-        assert _version(conn) == 66
+        assert _version(conn) == 83
         _assert_cleanup_schema(conn)
         assert conn.execute(
             "SELECT desired_state FROM note_semantic_index_configs "
@@ -131,42 +131,42 @@ def test_sqlite_v65_to_v66_upgrade_preserves_semantic_rows(tmp_path: Path, monke
         ).fetchone()[0] == "disabled"
 
 
-def test_sqlite_target_v65_dispatch_does_not_apply_v66(
+def test_sqlite_target_v82_dispatch_does_not_apply_v83(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db_path = tmp_path / "semantic-target-v65.sqlite"
-    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
+    db_path = tmp_path / "semantic-target-v82.sqlite"
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 82)
 
     _initialize(db_path)
 
     with sqlite3.connect(db_path) as conn:
-        assert _version(conn) == 65
+        assert _version(conn) == 82
         assert conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
             (_TABLE,),
         ).fetchone() is None
 
 
-def test_sqlite_v66_migration_failure_rolls_back_table_and_version(
+def test_sqlite_v83_migration_failure_rolls_back_table_and_version(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    db_path = tmp_path / "semantic-v66-rollback.sqlite"
-    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 65)
+    db_path = tmp_path / "semantic-v83-rollback.sqlite"
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 82)
     db = CharactersRAGDB(str(db_path), client_id="owner-a")
     original_split = chacha_db_module.split_sql_statements
 
     def broken_statements(script: str) -> list[str]:
         statements = original_split(script)
-        return [statements[0], "INSERT INTO missing_v66_relation(value) VALUES (1)"]
+        return [statements[0], "INSERT INTO missing_v83_relation(value) VALUES (1)"]
 
     monkeypatch.setattr(chacha_db_module, "split_sql_statements", broken_statements)
     try:
         with db.transaction() as conn:
-            with pytest.raises(SchemaError, match="Notes semantic v66 SQLite migration failed"):
-                db._migrate_from_v65_to_v66_sqlite(conn)
-            assert db._get_db_version(conn) == 65
+            with pytest.raises(SchemaError, match="Notes semantic v83 SQLite migration failed"):
+                db._migrate_from_v82_to_v83_sqlite(conn)
+            assert db._get_db_version(conn) == 82
             assert conn.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
                 (_TABLE,),
@@ -175,8 +175,8 @@ def test_sqlite_v66_migration_failure_rolls_back_table_and_version(
         db.close_all_connections()
 
 
-def test_sqlite_v66_cleanup_ledger_survives_note_and_generation_deletion(tmp_path: Path) -> None:
-    db_path = tmp_path / "semantic-v66-no-cascade.sqlite"
+def test_sqlite_v83_cleanup_ledger_survives_note_and_generation_deletion(tmp_path: Path) -> None:
+    db_path = tmp_path / "semantic-v83-no-cascade.sqlite"
     _initialize(db_path)
 
     with sqlite3.connect(db_path) as conn:

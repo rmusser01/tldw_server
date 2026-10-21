@@ -2133,7 +2133,10 @@ def test_cancelled_staging_generation_is_failed_and_queued_for_cleanup(
 async def test_committed_cancel_intent_blocks_late_worker_generation_creation(
     tmp_path,
     jobs: JobManager,
+    mocker,
 ) -> None:
+    worker_clock = mocker.patch.object(semantic_worker, "datetime", wraps=datetime)
+    worker_clock.now.return_value = NOW
     db = CharactersRAGDB(
         str(tmp_path / "semantic-cancel-before-create.sqlite"),
         client_id="owner-a",

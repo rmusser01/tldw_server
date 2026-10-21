@@ -2194,15 +2194,15 @@ def migration_096_add_admin_webhook_delivery_recovery(
     logger.info("Migration 096: Added admin webhook delivery recovery schema")
 
 
-def migration_097_seed_notes_graph_semantic_manage_permission(
+def migration_103_seed_notes_graph_semantic_manage_permission(
     conn: sqlite3.Connection,
 ) -> None:
     """Seed semantic management for approved existing Notes-writing roles."""
 
-    logger.info("Migration 097: START seed Notes graph semantic management permission")
+    logger.info("Migration 103: START seed Notes graph semantic management permission")
     required = ("roles", "permissions", "role_permissions")
     if not all(_sqlite_table_exists(conn, table_name) for table_name in required):
-        logger.info("Migration 097: RBAC tables missing; skipping Notes semantic permission seed")
+        logger.info("Migration 103: RBAC tables missing; skipping Notes semantic permission seed")
         return
     permission_insert = conn.execute(
         "INSERT OR IGNORE INTO permissions (name, description, category) VALUES (?, ?, ?)",
@@ -2215,7 +2215,7 @@ def migration_097_seed_notes_graph_semantic_manage_permission(
     if permission_insert.rowcount == 0:
         conn.commit()
         logger.info(
-            "Migration 097: Permission already exists; preserving role mappings"
+            "Migration 103: Permission already exists; preserving role mappings"
         )
         return
     conn.execute(
@@ -2230,7 +2230,7 @@ def migration_097_seed_notes_graph_semantic_manage_permission(
         ("admin", "user", "moderator", "notes.graph.semantic.manage"),
     )
     conn.commit()
-    logger.info("Migration 097: Seeded Notes graph semantic management permission")
+    logger.info("Migration 103: Seeded Notes graph semantic management permission")
 
 
 def rollback_086_drop_prototype_workspace_tables(conn: sqlite3.Connection) -> None:
@@ -6565,7 +6565,7 @@ def get_authnz_migrations() -> list[Migration]:
             migration_101_add_admin_perf_indexes,
         ),
         Migration(102, "Add native retained chat quota reservations", migration_102_native_chat_quota_reservations),
-        Migration(103, "Seed Notes graph semantic management permission", migration_097_seed_notes_graph_semantic_manage_permission),
+        Migration(103, "Seed Notes graph semantic management permission", migration_103_seed_notes_graph_semantic_manage_permission),
     ]
 
 

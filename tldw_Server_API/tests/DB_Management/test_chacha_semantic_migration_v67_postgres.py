@@ -1,4 +1,4 @@
-"""PostgreSQL schema-v67 contracts for semantic operation authority."""
+"""PostgreSQL schema-v88 contracts for semantic operation authority."""
 
 from __future__ import annotations
 
@@ -35,6 +35,9 @@ class _FakeTransaction:
 class _FakeBackend:
     backend_type = BackendType.POSTGRESQL
 
+    def execute(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
     def transaction(self) -> _FakeTransaction:
         return _FakeTransaction()
 
@@ -42,8 +45,8 @@ class _FakeBackend:
         return True
 
 
-def test_postgres_v67_ddl_has_model_authority_and_forced_owner_dataset_rls() -> None:
-    sql = " ".join(CharactersRAGDB._MIGRATION_SQL_V66_TO_V67_POSTGRES.split())
+def test_postgres_v88_ddl_has_model_authority_and_forced_owner_dataset_rls() -> None:
+    sql = " ".join(CharactersRAGDB._MIGRATION_SQL_V87_TO_V88_POSTGRES.split())
 
     assert "ADD COLUMN IF NOT EXISTS model_revision" in sql
     assert f"CREATE TABLE IF NOT EXISTS {_RECEIPTS}" in sql
@@ -54,7 +57,7 @@ def test_postgres_v67_ddl_has_model_authority_and_forced_owner_dataset_rls() -> 
     assert "idx_note_semantic_operation_receipts_expiry" in sql
 
 
-def test_postgres_initializer_routes_schema_v66_through_v67(
+def test_postgres_initializer_routes_schema_v87_through_v88(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db = CharactersRAGDB.__new__(CharactersRAGDB)
@@ -62,11 +65,19 @@ def test_postgres_initializer_routes_schema_v66_through_v67(
     db._uses_shared_content_backend = False
     db._backend_refresh_suspended = False
     db._local = SimpleNamespace()
-    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 67)
+    for name in vars(CharactersRAGDB):
+        if name.startswith("_ensure_"):
+            monkeypatch.setattr(db, name, lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(db, "_postgres_schema_is_current", lambda _conn: False)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap.postgres_schema_migration",
+        lambda backend, _timeout: backend.transaction(),
+    )
+    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 88)
     monkeypatch.setattr(
         db,
         "_get_schema_version_postgres",
-        lambda _conn, lock=False: 66,
+        lambda _conn, lock=False: 87,
     )
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
@@ -80,15 +91,15 @@ def test_postgres_initializer_routes_schema_v66_through_v67(
     )
 
     def reached(_conn: object) -> None:
-        raise RuntimeError("reached-v67")
+        raise RuntimeError("reached-v88")
 
-    monkeypatch.setattr(db, "_migrate_from_v66_to_v67_postgres", reached, raising=False)
+    monkeypatch.setattr(db, "_migrate_from_v87_to_v88_postgres", reached, raising=False)
 
-    with pytest.raises(RuntimeError, match="^reached-v67$"):
+    with pytest.raises(RuntimeError, match="^reached-v88$"):
         db._initialize_schema_postgres()
 
 
-def test_postgres_v67_live_receipts_are_forced_rls(
+def test_postgres_v88_live_receipts_are_forced_rls(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -119,7 +130,7 @@ def test_postgres_v67_live_receipts_are_forced_rls(
             ).rows
         }
 
-        assert int(version) == 67
+        assert int(version) == 88
         assert relation == {"relrowsecurity": True, "relforcerowsecurity": True}
         assert {"owner_user_id", "dataset_id", "key_digest", "request_fingerprint"} <= columns
         assert "idx_note_semantic_operation_receipts_expiry" in indexes
@@ -128,7 +139,7 @@ def test_postgres_v67_live_receipts_are_forced_rls(
         backend.get_pool().close_all()
 
 
-def test_postgres_v67_live_receipt_expiry_allows_reuse_and_fences_completion(
+def test_postgres_v88_live_receipt_expiry_allows_reuse_and_fences_completion(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -186,7 +197,7 @@ def test_postgres_v67_live_receipt_expiry_allows_reuse_and_fences_completion(
 
 
 @pytest.mark.parametrize("with_expired_predecessor", [False, True])
-def test_postgres_v67_serializes_same_fingerprint_admission_across_connections(
+def test_postgres_v88_serializes_same_fingerprint_admission_across_connections(
     pg_database_config: DatabaseConfig,
     with_expired_predecessor: bool,
 ) -> None:

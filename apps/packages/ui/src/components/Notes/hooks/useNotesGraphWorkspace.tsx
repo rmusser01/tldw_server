@@ -386,6 +386,9 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     identity: string
     graph: NotesGraphResponse
   } | null>(null)
+  if (isPermissionDenied || graphQuery.data?.pages.length === 0) {
+    lastGoodGraph.current = null
+  }
   if (currentGraph) {
     lastGoodGraph.current = {
       identity: fallbackIdentity,

@@ -1,4 +1,4 @@
-"""PostgreSQL schema-v65 contracts for Notes semantic-index persistence."""
+"""PostgreSQL schema-v86 contracts for Notes semantic-index persistence."""
 
 from __future__ import annotations
 
@@ -52,6 +52,9 @@ class _FakeTransaction:
 class _FakeBackend:
     backend_type = BackendType.POSTGRESQL
 
+    def execute(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
     def transaction(self) -> _FakeTransaction:
         return _FakeTransaction()
 
@@ -72,7 +75,7 @@ def _set_tenant_scope(backend: object, conn: object) -> None:
     )
 
 
-def _prepare_live_v64(pg_database_config: DatabaseConfig) -> None:
+def _prepare_live_v85(pg_database_config: DatabaseConfig) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
     try:
@@ -84,7 +87,7 @@ def _prepare_live_v64(pg_database_config: DatabaseConfig) -> None:
             for table in reversed(_TABLES):
                 backend.execute(f"DROP TABLE {table} CASCADE", connection=conn)  # nosec B608
             backend.execute(
-                "UPDATE db_schema_version SET version = 64 WHERE schema_name = %s",
+                "UPDATE db_schema_version SET version = 85 WHERE schema_name = %s",
                 (CharactersRAGDB._SCHEMA_NAME,),
                 connection=conn,
             )
@@ -143,8 +146,8 @@ def _create_resolved_store_generation(db: CharactersRAGDB):
     return resolved_config, resolved
 
 
-def test_postgres_v65_ddl_has_owner_keys_forced_rls_and_no_dimension_tables() -> None:
-    sql = " ".join(CharactersRAGDB._MIGRATION_SQL_V64_TO_V65_POSTGRES.split())
+def test_postgres_v86_ddl_has_owner_keys_forced_rls_and_no_dimension_tables() -> None:
+    sql = " ".join(CharactersRAGDB._MIGRATION_SQL_V85_TO_V86_POSTGRES.split())
 
     for table in _TABLES:
         assert f"CREATE TABLE IF NOT EXISTS {table}" in sql
@@ -163,15 +166,23 @@ def test_postgres_v65_ddl_has_owner_keys_forced_rls_and_no_dimension_tables() ->
     assert "note_semantic_vectors_" not in sql
 
 
-def test_postgres_initializer_routes_schema_v64_through_v65(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_postgres_initializer_routes_schema_v85_through_v86(monkeypatch: pytest.MonkeyPatch) -> None:
     db = CharactersRAGDB.__new__(CharactersRAGDB)
     db._backend = _FakeBackend()
     db._uses_shared_content_backend = False
     db._backend_refresh_suspended = False
     db._local = SimpleNamespace()
+    for name in vars(CharactersRAGDB):
+        if name.startswith("_ensure_"):
+            monkeypatch.setattr(db, name, lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(db, "_postgres_schema_is_current", lambda _conn: False)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap.postgres_schema_migration",
+        lambda backend, _timeout: backend.transaction(),
+    )
 
-    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 65)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: 64)
+    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 86)
+    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: 85)
     monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
     monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
     monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda _conn: None)
@@ -182,23 +193,67 @@ def test_postgres_initializer_routes_schema_v64_through_v65(monkeypatch: pytest.
         lambda _conn: None,
     )
 
-    def _reached_v65(_conn: object) -> None:
-        raise RuntimeError("reached-v65")
+    def _reached_v86(_conn: object) -> None:
+        raise RuntimeError("reached-v86")
 
-    monkeypatch.setattr(db, "_migrate_from_v64_to_v65_postgres", _reached_v65)
+    monkeypatch.setattr(db, "_migrate_from_v85_to_v86_postgres", _reached_v86)
 
-    with pytest.raises(RuntimeError, match="^reached-v65$"):
+    with pytest.raises(RuntimeError, match="^reached-v86$"):
         db._initialize_schema_postgres()
+
+
+@pytest.mark.parametrize("starting_version", [84, 85, 86, 87])
+def test_postgres_completed_schema_fast_path_reaches_semantic_target(
+    monkeypatch: pytest.MonkeyPatch, starting_version: int,
+) -> None:
+    db = CharactersRAGDB.__new__(CharactersRAGDB)
+    db._backend = _FakeBackend()
+    db._uses_shared_content_backend = False
+    db._backend_refresh_suspended = False
+    db._local = SimpleNamespace()
+    state = {"version": starting_version}
+    applied: list[int] = []
+    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 88)
+    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: state["version"])
+    monkeypatch.setattr(db, "_postgres_schema_is_current", lambda _conn: state["version"] == 88)
+    monkeypatch.setattr(db, "_configure_notes_moodboard_studio_v61_postgres_transaction", lambda _conn: None)
+    monkeypatch.setattr(db, "_repair_conversation_assistant_identity", lambda _conn: None)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap.postgres_schema_migration",
+        lambda backend, _timeout: backend.transaction(),
+    )
+
+    def reject_legacy_bootstrap(_conn: object) -> None:
+        pytest.fail("Completed schemas must not replay legacy reconciliation")
+
+    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", reject_legacy_bootstrap)
+
+    def migrate(_conn: object, *, target: int) -> None:
+        assert state["version"] == target - 1
+        state["version"] = target
+        applied.append(target)
+
+    for target in range(85, 89):
+        monkeypatch.setattr(
+            db,
+            f"_migrate_from_v{target - 1}_to_v{target}_postgres",
+            lambda conn, target=target: migrate(conn, target=target),
+        )
+
+    db._initialize_schema_postgres()
+
+    assert state["version"] == 88
+    assert applied == list(range(starting_version + 1, 89))
 
 
 @pytest.mark.integration
 @pytest.mark.timeout(30)
-def test_postgres_v65_live_schema_has_forced_owner_dataset_rls(
+def test_postgres_v86_live_schema_has_forced_owner_dataset_rls(
     pg_database_config: DatabaseConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _prepare_live_v64(pg_database_config)
-    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 65)
+    _prepare_live_v85(pg_database_config)
+    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 86)
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
     try:
@@ -255,7 +310,7 @@ def test_postgres_v65_live_schema_has_forced_owner_dataset_rls(
             (list(_TABLES),),
         ).rows
 
-        assert int(version) == 65
+        assert int(version) == 86
         assert {(str(row["table_name"]), str(row["column_name"])) for row in columns} >= {
             (table, column) for table in _TABLES for column in ("owner_user_id", "dataset_id")
         }
@@ -281,7 +336,7 @@ def test_postgres_v65_live_schema_has_forced_owner_dataset_rls(
 
 @pytest.mark.integration
 @pytest.mark.timeout(30)
-def test_postgres_v65_live_dimension_identity_constraints_preserve_disabled_states(
+def test_postgres_v86_live_dimension_identity_constraints_preserve_disabled_states(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -904,7 +959,7 @@ def test_postgres_generation_race_cleanup_preserves_injected_failure(
 
 @pytest.mark.integration
 @pytest.mark.timeout(30)
-def test_postgres_v65_live_constraints_reject_raw_fingerprints_and_unbound_work(
+def test_postgres_v86_live_constraints_reject_raw_fingerprints_and_unbound_work(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -1009,16 +1064,16 @@ def test_postgres_v65_live_constraints_reject_raw_fingerprints_and_unbound_work(
 
 @pytest.mark.integration
 @pytest.mark.timeout(30)
-def test_postgres_v65_live_migration_failure_rolls_back_to_v64(
+def test_postgres_v86_live_migration_failure_rolls_back_to_v85(
     pg_database_config: DatabaseConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _prepare_live_v64(pg_database_config)
+    _prepare_live_v85(pg_database_config)
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
     monkeypatch.setattr(
         CharactersRAGDB,
-        "_MIGRATION_SQL_V64_TO_V65_POSTGRES",
-        CharactersRAGDB._MIGRATION_SQL_V64_TO_V65_POSTGRES
+        "_MIGRATION_SQL_V85_TO_V86_POSTGRES",
+        CharactersRAGDB._MIGRATION_SQL_V85_TO_V86_POSTGRES
         + "\nTHIS IS AN INJECTED MIGRATION FAILURE;",
     )
 
@@ -1035,7 +1090,7 @@ def test_postgres_v65_live_migration_failure_rolls_back_to_v64(
             "AND tablename=ANY(%s)",
             (list(_TABLES),),
         ).rows
-        assert int(version) == 64
+        assert int(version) == 85
         assert tables == []
     finally:
         backend.get_pool().close_all()

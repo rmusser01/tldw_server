@@ -10,6 +10,8 @@
 
 **Spec:** `Docs/superpowers/specs/2026-08-29-notes-semantic-index-design.md`
 
+**ADR check (2026-10-20 integration):** No new durable decision is introduced by this rebase. [ADR-003](../../ADR/003-jobs-vs-scheduler-default.md) governs user-visible background work and [ADR-031](../../ADR/031-notes-capability-sync-domains.md) governs Notes Sync boundaries. The shared API artifacts follow the existing implementation described by proposed [ADR-069](../../ADR/069-frontend-api-contract-package.md); this work does not promote that proposal. Current migration allocation is SQLite 82-84, PostgreSQL 86-88, and AuthNZ 103. Use backlog-py for task updates and the existing Python 3.12 project environment for current verification; these supersede the historical tooling instructions below.
+
 ---
 
 ## Global Constraints

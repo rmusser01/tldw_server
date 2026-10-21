@@ -1,4 +1,4 @@
-"""PostgreSQL schema-v66 contracts for durable semantic cleanup authority."""
+"""PostgreSQL schema-v87 contracts for durable semantic cleanup authority."""
 
 from __future__ import annotations
 
@@ -45,6 +45,9 @@ class _FakeTransaction:
 class _FakeBackend:
     backend_type = BackendType.POSTGRESQL
 
+    def execute(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
     def transaction(self) -> _FakeTransaction:
         return _FakeTransaction()
 
@@ -63,6 +66,15 @@ def _fake_postgres_initializer(
     db._uses_shared_content_backend = False
     db._backend_refresh_suspended = False
     db._local = SimpleNamespace()
+    for name in vars(CharactersRAGDB):
+        if name.startswith("_ensure_"):
+            monkeypatch.setattr(db, name, lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(db, "_postgres_schema_is_current", lambda _conn: False)
+    monkeypatch.setattr(db, "_repair_conversation_assistant_identity", lambda _conn: None)
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap.postgres_schema_migration",
+        lambda backend, _timeout: backend.transaction(),
+    )
 
     monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", target_version)
     monkeypatch.setattr(
@@ -194,8 +206,8 @@ def _seed_complete_semantic_generation(db: CharactersRAGDB) -> tuple[str, str, s
     return dataset_id, generation.id, note_id, work.id
 
 
-def test_postgres_v66_ddl_is_owner_scoped_forced_rls_and_has_no_cascading_authority() -> None:
-    sql = " ".join(CharactersRAGDB._MIGRATION_SQL_V65_TO_V66_POSTGRES.split())
+def test_postgres_v87_ddl_is_owner_scoped_forced_rls_and_has_no_cascading_authority() -> None:
+    sql = " ".join(CharactersRAGDB._MIGRATION_SQL_V86_TO_V87_POSTGRES.split())
 
     assert f"CREATE TABLE IF NOT EXISTS {_TABLE}" in sql
     assert f"ALTER TABLE {_TABLE} ENABLE ROW LEVEL SECURITY" in sql
@@ -207,47 +219,42 @@ def test_postgres_v66_ddl_is_owner_scoped_forced_rls_and_has_no_cascading_author
     assert "REFERENCES note_semantic_generations" not in sql
 
 
-def test_postgres_initializer_routes_schema_v65_through_v66(
+def test_postgres_initializer_routes_schema_v86_through_v87(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db = _fake_postgres_initializer(
         monkeypatch,
-        current_version=65,
-        target_version=66,
+        current_version=86,
+        target_version=87,
     )
 
-    def _reached_v66(_conn: object) -> None:
-        raise RuntimeError("reached-v66")
+    def _reached_v87(_conn: object) -> None:
+        raise RuntimeError("reached-v87")
 
-    monkeypatch.setattr(db, "_migrate_from_v65_to_v66_postgres", _reached_v66)
+    monkeypatch.setattr(db, "_migrate_from_v86_to_v87_postgres", _reached_v87)
 
-    with pytest.raises(RuntimeError, match="^reached-v66$"):
+    with pytest.raises(RuntimeError, match="^reached-v87$"):
         db._initialize_schema_postgres()
 
 
-def test_postgres_initializer_honors_target_v65_without_dispatching_v66(
+def test_postgres_initializer_honors_target_v86_without_dispatching_v87(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     db = _fake_postgres_initializer(
         monkeypatch,
-        current_version=65,
-        target_version=65,
+        current_version=86,
+        target_version=86,
     )
 
-    def _unexpected_v66(_conn: object) -> None:
-        pytest.fail("v66 migration dispatched for a v65 target")
+    def _unexpected_v87(_conn: object) -> None:
+        pytest.fail("v87 migration dispatched for a v86 target")
 
-    def _stayed_at_v65(_conn: object) -> None:
-        raise RuntimeError("stayed-v65")
+    monkeypatch.setattr(db, "_migrate_from_v86_to_v87_postgres", _unexpected_v87)
 
-    monkeypatch.setattr(db, "_migrate_from_v65_to_v66_postgres", _unexpected_v66)
-    monkeypatch.setattr(db, "_ensure_flashcard_asset_schema_postgres", _stayed_at_v65)
-
-    with pytest.raises(RuntimeError, match="^stayed-v65$"):
-        db._initialize_schema_postgres()
+    db._initialize_schema_postgres()
 
 
-def test_postgres_v66_live_schema_has_cleanup_constraints_indexes_and_forced_rls(
+def test_postgres_v87_live_schema_has_cleanup_constraints_indexes_and_forced_rls(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -304,7 +311,7 @@ def test_postgres_v66_live_schema_has_cleanup_constraints_indexes_and_forced_rls
         backend.get_pool().close_all()
 
 
-def test_postgres_v65_to_v66_upgrade_preserves_all_semantic_rows(
+def test_postgres_v86_to_v87_upgrade_preserves_all_semantic_rows(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
@@ -315,7 +322,7 @@ def test_postgres_v65_to_v66_upgrade_preserves_all_semantic_rows(
         with backend.transaction() as conn:
             backend.execute(f"DROP TABLE {_TABLE}", connection=conn)  # nosec B608
             backend.execute(
-                "UPDATE db_schema_version SET version=65 WHERE schema_name=%s",
+                "UPDATE db_schema_version SET version=86 WHERE schema_name=%s",
                 (CharactersRAGDB._SCHEMA_NAME,),
                 connection=conn,
             )
@@ -381,7 +388,7 @@ def test_postgres_v65_to_v66_upgrade_preserves_all_semantic_rows(
         backend.get_pool().close_all()
 
 
-def test_postgres_v66_migration_failure_rolls_back_table_and_version(
+def test_postgres_v87_migration_failure_rolls_back_table_and_version(
     pg_database_config: DatabaseConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -391,7 +398,7 @@ def test_postgres_v66_migration_failure_rolls_back_table_and_version(
         with backend.transaction() as conn:
             backend.execute(f"DROP TABLE {_TABLE}", connection=conn)  # nosec B608
             backend.execute(
-                "UPDATE db_schema_version SET version=65 WHERE schema_name=%s",
+                "UPDATE db_schema_version SET version=86 WHERE schema_name=%s",
                 (CharactersRAGDB._SCHEMA_NAME,),
                 connection=conn,
             )
@@ -400,27 +407,27 @@ def test_postgres_v66_migration_failure_rolls_back_table_and_version(
             "_convert_sqlite_schema_to_postgres_statements",
             lambda _script: [
                 f"CREATE TABLE {_TABLE}(id TEXT PRIMARY KEY)",
-                "SELECT value FROM missing_v66_relation",
+                "SELECT value FROM missing_v87_relation",
             ],
         )
 
         with pytest.raises(BackendDatabaseError):
             with backend.transaction() as conn:
-                db._migrate_from_v65_to_v66_postgres(conn)
+                db._migrate_from_v86_to_v87_postgres(conn)
 
         assert int(
             backend.execute(
                 "SELECT version FROM db_schema_version WHERE schema_name=%s",
                 (CharactersRAGDB._SCHEMA_NAME,),
             ).scalar
-        ) == 65
+        ) == 86
         assert backend.execute("SELECT to_regclass(%s)", (_TABLE,)).scalar is None
     finally:
         db.close_all_connections()
         backend.get_pool().close_all()
 
 
-def test_postgres_v66_ledger_enforces_exact_tenant_scope_and_fails_closed(
+def test_postgres_v87_ledger_enforces_exact_tenant_scope_and_fails_closed(
     pg_database_config: DatabaseConfig,
 ) -> None:
     backend = DatabaseBackendFactory.create_backend(pg_database_config)

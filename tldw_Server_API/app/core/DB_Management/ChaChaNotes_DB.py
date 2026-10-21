@@ -1096,6 +1096,7 @@ class CharactersRAGDB:
             conversation_id: str | None = None,
             message_id: str | None = None,
             conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+            semantic_dataset_id: str | None = None,
         ) -> str | None: ...
 
         def get_note_by_id(
@@ -1111,6 +1112,7 @@ class CharactersRAGDB:
             update_data: dict[str, Any],
             expected_version: int,
             conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+            semantic_dataset_id: str | None = None,
         ) -> bool | None: ...
 
         def _ensure_conversation_settings_table(self, *, connection: Any | None = None) -> None: ...
@@ -1232,7 +1234,9 @@ class CharactersRAGDB:
             self, *, owner_user_id: str, conn: sqlite3.Connection | BackendConnectionWrapper | None = None
         ) -> str: ...
 
-        def restore_note(self, note_id: str, expected_version: int) -> bool | None: ...
+        def restore_note(
+            self, note_id: str, expected_version: int, semantic_dataset_id: str | None = None
+        ) -> bool | None: ...
 
         def search_keywords(self, search_term: str, limit: int = 10) -> list[dict[str, Any]]: ...
 
@@ -1266,7 +1270,9 @@ class CharactersRAGDB:
             conn: Any | None = None,
         ) -> bool | None: ...
 
-        def soft_delete_note(self, note_id: str, expected_version: int) -> bool | None: ...
+        def soft_delete_note(
+            self, note_id: str, expected_version: int, semantic_dataset_id: str | None = None
+        ) -> bool | None: ...
 
         def tombstone_note_from_sync(
             self,
@@ -1276,6 +1282,7 @@ class CharactersRAGDB:
             object_revision: int,
             object_hash: str,
             conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+            semantic_dataset_id: str | None = None,
         ) -> bool: ...
 
         def unlink_collection_from_keyword(self, collection_id: int, keyword_id: int) -> bool: ...
@@ -1306,10 +1313,11 @@ class CharactersRAGDB:
             expected_product_version: int | None = None,
             projection_timestamp: str | None = None,
             conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+            semantic_dataset_id: str | None = None,
         ) -> bool: ...
 
-    _CURRENT_SCHEMA_VERSION = 81  # Server-issued conversation source incarnation
-    _POSTGRES_SCHEMA_VERSION = 85
+    _CURRENT_SCHEMA_VERSION = 84  # Notes semantic index lifecycle
+    _POSTGRES_SCHEMA_VERSION = 88
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -7711,7 +7719,7 @@ DROP POLICY IF EXISTS note_graph_suggestion_evidence_tenant_isolation ON note_gr
 CREATE POLICY note_graph_suggestion_evidence_tenant_isolation ON note_graph_suggestion_evidence USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
 """
 
-    _MIGRATION_SQL_V64_TO_V65 = """
+    _MIGRATION_SQL_V81_TO_V82 = """
 CREATE TABLE note_semantic_index_configs(
   owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
   dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
@@ -7864,7 +7872,7 @@ CREATE UNIQUE INDEX idx_note_semantic_work_note_coalesce ON note_semantic_work(o
 CREATE UNIQUE INDEX idx_note_semantic_work_generation_coalesce ON note_semantic_work(owner_user_id, dataset_id, kind, generation_id) WHERE generation_id IS NOT NULL AND kind = 'delete_generation';
 """
 
-    _MIGRATION_SQL_V64_TO_V65_POSTGRES = """
+    _MIGRATION_SQL_V85_TO_V86_POSTGRES = """
 CREATE TABLE IF NOT EXISTS note_semantic_index_configs(
   owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
   dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
@@ -7982,7 +7990,7 @@ DROP POLICY IF EXISTS note_semantic_work_tenant_isolation ON note_semantic_work;
 CREATE POLICY note_semantic_work_tenant_isolation ON note_semantic_work USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
 """
 
-    _MIGRATION_SQL_V65_TO_V66 = """
+    _MIGRATION_SQL_V82_TO_V83 = """
 CREATE TABLE note_semantic_obsolete_vectors(
   id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
   owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
@@ -8017,7 +8025,7 @@ CREATE INDEX idx_note_semantic_obsolete_vectors_generation
   ON note_semantic_obsolete_vectors(owner_user_id,dataset_id,generation_id,vector_id);
 """
 
-    _MIGRATION_SQL_V65_TO_V66_POSTGRES = """
+    _MIGRATION_SQL_V86_TO_V87_POSTGRES = """
 CREATE TABLE IF NOT EXISTS note_semantic_obsolete_vectors(
   id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
   owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
@@ -8066,7 +8074,7 @@ CREATE POLICY note_semantic_obsolete_vectors_tenant_isolation
   );
 """
 
-    _MIGRATION_SQL_V66_TO_V67 = """
+    _MIGRATION_SQL_V83_TO_V84 = """
 ALTER TABLE note_semantic_index_configs ADD COLUMN model_revision TEXT;
 ALTER TABLE note_semantic_generations ADD COLUMN model_revision TEXT;
 CREATE UNIQUE INDEX idx_note_semantic_generations_root_job
@@ -8097,7 +8105,7 @@ CREATE INDEX idx_note_semantic_operation_receipts_expiry
   );
 """
 
-    _MIGRATION_SQL_V66_TO_V67_POSTGRES = """
+    _MIGRATION_SQL_V87_TO_V88_POSTGRES = """
 ALTER TABLE note_semantic_index_configs
   ADD COLUMN IF NOT EXISTS model_revision TEXT;
 ALTER TABLE note_semantic_generations
@@ -9823,6 +9831,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (78, "_migrate_from_v78_to_v79"),
             (79, "_migrate_from_v79_to_v80"),
             (80, "_migrate_from_v80_to_v81"),
+            (81, "_migrate_from_v81_to_v82_sqlite"),
+            (82, "_migrate_from_v82_to_v83_sqlite"),
+            (83, "_migrate_from_v83_to_v84_sqlite"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -15482,23 +15493,23 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise
             raise SchemaError(f"Notes graph suggestion v64 SQLite migration failed: {exc}") from exc
 
-    def _migrate_from_v64_to_v65_sqlite(self, conn: sqlite3.Connection) -> None:
+    def _migrate_from_v81_to_v82_sqlite(self, conn: sqlite3.Connection) -> None:
         """Add the durable owner/dataset Notes semantic-index authority ledger."""
-        if self._get_db_version(conn) != 64:
-            raise SchemaError("Notes semantic v65 migration requires schema version 64.")  # noqa: TRY003
-        savepoint = "note_semantic_v65_migration"
+        if self._get_db_version(conn) != 81:
+            raise SchemaError("Notes semantic v82 migration requires schema version 81.")  # noqa: TRY003
+        savepoint = "note_semantic_v82_migration"
         savepoint_active = False
         try:
             conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
             savepoint_active = True
-            for statement in split_sql_statements(self._MIGRATION_SQL_V64_TO_V65):
+            for statement in split_sql_statements(self._MIGRATION_SQL_V81_TO_V82):
                 conn.execute(statement)
             cursor = conn.execute(
                 "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
-                (65, self._SCHEMA_NAME, 64),
+                (82, self._SCHEMA_NAME, 81),
             )
-            if cursor.rowcount != 1 or self._get_db_version(conn) != 65:
-                raise SchemaError("Notes semantic v65 SQLite version transition failed.")  # noqa: TRY003
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 82:
+                raise SchemaError("Notes semantic v82 SQLite version transition failed.")  # noqa: TRY003
             conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
             savepoint_active = False
         except (SchemaError, sqlite3.Error) as exc:
@@ -15508,30 +15519,30 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
                 except sqlite3.Error as rollback_exc:
                     raise SchemaError(
-                        "Notes semantic v65 SQLite migration rollback failed: "
+                        "Notes semantic v82 SQLite migration rollback failed: "
                         f"{rollback_exc}"
                     ) from exc
             if isinstance(exc, SchemaError):
                 raise
-            raise SchemaError(f"Notes semantic v65 SQLite migration failed: {exc}") from exc
+            raise SchemaError(f"Notes semantic v82 SQLite migration failed: {exc}") from exc
 
-    def _migrate_from_v65_to_v66_sqlite(self, conn: sqlite3.Connection) -> None:
+    def _migrate_from_v82_to_v83_sqlite(self, conn: sqlite3.Connection) -> None:
         """Add crash-durable semantic obsolete-vector cleanup authority."""
-        if self._get_db_version(conn) != 65:
-            raise SchemaError("Notes semantic v66 migration requires schema version 65.")  # noqa: TRY003
-        savepoint = "note_semantic_v66_migration"
+        if self._get_db_version(conn) != 82:
+            raise SchemaError("Notes semantic v83 migration requires schema version 82.")  # noqa: TRY003
+        savepoint = "note_semantic_v83_migration"
         savepoint_active = False
         try:
             conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
             savepoint_active = True
-            for statement in split_sql_statements(self._MIGRATION_SQL_V65_TO_V66):
+            for statement in split_sql_statements(self._MIGRATION_SQL_V82_TO_V83):
                 conn.execute(statement)
             cursor = conn.execute(
                 "UPDATE db_schema_version SET version=? WHERE schema_name=? AND version=?",
-                (66, self._SCHEMA_NAME, 65),
+                (83, self._SCHEMA_NAME, 82),
             )
-            if cursor.rowcount != 1 or self._get_db_version(conn) != 66:
-                raise SchemaError("Notes semantic v66 SQLite version transition failed.")  # noqa: TRY003
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 83:
+                raise SchemaError("Notes semantic v83 SQLite version transition failed.")  # noqa: TRY003
             conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
             savepoint_active = False
         except (SchemaError, sqlite3.Error) as exc:
@@ -15541,30 +15552,30 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
                 except sqlite3.Error as rollback_exc:
                     raise SchemaError(
-                        "Notes semantic v66 SQLite migration rollback failed: "
+                        "Notes semantic v83 SQLite migration rollback failed: "
                         f"{rollback_exc}"
                     ) from exc
             if isinstance(exc, SchemaError):
                 raise
-            raise SchemaError(f"Notes semantic v66 SQLite migration failed: {exc}") from exc
+            raise SchemaError(f"Notes semantic v83 SQLite migration failed: {exc}") from exc
 
-    def _migrate_from_v66_to_v67_sqlite(self, conn: sqlite3.Connection) -> None:
+    def _migrate_from_v83_to_v84_sqlite(self, conn: sqlite3.Connection) -> None:
         """Add durable semantic operation and resolved-model authority."""
-        if self._get_db_version(conn) != 66:
-            raise SchemaError("Notes semantic v67 migration requires schema version 66.")
-        savepoint = "note_semantic_v67_migration"
+        if self._get_db_version(conn) != 83:
+            raise SchemaError("Notes semantic v84 migration requires schema version 83.")
+        savepoint = "note_semantic_v84_migration"
         savepoint_active = False
         try:
             conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608
             savepoint_active = True
-            for statement in split_sql_statements(self._MIGRATION_SQL_V66_TO_V67):
+            for statement in split_sql_statements(self._MIGRATION_SQL_V83_TO_V84):
                 conn.execute(statement)
             cursor = conn.execute(
                 "UPDATE db_schema_version SET version=? WHERE schema_name=? AND version=?",
-                (67, self._SCHEMA_NAME, 66),
+                (84, self._SCHEMA_NAME, 83),
             )
-            if cursor.rowcount != 1 or self._get_db_version(conn) != 67:
-                raise SchemaError("Notes semantic v67 SQLite version transition failed.")
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 84:
+                raise SchemaError("Notes semantic v84 SQLite version transition failed.")
             conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
             savepoint_active = False
         except (SchemaError, sqlite3.Error) as exc:
@@ -15574,12 +15585,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
                 except sqlite3.Error as rollback_exc:
                     raise SchemaError(
-                        "Notes semantic v67 SQLite migration rollback failed: "
+                        "Notes semantic v84 SQLite migration rollback failed: "
                         f"{rollback_exc}"
                     ) from exc
             if isinstance(exc, SchemaError):
                 raise
-            raise SchemaError(f"Notes semantic v67 SQLite migration failed: {exc}") from exc
+            raise SchemaError(f"Notes semantic v84 SQLite migration failed: {exc}") from exc
 
     @staticmethod
     def _notes_moodboard_studio_v61_postgres_checkpoint(_stage: str) -> None:
@@ -18813,41 +18824,41 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 64:
             raise SchemaError("Notes graph suggestion v64 PostgreSQL version verification failed.")  # noqa: TRY003
 
-    def _migrate_from_v64_to_v65_postgres(self, conn: Any) -> None:
+    def _migrate_from_v85_to_v86_postgres(self, conn: Any) -> None:
         """Add durable, forced-RLS Notes semantic-index persistence."""
-        if self._get_schema_version_postgres(conn) != 64:
-            raise SchemaError("Notes semantic v65 PostgreSQL migration requires schema version 64.")  # noqa: TRY003
+        if self._get_schema_version_postgres(conn) != 85:
+            raise SchemaError("Notes semantic v86 PostgreSQL migration requires schema version 85.")  # noqa: TRY003
         self._apply_postgres_migration_script(
-            self._MIGRATION_SQL_V64_TO_V65_POSTGRES,
+            self._MIGRATION_SQL_V85_TO_V86_POSTGRES,
             conn,
-            expected_version=65,
+            expected_version=86,
         )
-        if self._get_schema_version_postgres(conn) != 65:
-            raise SchemaError("Notes semantic v65 PostgreSQL version verification failed.")  # noqa: TRY003
+        if self._get_schema_version_postgres(conn) != 86:
+            raise SchemaError("Notes semantic v86 PostgreSQL version verification failed.")  # noqa: TRY003
 
-    def _migrate_from_v65_to_v66_postgres(self, conn: Any) -> None:
+    def _migrate_from_v86_to_v87_postgres(self, conn: Any) -> None:
         """Add forced-RLS crash-durable semantic cleanup authority."""
-        if self._get_schema_version_postgres(conn) != 65:
-            raise SchemaError("Notes semantic v66 PostgreSQL migration requires schema version 65.")  # noqa: TRY003
+        if self._get_schema_version_postgres(conn) != 86:
+            raise SchemaError("Notes semantic v87 PostgreSQL migration requires schema version 86.")  # noqa: TRY003
         self._apply_postgres_migration_script(
-            self._MIGRATION_SQL_V65_TO_V66_POSTGRES,
+            self._MIGRATION_SQL_V86_TO_V87_POSTGRES,
             conn,
-            expected_version=66,
+            expected_version=87,
         )
-        if self._get_schema_version_postgres(conn) != 66:
-            raise SchemaError("Notes semantic v66 PostgreSQL version verification failed.")  # noqa: TRY003
+        if self._get_schema_version_postgres(conn) != 87:
+            raise SchemaError("Notes semantic v87 PostgreSQL version verification failed.")  # noqa: TRY003
 
-    def _migrate_from_v66_to_v67_postgres(self, conn: Any) -> None:
+    def _migrate_from_v87_to_v88_postgres(self, conn: Any) -> None:
         """Add forced-RLS operation receipts and resolved-model authority."""
-        if self._get_schema_version_postgres(conn) != 66:
-            raise SchemaError("Notes semantic v67 PostgreSQL migration requires schema version 66.")
+        if self._get_schema_version_postgres(conn) != 87:
+            raise SchemaError("Notes semantic v88 PostgreSQL migration requires schema version 87.")
         self._apply_postgres_migration_script(
-            self._MIGRATION_SQL_V66_TO_V67_POSTGRES,
+            self._MIGRATION_SQL_V87_TO_V88_POSTGRES,
             conn,
-            expected_version=67,
+            expected_version=88,
         )
-        if self._get_schema_version_postgres(conn) != 67:
-            raise SchemaError("Notes semantic v67 PostgreSQL version verification failed.")
+        if self._get_schema_version_postgres(conn) != 88:
+            raise SchemaError("Notes semantic v88 PostgreSQL version verification failed.")
 
     def _configure_note_graph_suggestion_receipt_delete_trigger_postgres(self, conn: Any) -> None:
         """Clear only receipt IDs before PostgreSQL deletes an expiring receipt."""
@@ -20337,7 +20348,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _ensure_note_semantic_schema_sqlite(self, conn: sqlite3.Connection) -> None:
         """Verify the schema-version-owned Notes semantic-index relations."""
-        if self._get_db_version(conn) < 65:
+        if self._get_db_version(conn) < 82:
             return
         required_tables = {
             "note_semantic_index_configs",
@@ -20346,13 +20357,13 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "note_semantic_chunks",
             "note_semantic_work",
         }
-        if self._get_db_version(conn) >= 66:
+        if self._get_db_version(conn) >= 83:
             required_tables.add("note_semantic_obsolete_vectors")
-        if self._get_db_version(conn) >= 67:
+        if self._get_db_version(conn) >= 84:
             required_tables.add("note_semantic_operation_receipts")
         missing = required_tables - self._sqlite_table_names(conn)
         if missing:
-            raise SchemaError(f"Notes semantic v65 SQLite schema is incomplete: {sorted(missing)}")
+            raise SchemaError(f"Notes semantic v82 SQLite schema is incomplete: {sorted(missing)}")
 
     def _ensure_note_studio_schema_postgres(self, conn: Any) -> None:
         """Create the legacy sidecar before v63 or verify schema-owned v63 state."""
@@ -20401,7 +20412,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
     def _ensure_note_semantic_schema_postgres(self, conn: Any) -> None:
         """Verify the forced-RLS Notes semantic-index relations."""
-        if self._get_schema_version_postgres(conn) < 65:
+        if self._get_schema_version_postgres(conn) < 86:
             return
         required_tables = (
             "note_semantic_index_configs",
@@ -20410,15 +20421,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             "note_semantic_chunks",
             "note_semantic_work",
         )
-        if self._get_schema_version_postgres(conn) >= 66:
+        if self._get_schema_version_postgres(conn) >= 87:
             required_tables += ("note_semantic_obsolete_vectors",)
-        if self._get_schema_version_postgres(conn) >= 67:
+        if self._get_schema_version_postgres(conn) >= 88:
             required_tables += ("note_semantic_operation_receipts",)
         missing = [
             table for table in required_tables if not self.backend.table_exists(table, connection=conn)
         ]
         if missing:
-            raise SchemaError(f"Notes semantic v65 PostgreSQL schema is incomplete: {missing}")
+            raise SchemaError(f"Notes semantic v86 PostgreSQL schema is incomplete: {missing}")
 
     def _supports_notes_moodboard_studio_v61(self) -> bool:
         """Return whether this database instance has the v61 product catalog revision."""
@@ -26971,6 +26982,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._verify_note_attachment_schema_postgres(conn, runtime=True)
         self._verify_note_task_schema_postgres(conn, runtime=True)
         self._verify_notes_moodboard_studio_schema_postgres(conn)
+        self._ensure_note_semantic_schema_postgres(conn)
         for fts_table, source_table, _ in self._FTS_CONFIG:
             # Required PostgreSQL capability stays lazy and bound before mapping each source.
             register_fts_table: Callable[[str, str], None] = getattr(self.backend, "register_fts_table")  # noqa: B009
@@ -27043,7 +27055,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -27089,6 +27101,15 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 85 and current_version < 85:
                     self._migrate_from_v84_to_v85_postgres(conn)
                     current_version = 85
+                if target_version >= 86 and current_version < 86:
+                    self._migrate_from_v85_to_v86_postgres(conn)
+                    current_version = 86
+                if target_version >= 87 and current_version < 87:
+                    self._migrate_from_v86_to_v87_postgres(conn)
+                    current_version = 87
+                if target_version >= 88 and current_version < 88:
+                    self._migrate_from_v87_to_v88_postgres(conn)
+                    current_version = 88
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -27569,6 +27590,21 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v84_to_v85_postgres(conn)
                 self._runtime_schema_version = 85
                 current_version = 85
+
+            if target_version >= 86 and current_version < 86:
+                self._migrate_from_v85_to_v86_postgres(conn)
+                self._runtime_schema_version = 86
+                current_version = 86
+            if target_version >= 87 and current_version < 87:
+                self._migrate_from_v86_to_v87_postgres(conn)
+                self._runtime_schema_version = 87
+                current_version = 87
+            if target_version >= 88 and current_version < 88:
+                self._migrate_from_v87_to_v88_postgres(conn)
+                self._runtime_schema_version = 88
+                current_version = 88
+
+            self._ensure_note_semantic_schema_postgres(conn)
 
             if current_version < target_version:
                 logger.warning(

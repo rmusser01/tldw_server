@@ -1,4 +1,4 @@
-"""SQLite schema-v67 contracts for semantic model and operation authority."""
+"""SQLite schema-v84 contracts for semantic model and operation authority."""
 
 from __future__ import annotations
 
@@ -35,15 +35,15 @@ def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
     }
 
 
-def test_sqlite_v67_fresh_schema_has_model_revision_and_operation_receipts(
+def test_sqlite_v84_fresh_schema_has_model_revision_and_operation_receipts(
     tmp_path: Path,
 ) -> None:
-    path = tmp_path / "semantic-v67-fresh.sqlite"
+    path = tmp_path / "semantic-v84-fresh.sqlite"
 
     _initialize(path)
 
     with sqlite3.connect(path) as conn:
-        assert _version(conn) == 67
+        assert _version(conn) == 84
         assert "model_revision" in _columns(conn, "note_semantic_index_configs")
         assert "model_revision" in _columns(conn, "note_semantic_generations")
         assert {
@@ -66,12 +66,12 @@ def test_sqlite_v67_fresh_schema_has_model_revision_and_operation_receipts(
         assert "idx_note_semantic_operation_receipts_expiry" in indexes
 
 
-def test_sqlite_v66_to_v67_preserves_semantic_authority(
+def test_sqlite_v83_to_v84_preserves_semantic_authority(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    path = tmp_path / "semantic-v66-upgrade.sqlite"
-    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 66)
+    path = tmp_path / "semantic-v83-upgrade.sqlite"
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 83)
     _initialize(path)
     with sqlite3.connect(path) as conn:
         conn.execute(
@@ -85,11 +85,11 @@ def test_sqlite_v66_to_v67_preserves_semantic_authority(
         )
         conn.commit()
 
-    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 67)
+    monkeypatch.setattr(CharactersRAGDB, "_CURRENT_SCHEMA_VERSION", 84)
     _initialize(path)
 
     with sqlite3.connect(path) as conn:
-        assert _version(conn) == 67
+        assert _version(conn) == 84
         assert conn.execute(
             "SELECT desired_state,model_revision FROM note_semantic_index_configs "
             "WHERE owner_user_id='owner-a' AND dataset_id='dataset-a'"
