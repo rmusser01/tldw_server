@@ -49,6 +49,7 @@ import threading  # noqa: E402
 import time  # noqa: E402
 import unicodedata  # noqa: E402
 import uuid  # noqa: E402
+import weakref  # noqa: E402
 from collections import Counter
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from configparser import ConfigParser  # noqa: E402
@@ -468,31 +469,38 @@ _CHACHA_NONCRITICAL_EXCEPTIONS = (
     ConflictError,
 )
 
-_DROPPED_CHECKOUTS: queue.SimpleQueue[tuple[Any, Any]] = queue.SimpleQueue()
+_DROPPED_CHECKOUTS: queue.SimpleQueue[tuple[Any, Any, Any]] = queue.SimpleQueue()
 
 
 class _LegacyCheckout:
     """Queue a legacy PostgreSQL checkout for return when its thread-local slot is dropped.
 
     Outside a ChaCha operation each thread keeps its checkout in the handle's
-    ``threading.local``. The slot is dropped when the thread exits, which CPython
-    does at once and on that thread, or on whichever thread drops the handle's
-    ``threading.local``: a collection (the handle's stores hold it, so only the
-    cyclic garbage collector frees it) or ``close_all_connections()``. psycopg's
-    ``Connection.__del__`` skips pooled connections, so without this the checkout
-    and its pool slot are lost.
+    ``threading.local``. psycopg's ``Connection.__del__`` skips pooled connections,
+    so without this guard the checkout and its pool slot are lost with the slot.
 
-    On its owning thread the guard also closes the connection, so a session that
-    thread left in a transaction does not keep its locks and snapshot until the
-    queued return is made. Any other thread only queues it: the owner may still be
-    inside libpq on that connection, and finishing it there would free it in use.
+    - Dropped on its owning thread (that thread's exit, which CPython finalizes on
+      that thread, or that thread's own collection of the handle), the guard closes
+      the connection, so a session left in a transaction does not keep its locks and
+      snapshot, and queues it so the pool gets its slot back.
+    - Dropped on any other thread (the handle collected or evicted elsewhere), it
+      only queues the checkout, with a reference to its owner thread. The owner may
+      be inside libpq on that connection: psycopg's C generators keep the raw
+      ``PGconn*`` across yields and call libpq without the GIL, so closing or
+      returning it from another thread would free it in use.
+      ``_return_dropped_checkouts`` keeps such an entry queued until the owner has
+      exited. A thread never seen to exit (a ``_DummyThread``, for one) keeps its
+      entry, and the pool slot, for good; dev lost that slot anyway.
+    - ``close_all_connections()`` keeps the ``threading.local`` on PostgreSQL, so it
+      never drops another thread's slot.
     """
 
-    __slots__ = ("backend", "conn", "pid", "thread_id")
+    __slots__ = ("backend", "conn", "owner", "pid", "thread_id")
 
     def __init__(self, conn: Any, backend: Any) -> None:
         self.conn = conn
         self.backend = backend
+        self.owner = weakref.ref(threading.current_thread())
         self.pid = os.getpid()
         self.thread_id = threading.get_ident()
 
@@ -505,16 +513,16 @@ class _LegacyCheckout:
         try:
             if self.conn is None or os.getpid() != self.pid:
                 return  # disarmed, or a forked child: the parent still owns this session
-            try:
-                if threading.get_ident() == self.thread_id:
-                    # The owner's own slot, typically at its exit: nothing else is using the
-                    # connection, so end the session now (PQfinish). psycopg's close() takes no
-                    # lock and makes no pool call, because these pools do not set close_returns.
-                    self.conn.close()
-            finally:
-                # Lock-free: a collection can run this on any thread, even one holding the
-                # pool's own lock, so the pool's bookkeeping waits for _return_dropped_checkouts().
-                _DROPPED_CHECKOUTS.put((self.backend, self.conn))
+            owner = self.owner
+            if threading.get_ident() == self.thread_id:
+                # The owner's own slot: nothing else is using the connection, so end the
+                # session now (PQfinish). psycopg's close() takes no lock and makes no pool
+                # call, because these pools do not set close_returns.
+                self.conn.close()
+                owner = None  # closed, so the drain may return it at once
+            # Lock-free: a collection can run this on any thread, even one holding the
+            # pool's own lock, so the pool's bookkeeping waits for _return_dropped_checkouts().
+            _DROPPED_CHECKOUTS.put((self.backend, self.conn, owner))
         except Exception:  # noqa: BLE001  # nosec B110
             pass  # nothing may escape a finalizer
 
@@ -527,16 +535,32 @@ def _disarm_legacy_checkout(state: Any) -> None:
 
 
 def _return_dropped_checkouts() -> None:
-    """Return checkouts queued by _LegacyCheckout, outside any finalizer."""
+    """Return checkouts queued by _LegacyCheckout, outside any finalizer.
+
+    An entry whose owner thread is still alive goes back on the queue: that thread may
+    be inside libpq on the connection (see ``_LegacyCheckout``).
+    """
+    still_owned = []
     while True:
         try:
-            backend, conn = _DROPPED_CHECKOUTS.get_nowait()
+            entry = _DROPPED_CHECKOUTS.get_nowait()
         except queue.Empty:
-            return
+            break
+        backend, conn, owner = entry
+        thread = owner() if owner is not None else None
+        try:
+            owner_alive = thread is not None and thread.is_alive()
+        except AssertionError:  # a stopped _DummyThread asserts instead of answering
+            owner_alive = False
+        if owner_alive:
+            still_owned.append(entry)
+            continue
         try:
             backend.get_pool().return_connection(conn)
         except Exception as exc:  # noqa: BLE001 - keep draining; one bad return must not strand the rest
             logger.warning("Returning a dropped legacy checkout failed ({})", type(exc).__name__)
+    for entry in still_owned:
+        _DROPPED_CHECKOUTS.put(entry)
 
 
 class BackendCursorAdapter:
@@ -8848,7 +8872,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         Primarily used in tests/shutdown to ensure no background SQLite threads remain.
         On PostgreSQL the shared content pool is never closed here: every user's
-        handle draws from it, and content-backend shutdown owns it.
+        handle draws from it, and content-backend shutdown owns it. Other threads'
+        checkouts are left to those threads, which close them on their own exit.
         """
         if self.backend_type == BackendType.POSTGRESQL:
             if self._uses_shared_content_backend:
@@ -8891,9 +8916,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
                 logger.warning("Error closing all backend connections for {}: {}", self.db_path_str, exc)
 
-        # Reset thread-local reference regardless of backend
-        with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
-            self._local = threading.local()
+        # Reset the thread-local reference, except on PostgreSQL: replacing it would drop every
+        # other thread's slot here, while those threads may be inside libpq on their checkouts.
+        # Each guard stays in its own slot and is finalized on its own thread instead.
+        if self.backend_type != BackendType.POSTGRESQL:
+            with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
+                self._local = threading.local()
 
     def backup_database(self, backup_file_path: str) -> bool:
         """
