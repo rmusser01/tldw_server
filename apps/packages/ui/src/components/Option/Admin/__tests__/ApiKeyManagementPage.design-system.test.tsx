@@ -163,6 +163,20 @@ describe("ApiKeyManagementPage design-system states", () => {
     apiMock.rotateUserApiKey.mockResolvedValue({});
   });
 
+  it("explains single-user primary-key authentication without offering unusable managed keys", () => {
+    apiMock.canonical.mockReturnValue({
+      config: { serverUrl: "https://admin-a.example.test", authMode: "single-user" },
+      authorityLoading: false,
+    });
+    render(<ApiKeyManagementPage />);
+    expect(screen.getByText("Single-user API key")).toBeVisible();
+    expect(screen.getByText(/accepts only the primary API key configured on the server/)).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Create Key" })).not.toBeInTheDocument();
+    expect(apiMock.listAdminUsers).not.toHaveBeenCalled();
+    expect(apiMock.listUserApiKeys).not.toHaveBeenCalled();
+    expect(apiMock.createUserApiKey).not.toHaveBeenCalled();
+  });
+
   it("renders forbidden guard feedback through the design-system Alert primitive", async () => {
     apiMock.listAdminUsers.mockRejectedValueOnce({ status: 403 });
 
@@ -266,7 +280,7 @@ describe("ApiKeyManagementPage design-system states", () => {
     expect(alert).toHaveTextContent("sk-test-secret");
   });
 
-  it("auto-selects the only user so single-user servers skip the picker", async () => {
+  it("auto-selects the only account on a multi-user server", async () => {
     render(<ApiKeyManagementPage />);
 
     await waitFor(() => {
@@ -363,7 +377,7 @@ describe("ApiKeyManagementPage design-system states", () => {
     expect(screen.getByText("Bob scoped key")).toBeVisible();
   });
 
-  it.each(["server", "account", "unresolved"])(
+  it.each(["server", "account", "unresolved", "single-user"])(
     "clears held key material when %s authority changes",
     async (change) => {
       const view = render(<ApiKeyManagementPage />);
@@ -387,7 +401,9 @@ describe("ApiKeyManagementPage design-system states", () => {
             ? testConfig(1, "https://admin-b.example.test")
             : change === "account"
               ? testConfig(2)
-              : testConfig(),
+              : change === "single-user"
+                ? { serverUrl: testConfig().serverUrl, authMode: "single-user" }
+                : testConfig(),
         authorityLoading: change === "unresolved",
       });
       view.rerender(<ApiKeyManagementPage />);

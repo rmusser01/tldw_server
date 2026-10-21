@@ -16,6 +16,16 @@ type UserOverridesResponse = {
 };
 type UserEffectivePermissionsResponse = { user_id: number; permissions: string[] };
 
+export type BundleImportResult = {
+  status: string;
+  datasets_restored: string[];
+  warnings: string[];
+  rollback_failures?: string[];
+  validations: Array<{ dataset: string; compatible: boolean; message?: string }>;
+  safety_snapshots?: Record<string, string>;
+};
+type BundleRequestScope = { configSnapshot: TldwConfig; abortSignal: AbortSignal };
+
 export const adminMethods = {
   // ── Admin Users & Roles ──
 
@@ -206,9 +216,10 @@ export const adminMethods = {
   },
 
   async updateMaintenanceState(payload: {
-    enabled?: boolean;
+    enabled: boolean;
     message?: string;
-    allowlist?: string[];
+    allowlist_user_ids?: number[];
+    allowlist_emails?: string[];
   }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/maintenance",
@@ -219,15 +230,20 @@ export const adminMethods = {
   },
 
   async listFeatureFlags(): Promise<any[]> {
-    return await bgRequest<any[]>({
+    const result = await bgRequest<unknown[] | { items: unknown[] }>({
       path: "/api/v1/admin/feature-flags",
       method: "GET",
     });
+    return Array.isArray(result) ? result : result.items;
   },
 
   async updateFeatureFlag(
     flagKey: string,
-    payload: { enabled: boolean },
+    payload: {
+      enabled: boolean; scope: "global" | "org" | "user";
+      org_id?: number; user_id?: number; target_user_ids: number[];
+      rollout_percent: number; variant_value: string | null;
+    },
   ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/feature-flags/${encodeURIComponent(flagKey)}`,
@@ -237,24 +253,28 @@ export const adminMethods = {
     });
   },
 
-  async deleteFeatureFlag(flagKey: string): Promise<any> {
+  async deleteFeatureFlag(flagKey: string, target: {
+    scope: "global" | "org" | "user"; org_id?: number; user_id?: number;
+  }): Promise<any> {
+    const query = buildQuery(target);
     return await bgRequest<any>({
-      path: `/api/v1/admin/feature-flags/${encodeURIComponent(flagKey)}`,
+      path: `/api/v1/admin/feature-flags/${encodeURIComponent(flagKey)}${query}`,
       method: "DELETE",
     });
   },
 
   async listIncidents(): Promise<any[]> {
-    return await bgRequest<any[]>({
+    const result = await bgRequest<unknown[] | { items: unknown[] }>({
       path: "/api/v1/admin/incidents",
       method: "GET",
     });
+    return Array.isArray(result) ? result : result.items;
   },
 
   async createIncident(payload: {
     title: string;
     severity?: string;
-    description?: string;
+    summary?: string;
   }): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/incidents",
@@ -266,7 +286,7 @@ export const adminMethods = {
 
   async updateIncident(
     incidentId: number,
-    payload: { status?: string; severity?: string; description?: string },
+    payload: { status?: string; severity?: string; summary?: string },
   ): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/incidents/${incidentId}`,
@@ -284,10 +304,11 @@ export const adminMethods = {
   },
 
   async listRotationRuns(): Promise<any[]> {
-    return await bgRequest<any[]>({
+    const result = await bgRequest<unknown[] | { items: unknown[] }>({
       path: "/api/v1/admin/maintenance/rotation-runs",
       method: "GET",
     });
+    return Array.isArray(result) ? result : result.items;
   },
 
   async createRotationRun(): Promise<any> {
@@ -295,7 +316,7 @@ export const adminMethods = {
       path: "/api/v1/admin/maintenance/rotation-runs",
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: {},
+      body: { mode: "dry_run" },
     });
   },
 
@@ -724,26 +745,54 @@ export const adminMethods = {
     });
   },
 
-  async listBundles(): Promise<any> {
+  async listBundles(scope?: BundleRequestScope): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/backups/bundles",
       method: "GET",
+      ...scope,
     });
   },
 
-  async createBundle(payload: { datasets: string[] }): Promise<any> {
+  async createBundle(payload: { datasets: string[]; user_id?: number }, scope?: BundleRequestScope): Promise<any> {
     return await bgRequest<any>({
       path: "/api/v1/admin/backups/bundles",
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: payload,
+      ...scope,
     });
   },
 
-  async deleteBundle(bundleId: string): Promise<any> {
+  async downloadBundle(bundleId: string, scope: BundleRequestScope): Promise<Blob> {
+    const data = await bgRequest<ArrayBuffer>({
+      path: `/api/v1/admin/backups/bundles/${encodeURIComponent(bundleId)}/download`,
+      method: "GET",
+      responseType: "arrayBuffer",
+      ...scope,
+    });
+    if (!(data instanceof ArrayBuffer) || !data.byteLength) throw new Error("Backup download did not return a file.");
+    return new Blob([data], { type: "application/zip" });
+  },
+
+  async importBundle(file: File, params: { user_id?: number; dry_run: boolean }, scope: BundleRequestScope): Promise<BundleImportResult> {
+    if (scope.abortSignal.aborted) throw new DOMException("Backup transfer cancelled", "AbortError");
+    const body = new FormData();
+    body.append("file", file, file.name);
+    return await bgRequest<BundleImportResult>({
+      path: `/api/v1/admin/backups/bundles/import${buildQuery(params)}`,
+      method: "POST",
+      body,
+      preferDirect: true,
+      timeoutMs: 15000,
+      ...scope,
+    });
+  },
+
+  async deleteBundle(bundleId: string, scope?: BundleRequestScope): Promise<any> {
     return await bgRequest<any>({
       path: `/api/v1/admin/backups/bundles/${encodeURIComponent(bundleId)}`,
       method: "DELETE",
+      ...scope,
     });
   },
 

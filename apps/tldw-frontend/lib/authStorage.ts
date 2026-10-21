@@ -3,6 +3,8 @@ import type { TldwConfig } from "@/services/tldw/TldwApiClient";
 import { isCookieSessionConfigInvalidated } from "@/services/tldw/runtime-auth-override";
 import {
   applyRefreshRotation,
+  MANUAL_SESSION_KEY,
+  resolveManualSessionCredential,
   refreshSessionInvalidationKey,
   REFRESH_ROTATION_KEY
 } from "@/services/tldw/single-user-credential";
@@ -159,6 +161,15 @@ export const getApiKey = (): string | null => {
 
   const storedMode = normalizeValue(String(storedConfig?.authMode || ""));
   if (storedMode === "single-user") {
+    if (storedConfig?.credentialSource === "manual" && storedConfig.apiKeyPersistence === "session") {
+      let record: unknown = null;
+      try {
+        record = JSON.parse(window.sessionStorage.getItem(MANUAL_SESSION_KEY) || "null");
+      } catch {
+        // Missing or unavailable session storage cannot authorize a legacy key.
+      }
+      return normalizeApiKeyValue(resolveManualSessionCredential(storedConfig as TldwConfig, record));
+    }
     const storedConfigKey = normalizeApiKeyValue(String(storedConfig?.apiKey || ""));
     if (storedConfigKey) return storedConfigKey;
   }

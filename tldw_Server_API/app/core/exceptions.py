@@ -1740,6 +1740,10 @@ class UnknownBackupDatasetError(AdminDataOpsError):
     """Raised when a backup request references an unknown dataset."""
 
 
+class UnsupportedBackupBackendError(AdminDataOpsError):
+    """Requested dataset scope has no compatible backup/restore implementation."""
+
+
 class InvalidBackupUserIdError(AdminDataOpsError):
     """Raised when a backup request references an invalid user id."""
 

@@ -103,4 +103,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-075](075-native-messages-and-mcp-tools-use-the-provider-recorder.md) | Accepted | A provider call no `ChatProvider` method makes (the Messages API native path) records through the provider recorder's public wrappers, and an MCP tool's LLM calls are recorded for its caller even under a caller that records itself. |
 | [ADR-076](076-per-user-concurrency-quotas.md) | Accepted | Per-user synchronous concurrency (media ingest, audio streams, direct transcription) is a `limits.*` usage quota held as one Resource Governor lease per request; the request carries its own limit, the lease store follows `RG_BACKEND`, and `RG_ENABLED` does not turn it off. |
 
+| [ADR-068](068-explicit-postgresql-database-recovery-scope.md) | Proposed | Require explicit global scope, platform admission and overwrite confirmation for PostgreSQL database recovery covering all users and Jobs. |
+
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

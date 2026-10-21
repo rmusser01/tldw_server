@@ -4,6 +4,7 @@ import type {
   RoleplayResumeUserAppendReceipt
 } from "./roleplay-resume"
 import type { InitialChatSetupAttempt } from "@/utils/settings-return"
+import type { LlamacppRequestOptions } from "./domains/models-audio"
 import { knowledgeNoteWriteFields, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
 import { BoundedTtlCache } from "./bounded-ttl-cache"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"
@@ -3293,31 +3294,35 @@ export class TldwApiClientBase {
     })
   }
 
-  async getLlamacppStatus(): Promise<any> {
+  async getLlamacppStatus(options?: LlamacppRequestOptions): Promise<any> {
     return await bgRequest<any>({
+      ...options,
       path: "/api/v1/llamacpp/status",
       method: "GET"
     })
   }
 
-  async listLlamacppModels(): Promise<any> {
+  async listLlamacppModels(options?: LlamacppRequestOptions): Promise<any> {
     return await bgRequest<any>({
+      ...options,
       path: "/api/v1/llamacpp/models",
       method: "GET"
     })
   }
 
-  async getLlamacppConfig(): Promise<LlamacppConfigResponse> {
+  async getLlamacppConfig(options?: LlamacppRequestOptions): Promise<LlamacppConfigResponse> {
     return await bgRequest<LlamacppConfigResponse>({
+      ...options,
       path: "/api/v1/llamacpp/config",
       method: "GET"
     })
   }
 
   async updateLlamacppConfig(
-    payload: LlamacppConfigUpdateRequest
+    payload: LlamacppConfigUpdateRequest, options?: LlamacppRequestOptions
   ): Promise<LlamacppConfigResponse> {
     return await bgRequest<LlamacppConfigResponse>({
+      ...options,
       path: "/api/v1/llamacpp/config",
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -3326,9 +3331,10 @@ export class TldwApiClientBase {
   }
 
   async validateLlamacpp(
-    payload: LlamacppValidationRequest
+    payload: LlamacppValidationRequest, options?: LlamacppRequestOptions
   ): Promise<LlamacppValidationResponse> {
     return await bgRequest<LlamacppValidationResponse>({
+      ...options,
       path: "/api/v1/llamacpp/validate",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3336,22 +3342,25 @@ export class TldwApiClientBase {
     })
   }
 
-  async getLlamacppInventory(): Promise<LlamacppInventoryResponse> {
+  async getLlamacppInventory(options?: LlamacppRequestOptions): Promise<LlamacppInventoryResponse> {
     return await bgRequest<LlamacppInventoryResponse>({
+      ...options,
       path: "/api/v1/llamacpp/inventory",
       method: "GET"
     })
   }
 
-  async getLlamacppAssets(): Promise<LlamacppAssetsResponse> {
+  async getLlamacppAssets(options?: LlamacppRequestOptions): Promise<LlamacppAssetsResponse> {
     return await bgRequest<LlamacppAssetsResponse>({
+      ...options,
       path: "/api/v1/llamacpp/assets",
       method: "GET"
     })
   }
 
-  async registerLlamacppModelPath(path: string): Promise<LlamacppInventoryItem> {
+  async registerLlamacppModelPath(path: string, options?: LlamacppRequestOptions): Promise<LlamacppInventoryItem> {
     return await bgRequest<LlamacppInventoryItem>({
+      ...options,
       path: "/api/v1/llamacpp/models/register-path",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3359,8 +3368,9 @@ export class TldwApiClientBase {
     })
   }
 
-  async registerLlamacppAssetPath(path: string): Promise<LlamacppAsset> {
+  async registerLlamacppAssetPath(path: string, options?: LlamacppRequestOptions): Promise<LlamacppAsset> {
     return await bgRequest<LlamacppAsset>({
+      ...options,
       path: "/api/v1/llamacpp/assets/register-path",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3368,8 +3378,9 @@ export class TldwApiClientBase {
     })
   }
 
-  async importLlamacppAssetFolder(path: string): Promise<LlamacppAsset> {
+  async importLlamacppAssetFolder(path: string, options?: LlamacppRequestOptions): Promise<LlamacppAsset> {
     return await bgRequest<LlamacppAsset>({
+      ...options,
       path: "/api/v1/llamacpp/assets/import-folder",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3379,9 +3390,10 @@ export class TldwApiClientBase {
 
   async startLlamacppServer(
     modelFilename: string,
-    serverArgs?: Record<string, any>
+    serverArgs?: Record<string, any>, options?: LlamacppRequestOptions
   ): Promise<any> {
     return await bgRequest<any>({
+      ...options,
       path: "/api/v1/llamacpp/start_server",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3394,9 +3406,10 @@ export class TldwApiClientBase {
 
   async startLlamacppModel(
     modelId: string,
-    serverArgs?: Record<string, unknown>
+    serverArgs?: Record<string, unknown>, options?: LlamacppRequestOptions
   ): Promise<Record<string, unknown>> {
     return await bgRequest<Record<string, unknown>>({
+      ...options,
       path: "/api/v1/llamacpp/start-by-model",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3407,8 +3420,9 @@ export class TldwApiClientBase {
     })
   }
 
-  async stopLlamacppServer(): Promise<any> {
+  async stopLlamacppServer(options?: LlamacppRequestOptions): Promise<any> {
     return await bgRequest<any>({
+      ...options,
       path: "/api/v1/llamacpp/stop_server",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3416,8 +3430,9 @@ export class TldwApiClientBase {
     })
   }
 
-  async useLlamacppInChat(): Promise<LlamacppUseInChatResponse> {
+  async useLlamacppInChat(options?: LlamacppRequestOptions): Promise<LlamacppUseInChatResponse> {
     return await bgRequest<LlamacppUseInChatResponse>({
+      ...options,
       path: "/api/v1/llamacpp/use-in-chat",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3425,16 +3440,18 @@ export class TldwApiClientBase {
     })
   }
 
-  async tailLlamacppLogs(lines?: number): Promise<LlamacppLogTailResponse> {
+  async tailLlamacppLogs(lines?: number, options?: LlamacppRequestOptions): Promise<LlamacppLogTailResponse> {
     const query = this.buildQuery(lines === undefined ? {} : { lines })
     return await bgRequest<LlamacppLogTailResponse>({
+      ...options,
       path: `/api/v1/llamacpp/logs/tail${query}`,
       method: "GET"
     })
   }
 
-  async listLlamacppProfiles(): Promise<LlamacppProfileListResponse> {
+  async listLlamacppProfiles(options?: LlamacppRequestOptions): Promise<LlamacppProfileListResponse> {
     return await bgRequest<LlamacppProfileListResponse>({
+      ...options,
       path: "/api/v1/llamacpp/profiles",
       method: "GET"
     })
@@ -3442,32 +3459,35 @@ export class TldwApiClientBase {
 
   async getLlamacppSnapshotSlots(
     profileId: string,
-    signal?: AbortSignal
+    signal?: AbortSignal, options?: LlamacppRequestOptions
   ): Promise<LlamacppSnapshotSlotsResponse> {
     return await bgRequest<LlamacppSnapshotSlotsResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/slots`,
       method: "GET",
-      abortSignal: signal
+      abortSignal: signal && options?.abortSignal ? AbortSignal.any([signal, options.abortSignal]) : signal ?? options?.abortSignal
     })
   }
 
   async listLlamacppSnapshots(
     profileId: string,
     offset = 0,
-    signal?: AbortSignal
+    signal?: AbortSignal, options?: LlamacppRequestOptions
   ): Promise<LlamacppSnapshotCatalogResponse> {
     return await bgRequest<LlamacppSnapshotCatalogResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/snapshots?offset=${offset}&limit=50`,
       method: "GET",
-      abortSignal: signal
+      abortSignal: signal && options?.abortSignal ? AbortSignal.any([signal, options.abortSignal]) : signal ?? options?.abortSignal
     })
   }
 
   async saveLlamacppSnapshot(
     profileId: string,
-    payload: LlamacppSnapshotRequest
+    payload: LlamacppSnapshotRequest, options?: LlamacppRequestOptions
   ): Promise<LlamacppSnapshotOperationResponse> {
     return await bgRequest<LlamacppSnapshotOperationResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/snapshots`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3478,9 +3498,10 @@ export class TldwApiClientBase {
   async restoreLlamacppSnapshot(
     profileId: string,
     snapshotId: string,
-    payload: LlamacppSnapshotRequest & { replace_confirmed: true }
+    payload: LlamacppSnapshotRequest & { replace_confirmed: true }, options?: LlamacppRequestOptions
   ): Promise<LlamacppSnapshotOperationResponse> {
     return await bgRequest<LlamacppSnapshotOperationResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/snapshots/${encodeURIComponent(snapshotId)}/restore`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3490,9 +3511,10 @@ export class TldwApiClientBase {
 
   async deleteLlamacppSnapshot(
     profileId: string,
-    snapshotId: string
+    snapshotId: string, options?: LlamacppRequestOptions
   ): Promise<{ deleted: boolean }> {
     return await bgRequest<{ deleted: boolean }>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/snapshots/${encodeURIComponent(snapshotId)}`,
       method: "DELETE"
     })
@@ -3501,19 +3523,21 @@ export class TldwApiClientBase {
   async getLlamacppSnapshotOperation(
     profileId: string,
     operationId: string,
-    signal?: AbortSignal
+    signal?: AbortSignal, options?: LlamacppRequestOptions
   ): Promise<LlamacppSnapshotOperationResponse> {
     return await bgRequest<LlamacppSnapshotOperationResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/snapshot-operations/${encodeURIComponent(operationId)}`,
       method: "GET",
-      abortSignal: signal
+      abortSignal: signal && options?.abortSignal ? AbortSignal.any([signal, options.abortSignal]) : signal ?? options?.abortSignal
     })
   }
 
   async createLlamacppProfile(
-    payload: LlamacppProfileCreateRequest
+    payload: LlamacppProfileCreateRequest, options?: LlamacppRequestOptions
   ): Promise<LlamacppProfile> {
     return await bgRequest<LlamacppProfile>({
+      ...options,
       path: "/api/v1/llamacpp/profiles",
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3523,9 +3547,10 @@ export class TldwApiClientBase {
 
   async updateLlamacppProfile(
     profileId: string,
-    payload: LlamacppProfileUpdateRequest
+    payload: LlamacppProfileUpdateRequest, options?: LlamacppRequestOptions
   ): Promise<LlamacppProfile> {
     return await bgRequest<LlamacppProfile>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -3534,18 +3559,20 @@ export class TldwApiClientBase {
   }
 
   async deleteLlamacppProfile(
-    profileId: string
+    profileId: string, options?: LlamacppRequestOptions
   ): Promise<{ profile_id: string; deleted: boolean }> {
     return await bgRequest<{ profile_id: string; deleted: boolean }>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}`,
       method: "DELETE"
     })
   }
 
   async startLlamacppProfile(
-    profileId: string
+    profileId: string, options?: LlamacppRequestOptions
   ): Promise<LlamacppLifecycleActionResponse> {
     return await bgRequest<LlamacppLifecycleActionResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/start`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3554,9 +3581,10 @@ export class TldwApiClientBase {
   }
 
   async stopLlamacppProfile(
-    profileId: string
+    profileId: string, options?: LlamacppRequestOptions
   ): Promise<LlamacppLifecycleActionResponse> {
     return await bgRequest<LlamacppLifecycleActionResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/stop`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3565,9 +3593,10 @@ export class TldwApiClientBase {
   }
 
   async pauseLlamacppProfile(
-    profileId: string
+    profileId: string, options?: LlamacppRequestOptions
   ): Promise<LlamacppLifecycleActionResponse> {
     return await bgRequest<LlamacppLifecycleActionResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/pause`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3576,9 +3605,10 @@ export class TldwApiClientBase {
   }
 
   async resumeLlamacppProfile(
-    profileId: string
+    profileId: string, options?: LlamacppRequestOptions
   ): Promise<LlamacppLifecycleActionResponse> {
     return await bgRequest<LlamacppLifecycleActionResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/resume`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3587,9 +3617,10 @@ export class TldwApiClientBase {
   }
 
   async useLlamacppProfileInChat(
-    profileId: string
+    profileId: string, options?: LlamacppRequestOptions
   ): Promise<LlamacppUseInChatResponse> {
     return await bgRequest<LlamacppUseInChatResponse>({
+      ...options,
       path: `/api/v1/llamacpp/profiles/${encodeURIComponent(profileId)}/use-in-chat`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3597,8 +3628,9 @@ export class TldwApiClientBase {
     })
   }
 
-  async listLlamacppInstances(): Promise<LlamacppRuntimeListResponse> {
+  async listLlamacppInstances(options?: LlamacppRequestOptions): Promise<LlamacppRuntimeListResponse> {
     return await bgRequest<LlamacppRuntimeListResponse>({
+      ...options,
       path: "/api/v1/llamacpp/instances",
       method: "GET"
     })
@@ -3606,17 +3638,19 @@ export class TldwApiClientBase {
 
   async tailLlamacppInstanceLogs(
     profileId: string,
-    lines?: number
+    lines?: number, options?: LlamacppRequestOptions
   ): Promise<LlamacppLogTailResponse> {
     const query = this.buildQuery(lines === undefined ? {} : { lines })
     return await bgRequest<LlamacppLogTailResponse>({
+      ...options,
       path: `/api/v1/llamacpp/instances/${encodeURIComponent(profileId)}/logs/tail${query}`,
       method: "GET"
     })
   }
 
-  async getLlamacppHardware(): Promise<LlamacppHardwareSnapshotResponse> {
+  async getLlamacppHardware(options?: LlamacppRequestOptions): Promise<LlamacppHardwareSnapshotResponse> {
     return await bgRequest<LlamacppHardwareSnapshotResponse>({
+      ...options,
       path: "/api/v1/llamacpp/hardware",
       method: "GET"
     })

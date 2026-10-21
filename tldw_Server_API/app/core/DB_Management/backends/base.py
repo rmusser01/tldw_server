@@ -147,6 +147,20 @@ class DatabaseConfig:
     isolation_level: Optional[str] = None
     connect_timeout: int = 10
 
+    def postgres_connection_string(self) -> str:
+        """Return the conninfo used by both PostgreSQL connection paths."""
+        if self.connection_string:
+            return str(self.connection_string)
+        return (
+            f"host={self.pg_host or 'localhost'} "
+            f"port={self.pg_port or 5432} "
+            f"dbname={self.pg_database or 'tldw'} "
+            f"user={self.pg_user or 'tldw_user'} "
+            f"password={self.pg_password or ''} "
+            f"sslmode={self.pg_sslmode or 'prefer'} "
+            f"connect_timeout={self.connect_timeout or 10}"
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Convert config to dictionary."""
         return {k: v for k, v in self.__dict__.items() if v is not None}

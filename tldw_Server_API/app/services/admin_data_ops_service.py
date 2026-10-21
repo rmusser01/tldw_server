@@ -21,6 +21,7 @@ from urllib.parse import unquote, urlparse
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Audit.storage_mode import resolve_audit_storage_mode
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.retention_policies import (
     RETENTION_POLICIES,
@@ -28,16 +29,20 @@ from tldw_Server_API.app.core.AuthNZ.retention_policies import (
     upsert_retention_override,
 )
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.config import load_comprehensive_config
+from tldw_Server_API.app.core.config import settings as app_settings
 from tldw_Server_API.app.core.DB_Management.admin_retention_preview_counts import (
     count_retention_window,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+from tldw_Server_API.app.core.DB_Management.content_backend import load_content_db_settings
 from tldw_Server_API.app.core.DB_Management.DB_Backups import (
     create_backup,
     create_incremental_backup,
     create_postgres_backup,
     restore_postgres_backup,
     restore_single_db_backup,
+    restore_sqlite_database_file,
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.exceptions import (
@@ -47,6 +52,7 @@ from tldw_Server_API.app.core.exceptions import (
     InvalidRetentionPolicyError,
     InvalidRetentionRangeError,
     UnknownBackupDatasetError,
+    UnsupportedBackupBackendError,
 )
 from tldw_Server_API.app.core.Utils.path_utils import safe_join
 from tldw_Server_API.app.core.Utils.Utils import get_project_relative_path
@@ -84,7 +90,8 @@ DATASET_DB_RESOLVERS = {
     "evaluations": DatabasePaths.get_evaluations_db_path,
     "audit": DatabasePaths.get_audit_db_path,
 }
-_BACKUP_DATASETS = frozenset([*DATASET_DB_RESOLVERS.keys(), "authnz"])
+_GLOBAL_BACKUP_DATASETS = frozenset({"authnz", "postgresql"})
+_BACKUP_DATASETS = frozenset(DATASET_DB_RESOLVERS) | _GLOBAL_BACKUP_DATASETS
 _BACKUP_EXTENSIONS = (".db", ".sqlib", ".dump")
 _RETENTION_PREVIEW_SCHEMA_VERSION = "v1"
 
@@ -269,8 +276,128 @@ def list_backup_items(
     return page, total
 
 
+def _explicit_pg_database(dsn: str | None) -> str | None:
+    """Read only explicit database identity; never connect or expose a DSN."""
+    if not dsn:
+        return None
+    try:
+        from psycopg import ProgrammingError
+        from psycopg.conninfo import conninfo_to_dict
+    except ImportError:
+        return None
+    try:
+        info = conninfo_to_dict(dsn)
+    except (ProgrammingError, ValueError):
+        return None
+    if info.get("service"):
+        return None
+    name = info.get("dbname")
+    if not name or "=" in name or name.startswith(("postgres:", "postgresql:")):
+        return None
+    return name
+
+
+def _postgresql_database_config() -> DatabaseConfig:
+    """Resolve a single explicit database covering AuthNZ, content and Jobs."""
+    try:
+        if any(os.getenv(key) for key in ("PGHOSTADDR", "PGPORT", "PGSERVICE", "PGOPTIONS")):
+            raise ValueError("ambiguous_ambient_libpq_settings")
+        auth_dsn = get_settings().DATABASE_URL
+        content = load_content_db_settings(load_comprehensive_config())
+        jobs_dsn = (os.getenv("JOBS_DB_URL") or "").strip()
+        if (
+            not auth_dsn.startswith("postgres")
+            or content.backend_type != BackendType.POSTGRESQL
+            or not jobs_dsn.startswith("postgres")
+        ):
+            raise ValueError("postgresql_colocation_required")
+        configurations = [
+            _config_from_postgres_url(auth_dsn),
+            _config_from_postgres_url(content.database_config.postgres_connection_string()),
+            _config_from_postgres_url(jobs_dsn),
+        ]
+        identities = {(item.pg_host, item.pg_port, item.pg_database) for item in configurations}
+        if len(identities) != 1:
+            raise ValueError("postgresql_colocation_required")
+        return configurations[0]
+    except Exception as exc:
+        raise UnsupportedBackupBackendError(
+            "unsupported_backup_backend:postgresql: whole-database recovery requires AuthNZ, content and Jobs "
+            "to select the same explicit PostgreSQL host, port and database, without ambient PGHOSTADDR/PGPORT/PGSERVICE/PGOPTIONS overrides"
+        ) from exc
+
+
+def _postgresql_backup_config() -> DatabaseConfig:
+    """Use optional backup-only credentials without changing the database scope."""
+    target = _postgresql_database_config()
+    backup_dsn = (os.getenv("TLDW_POSTGRES_BACKUP_DSN") or "").strip()
+    if not backup_dsn:
+        return target
+    try:
+        backup = _config_from_postgres_url(backup_dsn)
+        if (backup.pg_host, backup.pg_port, backup.pg_database) != (target.pg_host, target.pg_port, target.pg_database):
+            raise ValueError("backup_database_scope_changed")
+    except Exception as exc:
+        raise UnsupportedBackupBackendError(
+            "unsupported_backup_backend:postgresql: backup credentials must select the same explicit host, port and database"
+        ) from exc
+    return backup
+
+
+def _require_supported_backup_storage(dataset: str) -> None:
+    """Refuse a nominal SQLite file when the dataset lives in another backend."""
+    if dataset == "postgresql":
+        _postgresql_database_config()
+        return
+    if dataset in {"media", "chacha", "evaluations"}:
+        settings = load_content_db_settings(load_comprehensive_config())
+        forced_media_pg = dataset == "media" and (os.getenv("CONTENT_DB_MODE") or "").strip().lower() in {
+            "postgres",
+            "postgresql",
+        }
+        if settings.backend_type != BackendType.SQLITE or forced_media_pg:
+            raise UnsupportedBackupBackendError(
+                f"unsupported_backup_backend:{dataset}: per-user database backup and restore "
+                "support SQLite only; PostgreSQL content requires a supported ownership-aware export"
+            )
+
+    if dataset == "audit" and resolve_audit_storage_mode(app_settings) == "shared":
+        raise UnsupportedBackupBackendError(
+            "unsupported_backup_backend:audit: per-user backup and restore cannot operate on shared audit storage"
+        )
+    if dataset == "authnz":
+        auth_dsn = get_settings().DATABASE_URL
+        if not auth_dsn.startswith("postgres"):
+            return
+        auth_config = _config_from_postgres_url(auth_dsn)
+        content = load_content_db_settings(load_comprehensive_config())
+        other_databases: list[str | None] = []
+        if content.backend_type == BackendType.POSTGRESQL:
+            config = content.database_config
+            other_databases.append(_explicit_pg_database(config.postgres_connection_string()))
+        elif content.backend_type != BackendType.SQLITE or (os.getenv("CONTENT_DB_MODE") or "").strip().lower() in {
+            "postgres",
+            "postgresql",
+        }:
+            other_databases.append(None)
+        jobs_dsn = (os.getenv("JOBS_DB_URL") or "").strip()
+        if jobs_dsn.startswith("postgres"):
+            other_databases.append(_explicit_pg_database(jobs_dsn))
+        auth_database = auth_config.pg_database
+        # shortcut: same-named databases on separate clusters stay refused until explicit whole-database scope exists.
+        if any(not auth_database or not other or auth_database == other for other in other_databases):
+            raise UnsupportedBackupBackendError(
+                "unsupported_backup_backend:authnz: PostgreSQL snapshots cover the entire database; "
+                "configure a demonstrably separate AuthNZ database before using an AuthNZ-only backup or restore"
+            )
+
 def _resolve_dataset_db_path(dataset: str, user_id: int | None) -> tuple[str, int | None]:
     dataset_name = _validate_backup_dataset(dataset)
+    if dataset_name == "postgresql":
+        if user_id is not None:
+            raise InvalidBackupUserIdError("user_id_forbidden")
+        return _postgresql_database_config().connection_string, None
+    _require_supported_backup_storage(dataset_name)
     if dataset_name == "authnz":
         settings = get_settings()
         url = settings.DATABASE_URL
@@ -298,18 +425,43 @@ def _resolve_dataset_db_path(dataset: str, user_id: int | None) -> tuple[str, in
 
 
 def _config_from_postgres_url(url: str) -> DatabaseConfig:
-    parsed = urlparse(url)
+    """Resolve exactly the libpq fields forwarded by the backup/restore tools."""
+    try:
+        from psycopg.conninfo import conninfo_to_dict
+
+        info = conninfo_to_dict(url)
+        unsupported = set(info) - {"host", "port", "dbname", "user", "password", "sslmode", "connect_timeout"}
+        database = _explicit_pg_database(url)
+        host = info.get("host")
+        user = info.get("user")
+        port = int(info.get("port", "5432"))
+        connect_timeout = int(info.get("connect_timeout", "10"))
+        if (
+            unsupported
+            or not database
+            or not host
+            or not user
+            or "," in host
+            or not 0 < port < 65536
+            or connect_timeout <= 0
+        ):
+            raise ValueError("unsupported_connection_identity")
+    except Exception as exc:
+        raise UnsupportedBackupBackendError(
+            "unsupported_backup_backend:authnz: backup requires an explicit PostgreSQL host, database and user; "
+            "use only host, port, dbname, user, password, sslmode and a positive connect_timeout"
+        ) from exc
     return DatabaseConfig(
         backend_type=BackendType.POSTGRESQL,
         connection_string=url,
-        pg_host=parsed.hostname or "localhost",
-        pg_port=int(parsed.port or 5432),
-        pg_database=(parsed.path or "/").lstrip("/") or None,
-        pg_user=parsed.username or None,
-        pg_password=parsed.password or None,
-        pg_sslmode="prefer",
+        pg_host=host,
+        pg_port=port,
+        pg_database=database,
+        pg_user=user,
+        pg_password=info.get("password"),
+        pg_sslmode=info.get("sslmode", "prefer"),
+        connect_timeout=connect_timeout,
     )
-
 
 def _normalize_backup_filename(path: str) -> str:
     return os.path.basename(path)
@@ -358,14 +510,18 @@ def create_backup_snapshot(
     backup_type: str,
     max_backups: int | None,
 ) -> BackupFile:
+    dataset = _validate_backup_dataset(dataset)
     db_path, effective_user_id = _resolve_dataset_db_path(dataset, user_id)
+    postgres_config = _postgresql_backup_config() if dataset == "postgresql" else None
     backup_dir = _backup_dir_for_dataset(dataset, effective_user_id)
     os.makedirs(backup_dir, exist_ok=True)
 
-    if dataset == "authnz" and not str(db_path).startswith("sqlite") and str(db_path).startswith("postgres"):
-        config = _config_from_postgres_url(db_path)
+    if dataset in _GLOBAL_BACKUP_DATASETS and str(db_path).startswith("postgres"):
+        config = postgres_config or _config_from_postgres_url(db_path)
         backend = SimpleNamespace(backend_type=BackendType.POSTGRESQL, config=config)
-        backup_path = create_postgres_backup(backend, backup_dir, label="authnz")
+        backup_path = create_postgres_backup(
+            backend, backup_dir, label=dataset, **({"timeout_seconds": 600} if dataset == "postgresql" else {})
+        )
         if not backup_path or not os.path.exists(backup_path):
             raise RuntimeError(backup_path or "pg_dump failed")
         filename = _normalize_backup_filename(backup_path)
@@ -397,6 +553,33 @@ def create_backup_snapshot(
     )
 
 
+def restore_backup_file(
+    *, dataset: str, user_id: int | None, backup_path: str, offline_database_restore: bool = False
+) -> None:
+    """Restore a validated file; whole-database callers must own offline handoff."""
+    dataset = _validate_backup_dataset(dataset)
+    if dataset == "postgresql" and not offline_database_restore:
+        raise UnsupportedBackupBackendError(
+            "offline_restore_required: stop API writers and Jobs consumers and use the PostgreSQL recovery helper"
+        )
+    db_path, _ = _resolve_dataset_db_path(dataset, user_id)
+    if dataset in _GLOBAL_BACKUP_DATASETS and str(db_path).startswith("postgres"):
+        backend = SimpleNamespace(
+            backend_type=BackendType.POSTGRESQL,
+            config=_config_from_postgres_url(db_path),
+        )
+        result = restore_postgres_backup(backend, backup_path, drop_first=True)
+        if result != "ok":
+            raise RuntimeError(result)
+        return
+    os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+    restore_sqlite_database_file(
+        source_db_path=backup_path,
+        target_db_path=db_path,
+        lock_timeout_seconds=0.5,
+    )
+
+
 def restore_backup_snapshot(
     *,
     dataset: str,
@@ -407,14 +590,12 @@ def restore_backup_snapshot(
     backup_dir = _backup_dir_for_dataset(dataset, effective_user_id)
     backup_name = _validate_backup_id(backup_id)
 
-    if dataset == "authnz" and not str(db_path).startswith("sqlite") and str(db_path).startswith("postgres"):
-        config = _config_from_postgres_url(db_path)
-        backend = SimpleNamespace(backend_type=BackendType.POSTGRESQL, config=config)
-        backup_path = _safe_join(backup_dir, backup_name)
-        result = restore_postgres_backup(backend, backup_path, drop_first=True)
-        if result != "ok":
-            raise RuntimeError(result)
-        _invalidate_backup_cache()
+    if dataset in _GLOBAL_BACKUP_DATASETS and str(db_path).startswith("postgres"):
+        restore_backup_file(
+            dataset=dataset,
+            user_id=user_id,
+            backup_path=_safe_join(backup_dir, backup_name),
+        )
         return "ok"
 
     result = restore_single_db_backup(db_path, backup_dir, dataset, backup_name)

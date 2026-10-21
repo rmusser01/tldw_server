@@ -7,6 +7,7 @@ type RefreshedAtLabelProps = {
   at: Date | null
   /** Translation function from the host page (stable for the session). */
   t: TFunction
+  label?: string
 }
 
 /**
@@ -17,7 +18,7 @@ type RefreshedAtLabelProps = {
  * host page or its tables. `React.memo` (with the stable `t` reference) keeps
  * the label itself from re-rendering on unrelated host re-renders.
  */
-function RefreshedAtLabelBase({ at, t }: RefreshedAtLabelProps) {
+function RefreshedAtLabelBase({ at, t, label }: RefreshedAtLabelProps) {
   const [timeSinceRefresh, setTimeSinceRefresh] = useState("")
 
   useEffect(() => {
@@ -37,7 +38,7 @@ function RefreshedAtLabelBase({ at, t }: RefreshedAtLabelProps) {
 
   return (
     <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-      {t("settings:adminMonitoring.updated", "Updated")} {timeSinceRefresh}
+      {label ?? t("settings:adminMonitoring.updated", "Updated")} {timeSinceRefresh}
     </Typography.Text>
   )
 }

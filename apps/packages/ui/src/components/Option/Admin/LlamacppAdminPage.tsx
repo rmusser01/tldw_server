@@ -3,7 +3,11 @@ import { Space, Typography } from "antd"
 import { useTranslation } from "react-i18next"
 import { PageShell } from "@/components/Common/PageShell"
 import { Alert as DesignSystemAlert } from "@/components/ui/primitives"
-import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
+import type { LlamacppRequestOptions } from "@/services/tldw/domains/models-audio"
+import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
+import { useAdminRequestScope } from "./admin-request-scope"
 import type {
   LlamacppAcquisitionJobListResponse,
   LlamacppAssetDownloadRequest,
@@ -83,19 +87,40 @@ const isSnapshotAdmissionRejection = (error: unknown): boolean => {
   )
 }
 
+const useLlamacppRequest = (config: TldwConfig) => {
+  const captureScope = useAdminRequestScope(config)
+  const request = React.useCallback(async <T,>(action: (options: LlamacppRequestOptions) => Promise<T>): Promise<T> => {
+    const scope = captureScope()
+    if (!scope) throw new DOMException("Model administration scope retired", "AbortError")
+    const result = await action(scope)
+    scope.abortSignal.throwIfAborted()
+    return result
+  }, [captureScope])
+  return { request, captureScope }
+}
+
+export const LlamacppSnapshotsAdmin = (props: Omit<React.ComponentProps<typeof LlamacppSnapshotsWorkspace>, "connectionConfig">) => {
+  const { config, authorityLoading } = useCanonicalConnectionConfig()
+  if (!config || authorityLoading) return null
+  return <LlamacppSnapshotsWorkspace key={deriveConnectionAuthorityId(config)} {...props} connectionConfig={config} />
+}
+
 /** Profile-scoped network owner. The presentation panel never sends requests. */
-export const LlamacppSnapshotsAdmin = ({
+const LlamacppSnapshotsWorkspace = ({
+  connectionConfig,
   profile,
   generation,
   runtimeState,
   onProfileChanged
 }: {
+  connectionConfig: TldwConfig
   profile: LlamacppProfile
   generation?: string | null
   runtimeState?: string
   onProfileChanged: () => void
 }) => {
   const { t } = useTranslation()
+  const { request } = useLlamacppRequest(connectionConfig)
   const [slots, setSlots] =
     React.useState<LlamacppSnapshotSlotsResponse | null>(null)
   const [catalog, setCatalog] =
@@ -151,32 +176,18 @@ export const LlamacppSnapshotsAdmin = ({
     setLoading(true)
     void (async () => {
       try {
-        const nextSlots = await tldwClient.getLlamacppSnapshotSlots(
-          profile.profile_id,
-          controller.signal
-        )
+        const nextSlots = await request((options) => tldwClient.getLlamacppSnapshotSlots(profile.profile_id, controller.signal, options))
         if (!current()) return
         const [nextCatalog, nextOperation] = await Promise.all([
-          tldwClient.listLlamacppSnapshots(
-            profile.profile_id,
-            offset,
-            controller.signal
-          ),
+          request((options) => tldwClient.listLlamacppSnapshots(profile.profile_id, offset, controller.signal, options)),
           nextSlots.latest_operation_id
-            ? tldwClient.getLlamacppSnapshotOperation(
-                profile.profile_id,
-                nextSlots.latest_operation_id,
-                controller.signal
-              )
+            ? request((options) => tldwClient.getLlamacppSnapshotOperation(profile.profile_id, nextSlots.latest_operation_id, controller.signal, options))
             : Promise.resolve(null)
         ])
         if (!current()) return
         // Runtime list responses may omit generation. Fence the combined reads
         // with a second slots observation instead of relying on PID or UI state.
-        const confirmed = await tldwClient.getLlamacppSnapshotSlots(
-          profile.profile_id,
-          controller.signal
-        )
+        const confirmed = await request((options) => tldwClient.getLlamacppSnapshotSlots(profile.profile_id, controller.signal, options))
         if (!current()) return
         if (
           (generation && nextSlots.launch_generation !== generation) ||
@@ -230,7 +241,7 @@ export const LlamacppSnapshotsAdmin = ({
     revision,
     offset,
     visible,
-    t
+    t, request
   ])
   React.useEffect(() => {
     if (
@@ -265,10 +276,7 @@ export const LlamacppSnapshotsAdmin = ({
       if (action === "save" || action === "restore") {
         const controller = new AbortController()
         readController.current = controller
-        const fresh = await tldwClient.getLlamacppSnapshotSlots(
-          profile.profile_id,
-          controller.signal
-        )
+        const fresh = await request((options) => tldwClient.getLlamacppSnapshotSlots(profile.profile_id, controller.signal, options))
         if (!current()) return
         if (
           !slots?.launch_generation ||
@@ -288,12 +296,8 @@ export const LlamacppSnapshotsAdmin = ({
         sent = true
         const result =
           action === "save"
-            ? await tldwClient.saveLlamacppSnapshot(profile.profile_id, payload)
-            : await tldwClient.restoreLlamacppSnapshot(
-                profile.profile_id,
-                snapshotId!,
-                { ...payload, replace_confirmed: true }
-              )
+            ? await request((options) => tldwClient.saveLlamacppSnapshot(profile.profile_id, payload, options))
+            : await request((options) => tldwClient.restoreLlamacppSnapshot(profile.profile_id, snapshotId!, { ...payload, replace_confirmed: true }, options))
         if (!current()) return
         if (
           result.profile_id !== profile.profile_id ||
@@ -303,15 +307,15 @@ export const LlamacppSnapshotsAdmin = ({
         }
         setOperation(result)
       } else if (action === "delete") {
-        await tldwClient.deleteLlamacppSnapshot(profile.profile_id, snapshotId!)
+        await request((options) => tldwClient.deleteLlamacppSnapshot(profile.profile_id, snapshotId!, options))
       } else if (action === "stop") {
-        await tldwClient.stopLlamacppProfile(profile.profile_id)
+        await request((options) => tldwClient.stopLlamacppProfile(profile.profile_id, options))
         if (current()) {
           setUncertain(false)
           onProfileChanged()
         }
       } else {
-        await tldwClient.updateLlamacppProfile(profile.profile_id, settings!)
+        await request((options) => tldwClient.updateLlamacppProfile(profile.profile_id, settings!, options))
         if (current()) onProfileChanged()
       }
     } catch (caught) {
@@ -456,11 +460,18 @@ const coerceImportedSettings = (
 }
 
 export const LlamacppAdminPage: React.FC = () => {
+  const { config, authorityLoading } = useCanonicalConnectionConfig()
+  const { t } = useTranslation("settings")
+  if (!config || authorityLoading) return <p role="status">{t("admin.resolvingConnection", "Resolving admin connection…")}</p>
+  return <LlamacppAdminWorkspace key={deriveConnectionAuthorityId(config)} connectionConfig={config} />
+}
+
+const LlamacppAdminWorkspace = ({ connectionConfig }: { connectionConfig: TldwConfig }) => {
+  const { request, captureScope } = useLlamacppRequest(connectionConfig)
   const [snapshotProfileId, setSnapshotProfileId] = React.useState<
     string | null
   >(null)
   const { t } = useTranslation(["option", "settings", "common"])
-  const initialLoadRef = React.useRef(false)
   const presetFileInputRef = React.useRef<HTMLInputElement | null>(null)
   const refreshedDownloadJobIdsRef = React.useRef<Set<string>>(new Set())
   const downloadsInitializedRef = React.useRef(false)
@@ -548,6 +559,12 @@ export const LlamacppAdminPage: React.FC = () => {
     }
   }, [])
 
+  const markAdminMutationGuardFromError = React.useCallback((error: unknown) => {
+    if (deriveAdminGuardFromError(error) === "forbidden") {
+      setAdminGuard("forbidden")
+    }
+  }, [])
+
   // A 502/503/504 means the llama.cpp runtime is down — say that, instead of
   // a generic failure (or, worse, the old "Admin APIs are not available" wall).
   const describeLoadError = React.useCallback(
@@ -562,42 +579,57 @@ export const LlamacppAdminPage: React.FC = () => {
   )
 
   const loadConfig = React.useCallback(async () => {
+    const lifetime = captureScope()
+    if (!lifetime) return;
     try {
       setLoadingConfig(true)
-      const data = await tldwClient.getLlamacppConfig()
+      const data = await request((options) => tldwClient.getLlamacppConfig(options))
+      if (lifetime.abortSignal.aborted) return;
       setConfig(data)
     } catch (error: unknown) {
+      if (lifetime.abortSignal.aborted) return;
       setStatusError(
         describeLoadError(error, "Failed to load Llama.cpp configuration.")
       )
       markAdminGuardFromError(error)
     } finally {
+      if (!lifetime.abortSignal.aborted) {
       setLoadingConfig(false)
+      }
     }
-  }, [markAdminGuardFromError])
+  }, [markAdminGuardFromError, request, captureScope])
 
   const loadStatus = React.useCallback(async () => {
+    const lifetime = captureScope()
+    if (!lifetime) return;
     try {
       setLoadingStatus(true)
       setStatusError(null)
-      const data = await tldwClient.getLlamacppStatus()
+      const data = await request((options) => tldwClient.getLlamacppStatus(options))
+      if (lifetime.abortSignal.aborted) return;
       setStatus(data as LlamacppStatus)
     } catch (error: unknown) {
+      if (lifetime.abortSignal.aborted) return;
       setStatus(null)
       setStatusError(
         describeLoadError(error, "Failed to load Llama.cpp status.")
       )
       markAdminGuardFromError(error)
     } finally {
+      if (!lifetime.abortSignal.aborted) {
       setLoadingStatus(false)
+      }
     }
-  }, [markAdminGuardFromError])
+  }, [markAdminGuardFromError, request, captureScope])
 
   const loadInventory = React.useCallback(async () => {
+    const lifetime = captureScope()
+    if (!lifetime) return;
     try {
       setLoadingInventory(true)
       setInventoryError(null)
-      const data = await tldwClient.getLlamacppInventory()
+      const data = await request((options) => tldwClient.getLlamacppInventory(options))
+      if (lifetime.abortSignal.aborted) return;
       setInventory(data)
       setSelectedModelId((current) => {
         if (current && data.models.some((item) => item.model_id === current)) {
@@ -606,6 +638,7 @@ export const LlamacppAdminPage: React.FC = () => {
         return data.models[0]?.model_id
       })
     } catch (error: unknown) {
+      if (lifetime.abortSignal.aborted) return;
       setInventory(null)
       setSelectedModelId(undefined)
       setInventoryError(
@@ -613,33 +646,45 @@ export const LlamacppAdminPage: React.FC = () => {
       )
       markAdminGuardFromError(error)
     } finally {
+      if (!lifetime.abortSignal.aborted) {
       setLoadingInventory(false)
+      }
     }
-  }, [markAdminGuardFromError])
+  }, [markAdminGuardFromError, request, captureScope])
 
   const loadAssets = React.useCallback(async (): Promise<boolean> => {
+    const lifetime = captureScope()
+    if (!lifetime) return false;
     try {
       setLoadingAssets(true)
       setAssetError(null)
-      const data = await tldwClient.getLlamacppAssets()
+      const data = await request((options) => tldwClient.getLlamacppAssets(options))
+      if (lifetime.abortSignal.aborted) return false;
       setAssets(data)
       return true
     } catch (error: unknown) {
+      if (lifetime.abortSignal.aborted) return false;
       setAssets(null)
       setAssetError(
         describeLoadError(error, "Failed to load Llama.cpp assets.")
       )
       return false
     } finally {
+      if (!lifetime.abortSignal.aborted) {
       setLoadingAssets(false)
+      }
     }
-  }, [])
+  }, [request, captureScope])
 
   const loadHardware = React.useCallback(async () => {
+    const lifetime = captureScope()
+    if (!lifetime) return;
     try {
-      const data = await tldwClient.getLlamacppHardware()
+      const data = await request((options) => tldwClient.getLlamacppHardware(options))
+      if (lifetime.abortSignal.aborted) return;
       setHardware(data)
     } catch (error: unknown) {
+      if (lifetime.abortSignal.aborted) return;
       setHardware({
         gpus: [],
         warnings: [
@@ -647,13 +692,16 @@ export const LlamacppAdminPage: React.FC = () => {
         ]
       })
     }
-  }, [])
+  }, [request, captureScope])
 
   const loadAssetDownloads = React.useCallback(async () => {
+    const lifetime = captureScope()
+    if (!lifetime) return;
     try {
       setLoadingAssetDownloads(true)
       setAssetError(null)
-      const data = await tldwClient.listLlamacppAssetDownloads()
+      const data = await request((options) => tldwClient.listLlamacppAssetDownloads(options))
+      if (lifetime.abortSignal.aborted) return;
       setAssetDownloads(data)
       const completedJobs = (data.jobs || []).filter((job) =>
         ["completed", "succeeded", "done"].includes(job.status.toLowerCase())
@@ -664,6 +712,7 @@ export const LlamacppAdminPage: React.FC = () => {
       if (newlyCompleted.length > 0) {
         if (downloadsInitializedRef.current) {
           const refreshed = await loadAssets()
+      if (lifetime.abortSignal.aborted) return;
           if (refreshed) {
             newlyCompleted.forEach((job) => {
               refreshedDownloadJobIdsRef.current.add(job.job_id)
@@ -677,6 +726,7 @@ export const LlamacppAdminPage: React.FC = () => {
       }
       downloadsInitializedRef.current = true
     } catch (error: unknown) {
+      if (lifetime.abortSignal.aborted) return;
       downloadsInitializedRef.current = true
       setAssetError(
         sanitizeAdminErrorMessage(
@@ -685,22 +735,28 @@ export const LlamacppAdminPage: React.FC = () => {
         )
       )
     } finally {
+      if (!lifetime.abortSignal.aborted) {
       setLoadingAssetDownloads(false)
+      }
     }
-  }, [loadAssets])
+  }, [loadAssets, request, captureScope])
 
   const loadRuntimePlane = React.useCallback(async () => {
+    const lifetime = captureScope()
+    if (!lifetime) return;
     try {
       setLoadingRuntimes(true)
       setRuntimeError(null)
       const [profileData, instanceData] = await Promise.all([
-        tldwClient.listLlamacppProfiles(),
-        tldwClient.listLlamacppInstances()
+        request((options) => tldwClient.listLlamacppProfiles(options)),
+        request((options) => tldwClient.listLlamacppInstances(options))
       ])
+      if (lifetime.abortSignal.aborted) return;
       setRuntimeProfiles(profileData.profiles || [])
       setRuntimeInstances(instanceData.runtimes || [])
       setRuntimeUnsupported(false)
     } catch (error: unknown) {
+      if (lifetime.abortSignal.aborted) return;
       const guardState = deriveAdminGuardFromError(error)
       if (guardState === "forbidden") {
         setAdminGuard(guardState)
@@ -718,14 +774,13 @@ export const LlamacppAdminPage: React.FC = () => {
         describeLoadError(error, "Failed to load Llama.cpp runtime instances.")
       )
     } finally {
+      if (!lifetime.abortSignal.aborted) {
       setLoadingRuntimes(false)
+      }
     }
-  }, [])
+  }, [request, captureScope])
 
   React.useEffect(() => {
-    if (initialLoadRef.current) return
-    initialLoadRef.current = true
-
     void Promise.all([
       loadConfig(),
       loadStatus(),
@@ -800,7 +855,7 @@ export const LlamacppAdminPage: React.FC = () => {
       try {
         setRegisteringPath(true)
         setInventoryError(null)
-        await tldwClient.registerLlamacppModelPath(path)
+        await request((options) => tldwClient.registerLlamacppModelPath(path, options))
         await loadInventory()
         return true
       } catch (error: unknown) {
@@ -810,7 +865,7 @@ export const LlamacppAdminPage: React.FC = () => {
             "Failed to register Llama.cpp model path."
           )
         )
-        markAdminGuardFromError(error)
+        markAdminMutationGuardFromError(error)
         return false
       } finally {
         setRegisteringPath(false)
@@ -824,7 +879,7 @@ export const LlamacppAdminPage: React.FC = () => {
       try {
         setRegisteringAssetPath(true)
         setAssetError(null)
-        const asset = await tldwClient.registerLlamacppAssetPath(path)
+        const asset = await request((options) => tldwClient.registerLlamacppAssetPath(path, options))
         await loadAssets()
         if (asset.kind === "gguf") {
           await loadInventory()
@@ -850,7 +905,7 @@ export const LlamacppAdminPage: React.FC = () => {
       try {
         setPreviewingAssetFolder(true)
         setAssetError(null)
-        const preview = await tldwClient.previewLlamacppAssetFolder(path)
+        const preview = await request((options) => tldwClient.previewLlamacppAssetFolder(path, options))
         setAssetImportPreview(preview)
         return true
       } catch (error: unknown) {
@@ -874,7 +929,7 @@ export const LlamacppAdminPage: React.FC = () => {
       try {
         setImportingAssetFolder(true)
         setAssetError(null)
-        await tldwClient.importLlamacppAssetFolder(path)
+        await request((options) => tldwClient.importLlamacppAssetFolder(path, options))
         setAssetImportPreview(null)
         await loadAssets()
         return true
@@ -898,7 +953,7 @@ export const LlamacppAdminPage: React.FC = () => {
       try {
         setStartingAssetDownload(true)
         setAssetError(null)
-        await tldwClient.startLlamacppAssetDownload(payload)
+        await request((options) => tldwClient.startLlamacppAssetDownload(payload, options))
         await loadAssetDownloads()
         return true
       } catch (error: unknown) {
@@ -921,7 +976,7 @@ export const LlamacppAdminPage: React.FC = () => {
       try {
         setCancelingAssetDownloadId(jobId)
         setAssetError(null)
-        await tldwClient.cancelLlamacppAssetDownload(jobId)
+        await request((options) => tldwClient.cancelLlamacppAssetDownload(jobId, options))
         await loadAssetDownloads()
         return true
       } catch (error: unknown) {
@@ -948,14 +1003,14 @@ export const LlamacppAdminPage: React.FC = () => {
       try {
         setProfileActionId("__create__")
         setProfileError(null)
-        await tldwClient.createLlamacppProfile(payload)
+        await request((options) => tldwClient.createLlamacppProfile(payload, options))
         await loadRuntimePlane()
         return true
       } catch (error: unknown) {
         setProfileError(
           sanitizeAdminErrorMessage(error, "Failed to create llama.cpp profile.")
         )
-        markAdminGuardFromError(error)
+        markAdminMutationGuardFromError(error)
         return false
       } finally {
         setProfileActionId(null)
@@ -972,14 +1027,14 @@ export const LlamacppAdminPage: React.FC = () => {
       try {
         setProfileActionId(profileId)
         setProfileError(null)
-        await tldwClient.updateLlamacppProfile(profileId, payload)
+        await request((options) => tldwClient.updateLlamacppProfile(profileId, payload, options))
         await loadRuntimePlane()
         return true
       } catch (error: unknown) {
         setProfileError(
           sanitizeAdminErrorMessage(error, "Failed to update llama.cpp profile.")
         )
-        markAdminGuardFromError(error)
+        markAdminMutationGuardFromError(error)
         return false
       } finally {
         setProfileActionId(null)
@@ -993,14 +1048,14 @@ export const LlamacppAdminPage: React.FC = () => {
       try {
         setProfileActionId(profileId)
         setProfileError(null)
-        await tldwClient.deleteLlamacppProfile(profileId)
+        await request((options) => tldwClient.deleteLlamacppProfile(profileId, options))
         await loadRuntimePlane()
         return true
       } catch (error: unknown) {
         setProfileError(
           sanitizeAdminErrorMessage(error, "Failed to delete llama.cpp profile.")
         )
-        markAdminGuardFromError(error)
+        markAdminMutationGuardFromError(error)
         return false
       } finally {
         setProfileActionId(null)
@@ -1015,14 +1070,14 @@ export const LlamacppAdminPage: React.FC = () => {
       setActionLoading(true)
       setStatusError(null)
       const serverArgs = buildLlamacppServerArgs(settingsRef.current)
-      await tldwClient.startLlamacppModel(selectedModelId, serverArgs)
+      await request((options) => tldwClient.startLlamacppModel(selectedModelId, serverArgs, options))
       setChatActionVisible(true)
       await Promise.all([loadStatus(), loadRuntimePlane()])
     } catch (error: unknown) {
       setStatusError(
         sanitizeAdminErrorMessage(error, "Failed to start Llama.cpp server.")
       )
-      markAdminGuardFromError(error)
+      markAdminMutationGuardFromError(error)
     } finally {
       setActionLoading(false)
     }
@@ -1038,14 +1093,14 @@ export const LlamacppAdminPage: React.FC = () => {
     try {
       setActionLoading(true)
       setStatusError(null)
-      await tldwClient.startLlamacppModel(selectedModelId)
+      await request((options) => tldwClient.startLlamacppModel(selectedModelId, undefined, options))
       setChatActionVisible(true)
       await Promise.all([loadStatus(), loadRuntimePlane()])
     } catch (error: unknown) {
       setStatusError(
         sanitizeAdminErrorMessage(error, "Failed to start Llama.cpp server.")
       )
-      markAdminGuardFromError(error)
+      markAdminMutationGuardFromError(error)
     } finally {
       setActionLoading(false)
     }
@@ -1059,14 +1114,14 @@ export const LlamacppAdminPage: React.FC = () => {
   const handleStop = React.useCallback(async () => {
     try {
       setActionLoading(true)
-      await tldwClient.stopLlamacppServer()
+      await request((options) => tldwClient.stopLlamacppServer(options))
       setChatActionVisible(false)
       await Promise.all([loadStatus(), loadRuntimePlane()])
     } catch (error: unknown) {
       setStatusError(
         sanitizeAdminErrorMessage(error, "Failed to stop Llama.cpp server.")
       )
-      markAdminGuardFromError(error)
+      markAdminMutationGuardFromError(error)
     } finally {
       setActionLoading(false)
     }
@@ -1077,7 +1132,7 @@ export const LlamacppAdminPage: React.FC = () => {
       setChatActionLoading(true)
       setChatNotice(null)
       setChatWarnings([])
-      const response = await tldwClient.useLlamacppInChat()
+      const response = await request((options) => tldwClient.useLlamacppInChat(options))
       setChatNotice(
         response.effective
           ? "Chat provider updated."
@@ -1089,7 +1144,7 @@ export const LlamacppAdminPage: React.FC = () => {
       setChatWarnings([
         sanitizeAdminErrorMessage(error, "Failed to wire llama.cpp into Chat.")
       ])
-      markAdminGuardFromError(error)
+      markAdminMutationGuardFromError(error)
     } finally {
       setChatActionLoading(false)
     }
@@ -1108,7 +1163,7 @@ export const LlamacppAdminPage: React.FC = () => {
         await Promise.all([loadStatus(), loadRuntimePlane()])
       } catch (error: unknown) {
         setRuntimeError(sanitizeAdminErrorMessage(error, fallbackMessage))
-        markAdminGuardFromError(error)
+        markAdminMutationGuardFromError(error)
       } finally {
         setRuntimeActionProfileId(null)
       }
@@ -1120,7 +1175,7 @@ export const LlamacppAdminPage: React.FC = () => {
     (profileId: string) => {
       void runRuntimeAction(
         profileId,
-        () => tldwClient.startLlamacppProfile(profileId),
+        () => request((options) => tldwClient.startLlamacppProfile(profileId, options)),
         "Failed to start Llama.cpp runtime profile."
       )
     },
@@ -1131,7 +1186,7 @@ export const LlamacppAdminPage: React.FC = () => {
     (profileId: string) => {
       void runRuntimeAction(
         profileId,
-        () => tldwClient.stopLlamacppProfile(profileId),
+        () => request((options) => tldwClient.stopLlamacppProfile(profileId, options)),
         "Failed to stop Llama.cpp runtime profile."
       )
     },
@@ -1142,7 +1197,7 @@ export const LlamacppAdminPage: React.FC = () => {
     (profileId: string) => {
       void runRuntimeAction(
         profileId,
-        () => tldwClient.pauseLlamacppProfile(profileId),
+        () => request((options) => tldwClient.pauseLlamacppProfile(profileId, options)),
         "Failed to pause Llama.cpp runtime profile."
       )
     },
@@ -1153,7 +1208,7 @@ export const LlamacppAdminPage: React.FC = () => {
     (profileId: string) => {
       void runRuntimeAction(
         profileId,
-        () => tldwClient.resumeLlamacppProfile(profileId),
+        () => request((options) => tldwClient.resumeLlamacppProfile(profileId, options)),
         "Failed to resume Llama.cpp runtime profile."
       )
     },
@@ -1166,7 +1221,7 @@ export const LlamacppAdminPage: React.FC = () => {
         setRuntimeActionProfileId(profileId)
         setChatNotice(null)
         setChatWarnings([])
-        const response = await tldwClient.useLlamacppProfileInChat(profileId)
+        const response = await request((options) => tldwClient.useLlamacppProfileInChat(profileId, options))
         setChatNotice(
           response.effective
             ? "Chat provider updated."
@@ -1181,7 +1236,7 @@ export const LlamacppAdminPage: React.FC = () => {
             "Failed to wire llama.cpp into Chat."
           )
         ])
-        markAdminGuardFromError(error)
+        markAdminMutationGuardFromError(error)
       } finally {
         setRuntimeActionProfileId(null)
       }

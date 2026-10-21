@@ -35,6 +35,19 @@ const ApiKeyManagementPage: React.FC = () => {
       </p>
     )
   }
+  if (config.authMode === "single-user") {
+    return (
+      <Alert
+        variant="info"
+        title={t("adminApiKeys.singleUserTitle", "Single-user API key")}
+      >
+        {t(
+          "adminApiKeys.singleUserBody",
+          "This server accepts only the primary API key configured on the server. Change that key in the server configuration. Per-user key creation and rotation are available only in multi-user mode."
+        )}
+      </Alert>
+    )
+  }
   return (
     <ApiKeyManagementWorkspace
       key={deriveConnectionAuthorityId(config)}
