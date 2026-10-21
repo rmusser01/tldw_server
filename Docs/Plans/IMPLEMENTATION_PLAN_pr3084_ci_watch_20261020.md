@@ -239,3 +239,12 @@ Capture's shared scoped policy and real content/analysis editors legitimately pe
 Quota resolver unit fixtures now include soft/hard status fields and versioned-delete orchestration. A distinct connection exists only inside the transaction context; capture/delete/touch require it and the same floor in exact order. This is a recording unit boundary, not actual profile-gateway SQL or PostgreSQL qualification. All11pass on final formatted source. Bandit20baseline/20current, zero errors or non-assert findings; added test-only assertions have explicit B101 regression annotations. Ruff1baseline/0current. Global quality5208passed unchanged baseline and final changed-file ratchet passes. Three TS lint scopes0/0. Independent connected final review is clear; no production rule, dependency, baseline or architecture change, so no new ADR. Six configured path checks precede publication.
 
 Further hosted failures, seven actual final-head required statuses, current-dev integration at landing and verified normal merge remain open. The trusted direct all-approvals instruction resolves the expanded-summary waiver; preserve original human summary bytes.
+
+
+## Hosted Kanban toast admission regression
+
+Current d489 hosted shared-ui-coverage2/16 job119271340956 reproduces the original Undo DOM absence after the archive request and message.open succeed:2,084other cases pass. Earlier unchanged normal and V8 local scopes did not reproduce it, so those runs do not close the hosted failure.
+
+The fixture now awaits the actual asynchronous archive event within React act before observing AntD's separately mounted static holder. Installed AntD source defers holder rendering and instance admission to a microtask; the original synchronous fireEvent wrapper did not await that work. All original visible Undo, retained callback, retired-owner and no-unarchive assertions remain unchanged, as do production code and timeouts.
+
+Complete Kanban15 plus existing native static-root5 pass20/20 with V8 coverage. This qualifies the connected local scope, not the hosted165-file shard or aggregate coverage. ESLint0/0. No architecture rule, dependency or allowance changes; no new ADR or PythonBandit scope. Independent connected review and three configured path checks precede publication. The human explicitly requested continued active work through merge; required pending statuses are not a reason for an early status-only handoff.

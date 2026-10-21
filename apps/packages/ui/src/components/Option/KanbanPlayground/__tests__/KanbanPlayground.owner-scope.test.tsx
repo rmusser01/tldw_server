@@ -283,7 +283,7 @@ describe("Kanban workspace owner lifetime", () => {
     const opened = vi.spyOn(message, "open")
     const view = render(tree())
     const dialog = await openCard()
-    fireEvent.click(within(dialog).getByTitle("Archive card"))
+    await act(async () => { fireEvent.click(within(dialog).getByTitle("Archive card")) })
     await waitFor(() => expect(opened).toHaveBeenCalled())
     expect(transport.fetch.mock.calls.filter(([url]) => String(url).endsWith("/archive"))).toHaveLength(1)
     await screen.findByRole("button", { name: "Undo" })
