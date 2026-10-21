@@ -27,6 +27,37 @@ pytestmark = pytest.mark.unit
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("view_kind", ["agenda", "week"])
+@pytest.mark.parametrize(("partial", "errors"), [(True, []), (True, ["reminder_tasks_unavailable"]), (False, ["reminder_tasks_unavailable"])])
+async def test_independent_review_projection_degradation_keeps_items_and_marks_partial(
+    calendar_db: CalendarDatabase, view_kind: str, partial: bool, errors: list[str],
+) -> None:
+    """Unavailable scheduled sources cannot masquerade as a complete agenda."""
+    from tldw_Server_API.app.core.Calendar.view_service import CalendarViewService
+
+    service = CalendarService(db=calendar_db)
+    calendar = service.create_calendar(actor_user_id=1, name="Local")
+    service.create_item(actor_user_id=1, calendar_id=calendar.id, kind="event", title="Local", start_at="2026-06-05T09:00:00Z")
+    task = ScheduledTask(id="reminder:retained", primitive="reminder_task", title="Retained", status="scheduled",
+                         enabled=True, next_run_at="2026-06-05T10:00:00Z", edit_mode="native")
+
+    class PartialScheduledTasks:
+        async def list_tasks(self, *, user_id: int) -> ScheduledTaskListResponse:
+            return ScheduledTaskListResponse(items=[task], total=1, partial=partial, errors=errors)
+
+    view = CalendarViewService(calendar_service=service, scheduled_tasks_service=PartialScheduledTasks())
+    result = (
+        await view.agenda(actor_user_id=1, start_at="2026-06-01", end_at="2026-06-08")
+        if view_kind == "agenda" else await view.week(actor_user_id=1, week_start="2026-06-01", timezone="UTC")
+    )
+    assert result.partial is True
+    assert result.warnings
+    assert {item.title for item in result.items} == {"Local", "Retained"}
+    if errors:
+        assert any("reminder_tasks_unavailable" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("view_kind", ["agenda", "week"])
 @pytest.mark.parametrize("persisted_start", [None, "2026-06-05T09:00:00Z"])
 async def test_todo_views_expose_canonical_start_separately_from_due_fallback(
     calendar_db: CalendarDatabase, view_kind: str, persisted_start: str | None,

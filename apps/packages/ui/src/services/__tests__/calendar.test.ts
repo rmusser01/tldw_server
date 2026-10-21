@@ -16,6 +16,7 @@ import {
   createExternalCalendarBinding,
   deleteCalendarItem,
   listCalendarLinks,
+  listCalendarAnnotations,
   deleteCalendarLink,
   deleteCalDavAccount,
   discoverExternalCalendars,
@@ -31,6 +32,12 @@ import {
 } from "../calendar"
 
 describe("calendar service contract", () => {
+  it("lists persisted annotations through the encoded item endpoint", async () => {
+    mocks.bgRequest.mockResolvedValue({ items: [{ id: 12, body: "Retain my notes" }], total: 1 })
+    const result = await listCalendarAnnotations("item/7")
+    expect(result.items[0].body).toBe("Retain my notes")
+    expect(mocks.bgRequest).toHaveBeenCalledWith({ path: "/api/v1/calendar/items/item%2F7/annotations", method: "GET" })
+  })
   beforeEach(() => {
     mocks.bgRequest.mockReset()
   })

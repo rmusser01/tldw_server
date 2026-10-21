@@ -144,6 +144,7 @@ class CalendarViewService:
                     actor_user_id=actor_user_id,
                     start_at=window_start,
                     end_at=window_end,
+                    warnings=warnings,
                 )
             )
         items.sort(key=_view_sort_key)
@@ -252,6 +253,7 @@ class CalendarViewService:
         actor_user_id: int,
         start_at: TemporalValue,
         end_at: TemporalValue,
+        warnings: list[str] | None = None,
     ) -> list[CalendarViewItem]:
         """Load read-only linked projections for scheduled tasks in the window."""
 
@@ -259,6 +261,11 @@ class CalendarViewService:
         window_start = _coerce_datetime(start_at)
         window_end = _coerce_datetime(end_at)
         response = await self.scheduled_tasks_service.list_tasks(user_id=actor_user_id)
+        if warnings is not None and (response.partial or response.errors):
+            warnings.extend(
+                [f"Scheduled tasks: {error}" for error in response.errors]
+                or ["Scheduled task projections may be incomplete"]
+            )
         projections: list[CalendarViewItem] = []
         for task in response.items:
             if not task.next_run_at:

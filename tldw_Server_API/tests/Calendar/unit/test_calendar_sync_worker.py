@@ -32,6 +32,34 @@ from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 pytestmark = pytest.mark.unit
 
 
+@pytest.mark.asyncio
+async def test_independent_review_failed_poll_yields_to_later_binding(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A terminal failed provider job must not monopolize bounded due scans."""
+    from tldw_Server_API.app.core.Calendar import calendar_sync_worker as worker
+    from tldw_Server_API.app.services.calendar_sync_scheduler import queue_due_calendar_sync_jobs
+
+    first = _create_sync_fixture(calendar_db)
+    later = _create_sync_fixture(calendar_db, owner_user_id=2)
+    monkeypatch.setattr(worker, "_utcnow_iso", lambda: "2026-06-05T17:00:00+00:00")
+    queued = await queue_due_calendar_sync_jobs(
+        db=calendar_db, job_manager=jobs_manager, now=datetime(2026, 6, 5, 17, tzinfo=timezone.utc), limit=1,
+    )
+    assert [row.binding_id for row in queued] == [first.binding_id]
+    job = jobs_manager.acquire_next_job(domain="calendar", queue="default", worker_id="review-regression", lease_seconds=60)
+    with pytest.raises(RuntimeError, match="provider unavailable"):
+        await worker.handle_calendar_sync_job(job, db=calendar_db, provider=_FakeProvider(exc=RuntimeError("provider unavailable")))
+    jobs_manager.fail_job(job["id"], error="provider unavailable", retryable=False, enforce=False)
+    following = await queue_due_calendar_sync_jobs(
+        db=calendar_db, job_manager=jobs_manager, now=datetime(2026, 6, 5, 17, 1, tzinfo=timezone.utc), limit=1,
+    )
+    assert [row.binding_id for row in following] == [later.binding_id]
+    binding = calendar_db.get_external_binding(first.binding_id)
+    assert binding.next_scan_at == "2026-06-05T18:00:00+00:00"
+    assert binding.last_sync_at is None
+
+
 _CUSTOM_VTIMEZONE = """BEGIN:VTIMEZONE
 TZID:Custom/Research
 BEGIN:STANDARD

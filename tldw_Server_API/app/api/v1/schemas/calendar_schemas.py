@@ -426,6 +426,13 @@ class CalendarLinkResponse(BaseModel):
         )
 
 
+class CalendarAnnotationListResponse(BaseModel):
+    """Persisted commentary visible to the authorized item reader."""
+
+    items: list[CalendarAnnotationResponse] = Field(default_factory=list)
+    total: int = Field(..., ge=0)
+
+
 class CalendarLinkListResponse(BaseModel):
     """Context-link collection and nonnegative total."""
 

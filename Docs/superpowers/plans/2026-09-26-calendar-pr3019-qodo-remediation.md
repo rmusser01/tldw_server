@@ -15,6 +15,10 @@
 - Keep database SQL in `Calendar_DB.py`; make item/recurrence writes atomic.
 - Do not invent a human Change summary or bypass required checks or merge policy.
 - Reply to each Qodo thread with the verified disposition and commit; obtain a fresh review after fixes.
+- The human requester replaced the fresh Qodo gate with the
+  `requesting-code-review` independent reviewer workflow after Qodo exhausted
+  workspace credits. Historical Qodo dispositions remain evidence; no new Qodo
+  request or paid credit purchase is required.
 
 ## Approved CI Follow-Up (2026-10-20)
 
@@ -34,8 +38,9 @@ Docs/ADR/021-services-lifecycle-startup-and-shutdown.md); it changes no API fiel
    AuthNZ PostgreSQL, privilege and startup tests; frontend/TypeScript, applicable
    CI contracts, shard guard, Ruff, Bandit and normal hooks. Record actual results.
 4. **Publication (In Progress):** Push with an explicit lease against the verified
-   remote head, inspect CI on the published commit and request one new full Qodo
-   review. Provider smoke and human-authored what-and-why rationale remain gates.
+   remote head, inspect CI on the published commit and complete a full independent
+   review via `requesting-code-review`. Provider smoke and human-authored
+   what-and-why rationale remain gates.
 
 Local Python 3.12 evidence: Calendar/scheduled-task/permission unit scope 585 pass;
 real PostgreSQL and privilege scope 49 pass; worker/startup scope 87 pass;
@@ -47,6 +52,84 @@ shard guard reports 5,145 files with no newly uncovered files. No test-quality
 baseline or guard was weakened. Hosted exact-head checks remain mandatory.
 Final real-quota API/startup rerun: 144 pass. Normal hooks pass over the entire
 PR merge-base diff, including the new shared models and canonical task records.
+
+Published candidate: `2f73fcc8d62d6cf2c454db9aef9c23228768585d`, verified on PR3019
+after an exact old-head lease push. GitHub reports MERGEABLE against current dev
+`e1ca22f2986554f85a7f9473104bfd3e984b95ae`. Fresh CI run 39523251502 and required
+gate runs are queued; trusted-license audit 39523304079 is queued with no steps
+started. No hosted pass is claimed. Validation-only PR-body refresh preserved all
+other bytes. Full Qodo request 6305157939 received billing-blocked reply
+6305159034: workspace credits exhausted, so no full review ran. Existing provider
+smoke and human-authored what-and-why summary gates remain unwaived. No merge.
+
+Human-authorized review replacement: one fresh, read-only general-purpose
+reviewer is reviewing the entire base `e1ca22f2986554f85a7f9473104bfd3e984b95ae`
+through head `2f73fcc8d62d6cf2c454db9aef9c23228768585d` range using the
+requesting-code-review template, without inheriting implementation history.
+Reviewer agent: `01a15bee-211d-70c1-b099-27feb5c10a1f`. Full review completed;
+Qodo credit exhaustion no longer blocks merge under the updated human instruction.
+
+### Independent Review Result
+
+Review: https://github.com/rmusser01/tldw_server/pull/3019#pullrequestreview-5593667681
+Exact head: `2f73fcc8d62d6cf2c454db9aef9c23228768585d`.
+Verdict: **With fixes**, no verified Critical findings, five Important/P2 findings:
+
+1. `CalendarItemDrawer.tsx:34`: displayed original wall times lose their offset
+   on edits when item timezone metadata exists, shifting instants or failing
+   start/end validation. Keep display and serialization in the same timezone.
+2. `calendar_sync_worker.py:326` / `Calendar_DB.py:2117`: failures leave the oldest
+   due timestamp unchanged, so repeated bounded scans can starve later bindings.
+   Reschedule failed attempts without weakening active-job deduplication.
+3. `CalendarItemDrawer.tsx:135` / `calendar.py:667`: persisted annotations have no
+   product read path. Expose the existing authorized list operation and render
+   saved notes when reopening the item.
+4. `Calendar_DB.py:1863`: revoked accounts retain references to wiped secrets;
+   subsequent deletion fails and rolls back. Make scoped revocation/deletion
+   cleanup composable while retaining ownership checks.
+5. `view_service.py:261`: scheduled-source partial/errors are discarded; a source
+   outage is shown as a complete empty agenda. Propagate degradation warnings.
+
+The coordinator checked the cited implementations and published five inline
+comments. Reviewer reports 412 focused Python 3.12 tests passing, zero Bandit
+findings/errors across 19 Calendar runtime files, and clean whitespace checks.
+Evidence detail: 299 tests plus 112 tests passed under an isolated `--noconftest`
+harness; one multiprocessing harness invocation could not reopen `<stdin>` and
+passed when rerun through the pytest module entrypoint (412 distinct passes).
+This is focused review evidence, not a canonical hosted-suite result. Saved
+security report: `/private/tmp/calendar_pr3019_review_bandit.json`.
+No source approval or fixes for these five findings are claimed. No production
+files changed in this review-only turn. Hosted CI, provider smoke and human
+what-and-why summary remain separate, unwaived gates.
+
+## Approved Independent-Review Remediation (2026-10-20)
+
+Human approval covers all five P2 findings, regression tests, fresh CI and a new
+requesting-code-review pass. ADR required: no; these restore existing Calendar
+timezone, polling, authorized commentary and degraded-result contracts.
+
+1. **Regressions (Complete):** Ten backend cases and three frontend cases failed
+   against the published head for the expected five reported defects.
+2. **Scoped fixes (Complete):** Normalize editor display into the item timezone;
+   reuse polling cadence after failures; expose authorized annotation listing
+   without private tag overlays; atomically clear revoked secret references;
+   propagate partial scheduled-source warnings while preserving loaded items.
+3. **Local verification (Complete):** Full Calendar and scheduled-task suites,
+   French/Paris frontend, TypeScript, API/OpenAPI/route contracts, quality ratchets,
+   Bandit and normal hooks. Preserve existing DST and authority regressions.
+4. **Publication and review (In Progress):** Lease-protected push, exact-head CI,
+   individual evidence replies, fresh independent full requesting-code-review.
+   Provider smoke and human-owned rationale gates remain unchanged.
+
+Integrated current dev `721bb583e9090d3794d43775ff33df8f425b3259` (PR3292),
+with no conflicts and all 23 Calendar commits range-diff equivalent. Combined
+Calendar/scheduled-task/required workflow/task/quality suite: **675 pass** on
+Python 3.12. French/Paris frontend: **133 pass**, TypeScript pass. Shared
+route-auth/privilege/import boundaries: **63 pass**; required real PostgreSQL
+migration fixture: **2 pass**, no skips. Canonical OpenAPI/path union and normal
+full-PR hooks pass; Ruff pass; Bandit zero findings/errors; shard coverage 5,145
+files with zero newly uncovered files. These are local results, not hosted CI
+or independent source approval.
 
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.
@@ -74,7 +157,7 @@ PR merge-base diff, including the new shared models and canonical task records.
 
 ## Stage 4: Re-review and Integration
 **Goal:** Publish verified fixes, address follow-up review, and satisfy merge gates.
-**Success Criteria:** Each Qodo finding has a verified disposition in its thread; fresh Qodo review and required CI checks pass; branch is current with dev; PR is merged, or an exact remaining external/policy gate is recorded without claiming completion.
+**Success Criteria:** Each earlier Qodo finding has a verified disposition in its thread; the human-authorized requesting-code-review replacement and required CI checks pass; branch is current with dev; PR is merged, or an exact remaining external/policy gate is recorded without claiming completion.
 **Tests:** Full Calendar pytest suite; focused frontend Vitest tests from frontend and shared-UI working directories; frontend TypeScript; touched-scope Bandit; pre-commit; shard coverage guard; git diff checks. Inspect baseline failures separately rather than masking them.
 **Steps:** Self-review complete diff; verify and push; reply to Qodo threads; request fresh review; inspect CI and latest dev; rebase/reverify if required; merge only when allowed; update Backlog with PR/verification/final state.
 **Status:** In Progress

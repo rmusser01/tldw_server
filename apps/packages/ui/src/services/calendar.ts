@@ -533,6 +533,15 @@ export async function createCalendarAnnotation(
   })
 }
 
+export async function listCalendarAnnotations(
+  itemId: string | number
+): Promise<{ items: CalendarAnnotationResponse[]; total: number }> {
+  return await bgRequest({
+    path: toAllowedPath(`${CALENDAR_BASE}/items/${encodePathId(itemId)}/annotations`),
+    method: "GET"
+  })
+}
+
 export async function updateCalendarLocalTags(
   itemId: string | number,
   payload: CalendarLocalTagsUpdateRequest
