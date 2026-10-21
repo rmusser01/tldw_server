@@ -259,6 +259,19 @@ export const clearSetting = async (setting: SettingDef<unknown>) => {
   clearLocalStorageValue(setting)
 }
 
+/**
+ * Test-only seam: drop the module-level value/mirror caches. Suites that seed
+ * storage directly (bypassing `setSetting`) or that swap the storage mock have
+ * no `storage.onChanged` invalidation path in jsdom, so a cached value from an
+ * earlier test would be served across the reset. Production never needs this:
+ * the cache is invalidated by `storage.onChanged`, `setSetting` and
+ * `clearSetting`.
+ */
+export const __clearSettingCachesForTests = (): void => {
+  valueCache.clear()
+  mirrorCache.clear()
+}
+
 export const coerceBoolean = (value: unknown, fallback: boolean): boolean => {
   if (typeof value === "boolean") return value
   if (typeof value === "string") return value === "true"
