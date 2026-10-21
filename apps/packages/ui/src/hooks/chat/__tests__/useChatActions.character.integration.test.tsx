@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { createSafeStorage } from "@/utils/safe-storage"
 
 import { useChatActions as useRawChatActions } from "../useChatActions"
-import type { ChatHistory, Message, State } from "@/store/option"
+import { useStoreMessageOption, type ChatHistory, type Message, type State } from "@/store/option"
 import { createCoreSlice } from "@/store/option/slices/core-slice"
 import { createServerChatSlice } from "@/store/option/slices/server-chat-slice"
 import { useStoreChatModelSettings } from "@/store/model"
@@ -353,7 +353,9 @@ const useChatActions = (options: Parameters<typeof useRawChatActions>[0]) => {
     } : null
     const view = owner ? { owner_key: owner.owner_key, conversation_id: owner.conversation_id, view_session_id: "legacy-character-scene-view",
       selection_revision: 0, interpretation: { kind: "parent_graph_v1" as const }, cursor: { kind: "empty" as const } } : null
-    Object.assign(state, { historyId, serverChatId: serverId, chatDraftRevision: state.chatDraftRevision ?? 0,
+    Object.assign(state, { historyId, serverChatId: serverId,
+      serverChatMetaLoaded: state.serverChatMetaLoaded ?? (serverId ? options.serverChatMetaLoaded : false),
+      chatDraftRevision: state.chatDraftRevision ?? 0,
       chatDraftAddress: state.chatDraftAddress ?? (owner && view ? chatDraftAddressForReceipt({ owner, view }) : freshChatDraftAddress(options.temporaryChat)),
       selectedModel: options.selectedModel, selectedModelRevision: state.selectedModelRevision ?? 0, toolChoice: options.toolChoice,
       temporaryChat: options.temporaryChat })
@@ -441,6 +443,7 @@ const createHookOptions = () => ({
   ragSources: [],
   ragAdvancedOptions: {},
   serverChatId: "tracked-chat-1",
+  serverChatMetaLoaded: true,
   serverChatTitle: "Tracked character chat",
   serverChatCharacterId: "char-tracked",
   serverChatAssistantKind: "character" as const,
@@ -589,6 +592,22 @@ describe("useChatActions character integration", () => {
   })
 
 
+
+  it.each(["prop", "store"])("retains a Character draft when %s identity is still unloaded", async boundary => {
+    const options = { ...createHookOptions(), serverChatMetaLoaded: boundary !== "prop" }
+    if (boundary === "store") Object.assign(messageStoreState.value, { serverChatMetaLoaded: false })
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]))
+    await act(async () => {
+      expect(await result.current.onSubmit({ message: "Keep this Character draft", image: "" })).toMatchObject({
+        status: "failed", restoreDraft: true
+      })
+    })
+    expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(false)
+    expect(streamCharacterChatCompletionMock).not.toHaveBeenCalled()
+    expect(saveLocalSuccessMock).not.toHaveBeenCalled()
+    expect(addChatMessageMock).not.toHaveBeenCalled()
+    expect(options.setMessages).not.toHaveBeenCalled()
+  })
 
   it("publishes full-page legacy Thinking progress before any answer or persistence", async () => {
     let release!: () => void, entered = false, enter!: () => void

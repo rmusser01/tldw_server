@@ -154,3 +154,11 @@ Persona fixture batch59944a2dc03a8ed9f01958f26f00805db2cd628a was safely publish
 Image and dynamic-action fixtures explicitly declare their loaded neutral saved identity; the fresh image case explicitly remains unloaded. Overlay metadata-retention tests now admit a loaded neutral chat and deliver canonical character metadata only after the real local save is held. Every original final title/character/version/meta/history-ID assertion and retired-owner control remains. A separate known-character overlay case refuses with retained draft and no dispatch/clearing. No production guard is bypassed or changed.
 
 All44cases pass in one complete run (original43plus1refusal). Three lint scopes add0findings: dynamic12/12,image21/21,overlay0/0 inherited. PythonBandit is inapplicable. Independent connected final review is clear; no new architecture rule, dependency, schema or baseline is introduced and no new ADR is needed. Normal configured checks precede publication. Other CI scopes, final-head required statuses, trusted summary disposition and verified normal merge remain open.
+
+## Qualified Character fixture readiness repair
+
+Sibling SDK batch35e90fb83d271ac7db9f40e36cfc523642202b83 was safely published and GitHub read back OPEN/unarmed.
+
+The separate private Character Scene fixture likewise omitted saved identity readiness. It now declares the tracked saved-chat prerequisite and fills missing state while preserving an explicit currentfalse and freshfalse. Two new refusal controls cover unloaded props and unloaded current state. No original assertion, production guard or H1 authority changes.
+
+The initial84case run failed81/passed3; the first focused repair passed the five original progress/greeting cases, with two new controls requiring a missing value-import correction. Final complete qualification passes86/86 (original84plus2controls), covering existing auth, logout, timeout, retry, branch, attachment, greeting and cancellation assertions. ESLint25/25 inherited,0new; PythonBandit is inapplicable. Independent connected final review is clear. No durable architecture rule, API, schema, dependency or baseline changed; no new ADR is needed. Normal configured checks precede publication. Other CI, required final-head statuses, trusted summary disposition and verified merge remain open.
