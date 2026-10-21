@@ -171,6 +171,7 @@ export function useComposerText(
   const rawForm = useSimpleForm<ComposerFormValues>({
     initialValues: { message: "", image: "", imageFilename: "" }
   })
+  const previousImageRef = React.useRef(rawForm.values.image)
   const {
     setValues: setRawValues,
     setFieldValue: setRawFieldValue,
@@ -180,6 +181,7 @@ export function useComposerText(
     (field: keyof ComposerFormValues, value: string) => {
       if (field === "image") {
         imageRevisionRef.current++
+        previousImageRef.current = value
         // Every image replacement/removal must retire its old display name.
         setRawValues({ image: value, imageFilename: "" })
       } else {
@@ -235,7 +237,6 @@ export function useComposerText(
   const [restoreAttemptId, setRestoreAttemptId] = React.useState<number | null>(
     null
   )
-  const previousImageRef = React.useRef(form.values.image)
   React.useLayoutEffect(() => {
     if (previousImageRef.current !== form.values.image) {
       previousImageRef.current = form.values.image

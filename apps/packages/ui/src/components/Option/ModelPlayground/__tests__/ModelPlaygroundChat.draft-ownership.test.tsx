@@ -37,8 +37,9 @@ vi.mock("@/hooks/useMessageOption", () => ({
     historyId: null,
   }),
 }));
-vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [] }),
+vi.mock("@/hooks/useChatModelCatalog", () => ({
+  useChatModelCatalog: () => ({ data: [] }),
+  EMPTY_CHAT_MODELS: [],
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({

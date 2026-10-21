@@ -115,10 +115,15 @@ describe("useSetupOnboarding", () => {
         api_key: "synthetic-private-key"
       })
     })
+    const requestOptions = vi.mocked(tldwClient.saveSetupProvider).mock.calls[0][1]
+    expect(requestOptions).toEqual({
+      configSnapshot: { serverUrl: "https://declared-setup.test", authMode: "single-user", apiKey: "declared-setup-key" },
+      abortSignal: expect.any(AbortSignal)
+    })
     expect(tldwClient.updateFirstRunState).toHaveBeenCalledWith({
       step: "providers",
       data
-    })
+    }, requestOptions)
     expect(result.current.state?.step_data.providers).toEqual(data)
     expect(result.current.state?.completed_steps).not.toContain("providers")
   })
