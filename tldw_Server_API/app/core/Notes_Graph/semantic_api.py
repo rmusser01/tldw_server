@@ -32,6 +32,7 @@ from tldw_Server_API.app.core.exceptions import SemanticAPIError
 from tldw_Server_API.app.core.LLM_Calls.embeddings_adapter_registry import (
     get_embeddings_registry,
 )
+from tldw_Server_API.app.core.Utils.coercion import parse_bool
 
 from .semantic_capabilities import (
     SemanticCapabilities,
@@ -112,17 +113,15 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _truthy(value: str | None) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def load_semantic_settings() -> SemanticIndexSettings:
     """Load the operator kill switch while retaining hard-bounded defaults."""
 
     raw = os.getenv("NOTES_SEMANTIC_INDEXING_ENABLED")
     if raw is None:
         return DEFAULT_SEMANTIC_INDEX_SETTINGS
-    return SemanticIndexSettings(indexing_enabled=_truthy(raw))
+    return SemanticIndexSettings(
+        indexing_enabled=parse_bool(raw, default=False, key="NOTES_SEMANTIC_INDEXING_ENABLED")
+    )
 
 
 def _active_note_count(note_db: Any) -> int:

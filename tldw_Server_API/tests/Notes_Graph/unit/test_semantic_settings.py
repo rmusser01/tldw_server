@@ -2,9 +2,46 @@ from __future__ import annotations
 
 import pytest
 
+from tldw_Server_API.app.core.Notes_Graph.semantic_api import load_semantic_settings
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize(
+    ("value", "enabled"),
+    [
+        ("1", True),
+        (" TRUE ", True),
+        ("yes", True),
+        ("on", True),
+        ("y", True),
+        ("enabled", True),
+        ("0", False),
+        ("false", False),
+        ("no", False),
+        ("off", False),
+        ("disabled", False),
+        ("", False),
+        ("unexpected", False),
+    ],
+)
+def test_semantic_operator_switch_uses_shared_boolean_vocabulary(
+    monkeypatch: pytest.MonkeyPatch,
+    value: str,
+    enabled: bool,
+) -> None:
+    monkeypatch.setenv("NOTES_SEMANTIC_INDEXING_ENABLED", value)
+
+    assert load_semantic_settings().indexing_enabled is enabled
+
+
+def test_semantic_operator_switch_preserves_unset_defaults(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("NOTES_SEMANTIC_INDEXING_ENABLED", raising=False)
+
+    assert load_semantic_settings() == SemanticIndexSettings()
 
 
 def test_semantic_settings_exposes_bounded_operator_controls() -> None:
