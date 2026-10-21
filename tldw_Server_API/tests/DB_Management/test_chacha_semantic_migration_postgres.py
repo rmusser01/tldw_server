@@ -144,7 +144,7 @@ def test_postgres_v86_ddl_has_owner_keys_forced_rls_and_no_dimension_tables() ->
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("starting_version", [84, 85, 86, 87])
+@pytest.mark.parametrize("starting_version", [84, 85, 86, 87, 88])
 def test_postgres_completed_schema_fast_path_reaches_semantic_target(
     pg_database_config: DatabaseConfig,
     monkeypatch: pytest.MonkeyPatch,
@@ -154,6 +154,7 @@ def test_postgres_completed_schema_fast_path_reaches_semantic_target(
     with monkeypatch.context() as old_schema:
         old_schema.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", starting_version)
         original = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
+        retained = _create_store_configuration(original) if starting_version == 88 else None
         original.close_all_connections()
 
     def reject_legacy_bootstrap(_self: CharactersRAGDB, _conn: object) -> None:
@@ -167,9 +168,11 @@ def test_postgres_completed_schema_fast_path_reaches_semantic_target(
             "SELECT version FROM db_schema_version WHERE schema_name=%s",
             (CharactersRAGDB._SCHEMA_NAME,),
         ).scalar
-        assert int(version) == 88
+        assert int(version) == 89  # nosec B101 - The composed current schema includes dictionary ownership.
         assert backend.table_exists("note_semantic_operation_receipts")
         assert backend.table_exists("note_semantic_obsolete_vectors")
+        if retained is not None:
+            assert db.note_semantic_store.get_configuration("dataset-a") == retained  # nosec B101 - Dictionary89 preserves published semantic88 data.
     finally:
         db.close_all_connections()
 

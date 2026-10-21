@@ -19274,8 +19274,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._normalize_postgres_catalog_expression,
         )
 
+    def _bridge_legacy_dictionary_v86_postgres(self, conn: Any) -> None:
+        """Complete semantic86 for the verified PR-only dictionary86 layout."""
+        semantic_tables = (
+            "note_semantic_index_configs", "note_semantic_generations", "note_semantic_note_state",
+            "note_semantic_chunks", "note_semantic_work", "note_semantic_obsolete_vectors",
+            "note_semantic_operation_receipts",
+        )
+        if any(self.backend.table_exists(table, connection=conn) for table in semantic_tables):
+            self._ensure_note_semantic_schema_postgres(conn)
+            return
+        self._verify_dictionary_schema_postgres(conn)
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V85_TO_V86_POSTGRES, conn, expected_version=86,
+        )
+
     def _migrate_from_v88_to_v89_postgres(self, conn: Any) -> None:
         """Quarantine unowned legacy dictionaries before publishing forced RLS."""
+        if self._get_schema_version_postgres(conn) != 88:
+            raise SchemaError("Dictionary PostgreSQL owner migration requires schema version 88.")
         from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_dictionary_rls_sql
         from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import (
             postgres_dictionary_schema_statements,
@@ -27045,6 +27062,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise SchemaError(  # noqa: TRY003
                     f"Database schema version ({current_version}) is newer than supported by code ({target_version})."
                 )
+            if current_version == 86 and target_version >= 89:
+                self._bridge_legacy_dictionary_v86_postgres(conn)
+
             # H1 previously published v68 for history projections, while dev
             # published v68 for owner-scoped character names. Inspect the actual
             # catalog under the migration lock before replaying the missing step.

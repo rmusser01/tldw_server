@@ -360,3 +360,45 @@ def test_runtime_and_service_init_refuse_dictionary_authority_drift(catalogs, dr
         CharactersRAGDB(":memory:", client_id="1", backend=c.backend)
     with pytest.raises(CharactersRAGDBError):
         ChatDictionaryService(c.alice)
+
+
+@pytest.mark.parametrize("layout", ["legacy86", "partial86", "unsafe86"])
+def test_legacy_dictionary_v86_composes_with_semantic_migrations(pg_restricted_backend, monkeypatch, layout):
+    from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+    from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_dictionary_rls_sql
+    from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import postgres_dictionary_schema_statements
+
+    with monkeypatch.context() as historical:
+        historical.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 85)
+        old = CharactersRAGDB(":memory:", client_id="1", backend=pg_restricted_backend)
+    try:
+        with old.transaction() as conn:
+            for statement in (*postgres_dictionary_schema_statements(), *build_dictionary_rls_sql()):
+                conn.execute(statement)
+        service = ChatDictionaryService(old)
+        dictionary_id = service.create_dictionary("Retained legacy v86")
+        with old.transaction() as conn:
+            conn.execute("UPDATE db_schema_version SET version=86 WHERE schema_name=?", (old._SCHEMA_NAME,))
+            if layout == "partial86":
+                conn.execute("CREATE TABLE note_semantic_operation_receipts (id integer)")
+            elif layout == "unsafe86":
+                conn.execute("ALTER TABLE chat_dictionaries NO FORCE ROW LEVEL SECURITY")
+    finally:
+        old.close_all_connections()
+    backend = DatabaseBackendFactory.create_backend(pg_restricted_backend.config)
+    try:
+        if layout != "legacy86":
+            with pytest.raises(CharactersRAGDBError):
+                CharactersRAGDB(":memory:", client_id="1", backend=backend)
+            assert int(backend.execute("SELECT version FROM db_schema_version WHERE schema_name=?", (old._SCHEMA_NAME,)).scalar) == 86  # nosec B101 - Refusal cannot stamp an upgrade.
+            assert not backend.table_exists("note_semantic_index_configs")  # nosec B101 - Refuse partial or unsafe catalogs without creating semantic data.
+            return
+        upgraded = CharactersRAGDB(":memory:", client_id="1", backend=backend)
+        try:
+            assert int(backend.execute("SELECT version FROM db_schema_version WHERE schema_name=?", (old._SCHEMA_NAME,)).scalar) == 89  # nosec B101 - Both published semantic and dictionary migrations must finish.
+            assert ChatDictionaryService(upgraded).get_dictionary(dictionary_id)["name"] == "Retained legacy v86"  # nosec B101 - Preserve the original owned row.
+            assert backend.table_exists("note_semantic_index_configs") and backend.table_exists("note_semantic_operation_receipts")  # nosec B101 - Reach both ends of semantic86-88.
+        finally:
+            upgraded.close_all_connections()
+    finally:
+        backend.get_pool().close_all()
