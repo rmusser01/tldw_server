@@ -43,6 +43,7 @@ ORDINARY_WORKFLOW_NAMES = (
     "sbom.yml",
     "security-required.yml",
     "ui-characters-harness-tests.yml",
+    "ui-design-system-drift-report.yml",
     "ui-dictionaries-tests.yml",
     "ui-playground-quality-gates.yml",
     "ui-research-workspace-parity.yml",
@@ -95,6 +96,7 @@ DIRECT_TRIGGER_DIGESTS = {
     "sbom.yml": "6ba4774ab2129a605bb160c5ee6f48ebc51544881592ad60ad5268b910fcfbde",
     "security-required.yml": "17a6ff1c75afa8c8826e8378c3f73c1099375730bdd06067a2921ecaf38f58ab",
     "ui-characters-harness-tests.yml": "8977899d9903b59c454c686e1fda272a7b919f63782d84ec8c24973449f2eee6",
+    "ui-design-system-drift-report.yml": "9668d35955cd772888b26c55ab8a92b6ab39da5032a63daed98cb7de6e96ed59",
     "ui-dictionaries-tests.yml": "f191b9920abca964265ff7ff4510cc9ac554770d4e4a0b8b172854147c0c0dbe",
     "ui-playground-quality-gates.yml": "af4b03b1d48dd12b93e1bd39a8036109b26a7890ee5cd8ef8ed57b7d2da3008a",
     "ui-research-workspace-parity.yml": "aa73478a8917cbf0eb7be01e1f4212f1a0692200919d9a09982ab6525af49503",
@@ -149,6 +151,7 @@ ORIGINAL_JOB_NAMES = {
     "sbom.yml": ("build-sbom",),
     "security-required.yml": ("changes", "security-required", "queue-tick", "queue-kick"),
     "ui-characters-harness-tests.yml": ("characters-harness",),
+    "ui-design-system-drift-report.yml": ("drift-report",),
     "ui-dictionaries-tests.yml": ("dictionaries-vitest",),
     "ui-playground-quality-gates.yml": ("playground-quality",),
     "ui-research-workspace-parity.yml": (
@@ -465,6 +468,104 @@ def test_ordinary_pr_workflow_inventory_and_direct_triggers_are_frozen() -> None
         direct_trigger.pop("workflow_run", None)
         encoded = json.dumps(direct_trigger, sort_keys=True, separators=(",", ":")).encode()
         assert hashlib.sha256(encoded).hexdigest() == DIRECT_TRIGGER_DIGESTS[name], name
+
+
+def test_design_system_drift_report_is_advisory_and_retains_failure_evidence() -> None:
+    path = REPO_ROOT / ".github/workflows/ui-design-system-drift-report.yml"
+    assert path.exists(), "the advisory drift workflow is missing"  # nosec B101 - regression assertion
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert set(_trigger(data)) == {"pull_request", "workflow_dispatch"}  # nosec B101 - regression assertion
+    assert data["permissions"] == {"contents": "read"}  # nosec B101 - regression assertion
+    job = data["jobs"]["drift-report"]
+    assert job["name"] == "UI Design-System Drift Report"  # nosec B101 - regression assertion
+    assert job["continue-on-error"] is True  # nosec B101 - regression assertion
+    assert job["timeout-minutes"] == 20  # nosec B101 - regression assertion
+    assert job["permissions"] == {"contents": "read"}  # nosec B101 - regression assertion
+    assert _needs(job) == ["admission", "await_license"]  # nosec B101 - regression assertion
+    assert job["env"]["SKIP_WXT_PREPARE"] == "1"  # nosec B101 - regression assertion
+    steps = job["steps"]
+    checkout = steps[0]
+    assert checkout["uses"] == CHECKOUT_ACTION  # nosec B101 - regression assertion
+    assert checkout["with"]["persist-credentials"] is False  # nosec B101 - regression assertion
+    node = next(step for step in steps if step.get("uses", "").startswith("actions/setup-node@"))
+    assert node["with"]["node-version"] == "24"  # nosec B101 - regression assertion
+    bun = next(step for step in steps if step.get("uses") == "oven-sh/setup-bun@v2")
+    assert bun["with"]["bun-version"] == "1.3.2"  # nosec B101 - regression assertion
+    install = next(step for step in steps if step.get("name") == "Install workspace dependencies")
+    assert (install["working-directory"], install["run"]) == (  # nosec B101 - regression assertion
+        "apps", "bun install --frozen-lockfile",
+    )
+    scan = next(step for step in steps if step.get("id") == "drift")
+    assert scan["working-directory"] == "apps/packages/ui"  # nosec B101 - regression assertion
+    assert scan["continue-on-error"] is True  # nosec B101 - regression assertion
+    assert scan["run"] == (  # nosec B101 - regression assertion
+        'bun run report:design-system-drift --output "$RUNNER_TEMP/tldw-design-system-drift.json"'
+    )
+    upload = next(step for step in steps if step.get("name") == "Upload drift report")
+    assert upload["if"] == "always()"  # nosec B101 - regression assertion
+    assert upload["uses"] == "actions/upload-artifact@v7"  # nosec B101 - regression assertion
+    assert upload["with"] == {  # nosec B101 - regression assertion
+        "name": "ui-design-system-drift-${{ github.event.pull_request.head.sha || github.sha }}",
+        "path": "${{ runner.temp }}/tldw-design-system-drift.json",
+        "if-no-files-found": "warn",
+    }
+    summary = next(step for step in steps if step.get("name") == "Publish drift summary")
+    assert summary["if"] == "always()"  # nosec B101 - regression assertion
+    assert "GITHUB_STEP_SUMMARY" in summary["run"]  # nosec B101 - regression assertion
+    assert "./apps/packages/ui/scripts/design-system-drift-report.mjs" in summary["run"]  # nosec B101 - regression assertion
+    assert "formatDriftSummary(report, { limit: 25, reportPath })" in summary["run"]  # nosec B101 - regression assertion
+    failure = steps[-1]
+    assert _normalized(failure["if"]) == _normalized(  # nosec B101 - regression assertion
+        "always() && steps.drift.outcome == 'failure'"
+    )
+    assert failure["run"] == "exit 1"  # nosec B101 - regression assertion
+    assert steps.index(scan) < steps.index(upload) < steps.index(summary) < len(steps) - 1  # nosec B101 - regression assertion
+    assert not any(  # nosec B101 - regression assertion
+        "drift-report" in _needs(candidate)
+        for workflow, _ in _load_ordinary_workflows().values()
+        for candidate in workflow["jobs"].values()
+    )
+
+
+@pytest.mark.parametrize("report_state", ["missing", "complete", "incomplete", "malformed"])
+def test_design_system_drift_summary_preserves_scan_status(tmp_path: Path, report_state: str) -> None:
+    path = REPO_ROOT / ".github/workflows/ui-design-system-drift-report.yml"
+    assert path.exists(), "the advisory drift workflow is missing"  # nosec B101 - regression assertion
+    steps = yaml.safe_load(path.read_text(encoding="utf-8"))["jobs"]["drift-report"]["steps"]
+    summary = next(step for step in steps if step.get("name") == "Publish drift summary")
+    report_path = tmp_path / "tldw-design-system-drift.json"
+    summary_path = tmp_path / "step-summary"
+    if report_state != "missing":
+        report_path.write_text(
+            "{" if report_state == "malformed" else json.dumps({"status": report_state}),
+            encoding="utf-8",
+        )
+    module = tmp_path / "apps/packages/ui/scripts/design-system-drift-report.mjs"
+    module.parent.mkdir(parents=True)
+    module.write_text(
+        "export function formatDriftSummary(report, options) {\n"
+        "  if (options.limit !== 25) throw new Error('wrong summary limit');\n"
+        "  return `Status: ${report.status}; report: ${options.reportPath}\\n`;\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(  # nosec B603 B607 - execute the repository workflow under test
+        ["bash", "-e", "-o", "pipefail", "-c", summary["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "RUNNER_TEMP": str(tmp_path), "GITHUB_STEP_SUMMARY": str(summary_path)},
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    text = summary_path.read_text(encoding="utf-8")
+    if report_state == "missing":
+        assert result.returncode == 0, result.stderr  # nosec B101 - regression assertion
+        assert "scan did not produce a report" in text  # nosec B101 - regression assertion
+        assert "setup/scan steps" in text  # nosec B101 - regression assertion
+    elif report_state == "malformed":
+        assert result.returncode != 0  # nosec B101 - regression assertion
+        assert "could not be summarized" in text  # nosec B101 - regression assertion
+    else:
+        assert result.returncode == 0, result.stderr  # nosec B101 - regression assertion
+        assert text == f"Status: {report_state}; report: {report_path}\n"  # nosec B101 - regression assertion
 
 
 def test_queue_control_workflows_never_run_pull_request_code() -> None:
@@ -790,7 +891,7 @@ def test_runner_roots_cannot_bypass_admission_and_checkouts_are_immutable() -> N
                     }
                 assert other_inputs == expected_other_inputs, (name, job_name)
 
-    assert checkout_count == 58
+    assert checkout_count == 59  # nosec B101 - regression assertion
 
 
 def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
@@ -831,10 +932,10 @@ def test_pr_context_and_base_diff_logic_are_workflow_run_safe() -> None:
         assert "github.event.workflow_run.head_sha" not in text
 
     combined_text = "\n".join(text for _, text in workflows.values())
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 27
-    assert combined_text.count("github.event.pull_request.number") == 27
-    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 57
-    assert combined_text.count("github.event.pull_request.head.sha") == 54
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].number") == 28  # nosec B101 - regression assertion
+    assert combined_text.count("github.event.pull_request.number") == 28  # nosec B101 - regression assertion
+    assert combined_text.count("github.event.workflow_run.pull_requests[0].head.sha") == 58  # nosec B101 - regression assertion
+    assert combined_text.count("github.event.pull_request.head.sha") == 56  # nosec B101 - regression assertion
     # +1 each: backend-required passes the admitted-or-PR base to the backlog
     # task-format ratchet (TASK-13440), admission's base first, as the mypy step does.
     assert combined_text.count("github.event.pull_request.base.sha") == 6

@@ -1,6 +1,6 @@
 # Design-System Drift Reporting Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans for inline execution, or superpowers:subagent-driven-development if the owner selects delegation. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans for inline execution, or superpowers:subagent-driven-development if the owner selects delegation. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Publish an advisory inventory of existing and new styling drift across all four product UI roots.
 
@@ -33,11 +33,11 @@
 
 | Stage | Goal | Success Criteria | Tests | Status |
 | --- | --- | --- | --- | --- |
-| 1 | Extract token authority and definition scopes | Mixed files retain product analysis; four surfaces use the right definitions | Token authority fixtures and real configs | Not Started |
-| 2 | Analyze styling and classify findings | Four rules, named colors, and `@apply` produce located findings without flagging prose | Syntax-aware rule fixtures | Not Started |
-| 3 | Assemble reports and exceptions | Deterministic complete/incomplete output, visible debt and stale exceptions | Report/manifest fixtures | Not Started |
-| 4 | Deliver CLI, inventory, and provenance | Whole-root scan, honest dirty-source metadata, correct exit codes | Temporary Git repositories and CLI subprocesses | Not Started |
-| 5 | Publish advisory CI and migration guidance | License-first ordering, nonrequired job, retained artifacts, documented limits | Existing CI contracts, actionlint, full scan sample | Not Started |
+| 1 | Extract token authority and definition scopes | Mixed files retain product analysis; four surfaces use the right definitions | Token authority fixtures and real configs | Complete |
+| 2 | Analyze styling and classify findings | Four rules, named colors, and `@apply` produce located findings without flagging prose | Syntax-aware rule fixtures | In Progress (final spread-order review fix) |
+| 3 | Assemble reports and exceptions | Deterministic complete/incomplete output, visible debt and stale exceptions | Report/manifest fixtures | Complete |
+| 4 | Deliver CLI, inventory, and provenance | Whole-root scan, honest dirty-source metadata, correct exit codes | Temporary Git repositories and CLI subprocesses | Complete |
+| 5 | Publish advisory CI and migration guidance | License-first ordering, nonrequired job, retained artifacts, documented limits | Existing CI contracts, actionlint, full scan sample | In Progress |
 
 Create these implementation files; do not add a generic parser or plugin framework:
 
@@ -109,7 +109,7 @@ through diagnostics; never substitute empty authority for a failed config read.
 **Interface:** `buildTokenAuthority({sources: Source[]}): Authority`.
 It parses only known repository definition inputs; it never imports them.
 
-- [ ] **1. Prepare the existing toolchain and write failing fixtures.** From `apps/`, run `bun install --frozen-lockfile` using the existing lockfile. Use Node 24 for commands. In each new test file use `// @vitest-environment node`. Add token fixtures proving semantic names, nested `DEFAULT` handling, and mixed-file behavior:
+- [x] **1. Prepare the existing toolchain and write failing fixtures.** From `apps/`, run `bun install --frozen-lockfile` using the existing lockfile. Use Node 24 for commands. Use the existing package jsdom environment: its shared setup accesses `window`, so a Node-environment annotation cannot run here. Add token fixtures proving semantic names, nested `DEFAULT` handling, and mixed-file behavior:
 
 ```ts
 import { expect, it } from "vitest"
@@ -126,8 +126,8 @@ it("keeps product CSS outside token declarations eligible", () => {
 })
 ```
 
-- [ ] **2. Establish red.** From `apps/packages/ui/`, run `bunx vitest run src/design-system/__tests__/drift-tokens.test.ts --maxWorkers=1`. Confirm the missing module/export failure before production code.
-- [ ] **3. Implement static authority extraction.** Use `ts.createSourceFile` and PostCSS; parse diagnostics are errors. For shared/WebUI/extension, read WebUI Tailwind `theme.extend.colors` and `borderRadius`, shared CSS token declarations, and shared `styles/tokens` exports. Pin extension's known static inheritance of `../tldw-frontend/tailwind.config.js`; do not execute `require`. For admin, read its Tailwind config and `app/globals.css`. Flatten nested color objects (`primary.DEFAULT` becomes `primary`; `primary.foreground` becomes `primary-foreground`). A configured raw palette entry is not a semantic token unless backed by an established semantic variable.
+- [x] **2. Establish red.** From `apps/packages/ui/`, run `bunx vitest run src/design-system/__tests__/drift-tokens.test.ts --maxWorkers=1`. Confirm the missing module/export failure before production code.
+- [x] **3. Implement static authority extraction.** Use `ts.createSourceFile` and PostCSS; parse diagnostics are errors. For shared/WebUI/extension, read WebUI Tailwind `theme.extend.colors` and `borderRadius`, shared CSS token declarations, and shared `styles/tokens` exports. Pin extension's known static inheritance of `../tldw-frontend/tailwind.config.js`; do not execute `require`. For admin, read its Tailwind config and `app/globals.css`. Flatten nested color objects (`primary.DEFAULT` becomes `primary`; `primary.foreground` becomes `primary-foreground`). A configured raw palette entry is not a semantic token unless backed by an established semantic variable.
 
 ```js
 import ts from "typescript"
@@ -152,8 +152,8 @@ their named theme object declarations as definitions; ordinary components or
 unrecognized exports in those files remain eligible. Do not whitelist every
 custom property or every object in a theme directory.
 
-- [ ] **4. Add controls and establish green.** Test mixed TypeScript, light/dark definitions, unsupported config expressions, missing required definition inputs, extension inheritance, admin-only semantic names, and allowed radius classes. Load the actual checked-in configs as a smoke fixture and assert no evaluation side effects. Run the Stage 1 command again.
-- [ ] **5. Review and commit.** Update Stage 1 status and Backlog verification, inspect the diff, and commit as `feat(design-system): extract static drift token authority`.
+- [x] **4. Add controls and establish green.** Test mixed TypeScript, light/dark definitions, unsupported config expressions, missing required definition inputs, extension inheritance, admin-only semantic names, and allowed radius classes. Load the actual checked-in configs as a smoke fixture and assert no evaluation side effects. Run the Stage 1 command again.
+- [x] **5. Review and commit.** Update Stage 1 status and Backlog verification, inspect the diff, and commit as `feat(design-system): extract static drift token authority`.
 
 ### Stage 2: Styling Analysis
 
@@ -162,7 +162,7 @@ custom property or every object in a theme directory.
 **Interface:** `analyzeDriftSource({path: string, source: string, authority: Authority}): Analysis`.
 Consume Stage 1 authority and retain original locations/nearest named owner.
 
-- [ ] **1. Write failing behavior tests.** Include both JSX and CSS using actual supported styling locations:
+- [x] **1. Write failing behavior tests.** Include both JSX and CSS using actual supported styling locations:
 
 ```ts
 const css = ":root { --color-danger: 224 88 109; } .notice { @apply bg-red-500 rounded-[13px]; color: red; }"
@@ -178,8 +178,8 @@ complete minimal definition fixture used in Stage 1. Add a JSX fixture with
 `className="dark:hover:bg-red-500/20 sm:w-[44px]"` and `style={{color: "red"}}`.
 Assert named-color coverage and that width is a `layout-review` candidate.
 
-- [ ] **2. Establish red.** Run `bunx vitest run src/design-system/__tests__/drift-rules.test.ts --maxWorkers=1` from the package directory; verify the new expectations fail before implementing them.
-- [ ] **3. Implement supported syntax analysis.** Use TypeScript AST nodes for `className`/`class` attributes, inline `style` objects, local immutable class maps and `cn`/`clsx`/`classNames`/`cva` static arguments. Follow local static references conservatively with a visited set; unknown expressions yield coverage diagnostics. Analyze branches independently and do not invent a joined class across interpolation gaps. Do not execute imports or attempt cross-module application evaluation.
+- [x] **2. Establish red.** Run `bunx vitest run src/design-system/__tests__/drift-rules.test.ts --maxWorkers=1` from the package directory; verify the new expectations fail before implementing them.
+- [x] **3. Implement supported syntax analysis.** Use TypeScript AST nodes for `className`/`class` attributes, inline `style` objects, local immutable class maps and `cn`/`clsx`/`classNames`/`cva` static arguments. Follow local static references conservatively with a visited set; unknown expressions yield coverage diagnostics. Analyze branches independently and do not invent a joined class across interpolation gaps. Do not execute imports or attempt cross-module application evaluation.
 
 Parse CSS declarations and `@apply` through PostCSS. Use one bracket/quote-aware
 utility splitter for JSX and `@apply`, retaining offsets for variants, arbitrary
@@ -208,8 +208,8 @@ semantics. Evaluate radius shorthands per value without guessing unresolved
 variables or units. Do not propose a semantic color based solely on numeric
 similarity. Known definitions are emitted separately, not suppressed by filename.
 
-- [ ] **4. Establish green with negative controls.** Add semantic colors and `@apply`, shorthand named colors, unrelated payload strings, CSS URLs, text sizes, arbitrary selectors, escaped/quoted utilities, mixed token/product files, canonical-root components, and dynamic props. Verify TS/JS/JSX/TSX and CSS locations, definitions, diagnostics, and deterministic order. Run token and rule tests together.
-- [ ] **5. Review and commit.** Record genuine red/green evidence and commit as `feat(design-system): report syntax-aware styling drift`.
+- [x] **4. Establish green with negative controls.** Add semantic colors and `@apply`, shorthand named colors, unrelated payload strings, CSS URLs, text sizes, arbitrary selectors, escaped/quoted utilities, mixed token/product files, canonical-root components, and dynamic props. Verify TS/JS/JSX/TSX and CSS locations, definitions, diagnostics, and deterministic order. Run token and rule tests together.
+- [x] **5. Review and commit.** Record genuine red/green evidence and commit as `feat(design-system): report syntax-aware styling drift`.
 
 ### Stage 3: Reports and Intentional Exceptions
 
@@ -228,7 +228,7 @@ formatDriftSummary(report: Report, options: {limit: number; reportPath: string})
 `staleExceptions`, and `diagnostics`. An error diagnostic makes it incomplete;
 coverage diagnostics remain visible without changing successful scan status.
 
-- [ ] **1. Write red cases.** Start with no suppression baseline and an empty manifest. Verify findings remain visible and a stale exception does not remove them:
+- [x] **1. Write red cases.** Start with no suppression baseline and an empty manifest. Verify findings remain visible and a stale exception does not remove them:
 
 ```ts
 const report = assembleDriftReport({
@@ -243,8 +243,8 @@ expect(report.acceptedExceptions).toEqual([])
 Use the concrete located finding returned by Stage 2 and clean provenance
 `{sourceCommit: "1".repeat(40), dirtySource: false, untrackedSourceFileCount: 0}`.
 
-- [ ] **2. Establish red.** Run `bunx vitest run src/design-system/__tests__/drift-report.test.ts --maxWorkers=1` and verify failure.
-- [ ] **3. Implement report assembly and manifest validation.** Seed exactly:
+- [x] **2. Establish red.** Run `bunx vitest run src/design-system/__tests__/drift-report.test.ts --maxWorkers=1` and verify failure.
+- [x] **3. Implement report assembly and manifest validation.** Seed exactly:
 
 ```json
 {"schemaVersion":1,"exceptions":[]}
@@ -264,8 +264,8 @@ layout candidates, accepted exceptions, stale entries, and diagnostics. Show
 root counts, limitations, commit, dirty state, and omitted finding count when
 the display limit is reached. Full JSON is never truncated.
 
-- [ ] **4. Establish green.** Test duplicate locations, line-shift-stable exceptions, stale/ambiguous/invalid records, reversed input order, summary truncation, complete scans with findings, and incomplete scans that cannot look clean. Run Stage 3 tests and prior stages.
-- [ ] **5. Review and commit.** Commit as `feat(design-system): assemble advisory drift reports and exceptions`.
+- [x] **4. Establish green.** Test duplicate locations, line-shift-stable exceptions, stale/ambiguous/invalid records, reversed input order, summary truncation, complete scans with findings, and incomplete scans that cannot look clean. Run Stage 3 tests and prior stages.
+- [x] **5. Review and commit.** Commit as `feat(design-system): assemble advisory drift reports and exceptions`.
 
 ### Stage 4: Whole-Repository CLI and Provenance
 
@@ -286,7 +286,7 @@ destinations may be replaced. Do not let output selection hide a source input or
 overwrite repository content.
 Invalid or repeated flags exit 1; no enforcement/baseline-update flag.
 
-- [ ] **1. Write temporary-repository red tests.** Use `mkdtemp`, `execFile`, and a private Git fixture containing all four roots and minimal complete definitions. Create commits only inside that fixture, with test-local author configuration. Use staged/unstaged/untracked/ignored files and filenames containing spaces. Call the CLI through Node subprocesses so exit behavior is real.
+- [x] **1. Write temporary-repository red tests.** Use `mkdtemp`, `execFile`, and a private Git fixture containing all four roots and minimal complete definitions. Create commits only inside that fixture, with test-local author configuration. Use staged/unstaged/untracked/ignored files and filenames containing spaces. Call the CLI through Node subprocesses so exit behavior is real.
 
 ```ts
 const result = await runDriftReport({ repoRoot: fixtureRoot, outputPath })
@@ -295,8 +295,8 @@ expect(result.report.findings.length).toBeGreaterThan(0)
 expect(result.report.dirtySource).toBe(false)
 ```
 
-- [ ] **2. Establish red.** Run `bunx vitest run src/design-system/__tests__/drift-cli.test.ts --maxWorkers=1` and verify the failure.
-- [ ] **3. Implement inventory, provenance, and output.** Use Git subprocess argument arrays, never a shell:
+- [x] **2. Establish red.** Run `bunx vitest run src/design-system/__tests__/drift-cli.test.ts --maxWorkers=1` and verify the failure.
+- [x] **3. Implement inventory, provenance, and output.** Use Git subprocess argument arrays, never a shell:
 
 ```js
 execFile("git", ["-C", repoRoot, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", ...roots])
@@ -334,8 +334,8 @@ Package command:
 "report:design-system-drift": "node scripts/verify-design-system-drift.mjs"
 ```
 
-- [ ] **4. Establish green.** Verify all roots, one missing root, an empty root, unreadable/malformed source, untracked and ignored source, staged/unstaged deletions and renames, symlinks, unrelated changes, modified definition inputs, valid output replacement, rejected source/tracked/symlink output destinations, unknown flags, and output write failure. Run all four focused suites.
-- [ ] **5. Inspect the actual repository report and commit.** Run the package command with `--output /tmp/tldw-design-system-drift.json`. Review findings from each rule/surface and inspect diagnostics; do not suppress all debt to obtain clean counts. Commit as `feat(design-system): add repository-wide advisory drift CLI`.
+- [x] **4. Establish green.** Verify all roots, one missing root, an empty root, unreadable/malformed source, untracked and ignored source, staged/unstaged deletions and renames, symlinks, unrelated changes, modified definition inputs, valid output replacement, rejected source/tracked/symlink output destinations, unknown flags, and output write failure. Run all four focused suites.
+- [x] **5. Inspect the actual repository report and commit.** Run the package command with `--output /tmp/tldw-design-system-drift.json`. Review findings from each rule/surface and inspect diagnostics; do not suppress all debt to obtain clean counts. Commit as `feat(design-system): add repository-wide advisory drift CLI`.
 
 ### Stage 5: Advisory CI and Usage Guidance
 
@@ -424,3 +424,18 @@ implementation complete merely because the planning documents are committed.
 At planning time only declared parser/tool versions and CI contracts were read;
 the fresh worktree has no installed JS dependencies. The stage commands above
 are execution requirements, not claims of passing tests.
+
+## Execution Evidence
+
+Execution task: TASK-13894. Dependencies installed from the frozen lockfile with
+no lockfile changes. Latest full focused run: token44, rules49, report15, CLI19
+and existing guard54 tests pass (181 total); two CI contract modules pass113 tests. Scoped TypeScript compilation
+passes. Pinned frontend ESLint exits0 with the existing Next pages-directory
+advisory. Final CVA spread-order correction and Stage5 publication remain pending.
+
+Reviewed corrections include atomic report-file replacement (verified hard-link
+overwrite regression), explicit errors for unavailable sparse source, and unknown
+provenance for skip-worktree/assume-unchanged inputs. Known upstream
+`src/assets/react-pdf.css` is excluded as a documented vendor copy. Native CSS
+system colors remain allowed, and unresolved cross-unit radii yield coverage
+diagnostics. These preserve the approved advisory policy and add no dependencies.
