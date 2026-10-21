@@ -136,6 +136,18 @@ const baseWorkspaceState = () => ({
     "source_membership"
   ] as const),
   toggleEdgeType: vi.fn(),
+  semantic: {
+    enabled: false,
+    setEnabled: vi.fn(),
+    threshold: 0.75,
+    setThreshold: vi.fn(),
+    topK: 10,
+    maxTopK: 50,
+    setTopK: vi.fn(),
+    focusRequired: false,
+    reset: vi.fn()
+  },
+  semanticIndex: undefined,
   allNotes: { activeNoteCount: 8, effectiveNoteCap: 7, eligible: false },
   canExpand: true,
   expand: vi.fn(async () => graph),

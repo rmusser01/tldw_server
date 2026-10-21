@@ -1,6 +1,7 @@
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import NotesManagerPage from "../NotesManagerPage"
 
@@ -309,6 +310,7 @@ describe("NotesManagerPage stage 10 AI content assist actions", () => {
   })
 
   it("suggests keywords with explicit selection and reports latest assist after apply", async () => {
+    const user = userEvent.setup()
     renderPage()
     fireEvent.change(screen.getByPlaceholderText("Write your note here... (Markdown supported)"), {
       target: {
@@ -317,15 +319,19 @@ describe("NotesManagerPage stage 10 AI content assist actions", () => {
       }
     })
 
-    fireEvent.click(screen.getByTestId("notes-assist-suggest-keywords"))
+    await user.click(screen.getByTestId("notes-assist-suggest-keywords"))
 
-    await waitFor(() => {
-      expect(screen.getByTestId("notes-assist-keyword-suggestions-modal")).toBeInTheDocument()
-    })
+    const modal = await screen.findByTestId("notes-assist-keyword-suggestions-modal")
+    const checks = within(modal).getByRole("checkbox", { name: /^checks\b/ })
+    const quantum = within(modal).getByRole("checkbox", { name: /^quantum\b/ })
+    expect(checks).toBeChecked()
+    expect(quantum).toBeChecked()
 
     expect(mockConfirmDanger).not.toHaveBeenCalled()
-    fireEvent.click(screen.getByTestId("notes-assist-keyword-option-checks"))
-    fireEvent.click(screen.getByRole("button", { name: "Apply selected" }))
+    await user.click(checks)
+    expect(checks).not.toBeChecked()
+    expect(quantum).toBeChecked()
+    await user.click(screen.getByRole("button", { name: "Apply selected" }))
 
     await waitFor(() => {
       expect(mockMessageSuccess).toHaveBeenCalledWith("Applied suggested tags.")

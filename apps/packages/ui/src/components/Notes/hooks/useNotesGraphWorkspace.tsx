@@ -1,8 +1,11 @@
 import {
+  NOTES_GRAPH_SEMANTIC_MAX_TOP_K,
   type NotesGraphEdge,
   type NotesGraphEdgeType,
   type NotesGraphNode,
   type NotesGraphResponse,
+  NotesGraphSuggestionClientError,
+  createSemanticManualLink,
   fetchNotesGraph
 } from "@/services/note-graph-suggestions"
 import {
@@ -14,13 +17,24 @@ import {
 } from "@tanstack/react-query"
 import * as React from "react"
 
-const DEFAULT_EDGE_TYPES: NotesGraphEdgeType[] = [
+import { normalizeGraphNoteId } from "../notes-manager-utils"
+import { useNotesSemanticIndex } from "./useNotesSemanticIndex"
+
+const ORDINARY_EDGE_TYPES: NotesGraphEdgeType[] = [
   "manual",
   "wikilink",
   "backlink",
   "tag_membership",
   "source_membership"
 ]
+const DEFAULT_SEMANTIC_THRESHOLD = 0.75
+const DEFAULT_SEMANTIC_TOP_K = 10
+
+const boundSemanticThreshold = (value: number): number =>
+  Math.min(1, Math.max(0, value))
+
+const boundSemanticTopK = (value: number, maxTopK: number): number =>
+  Math.min(maxTopK, Math.max(1, Math.trunc(value)))
 
 export const notesGraphWorkspaceQueryKey = ["notes-graph-workspace"] as const
 
@@ -35,6 +49,7 @@ export type UseNotesGraphWorkspaceOptions = {
   radius?: 1 | 2
   maxNodes?: number
   maxEdges?: number
+  semanticManagementEnabled?: boolean
 }
 
 type NavigationState = {
@@ -160,6 +175,12 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   const isAuthorityDenied = Boolean(
     authorityScope && deniedAuthority === authorityScope
   )
+  const semanticIndex = useNotesSemanticIndex({
+    authorityScope,
+    enabled: Boolean(options.enabled && options.semanticManagementEnabled),
+    isOnline: options.isOnline,
+    datasetId: options.datasetId
+  })
   const inputIdentity = JSON.stringify([
     authorityScope,
     options.datasetId ?? null,
@@ -180,8 +201,12 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   const [layout, setLayout] = React.useState<NotesGraphLayout>("dagre")
   const [search, setSearch] = React.useState("")
   const [visibleEdgeTypes, setVisibleEdgeTypes] = React.useState(
-    () => new Set<NotesGraphEdgeType>(DEFAULT_EDGE_TYPES)
+    () => new Set<NotesGraphEdgeType>(ORDINARY_EDGE_TYPES)
   )
+  const [semanticThreshold, setSemanticThreshold] = React.useState(
+    DEFAULT_SEMANTIC_THRESHOLD
+  )
+  const [semanticTopK, setSemanticTopK] = React.useState(DEFAULT_SEMANTIC_TOP_K)
   React.useEffect(() => {
     setNavigation((current) =>
       current.inputIdentity === inputIdentity ? current : initialNavigation
@@ -195,6 +220,15 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   const radius = options.radius ?? 1
   const maxNodes = options.maxNodes ?? 120
   const maxEdges = options.maxEdges ?? 480
+  const semanticEnabled = visibleEdgeTypes.has("semantic")
+  const semanticQueryEnabled = semanticEnabled && Boolean(centerNoteId)
+  const requestedEdgeTypes = React.useMemo<NotesGraphEdgeType[]>(
+    () =>
+      semanticQueryEnabled
+        ? [...ORDINARY_EDGE_TYPES, "semantic"]
+        : [...ORDINARY_EDGE_TYPES],
+    [semanticQueryEnabled]
+  )
   const canRequest = Boolean(
     authorityScope &&
       options.enabled &&
@@ -214,7 +248,11 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
         centerNoteId ?? null,
         radius,
         maxNodes,
-        maxEdges
+        maxEdges,
+        semanticQueryEnabled,
+        requestedEdgeTypes,
+        semanticQueryEnabled ? semanticThreshold : null,
+        semanticQueryEnabled ? semanticTopK : null
       ] as const,
     [
       authorityScope,
@@ -224,7 +262,11 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       maxEdges,
       maxNodes,
       options.datasetId,
-      radius
+      radius,
+      requestedEdgeTypes,
+      semanticQueryEnabled,
+      semanticThreshold,
+      semanticTopK
     ]
   )
   const queryIdentity = JSON.stringify(queryKey)
@@ -234,14 +276,18 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       requestKey: QueryKey,
       signal: AbortSignal
     ) => {
+      const includeSemantic = semanticQueryEnabled && pageParam === undefined
       try {
         return await fetchNotesGraph({
           centerNoteId,
           datasetId: options.datasetId,
           radius,
+          edgeTypes: includeSemantic ? requestedEdgeTypes : ORDINARY_EDGE_TYPES,
           maxNodes,
           maxEdges,
-          cursor: pageParam
+          cursor: pageParam,
+          semanticThreshold: includeSemantic ? semanticThreshold : undefined,
+          semanticTopK: includeSemantic ? semanticTopK : undefined
         })
       } catch (error) {
         if (isPermissionError(error) && !signal.aborted) {
@@ -279,7 +325,11 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
       maxNodes,
       options.datasetId,
       queryClient,
-      radius
+      radius,
+      requestedEdgeTypes,
+      semanticQueryEnabled,
+      semanticThreshold,
+      semanticTopK
     ]
   )
   const graphQuery = useInfiniteQuery<
@@ -318,10 +368,108 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
   const isPermissionDenied =
     isAuthorityDenied || isPermissionError(graphQuery.error)
 
-  const graph = React.useMemo(
+  const currentGraph = React.useMemo(
     () => (isPermissionDenied ? null : aggregatePages(graphQuery.data)),
     [graphQuery.data, isPermissionDenied]
   )
+  const fallbackIdentity = JSON.stringify([
+    authorityScope,
+    options.datasetId ?? null,
+    effectiveNavigation.scope,
+    effectiveNavigation.focusNoteId,
+    centerNoteId ?? null,
+    radius,
+    maxNodes,
+    maxEdges
+  ])
+  const lastGoodGraph = React.useRef<{
+    identity: string
+    graph: NotesGraphResponse
+  } | null>(null)
+  if (isPermissionDenied || graphQuery.data?.pages.length === 0) {
+    lastGoodGraph.current = null
+  }
+  if (currentGraph) {
+    lastGoodGraph.current = {
+      identity: fallbackIdentity,
+      graph: {
+        ...currentGraph,
+        edges: currentGraph.edges.filter((edge) => edge.type !== "semantic"),
+        semantic_status: undefined
+      }
+    }
+  }
+  const semanticControlDefaults = React.useRef<{
+    identity: string
+    topK: number
+    threshold: number
+    maxTopK: number
+  } | null>(null)
+  const semanticControlValues = React.useRef({
+    topK: semanticTopK,
+    threshold: semanticThreshold
+  })
+  semanticControlValues.current = {
+    topK: semanticTopK,
+    threshold: semanticThreshold
+  }
+  const responseSemanticStatus = currentGraph?.semantic_status
+  const responseMaxTopK = Math.max(
+    1,
+    Math.min(
+      NOTES_GRAPH_SEMANTIC_MAX_TOP_K,
+      responseSemanticStatus?.max_top_k ?? NOTES_GRAPH_SEMANTIC_MAX_TOP_K
+    )
+  )
+  const semanticMaxTopK = responseSemanticStatus
+    ? responseMaxTopK
+    : semanticControlDefaults.current?.identity === fallbackIdentity
+      ? semanticControlDefaults.current.maxTopK
+      : NOTES_GRAPH_SEMANTIC_MAX_TOP_K
+  React.useEffect(() => {
+    if (!semanticQueryEnabled || !responseSemanticStatus) return
+    const effectiveTopK =
+      typeof responseSemanticStatus.effective_top_k === "number"
+        ? boundSemanticTopK(
+            responseSemanticStatus.effective_top_k,
+            semanticMaxTopK
+          )
+        : boundSemanticTopK(semanticControlValues.current.topK, semanticMaxTopK)
+    const effectiveThreshold =
+      typeof responseSemanticStatus.effective_threshold === "number"
+        ? boundSemanticThreshold(responseSemanticStatus.effective_threshold)
+        : semanticControlValues.current.threshold
+    if (semanticControlDefaults.current?.identity !== fallbackIdentity) {
+      semanticControlDefaults.current = {
+        identity: fallbackIdentity,
+        topK: effectiveTopK,
+        threshold: effectiveThreshold,
+        maxTopK: semanticMaxTopK
+      }
+    } else {
+      semanticControlDefaults.current.topK = boundSemanticTopK(
+        semanticControlDefaults.current.topK,
+        semanticMaxTopK
+      )
+      semanticControlDefaults.current.maxTopK = semanticMaxTopK
+    }
+    setSemanticTopK((current) =>
+      current === effectiveTopK ? current : effectiveTopK
+    )
+    setSemanticThreshold((current) =>
+      current === effectiveThreshold ? current : effectiveThreshold
+    )
+  }, [
+    fallbackIdentity,
+    responseSemanticStatus,
+    semanticMaxTopK,
+    semanticQueryEnabled
+  ])
+  const graph = isPermissionDenied ? null :
+    currentGraph ??
+    (lastGoodGraph.current?.identity === fallbackIdentity
+      ? lastGoodGraph.current.graph
+      : null)
 
   const allNotes = React.useMemo(() => {
     if (!graph) {
@@ -459,6 +607,77 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     return aggregatePages(queryClient.getQueryData<GraphInfiniteData>(queryKey))
   }, [authorityScope, canRequest, graph, graphQuery, queryClient, queryKey])
 
+  const manualLinkInFlight = React.useRef(new Map<string, Promise<boolean>>())
+  const [manualLinkPendingEdgeIds, setManualLinkPendingEdgeIds] =
+    React.useState<ReadonlySet<string>>(() => new Set())
+  const createManualLink = React.useCallback(
+    (edge: NotesGraphEdge): Promise<boolean> => {
+      const pending = manualLinkInFlight.current.get(edge.id)
+      if (pending) return pending
+      const responseEdge = currentGraph?.edges.find(
+        (candidate) => candidate.id === edge.id && candidate.type === "semantic"
+      )
+      const generationId = currentGraph?.semantic_status?.generation_id
+      if (
+        edge.type !== "semantic" ||
+        !responseEdge ||
+        !generationId ||
+        currentGraph?.manual_link_authorized !== true ||
+        (responseEdge.evidence
+          ? responseEdge.evidence.generation_id !== generationId
+          : responseEdge.evidence_omitted !== "response_byte_cap")
+      ) {
+        return Promise.resolve(false)
+      }
+      const idempotencyKey =
+        globalThis.crypto?.randomUUID?.() ??
+        `semantic-${Date.now()}-${Math.random().toString(16).slice(2)}`
+      const conversion = (async () => {
+        try {
+          await createSemanticManualLink({
+            sourceNoteId: normalizeGraphNoteId(responseEdge.source),
+            targetNoteId: normalizeGraphNoteId(responseEdge.target),
+            datasetId: options.datasetId,
+            generationId,
+            idempotencyKey
+          })
+        } catch (error) {
+          if (
+            !(
+              error instanceof NotesGraphSuggestionClientError &&
+              error.code === "notes_semantic_conversion_manual_link_exists"
+            )
+          ) {
+            throw error
+          }
+        }
+        await queryClient.invalidateQueries({
+          queryKey: notesGraphWorkspaceQueryKey
+        })
+        return true
+      })()
+      manualLinkInFlight.current.set(edge.id, conversion)
+      setManualLinkPendingEdgeIds((current) => {
+        const next = new Set(current)
+        next.add(edge.id)
+        return next
+      })
+      const clearPending = () => {
+        if (manualLinkInFlight.current.get(edge.id) === conversion) {
+          manualLinkInFlight.current.delete(edge.id)
+          setManualLinkPendingEdgeIds((current) => {
+            const next = new Set(current)
+            next.delete(edge.id)
+            return next
+          })
+        }
+      }
+      void conversion.then(clearPending, clearPending)
+      return conversion
+    },
+    [currentGraph, options.datasetId, queryClient]
+  )
+
   return {
     graph,
     graphQuery,
@@ -471,6 +690,40 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     searchResults,
     visibleEdgeTypes,
     toggleEdgeType,
+    semantic: {
+      enabled: semanticEnabled,
+      setEnabled: (next: boolean) => {
+        setVisibleEdgeTypes((current) => {
+          const enabledNow = current.has("semantic")
+          if (enabledNow === next) return current
+          const updated = new Set(current)
+          if (next) updated.add("semantic")
+          else updated.delete("semantic")
+          return updated
+        })
+      },
+      threshold: semanticThreshold,
+      setThreshold: (next: number) =>
+        setSemanticThreshold(boundSemanticThreshold(next)),
+      topK: boundSemanticTopK(semanticTopK, semanticMaxTopK),
+      maxTopK: semanticMaxTopK,
+      setTopK: (next: number) =>
+        setSemanticTopK(boundSemanticTopK(next, semanticMaxTopK)),
+      focusRequired: semanticEnabled && !centerNoteId,
+      reset: () => {
+        const defaults = semanticControlDefaults.current
+        if (defaults?.identity === fallbackIdentity) {
+          setSemanticTopK(boundSemanticTopK(defaults.topK, semanticMaxTopK))
+          setSemanticThreshold(boundSemanticThreshold(defaults.threshold))
+          return
+        }
+        setSemanticTopK(
+          boundSemanticTopK(DEFAULT_SEMANTIC_TOP_K, semanticMaxTopK)
+        )
+        setSemanticThreshold(DEFAULT_SEMANTIC_THRESHOLD)
+      }
+    },
+    semanticIndex,
     allNotes,
     canExpand: Boolean(
       enabled &&
@@ -483,6 +736,9 @@ export function useNotesGraphWorkspace(options: UseNotesGraphWorkspaceOptions) {
     showAllNotes,
     refresh,
     isPermissionDenied,
+    createManualLink,
+    manualLinkPendingEdgeIds,
+    queryIdentity,
     isOffline: !options.isOnline,
     isLoading: Boolean(authorityScope && graphQuery.isLoading && !graph),
     error: graphQuery.error
