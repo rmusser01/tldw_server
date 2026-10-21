@@ -191,6 +191,7 @@ const createHookOptions = () => ({
   ragSources: [],
   ragAdvancedOptions: {},
   serverChatId: "chat-1",
+  serverChatMetaLoaded: true,
   serverChatTitle: "Dynamic UI Action Chat",
   serverChatCharacterId: null,
   serverChatAssistantKind: null,

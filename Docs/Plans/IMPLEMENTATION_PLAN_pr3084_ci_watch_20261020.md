@@ -146,3 +146,11 @@ The shared SDK Scene fixture now copies the supplied metadata-loaded flag into r
 The connected run was83passed35failed/118: all27Persona and48reset-helper cases passed; exact saved-signal positives subsequently2passed25excluded. Actual Form detachment1passed220excluded. The three sibling SDK files also fail35/43 using the exact pre-edit fixture, with every failure name identical; this introduces no sibling regression and does not qualify that scope. Three changed TS files report0lint diagnostics; PythonBandit is inapplicable. Independent connected final review is clear. No new architecture rule, dependency, schema or baseline is introduced; no new ADR is needed. Normal configured checks precede publication.
 
 The35sibling failures and other remaining CI scopes, final-head statuses, summary disposition and normal verified merge remain open.
+
+## Qualified sibling SDK fixture repair
+
+Persona fixture batch59944a2dc03a8ed9f01958f26f00805db2cd628a was safely published and GitHub read back OPEN/unarmed. The previously identical35sibling failures are now resolved in their bounded scope.
+
+Image and dynamic-action fixtures explicitly declare their loaded neutral saved identity; the fresh image case explicitly remains unloaded. Overlay metadata-retention tests now admit a loaded neutral chat and deliver canonical character metadata only after the real local save is held. Every original final title/character/version/meta/history-ID assertion and retired-owner control remains. A separate known-character overlay case refuses with retained draft and no dispatch/clearing. No production guard is bypassed or changed.
+
+All44cases pass in one complete run (original43plus1refusal). Three lint scopes add0findings: dynamic12/12,image21/21,overlay0/0 inherited. PythonBandit is inapplicable. Independent connected final review is clear; no new architecture rule, dependency, schema or baseline is introduced and no new ADR is needed. Normal configured checks precede publication. Other CI scopes, final-head required statuses, trusted summary disposition and verified normal merge remain open.
