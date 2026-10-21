@@ -16,28 +16,29 @@ from tldw_Server_API.app.core.Persona.exemplar_turn_classifier import PersonaTur
 pytestmark = pytest.mark.integration
 
 _APP = Path(__file__).resolve().parents[2] / "app"
-# Off-loop uses of a persona session's handle: the WebSocket and the two helpers its turns call.
+# Off-loop uses of a persona session's handle, and the wrapper each must use: the WebSocket owns
+# every call, and the two helpers its turns call join an HTTP request's operation when there is one.
 _HANDLE_SITES = {
-    "api/v1/endpoints/persona.py": "persona_scope_db",
-    "core/Persona/live_conversation.py": "profile_store",
-    "core/Persona/exemplar_runtime.py": "persona_scope_db",
+    "api/v1/endpoints/persona.py": ("persona_scope_db", "chacha_operation(independent=True)("),
+    "core/Persona/live_conversation.py": ("profile_store", "chacha_operation()("),
+    "core/Persona/exemplar_runtime.py": ("persona_scope_db", "chacha_operation()("),
 }
 
 
 def test_every_off_loop_persona_handle_call_runs_in_its_own_operation():
     unwrapped, wrapped = [], 0
-    for rel, handle in _HANDLE_SITES.items():
+    for rel, (handle, wrapper) in _HANDLE_SITES.items():
         for node in ast.walk(ast.parse((_APP / rel).read_text(encoding="utf-8"))):
             if not (isinstance(node, ast.Call) and ast.unparse(node.func) == "asyncio.to_thread"):
                 continue
             if handle not in ast.unparse(node):
                 continue
             callable_text = ast.unparse(node.args[0])
-            if callable_text.startswith("chacha_operation("):
+            if callable_text.startswith(wrapper):
                 wrapped += 1
             else:
                 unwrapped.append(f"{rel}:{node.lineno} {callable_text}")
-    assert unwrapped == [], f"wrap these in chacha_operation(...)(callable): {unwrapped}"
+    assert unwrapped == [], f"wrap these in the file's chacha_operation(...)(callable): {unwrapped}"
     assert wrapped == 8
 
 
@@ -66,10 +67,10 @@ def test_every_on_loop_persona_handle_call_runs_in_its_own_operation():
         calls_handle = isinstance(callee, ast.Attribute) and ast.unparse(callee.value) == "persona_scope_db"
         if not (passes_handle or calls_handle) or ast.unparse(callee) in _SELF_OWNING:
             continue
-        if per_call:
+        if per_call and ast.unparse(target.func) == "chacha_operation(independent=True)":
             wrapped += 1
         else:
-            unwrapped.append(f"persona.py:{node.lineno} {ast.unparse(callee)}")
+            unwrapped.append(f"persona.py:{node.lineno} {ast.unparse(target)}")
     assert unwrapped == [], f"wrap these as chacha_operation(independent=True)(fn)(...): {unwrapped}"
     assert wrapped == 13
 

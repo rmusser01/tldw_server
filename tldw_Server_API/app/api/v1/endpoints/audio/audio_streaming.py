@@ -2469,12 +2469,13 @@ async def websocket_audio_chat_stream(
                     except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as settings_exc:
                         logger.debug(f"audio.chat.stream conversation_settings upsert failed: {settings_exc}")
 
-                    if _outer_stream and not persistence_announced:
-                        await _outer_stream.send_json({"type": "session", "session_id": persistence_session_id})
-                        persistence_announced = True
+                # The step's checkouts are back: a slow client cannot hold one through the send.
+                if _outer_stream and not persistence_announced:
+                    await _outer_stream.send_json({"type": "session", "session_id": persistence_session_id})
+                    persistence_announced = True
 
-                    persistence_ready = True
-                    return persistence_db, persistence_session_id
+                persistence_ready = True
+                return persistence_db, persistence_session_id
             except _AUDIO_STREAMING_NONCRITICAL_EXCEPTIONS as exc:
                 logger.warning(f"audio.chat.stream persistence unavailable: {exc}")
                 persistence_enabled = False
