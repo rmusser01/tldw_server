@@ -302,3 +302,14 @@ Current eae coverage12/16 job119358142862 fails the original stats Error/Retry c
 The real page first awaits canonical config, mounts the heavy AntD workspace, receives a timer-batched query notification, then copies query error through an effect. The existing one-second Error lookup began from the resolving-config placeholder. The minimal candidate awaits React async act around this exact initial render before the unchanged Error lookup. It retains the immediate rejection, original visible Error/Retry/count2 and every timeout; no production, mock, cache, ownership or guard change.
 
 Complete candidate12/12 passes with V8; ESLint0/0. Independent connected review and normal three-path checks precede publication. Hosted closure remains required, and a further recurrence needs renewed phase evidence rather than another guessed wait. No new architecture rule, dependency, baseline or allowance; no new ADR or PythonBandit scope. Six required contexts have passed on eae, but the known frontend failure still blocks merge and all statuses must qualify the final head.
+
+
+## RBAC assignment recovery queries in the owning role card
+
+Current2e01 coverage1/16 job119383875127 times out the original missing-role/refusal/fresh-selection journey at15seconds while1,875other cases pass. Both hosted AntD message warnings show the path reached refusal and successful replacement. There is no connected evidence of a stalled mutation, a production guard problem or a need for a longer timeout.
+
+A temporary exact-case V8 phase profile passes1with14excluded in3.37seconds; original bytes were restored exactly. The body-wide initial/final cell waits consume582/1037ms locally. Pinned Testing Library computes accessible names across matching cells before visibility filtering, including other permission tables and retained tabs. The minimal fixture scopes the same three exact cell queries and Add Role control to the selected user's real Assigned Roles card. This strengthens the correct-table assertion; original global guard, effective permission, dialog, mutation-order and15second checks remain.
+
+Complete candidate15/15passes with V8, target4.892seconds in that full run. The focused baseline/full candidate are not a comparable speed benchmark, and no local red or throughput improvement is claimed. ESLint0/0; independent connected final review clear because the owning card persists through data reload for selected user11. Normal three-path checks precede publication. No architecture rule, dependency, guard or allowance changes; no new ADR or PythonBandit scope. Actual hosted closure remains required.
+
+A separate current-head admin-reset-backups job119384338261 fails before tests because the PostgreSQL18 mirror rejects pulls for quota. No source workaround or acceptance is claimed; the next necessary source push naturally retries that lane. The six required successes on2e01 do not transfer to a new head; frontend/known failures still prevent merge.
