@@ -126,3 +126,13 @@ The timeout query and workspace receive the correct error, but the initial async
 The StrictMode case retains Create-user visibility and now checks exactly two query attempts: the abandoned mount signal is aborted, the current signal is distinct/live, and a late retired result cannot replace current statistics. The two-file cohort was16passed1failed/17, followed by1passing focused card correction with11excluded;17unique cases are qualified, not one17green run. Both lint scopes report0diagnostics; PythonBandit is inapplicable. Independent connected review is clear. No production guard, architecture rule, API, schema, dependency or baseline changed; existing canonical authority/cancellation decisions govern without a new ADR.
 
 Current published1b318b9587 remains OPEN/dev and unarmed. Other CI repairs, seven final-head required statuses, trusted expanded-summary disposition and verified merge remain open.
+
+## Qualified Compare mirror identity repair
+
+Admin fixture batchc585c46d3b1c4dea439404568d3d3429c4afe451 was safely published and GitHub read back OPEN/dev with auto-merge disabled.
+
+Two original Compare snapshot regressions exposed incomplete positive fixtures: mirror helpers now require real captured admission and publish their exact local alias while preserving server identity; loaded saved identity is explicit. After those prerequisites, the actual production metadata fence still compared the admitted mirror ID against captured pre-mirror null. The one-line repair initializes Compare metadata identity from the already admitted enhanced chat parameters. Exact store-ID equality and every Scene/draft/account/session/dispatch fence remain.
+
+Causal red was2original failures plus2passing New/same-ID replacement controls with73excluded. The final complete cohort passes77/77, including every original assertion and both replacement controls. ESLint adds0diagnostics across source22/22 and test2/2 inherited findings; PythonBandit is inapplicable. Independent connected root/final reviews are clear. This restores the existing captured-identity contract without a new durable architecture rule, API, schema, dependency or quality allowance; no new ADR is needed. Normal configured checks precede publication.
+
+Other valid CI failures, final-head required statuses, trusted expanded-summary disposition and verified merge remain open.

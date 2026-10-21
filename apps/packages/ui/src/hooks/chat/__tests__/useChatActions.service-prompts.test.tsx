@@ -442,7 +442,7 @@ const useChatActions = (options: Parameters<typeof useRawChatActions>[0]) => {
   if (!continuationStoreBoundary.actual && !fixture.current) {
     const core = useStoreMessageOption.getState();
     core.startNewChatDraft(options.temporaryChat);
-    useStoreMessageOption.setState({ historyId: options.historyId, serverChatId: options.serverChatId,
+    useStoreMessageOption.setState({ historyId: options.historyId, serverChatId: options.serverChatId, serverChatMetaLoaded: options.serverChatMetaLoaded,
       selectedModel: options.selectedModel, toolChoice: options.toolChoice, messages: options.messages, history: options.history });
     let epoch = 0;
     const account = { requestScope: snapshot.requestScope, isCurrent: () => true };
@@ -1945,9 +1945,11 @@ describe("useChatActions Compare service prompt snapshot", () => {
   it("uses the ensured server history only after the snapshot gate succeeds", async () => {
     const pendingSnapshot = deferred<typeof snapshot>();
     loadServicePromptSnapshotMock.mockReturnValueOnce(pendingSnapshot.promise);
-    const options = createHookOptions({ serverChatId: "server-chat-7" });
-    options.ensureServerChatHistoryId.mockImplementation(async () => {
+    const options = { ...createHookOptions({ serverChatId: "server-chat-7" }), serverChatMetaLoaded: true };
+    options.ensureServerChatHistoryId.mockImplementation(async (_id, _title, _signal, _snapshot, scene) => {
       events.push("ensureHistory");
+      if (!scene?.acceptHistoryMirror?.("history-from-server")) throw new Error("Original mirror source changed");
+      useStoreMessageOption.getState().setHistoryId("history-from-server", { preserveServerChatId: true });
       return "history-from-server";
     });
     const { result } = renderHook(() =>
@@ -2057,13 +2059,15 @@ describe("useChatActions Compare service prompt snapshot", () => {
   });
 
   it("captures only owner scope and preserves server history when Compare web search is disabled", async () => {
-    const options = createHookOptions({
+    const options = { ...createHookOptions({
       webSearch: false,
       serverChatId: "server-chat-7",
+    }), serverChatMetaLoaded: true };
+    options.ensureServerChatHistoryId.mockImplementationOnce(async (_id, _title, _signal, _snapshot, scene) => {
+      if (!scene?.acceptHistoryMirror?.("history-from-server")) throw new Error("Original mirror source changed");
+      useStoreMessageOption.getState().setHistoryId("history-from-server", { preserveServerChatId: true });
+      return "history-from-server";
     });
-    options.ensureServerChatHistoryId.mockResolvedValueOnce(
-      "history-from-server",
-    );
     const { result } = renderHook(() =>
       useChatActions(
         options as unknown as Parameters<typeof useChatActions>[0],
@@ -2094,6 +2098,33 @@ describe("useChatActions Compare service prompt snapshot", () => {
     expect(normalChatModeMock.mock.calls[1]?.[6].historyId).toBe(
       "history-from-server",
     );
+  });
+
+  it.each(["new", "same-id"])("rejects a %s replacement after an admitted Compare mirror", async boundary => {
+    const options = { ...createHookOptions({ webSearch: false, serverChatId: "server-chat-7" }), serverChatMetaLoaded: true };
+    options.ensureServerChatHistoryId.mockImplementationOnce(async (_id, _title, _signal, _snapshot, scene) => {
+      expect(scene?.acceptHistoryMirror?.("history-from-server")).toBe(true);
+      useStoreMessageOption.getState().setHistoryId("history-from-server", { preserveServerChatId: true });
+      useStoreMessageOption.getState().startNewChatDraft(false);
+      if (boundary === "same-id") useStoreMessageOption.setState({
+        historyId: "history-from-server", serverChatId: "server-chat-7", serverChatMetaLoaded: true
+      });
+      return "history-from-server";
+    });
+    const { result } = renderHook(() => useChatActions(options as unknown as Parameters<typeof useChatActions>[0]));
+    options.setMessages.mockClear();
+    options.setHistory.mockClear();
+    await act(async () => {
+      const outcome = await result.current.onSubmit({ message: "Original Compare question", image: "" });
+      expect(outcome.status).toBe("failed");
+    });
+    expect(options.ensureServerChatHistoryId).toHaveBeenCalledOnce();
+    expect(saveMessageMock).not.toHaveBeenCalled();
+    expect(normalChatModeMock).not.toHaveBeenCalled();
+    expect(options.setMessages).not.toHaveBeenCalled();
+    expect(options.setHistory).not.toHaveBeenCalled();
+    expect(releaseSnapshotMock).toHaveBeenCalledOnce();
+    expect(useStoreMessageOption.getState().chatDraftAddress?.kind).toBe("fresh");
   });
 
   it("uses the request-level web-search override for the Compare prompt gate", async () => {

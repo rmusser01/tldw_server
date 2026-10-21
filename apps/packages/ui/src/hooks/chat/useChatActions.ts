@@ -4729,7 +4729,7 @@ export const useChatActions = ({
           let compareReceipt: HistoryLoadReceipt | undefined
           let compareAdoptionIsCurrent: (() => boolean) | undefined
           let temporaryCompareBound = false
-          let compareHistoryId = commandDraftSource.historyId
+          let compareHistoryId = enhancedChatModeParams.historyId
           let compareMetadataRetired = false
           const compareMetadataIsCurrent = () => {
             const current = useStoreMessageOption.getState()
