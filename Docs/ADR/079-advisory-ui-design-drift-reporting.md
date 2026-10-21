@@ -5,7 +5,7 @@
 **Backfilled from:** not backfilled
 **Decision owner:** Repository owner; direction approved in this design session
 **Related task:** TASK-45.44.16
-**Related spec/plan:** [Design spec](../superpowers/specs/2026-10-20-design-system-drift-reporting-design.md)
+**Related spec/plan:** [Design spec (repository source)](https://github.com/rmusser01/tldw_server/blob/73336cf8534b1f00f5291a219a6c6af43f0a92eb/Docs/superpowers/specs/2026-10-20-design-system-drift-reporting-design.md)
 
 ## Decision
 
