@@ -313,3 +313,10 @@ A temporary exact-case V8 phase profile passes1with14excluded in3.37seconds; ori
 Complete candidate15/15passes with V8, target4.892seconds in that full run. The focused baseline/full candidate are not a comparable speed benchmark, and no local red or throughput improvement is claimed. ESLint0/0; independent connected final review clear because the owning card persists through data reload for selected user11. Normal three-path checks precede publication. No architecture rule, dependency, guard or allowance changes; no new ADR or PythonBandit scope. Actual hosted closure remains required.
 
 A separate current-head admin-reset-backups job119384338261 fails before tests because the PostgreSQL18 mirror rejects pulls for quota. No source workaround or acceptance is claimed; the next necessary source push naturally retries that lane. The six required successes on2e01 do not transfer to a new head; frontend/known failures still prevent merge.
+
+
+## Chat initial-setup complete composer fixtures
+
+Current0a66 final frontend-required job119421588630 fails only the two fresh-input restoration cases;2,453other cases pass. The unchanged complete file reproduces2failures/12passes locally. The real composer initializes message, image and imageFilename, merges partial values, and captures/restores the complete form. Both fixture objects omitted the existing empty filename.
+
+The minimal repair adds imageFilename:"" to those two objects. Exact whole-form equality, metadata restoration, address retirement, null chat IDs, no unresolved registry storage and no Chat request checks remain unchanged. Complete candidate14/14passes with WebUI V8; the configured local report shows0percent and does not qualify aggregate coverage. ESLint0/0; independent final connected review clear. Normal three-path hooks precede publication. No production, timeout, dependency, architecture rule or allowance change; no new ADR or PythonBandit scope. Seven actual final-head required statuses/currentdev/reviews and verified normal merge remain open.
