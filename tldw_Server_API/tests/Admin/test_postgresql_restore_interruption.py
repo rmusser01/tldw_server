@@ -23,6 +23,7 @@ def separate_interruption_target(pg_secondary_database_config):
     yield from official_restricted.__wrapped__(pg_secondary_database_config)
 
 
+@pytest.mark.usefixtures("backup_workspace")
 def test_real_restore_timeout_rolls_back_then_accepts_legitimate_retry(
     tmp_path, monkeypatch, pg_restricted_backend, separate_interruption_target
 ):
@@ -30,8 +31,6 @@ def test_real_restore_timeout_rolls_back_then_accepts_legitimate_retry(
     target_name = target.config.pg_database
     if not re.fullmatch(r"[a-zA-Z0-9_]+", target_name) or source.config.pg_database == target_name:
         pytest.fail("Distinct official database identifiers are required")
-    monkeypatch.setenv("TLDW_DB_BACKUP_PATH", str(tmp_path))
-    monkeypatch.setenv("TLDW_DB_ALLOWED_BASE_DIRS", str(tmp_path))
     for key in ("PGHOSTADDR", "PGSERVICE", "PGOPTIONS", "PGPORT"):
         monkeypatch.delenv(key, raising=False)
     from tldw_Server_API.app.core.DB_Management import DB_Backups

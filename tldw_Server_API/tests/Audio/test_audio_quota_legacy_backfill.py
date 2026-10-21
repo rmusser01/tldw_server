@@ -7,7 +7,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.mark.asyncio
-async def test_legacy_audio_usage_daily_backfilled_into_resource_daily_ledger(tmp_path, monkeypatch):
+async def test_legacy_audio_usage_daily_backfilled_into_resource_daily_ledger(tmp_path, monkeypatch, restart_audio_ledger_caches):
     """
     Simulate an upgrade where audio_usage_daily already contains usage for
     today and verify that the first ResourceDailyLedger initialization
@@ -46,10 +46,6 @@ async def test_legacy_audio_usage_daily_backfilled_into_resource_daily_ledger(tm
             2.5,
         )
 
-        # Reset any cached ledger state in the module
-        audio_quota._daily_ledger = None  # type: ignore[attr-defined]
-        audio_quota._audio_minutes_legacy_backfill_done = False  # type: ignore[attr-defined]
-
         # Trigger ledger initialization + backfill
         ledger = await audio_quota._get_daily_ledger()
         assert ledger is not None
@@ -67,7 +63,7 @@ async def test_legacy_audio_usage_daily_backfilled_into_resource_daily_ledger(tm
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("first_period", ["daily", "monthly"])
-async def test_reporting_first_backfills_legacy_audio_minutes(tmp_path, monkeypatch, first_period):
+async def test_reporting_first_backfills_legacy_audio_minutes(tmp_path, monkeypatch, first_period, restart_audio_ledger_caches):
     """A reporting-first upgrade includes legacy usage before any admission."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
     from tldw_Server_API.app.core.Usage import audio_quota, quota_checks
@@ -76,8 +72,7 @@ async def test_reporting_first_backfills_legacy_audio_minutes(tmp_path, monkeypa
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'reporting_first.db'}")
     await reset_db_pool()
     pool = await get_db_pool()
-    monkeypatch.setattr(audio_quota, "_daily_ledger", None)
-    monkeypatch.setattr(audio_quota, "_audio_minutes_legacy_backfill_done", False)
+    restart_audio_ledger_caches()
     quota_checks.reset_ledger_cache()
     try:
         await audio_quota._ensure_tables(pool)
@@ -92,8 +87,7 @@ async def test_reporting_first_backfills_legacy_audio_minutes(tmp_path, monkeypa
         assert await audio_quota.get_daily_minutes_used(7) == 2.5  # nosec B101 - pytest regression assertion.
         assert await audio_quota.get_monthly_minutes_used(7) == 2.5  # nosec B101 - pytest regression assertion.
         # A fresh process repeats the existing idempotent migration without doubling usage.
-        monkeypatch.setattr(audio_quota, "_daily_ledger", None)
-        monkeypatch.setattr(audio_quota, "_audio_minutes_legacy_backfill_done", False)
+        restart_audio_ledger_caches()
         assert await read(7) == 2.5  # nosec B101 - pytest regression assertion.
     finally:
         quota_checks.reset_ledger_cache()

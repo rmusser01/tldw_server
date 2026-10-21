@@ -233,7 +233,7 @@ async def test_postgres_legacy_audio_backfill_preserves_current_day_usage_once(a
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("minutes_used", [None])
-async def test_postgres_reporting_first_backfills_legacy_usage(configured_audio_profile_user, monkeypatch):
+async def test_postgres_reporting_first_backfills_legacy_usage(configured_audio_profile_user, monkeypatch, restart_audio_ledger_caches):
     """A profile-first upgrade reports migrated daily usage and remaining allowance."""
     from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
     from tldw_Server_API.app.core.Usage import audio_quota, quota_checks
@@ -241,8 +241,7 @@ async def test_postgres_reporting_first_backfills_legacy_usage(configured_audio_
     client, _pool, user_id, headers = configured_audio_profile_user
     pool = await get_db_pool()
     monkeypatch.setattr(audio_quota, "datetime", datetime)
-    monkeypatch.setattr(audio_quota, "_daily_ledger", None)
-    monkeypatch.setattr(audio_quota, "_audio_minutes_legacy_backfill_done", False)
+    restart_audio_ledger_caches()
     quota_checks.reset_ledger_cache()
     await pool.execute(
         "INSERT INTO audio_usage_daily (user_id, day, minutes_used, jobs_started) VALUES ($1, $2, 2.5, 0)",
@@ -256,8 +255,7 @@ async def test_postgres_reporting_first_backfills_legacy_usage(configured_audio_
         assert audio["daily_minutes_used"] == 2.5  # nosec B101 - pytest regression assertion.
         assert audio["daily_minutes_remaining"] == 27.5  # nosec B101 - pytest regression assertion.
         # Retry migration through a fresh reporting read; the legacy op_id stays unique.
-        monkeypatch.setattr(audio_quota, "_daily_ledger", None)
-        monkeypatch.setattr(audio_quota, "_audio_minutes_legacy_backfill_done", False)
+        restart_audio_ledger_caches()
         response = client.get("/api/v1/users/me/profile", headers=headers)
         assert response.status_code == 200  # nosec B101 - pytest regression assertion.
         assert response.json()["quotas"]["audio"]["daily_minutes_used"] == 2.5  # nosec B101 - pytest regression assertion.

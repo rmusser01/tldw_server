@@ -87,7 +87,8 @@ async def test_org_admin_listing_filters_global_scope_before_pagination(org_admi
         return [], 0
 
     monkeypatch.setattr(routes.svc, "list_bundles", listing)
-    await routes.list_bundles(user_id=None, limit=1, offset=2, principal=org_admin)
+    result = await routes.list_bundles(user_id=None, limit=1, offset=2, principal=org_admin)
+    assert (result.items, result.total, result.limit, result.offset) == ([], 0, 1, 2)  # nosec B101 -- hidden archives cannot leak into pagination or response items.
     assert seen == [{"user_id": None, "limit": 1, "offset": 2, "include_database": False}]  # nosec B101 -- hidden globals must not affect totals or pages.
 
 

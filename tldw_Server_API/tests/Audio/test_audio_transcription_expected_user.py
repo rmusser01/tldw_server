@@ -1,6 +1,6 @@
 """Transcription rejects a changed cookie principal before any processing."""
 
-from types import SimpleNamespace
+from collections.abc import Iterator
 
 import pytest
 from fastapi import FastAPI
@@ -8,13 +8,15 @@ from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints.audio import audio_transcriptions
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.Utils.fastapi_routes import iter_served_routes
 
 pytestmark = pytest.mark.unit
 
 
-@pytest.mark.parametrize("expected,status", [("42", 412), ("84", 200), (None, 200)])
-def test_b05_transcription_owner_admission(expected: str | None, status: int, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def transcription_admission(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[TestClient, str, list[bool]]]:
+    """Own the route probe and client while keeping actual principal admission active."""
     app = FastAPI()
     app.include_router(audio_transcriptions.router, prefix="/api/v1/audio")
     route = next(r for r in iter_served_routes(app.routes) if r.path == "/api/v1/audio/transcriptions")
@@ -32,11 +34,22 @@ def test_b05_transcription_owner_admission(expected: str | None, status: int, mo
     for dependency in route.dependant.dependencies:
         if dependency.call is not auth_deps.require_expected_user:
             app.dependency_overrides[dependency.call] = no_side_effect
-    app.dependency_overrides[auth_deps.get_auth_principal] = lambda: SimpleNamespace(user_id=84)
+    app.dependency_overrides[auth_deps.get_auth_principal] = lambda: AuthPrincipal(kind="user", user_id=84)
+    try:
+        with TestClient(app) as client:
+            yield client, route.path, calls
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("expected,status", [("42", 412), ("84", 200), (None, 200)])
+def test_b05_transcription_owner_admission(transcription_admission, expected: str | None, status: int) -> None:
+    client, path, calls = transcription_admission
     headers = {} if expected is None else {"X-TLDW-Expected-User-ID": expected}
-    with TestClient(app) as client:
-        response = client.post(route.path, headers=headers, files={"file": ("unit.wav", b"unit bytes", "audio/wav")})
+    response = client.post(path, headers=headers, files={"file": ("unit.wav", b"unit bytes", "audio/wav")})
     assert response.status_code == status, response.text  # nosec B101 - Verify actual route admission.
     assert bool(calls) is (status == 200)  # nosec B101 - Rejected requests must not process audio.
     if status == 412:
         assert response.json()["detail"]["code"] == "request_config_scope_changed"  # nosec B101 - Verify structured recovery contract.
+    else:
+        assert response.json() == {"text": "admitted unit probe"}  # nosec B101 - Authorized requests execute the actual route probe.

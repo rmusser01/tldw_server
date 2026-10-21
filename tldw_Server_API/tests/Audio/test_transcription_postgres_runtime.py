@@ -206,12 +206,13 @@ def test_runtime_timeout_retains_fixture_until_owned_child_exits(tmp_path, monke
             raise subprocess.TimeoutExpired("owned runtime", timeout)
 
         def poll(self):
-            return None
+            return self.returncode
 
         def terminate(self):
             calls.append("terminate")
 
-    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: Child())
+    child = Child()
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: child)
     fixture = SimpleNamespace(
         config=SimpleNamespace(  # nosec B106 - Synthetic timeout-test credential; no process or database is contacted.
             pg_user="fixture", pg_password="private", pg_host="127.0.0.1", pg_port=15492, pg_database="fixture"
@@ -219,4 +220,5 @@ def test_runtime_timeout_retains_fixture_until_owned_child_exits(tmp_path, monke
     )
     with pytest.raises(AssertionError, match="Owned runtime exceeded150s; graceful cleanup completed"):
         test_ordinary_postgres_user_can_transcribe_after_normal_startup(fixture, tmp_path)
+    assert child.poll() == 143  # nosec B101 - The owned child has actually exited before releasing its fixture.
     assert calls == [("communicate", 150), "terminate", ("communicate", 15), ("communicate", None)]  # nosec B101 - Require graceful ownership cleanup, never force.

@@ -443,12 +443,15 @@ def test_direct_pg_connection_forwards_the_shared_effective_conninfo(monkeypatch
         connect_timeout=3,
     )
 
+    transport_error = ConnectionError("controlled no-network boundary")
+
     def transport_boundary(dsn):
         seen.append(dsn)
-        raise ConnectionError("controlled no-network boundary")
+        raise transport_error
 
     monkeypatch.setattr(postgresql_backend, "PSYCOPG2_AVAILABLE", True)
     monkeypatch.setattr(postgresql_backend, "psycopg", SimpleNamespace(connect=transport_boundary))
-    with pytest.raises(ConnectionError, match="controlled no-network boundary"):
+    with pytest.raises(ConnectionError, match="controlled no-network boundary") as failure:
         postgresql_backend.PostgreSQLBackend(config).connect()
+    assert failure.value is transport_error  # nosec B101 -- preserve the actual transport failure instead of masking it.
     assert seen == [expected]  # nosec B101 -- actual direct-connect caller must forward the same effective target.

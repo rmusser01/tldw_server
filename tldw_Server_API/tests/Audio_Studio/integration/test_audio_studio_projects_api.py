@@ -476,3 +476,5 @@ def test_b06_archive_between_lookup_and_snapshot_is_404(client_audio_studio, mon
     monkeypatch.setattr(CollectionsDatabase, "get_audio_studio_project_snapshot", archive_then_read)
     response = client_audio_studio.get("/api/v1/audio-studio/projects/" + project["project_id"])
     assert response.status_code == 404  # nosec B101 - Concurrent archive is absence, not an internal500 or stale owner disclosure.
+    assert response.json() == {"detail": "audio_studio_project_not_found"}  # nosec B101 - The race has the same public absence contract as a missing project.
+    assert client_audio_studio.get("/api/v1/audio-studio/projects").json()["projects"] == []  # nosec B101 - The archived row cannot remain visible through listing.

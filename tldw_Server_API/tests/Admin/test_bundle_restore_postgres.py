@@ -42,16 +42,14 @@ async def read_user(dsn: str, username: str):
         await pool.close()
 
 
+@pytest.mark.usefixtures("backup_workspace")
 async def test_real_auth_bundle_restores_identity_into_separate_restricted_database(
     tmp_path, monkeypatch, pg_restricted_backend, separate_target_backend
 ):
-    monkeypatch.chdir(tmp_path)
     source, target = pg_restricted_backend, separate_target_backend
     assert source.config.pg_database != target.config.pg_database  # nosec B101 - Separate official targets are mandatory.
     assert source.config.pg_user != target.config.pg_user  # nosec B101 - Distinct restricted roles must remain distinct.
     assert not target.table_exists("users")  # nosec B101 - The one session target must be fresh before mutation.
-    monkeypatch.setenv("TLDW_DB_BACKUP_PATH", str(tmp_path / "backups"))
-    monkeypatch.setenv("TLDW_DB_ALLOWED_BASE_DIRS", str(tmp_path))
     source_dsn, target_dsn = dsn_for(source), dsn_for(target)
     monkeypatch.setenv("DATABASE_URL", source_dsn)
     reset_settings()

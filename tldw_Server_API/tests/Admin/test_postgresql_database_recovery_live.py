@@ -66,6 +66,7 @@ def read_security(backend):
     return flags, policies
 
 
+@pytest.mark.usefixtures("backup_workspace")
 async def test_real_database_bundle_preserves_all_users_owned_media_and_jobs(
     tmp_path,
     monkeypatch,
@@ -77,11 +78,6 @@ async def test_real_database_bundle_preserves_all_users_owned_media_and_jobs(
     source, target = pg_restricted_backend, distinct_restricted_target
     assert source.config.pg_database != target.config.pg_database  # nosec B101 -- separate official databases, never an in-place test restore.
     assert source.config.pg_user != target.config.pg_user  # nosec B101 -- source owner cannot stand in for the target application role.
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("AUTH_MODE", "single_user")
-    monkeypatch.setenv("TLDW_DB_BACKUP_PATH", str(tmp_path / "backups"))
-    monkeypatch.setenv("TLDW_DB_ALLOWED_BASE_DIRS", str(tmp_path))
-    monkeypatch.delenv("TLDW_POSTGRES_BACKUP_DSN", raising=False)
     source_url, target_url = dsn(source.config), dsn(target.config)
     select_scope(monkeypatch, source_url)
     passwords = PasswordService()

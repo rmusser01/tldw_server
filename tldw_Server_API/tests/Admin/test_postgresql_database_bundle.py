@@ -86,6 +86,7 @@ def test_database_restore_refuses_the_online_boundary_before_tool_dispatch(datab
             dataset="postgresql", user_id=None, backup_path=str(database_scope / "incoming.dump")
         )
     assert called == []  # nosec B101 -- the online boundary cannot dispatch a whole-database overwrite.
+    assert not (database_scope / "backups").exists()  # nosec B101 -- refuse before creating safety or restore artifacts.
 
 
 @pytest.fixture
@@ -131,6 +132,7 @@ def test_database_restore_normalizes_scope_before_offline_gate(database_scope, m
             dataset=" POSTGRESQL ", user_id=None, backup_path=str(database_scope / "incoming.dump")
         )
     assert called == []  # nosec B101 -- spelling normalization cannot escape the offline boundary.
+    assert not (database_scope / "backups").exists()  # nosec B101 -- normalization cannot admit restore artifact creation.
 
 
 def test_database_snapshot_normalizes_global_scope(database_scope, dump_boundary):
