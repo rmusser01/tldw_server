@@ -1,0 +1,134 @@
+name: UI Design-System Drift Report
+
+on:
+  pull_request:
+    branches: [dev, main]
+    paths:
+      - "apps/packages/ui/src/**"
+      - "apps/packages/ui/scripts/design-system-drift-*"
+      - "apps/packages/ui/scripts/verify-design-system-drift.mjs"
+      - "apps/packages/ui/package.json"
+      - "apps/tldw-frontend/**"
+      - "apps/extension/**"
+      - "admin-ui/**"
+      - "apps/bun.lock"
+      - ".github/workflows/ui-design-system-drift-report.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-design-system-drift-report-${{ github.event_name }}-${{ github.event.workflow_run.pull_requests[0].number || github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  admission:
+    if: >-
+      vars.LICENSE_FIRST_CI_ENABLED == 'true' &&
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success'
+    uses: ./.github/workflows/license-first-admission.yml
+    with:
+      workflow_file: ui-design-system-drift-report.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      statuses: read
+
+  await_license:
+    if: github.event_name == 'pull_request'
+    uses: ./.github/workflows/license-first-await.yml
+    permissions:
+      contents: read
+      statuses: read
+
+  drift-report:
+    name: UI Design-System Drift Report
+    needs: [admission, await_license]
+    if: >-
+      always() && !cancelled() &&
+      (
+        (
+          github.event_name == 'workflow_run' &&
+          needs.admission.result == 'success' &&
+          needs.admission.outputs.should_run == 'true'
+        ) ||
+        (
+          github.event_name != 'workflow_run' &&
+          (
+            needs.await_license.result == 'skipped' ||
+            needs.await_license.outputs.license_passed == 'true'
+          )
+        )
+      )
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      SKIP_WXT_PREPARE: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.admission.outputs.head_sha || github.event.workflow_run.pull_requests[0].head.sha || github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.2"
+
+      - name: Install workspace dependencies
+        working-directory: apps
+        run: bun install --frozen-lockfile
+
+      - name: Generate drift report
+        id: drift
+        working-directory: apps/packages/ui
+        continue-on-error: true
+        run: bun run report:design-system-drift --output "$RUNNER_TEMP/tldw-design-system-drift.json"
+
+      - name: Upload drift report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ui-design-system-drift-${{ github.event.pull_request.head.sha || github.sha }}
+          path: ${{ runner.temp }}/tldw-design-system-drift.json
+          if-no-files-found: warn
+
+      - name: Publish drift summary
+        if: always()
+        shell: bash
+        run: |
+          if [[ ! -f "$RUNNER_TEMP/tldw-design-system-drift.json" ]]; then
+            printf '%s\n' '## UI Design-System Drift Report' \
+              'The scan did not produce a report. See failed setup/scan steps; this is not zero drift.' \
+              >> "$GITHUB_STEP_SUMMARY"
+          else
+            node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const reportPath = `${process.env.RUNNER_TEMP}/tldw-design-system-drift.json`;
+          try {
+            const { formatDriftSummary } = await import('./apps/packages/ui/scripts/design-system-drift-report.mjs');
+            const report = JSON.parse(readFileSync(reportPath, 'utf8'));
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY, formatDriftSummary(report, { limit: 25, reportPath }));
+          } catch (error) {
+            appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+              'The drift report could not be summarized. See failed setup/scan steps and the JSON artifact.\n');
+            throw error;
+          }
+          NODE
+          fi
+
+      - name: Mark incomplete scan as advisory failure
+        if: always() && steps.drift.outcome == 'failure'
+        run: exit 1

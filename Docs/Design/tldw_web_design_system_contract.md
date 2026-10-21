@@ -384,6 +384,92 @@ Recommended enforcement sequence:
 4. Optional Storybook or visual-regression coverage after the contract has
    stabilized.
 
+### Advisory Styling Drift Reports
+
+The standalone drift reporter inventories existing and new code across
+`apps/packages/ui/src/`, `apps/tldw-frontend/`, `apps/extension/`, and `admin-ui/`
+on every run, not just changed lines. It reports `literal-color`, `palette-color`,
+`custom-radius`, and `layout-value` findings. Layout values are context-dependent
+review candidates, not confirmed defects. Admin UI retains its own token
+vocabulary; recognized token/theme declarations are listed as definitions,
+without exempting adjacent product styling.
+
+With Node.js 24 and Bun 1.3.2, install from the existing workspace lockfile and
+write the report outside scanned roots:
+
+```sh
+cd apps
+SKIP_WXT_PREPARE=1 bun install --frozen-lockfile
+cd packages/ui
+bun run report:design-system-drift --output /tmp/tldw-design-system-drift.json
+```
+
+The command prints a bounded summary and writes complete JSON (`schemaVersion: 1`)
+with `status`, `sourceCommit`, `dirtySource`, `untrackedSourceFileCount`, `coverage`,
+`findings`, `definitions`, `acceptedExceptions`, `staleExceptions`, and
+`diagnostics`. Coverage includes discovered/analyzed counts per root, exclusions
+by reason, and syntax limitations. Findings carry surface, rule, path, one-based
+line/column, value, owner, classification, reason, and supported token suggestions.
+Inspect JSON for entries omitted from the summary.
+
+`sourceCommit` identifies checked-out HEAD, not necessarily the analyzed bytes.
+`dirtySource` includes relevant tracked edits/deletions, included untracked source,
+and changes to reporter/token/configuration inputs or exceptions. Output files
+and unrelated edits do not make the scan dirty. Unknown provenance remains
+nullable, not falsely clean. Use the commit and dirty indicator when comparing
+reports; timestamps and arbitrary repository-wide counts are not conformance gates.
+Git `skip-worktree` or `assume-unchanged` flags on relevant inputs produce a
+`limited-git-provenance` error: `status` is `incomplete` and `dirtySource` is
+`null` (unknown), never falsely clean, including sparse-checkout inputs.
+
+The `UI Design-System Drift Report` workflow runs independently on UI/reporting
+pull requests to `dev`/`main` and manual dispatch. It waits for the existing
+license verdict before executing PR code, checks out the PR head (or selected
+manual SHA), and uses read-only permissions without persisted checkout credentials.
+The reporter job is advisory (`continue-on-error: true`), not required by any
+build or merge gate. The full JSON is uploaded as
+`ui-design-system-drift-<source SHA>` and the job summary shows at most 25 findings,
+with bounded exception/diagnostic sections.
+Artifact and summary publication are attempted even after setup/scan failure;
+missing JSON is reported explicitly, never presented as zero drift. Cancellation,
+runner loss, or the job timeout can still prevent publication.
+
+A completed scan exits 0 regardless of finding or stale-exception counts. Missing
+or empty expected roots, unreadable/malformed source, invalid exceptions, or
+inventory/provenance errors make it incomplete (exit 1); output errors also exit 1.
+CI preserves that failure after publication while keeping the job nonblocking.
+Coverage diagnostics for unresolved dynamic expressions remain visible even in a
+completed scan. Check status and diagnostics before interpreting counts.
+
+V1 statically inspects JS/TS/JSX/TSX/MJS/CJS and CSS, including inline styles,
+static class composition, and Tailwind `@apply`; it never executes analyzed code.
+It selects tracked and nonignored untracked source, excludes dependencies,
+generated/vendor/test/fixture/tooling output, and does not traverse symlinks or
+other worktrees. The documented upstream stylesheet copy
+`apps/packages/ui/src/assets/react-pdf.css` is explicitly excluded as
+`documented-upstream-vendor-copy`; other asset stylesheets remain eligible.
+Runtime-generated styles, unresolved expressions, backend
+templates, static HTML, and MDX are outside v1 coverage. This is an inventory,
+not proof of visual or accessibility conformance.
+
+Review each finding in product context: migrate to an existing semantic token or
+shared primitive when appropriate, retain intentional values with a documented
+exception, or create a focused migration task. Do not infer semantic meaning from
+numeric color similarity or auto-rewrite necessary layout geometry. Intentional
+exceptions live in `apps/packages/ui/scripts/design-system-drift-exceptions.json`:
+each record matches exact path, rule, normalized value, and stable owner (or null),
+with a category and nonempty reason. Categories cover theme definitions, data
+visualization, user-controlled styling, media/editor rendering, and necessary
+layout geometry. Accepted exceptions keep locations and matched occurrence counts;
+stale entries and ambiguous matches remain visible for review. Do not seed an
+exception for every existing finding or create a suppression baseline.
+
+See the [reviewed specification](../superpowers/specs/2026-10-20-design-system-drift-reporting-design.md)
+and proposed [ADR-079](../ADR/079-advisory-ui-design-drift-reporting.md). No new ADR
+is introduced here: ADR-079 governs this advisory policy. Existing product-state
+guards, their baseline, and token-sync build checks are unchanged. Enforcement
+requires a separate owner decision and CI-policy change; counts never activate it.
+
 ## Rollout Plan
 
 ### Stage 1: Contract
@@ -455,6 +541,14 @@ Block new local one-off recovery, alert, status, and empty-state patterns in the
 proof surface.
 
 ### Stage 5: Migration Queue
+
+Non-product-state token, color, radius, and layout reporting is specified in
+[Repository-Wide Design-System Drift Reporting](../superpowers/specs/2026-10-20-design-system-drift-reporting-design.md).
+The standalone reporter and its usage are documented under
+[Advisory Styling Drift Reports](#advisory-styling-drift-reports); the specification
+alone does not deliver it or change current required guards.
+See proposed [ADR-079](../ADR/079-advisory-ui-design-drift-reporting.md) for the
+nonblocking policy and the separate decision required before enforcement.
 
 Prioritize later migrations:
 
