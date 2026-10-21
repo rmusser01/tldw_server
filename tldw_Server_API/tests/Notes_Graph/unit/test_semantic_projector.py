@@ -96,6 +96,9 @@ class _Store:
         target: SemanticProjectionChunk,
     ) -> None:
         self.records = {source.vector_id: source, target.vector_id: target}
+        self.configuration_calls: list[str] = []
+        self.generation_calls: list[tuple[str, str]] = []
+        self.projection_dependencies: list[tuple[_DB, _GraphService]] = []
         self.load_calls: list[tuple[str, ...]] = []
         self.filter_calls: list[dict[str, object]] = []
         self.drop_target_after_io = False
@@ -134,15 +137,15 @@ class _Store:
         )
 
     def get_configuration(self, dataset_id: str):
-        assert dataset_id == "dataset-a"
+        self.configuration_calls.append(dataset_id)
         return self.config
 
     def get_generation(self, dataset_id: str, generation_id: str):
-        assert (dataset_id, generation_id) == ("dataset-a", "generation-a")
+        self.generation_calls.append((dataset_id, generation_id))
         return self.generation
 
     def get_generation_integrity(self, dataset_id: str, generation_id: str):
-        assert (dataset_id, generation_id) == ("dataset-a", "generation-a")
+        self.generation_calls.append((dataset_id, generation_id))
         return SimpleNamespace(
             indexed_note_count=self.indexed_notes,
             excluded_note_count=0,
@@ -158,7 +161,7 @@ class _Store:
         generation_id: str,
         vector_ids: tuple[str, ...],
     ) -> tuple[SemanticProjectionChunk, ...]:
-        assert (dataset_id, generation_id) == ("dataset-a", "generation-a")
+        self.generation_calls.append((dataset_id, generation_id))
         ids = tuple(vector_ids)
         self.load_calls.append(ids)
         records = [self.records[item] for item in ids if item in self.records]
@@ -176,7 +179,7 @@ class _Store:
         generation_id: str,
         note_id: str | None = None,
     ) -> tuple[str, ...]:
-        assert (dataset_id, generation_id) == ("dataset-a", "generation-a")
+        self.generation_calls.append((dataset_id, generation_id))
         return tuple(
             chunk.vector_id
             for chunk in sorted(
@@ -191,13 +194,14 @@ class _VectorStore:
     def __init__(self, source_id: str, target_id: str) -> None:
         self.source_id = source_id
         self.target_id = target_id
+        self.scope_calls: list[tuple[str, str]] = []
         self.fetch_calls: list[tuple[str, ...]] = []
         self.query_calls: list[tuple[int, int]] = []
         self.fail_query = False
         self.distance = 0.1
 
     async def fetch(self, dataset_id: str, generation_id: str, vector_ids):
-        assert (dataset_id, generation_id) == ("dataset-a", "generation-a")
+        self.scope_calls.append((dataset_id, generation_id))
         ids = tuple(vector_ids)
         self.fetch_calls.append(ids)
         return tuple(
@@ -212,7 +216,7 @@ class _VectorStore:
         *,
         limit: int,
     ):
-        assert (dataset_id, generation_id) == ("dataset-a", "generation-a")
+        self.scope_calls.append((dataset_id, generation_id))
         vectors = tuple(query_vectors)
         self.query_calls.append((len(vectors), limit))
         if self.fail_query:
@@ -236,9 +240,11 @@ class _DB:
         self.note_semantic_store = store
         self.note_graph_projection_store = _ProjectionStore()
         self.manual_edges: list[dict[str, object]] = []
+        self.count_calls: list[bool] = []
+        self.manual_edge_calls: list[tuple[str, list[str]]] = []
 
     def count_user_notes(self, include_deleted: bool = False) -> int:
-        assert include_deleted is False
+        self.count_calls.append(include_deleted)
         return 2
 
     def get_manual_edges_for_notes(
@@ -246,7 +252,7 @@ class _DB:
         user_id: str,
         note_ids: list[str],
     ) -> list[dict[str, object]]:
-        assert user_id == "owner-a"
+        self.manual_edge_calls.append((user_id, list(note_ids)))
         wanted = set(note_ids)
         return [edge for edge in self.manual_edges if edge["from_note_id"] in wanted or edge["to_note_id"] in wanted]
 
@@ -254,6 +260,7 @@ class _DB:
 class _GraphService:
     def __init__(self, ordinary: NoteGraphResponse) -> None:
         self.calls: list[tuple[int, int]] = []
+        self.requests: list[NoteGraphRequest] = []
         self.ordinary = ordinary
         self.on_generate = None
 
@@ -264,7 +271,7 @@ class _GraphService:
         additional_nodes: int,
         additional_edges: int,
     ) -> SemanticGraphCandidateResult:
-        assert request.semantic_requested
+        self.requests.append(request)
         self.calls.append((additional_nodes, additional_edges))
         if self.on_generate is not None:
             self.on_generate()
@@ -490,6 +497,8 @@ def _projector(
     settings: SemanticIndexSettings | None = None,
 ) -> tuple[SemanticGraphProjector, _GraphService, list[int]]:
     graph_service = _GraphService(ordinary)
+    db = _DB(store)
+    store.projection_dependencies.append((db, graph_service))
     factory_calls: list[int] = []
 
     async def vector_factory():
@@ -500,7 +509,7 @@ def _projector(
         SemanticGraphProjector(
             owner_user_id="owner-a",
             dataset_id="dataset-a",
-            db=_DB(store),
+            db=db,
             graph_service=graph_service,
             cache=cache,
             vector_store_factory=vector_factory,
@@ -528,7 +537,15 @@ def projection_parts():
     )
     store = _Store(source, target)
     vectors = _VectorStore(source.vector_id, target.vector_id)
-    return source, target, store, vectors
+    yield source, target, store, vectors
+
+    assert all(dataset == "dataset-a" for dataset in store.configuration_calls)
+    assert all(scope == ("dataset-a", "generation-a") for scope in store.generation_calls)
+    assert all(scope == ("dataset-a", "generation-a") for scope in vectors.scope_calls)
+    for db, service in store.projection_dependencies:
+        assert all(include_deleted is False for include_deleted in db.count_calls)
+        assert all(user == "owner-a" for user, _notes in db.manual_edge_calls)
+        assert all(request.semantic_requested for request in service.requests)
 
 
 @pytest.mark.asyncio
@@ -565,6 +582,12 @@ async def test_projector_queries_once_revalidates_after_io_and_builds_current_ev
     assert vectors.fetch_calls == [(source.vector_id,)]
     assert vectors.query_calls == [(1, 2)]
     assert graph_service.calls == [(2, 2)]
+    assert graph_service.requests == [request]
+    assert store.configuration_calls
+    assert store.generation_calls
+    assert vectors.scope_calls == [("dataset-a", "generation-a")] * 2
+    assert projector._db.count_calls
+    assert projector._db.manual_edge_calls == [("owner-a", ["focus-note"])]
     assert factory_calls == [1]
     assert len(store.load_calls) >= 2
     assert store.filter_calls[0]["tag"] == "tag:research"

@@ -5,12 +5,10 @@ from __future__ import annotations
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import (
-    BackendType,
     DatabaseConfig,
 )
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
@@ -24,27 +22,6 @@ pytestmark = [pytest.mark.integration, pytest.mark.timeout(30)]
 _RECEIPTS = "note_semantic_operation_receipts"
 
 
-class _FakeTransaction:
-    def __enter__(self) -> object:
-        return object()
-
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
-        return False
-
-
-class _FakeBackend:
-    backend_type = BackendType.POSTGRESQL
-
-    def execute(self, *_args: object, **_kwargs: object) -> None:
-        return None
-
-    def transaction(self) -> _FakeTransaction:
-        return _FakeTransaction()
-
-    def table_exists(self, _name: str, connection: object = None) -> bool:
-        return True
-
-
 def test_postgres_v88_ddl_has_model_authority_and_forced_owner_dataset_rls() -> None:
     sql = " ".join(CharactersRAGDB._MIGRATION_SQL_V87_TO_V88_POSTGRES.split())
 
@@ -55,48 +32,6 @@ def test_postgres_v88_ddl_has_model_authority_and_forced_owner_dataset_rls() -> 
     assert f"CREATE POLICY {_RECEIPTS}_tenant_isolation" in sql
     assert "idx_note_semantic_operation_receipts_scope" in sql
     assert "idx_note_semantic_operation_receipts_expiry" in sql
-
-
-def test_postgres_initializer_routes_schema_v87_through_v88(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    db = CharactersRAGDB.__new__(CharactersRAGDB)
-    db._backend = _FakeBackend()
-    db._uses_shared_content_backend = False
-    db._backend_refresh_suspended = False
-    db._local = SimpleNamespace()
-    for name in vars(CharactersRAGDB):
-        if name.startswith("_ensure_"):
-            monkeypatch.setattr(db, name, lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(db, "_postgres_schema_is_current", lambda _conn: False)
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap.postgres_schema_migration",
-        lambda backend, _timeout: backend.transaction(),
-    )
-    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 88)
-    monkeypatch.setattr(
-        db,
-        "_get_schema_version_postgres",
-        lambda _conn, lock=False: 87,
-    )
-    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_ensure_note_graph_suggestion_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_ensure_note_semantic_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(
-        db,
-        "_configure_notes_moodboard_studio_v61_postgres_transaction",
-        lambda _conn: None,
-    )
-
-    def reached(_conn: object) -> None:
-        raise RuntimeError("reached-v88")
-
-    monkeypatch.setattr(db, "_migrate_from_v87_to_v88_postgres", reached, raising=False)
-
-    with pytest.raises(RuntimeError, match="^reached-v88$"):
-        db._initialize_schema_postgres()
 
 
 def test_postgres_v88_live_receipts_are_forced_rls(
@@ -124,8 +59,7 @@ def test_postgres_v88_live_receipts_are_forced_rls(
         indexes = {
             str(row["indexname"])
             for row in backend.execute(
-                "SELECT indexname FROM pg_indexes WHERE schemaname=current_schema() "
-                "AND tablename=%s",
+                "SELECT indexname FROM pg_indexes WHERE schemaname=current_schema() AND tablename=%s",
                 (_RECEIPTS,),
             ).rows
         }
@@ -234,9 +168,7 @@ def test_postgres_v88_serializes_same_fingerprint_admission_across_connections(
     def admit_first() -> None:
         try:
             with first_db.transaction() as conn:
-                results["first_pid"] = int(
-                    conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
-                )
+                results["first_pid"] = int(conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"])
                 results["first"] = first_db.note_semantic_store.begin_operation_receipt(
                     dataset_id=dataset,
                     key_digest="a" * 64,
@@ -259,9 +191,7 @@ def test_postgres_v88_serializes_same_fingerprint_admission_across_connections(
     def admit_second() -> None:
         try:
             with second_db.transaction() as conn:
-                results["second_pid"] = int(
-                    conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
-                )
+                results["second_pid"] = int(conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"])
                 second_connection_ready.set()
                 results["second"] = second_db.note_semantic_store.begin_operation_receipt(
                     dataset_id=dataset,
@@ -304,9 +234,7 @@ def test_postgres_v88_serializes_same_fingerprint_admission_across_connections(
             ).rows
             if rows:
                 last_activity = dict(rows[0])
-                blocking_pids = {
-                    int(pid) for pid in (last_activity["blocking_pids"] or [])
-                }
+                blocking_pids = {int(pid) for pid in (last_activity["blocking_pids"] or [])}
                 if (
                     last_activity["state"] == "active"
                     and last_activity["wait_event_type"] == "Lock"

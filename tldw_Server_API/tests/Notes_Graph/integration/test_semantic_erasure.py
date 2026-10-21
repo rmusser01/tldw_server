@@ -396,7 +396,7 @@ async def test_dsr_reclaims_emit_each_committed_retry_once_with_actual_backend(
         raising=False,
     )
 
-    await SemanticErasureCoordinator(
+    result = await SemanticErasureCoordinator(
         db=db,
         vector_store_factory=lambda _backend: RecordingVectors([]),
         timeout_seconds=1,
@@ -406,6 +406,10 @@ async def test_dsr_reclaims_emit_each_committed_retry_once_with_actual_backend(
         {"status": "failed", "backend": "chromadb", "count": 1},
         {"status": "failed", "backend": "chromadb", "count": 3},
     ]
+    assert result.deleted_notes == 1
+    assert result.cleaned_generations == 1
+    assert db.note_store.get_note_by_id(NOTE_ID) is None
+    assert db.note_semantic_store.get_generation(DATASET_ID, generation.id) is None
 
 
 @pytest.mark.asyncio
@@ -1354,13 +1358,16 @@ async def test_erasure_fence_rejects_in_flight_generation_publication(
         )
         return vectors
 
-    await SemanticErasureCoordinator(
+    result = await SemanticErasureCoordinator(
         db=db,
         vector_store_factory=_vectors_after_fence,
         timeout_seconds=1,
     ).erase()
 
     assert publication_result == [None]
+    assert result.deleted_notes == 1
+    assert db.note_store.get_note_by_id(NOTE_ID) is None
+    assert db.note_semantic_store.get_generation(DATASET_ID, generation.id) is None
 
 
 @pytest.mark.asyncio

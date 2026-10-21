@@ -545,16 +545,16 @@ def test_manage_permission_failure_is_typed_403(client, denial_source: str) -> N
         )
 
     if denial_source == "permission":
-        app.dependency_overrides[endpoint.require_semantic_manage] = forbidden
+        denied_dependency = endpoint.require_semantic_manage
     else:
-        scope_dependency = next(
+        denied_dependency = next(
             dependency.call
             for route in endpoint.router.routes
             if route.path == "/graph/semantic-index/runs"
             for dependency in route.dependant.dependencies
             if getattr(dependency.call, "_tldw_token_scope", False)
         )
-        app.dependency_overrides[scope_dependency] = forbidden
+    app.dependency_overrides[denied_dependency] = forbidden
 
     response = test_client.post(
         "/api/v1/notes/graph/semantic-index/runs",

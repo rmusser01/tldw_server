@@ -9,6 +9,7 @@ import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -19,6 +20,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
     SemanticWorkItem,
     SemanticWorkKind,
 )
+from tldw_Server_API.app.core.Metrics import metrics_manager
 from tldw_Server_API.app.core.Notes_Graph import (
     semantic_indexing,
     semantic_observability,
@@ -389,26 +391,37 @@ def test_operational_metrics_use_only_closed_low_cardinality_labels(
         assert forbidden not in serialized
 
 
+@pytest.fixture()
+def health_metrics_registry(monkeypatch: pytest.MonkeyPatch):
+    registry = metrics_manager.MetricsRegistry()
+    monkeypatch.setattr(metrics_manager, "_metrics_registry", registry)
+    monkeypatch.setattr(semantic_observability, "_METRICS_REGISTERED", False)
+    semantic_observability._ensure_metrics_registered()
+    for definition in semantic_observability._METRIC_DEFINITIONS:
+        if definition.type is metrics_manager.MetricType.GAUGE:
+            registry.set_gauge(
+                definition.name,
+                17,
+                {label: "indexed" if label == "state" else "chromadb" for label in definition.labels},
+            )
+    return registry
+
+
 def test_build_completion_does_not_overwrite_global_health_gauges(
     monkeypatch: pytest.MonkeyPatch,
+    health_metrics_registry,
 ) -> None:
-    calls: list[str] = []
-    monkeypatch.setattr(semantic_observability, "_ensure_metrics_registered", lambda: None)
-    monkeypatch.setattr(
-        semantic_observability,
-        "increment_counter",
-        lambda name, value=1, labels=None: calls.append(name),
-    )
-    monkeypatch.setattr(
-        semantic_observability,
-        "observe_histogram",
-        lambda name, value, labels=None: calls.append(name),
-    )
-    monkeypatch.setattr(
-        semantic_observability,
-        "set_gauge",
-        lambda name, value, labels=None: calls.append(name),
-    )
+    registry = health_metrics_registry
+    gauges_before = {
+        definition.name: registry.get_metric_stats(definition.name)
+        for definition in semantic_observability._METRIC_DEFINITIONS
+        if definition.type is metrics_manager.MetricType.GAUGE
+    }
+    emissions = Mock()
+    for name in ("increment_counter", "observe_histogram", "set_gauge"):
+        spy = Mock(wraps=getattr(semantic_observability, name))
+        emissions.attach_mock(spy, name)
+        monkeypatch.setattr(semantic_observability, name, spy)
 
     semantic_observability.record_semantic_build_metrics(
         operation="build",
@@ -418,36 +431,41 @@ def test_build_completion_does_not_overwrite_global_health_gauges(
         counts={"indexed": 20, "excluded": 0, "failed": 0, "dirty": 0, "pending": 0},
     )
 
-    assert calls == [
-        "notes_semantic_build_duration_seconds",
-        "notes_semantic_builds_total",
+    labels = {"operation": "build", "status": "success", "backend": "chromadb"}
+    assert emissions.mock_calls == [
+        call.observe_histogram("notes_semantic_build_duration_seconds", 0.5, labels),
+        call.increment_counter("notes_semantic_builds_total", 1, labels),
     ]
+    assert registry.get_cumulative_counter("notes_semantic_builds_total", labels) == 1
+    assert registry.get_metric_stats("notes_semantic_build_duration_seconds", labels)["latest"] == 0.5
+    assert {name: registry.get_metric_stats(name) for name in gauges_before} == gauges_before
 
 
 def test_dsr_completion_does_not_overwrite_global_health_gauges(
     monkeypatch: pytest.MonkeyPatch,
+    health_metrics_registry,
 ) -> None:
-    counters: list[str] = []
-    gauges: list[str] = []
-    monkeypatch.setattr(semantic_observability, "_ensure_metrics_registered", lambda: None)
-    monkeypatch.setattr(
-        semantic_observability,
-        "increment_counter",
-        lambda name, value=1, labels=None: counters.append(name),
-    )
-    monkeypatch.setattr(
-        semantic_observability,
-        "set_gauge",
-        lambda name, value, labels=None: gauges.append(name),
-    )
+    registry = health_metrics_registry
+    gauges_before = {
+        definition.name: registry.get_metric_stats(definition.name)
+        for definition in semantic_observability._METRIC_DEFINITIONS
+        if definition.type is metrics_manager.MetricType.GAUGE
+    }
+    counter = Mock(wraps=semantic_observability.increment_counter)
+    gauge = Mock(wraps=semantic_observability.set_gauge)
+    monkeypatch.setattr(semantic_observability, "increment_counter", counter)
+    monkeypatch.setattr(semantic_observability, "set_gauge", gauge)
 
     semantic_observability.record_semantic_dsr_metrics(
         status="success",
         backend="chromadb",
     )
 
-    assert counters == ["notes_semantic_dsr_total"]
-    assert gauges == []
+    labels = {"status": "success", "backend": "chromadb"}
+    counter.assert_called_once_with("notes_semantic_dsr_total", 1, labels)
+    gauge.assert_not_called()
+    assert registry.get_cumulative_counter("notes_semantic_dsr_total", labels) == 1
+    assert {name: registry.get_metric_stats(name) for name in gauges_before} == gauges_before
 
 
 def test_authoritative_health_aggregates_multi_dataset_state_cleanup_and_age(
@@ -634,7 +652,7 @@ async def test_cleanup_retry_counter_increments_only_after_committed_retry(
         receipt_factory=lambda: "receipt-a",
         backend="chromadb",
     )
-    claim = SimpleNamespace(
+    claim = SimpleNamespace(  # nosec B106 # Synthetic lease ID, not a credential.
         dataset_id="dataset-a",
         ledger_ids=("ledger-a",),
         claim_token="claim-a",
@@ -677,7 +695,7 @@ async def test_partial_obsolete_retry_counts_committed_rows_but_remains_incomple
         receipt_factory=lambda: "receipt-a",
         backend="pgvector",
     )
-    claim = SimpleNamespace(
+    claim = SimpleNamespace(  # nosec B106 # Synthetic lease ID, not a credential.
         dataset_id="dataset-a",
         ledger_ids=("ledger-a", "ledger-b"),
         claim_token="claim-a",

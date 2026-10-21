@@ -788,7 +788,7 @@ def test_resolved_google_auth_failure_never_retries_with_query_key(
 
     monkeypatch.setattr(module, "create_client", lambda **_kwargs: Client())
 
-    with pytest.raises(ChatProviderError):
+    with pytest.raises(ChatProviderError) as exc_info:
         GoogleEmbeddingsAdapter().embed(
             {
                 "input": "note text",
@@ -800,6 +800,9 @@ def test_resolved_google_auth_failure_never_retries_with_query_key(
             }
         )
 
+    assert exc_info.value.provider == "google-embeddings"
+    assert str(exc_info.value) == "Embedding provider request failed."
+    assert exc_info.value.__context__ is None
     assert calls == [
         (
             None,

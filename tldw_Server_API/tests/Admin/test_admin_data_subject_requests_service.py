@@ -101,11 +101,21 @@ async def test_erase_notes_returns_transactional_finalizer_count(monkeypatch) ->
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("is_postgres", [False, True])
 async def test_erase_notes_does_not_delete_canonical_notes_after_semantic_failure(
     monkeypatch,
+    tmp_path: Path,
+    is_postgres: bool,
 ) -> None:
+    from configparser import ConfigParser
+
+    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
     from tldw_Server_API.app.services import admin_data_subject_requests_service as service
 
+    path = tmp_path / "ChaChaNotes.db"
+    db = CharactersRAGDB(path, client_id="7", config=ConfigParser())
+    note_id = db.note_store.add_note("Private", "Retained body")
+    monkeypatch.setattr(service.DatabasePaths, "get_chacha_db_path", lambda _user_id: path)
     calls: list[str] = []
 
     class _Coordinator:
@@ -118,11 +128,15 @@ async def test_erase_notes_does_not_delete_canonical_notes_after_semantic_failur
         "_build_notes_semantic_erasure_coordinator",
         lambda _user_id: _Coordinator(),
     )
-    monkeypatch.setattr(service, "_notes_content_backend_is_postgres", lambda: True)
-    with pytest.raises(RuntimeError, match="notes_semantic_erasure_timeout"):
-        await service._erase_notes(7)
+    monkeypatch.setattr(service, "_notes_content_backend_is_postgres", lambda: is_postgres)
+    try:
+        with pytest.raises(RuntimeError, match="notes_semantic_erasure_timeout"):
+            await service._erase_notes(7)
 
-    assert calls == ["semantic"]
+        assert calls == ["semantic"]
+        assert db.note_store.get_note_by_id(note_id)["content"] == "Retained body"
+    finally:
+        db.close_all_connections()
 
 
 @pytest.mark.asyncio
@@ -196,28 +210,22 @@ async def test_notes_erasure_builder_releases_constructor_thread_connection(
 
     path = tmp_path / "ChaChaNotes.db"
     seed = CharactersRAGDB(path, client_id="7", config=ConfigParser())
+    seed.note_store.add_note("Private", "Body")
     seed.close_all_connections()
     monkeypatch.setattr(
         service.DatabasePaths,
         "get_chacha_db_path",
         lambda _user_id: path,
     )
-    original_close = CharactersRAGDB.close_connection
-    closed: list[CharactersRAGDB] = []
+    def _build_and_read_connection():
+        coordinator = service._build_notes_semantic_erasure_coordinator(7)
+        return coordinator, getattr(coordinator._db._local, "conn", None)
 
-    def _close(db: CharactersRAGDB) -> None:
-        closed.append(db)
-        original_close(db)
+    coordinator, constructor_connection = await asyncio.to_thread(_build_and_read_connection)
 
-    monkeypatch.setattr(CharactersRAGDB, "close_connection", _close)
-
-    coordinator = await asyncio.to_thread(
-        service._build_notes_semantic_erasure_coordinator,
-        7,
-    )
-
-    assert closed == [coordinator._db]
-    await coordinator.erase()
+    assert constructor_connection is None
+    result = await coordinator.erase()
+    assert result.deleted_notes == 1
 
 
 @pytest.mark.asyncio

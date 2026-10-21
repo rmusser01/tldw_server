@@ -5,7 +5,7 @@
 from __future__ import annotations
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from starlette.requests import Request
 
 from tldw_Server_API.app.api.v1.endpoints import notes_graph as endpoint
@@ -248,9 +248,12 @@ async def test_graph_rate_limit_selects_exactly_one_request_specific_resource(
     monkeypatch,
 ) -> None:
     calls: list[str] = []
+    rate_error = None
 
     async def record_rate(_request, resource, _db_pool):
         calls.append(resource)
+        if rate_error is not None:
+            raise rate_error
 
     monkeypatch.setattr(endpoint, "enforce_rbac_rate_limit", record_rate)
     ordinary = Request({"type": "http", "method": "GET", "path": "/graph", "query_string": b"edge_types=manual"})
@@ -267,6 +270,14 @@ async def test_graph_rate_limit_selects_exactly_one_request_specific_resource(
     await endpoint._enforce_graph_request_rate_limit(semantic, object())
 
     assert calls == ["notes.graph.read", "notes.graph.semantic.read"]
+
+    rate_error = HTTPException(status_code=429, detail="Semantic graph quota exceeded")
+    with pytest.raises(HTTPException) as exc_info:
+        await endpoint._enforce_graph_request_rate_limit(semantic, object())
+
+    assert exc_info.value.status_code == 429
+    assert exc_info.value.detail == "Semantic graph quota exceeded"
+    assert calls == ["notes.graph.read", "notes.graph.semantic.read", "notes.graph.semantic.read"]
 
 
 def test_semantic_graph_rate_resource_is_registered() -> None:

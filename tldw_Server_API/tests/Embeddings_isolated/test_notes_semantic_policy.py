@@ -51,20 +51,22 @@ class FailingAdapter(RecordingAdapter):
 class Registry:
     def __init__(self, adapter: RecordingAdapter | None) -> None:
         self.adapter = adapter
+        self.providers: list[str] = []
 
     def get_adapter(self, provider: str) -> RecordingAdapter | None:
-        assert provider == "openai"
-        return self.adapter
+        self.providers.append(provider)
+        return self.adapter if provider == "openai" else None
 
 
 class ProviderRegistry:
     def __init__(self, provider: str, adapter: object) -> None:
         self.provider = provider
         self.adapter = adapter
+        self.providers: list[str] = []
 
     def get_adapter(self, provider: str) -> object | None:
-        assert provider == self.provider
-        return self.adapter
+        self.providers.append(provider)
+        return self.adapter if provider == self.provider else None
 
 
 class AnyProviderRegistry:
@@ -149,11 +151,12 @@ async def test_executor_resolves_only_explicit_durable_credentials_without_reque
         resolver_calls.append({"provider": provider, **kwargs})
         return _credentials()
 
+    registry = Registry(adapter)
     executor = NotesEmbeddingExecutor(
         config=_config(),
         user_id="7",
         credential_resolver=resolver,
-        adapter_registry=Registry(adapter),
+        adapter_registry=registry,
     )
 
     vectors = await executor.create(
@@ -164,6 +167,7 @@ async def test_executor_resolves_only_explicit_durable_credentials_without_reque
     )
 
     assert vectors == [[1.0, 2.0]]
+    assert registry.providers == ["openai"]
     assert resolver_calls == [
         {
             "provider": "openai",
@@ -393,6 +397,7 @@ async def test_executor_admits_every_provider_in_the_semantic_catalog(
     async def resolver(_provider: str, **_kwargs: object) -> ResolvedByokCredentials:
         return _credentials(provider=provider, base_url=base_url)
 
+    registry = ProviderRegistry(provider, adapter)
     executor = NotesEmbeddingExecutor(
         config=_config(
             provider=provider,
@@ -401,7 +406,7 @@ async def test_executor_admits_every_provider_in_the_semantic_catalog(
         ),
         user_id="7",
         credential_resolver=resolver,
-        adapter_registry=ProviderRegistry(provider, adapter),
+        adapter_registry=registry,
     )
 
     vectors = await executor.create(
@@ -412,6 +417,7 @@ async def test_executor_admits_every_provider_in_the_semantic_catalog(
     )
 
     assert vectors == [[1.0, 2.0]]
+    assert registry.providers == [provider]
     assert adapter.requests[0]["base_url"] == base_url
 
 
@@ -663,6 +669,10 @@ async def test_real_google_batch_result_count_is_validated_by_notes_executor(
         )
 
     assert calls == ["https://embeddings.example/v1/models/text-embedding-004:batchEmbedContents"]
+    identity = executor.execution_identity()
+    assert identity.provider_status == "failed"
+    assert identity.provider_input_count == 2
+    assert identity.provider_attempt_sequence == 1
 
 
 @pytest.mark.asyncio

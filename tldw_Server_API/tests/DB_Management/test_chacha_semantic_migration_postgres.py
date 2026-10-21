@@ -6,12 +6,10 @@ import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
-from types import SimpleNamespace
 
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.base import (
-    BackendType,
     DatabaseConfig,
 )
 from tldw_Server_API.app.core.DB_Management.backends.base import (
@@ -39,27 +37,6 @@ _TABLES = (
 )
 _DIGEST = f"sha256:{'a' * 64}"
 _NOW = datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc)
-
-
-class _FakeTransaction:
-    def __enter__(self) -> object:
-        return object()
-
-    def __exit__(self, exc_type: object, exc: object, tb: object) -> bool:
-        return False
-
-
-class _FakeBackend:
-    backend_type = BackendType.POSTGRESQL
-
-    def execute(self, *_args: object, **_kwargs: object) -> None:
-        return None
-
-    def transaction(self) -> _FakeTransaction:
-        return _FakeTransaction()
-
-    def table_exists(self, _name: str, connection: object = None) -> bool:
-        return True
 
 
 def _set_tenant_scope(backend: object, conn: object) -> None:
@@ -166,84 +143,35 @@ def test_postgres_v86_ddl_has_owner_keys_forced_rls_and_no_dimension_tables() ->
     assert "note_semantic_vectors_" not in sql
 
 
-def test_postgres_initializer_routes_schema_v85_through_v86(monkeypatch: pytest.MonkeyPatch) -> None:
-    db = CharactersRAGDB.__new__(CharactersRAGDB)
-    db._backend = _FakeBackend()
-    db._uses_shared_content_backend = False
-    db._backend_refresh_suspended = False
-    db._local = SimpleNamespace()
-    for name in vars(CharactersRAGDB):
-        if name.startswith("_ensure_"):
-            monkeypatch.setattr(db, name, lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(db, "_postgres_schema_is_current", lambda _conn: False)
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap.postgres_schema_migration",
-        lambda backend, _timeout: backend.transaction(),
-    )
-
-    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 86)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: 85)
-    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_note_task_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_verify_notes_moodboard_studio_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(db, "_ensure_note_graph_suggestion_schema_postgres", lambda _conn: None)
-    monkeypatch.setattr(
-        db,
-        "_configure_notes_moodboard_studio_v61_postgres_transaction",
-        lambda _conn: None,
-    )
-
-    def _reached_v86(_conn: object) -> None:
-        raise RuntimeError("reached-v86")
-
-    monkeypatch.setattr(db, "_migrate_from_v85_to_v86_postgres", _reached_v86)
-
-    with pytest.raises(RuntimeError, match="^reached-v86$"):
-        db._initialize_schema_postgres()
-
-
+@pytest.mark.integration
 @pytest.mark.parametrize("starting_version", [84, 85, 86, 87])
 def test_postgres_completed_schema_fast_path_reaches_semantic_target(
-    monkeypatch: pytest.MonkeyPatch, starting_version: int,
+    pg_database_config: DatabaseConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    starting_version: int,
 ) -> None:
-    db = CharactersRAGDB.__new__(CharactersRAGDB)
-    db._backend = _FakeBackend()
-    db._uses_shared_content_backend = False
-    db._backend_refresh_suspended = False
-    db._local = SimpleNamespace()
-    state = {"version": starting_version}
-    applied: list[int] = []
-    monkeypatch.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", 88)
-    monkeypatch.setattr(db, "_get_schema_version_postgres", lambda _conn, lock=False: state["version"])
-    monkeypatch.setattr(db, "_postgres_schema_is_current", lambda _conn: state["version"] == 88)
-    monkeypatch.setattr(db, "_configure_notes_moodboard_studio_v61_postgres_transaction", lambda _conn: None)
-    monkeypatch.setattr(db, "_repair_conversation_assistant_identity", lambda _conn: None)
-    monkeypatch.setattr(
-        "tldw_Server_API.app.core.DB_Management.chacha.schema_bootstrap.postgres_schema_migration",
-        lambda backend, _timeout: backend.transaction(),
-    )
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    with monkeypatch.context() as old_schema:
+        old_schema.setattr(CharactersRAGDB, "_POSTGRES_SCHEMA_VERSION", starting_version)
+        original = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
+        original.close_all_connections()
 
-    def reject_legacy_bootstrap(_conn: object) -> None:
+    def reject_legacy_bootstrap(_self: CharactersRAGDB, _conn: object) -> None:
         pytest.fail("Completed schemas must not replay legacy reconciliation")
 
-    monkeypatch.setattr(db, "_verify_note_attachment_schema_postgres", reject_legacy_bootstrap)
-
-    def migrate(_conn: object, *, target: int) -> None:
-        assert state["version"] == target - 1
-        state["version"] = target
-        applied.append(target)
-
-    for target in range(85, 89):
-        monkeypatch.setattr(
-            db,
-            f"_migrate_from_v{target - 1}_to_v{target}_postgres",
-            lambda conn, target=target: migrate(conn, target=target),
-        )
-
-    db._initialize_schema_postgres()
-
-    assert state["version"] == 88
-    assert applied == list(range(starting_version + 1, 89))
+    monkeypatch.setattr(CharactersRAGDB, "_ensure_flashcard_asset_schema_postgres", reject_legacy_bootstrap)
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = CharactersRAGDB(":memory:", client_id="owner-a", backend=backend)
+    try:
+        version = backend.execute(
+            "SELECT version FROM db_schema_version WHERE schema_name=%s",
+            (CharactersRAGDB._SCHEMA_NAME,),
+        ).scalar
+        assert int(version) == 88
+        assert backend.table_exists("note_semantic_operation_receipts")
+        assert backend.table_exists("note_semantic_obsolete_vectors")
+    finally:
+        db.close_all_connections()
 
 
 @pytest.mark.integration
@@ -315,8 +243,7 @@ def test_postgres_v86_live_schema_has_forced_owner_dataset_rls(
             (table, column) for table in _TABLES for column in ("owner_user_id", "dataset_id")
         }
         assert {
-            (str(row["relname"]), bool(row["relrowsecurity"]), bool(row["relforcerowsecurity"]))
-            for row in relations
+            (str(row["relname"]), bool(row["relrowsecurity"]), bool(row["relforcerowsecurity"])) for row in relations
         } >= {(table, True, True) for table in _TABLES}
         assert len(policies) == len(_TABLES)
         for row in policies:
@@ -475,8 +402,7 @@ def test_postgres_semantic_store_generation_creation_matches_configuration_ident
                 ("dataset-a",),
             )
             conn.execute(
-                "UPDATE note_semantic_generations SET state='failed' "
-                "WHERE owner_user_id=? AND dataset_id=? AND id=?",
+                "UPDATE note_semantic_generations SET state='failed' WHERE owner_user_id=? AND dataset_id=? AND id=?",
                 ("owner-a", "dataset-a", resolved.id),
             )
 
@@ -550,25 +476,24 @@ def test_postgres_semantic_store_activation_identity_mismatch_has_no_side_effect
                 (dimensions, compatibility_hash, "owner-a", "dataset-a", replacement.id),
             )
 
-        assert db.note_semantic_store.activate_generation(
-            dataset_id="dataset-a",
-            generation_id=replacement.id,
-            expected_configuration_revision=active.configuration_revision,
-            publication_receipt="receipt-2",
-            now=_NOW,
-        ) is None
+        assert (
+            db.note_semantic_store.activate_generation(
+                dataset_id="dataset-a",
+                generation_id=replacement.id,
+                expected_configuration_revision=active.configuration_revision,
+                publication_receipt="receipt-2",
+                now=_NOW,
+            )
+            is None
+        )
         unchanged = db.note_semantic_store.get_configuration("dataset-a")
         assert unchanged is not None
         assert unchanged.configuration_revision == active.configuration_revision
         assert unchanged.semantic_index_revision == active.semantic_index_revision
         assert unchanged.active_generation_id == first.id
+        assert db.note_semantic_store.get_generation("dataset-a", first.id).state is SemanticGenerationState.ACTIVE
         assert (
-            db.note_semantic_store.get_generation("dataset-a", first.id).state
-            is SemanticGenerationState.ACTIVE
-        )
-        assert (
-            db.note_semantic_store.get_generation("dataset-a", replacement.id).state
-            is SemanticGenerationState.STAGING
+            db.note_semantic_store.get_generation("dataset-a", replacement.id).state is SemanticGenerationState.STAGING
         )
         with db.transaction() as conn:
             conn.execute(
@@ -726,17 +651,14 @@ def _exercise_postgres_generation_configuration_race(
                 ("dataset-a",),
             )
             conn.execute(
-                "UPDATE note_semantic_generations SET state='failed' "
-                "WHERE owner_user_id=? AND dataset_id=? AND id=?",
+                "UPDATE note_semantic_generations SET state='failed' WHERE owner_user_id=? AND dataset_id=? AND id=?",
                 ("owner-a", "dataset-a", old_generation.id),
             )
 
         def create_generation() -> None:
             try:
                 with db.transaction() as conn:
-                    results["generation_pid"] = int(
-                        conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
-                    )
+                    results["generation_pid"] = int(conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"])
                     results["generation"] = db.note_semantic_store.create_generation(
                         dataset_id="dataset-a",
                         configuration_revision=resolved_config.configuration_revision,
@@ -757,9 +679,7 @@ def _exercise_postgres_generation_configuration_race(
         def update_configuration() -> None:
             try:
                 with db.transaction() as conn:
-                    results["configuration_pid"] = int(
-                        conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"]
-                    )
+                    results["configuration_pid"] = int(conn.execute("SELECT pg_backend_pid() AS pid").fetchone()["pid"])
                     configuration_connection_ready.set()
                     results["disabled"] = db.note_semantic_store.disable_configuration(
                         dataset_id="dataset-a",
@@ -853,16 +773,18 @@ def _exercise_postgres_generation_configuration_race(
             now=_NOW,
         )
         assert reenabled is not None
-        assert db.note_semantic_store.activate_generation(
-            dataset_id="dataset-a",
-            generation_id=generation.id,
-            expected_configuration_revision=reenabled.configuration_revision,
-            publication_receipt="receipt-stale",
-            now=_NOW,
-        ) is None
         assert (
-            db.note_semantic_store.get_generation("dataset-a", generation.id).state
-            is SemanticGenerationState.STAGING
+            db.note_semantic_store.activate_generation(
+                dataset_id="dataset-a",
+                generation_id=generation.id,
+                expected_configuration_revision=reenabled.configuration_revision,
+                publication_receipt="receipt-stale",
+                now=_NOW,
+            )
+            is None
+        )
+        assert (
+            db.note_semantic_store.get_generation("dataset-a", generation.id).state is SemanticGenerationState.STAGING
         )
 
         with db.transaction() as conn:
@@ -968,8 +890,7 @@ def test_postgres_v86_live_constraints_reject_raw_fingerprints_and_unbound_work(
         with backend.transaction() as conn:
             _set_tenant_scope(backend, conn)
             backend.execute(
-                "INSERT INTO notes(id,title,content,client_id) "
-                "VALUES ('note-a','title','body','owner-a')",
+                "INSERT INTO notes(id,title,content,client_id) VALUES ('note-a','title','body','owner-a')",
                 connection=conn,
             )
             backend.execute(
@@ -1073,8 +994,7 @@ def test_postgres_v86_live_migration_failure_rolls_back_to_v85(
     monkeypatch.setattr(
         CharactersRAGDB,
         "_MIGRATION_SQL_V85_TO_V86_POSTGRES",
-        CharactersRAGDB._MIGRATION_SQL_V85_TO_V86_POSTGRES
-        + "\nTHIS IS AN INJECTED MIGRATION FAILURE;",
+        CharactersRAGDB._MIGRATION_SQL_V85_TO_V86_POSTGRES + "\nTHIS IS AN INJECTED MIGRATION FAILURE;",
     )
 
     try:
@@ -1086,8 +1006,7 @@ def test_postgres_v86_live_migration_failure_rolls_back_to_v85(
             (CharactersRAGDB._SCHEMA_NAME,),
         ).scalar
         tables = backend.execute(
-            "SELECT tablename FROM pg_tables WHERE schemaname=current_schema() "
-            "AND tablename=ANY(%s)",
+            "SELECT tablename FROM pg_tables WHERE schemaname=current_schema() AND tablename=ANY(%s)",
             (list(_TABLES),),
         ).rows
         assert int(version) == 85

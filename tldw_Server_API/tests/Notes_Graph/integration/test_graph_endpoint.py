@@ -22,7 +22,11 @@ pytestmark = pytest.mark.integration
 def _make_token(scope: str) -> str:
     svc = JWTService(get_settings())
     return svc.create_virtual_access_token(
-        user_id=1, username="tester", role="user", scope=scope, ttl_minutes=5,
+        user_id=1,
+        username="tester",
+        role="user",
+        scope=scope,
+        ttl_minutes=5,
     )
 
 
@@ -161,8 +165,19 @@ def test_graph_returns_wikilink_edges(client_and_db):
     ],
 )
 def test_graph_accepts_csv_and_repeated_edge_types(client_and_db, edge_type_params):
-    client, _db = client_and_db
+    client, db = client_and_db
     note_id = _create_note(client, "Filtered graph", "body")
+    manual_target = _create_note(client, "Manual target", "body")
+    wiki_target = _create_note(client, "Wikilink target", "body")
+    link = client.post(
+        f"/api/v1/notes/{note_id}/links",
+        json={"to_note_id": manual_target, "directed": False},
+        headers=_headers(),
+    )
+    assert link.status_code == 200, link.text
+    db.update_note(note_id, {"content": f"[[id:{wiki_target}]]"}, expected_version=1)
+    keyword_id = db.add_keyword("filtered-tag")
+    db.link_note_to_keyword(note_id, keyword_id)
 
     response = client.get(
         "/api/v1/notes/graph",
@@ -171,6 +186,7 @@ def test_graph_accepts_csv_and_repeated_edge_types(client_and_db, edge_type_para
     )
 
     assert response.status_code == 200, response.text
+    assert {edge["type"] for edge in response.json()["edges"]} == {"manual", "wikilink"}
 
 
 def test_graph_returns_tag_edges(client_and_db):

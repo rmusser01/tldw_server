@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sqlite3
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -16,6 +19,7 @@ from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_models import (
 )
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.Jobs.manager import JobManager
+from tldw_Server_API.app.core.Notes_Graph.semantic_embeddings import NotesSemanticEmbedder
 from tldw_Server_API.app.core.Notes_Graph.semantic_jobs import (
     JOB_DOMAIN,
     JOB_QUEUE,
@@ -28,6 +32,7 @@ from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
     serialize_semantic_health_snapshots,
 )
 from tldw_Server_API.app.core.Notes_Graph.semantic_publication import (
+    SemanticAuthorityState,
     revalidate_execution_fence,
 )
 from tldw_Server_API.app.core.Notes_Graph.semantic_settings import SemanticIndexSettings
@@ -98,23 +103,67 @@ async def test_store_cancellation_signal_preserves_worker_cancelled_semantics() 
 
 
 @pytest.mark.asyncio
-async def test_app_managed_and_standalone_entrypoints_share_one_handler(monkeypatch) -> None:
+async def test_app_managed_and_standalone_entrypoints_share_one_handler(monkeypatch, tmp_path) -> None:
     seen: list[object] = []
+    opened: list[CharactersRAGDB] = []
+    outcomes: dict[asyncio.Event, dict[str, object]] = {}
+    db_path = str(tmp_path / "entrypoint-notes.sqlite")
+    db = CharactersRAGDB(db_path, client_id="owner-a")
+    try:
+        config = _enabled_configuration(db)
+    finally:
+        db.close_all_connections()
+    jobs = JobManager(tmp_path / "entrypoint-jobs.sqlite")
+    job = {
+        "domain": JOB_DOMAIN,
+        "queue": JOB_QUEUE,
+        "job_type": JOB_TYPE,
+        "owner_user_id": "owner-a",
+        "uuid": "00000000-0000-4000-8000-000000000001",
+        "payload": {
+            "schema_version": 1,
+            "dataset_id": "dataset-a",
+            "configuration_revision": config.configuration_revision,
+            "generation_id": None,
+            "mode": "delete",
+        },
+    }
+
+    async def open_database(owner):
+        wrapper = CharactersRAGDB(db_path, client_id=owner)
+        opened.append(wrapper)
+        return wrapper
 
     async def fake_runner(*, stop_event, handler):
         seen.append((stop_event, handler))
+        outcomes[stop_event] = await handler(job, jobs=jobs, worker_id="entrypoint-test")
 
+    monkeypatch.setattr(notes_semantic_index_worker, "_open_owner_database", open_database)
     monkeypatch.setattr(notes_semantic_index_worker, "_run_worker", fake_runner)
     first = asyncio.Event()
     second = asyncio.Event()
 
-    await notes_semantic_index_worker.run_notes_semantic_index_worker(first)
-    await notes_semantic_index_worker.run_standalone_notes_semantic_index_worker(second)
+    try:
+        await notes_semantic_index_worker.run_notes_semantic_index_worker(first)
+        await notes_semantic_index_worker.run_standalone_notes_semantic_index_worker(second)
+    finally:
+        for wrapper in opened:
+            wrapper.close_all_connections()
 
     assert seen == [
         (first, notes_semantic_index_worker.handle_notes_semantic_index_job),
         (second, notes_semantic_index_worker.handle_notes_semantic_index_job),
     ]
+    expected = {
+        "state": "completed",
+        "indexed_notes": 0,
+        "excluded_notes": 0,
+        "failed_notes": 0,
+        "published_chunks": 0,
+        "cleanup_complete": True,
+        "error_code": None,
+    }
+    assert outcomes[first] == outcomes[second] == expected
 
 
 def test_startup_flags_cannot_create_duplicate_app_and_sidecar_ownership(monkeypatch) -> None:
@@ -261,7 +310,7 @@ async def test_generation_cleanup_retry_counter_records_only_committed_retry(
         lambda **kwargs: events.append(dict(kwargs)),
         raising=False,
     )
-    claim = SimpleNamespace(
+    claim = SimpleNamespace(  # nosec B106 # Synthetic lease ID, not a credential.
         id="cleanup-a",
         generation_id="generation-a",
         claim_token="claim-a",
@@ -937,24 +986,42 @@ async def test_unresolved_generation_cleanup_confirms_no_storage_without_backend
 
 
 @pytest.mark.asyncio
-async def test_maintenance_loop_drains_cleanly_on_shutdown() -> None:
+async def test_maintenance_loop_drains_cleanly_on_shutdown(monkeypatch, tmp_path) -> None:
     stop = asyncio.Event()
     calls: list[str] = []
+    jobs = JobManager(tmp_path / "shutdown-jobs.sqlite")
+    runner = notes_semantic_maintenance._MaintenanceRunner(
+        jobs=jobs,
+        users_repo=SimpleNamespace(
+            list_users=AsyncMock(return_value=([], 0)),
+            list_users_for_semantic_health_sweep=AsyncMock(return_value=[]),
+        ),
+        settings=SemanticIndexSettings(),
+    )
+    original_pass = runner.run_pass
 
-    class Runner:
-        async def run_pass(self, *, now, limit):
-            del now, limit
-            calls.append("pass")
-            stop.set()
+    async def run_and_stop(*, now, limit):
+        result = await original_pass(now=now, limit=limit)
+        calls.append("pass")
+        stop.set()
+        return result
 
-    await notes_semantic_maintenance.run_maintenance_loop(
-        Runner(),
-        stop,
-        interval_seconds=60,
-        now=lambda: NOW,
+    monkeypatch.setattr(runner, "run_pass", run_and_stop)
+
+    await asyncio.wait_for(
+        notes_semantic_maintenance.run_maintenance_loop(
+            runner,
+            stop,
+            interval_seconds=60,
+            now=lambda: NOW,
+        ),
+        timeout=5,
     )
 
     assert calls == ["pass"]
+    checkpoint = JobManager(jobs.db_path).get_notes_semantic_health_sweep()
+    assert checkpoint["revision"] == 1
+    assert checkpoint["last_completed_at"] == NOW
 
 
 @pytest.mark.asyncio
@@ -1310,77 +1377,71 @@ async def test_committed_activation_recovers_before_unavailable_vector_construct
 
 
 @pytest.mark.asyncio
-async def test_active_cancellation_callback_is_forwarded_into_task6_orchestration() -> None:
+async def test_active_cancellation_callback_is_forwarded_into_task6_orchestration(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     checks = 0
-    provider_called = False
     root_job_id = "6ec1dfbe-f86f-4d2b-93af-f88f64cd9701"
-    config = SimpleNamespace(
-        configuration_revision=8,
-        desired_state=SimpleNamespace(value="enabled"),
-        capability_revision="capability-v1",
-        disclosure_hash="disclosure-v1",
-        provider="provider-a",
-        model="model-a",
-        model_revision="model-digest-a",
-        endpoint_origin_display="https://api.example.test",
-        endpoint_origin_revision="origin-v1",
-        compatibility_hash="compatibility-v1",
-        dimensions=1536,
-        vector_backend="chromadb",
-    )
-    generation = SimpleNamespace(
-        id="generation-a",
-        owner_user_id="owner-a",
-        configuration_revision=8,
-        state=SemanticGenerationState.STAGING,
+    db = CharactersRAGDB(str(tmp_path / "active-cancellation.sqlite"), client_id="owner-a")
+    config = _enabled_configuration(db)
+    generation = db.note_semantic_store.create_generation(
+        dataset_id="dataset-a",
+        configuration_revision=config.configuration_revision,
+        compatibility_hash=None,
+        dimension_state=SemanticDimensionState.PENDING,
+        dimensions=None,
         root_job_id=root_job_id,
-        model_revision="model-digest-a",
+        model_revision=None,
+        now=NOW,
     )
 
-    class Store:
-        owner_user_id = "owner-a"
+    async def revalidate(_runtime, fence):
+        return SemanticAuthorityState(
+            **asdict(fence),
+            user_exists=True,
+            owner_authorized=True,
+            semantic_manage_allowed=True,
+            desired_enabled=True,
+            endpoint_policy_allowed=True,
+            vector_capable=True,
+        )
 
-        def get_configuration(self, _dataset_id):
-            return config
-
-        def get_generation(self, _dataset_id, _generation_id):
-            return generation
-
-        def get_generation_by_root_job_id(self, _dataset_id, _root_job_id):
-            return generation
-
-    class Builder:
-        async def build_initial_generation(self, _request, *, before_side_effect):
-            nonlocal provider_called
-            await before_side_effect()
-            provider_called = True
-            raise AssertionError("provider must be fenced by active cancellation")
-
+    monkeypatch.setattr(notes_semantic_index_worker.ProductionSemanticRuntime, "_revalidate", revalidate)
+    probe = AsyncMock(side_effect=AssertionError("provider must be fenced by active cancellation"))
+    monkeypatch.setattr(NotesSemanticEmbedder, "resolve_dimensions", probe)
+    vectors = AsyncMock(spec=NotesSemanticVectorStore)
     runtime = notes_semantic_index_worker.ProductionSemanticRuntime(
-        db=SimpleNamespace(note_semantic_store=Store(), note_store=object()),
+        db=db,
         owner_user_id="owner-a",
         dataset_id="dataset-a",
-        configuration_revision=8,
-        generation_id="generation-a",
+        configuration_revision=config.configuration_revision,
+        generation_id=generation.id,
         root_job_id=root_job_id,
-        vectors=object(),
+        vectors=vectors,
         settings=SemanticIndexSettings(),
     )
-    runtime._builder = Builder()
 
     async def cancellation_requested() -> bool:
         nonlocal checks
         checks += 1
         return checks >= 2
 
-    with pytest.raises(SemanticJobCancelled):
-        await runtime.execute(
-            mode="build",
-            cancellation_requested=cancellation_requested,
-        )
+    try:
+        with pytest.raises(SemanticJobCancelled):
+            await runtime.execute(
+                mode="build",
+                cancellation_requested=cancellation_requested,
+            )
 
-    assert checks == 2
-    assert provider_called is False
+        assert checks == 2
+        probe.assert_not_awaited()
+        assert vectors.mock_calls == []
+        assert db.note_semantic_store.get_configuration("dataset-a") == config
+        assert db.note_semantic_store.get_generation("dataset-a", generation.id) == generation
+        assert db.note_semantic_store.list_visible_vector_ids("dataset-a", generation.id) == ()
+    finally:
+        db.close_all_connections()
 
 
 @pytest.mark.asyncio
@@ -2081,6 +2142,26 @@ async def test_health_sweep_bounds_empty_owner_database_scans(
 
     assert opened == ["3"]
     assert observations == []
+    checkpoint = JobManager(runner._jobs.db_path).get_notes_semantic_health_sweep()
+    assert checkpoint["revision"] == 1
+    assert checkpoint["after_owner_id"] == 3
+    assert checkpoint["after_dataset_id"] is None
+    assert checkpoint["last_completed_at"] is None
+    assert json.loads(checkpoint["totals_json"]) == [
+        {
+            "backend": backend,
+            "indexed_notes": 0,
+            "excluded_notes": 0,
+            "failed_notes": 0,
+            "dirty_notes": 0,
+            "pending_notes": 0,
+            "stale_generations": 0,
+            "cleanup_backlog": 0,
+            "cleanup_retries": 0,
+            "oldest_cleanup_created_at": None,
+        }
+        for backend in ("chromadb", "pgvector", "unavailable")
+    ]
 
 
 @pytest.mark.asyncio

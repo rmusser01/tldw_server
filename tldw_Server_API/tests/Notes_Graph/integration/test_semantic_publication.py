@@ -1921,11 +1921,6 @@ async def test_activation_revision_supports_active_incremental_manifest_and_tomb
         (1, len(revised_chunks)),
         (1, len(revised_chunks)),
     )
-    monkeypatch.setattr(
-        db.note_semantic_store,
-        "_refresh_generation_counts_locked",
-        original_refresh,
-    )
     active_integrity = db.note_semantic_store.get_generation_integrity(
         DATASET_ID,
         pending.id,
@@ -1935,12 +1930,8 @@ async def test_activation_revision_supports_active_incremental_manifest_and_tomb
     assert active_after_edit is not None
     assert active_after_edit.manifest_hash == activation_manifest_hash
 
+    # Integrity reads may refresh counters; only subsequent writes must avoid it.
     refresh_calls = 0
-    monkeypatch.setattr(
-        db.note_semantic_store,
-        "_refresh_generation_counts_locked",
-        counted_refresh,
-    )
     assert db.note_store.update_note(
         NOTE_ID,
         {"content": "Body rejected"},
