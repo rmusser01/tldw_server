@@ -256,6 +256,7 @@ async def test_pg_calendar_permissions_readiness_failure_blocks_startup(
     names = (
         "ensure_user_timestamp_timezones_pg",
         "ensure_authnz_core_tables_pg",
+        "ensure_storage_quota_overrides_backfill_pg",
         "ensure_admin_webhook_canonical_tables_pg",
         "ensure_sharing_tables_pg",
         "ensure_notification_permissions_pg",
@@ -268,7 +269,7 @@ async def test_pg_calendar_permissions_readiness_failure_blocks_startup(
         "ensure_virtual_key_counters_pg",
         "ensure_llm_provider_overrides_pg",
     )
-    ensures = {name: _success for name in names}
+    ensures = dict.fromkeys(names, _success)
     ensures["ensure_calendar_permissions_pg"] = _calendar_failure
     _install_module(monkeypatch, "tldw_Server_API.app.core.AuthNZ.pg_migrations_extra", **ensures)
     startup_auth = _import_startup_auth()

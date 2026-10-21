@@ -117,6 +117,16 @@ def test_calendar_db_test_signatures_have_concrete_annotations() -> None:
     assert not violations, f"DB test signature violations: {violations}"
 
 
+def test_scheduled_task_api_schemas_preserve_core_model_identity() -> None:
+    """Keep existing API imports compatible with the shared domain models."""
+    from tldw_Server_API.app.api.v1.schemas import scheduled_tasks_control_plane_schemas as api
+    from tldw_Server_API.app.core.Scheduled_Tasks import control_plane_models as core
+
+    assert (api.ScheduledTask, api.ScheduledTaskListResponse, api.ScheduledTaskDeleteResponse) == (
+        core.ScheduledTask, core.ScheduledTaskListResponse, core.ScheduledTaskDeleteResponse,
+    )
+
+
 def test_calendar_db_tests_are_classified_unit_exactly_once() -> None:
     """Keep a single module unit marker so marker selection includes every DB regression."""
     module = _parse_module(DB_TEST_PATH)

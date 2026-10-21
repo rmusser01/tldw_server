@@ -6,11 +6,10 @@ import importlib
 import json
 import re
 import threading
-from collections.abc import Generator
+from collections.abc import AsyncIterator, Generator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
 
 import pytest
 from anyio import CancelScope
@@ -20,14 +19,38 @@ from httpx import ASGITransport, AsyncClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user
 from tldw_Server_API.app.api.v1.schemas.scheduled_tasks_control_plane_schemas import ScheduledTask
+from tldw_Server_API.app.core.AuthNZ.database import DatabasePool
+from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
+from tldw_Server_API.app.core.AuthNZ.repos import rbac_rate_limits_repo
+from tldw_Server_API.app.core.AuthNZ.settings import get_settings
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
 from tldw_Server_API.app.core.Calendar.calendar_service import CalendarService
 from tldw_Server_API.app.core.Calendar.errors import CalendarValidationError
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase
+from tldw_Server_API.app.core.DB_Management.Users_DB import UsersDB
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
 
 pytestmark = pytest.mark.integration
+
+
+@pytest.fixture()
+async def calendar_rate_limit_pool(tmp_path: Path) -> AsyncIterator[DatabasePool]:
+    """Exercise catalog/database quota precedence against real isolated storage."""
+    settings = get_settings().model_copy(update={"DATABASE_URL": f"sqlite:///{tmp_path / 'quotas.db'}"})
+    pool = DatabasePool(settings)
+    await pool.initialize()
+    try:
+        users = UsersDB(pool)
+        await users.initialize(ensure_schema=False)
+        for user_id in (1, 2):
+            user = await users.create_user(
+                username=f"quota-{user_id}", email=f"quota-{user_id}@example.test", password_hash="unused",
+            )
+            assert user["id"] == user_id
+        yield pool
+    finally:
+        await pool.close()
 
 
 @pytest.mark.parametrize("db_quota", [None, (1, 1), (1000, 1000)])
@@ -38,6 +61,7 @@ pytestmark = pytest.mark.integration
 ])
 def test_calendar_catalog_limits_enforce_shared_user_budget(
     calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+    calendar_rate_limit_pool: DatabasePool,
     monkeypatch: pytest.MonkeyPatch,
     resource: str, method: str, path: str, payload: dict[str, str] | None,
     expected: int, quota: tuple[int, int],
@@ -45,34 +69,29 @@ def test_calendar_catalog_limits_enforce_shared_user_budget(
 ) -> None:
     """Real catalog quotas yield HTTP 429 and cannot be reset by switching auth kinds."""
     from tldw_Server_API.app.api.v1.API_Deps import auth_deps
-    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthContext, AuthPrincipal
-    from tldw_Server_API.app.core.AuthNZ.privilege_catalog import load_catalog
 
     client, db, _reminders = calendar_api_client
-    catalog_path = Path(__file__).resolve().parents[3] / "Config_Files" / "privilege_catalog.yaml"
-    monkeypatch.setattr(auth_deps, "load_catalog", lambda: load_catalog(catalog_path))
     monkeypatch.setattr(auth_deps, "_AUTH_DEPS_FALLBACK_RATE_WINDOWS", {})
     monkeypatch.setattr(auth_deps, "time", SimpleNamespace(monotonic=lambda: 100.0))
-    identity: dict[str, Any] = {"user_id": 1, "kind": "user"}
+    client.current_auth_kind["value"] = "user"  # type: ignore[attr-defined]
 
-    async def authenticated_user(request: Request) -> User:
-        request.state.user_id = identity["user_id"]
-        request.state.auth = AuthContext(principal=AuthPrincipal(
-            kind=identity["kind"], user_id=identity["user_id"], api_key_id=99,
-        ))
-        return User(id=identity["user_id"], username="limited", is_active=True,
-                    is_admin=True, roles=["admin"], permissions=["*"])
+    pool = calendar_rate_limit_pool
+    if db_quota:
+        async def save_quota() -> None:
+            async with pool.acquire() as connection:
+                await rbac_rate_limits_repo.upsert_user_limit(
+                    connection, is_postgres=False, user_id=1, resource=resource,
+                    limit_per_min=db_quota[0], burst=db_quota[1],
+                )
 
-    override = dict(zip(("limit_per_min", "burst"), db_quota)) if db_quota else None
-    pool = SimpleNamespace(pool=True, fetchone=AsyncMock(return_value=override), fetchall=AsyncMock(return_value=[]))
-    client.app.dependency_overrides[get_request_user] = authenticated_user
+        asyncio.run(save_quota())
     client.app.dependency_overrides[auth_deps.get_db_pool] = lambda: pool
 
     assert auth_deps._catalog_rate_limit_for_resource(resource) == quota
     budget = min(quota[1], db_quota[1]) if db_quota else quota[1]
     for index in range(budget):
         if index == budget // 2:
-            identity["kind"] = "api_key"
+            client.current_auth_kind["value"] = "api_key"  # type: ignore[attr-defined]
         response = client.request(method, f"/api/v1/calendar{path}", json=payload)
         assert response.status_code == expected, response.text
     before = db.list_calendars(tenant_id="default")
@@ -87,7 +106,7 @@ def test_calendar_catalog_limits_enforce_shared_user_budget(
             for route_method in route.methods:
                 blocked = client.request(route_method, route_path, json=payload)
                 assert blocked.status_code == 429, (route_method, route_path, blocked.text)
-    identity["user_id"] = 2
+    _set_user(client, 2)
     assert client.request(method, f"/api/v1/calendar{path}", json=payload).status_code == expected
 
 
@@ -398,7 +417,7 @@ def test_recurrence_write_failure_rolls_back_item_mutation(calendar_api_client, 
 
 @pytest.mark.parametrize("field", ["rdate", "exdate"])
 def test_recurrence_rejects_malformed_dates_before_persistence(calendar_api_client, field) -> None:
-    client, _db, _reminders = calendar_api_client
+    client, db, _reminders = calendar_api_client
     calendar = _create_calendar(client)
     response = client.post(
         "/api/v1/calendar/items",
@@ -411,6 +430,9 @@ def test_recurrence_rejects_malformed_dates_before_persistence(calendar_api_clie
         },
     )
     assert response.status_code in {400, 422}
+    assert db.list_items_for_expansion(
+        calendar_ids=[calendar["id"]], window_start="2026-06-01", window_end="2026-06-08"
+    ) == []
 
 
 @pytest.mark.asyncio
@@ -517,11 +539,17 @@ def calendar_api_client(
     reminder_service = _ReminderServiceStub()
     caldav_provider = _CalDavProviderStub()
     current_user_id = {"value": 1}
+    current_auth_kind: dict[str, str | None] = {"value": None}
     current_tenant_id: dict[str, str | None] = {"value": None}
     current_org_ids: dict[str, list[int]] = {"value": []}
 
-    async def override_user() -> User:
+    async def override_user(request: Request) -> User:
         user_id = current_user_id["value"]
+        if current_auth_kind["value"] is not None:
+            request.state.user_id = user_id
+            request.state.auth = AuthContext(principal=AuthPrincipal(
+                kind=current_auth_kind["value"], user_id=user_id, api_key_id=99,
+            ))
         return User(
             id=user_id,
             username=f"user-{user_id}",
@@ -549,6 +577,7 @@ def calendar_api_client(
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             client.current_user_id = current_user_id  # type: ignore[attr-defined]
+            client.current_auth_kind = current_auth_kind  # type: ignore[attr-defined]
             client.current_tenant_id = current_tenant_id  # type: ignore[attr-defined]
             client.current_org_ids = current_org_ids  # type: ignore[attr-defined]
             client.caldav_provider = caldav_provider  # type: ignore[attr-defined]
@@ -940,6 +969,8 @@ def test_create_item_validates_required_time_fields(
 
     assert event.status_code == 422
     assert todo.status_code == 422
+    assert "Calendar events require start_at" in event.json()["detail"][0]["msg"]
+    assert "Calendar todos require due_at or start_at" in todo.json()["detail"][0]["msg"]
 
 
 def test_update_rejects_provider_owned_items(
@@ -1525,7 +1556,7 @@ def test_created_wall_clock_item_inherits_calendar_zone_in_agenda_and_week(
 def test_binding_rejects_remote_calendar_on_other_origin(
     calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
 ) -> None:
-    client, _db, _reminder_service = calendar_api_client
+    client, db, _reminder_service = calendar_api_client
     calendar = _create_calendar(client)
     account = client.post(
         "/api/v1/calendar/external/accounts",
@@ -1549,6 +1580,7 @@ def test_binding_rejects_remote_calendar_on_other_origin(
     )
 
     assert response.status_code == 400, response.text
+    assert db.list_external_bindings_for_account(account.json()["id"]) == []
 
 
 def test_external_binding_placeholders_enforce_account_owner_scope(

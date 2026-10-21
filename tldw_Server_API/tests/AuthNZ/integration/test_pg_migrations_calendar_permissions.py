@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncpg
 import pytest
 from fastapi.testclient import TestClient
 
@@ -52,9 +53,14 @@ async def test_calendar_pg_backfill_skips_incomplete_schema(
     isolated_test_environment: tuple[TestClient, str],
 ) -> None:
     """A missing mapping table must skip the seed rather than fail on its inserts."""
-    _client, _database_name = isolated_test_environment
+    _client, database_name = isolated_test_environment
     pool = await get_db_pool()
-    async with pool.transaction() as connection:
+    # Schema setup uses the fixture's isolated DB, not the guarded application pool.
+    connection = await asyncpg.connect(pool.settings.DATABASE_URL)
+    try:
+        assert await connection.fetchval("SELECT current_database()") == database_name
         await connection.execute("DROP TABLE role_permissions")
+    finally:
+        await connection.close()
 
     assert await ensure_calendar_permissions_pg(pool) is False
