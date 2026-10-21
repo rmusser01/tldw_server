@@ -23,6 +23,7 @@ import ts from "typescript"
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import * as historyController from "@/hooks/chat/useHistorySelection"
+import * as historyService from "@/services/chat-history-selection"
 import * as historyRecoveryStorage from "@/db/dexie/history-selection"
 import { resolveHistorySelection } from "@/utils/history-selection"
 import type { HistoryTurnRecoveryEntry } from "@/services/history-turn-keep"
@@ -593,6 +594,8 @@ it("mounted shared Sidepanel keeps a stale completed Regenerate through the guar
     view: request.view
   }))
   io.settle.mockReset().mockResolvedValue({ id: assistant.id })
+  const actualHistory = await vi.importActual<typeof import("@/services/chat-history-selection")>("@/services/chat-history-selection")
+  const capture = vi.spyOn(historyService, "captureHistorySnapshot").mockImplementation(actualHistory.captureHistorySnapshot)
   const mounted = render(<SidepanelChat />)
   try {
     await waitFor(() => expect(io.settle).toHaveBeenCalledOnce())
@@ -612,6 +615,7 @@ it("mounted shared Sidepanel keeps a stale completed Regenerate through the guar
     selection.mockRestore()
     load.mockRestore()
     dismiss.mockRestore()
+    capture.mockRestore()
   }
 })
 const tabsState = (user = "alice") => ({
@@ -2521,9 +2525,10 @@ describe.each([
     io.local.mockResolvedValue({ historyInfo: { id: "owned", title: "Owned review", server_scope_key: ownerKey("alice") },
       messages: [{ id: "row", role: "user", content: "OWNED REVIEW TEXT" }] })
     render(<Route />)
+    await waitFor(() => expect(useSidepanelChatTabsStore.getState().activeTabId).not.toBeNull())
     fireEvent.click(await screen.findByRole("button", { name: "Open cached history" }))
     await screen.findByText("OWNED REVIEW TEXT")
-    fireEvent.click(screen.getByRole("button", { name: "Expand in full page" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Expand in full page" }))
     await waitFor(() => expect(window.open).toHaveBeenCalled())
     const route = String(vi.mocked(window.open).mock.calls.at(-1)![0])
     expect(parseHistorySelectionHandoff(route)).toMatchObject({ owner_kind: "local", conversation_id: "owned" })
@@ -3019,6 +3024,7 @@ describe.each([
       ]
     })
     render(<Route />)
+    await waitFor(() => expect(useSidepanelChatTabsStore.getState().activeTabId).not.toBeNull())
     fireEvent.click(
       await screen.findByRole("button", { name: "Open cached history" })
     )

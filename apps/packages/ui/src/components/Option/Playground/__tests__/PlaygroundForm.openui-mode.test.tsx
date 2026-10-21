@@ -15,6 +15,7 @@ import type { MediaChatHandoffPayload } from "@/services/tldw/media-chat-handoff
 import { useMilestoneStore } from "@/store/milestones"
 import { DISCUSS_MEDIA_PROMPT_SETTING } from "@/services/settings/ui-settings"
 import { useChatActions } from "@/hooks/chat/useChatActions"
+import { useServerChatLoader } from "@/hooks/chat/useServerChatLoader"
 import { useStoreChatModelSettings } from "@/store/model"
 import { captureChatDraftSource } from "@/hooks/chat/chat-draft-transition"
 import { captureActorSettingsTarget } from "@/utils/actor-settings-target"
@@ -26,6 +27,8 @@ import { usePlaygroundSessionPersistence } from "@/hooks/usePlaygroundSessionPer
 import { HistorySelectionProvider } from "@/hooks/chat/useHistorySelection"
 import { chatRagMethods } from "@/services/tldw/domains/chat-rag"
 import { buildChatSurfaceScopeKeyFromConfig } from "@/services/chat-surface-scope"
+import { resolveServicePromptScope } from "@/services/service-prompts"
+import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import type { TldwApiClientCore } from "@/services/tldw/TldwApiClient"
 const handoff = vi.hoisted(() => ({ scope: "server-a:alice" as string | null, search: "", draftReady: true, verificationState: "ready" as "pending" | "ready" | "error", retryVerification: vi.fn(), models: vi.fn(async () => [{ model: "tldw:gpt-4o-mini", provider: "openai", is_configured: true, provider_is_configured: true }]), get: vi.fn(), clear: vi.fn(), setRagMediaIds: vi.fn() }))
@@ -39,10 +42,16 @@ const sourceFlow = vi.hoisted(() => ({
   request: vi.fn(),
   stream: vi.fn(),
   getFullChatData: vi.fn(),
+  setAssistant: vi.fn(async () => undefined),
   snapshot: null as ServicePromptSnapshot | null,
   restore: null as null | (() => Promise<unknown>),
   sessionReady: false,
-  config: { serverUrl: "https://handoff.test", authMode: "single-user" as const, apiKey: "synthetic-handoff" }
+  userId: 1,
+  config: { serverUrl: "https://handoff.test", authMode: "multi-user" as const,
+    authSource: "manual" as const, accessToken: "header.eyJzdWIiOiIxIn0.signature" }
+}))
+vi.mock("@/services/tldw/TldwAuth", () => ({
+  tldwAuth: { getCurrentUser: async () => ({ id: sourceFlow.userId }) }
 }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: (...args: unknown[]) => sourceFlow.request(...args) }))
 vi.mock("@/services/service-prompts", async () => ({
@@ -62,12 +71,22 @@ vi.mock("@/hooks/chat/useHistorySelection", async importOriginal => {
 vi.mock("@/hooks/chat/actor-scene-source", async importOriginal => {
   const actual = await importOriginal<typeof import("@/hooks/chat/actor-scene-source")>()
   return { ...actual, captureActorSceneSend: (controller: any, commandIsCurrent = () => true) => {
-    if (!sourceFlow.enabled || controller !== null) return actual.captureActorSceneSend(controller, commandIsCurrent)
-    // Standalone SDK source tests retain a private Scene without claiming H1 readiness.
+    if (!sourceFlow.enabled) return actual.captureActorSceneSend(controller, commandIsCurrent)
+    const standaloneComposer = () => {
+      if (controller === null) return true
+      const state = controller.getCurrent()
+      return state.status === "idle" && !state.owner && !state.view && !state.capture
+    }
+    if (!standaloneComposer()) return actual.captureActorSceneSend(controller, commandIsCurrent)
+    // Legacy SDK actions/session stay outside the child composer provider (not native acceptance).
     const entry = sourceFlow.snapshot
     if (!entry) return null
     const key = chatDraftOwnerKey(entry.requestScope)
-    const account = { requestScope: entry.requestScope, isCurrent: () => sourceFlow.snapshot === entry &&
+    const composerIsCurrent = () => standaloneComposer() && (controller === null ||
+      (controller.draftAccount?.isCurrent() && controller.draftAccount.requestScope &&
+        chatDraftOwnerKey(controller.draftAccount.requestScope) === key))
+    if (!composerIsCurrent()) return null
+    const account = { requestScope: entry.requestScope, isCurrent: () => composerIsCurrent() && sourceFlow.snapshot === entry &&
       !entry.scopeSignal.aborted && !entry.scopeInvalidatedSignal.aborted &&
       chatDraftOwnerKey(sourceFlow.snapshot.requestScope) === key }
     const session = usePlaygroundSessionStore.getState()
@@ -501,8 +520,9 @@ vi.mock("@/hooks/useChatMoodBadgePreference", () => ({
   useChatMoodBadgePreference: () => [false, vi.fn()]
 }))
 
-vi.mock("@/hooks/useSelectedAssistant", () => ({
-  useSelectedAssistant: () => [null, vi.fn()]
+vi.mock("@/hooks/useSelectedAssistant", async importOriginal => ({
+  ...await importOriginal<typeof import("@/hooks/useSelectedAssistant")>(),
+  useSelectedAssistant: () => [null, sourceFlow.setAssistant, { isLoading: false }]
 }))
 
 vi.mock("@/hooks/useVoiceChatSettings", () => ({
@@ -643,6 +663,13 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: vi.fn(async () => undefined),
     getConfig: async () => sourceFlow.config,
+    ensureConfigForRequest: async () => sourceFlow.config,
+    getChat: async (id: string) => ({ id, title: "Cedar saved chat", scope_type: "global",
+      assistant_kind: null, assistant_id: null, character_id: null, persona_memory_mode: null }),
+    listChatMessages: async () => cedarRows.map((row, index) => ({
+      ...row, created_at: new Date(row.createdAt).toISOString(),
+      parent_message_id: index ? cedarRows[index - 1].id : null
+    })),
     ragSearch: (query: string, options: unknown) => chatRagMethods.ragSearch.call({ normalizeRagQuery: (value: string) => value } as unknown as TldwApiClientCore, query, options),
     createResearchRun: vi.fn(async () => ({})),
     updateChat: vi.fn(async () => ({}))
@@ -1168,6 +1195,9 @@ void sourceFlowI18n.init({ lng: "en", resources: {}, initImmediate: false })
 
 function useSourceFlowActions() {
   const state = useStoreMessageOption((value) => value)
+  const notification = React.useMemo(() => ({ error: vi.fn(), warning: vi.fn(), info: vi.fn(), success: vi.fn(), open: vi.fn(), destroy: vi.fn() }), [])
+  const noMirror = React.useCallback(async () => null, [])
+  useServerChatLoader({ ensureServerChatHistoryId: noMirror, notification, t: sourceFlowI18n.t })
   const [abortController, setAbortController] = React.useState<AbortController | null>(null)
   const actions = useChatActions({
     ...state,
@@ -1269,24 +1299,27 @@ const renderForm = (ui: React.ReactElement) => renderComponent(ui, {
 })
 
 describe("Home source handoff through the real Chat and RAG send boundary", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     sourceFlow.enabled = true
     sourceFlow.sessionReady = false
     sourceFlow.restore = null
     sourceFlow.config.serverUrl = "https://handoff.test"
-    sourceFlow.config.apiKey = "synthetic-handoff"
+    sourceFlow.config.accessToken = "header.eyJzdWIiOiIxIn0.signature"
+    sourceFlow.userId = 1
     localStorage.clear()
     sessionStorage.clear()
     useStoreMessageOption.setState(useStoreMessageOption.getInitialState(), true)
     useStoreMessageOption.setState({ selectedModel: "openai:gpt-4o-mini", temporaryChat: false, fileRetrievalEnabled: false })
     usePlaygroundSessionStore.getState().clearSession()
-    const scopeKey = buildChatSurfaceScopeKeyFromConfig(sourceFlow.config)
+    const requestScope = await resolveServicePromptScope()
+    const scopeKey = requestScope.scopeKey!
+    cedarData.historyInfo.server_scope_key = serverChatMirrorOwnerKey({ requestScope })
     usePlaygroundSessionStore.getState().saveSession({
       scopeKey, historyId: "cedar-local", serverChatId: "cedar-server", chatMode: "normal", ragMediaIds: null
     })
     const controller = new AbortController()
     sourceFlow.snapshot = {
-      scopeKey, requestScope: { config: sourceFlow.config, userId: 1 },
+      scopeKey, requestScope,
       scopeSignal: controller.signal, scopeInvalidatedSignal: controller.signal,
       capability: "supported", release: vi.fn(),
       definitions: Object.fromEntries(["chat.rag.answer", "chat.rag.question_rewrite"].map((id) => [id, {
@@ -1337,6 +1370,8 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     await act(async () => { await sourceFlow.restore!() })
   }
   const send = async () => {
+    if (useStoreMessageOption.getState().serverChatId)
+      await waitFor(() => expect(useStoreMessageOption.getState().serverChatMetaLoaded).toBe(true))
     await userEvent.setup().click(screen.getAllByRole("button", { name: "Send" })[0])
     await waitFor(() => expect(useStoreMessageOption.getState().streaming).toBe(false))
   }
@@ -1357,6 +1392,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
   it("preserves raw input and original messages when the private Scene read fails", async () => {
     render(<SourceFlowHarness />)
     await restore()
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
     await consume()
     const input = screen.getByTestId("composer-textarea") as HTMLTextAreaElement
     const originalInput = input.value
@@ -1433,7 +1469,10 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
 
   it.each(["account", "server"])("rejects source activation from a cold session owned by another %s", async changed => {
     await rehydrateColdSession(await persistSourceSession())
-    if (changed === "account") sourceFlow.config.apiKey = "synthetic-other-owner"
+    if (changed === "account") {
+      sourceFlow.userId = 2
+      sourceFlow.config.accessToken = "header.eyJzdWIiOiIyIn0.signature"
+    }
     else sourceFlow.config.serverUrl = "https://other-handoff.test"
     render(<SourceFlowHarness />)
     await restore()
@@ -1574,6 +1613,7 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     })
     render(<SourceFlowHarness />)
     await restore()
+    await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
     await consume()
     await userEvent.setup().click(screen.getAllByRole("button", { name: "Send" })[0])
     await waitFor(() => expect(sourceFlow.request).toHaveBeenCalledTimes(1))
@@ -1656,7 +1696,10 @@ describe("Home source handoff through the real Chat and RAG send boundary", () =
     render(<SourceFlowHarness />)
     await waitFor(() => expect(sourceFlow.sessionReady).toBe(true))
     await consume()
-    if (changed === "account") sourceFlow.config.apiKey = "synthetic-other-owner"
+    if (changed === "account") {
+      sourceFlow.userId = 2
+      sourceFlow.config.accessToken = "header.eyJzdWIiOiIyIn0.signature"
+    }
     sourceFlow.getFullChatData.mockResolvedValue({ ...cedarData, historyInfo: { ...cedarData.historyInfo, id: "other-local", server_chat_id: "other-server" } })
     await act(async () => usePlaygroundSessionStore.getState().saveSession({ scopeKey: buildChatSurfaceScopeKeyFromConfig(sourceFlow.config), historyId: "other-local", serverChatId: "other-server", chatMode: "rag", ragMediaIds: [7] }))
     await restore()
