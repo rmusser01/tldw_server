@@ -12,7 +12,7 @@
 
 **Tracking:** TASK-45.44.16; [issue #1673](https://github.com/rmusser01/tldw_server/issues/1673).
 
-**ADR check:** ADR required: yes, covered by proposed [ADR-079](../../ADR/079-advisory-ui-design-drift-reporting.md). This plan implements its advisory policy and introduces no further architecture decision. Retain Proposed status until accepted through owner review.
+**ADR check:** ADR required: yes, covered by proposed [ADR-098](../../ADR/098-advisory-ui-design-drift-reporting.md). This plan implements its advisory policy and introduces no further architecture decision. Retain Proposed status until accepted through owner review.
 
 ## Global Constraints
 

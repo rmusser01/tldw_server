@@ -19,7 +19,7 @@ no executable verifier, CI job, baseline, token changes, or product migrations.
 ## ADR Check
 
 ADR required: yes. Proposed ADR:
-`Docs/ADR/079-advisory-ui-design-drift-reporting.md`.
+`Docs/ADR/098-advisory-ui-design-drift-reporting.md`.
 
 The decision establishes lasting UI conventions and an advisory reporting policy.
 No existing ADR in the current index governs these rules. ADR-059 governs task

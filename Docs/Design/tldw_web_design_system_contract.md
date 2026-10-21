@@ -474,8 +474,8 @@ stale entries and ambiguous matches remain visible for review. Do not seed an
 exception for every existing finding or create a suppression baseline.
 
 See the [reviewed specification](../superpowers/specs/2026-10-20-design-system-drift-reporting-design.md)
-and proposed [ADR-079](../ADR/079-advisory-ui-design-drift-reporting.md). No new ADR
-is introduced here: ADR-079 governs this advisory policy. Existing product-state
+and proposed [ADR-098](../ADR/098-advisory-ui-design-drift-reporting.md). No new ADR
+is introduced here: ADR-098 governs this advisory policy. Existing product-state
 guards, their baseline, and token-sync build checks are unchanged. Enforcement
 requires a separate owner decision and CI-policy change; counts never activate it.
 
@@ -556,7 +556,7 @@ Non-product-state token, color, radius, and layout reporting is specified in
 The standalone reporter and its usage are documented under
 [Advisory Styling Drift Reports](#advisory-styling-drift-reports); the specification
 alone does not deliver it or change current required guards.
-See proposed [ADR-079](../ADR/079-advisory-ui-design-drift-reporting.md) for the
+See proposed [ADR-098](../ADR/098-advisory-ui-design-drift-reporting.md) for the
 nonblocking policy and the separate decision required before enforcement.
 
 Prioritize later migrations:

@@ -1,11 +1,11 @@
-# ADR-079: Advisory UI Design Drift Reporting
+# ADR-098: Advisory UI Design Drift Reporting
 
 **Status:** Proposed
 **Date:** 2026-10-20
 **Backfilled from:** not backfilled
 **Decision owner:** Repository owner; direction approved in this design session
 **Related task:** TASK-45.44.16
-**Related spec/plan:** [Design spec](../superpowers/specs/2026-10-20-design-system-drift-reporting-design.md)
+**Related spec/plan:** [Design spec (repository source)](https://github.com/rmusser01/tldw_server/blob/c8d3ef0a0d5c7c32efeb0b1334351487abc0c01e/Docs/superpowers/specs/2026-10-20-design-system-drift-reporting-design.md)
 
 ## Decision
 
