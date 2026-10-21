@@ -2989,7 +2989,7 @@ describe("SkillsManager imports", () => {
           offset: 0
         }
     ))
-    renderManager()
+    await act(async () => { renderManager() })
 
     fireEvent.click(await screen.findByRole("checkbox", { name: "Select shared-skill" }))
     fireEvent.click(screen.getByRole("button", { name: "View shared-skill" }))
