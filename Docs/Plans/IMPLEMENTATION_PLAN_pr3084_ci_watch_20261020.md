@@ -277,3 +277,10 @@ Independent final connected review clear for composition. FourPython Bandit95par
 Published105 shared-ui-coverage15/16 job119323013821 fails one initial Select shared-skill lookup while1,915other cases pass. This happens before the server-switch event. The unchanged full Manager file83/83 passes under V8, so there is no local red reproduction. Connected source review found valid single-user scope/config prerequisites and no evidenced earlier getConfig one-shot leak; speculative production, mock-reset and query-client edits were rejected.
 
 The minimal fixture correction awaits async React act around that exact initial render so the real scope/query updates settle before selection. Every original checkbox, drawer, count2, scope retirement, foreign-row absence and timeout assertion remains. Complete candidate83/83 passes with V8; ESLint18/18 no new. Independent read-only review clear; three configured path hooks precede safe fast-forward publication. PythonBandit is not applicable to this TS-only fixture change. No architecture decision, production guard, dependency or allowance changed. Hosted closure remains pending until the new head's full shard succeeds.
+
+
+## Exact Back-navigation completion observation
+
+Current cc02 shared-ui-coverage2/16 job119344249482 fails the hash Back case with zero confirmations while2,089other cases pass. The unchanged complete16-case navigation file passes locally under V8, so no local red reproduction is claimed. Its final substring root-route wait also accepts the old /programmatic route, allowing router disposal before the asynchronous POP/blocker confirmation.
+
+The minimal correction requires the exact root route before unmount. All original confirmation-count, error, disposal and timeout checks remain, as does production code. The complete candidate16/16 passes with V8; ESLint0/0. Independent connected review and normal configured path hooks precede publication. No new architecture rule, dependency, baseline or allowance; no new ADR or PythonBandit scope. Hosted shard closure and all seven actual final-head required statuses remain pending.
