@@ -1071,11 +1071,12 @@ export function useHistorySelection(
           }
           if (operation.epoch !== epoch.current || !isCurrent()) return false
           if (target.onDeviceScope && owner.profile_id !== target.onDeviceScope.profileId) return false
+          // Profile qualification can await before open advances its operation epoch.
+          const captureEpoch = epoch.current + 1
           const opening = open(owner, reference, opened, isCurrent,
             target.onDeviceScope ? { profileId: target.onDeviceScope.profileId, installLease: () => {
               releaseOwnerLease.current?.(); releaseOwnerLease.current = null
             } } : undefined, target.qualifyCapture)
-          const captureEpoch = epoch.current
           const result = await opening
           if (!result || captureEpoch !== epoch.current || live.current.owner !== owner || !isCurrent()) return false
           // Unsupported external assets are readable; resume the loader's metadata too.

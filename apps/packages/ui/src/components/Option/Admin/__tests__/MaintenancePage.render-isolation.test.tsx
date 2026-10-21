@@ -47,7 +47,8 @@ describe("MaintenancePage banner keystroke isolation (C-S5)", () => {
     apiMock.getMaintenanceState.mockResolvedValue({
       enabled: false,
       message: "old",
-      allowlist: ["1.2.3.4"]
+      allowlist_user_ids: [7],
+      allowlist_emails: []
     })
     apiMock.listFeatureFlags.mockResolvedValue([
       { key: "f1", enabled: true }
@@ -81,9 +82,9 @@ describe("MaintenancePage banner keystroke isolation (C-S5)", () => {
     expect(messageArea).toHaveValue("Scheduled downtime")
 
     // Allowlist typing is isolated too.
-    const allowlistInput = screen.getByDisplayValue("1.2.3.4")
-    await user.type(allowlistInput, ", 10.0.0.1")
-    expect(allowlistInput).toHaveValue("1.2.3.4, 10.0.0.1")
+    const allowlistInput = screen.getByDisplayValue("7")
+    await user.type(allowlistInput, ", 8")
+    expect(allowlistInput).toHaveValue("7, 8")
 
     expect(tableRenders.count).toBe(0)
 
@@ -95,7 +96,8 @@ describe("MaintenancePage banner keystroke isolation (C-S5)", () => {
     expect(apiMock.updateMaintenanceState).toHaveBeenCalledWith({
       enabled: true,
       message: "Scheduled downtime",
-      allowlist: ["1.2.3.4", "10.0.0.1"]
+      allowlist_user_ids: [7, 8],
+      allowlist_emails: []
     })
   })
 })
