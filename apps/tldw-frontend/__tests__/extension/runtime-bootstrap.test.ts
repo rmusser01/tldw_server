@@ -819,9 +819,11 @@ describe("runtime-bootstrap chrome shim", () => {
       })
     )
     const { Storage } = await import("@plasmohq/storage")
-    vi.spyOn(Storage.prototype, "remove").mockRejectedValueOnce(
-      new Error("storage unavailable")
-    )
+    const originalRemove = Storage.prototype.remove
+    const remove = vi.spyOn(Storage.prototype, "remove").mockImplementation(async function (key) {
+      if (key === "tldwCookieSessionConfig") throw new Error("storage unavailable")
+      return originalRemove.call(this, key)
+    })
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
@@ -843,6 +845,7 @@ describe("runtime-bootstrap chrome shim", () => {
 
     expect(config).toEqual(manualConfig)
     expect(readStoredValue("tldwConfig")).toEqual(manualConfig)
+    expect(remove).toHaveBeenCalledWith("tldwCookieSessionConfig")
     expect(readStoredValue("tldwCookieSessionConfig")).not.toBeNull()
   })
 
@@ -876,7 +879,8 @@ describe("runtime-bootstrap chrome shim", () => {
       expect(await client.getConfig()).toEqual({
         authMode: "single-user",
         authSource: "cookie-session",
-        serverUrl: "http://localhost:19769"
+        serverUrl: "http://localhost:19769",
+      verificationRevision: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
       })
       expect(
         fetchMock.mock.calls.filter(
@@ -913,7 +917,8 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(await tldwClient.getConfig()).toEqual({
       authMode: "single-user",
       authSource: "cookie-session",
-      serverUrl: "http://localhost:19769"
+      serverUrl: "http://localhost:19769",
+      verificationRevision: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
     })
   })
 
@@ -944,12 +949,14 @@ describe("runtime-bootstrap chrome shim", () => {
     expect(await tldwClient.getConfig()).toEqual({
       authMode: "single-user",
       authSource: "cookie-session",
-      serverUrl: "http://localhost:19769"
+      serverUrl: "http://localhost:19769",
+      verificationRevision: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
     })
     expect(readStoredValue("tldwCookieSessionConfig")).toEqual({
       authMode: "single-user",
       authSource: "cookie-session",
-      serverUrl: "http://localhost:19769"
+      serverUrl: "http://localhost:19769",
+      verificationRevision: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
     })
     expect(readStoredValue("tldwConfig")).toEqual(stored)
   })

@@ -190,12 +190,16 @@ describe("cookie bootstrap across WebUI tabs", () => {
     profileProbeStarted = false
     let releaseProfile!: () => void
     profileGate = new Promise<void>((resolve) => { releaseProfile = resolve })
+    let pendingConfig!: ReturnType<typeof import("@/services/tldw/TldwApiClient").tldwClient.getConfig>
     await act(async () => {
       await bootstrapPeerTab(async () => {
         try {
           await waitFor(() => expect(profileProbeStarted).toBe(true))
           const { tldwClient } = await import("@/services/tldw/TldwApiClient")
-          expect(await tldwClient.getConfig()).toBeNull()
+          const { resolveDirectBrowserConfig } = await import("@/services/tldw/direct-browser-config")
+          const { createSafeStorage } = await import("@/utils/safe-storage")
+          pendingConfig = tldwClient.getConfig()
+          expect(await resolveDirectBrowserConfig(createSafeStorage({ area: "local" }))).toBeNull()
           expect(connection.getState().state.isConnected).toBe(true)
           expect(screen.getByLabelText("Question")).toHaveTextContent("First tab private draft")
         } finally {
@@ -203,8 +207,7 @@ describe("cookie bootstrap across WebUI tabs", () => {
         }
       })
     })
-    const { tldwClient } = await import("@/services/tldw/TldwApiClient")
-    expect(await tldwClient.getConfig()).toMatchObject({ authSource: "cookie-session" })
+    expect(await pendingConfig).toMatchObject({ authSource: "cookie-session" })
   })
 
 
@@ -221,19 +224,25 @@ describe("cookie bootstrap across WebUI tabs", () => {
     profileGate = new Promise<void>((resolve) => { releaseProfile = resolve })
     vi.useFakeTimers()
     let newerMarker: string | null = null
+    let pendingOlderConfig!: ReturnType<typeof import("@/services/tldw/TldwApiClient").tldwClient.getConfig>
     try {
       await act(async () => {
         await bootstrapPeerTab(async () => {
           await vi.advanceTimersByTimeAsync(0)
           expect(profileProbeStarted).toBe(true)
           const { tldwClient: olderClient } = await import("@/services/tldw/TldwApiClient")
-          expect(await olderClient.getConfig()).toBeNull()
+          const { resolveDirectBrowserConfig } = await import("@/services/tldw/direct-browser-config")
+          const { createSafeStorage } = await import("@/utils/safe-storage")
+          const olderStorage = createSafeStorage({ area: "local" })
+          pendingOlderConfig = olderClient.getConfig()
+          await vi.advanceTimersByTimeAsync(0)
+          expect(await resolveDirectBrowserConfig(olderStorage)).toBeNull()
           profileOk = true
           profileGate = null
           await bootstrapPeerTab()
           newerMarker = localStorage.getItem("tldwCookieSessionConfig")
           expect(newerMarker).not.toBeNull()
-          expect(await olderClient.getConfig()).toBeNull()
+          expect(await resolveDirectBrowserConfig(olderStorage)).toBeNull()
           if (failure === "timed out") await vi.advanceTimersByTimeAsync(8_000)
           else releaseProfile()
         })
@@ -242,6 +251,7 @@ describe("cookie bootstrap across WebUI tabs", () => {
       releaseProfile()
       vi.useRealTimers()
     }
+    expect(await pendingOlderConfig).toBeNull()
     expect(connection.getState().state.isConnected).toBe(true)
     expect(localStorage.getItem("tldwCookieSessionConfig")).toBe(newerMarker)
     expect(screen.getByLabelText("Answer")).toHaveTextContent(answer)

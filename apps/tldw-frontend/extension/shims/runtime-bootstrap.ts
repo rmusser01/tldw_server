@@ -623,9 +623,6 @@ export const runtimeBootstrapReady: Promise<void> = (async () => {
     }
   })
   invalidateCookieSessionConfig()
-  await createSafeStorage()
-    .remove(COOKIE_SESSION_CONFIG_KEY)
-    .catch(() => undefined)
   const outcome = await seedTldwConfigFromRuntime(initialIsCurrent).catch(
     () => "retry"
   )
