@@ -152,10 +152,42 @@ fields returning 500 (P3). These block technical source approval until fixed.
    French/Paris frontend140 pass; route/workflow/task/import contracts80 pass;
    TypeScript, canonical OpenAPI and Ruff pass. Shared authority23 pass;
    Bandit zero findings/errors; normal full-PR hooks pass.
-4. **Publication and exact-head review (In Progress):** Publish with an exact
-   8096 old-head lease, then rerun CI and independent requesting-code-review.
+4. **Publication and exact-head review (In Progress):** Published and verified
+   `d7302b0103160084f74b2e0125cc45816ee64e78` with the exact 8096 old-head lease.
+   Fresh full CI `39528241681` and backend-required `39528241457` are queued;
+   trusted license audit `39528570121` is queued. Independent full reviewer
+   `01a15c19-9ce9-7041-a689-c899c0c1dc71` checked the entire exact-head PR;
+   the final follow-up below records its verdict and remaining repairs.
+   Individual evidence replies cover the remaining fold and new review findings.
    No hosted success, live-provider smoke, human rationale or source approval is
-   claimed by these local results.
+   claimed by these local results. Publication tracking stays local until the
+   candidate is settled, avoiding a tracking-only push that invalidates CI.
+
+### Final Review Admission and Binding Validation
+
+Full independent review of `d7302b0103160084f74b2e0125cc45816ee64e78` verified
+all prior repairs on the tested paths, but reproduced pre-dispatch quota
+starvation (P2) and required binding PATCH nulls returning 500 (P3):
+https://github.com/rmusser01/tldw_server/pull/3019#pullrequestreview-5594003361
+
+1. **Regressions (Complete):** Four failures reproduced before implementation:
+   a real Jobs quota with 100 older blocked bindings hides a new owner's binding,
+   and three required binding fields accept null. The manual-only null interval
+   positive control passes. Preserve reservations, owner quotas and deduplication.
+2. **Repairs (Complete):** Reuse the existing scan cadence after failed scheduled
+   admission; retain durable pending admissions and continue safely if backoff
+   persistence fails. Apply the existing PATCH explicit-null validation pattern
+   only to required binding policy fields. No new ADR or schema migration needed.
+3. **Verification (Complete):** Seven focused regressions pass. Full Calendar,
+   scheduled-task and test-quality scope: 598 pass; workflow/task/route/import
+   boundaries: 80 pass. OpenAPI, Ruff, Bandit zero findings/errors, whitespace
+   and normal full-PR hooks pass. No reservation or ratchet guard weakened.
+   Frontend source is unchanged from the independently verified 140 Calendar and
+   23 shared-authority passes; avoid repeating unchanged suites.
+4. **Publication and closure review (In Progress):** Commit with normal hooks,
+   push against the exact published d730 lease, and request independent review of
+   the final delta alongside the unchanged full-range review. Hosted CI and the
+   unwaived live-provider/human-rationale gates remain required.
 
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.

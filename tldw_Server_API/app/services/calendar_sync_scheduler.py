@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from tldw_Server_API.app.core.Calendar.calendar_service import CalendarService
 from tldw_Server_API.app.core.Calendar.calendar_sync_worker import (
     CalendarSyncJobResponse,
+    _next_scan_at,
     _run_db_phase,
 )
 from tldw_Server_API.app.core.Calendar.errors import CalendarError
@@ -116,10 +117,15 @@ def _queue_due_calendar_sync_jobs(
                     window_end=(scan_at + timedelta(days=int(binding.lookahead_days))).isoformat(),
                 )
             )
-        except CalendarError as exc:
+        except (CalendarError, *_SCHEDULER_GUARD_EXCEPTIONS) as exc:
             log_calendar_failure("queue_binding", exc, binding_id=binding.id, account_id=binding.account_id)
-        except _SCHEDULER_GUARD_EXCEPTIONS as exc:
-            log_calendar_failure("queue_binding", exc, binding_id=binding.id, account_id=binding.account_id)
+            try:
+                # Rotate failed admissions out of the bounded due scan without releasing their reservation.
+                calendar_db.update_binding_sync_state(
+                    binding.id, next_scan_at=_next_scan_at(binding, scan_at.isoformat()),
+                )
+            except (CalendarError, *_SCHEDULER_GUARD_EXCEPTIONS) as backoff_error:
+                log_calendar_failure("reschedule_binding", backoff_error, binding_id=binding.id)
     return queued
 
 

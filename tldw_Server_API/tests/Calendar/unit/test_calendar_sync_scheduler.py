@@ -16,6 +16,7 @@ import pytest
 from anyio import CancelScope
 from loguru import logger
 
+from tldw_Server_API.app.core.Calendar.calendar_service import CalendarService
 from tldw_Server_API.app.core.DB_Management.Calendar_DB import CalendarDatabase, ExternalCalendarBindingRow
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.migrations import ensure_jobs_tables
@@ -319,8 +320,57 @@ async def test_scheduler_preserves_scan_bound_windows_hourly_and_manual_cadence(
 
 
 @pytest.mark.asyncio
+async def test_quota_blocked_admissions_back_off_so_later_owner_can_sync(
+    calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A full page of refused admissions must not hide a fresh owner's binding."""
+    blocked = []
+    for owner, count in ((1, 100), (2, 1)):
+        calendar = calendar_db.create_calendar(
+            tenant_id="default", owner_user_id=owner, org_id=None, name=f"Owner {owner}",
+        )
+        account = calendar_db.create_external_account(
+            tenant_id="default", user_id=owner, provider="caldav", display_name=f"Owner {owner}", secret_ref=None,
+        )
+        if owner == 1:
+            manual = calendar_db.create_external_binding(
+                account_id=account.id, calendar_id=calendar.id, remote_calendar_id="manual", sync_interval_minutes=None,
+            )
+            reservation = CalendarService(db=calendar_db, job_manager=jobs_manager).trigger_binding_sync(
+                actor_user_id=owner, binding_id=manual.id,
+            )
+        for index in range(count):
+            binding = calendar_db.create_external_binding(
+                account_id=account.id, calendar_id=calendar.id, remote_calendar_id=f"{owner}/{index}",
+            )
+            calendar_db.update_binding_sync_state(binding.id, next_scan_at="2026-06-10T11:00:00+00:00")
+            if owner == 1:
+                blocked.append(binding)
+            else:
+                healthy = binding
+    monkeypatch.setenv("JOBS_QUOTA_MAX_QUEUED_CALENDAR_USER_1", "1")
+
+    first = await scheduler.queue_due_calendar_sync_jobs(db=calendar_db, job_manager=jobs_manager, now=_SCAN_AT)
+    pending = calendar_db.get_sync_admission(blocked[0].id)
+    second = await scheduler.queue_due_calendar_sync_jobs(db=calendar_db, job_manager=jobs_manager, now=_SCAN_AT)
+    repeated = await scheduler.queue_due_calendar_sync_jobs(db=calendar_db, job_manager=jobs_manager, now=_SCAN_AT)
+
+    assert first == []
+    assert [row.binding_id for row in second] == [healthy.id]
+    assert repeated[0].job_id == second[0].job_id and repeated[0].queued is False
+    assert jobs_manager.count_jobs(domain="calendar", owner_user_id="2") == 1
+    assert jobs_manager.count_jobs(domain="calendar", owner_user_id="1") == 1
+    assert jobs_manager.get_job(reservation.job_id)["status"] == "queued"
+    assert calendar_db.get_sync_admission(blocked[0].id).admission_id == pending.admission_id
+    assert all(calendar_db.get_external_binding(row.id).next_scan_at == "2026-06-10T13:00:00+00:00" for row in blocked)
+    assert all(calendar_db.get_external_binding(row.id).last_sync_at is None for row in blocked)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backoff_available", [True, False])
 async def test_scheduler_guard_failure_is_redacted_and_later_binding_is_queued(
     calendar_db: CalendarDatabase, jobs_manager: JobManager, monkeypatch: pytest.MonkeyPatch,
+    backoff_available: bool,
 ) -> None:
     """Moving queue work off-loop retains per-binding continuation and secret-free diagnostics."""
     broken = _binding(calendar_db)
@@ -335,6 +385,10 @@ async def test_scheduler_guard_failure_is_redacted_and_later_binding_is_queued(
         return original(account_id)
 
     monkeypatch.setattr(calendar_db, "get_external_account", account)
+    if not backoff_available:
+        def fail_backoff(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("password=do-not-log-this")
+        monkeypatch.setattr(calendar_db, "update_binding_sync_state", fail_backoff)
     sink = logger.add(messages.append)
     try:
         queued = await scheduler.queue_due_calendar_sync_jobs(db=calendar_db, job_manager=jobs_manager, now=_SCAN_AT)
@@ -343,8 +397,8 @@ async def test_scheduler_guard_failure_is_redacted_and_later_binding_is_queued(
     assert [row.binding_id for row in queued] == [healthy.id]
     assert jobs_manager.count_jobs(domain="calendar") == 1
     assert calendar_db.list_sync_events(binding_id=broken.id) == []
-    assert len(messages) == 1
-    assert "do-not-log-this" not in str(messages[0]) + str(messages[0].record)
+    assert len(messages) == (1 if backoff_available else 2)
+    assert all("do-not-log-this" not in str(entry) + str(entry.record) for entry in messages)
     assert messages[0].record["extra"]["binding_id"] == broken.id
     assert messages[0].record["extra"]["error_type"] == "RuntimeError"
     assert messages[0].record["extra"]["frames"]
