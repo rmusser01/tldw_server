@@ -34,7 +34,7 @@
 | Stage | Goal | Success Criteria | Tests | Status |
 | --- | --- | --- | --- | --- |
 | 1 | Extract token authority and definition scopes | Mixed files retain product analysis; four surfaces use the right definitions | Token authority fixtures and real configs | Complete |
-| 2 | Analyze styling and classify findings | Four rules, named colors, and `@apply` produce located findings without flagging prose | Syntax-aware rule fixtures | In Progress (final spread-order review fix) |
+| 2 | Analyze styling and classify findings | Four rules, named colors, and `@apply` produce located findings without flagging prose | Syntax-aware rule fixtures | Complete |
 | 3 | Assemble reports and exceptions | Deterministic complete/incomplete output, visible debt and stale exceptions | Report/manifest fixtures | Complete |
 | 4 | Deliver CLI, inventory, and provenance | Whole-root scan, honest dirty-source metadata, correct exit codes | Temporary Git repositories and CLI subprocesses | Complete |
 | 5 | Publish advisory CI and migration guidance | License-first ordering, nonrequired job, retained artifacts, documented limits | Existing CI contracts, actionlint, full scan sample | In Progress |
@@ -428,10 +428,11 @@ are execution requirements, not claims of passing tests.
 ## Execution Evidence
 
 Execution task: TASK-13894. Dependencies installed from the frozen lockfile with
-no lockfile changes. Latest full focused run: token44, rules49, report15, CLI19
-and existing guard54 tests pass (181 total); two CI contract modules pass113 tests. Scoped TypeScript compilation
+no lockfile changes. Latest full focused run: token44, rules57, report15, CLI19
+and existing guard54 tests pass (189 total); two CI contract modules pass113 tests. Scoped TypeScript compilation
 passes. Pinned frontend ESLint exits0 with the existing Next pages-directory
-advisory. Final CVA spread-order correction and Stage5 publication remain pending.
+advisory. Scoped CLI and analyzer re-reviews have no remaining findings. Stage5
+publication and hosted CI/review remain pending.
 
 Reviewed corrections include atomic report-file replacement (verified hard-link
 overwrite regression), explicit errors for unavailable sparse source, and unknown
