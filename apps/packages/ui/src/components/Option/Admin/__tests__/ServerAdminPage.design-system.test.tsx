@@ -284,7 +284,9 @@ describe("ServerAdminPage design-system states", () => {
         sessions: { active: 2, unique_users: 2 }
       })
 
-    renderPage(<ServerAdminPage />)
+    await act(async () => {
+      renderPage(<ServerAdminPage />)
+    })
 
     const errorLabel = await screen.findByText("Error")
     expect(errorLabel).toBeInTheDocument()

@@ -293,3 +293,12 @@ Current c99 Extension Research Workspace Parity job119351225684 fails before tes
 Both WXT children now default absent NODE_OPTIONS to6144MiB while retaining explicit caller options, including empty, and leaving parent env unchanged. The same one-line default in each existing child boundary avoids a new abstraction and keeps the existing isolated live-tier environment policy. No runtime ownership/security rule, dependency, quality/coverage allowance or durable architecture decision changes; no new ADR or PythonBandit scope.
 
 The absent-option regressions first fail2with11passing; final complete connected build/zip/profile scope16/16passes. The actual Chrome production build with no parent NODE_OPTIONS exits0 in55.6seconds and exports50.45MB. Both scripts pass node syntax; ESLint build0/zip2inherited/test0, no new findings. Independent final connected review and five-path normal hooks precede publication. The heap cap does not bound totalRSS; Firefox/Edge/archive and actual parity browser scenarios remain hosted qualification, as do all seven final-head required statuses.
+
+
+## Admin stats Error observation after asynchronous mounting
+
+Current eae coverage12/16 job119358142862 fails the original stats Error/Retry case after1443ms while1,824other cases pass. The DOM still shows the transitional Empty stats panel. Earlier mock reset and owned query-client cleanup remain but did not close this recurrence. The unchanged complete12-case file passes locally with V8, so no local red reproduction is claimed.
+
+The real page first awaits canonical config, mounts the heavy AntD workspace, receives a timer-batched query notification, then copies query error through an effect. The existing one-second Error lookup began from the resolving-config placeholder. The minimal candidate awaits React async act around this exact initial render before the unchanged Error lookup. It retains the immediate rejection, original visible Error/Retry/count2 and every timeout; no production, mock, cache, ownership or guard change.
+
+Complete candidate12/12 passes with V8; ESLint0/0. Independent connected review and normal three-path checks precede publication. Hosted closure remains required, and a further recurrence needs renewed phase evidence rather than another guessed wait. No new architecture rule, dependency, baseline or allowance; no new ADR or PythonBandit scope. Six required contexts have passed on eae, but the known frontend failure still blocks merge and all statuses must qualify the final head.
