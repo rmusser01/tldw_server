@@ -5,7 +5,12 @@ import asyncio
 import pytest
 
 from tldw_Server_API.app.core.Scheduler.handlers import watchlists as watchlists_handlers
-from tldw_Server_API.app.core.Usage.llm_call_context import current_llm_user_id
+from tldw_Server_API.app.core.Usage.llm_call_context import (
+    current_llm_call_context,
+    current_llm_user_id,
+    llm_call_context,
+    mark_llm_quota_prechecked,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -23,6 +28,27 @@ async def test_watchlist_output_enrichment_runs_for_the_payload_user(monkeypatch
     assert result == {"output_id": 5, "status": "completed"}
     assert seen == [7]
     assert current_llm_user_id() is None
+
+
+async def test_a_watchlist_run_runs_for_the_payload_user_not_the_request_that_started_the_scheduler(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A lazily started Scheduler's workers carry the starting request's user and admission; a run does not (TASK-13864)."""
+    seen: list[dict[str, object]] = []
+
+    async def _run(user_id: int, job_id: int, **_kwargs: object) -> dict[str, object]:
+        """Record the call context the run's LLM calls would see."""
+        context = current_llm_call_context()
+        seen.append({"user_id": context.user_id, "prechecked": context.prechecked})
+        return {"run_id": 3, "status": "succeeded", "items_ingested": 1}
+
+    monkeypatch.setattr(watchlists_handlers, "run_watchlist_job", _run)
+    with llm_call_context(user_id=7):
+        mark_llm_quota_prechecked()
+        result = await watchlists_handlers.watchlist_run({"inputs": {"watchlist_job_id": 2}, "user_id": "9"})
+
+    assert result == {"run_id": 3, "status": "succeeded", "items_ingested": 1}
+    assert seen == [{"user_id": 9, "prechecked": False}]
 
 
 async def test_the_agent_task_worker_runs_a_job_for_its_owner(monkeypatch: pytest.MonkeyPatch) -> None:

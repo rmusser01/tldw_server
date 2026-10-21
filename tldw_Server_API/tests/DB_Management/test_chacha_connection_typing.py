@@ -5,7 +5,7 @@ from typing import get_type_hints
 import pytest
 
 from tldw_Server_API.app.core.DB_Management import ChaChaNotes_DB as chacha_module
-from tldw_Server_API.app.core.DB_Management.backends.postgresql_backend import PostgreSQLBackend
+from tldw_Server_API.app.core.DB_Management.backends.sqlite_backend import SQLiteBackend
 
 
 def test_connection_lifecycle_helpers_use_named_raw_connection_alias() -> None:
@@ -40,7 +40,7 @@ def test_close_all_connections_suppresses_noncritical_local_reset(monkeypatch, g
         raise builtins.ExceptionGroup("cleanup", [error]) if grouped else error
 
     database = chacha_module.CharactersRAGDB.__new__(chacha_module.CharactersRAGDB)
-    database._backend = PostgreSQLBackend.__new__(PostgreSQLBackend)
+    database._backend = SQLiteBackend.__new__(SQLiteBackend)  # PostgreSQL keeps its thread-local
     database._uses_shared_content_backend = False
     database._local = chacha_module.threading.local()
     monkeypatch.setattr(database, "close_connection", lambda: events.append("close_connection"))
@@ -68,7 +68,7 @@ def test_close_all_connections_propagates_unexpected_local_reset(monkeypatch):
         raise reset_error
 
     database = chacha_module.CharactersRAGDB.__new__(chacha_module.CharactersRAGDB)
-    database._backend = PostgreSQLBackend.__new__(PostgreSQLBackend)
+    database._backend = SQLiteBackend.__new__(SQLiteBackend)  # PostgreSQL keeps its thread-local
     database._uses_shared_content_backend = False
     database._local = chacha_module.threading.local()
     monkeypatch.setattr(database, "close_connection", lambda: events.append("close_connection"))

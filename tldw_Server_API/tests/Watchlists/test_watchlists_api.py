@@ -1883,3 +1883,57 @@ def test_output_summaries_return_a_quota_refusal_as_402(client_with_user, monkey
     r = c.get("/api/v1/watchlists/outputs", params={"run_id": run_id})
     assert r.status_code == 200, r.text
     assert r.json()["total"] == 0
+
+
+def _over_quota_run(c, monkeypatch) -> tuple[int, list[list[dict]]]:
+    """A finished run for a user over an LLM quota; returns the run id and the summary calls made."""
+    from tldw_Server_API.app.api.v1.endpoints import watchlists as watchlists_endpoint
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    summarized: list[list[dict]] = []
+
+    async def _summarize(items, **_kwargs):
+        summarized.append(items)
+        return items
+
+    monkeypatch.setattr(watchlists_endpoint, "summarize_items_for_output", _summarize)
+    r = c.post(
+        "/api/v1/watchlists/sources",
+        json={"name": "Quota Feed", "url": "https://example.com/quota.xml", "source_type": "rss", "tags": ["quota"]},
+    )
+    assert r.status_code == 200, r.text
+    r = c.post("/api/v1/watchlists/jobs", json={"name": "Quota Digest", "scope": {"tags": ["quota"]}})
+    assert r.status_code == 200, r.text
+    r = c.post(f"/api/v1/watchlists/jobs/{r.json()['id']}/run")
+    assert r.status_code == 200, r.text
+    refuse_llm_work(monkeypatch)
+    return int(r.json()["id"]), summarized
+
+
+def test_output_summaries_refuse_an_over_quota_user_before_any_summary(client_with_user, monkeypatch):
+    """An over-quota user asking for summaries gets the 402 before any summary call (TASK-13864)."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+
+    c = client_with_user
+    run_id, summarized = _over_quota_run(c, monkeypatch)
+
+    r = c.post("/api/v1/watchlists/outputs", json={"run_id": run_id, "summarize": True, "llm_provider": "openai"})
+
+    assert_llm_quota_402(r)
+    assert summarized == []
+    r = c.get("/api/v1/watchlists/outputs", params={"run_id": run_id})
+    assert r.status_code == 200, r.text
+    assert r.json()["total"] == 0
+
+
+def test_output_without_summaries_is_not_refused_for_an_over_quota_user(client_with_user, monkeypatch):
+    """Without summarize there is no LLM work to refuse, so the output is written (TASK-13864)."""
+    c = client_with_user
+    run_id, summarized = _over_quota_run(c, monkeypatch)
+
+    r = c.post("/api/v1/watchlists/outputs", json={"run_id": run_id, "summarize": False})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["run_id"] == run_id
+    assert summarized == []

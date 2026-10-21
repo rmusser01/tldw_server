@@ -66,8 +66,10 @@ async def watchlist_run(payload: dict[str, Any]) -> dict[str, Any]:
     if tenant_id is not None:
         tenant_id = str(tenant_id)
 
-    # Execute the real pipeline (handles run row creation, stats, and job history)
-    result = await run_watchlist_job(uid_int, int(job_id), tenant_id=tenant_id)
+    # Execute the real pipeline (handles run row creation, stats, and job history). Its LLM
+    # extraction calls run for this user, whatever request started the Scheduler (TASK-13864).
+    with llm_call_root(uid_int):
+        result = await run_watchlist_job(uid_int, int(job_id), tenant_id=tenant_id)
     status = str(result.get("status") or "succeeded")
     return {"run_id": result.get("run_id"), "status": status, "items_ingested": int(result.get("items_ingested", 0))}
 

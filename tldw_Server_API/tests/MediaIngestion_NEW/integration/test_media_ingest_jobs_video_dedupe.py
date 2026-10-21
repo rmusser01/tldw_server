@@ -863,3 +863,119 @@ async def test_media_ingest_cross_user_dedupe_skips_reuse_when_clip_options_diff
         assert processor_calls == [source_url, source_url]
     finally:
         await reset_db_pool()
+
+
+@pytest.fixture
+async def cross_user_dedupe(monkeypatch, tmp_path):
+    """Per-user media DBs and the shared AuthNZ dedupe registry under tmp_path."""
+    from tldw_Server_API.app.core.AuthNZ.database import reset_db_pool
+
+    _set_jobs_db(monkeypatch, tmp_path)
+    _allow_url_policy(monkeypatch)
+    monkeypatch.setenv("PRIVILEGE_METADATA_VALIDATE_ON_STARTUP", "0")
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{tmp_path / 'users.db'}")
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "user_databases"))
+    await reset_db_pool()
+    yield
+    await reset_db_pool()
+
+
+def _reusable_video_job(job_manager, source_url: str, user_id: str) -> dict:
+    row = job_manager.create_job(
+        domain="media_ingest",
+        queue="default",
+        job_type="media_ingest_item",
+        payload={
+            "batch_id": f"batch-refused-reuse-{user_id}",
+            "media_type": "video",
+            "source": source_url,
+            "source_kind": "url",
+            "input_ref": source_url,
+            "options": {
+                "media_type": "video",
+                "transcription_model": "whisper-test",
+                "perform_analysis": True,
+                "api_name": "openai",
+                "perform_chunking": False,
+            },
+        },
+        owner_user_id=user_id,
+    )
+    return job_manager.get_job(int(row["id"]))
+
+
+@pytest.mark.asyncio
+async def test_a_job_refused_at_its_start_records_the_refusal_on_a_reused_transcript(
+    cross_user_dedupe,
+    monkeypatch,
+):
+    """TASK-13638 row 24 holds for a job refused when it starts (TASK-13864).
+
+    The reused transcript is stored, no LLM call is made, and the item's video_lite
+    metadata says why there is no summary.
+    """
+    import tldw_Server_API.app.services.media_ingest_jobs_worker as worker
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+    from tldw_Server_API.app.core.DB_Management.media_db.api import (
+        create_media_database,
+        get_full_media_details_rich,
+    )
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+    from tldw_Server_API.app.core.Jobs.manager import JobManager
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_calls
+
+    source_url = "https://www.youtube.com/watch?v=refusedreuse1"
+    analyze_calls: list[object] = []
+
+    async def _fake_process_videos(**kwargs):
+        return {
+            "results": [
+                {
+                    "status": "Success",
+                    "input_ref": source_url,
+                    "processing_source": source_url,
+                    "media_type": "video",
+                    "content": "Reusable transcript content.",
+                    "segments": [],
+                    "analysis": "processor summary",
+                    "analysis_details": {"transcription_language": "en"},
+                    "metadata": {"title": "Reusable Video", "source_url": source_url, "url": source_url},
+                    "warnings": None,
+                }
+            ],
+            "errors_count": 0,
+            "errors": [],
+        }
+
+    def _refused_analyze(*args, **kwargs):
+        """What the check at the call does on dev: refuse before the provider is reached."""
+        analyze_calls.append(args)
+        raise LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+
+    monkeypatch.setattr(
+        "tldw_Server_API.app.core.Ingestion_Media_Processing.Video.Video_DL_Ingestion_Lib.process_videos",
+        _fake_process_videos,
+    )
+    monkeypatch.setattr("tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib.analyze", _refused_analyze)
+    job_manager = JobManager()
+    await worker._handle_job(_reusable_video_job(job_manager, source_url, "1"), job_manager, worker._ProgressState())
+    refuse_llm_calls(monkeypatch)
+
+    result = await worker._handle_job(
+        _reusable_video_job(job_manager, source_url, "2"), job_manager, worker._ProgressState()
+    )
+
+    db = create_media_database(client_id="test-user-2", db_path=str(DatabasePaths.get_media_db_path("2")))
+    try:
+        details = get_full_media_details_rich(db, int(result["media_id"]))
+    finally:
+        db.close_connection()
+    assert details["content"]["text"] == "Reusable transcript content."
+    assert details["processing"]["safe_metadata"]["video_lite"] == {
+        "summary_status": "failed",
+        "summary_error": "llm_quota_exceeded",
+    }
+    assert result["analysis_error"]["code"] == "llm_quota_exceeded"
+    assert analyze_calls == []

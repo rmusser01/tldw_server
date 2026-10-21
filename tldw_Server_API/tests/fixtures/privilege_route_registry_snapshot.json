@@ -7684,6 +7684,502 @@
       ]
     }
   ],
+  "notes": [
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.disable_semantic_index",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "disable_semantic_index",
+      "path": "/api/v1/notes/graph/semantic-index",
+      "rate_limit_resources": [
+        "notes.graph.write"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.get_semantic_status",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_semantic_status",
+      "path": "/api/v1/notes/graph/semantic-index",
+      "rate_limit_resources": [
+        "notes.graph.read"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.enable_semantic_index",
+      "methods": [
+        "PUT"
+      ],
+      "name": "enable_semantic_index",
+      "path": "/api/v1/notes/graph/semantic-index",
+      "rate_limit_resources": [
+        "notes.graph.write"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.get_semantic_capabilities",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_semantic_capabilities",
+      "path": "/api/v1/notes/graph/semantic-index/capabilities",
+      "rate_limit_resources": [
+        "notes.graph.read"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.create_semantic_run",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_semantic_run",
+      "path": "/api/v1/notes/graph/semantic-index/runs",
+      "rate_limit_resources": [
+        "notes.graph.write"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.get_semantic_run",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_semantic_run",
+      "path": "/api/v1/notes/graph/semantic-index/runs/{run_id}",
+      "rate_limit_resources": [
+        "notes.graph.read"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.cancel_semantic_run",
+      "methods": [
+        "POST"
+      ],
+      "name": "cancel_semantic_run",
+      "path": "/api/v1/notes/graph/semantic-index/runs/{run_id}/cancel",
+      "rate_limit_resources": [
+        "notes.graph.write"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    }
+  ],
+  "notes.graph.read": [
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.get_semantic_status",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_semantic_status",
+      "path": "/api/v1/notes/graph/semantic-index",
+      "rate_limit_resources": [
+        "notes.graph.read"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.get_semantic_capabilities",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_semantic_capabilities",
+      "path": "/api/v1/notes/graph/semantic-index/capabilities",
+      "rate_limit_resources": [
+        "notes.graph.read"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.get_semantic_run",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_semantic_run",
+      "path": "/api/v1/notes/graph/semantic-index/runs/{run_id}",
+      "rate_limit_resources": [
+        "notes.graph.read"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    }
+  ],
+  "notes.graph.write": [
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.disable_semantic_index",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "disable_semantic_index",
+      "path": "/api/v1/notes/graph/semantic-index",
+      "rate_limit_resources": [
+        "notes.graph.write"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.enable_semantic_index",
+      "methods": [
+        "PUT"
+      ],
+      "name": "enable_semantic_index",
+      "path": "/api/v1/notes/graph/semantic-index",
+      "rate_limit_resources": [
+        "notes.graph.write"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.create_semantic_run",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_semantic_run",
+      "path": "/api/v1/notes/graph/semantic-index/runs",
+      "rate_limit_resources": [
+        "notes.graph.write"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    },
+    {
+      "dependencies": [
+        {
+          "id": "auth_deps._checker",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "auth_deps._dep",
+          "module": "tldw_Server_API.app.api.v1.API_Deps.auth_deps",
+          "type": "dependency"
+        },
+        {
+          "id": "notes_semantic_index.get_semantic_api",
+          "module": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index",
+          "type": "dependency"
+        }
+      ],
+      "description": "",
+      "endpoint": "tldw_Server_API.app.api.v1.endpoints.notes_semantic_index.cancel_semantic_run",
+      "methods": [
+        "POST"
+      ],
+      "name": "cancel_semantic_run",
+      "path": "/api/v1/notes/graph/semantic-index/runs/{run_id}/cancel",
+      "rate_limit_resources": [
+        "notes.graph.write"
+      ],
+      "summary": null,
+      "tags": [
+        "notes",
+        "notes",
+        "notes-semantic-index"
+      ]
+    }
+  ],
   "prompts.improve": [
     {
       "dependencies": [

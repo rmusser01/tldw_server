@@ -1747,14 +1747,26 @@ def _synthesize_reused_transcript_analysis_sync(
     return "\n\n---\n\n".join(chunk_summaries), warnings, chunked_texts_list
 
 
+def _record_reused_summary_refusal(process_result: dict[str, Any], refusal: LLMQuotaExceededError) -> None:
+    """Keep the reused transcript; record why there is no summary (TASK-13638 Decision 3)."""
+    _ensure_warnings_list(process_result).append(f"Summary generation failed during dedupe reuse: {refusal}")
+    process_result["video_lite_summary_status"] = "failed"
+    process_result["video_lite_summary_error"] = refusal.failure_code
+
+
 async def _populate_reused_transcript_summary(
     *,
     process_result: dict[str, Any],
     form_data: Any,
     chunk_options: dict[str, Any] | None,
     loop: asyncio.AbstractEventLoop,
+    analysis_refusal: LLMQuotaExceededError | None = None,
 ) -> None:
     if process_result.get("analysis") or process_result.get("summary"):
+        return
+    if analysis_refusal is not None:
+        # The job was refused when it started (TASK-13864): record it without an LLM call.
+        _record_reused_summary_refusal(process_result, analysis_refusal)
         return
     if not getattr(form_data, "perform_analysis", False):
         return
@@ -1790,10 +1802,7 @@ async def _populate_reused_transcript_summary(
         else:
             process_result["video_lite_summary_status"] = "failed"
     except LLMQuotaExceededError as refusal:
-        # Keep the transcript; record why there is no summary (Decision 3).
-        _ensure_warnings_list(process_result).append(f"Summary generation failed during dedupe reuse: {refusal}")
-        process_result["video_lite_summary_status"] = "failed"
-        process_result["video_lite_summary_error"] = refusal.failure_code
+        _record_reused_summary_refusal(process_result, refusal)
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS as exc:
         _ensure_warnings_list(process_result).append(f"Summary generation failed during dedupe reuse: {exc}")
         process_result["video_lite_summary_status"] = "failed"
@@ -1808,6 +1817,7 @@ async def _maybe_build_reused_transcript_process_result(
     form_data: Any,
     chunk_options: dict[str, Any] | None,
     loop: asyncio.AbstractEventLoop,
+    analysis_refusal: LLMQuotaExceededError | None = None,
 ) -> dict[str, Any] | None:
     if str(media_type) != "video":
         return None
@@ -1906,6 +1916,7 @@ async def _maybe_build_reused_transcript_process_result(
         form_data=form_data,
         chunk_options=chunk_options,
         loop=loop,
+        analysis_refusal=analysis_refusal,
     )
     return reused_result
 
@@ -4098,9 +4109,13 @@ async def process_batch_media(
     temp_dir: FilePath,
     user_id: int | None = None,
     cancel_check: Callable[[], bool] | None = None,
+    analysis_refusal: LLMQuotaExceededError | None = None,
 ) -> list[dict[str, Any]]:
     """
     Core implementation of the audio/video batch processing helper used by `/media/add`.
+
+    ``analysis_refusal``: a media ingest job refused at its start passes its refusal, so
+    a reused transcript records it as an LLM call refused here would (TASK-13864).
 
     This function mirrors the previous endpoint-local `_process_batch_media`
     behavior while living in the core ingestion module for shared reuse.
@@ -4398,6 +4413,7 @@ async def process_batch_media(
                 form_data=form_data,
                 chunk_options=chunk_options,
                 loop=loop,
+                analysis_refusal=analysis_refusal,
             )
             if reused_process_result is not None:
                 if pre_check_warning:
