@@ -85,6 +85,31 @@ def test_rereview_patch_rejects_null_nonnullable_fields(calendar_api_client, fie
     assert getattr(db.get_item(item["id"]), field) == item[field]
 
 
+@pytest.mark.parametrize("field", ["sync_enabled", "lookback_days", "lookahead_days"])
+def test_binding_patch_rejects_null_required_fields(calendar_api_client, field: str) -> None:
+    """Invalid null updates return422 without changing persisted binding policy."""
+    client, db, _reminders = calendar_api_client
+    _calendar, item = _create_provider_item(db)
+    original = db.get_external_binding(item.external_binding_id)
+    result = client.patch(f"/api/v1/calendar/external/bindings/{original.id}", json={field: None})
+    assert result.status_code == 422, result.text
+    assert getattr(db.get_external_binding(original.id), field) == getattr(original, field)
+
+
+def test_binding_patch_allows_manual_only_interval_and_preserves_omitted_fields(calendar_api_client) -> None:
+    """Null interval selects manual-only sync without clearing required policy."""
+    client, db, _reminders = calendar_api_client
+    _calendar, item = _create_provider_item(db)
+    original = db.get_external_binding(item.external_binding_id)
+    result = client.patch(f"/api/v1/calendar/external/bindings/{original.id}", json={"sync_interval_minutes": None})
+    assert result.status_code == 200, result.text
+    saved = db.get_external_binding(original.id)
+    assert saved.sync_interval_minutes is None
+    assert (saved.sync_enabled, saved.lookback_days, saved.lookahead_days) == (
+        original.sync_enabled, original.lookback_days, original.lookahead_days,
+    )
+
+
 @pytest.fixture()
 async def calendar_rate_limit_pool(tmp_path: Path) -> AsyncIterator[DatabasePool]:
     """Exercise catalog/database quota precedence against real isolated storage."""

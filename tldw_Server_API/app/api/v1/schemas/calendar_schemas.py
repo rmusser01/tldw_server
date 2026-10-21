@@ -655,6 +655,14 @@ class ExternalCalendarBindingUpdateRequest(BaseModel):
     lookahead_days: int | None = Field(default=None, ge=0, le=3700)
     provider_capabilities: dict[str, Any] | None = None
 
+    @model_validator(mode="after")
+    def reject_null_required_fields(self) -> ExternalCalendarBindingUpdateRequest:
+        """Omission preserves sync policy; only the interval may explicitly become manual-only."""
+        for name in ("sync_enabled", "lookback_days", "lookahead_days"):
+            if name in self.model_fields_set and getattr(self, name) is None:
+                raise ValueError(f"Calendar binding {name} cannot be null")
+        return self
+
     def service_updates(self) -> dict[str, Any]:
         """Return only supplied binding updates, translating capabilities to the JSON storage key."""
         updates = self.model_dump(exclude_unset=True)
