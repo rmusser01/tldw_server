@@ -371,6 +371,29 @@ export function analyzeDriftSource({ path, source, authority }) {
     function unresolved(node, context) {
       diagnostic(node.getStart(ast), "dynamic-styling", `Unresolved ${context} expression; runtime styling is outside static coverage.`)
     }
+    function effectiveProperties(node, visited) {
+      const object = resolve(node, visited)
+      const properties = new Map()
+      let unknown = false
+      if (!object || !ts.isObjectLiteralExpression(object)) {
+        unresolved(node, "class map spread")
+        return { properties, unknown: true }
+      }
+      const nextVisited = new Set([...visited, object])
+      for (const prop of object.properties) {
+        if (ts.isSpreadAssignment(prop)) {
+          const spread = effectiveProperties(prop.expression, nextVisited)
+          // An unknown spread may replace any earlier key, including through nested spreads.
+          if (spread.unknown) { properties.clear(); unknown = true }
+          for (const [key, value] of spread.properties) properties.set(key, value)
+        } else if (prop.name.text === undefined) {
+          unresolved(prop.name, "class map key")
+          properties.clear()
+          unknown = true
+        } else properties.set(prop.name.text, prop)
+      }
+      return { properties, unknown }
+    }
     function classExpression(node, visited = new Set(), mode = "classes") {
       node = unwrap(node)
       if (!node) return
@@ -405,7 +428,8 @@ export function analyzeDriftSource({ path, source, authority }) {
       } else if (ts.isArrayLiteralExpression(node)) {
         for (const element of node.elements) classExpression(element, nextVisited, mode)
       } else if (ts.isObjectLiteralExpression(node)) {
-        for (const prop of node.properties) {
+        const properties = mode === "classes" ? node.properties : effectiveProperties(node, visited).properties.values()
+        for (const prop of properties) {
           if (ts.isSpreadAssignment(prop)) { classExpression(prop.expression, nextVisited, mode); continue }
           if (!ts.isPropertyAssignment(prop) && !ts.isShorthandPropertyAssignment(prop)) { unresolved(prop, "class map"); continue }
           const value = ts.isPropertyAssignment(prop) ? prop.initializer : prop.name

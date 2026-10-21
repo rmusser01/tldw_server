@@ -328,4 +328,53 @@ const View = cva('', {...options})`
     expect(result.findings).toEqual([])
     expect(result.diagnostics).toEqual([])
   })
+
+  it.each([
+    "...options, variants: {tone: {bad: 'bg-danger'}}",
+    "variants: {tone: {bad: 'bg-red-500'}}, ...semanticOptions",
+    "...options, compoundVariants: [], variants: {tone: {bad: 'bg-danger'}}"
+  ])("honors effective CVA options after property overwrites: %s", body => {
+    const source = `const options = {variants: {tone: {bad: 'bg-red-500'}}};
+const semanticOptions = {variants: {tone: {bad: 'bg-danger'}}};
+const badge = cva('', {${body}})`
+    const result = analyze(source)
+    expect(result.findings).toEqual([])
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it("keeps a later spread's effective palette entry and original location", () => {
+    const source = "const options = {variants: {tone: {bad: 'bg-red-500'}}};\nconst badge = cva('', {variants: {tone: {bad: 'bg-danger'}}, ...options})"
+    const result = analyze(source)
+    expect(result.findings).toEqual([expect.objectContaining({rule: "palette-color", value: "bg-red-500", owner: "options", line: 1, column: 42})])
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it("honors overwrites in nested option, variant and compound class spreads", () => {
+    const source = `const bad = {bad: 'bg-red-500'};
+const badCompound = {className: 'text-white'};
+const original = {variants: {tone: bad}, compoundVariants: [badCompound]};
+const replaced = {...original, 'variants': {tone: {...bad, bad: 'bg-danger'}}, compoundVariants: [{...badCompound, 'className': 'bg-danger'}]};
+const badge = cva('', {...{...replaced}})`
+    const result = analyze(source)
+    expect(result.findings).toEqual([])
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it("does not report earlier CVA entries that an unresolved spread may overwrite", () => {
+    const result = analyze("const options = {variants: {tone: {bad: 'bg-red-500'}}}; const badge = cva('', {...options, ...getOptions()})")
+    expect(result.findings).toEqual([])
+    expect(result.diagnostics).toEqual([expect.objectContaining({severity: "coverage", code: "dynamic-styling"})])
+  })
+
+  it("propagates nested unresolved spread uncertainty but preserves explicit later entries", () => {
+    const result = analyze("const uncertain = {...getOptions(), variants: {tone: {bad: 'bg-danger'}}}; const badge = cva('', {compoundVariants: [{className: 'text-white'}], ...uncertain})")
+    expect(result.findings).toEqual([])
+    expect(result.diagnostics).toEqual([expect.objectContaining({severity: "coverage", code: "dynamic-styling"})])
+  })
+
+  it("analyzes explicit CVA entries after an unresolved spread", () => {
+    const result = analyze("const badge = cva('', {...getOptions(), variants: {tone: {bad: 'bg-red-500'}}})")
+    expect(result.findings.map(f => f.value)).toEqual(["bg-red-500"])
+    expect(result.diagnostics).toEqual([expect.objectContaining({severity: "coverage", code: "dynamic-styling"})])
+  })
 })
