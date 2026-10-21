@@ -39,6 +39,7 @@ changes in the `sync_log` and in individual records.
 import hashlib  # noqa: E402
 import json  # noqa: E402
 import math  # noqa: E402
+import os  # noqa: E402
 import queue  # noqa: E402
 import re  # noqa: E402
 import sqlite3  # noqa: E402
@@ -471,30 +472,43 @@ _DROPPED_CHECKOUTS: queue.SimpleQueue[tuple[Any, Any]] = queue.SimpleQueue()
 
 
 class _LegacyCheckout:
-    """Queue a legacy PostgreSQL checkout for return when its thread-local slot is dropped.
+    """Close a legacy PostgreSQL checkout, and queue it for return, when its thread-local slot is dropped.
 
     Outside a ChaCha operation each thread keeps its checkout in the handle's
     ``threading.local``. The slot is dropped when the thread exits, which CPython
     does at once, or when the handle is collected, which needs the cyclic garbage
     collector because the handle's stores hold it. psycopg's ``Connection.__del__``
     skips pooled connections, so without this the checkout and its pool slot are lost.
+    The connection is closed at once, so a session the thread left in a transaction
+    does not keep its locks and snapshot until the queued return is made.
     """
 
-    __slots__ = ("backend", "conn")
+    __slots__ = ("backend", "conn", "pid")
 
     def __init__(self, conn: Any, backend: Any) -> None:
         self.conn = conn
         self.backend = backend
+        self.pid = os.getpid()
 
     def disarm(self) -> None:
         """The checkout was returned or closed explicitly."""
         self.conn = None
 
     def __del__(self) -> None:
-        if self.conn is not None:
-            # Lock-free: a collection can run this on any thread, even one holding the
-            # pool's own lock, so the return itself waits for _return_dropped_checkouts().
-            _DROPPED_CHECKOUTS.put((self.backend, self.conn))
+        # A finalizer must never raise, even at interpreter teardown with module globals gone.
+        try:
+            if self.conn is None or os.getpid() != self.pid:
+                return  # disarmed, or a forked child: the parent still owns this session
+            try:
+                # Ends the server session now (PQfinish). psycopg's close() takes no lock
+                # and makes no pool call, because these pools do not set close_returns.
+                self.conn.close()
+            finally:
+                # Lock-free: a collection can run this on any thread, even one holding the
+                # pool's own lock, so the pool's bookkeeping waits for _return_dropped_checkouts().
+                _DROPPED_CHECKOUTS.put((self.backend, self.conn))
+        except Exception:  # noqa: BLE001  # nosec B110
+            pass  # nothing may escape a finalizer
 
 
 def _disarm_legacy_checkout(state: Any) -> None:
@@ -514,7 +528,7 @@ def _return_dropped_checkouts() -> None:
         try:
             backend.get_pool().return_connection(conn)
         except Exception as exc:  # noqa: BLE001 - keep draining; one bad return must not strand the rest
-            logger.debug("Returning a dropped legacy checkout failed ({})", type(exc).__name__)
+            logger.warning("Returning a dropped legacy checkout failed ({})", type(exc).__name__)
 
 
 class BackendCursorAdapter:

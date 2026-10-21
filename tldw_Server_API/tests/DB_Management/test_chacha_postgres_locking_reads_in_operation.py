@@ -4,7 +4,7 @@ import pytest
 
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
-from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, InputError
 
 pytestmark = pytest.mark.integration
 
@@ -37,3 +37,20 @@ def test_a_persona_locking_read_inside_an_operation_sees_its_transaction(pg_db):
             persona = pg_db.get_persona_profile(persona_id, user_id="1", conn=conn, for_update=True)
 
     assert persona["id"] == persona_id
+
+
+@pytest.mark.parametrize("getter", ["workspace", "persona"])
+def test_a_locking_read_inside_an_operation_rejects_a_finished_transaction(pg_db, getter):
+    """After a read the operation's session is in a transaction again, but no managed one is open."""
+    pg_db.upsert_workspace("ws-done", "Finished workspace")
+    persona_id = pg_db.create_persona_profile({"user_id": "1", "name": "Finished persona"})
+
+    with chacha_operation(independent=True):
+        with pg_db.transaction() as conn:
+            pass
+        pg_db.execute_query("SELECT 1")
+        with pytest.raises(InputError):
+            if getter == "workspace":
+                pg_db.get_workspace("ws-done", conn=conn, for_update=True)
+            else:
+                pg_db.get_persona_profile(persona_id, user_id="1", conn=conn, for_update=True)
