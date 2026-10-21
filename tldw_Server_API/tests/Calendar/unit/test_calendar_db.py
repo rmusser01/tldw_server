@@ -16,6 +16,24 @@ from tldw_Server_API.app.core.DB_Management.Calendar_DB import (
 pytestmark = pytest.mark.unit
 
 
+def test_independent_review_revoked_account_can_be_deleted(calendar_db: CalendarDatabase) -> None:
+    """Wiping credentials must not make subsequent account cleanup impossible."""
+    secret = calendar_db.create_secret_ref(
+        tenant_id="default", user_id=1, provider="caldav", encrypted_payload="encrypted-test-payload",
+    )
+    account = calendar_db.create_external_account(
+        tenant_id="default", user_id=1, provider="caldav", display_name="Cleanup", secret_ref=secret,
+    )
+    calendar_db.revoke_external_account(account.id)
+    reopened = CalendarDatabase(calendar_db.db_path)
+    deleted = reopened.delete_external_account(account.id)
+    assert deleted.status == "deleted"
+    assert deleted.secret_ref is None
+    assert reopened.list_external_accounts_for_user(user_id=1) == []
+    with pytest.raises(CalendarValidationError):
+        reopened.resolve_secret_ref(secret)
+
+
 def test_outer_transaction_rolls_back_nested_item_and_recurrence(calendar_db: CalendarDatabase) -> None:
     calendar = _create_calendar(calendar_db)
     with pytest.raises(RuntimeError):

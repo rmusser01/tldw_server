@@ -1930,7 +1930,7 @@ class CalendarDatabase:
             conn.execute(
                 """
                 UPDATE external_calendar_accounts
-                SET status = 'revoked', revoked_at = ?, updated_at = ?
+                SET status = 'revoked', secret_ref = NULL, revoked_at = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (now, now, account_id),

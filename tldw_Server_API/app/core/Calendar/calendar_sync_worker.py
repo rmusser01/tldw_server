@@ -323,7 +323,9 @@ async def handle_calendar_sync_job(
     def _record_failure(exc: Exception) -> None:
         """Persist the original failure diagnostics without changing bookkeeping exception behavior."""
         finished_at = _utcnow_iso()
-        calendar_db.update_binding_sync_state(binding.id, last_error=str(exc))
+        calendar_db.update_binding_sync_state(
+            binding.id, last_error=str(exc), next_scan_at=_next_scan_at(binding, finished_at),
+        )
         calendar_db.record_sync_event(
             binding_id=binding.id,
             event_type="sync",

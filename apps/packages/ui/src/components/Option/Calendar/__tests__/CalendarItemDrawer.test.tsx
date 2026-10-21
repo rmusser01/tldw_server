@@ -1,5 +1,5 @@
 import React from "react"
-import { render, screen, waitFor } from "@testing-library/react"
+import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   createCalendarAnnotation: vi.fn(),
   createCalendarLink: vi.fn(),
   listCalendarLinks: vi.fn(),
+  listCalendarAnnotations: vi.fn(),
   deleteCalendarLink: vi.fn(),
   updateCalendarLocalTags: vi.fn(),
   copyCalendarItemIntoTldw: vi.fn()
@@ -22,6 +23,7 @@ vi.mock("@/services/calendar", () => ({
   createCalendarAnnotation: (...args: unknown[]) => mocks.createCalendarAnnotation(...args),
   createCalendarLink: (...args: unknown[]) => mocks.createCalendarLink(...args),
   listCalendarLinks: (...args: unknown[]) => mocks.listCalendarLinks(...args),
+  listCalendarAnnotations: (...args: unknown[]) => mocks.listCalendarAnnotations(...args),
   deleteCalendarLink: (...args: unknown[]) => mocks.deleteCalendarLink(...args),
   updateCalendarLocalTags: (...args: unknown[]) => mocks.updateCalendarLocalTags(...args),
   copyCalendarItemIntoTldw: (...args: unknown[]) => mocks.copyCalendarItemIntoTldw(...args)
@@ -130,6 +132,36 @@ const renderDrawer = (
   )
 
 describe("CalendarItemDrawer", () => {
+  it("independent review: displays offset timestamps in the item's editing timezone", async () => {
+    const user = userEvent.setup()
+    renderDrawer({ ...localItem, metadata: { timezone: "America/Los_Angeles" } })
+    expect(screen.getByRole("textbox", { name: "Start" })).toHaveProperty("value", "2026-06-05T02:00")
+    expect(screen.getByRole("textbox", { name: "End" })).toHaveProperty("value", "2026-06-05T03:00")
+    await user.clear(screen.getByRole("textbox", { name: "Start" }))
+    await user.type(screen.getByRole("textbox", { name: "Start" }), "2026-06-05T02:30")
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+    await waitFor(() => expect(mocks.updateCalendarItem).toHaveBeenCalledWith(7, expect.objectContaining({ start_at: "2026-06-05T02:30" })))
+    expect(mocks.updateCalendarItem.mock.calls[0][1]).not.toHaveProperty("end_at")
+  })
+
+  it("independent review: renders a saved annotation after closing and reopening", async () => {
+    const user = userEvent.setup()
+    mocks.listCalendarAnnotations.mockResolvedValueOnce({ items: [], total: 0 })
+    mocks.createCalendarAnnotation.mockResolvedValue({ id: 12 })
+    const { unmount } = renderDrawer(localItem)
+    await user.type(screen.getByRole("textbox", { name: "Annotation" }), "Retain my notes")
+    await user.click(screen.getByRole("button", { name: "Save item" }))
+    await waitFor(() => expect(mocks.createCalendarAnnotation).toHaveBeenCalled())
+    unmount()
+    mocks.listCalendarAnnotations.mockResolvedValue({ items: [{
+      id: 12, calendar_item_id: 7, author_user_id: 1, body: "Retain my notes", tags: [],
+      created_at: "2026-06-05T09:00:00Z", updated_at: "2026-06-05T09:00:00Z"
+    }], total: 1 })
+    renderDrawer(localItem)
+    expect(await screen.findByText("Retain my notes")).toBeTruthy()
+    expect(screen.getByRole("textbox", { name: "Annotation" })).toHaveProperty("value", "")
+  })
+
   it("lets the item timezone resolve edited dates across DST instead of reusing the old offset", async () => {
     const user = userEvent.setup()
     renderDrawer({ ...localItem,
@@ -146,11 +178,32 @@ describe("CalendarItemDrawer", () => {
       start_at: "2026-11-02T09:00", end_at: "2026-11-02T10:00"
     })
   })
+  it("keeps annotation drafts available when saved notes cannot be loaded", async () => {
+    mocks.listCalendarAnnotations.mockRejectedValue(new Error("private server detail"))
+    renderDrawer(localItem)
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "Annotations unavailable")
+    expect(screen.queryByText("private server detail")).toBeNull()
+    expect(screen.getByRole("textbox", { name: "Annotation" })).toHaveProperty("disabled", false)
+  })
+
+  it("does not render a stale annotation response after switching items", async () => {
+    let resolveOld: (value: { items: unknown[]; total: number }) => void = () => {}
+    mocks.listCalendarAnnotations.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+    const view = renderDrawer(localItem)
+    const next = { ...localItem, id: "local-8", calendar_item_id: 8, title: "Next item" }
+    mocks.listCalendarAnnotations.mockResolvedValue({ items: [{ id: 22, body: "Next notes" }], total: 1 })
+    view.rerender(<CalendarItemDrawer open item={next} calendars={calendars} onClose={vi.fn()} onSaved={vi.fn()} />)
+    expect(await screen.findByText("Next notes")).toBeTruthy()
+    await act(async () => { resolveOld({ items: [{ id: 12, body: "Old notes" }], total: 1 }) })
+    expect(screen.queryByText("Old notes")).toBeNull()
+    expect(screen.getByText("Next notes")).toBeTruthy()
+  })
   beforeEach(() => {
     for (const mock of Object.values(mocks)) {
       mock.mockReset()
     }
     mocks.listCalendarLinks.mockResolvedValue({ items: [], total: 0 })
+    mocks.listCalendarAnnotations.mockResolvedValue({ items: [], total: 0 })
   })
 
   it.each([

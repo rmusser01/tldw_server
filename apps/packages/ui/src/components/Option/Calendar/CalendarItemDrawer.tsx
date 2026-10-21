@@ -4,6 +4,7 @@ import { Trash2 } from "lucide-react"
 import { safeExternalUrl } from "@/utils/safe-external-url"
 import type {
   CalendarItemKind,
+  CalendarAnnotationResponse,
   CalendarItemUpdateRequest,
   CalendarLinkResponse,
   CalendarResponse,
@@ -16,6 +17,7 @@ import {
   createCalendarItem,
   createCalendarLink,
   listCalendarLinks,
+  listCalendarAnnotations,
   deleteCalendarLink,
   deleteCalendarItem,
   updateCalendarItem,
@@ -23,8 +25,22 @@ import {
 } from "@/services/calendar"
 import { CalendarOwnershipBadge } from "./CalendarOwnershipBadge"
 
-const toInputDateTime = (value?: string | null): string =>
-  value ? value.slice(0, 16) : ""
+const toInputDateTime = (value?: string | null, itemTimezone?: unknown): string => {
+  if (!value) return ""
+  if (typeof itemTimezone === "string" && itemTimezone && /T.*(?:Z|[+-]\d{2}:\d{2})$/i.test(value)) {
+    try {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: itemTimezone, year: "numeric", month: "2-digit", day: "2-digit",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+      }).formatToParts(new Date(value))
+      const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((entry) => entry.type === type)?.value
+      return `${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`
+    } catch {
+      // Invalid legacy zones keep their original wall-time display.
+    }
+  }
+  return value.slice(0, 16)
+}
 
 const toUpdatedDateTime = (
   value: string, original: string | null | undefined, allDay: boolean, itemTimezone: unknown
@@ -89,6 +105,9 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
   const [dueAt, setDueAt] = React.useState("")
   const [tags, setTags] = React.useState("")
   const [annotation, setAnnotation] = React.useState("")
+  const [annotations, setAnnotations] = React.useState<CalendarAnnotationResponse[]>([])
+  const [annotationsLoading, setAnnotationsLoading] = React.useState(false)
+  const [annotationsError, setAnnotationsError] = React.useState(false)
   const [linkLabel, setLinkLabel] = React.useState("")
   const [linkUrl, setLinkUrl] = React.useState("")
   const [links, setLinks] = React.useState<CalendarLinkResponse[]>([])
@@ -125,9 +144,9 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
     setTitle(item?.title ?? "")
     setDescription(item?.description ?? "")
     setLocation(item?.location ?? "")
-    setStartAt(toInputDateTime(originalStart))
-    setEndAt(toInputDateTime(item?.end_at))
-    setDueAt(toInputDateTime(item?.due_at))
+    setStartAt(toInputDateTime(originalStart, item?.metadata?.timezone))
+    setEndAt(toInputDateTime(item?.end_at, item?.metadata?.timezone))
+    setDueAt(toInputDateTime(item?.due_at, item?.metadata?.timezone))
     const nextTags = itemLocalTags(item)
     setInitialTags(nextTags)
     setTags(Array.isArray(nextTags) ? nextTags.join(", ") : "")
@@ -142,11 +161,19 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
     let active = true
     setLinks(item?.links ?? [])
     setLinksError(false)
+    setAnnotations([])
+    setAnnotationsError(false)
     if (!open || !item?.calendar_item_id || isLinkedProjection) {
       setLinksLoading(false)
+      setAnnotationsLoading(false)
       return () => { active = false }
     }
     setLinksLoading(true)
+    setAnnotationsLoading(true)
+    listCalendarAnnotations(item.calendar_item_id)
+      .then((result) => { if (active) setAnnotations(result.items) })
+      .catch(() => { if (active) setAnnotationsError(true) })
+      .finally(() => { if (active) setAnnotationsLoading(false) })
     listCalendarLinks(item.calendar_item_id)
       .then((result) => { if (active) setLinks(result.items) })
       .catch(() => { if (active) setLinksError(true) })
@@ -177,8 +204,8 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
     if (!calendarId || (!title.trim() && canEditItemFields)) return
     const kindChanged = Boolean(item && kind !== inferKind(item))
     const temporalChanged = item && (kind === "event"
-      ? startAt !== toInputDateTime(originalStart) || endAt !== toInputDateTime(item.end_at)
-      : dueAt !== toInputDateTime(item.due_at))
+      ? startAt !== toInputDateTime(originalStart, item.metadata?.timezone) || endAt !== toInputDateTime(item.end_at, item.metadata?.timezone)
+      : dueAt !== toInputDateTime(item.due_at, item.metadata?.timezone))
     // Text/context-only saves leave existing timing untouched. A kind change
     // discards the old start, so it cannot satisfy a new todo's schedule.
     if (canEditTemporalFields && (isCreate || kindChanged || temporalChanged)) {
@@ -238,7 +265,7 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
             // todo's saved start/end. Preserve those fields when its kind stays.
             if (!kindChanged && kind === "todo" && field !== "due_at") continue
             const original = field === "start_at" ? originalStart : item[field]
-            if (kindChanged || input !== toInputDateTime(original)) {
+            if (kindChanged || input !== toInputDateTime(original, item.metadata?.timezone)) {
               const active = field === "due_at" ? kind === "todo" : kind === "event"
               updates[field] = active ? toUpdatedDateTime(input, original, item.all_day, item.metadata?.timezone) : null
             }
@@ -499,6 +526,13 @@ export const CalendarItemDrawer: React.FC<CalendarItemDrawerProps> = ({
           {canEditLocalContext ? (
             <>
               <Divider className="my-1" />
+              {annotationsLoading ? <Typography.Text type="secondary" role="status">Loading annotations</Typography.Text> : null}
+              {annotationsError ? <Typography.Text type="danger" role="alert">Annotations unavailable</Typography.Text> : null}
+              {annotations.map((note) => (
+                <Typography.Paragraph key={note.id} className="!mb-0 whitespace-pre-wrap break-words">
+                  {note.body}
+                </Typography.Paragraph>
+              ))}
               <label className="flex flex-col gap-1">
                 <Typography.Text>Annotation</Typography.Text>
                 <Input.TextArea

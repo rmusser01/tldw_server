@@ -1108,6 +1108,48 @@ def test_create_annotation(calendar_api_client: tuple[TestClient, CalendarDataba
     assert payload["tags"] == ["meeting"]
 
 
+@pytest.mark.parametrize("provider_owned", [False, True])
+def test_independent_review_saved_annotations_can_be_read_only_by_authorized_users(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub], provider_owned: bool,
+) -> None:
+    """Reopening uses persisted notes and never exposes another user's private import."""
+    client, db, _reminders = calendar_api_client
+    if provider_owned:
+        _calendar, item = _create_provider_item(db)
+        item_id = item.id
+    else:
+        calendar = _create_calendar(client)
+        item_id = _create_event(client, calendar["id"])["id"]
+    path = f"/api/v1/calendar/items/{item_id}/annotations"
+    created = client.post(path, json={"body": "Retain my notes", "tags": ["review"]})
+    assert created.status_code == 201, created.text
+    result = client.get(path)
+    assert result.status_code == 200, result.text
+    assert result.json() == {"items": [created.json()], "total": 1}
+    _set_user(client, 2)
+    denied = client.get(path)
+    assert denied.status_code == 403, denied.text
+    assert "Retain my notes" not in denied.text
+
+
+def test_annotation_listing_keeps_private_tag_overlays_out_of_shared_notes(
+    calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
+) -> None:
+    """Readable shared commentary does not disclose the owner's private tag overlay."""
+    client, db, _reminders = calendar_api_client
+    calendar = _create_calendar(client)
+    item = _create_event(client, calendar["id"])
+    service = CalendarService(db=db)
+    service.add_membership(actor_user_id=1, calendar_id=calendar["id"], principal_type="user", principal_id="2", role="viewer")
+    note = service.create_annotation(actor_user_id=1, item_id=item["id"], body="Shared commentary")
+    service.update_local_tags(actor_user_id=1, item_id=item["id"], tags=["owner-private-tag"])
+    _set_user(client, 2)
+    result = client.get(f"/api/v1/calendar/items/{item['id']}/annotations")
+    assert result.status_code == 200, result.text
+    assert [row["id"] for row in result.json()["items"]] == [note.id]
+    assert "owner-private-tag" not in result.text
+
+
 def test_update_provider_owned_item_local_tags(
     calendar_api_client: tuple[TestClient, CalendarDatabase, _ReminderServiceStub],
 ) -> None:

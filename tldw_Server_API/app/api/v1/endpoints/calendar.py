@@ -20,6 +20,7 @@ from tldw_Server_API.app.api.v1.schemas.calendar_schemas import (
     CalDavAccountVerifyRequest,
     CalDavAccountVerifyResponse,
     CalendarAnnotationCreateRequest,
+    CalendarAnnotationListResponse,
     CalendarAnnotationResponse,
     CalendarCreateRequest,
     CalendarItemCopyRequest,
@@ -662,6 +663,25 @@ async def get_calendar_week(
     except (TypeError, ValueError) as exc:
         raise _map_calendar_error(CalendarValidationError(str(exc))) from exc
     return _view_response(result)
+
+
+@router.get(
+    "/items/{item_id}/annotations",
+    response_model=CalendarAnnotationListResponse,
+    dependencies=[Depends(rbac_rate_limit("calendar.read", per_user=True))],
+)
+async def list_calendar_annotations(
+    item_id: int = Path(..., ge=1),
+    current_user: User = Depends(get_request_user),
+    _principal: AuthPrincipal = Depends(RequirePermission(CALENDAR_READ)),  # noqa: B008
+    service: CalendarService = Depends(get_calendar_service),
+) -> CalendarAnnotationListResponse:
+    """List saved notes after item authorization, excluding private empty-body tag overlays."""
+    try:
+        rows = [row for row in service.list_annotations(actor_user_id=_user_id(current_user), item_id=item_id) if row.body.strip()]
+    except (CalendarNotFound, CalendarItemNotFound, CalendarPermissionDenied, CalendarValidationError) as exc:
+        raise _map_calendar_error(exc) from exc
+    return CalendarAnnotationListResponse(items=[CalendarAnnotationResponse.from_row(row) for row in rows], total=len(rows))
 
 
 @router.post(
