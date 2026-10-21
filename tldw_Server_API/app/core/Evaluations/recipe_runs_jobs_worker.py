@@ -19,6 +19,7 @@ from tldw_Server_API.app.api.v1.schemas.embeddings_abtest_schemas import (
     ABTestRetrieval,
     EmbeddingsABTestConfig,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.DB_Manager import get_content_backend_instance
 from tldw_Server_API.app.core.DB_Management.Evaluations_DB import EvaluationsDatabase
 from tldw_Server_API.app.core.DB_Management.db_path_utils import (
@@ -1227,6 +1228,7 @@ def handle_recipe_run_job(
     }
 
 
+@owns_chacha_checkouts
 async def handle_recipe_run_job_async(job: dict[str, Any]) -> dict[str, Any]:
     """Async WorkerSDK adapter for the synchronous recipe run handler."""
     return await asyncio.to_thread(handle_recipe_run_job, job)

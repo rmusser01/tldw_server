@@ -9,6 +9,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
+
 from .acp_adapter import resolve_acp_branch_capability, select_branch_strategy
 from .branch_runner import BranchPromptRunner
 from .context_snapshot import MacroContextSnapshot, redact_sensitive_text, snapshot_from_mapping
@@ -84,7 +86,7 @@ class ChatMacroExecutor:
                 error_message="Macro run was cancelled before execution started.",
             )
 
-        macro = await asyncio.to_thread(self.macro_loader, run)
+        macro = await asyncio.to_thread(chacha_operation(independent=True)(self.macro_loader), run)
         snapshot = snapshot_from_mapping(run.context_snapshot)
         model_selection = dict(run.model_selection or snapshot.model_selection or {})
         try:
@@ -366,9 +368,13 @@ class ChatMacroExecutor:
         )
 
     async def _repo_call(self, method_name: str, *args: Any, **kwargs: Any) -> Any:
-        """Run one synchronous repository operation outside the event-loop thread."""
+        """Run one synchronous repository operation outside the event-loop thread.
+
+        Branches call this concurrently, so each call owns its ChaCha operation, and with
+        it its own connection and transaction, and returns the checkout when it returns.
+        """
         method = getattr(self.repository, method_name)
-        return await asyncio.to_thread(method, *args, **kwargs)
+        return await asyncio.to_thread(chacha_operation(independent=True)(method), *args, **kwargs)
 
     async def _post_final_output_if_needed(self, run: MacroRunRecord) -> MacroRunRecord:
         if self.post_back is None or run.final_output is None:
