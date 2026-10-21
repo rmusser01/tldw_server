@@ -2,7 +2,7 @@
 id: TASK-13861
 title: Legacy thread-local PostgreSQL ChaCha checkouts leak (thread exit, long-lived
   threads, close_all_connections before reset)
-status: To Do
+status: In Progress
 labels:
 - chat
 - postgres
@@ -19,13 +19,18 @@ Found while fixing TASK-13841 (measured on origin/dev 7c94a2efb1). (1) Thread ex
 <!-- AC:BEGIN -->
 - [ ] #1 /chat/stream persistence is exercised on PostgreSQL first, and every production caller that reaches the legacy thread-local path on PostgreSQL is listed, with evidence
 - [ ] #2 No PostgreSQL checkout outlives its thread or pins a pool slot outside an operation: such callers run inside chacha_operation or return their checkout
-- [ ] #3 After CharactersRAGDB.close_all_connections() on psycopg_pool, no checkout it returned is left open without its reset
+- [x] #3 After CharactersRAGDB.close_all_connections() on psycopg_pool, no checkout it returned is left open without its reset
 - [ ] #4 Test apps over PostgreSQL ChaCha install ChaChaOperationMiddleware, or are shown not to leak
+- [x] #5 CharactersRAGDB.close_all_connections() never closes the shared PostgreSQL content pool
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+PR A (fix/chacha-pg-legacy-checkouts). close_all_connections() on PostgreSQL: (1) it closed the shared content pool. Every handle built without a backend uses the one cached content backend, so one MCP tool call (flashcards.decks.list through FlashcardsModule.execute_tool) left every later ChaCha access failing with 'Connection pool is closed' until restart. Callers: MCP flashcards x13, notes x10, quizzes x14, characters x2, slides x2, skills x1, persona_visuals x1, chats x2, rpg x1; Persona/memory_integration x3; persona.py /stream x1; Notes_Library x2; close_all_chacha_db_instances. Fix: on the shared backend only this thread's checkout is returned; content-backend shutdown owns the pool (ADR-020). (2) On a caller's pool the checkout was returned through putconn and the pool closed at once, so psycopg_pool discarded the queued reset and left the connection open INTRANS. Fix: close this thread's checkout (discard_connection) before closing the pool.
+PR A legacy-checkout guard: a thread-exit fix plus a GC-timed backstop. A legacy thread-local checkout was lost when its thread exited (plain thread, AnyIO worker, asyncio default executor). A guard stored next to the checkout queues it on a queue.SimpleQueue when the thread-local slot is dropped, and the next ChaCha checkout or close_connection() in the process returns it; a caller already blocked in getconn does not benefit. Thread exit is deterministic (CPython clears a dead thread's locals at once; the tests use no gc.collect()). A dropped handle is cyclic garbage, so its guard runs only when the cyclic GC does: in a server-sized heap that can take arbitrarily long (review probe 4). It is a backstop; PR C makes the known per-call sites own their checkouts. The finalizer never calls the pool (a collection can run on a thread holding psycopg_pool's task-queue lock); every explicit return disarms it first.
+PR A locking reads: get_workspace(for_update=True) and get_persona_profile(for_update=True) read the legacy thread-local tx_depth, so inside an operation (every production HTTP request) they raised 'locking reads require a transaction connection' even inside db.transaction(). On PostgreSQL every non-Character workspace chat creation, POST /chats/workspace-startup and persona admission returned 400, as did chat creation in a workspace under a chat quota. Found when PR D's middleware went into test_conversation_quota_count_backends.py's app. Fix: read self._connection_state().tx_depth.
+PR A RED/GREEN on 3c4d734981: test_chacha_postgres_close_all_connections.py dev 2 failed, fix 2 passed. test_chacha_postgres_legacy_checkouts.py dev 5 failed 1 passed, fix 6 passed (v1's lock-taking guard fails the finalizer test). test_chacha_postgres_locking_reads_in_operation.py dev 2 failed, fix 2 passed. The three new files plus test_chacha_connection_typing.py on unchanged dev: 9 failed, 5 passed. Operation-scope pins with the guard: 109 passed. Sweep of the 108 files that call close_all_connections over PostgreSQL ChaCha, 4 shards: 1224 passed 1 skipped; 762 passed; 832 passed 5 skipped; 652 passed 4 skipped; no FAILED, ERROR or timeout (dev baseline: not needed, nothing failed). Bandit: B101 only in the new tests; none in the product files. The ADR for the whole series (ADR-NNN, numbered in PR C) records the close_all_connections rule.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
