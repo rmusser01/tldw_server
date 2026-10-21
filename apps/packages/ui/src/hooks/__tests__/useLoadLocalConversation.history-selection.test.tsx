@@ -1,6 +1,7 @@
 import React from "react"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { beforeEach, expect, it, vi } from "vitest"
+import type { HistoryLoadReceipt } from "@/hooks/chat/useHistorySelection"
 const mocks = vi.hoisted(() => ({
   selection: null as any,
   modelPreference: vi.fn(async () => false),
@@ -513,10 +514,17 @@ it("explicit imported local consent resumes verified readable rows and all metad
   mocks.modelPreference.mockResolvedValue(true)
   mocks.prompt.mockResolvedValue({ id: "saved-prompt", content: "Saved prompt" })
   mocks.files.mockResolvedValue([{ id: "saved-file" }])
+  const owner = { kind: "local" as const, profile_id: "profile", owner_key: "browser-profile", conversation_id: "imported" }
+  const view = { view_session_id: "imported-consent-view", owner_key: owner.owner_key, conversation_id: owner.conversation_id,
+    selection_revision: 1, interpretation: { kind: "parent_graph_v1" }, cursor: { kind: "after_message", message_id: "image-question" } } satisfies HistoryLoadReceipt["view"]
   mocks.selection = {
     beginLoad: vi.fn(), fence: () => () => true,
-    loadConversation: vi.fn(async (value: any) => { target = value; return true }),
-    getCurrent: () => bound ? { owner: { kind: "local", conversation_id: "imported" }, capture: { status: "unsupported_history_capability", code: "unsupported_local_message_assets" } } : { owner: { kind: "unavailable", code: "unbound_local_history" } }
+    loadConversation: vi.fn(async (value: any, _reference: unknown, opened?: (receipt: { owner: typeof owner; view: typeof view }) => void) => {
+      target = value
+      if (bound) opened?.({ owner, view })
+      return true
+    }),
+    getCurrent: () => bound ? { owner, view, capture: { status: "unsupported_history_capability", code: "unsupported_local_message_assets" } } : { owner: { kind: "unavailable", code: "unbound_local_history" } }
   }
   const deps = { setServerChatId: vi.fn(), setHistoryId: vi.fn(), setHistory: vi.fn(), setMessages: vi.fn(), setSelectedModel: vi.fn(), setSelectedSystemPrompt: vi.fn(), setSystemPrompt: vi.fn(), setContextFiles: vi.fn() }
   const { result, unmount } = renderHook(() => useLoadLocalConversation(deps, { t: key => key, errorLogPrefix: "load", errorDefaultMessage: "failed" }))

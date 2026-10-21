@@ -173,3 +173,12 @@ Two original New-during-held-preparation tests exposed a production lock retaine
 The original document19 and draft34 cases pass53/53 in one run. One added late-old/held-new control passes separately with19excluded, qualifying54unique, not one54green run. The separate extracted compact command fixture now supplies its missing revision/owner normalization adapter and neutral intent/context prerequisites; all12original scene/New/edit/Undo/model/tool/file assertions pass. That adapter does not qualify context-mode/account changes. ESLint source17/17,test8/8,Scene0/0 inherited,0new; PythonBandit is inapplicable. Independent connected final review is clear for this batch only. Normal configured checks precede publication.
 
 Connected Sidepanel harness and two history fixture repairs remain separate WIP. The original disconnected readonly assertion stays intact pending the existing human question; final-head required statuses, expanded-summary disposition and normal verified merge remain open.
+
+
+## History fixture receipt qualification
+
+Cold-session fixture exports the current local binding dependency with an explicit unexpected-binding failure, preserving real H1/lease execution for already-owned rows. The explicit imported-consent fake controller supplies a matching local profile/owner and a typed valid view/opened receipt; the real draft transition still decides admission. Every original pre-binding refusal, readable-row, metadata, prompt, model, file and title assertion stays unchanged.
+
+Initial complete48+21history cohort passes69/69. Independent review identified an invalid fixture cursor/missing session ID hidden by existing any; corrected to a typed HistoryLoadReceipt view with a fixed session and after_message/image-question. The exact consent case passes again1with20excluded. This qualifies69unique cases across full/focused runs, not one final69green run. Initial ESLint14/14and17/17 inherited,0new; final typed-file lint and configured checks precede publication. No production logic, architecture rule, dependency or baseline changes; no new ADR or PythonBandit scope. Connected final receipt review precedes commit.
+
+Preparation batch caa155f739b828ebcfc822ff802cbbf91898d00c is committed locally. Connected Sidepanel harness remains WIP and readonly disposition is pending. Fresh b299 UX Smoke log119203461533 confirms the obsolete final blanket selected-history Regenerate-disabled expectation; it requires contract-preserving qualification. Other final-head gates and verified merge remain open.

@@ -43,6 +43,7 @@ const bookmarkKey = (scope: any, owner: any) =>
   ])
 vi.mock("@/db/dexie/history-selection", () => ({
   ensureLocalProfileId: () => mocks.profile(),
+  bindUnboundLocalHistory: async () => { throw new Error("Unexpected local binding in cold-session fixture") },
   getLocalHistoryOwner: async (id: string) => ({
     kind: "local",
     profile_id: "profile",
