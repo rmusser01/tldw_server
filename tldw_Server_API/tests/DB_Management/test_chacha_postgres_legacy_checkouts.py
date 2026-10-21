@@ -230,7 +230,7 @@ def test_a_guard_dropped_off_its_owning_thread_queues_without_closing(monkeypatc
 
     armed.clear()  # this thread, not the owner, drops the guard
 
-    assert [(backend, queued.closed) for backend, queued, _owner in [dropped.get_nowait()]] == [("backend", False)]
+    assert [(entry[0], entry[1].closed) for entry in [dropped.get_nowait()]] == [("backend", False)]
 
 
 def test_close_all_connections_leaves_a_live_threads_checkout_to_that_thread(ledger_backend, tmp_path, monkeypatch):
@@ -290,3 +290,23 @@ def test_a_drain_leaves_a_checkout_queued_while_its_owner_thread_lives(monkeypat
     chacha_module._return_dropped_checkouts()
 
     assert (while_owner_lives, returned) == (([], False, 1), [conn])
+
+
+def test_a_forked_childs_drain_forgets_the_parents_queued_checkouts(monkeypatch):
+    """A child inherits a copy of the queue; those are the parent's sockets, so it neither returns nor closes them."""
+    dropped = queue.SimpleQueue()
+    monkeypatch.setattr(chacha_module, "_DROPPED_CHECKOUTS", dropped)
+    returned = []
+    backend = SimpleNamespace(get_pool=lambda: SimpleNamespace(return_connection=returned.append))
+    conn = SimpleNamespace(closed=False)
+    conn.close = lambda: setattr(conn, "closed", True)
+    armed, parent_pid = [], os.getpid() + 1
+    with monkeypatch.context() as parent:
+        parent.setattr(os, "getpid", lambda: parent_pid)
+        _run_in_plain_thread(lambda: armed.append(chacha_module._LegacyCheckout(conn, backend)))
+        armed.clear()  # queued in the parent, off its owner's thread
+    queued_in_parent = dropped.qsize()
+
+    chacha_module._return_dropped_checkouts()  # the child drains
+
+    assert (queued_in_parent, returned, conn.closed, dropped.qsize()) == (1, [], False, 0)

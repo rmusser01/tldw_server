@@ -469,7 +469,7 @@ _CHACHA_NONCRITICAL_EXCEPTIONS = (
     ConflictError,
 )
 
-_DROPPED_CHECKOUTS: queue.SimpleQueue[tuple[Any, Any, Any]] = queue.SimpleQueue()
+_DROPPED_CHECKOUTS: queue.SimpleQueue[tuple[Any, Any, Any, int]] = queue.SimpleQueue()
 
 
 class _LegacyCheckout:
@@ -493,6 +493,9 @@ class _LegacyCheckout:
       entry, and the pool slot, for good; dev lost that slot anyway.
     - ``close_all_connections()`` keeps the ``threading.local`` on PostgreSQL, so it
       never drops another thread's slot.
+    - Each entry records the pid that queued it. A forked child inherits a copy of
+      the queue, and its drain forgets the parent's entries untouched: they are the
+      parent's sockets.
     """
 
     __slots__ = ("backend", "conn", "owner", "pid", "thread_id")
@@ -522,7 +525,7 @@ class _LegacyCheckout:
                 owner = None  # closed, so the drain may return it at once
             # Lock-free: a collection can run this on any thread, even one holding the
             # pool's own lock, so the pool's bookkeeping waits for _return_dropped_checkouts().
-            _DROPPED_CHECKOUTS.put((self.backend, self.conn, owner))
+            _DROPPED_CHECKOUTS.put((self.backend, self.conn, owner, self.pid))
         except Exception:  # noqa: BLE001  # nosec B110
             pass  # nothing may escape a finalizer
 
@@ -538,7 +541,8 @@ def _return_dropped_checkouts() -> None:
     """Return checkouts queued by _LegacyCheckout, outside any finalizer.
 
     An entry whose owner thread is still alive goes back on the queue: that thread may
-    be inside libpq on the connection (see ``_LegacyCheckout``).
+    be inside libpq on the connection (see ``_LegacyCheckout``). An entry queued by
+    another process (inherited across fork) is dropped untouched.
     """
     still_owned = []
     while True:
@@ -546,7 +550,9 @@ def _return_dropped_checkouts() -> None:
             entry = _DROPPED_CHECKOUTS.get_nowait()
         except queue.Empty:
             break
-        backend, conn, owner = entry
+        backend, conn, owner, pid = entry
+        if pid != os.getpid():
+            continue  # the parent's socket: neither return nor close it here
         thread = owner() if owner is not None else None
         try:
             owner_alive = thread is not None and thread.is_alive()
