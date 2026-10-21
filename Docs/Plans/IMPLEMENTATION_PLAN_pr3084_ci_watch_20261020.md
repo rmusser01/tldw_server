@@ -162,3 +162,14 @@ Sibling SDK batch35e90fb83d271ac7db9f40e36cfc523642202b83 was safely published a
 The separate private Character Scene fixture likewise omitted saved identity readiness. It now declares the tracked saved-chat prerequisite and fills missing state while preserving an explicit currentfalse and freshfalse. Two new refusal controls cover unloaded props and unloaded current state. No original assertion, production guard or H1 authority changes.
 
 The initial84case run failed81/passed3; the first focused repair passed the five original progress/greeting cases, with two new controls requiring a missing value-import correction. Final complete qualification passes86/86 (original84plus2controls), covering existing auth, logout, timeout, retry, branch, attachment, greeting and cancellation assertions. ESLint25/25 inherited,0new; PythonBandit is inapplicable. Independent connected final review is clear. No durable architecture rule, API, schema, dependency or baseline changed; no new ADR is needed. Normal configured checks precede publication. Other CI, required final-head statuses, trusted summary disposition and verified merge remain open.
+
+
+## Preparation retirement repair
+
+Character fixture batch b299e13f583c96cf644b3735d088877ad0811089 was safely published and GitHub read back OPEN/dev/unarmed.
+
+Two original New-during-held-preparation tests exposed a production lock retained after cancellation. Each preparation now carries its owning submission Symbol, and both retirement sites release only that token. Existing draft/account/context/scene admission, abort, identity and finalizer comparisons remain. No interface, schema, durable architecture rule or baseline changed; no new ADR is needed.
+
+The original document19 and draft34 cases pass53/53 in one run. One added late-old/held-new control passes separately with19excluded, qualifying54unique, not one54green run. The separate extracted compact command fixture now supplies its missing revision/owner normalization adapter and neutral intent/context prerequisites; all12original scene/New/edit/Undo/model/tool/file assertions pass. That adapter does not qualify context-mode/account changes. ESLint source17/17,test8/8,Scene0/0 inherited,0new; PythonBandit is inapplicable. Independent connected final review is clear for this batch only. Normal configured checks precede publication.
+
+Connected Sidepanel harness and two history fixture repairs remain separate WIP. The original disconnected readonly assertion stays intact pending the existing human question; final-head required statuses, expanded-summary disposition and normal verified merge remain open.

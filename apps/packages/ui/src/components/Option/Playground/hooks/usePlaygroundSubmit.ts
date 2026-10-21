@@ -266,6 +266,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
     currentDocumentSelectionKey
   )
   const activeDocumentPreparationRef = React.useRef<{
+    submission: symbol
     controller: AbortController
     selectionKey: string
     isCurrent: () => boolean
@@ -278,6 +279,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       active.controller.abort()
       if (activeDocumentPreparationRef.current === active) {
         activeDocumentPreparationRef.current = null
+        if (activeSubmissionRef.current === active.submission) activeSubmissionRef.current = null
         setIsPreparingDocuments(false)
       }
     }
@@ -324,6 +326,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
         activePreparation.controller.abort()
         if (activeDocumentPreparationRef.current === activePreparation) {
           activeDocumentPreparationRef.current = null
+          if (activeSubmissionRef.current === activePreparation.submission) activeSubmissionRef.current = null
           setIsPreparingDocuments(false)
         }
       }
@@ -341,6 +344,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       const submission = Symbol("playground-submit")
       activeSubmissionRef.current = submission
       let documentPreparation: {
+        submission: symbol
         controller: AbortController
         selectionKey: string
         isCurrent: () => boolean
@@ -577,6 +581,7 @@ export function usePlaygroundSubmit(deps: UsePlaygroundSubmitDeps) {
       let actorSceneSend: ActorSceneSend | undefined
       if (!intent.isImageCommand) {
         documentPreparation = {
+          submission,
           controller: new AbortController(),
           selectionKey: currentDocumentSelectionKeyRef.current,
           isCurrent: () => preparationIsCurrent() && sceneCapture?.isCurrent() !== false
