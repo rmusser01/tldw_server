@@ -92,7 +92,7 @@ describe("B02 canonical partial reply display", () => {
     const before = JSON.stringify(capture)
     const display = formatSelectedHistory(capture)
 
-    expect(display.messages[1].generationInfo).toMatchObject({ interrupted: true, stopped: status === "stopped", custom: "retained" })
+    expect(display.messages[1].generationInfo).toEqual({ interrupted: true, stopped: status === "stopped" })
     expect(display.messages[1].serverMessageId).toBe("srv-msg-assistant-1")
     expect(display.messages[1].metadataExtra).toEqual(capture.selected_content[1].extra_metadata)
     expect(JSON.stringify(capture)).toBe(before)
