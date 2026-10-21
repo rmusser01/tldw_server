@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.Web_Scraping import enhanced_web_scraping as scrap
 from tldw_Server_API.app.services import enhanced_web_scraping_service as enhanced
 from tldw_Server_API.app.services import web_scraping_service as service
 from tldw_Server_API.app.services.ephemeral_store import ephemeral_storage
+from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402, refuse_llm_work
 
 pytestmark = pytest.mark.integration
 PROMPT_ID = "media.web.summarization"
@@ -525,3 +526,61 @@ def test_persistence_uses_authenticated_prompt_owner(
     assert response.json()["stored_articles"] == 1
     assert owners == [2]
     assert {call["system_message"] for call in context.calls} == {"Owner 2 system {literal}"}
+
+
+WEB_SUMMARY_REQUESTS = [
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "individual", "api_name": "openai", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content",
+    ),
+    # The crawl methods summarize with a default provider when none is named (TASK-13864 review I1).
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "url_level", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content-url-level-default-provider",
+    ),
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "recursive_scraping", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content-recursive-default-provider",
+    ),
+    pytest.param(
+        "/api/v1/media/process-web-scraping",
+        {
+            "scrape_method": "Individual URLs",
+            "url_input": "https://example.com/a",
+            "api_name": "openai",
+            "mode": "ephemeral",
+            "perform_chunking": False,
+        },
+        "summarize_checkbox",
+        id="process-web-scraping",
+    ),
+]
+
+
+@pytest.mark.parametrize(("path", "body", "summarize_flag"), WEB_SUMMARY_REQUESTS)
+def test_summaries_for_an_over_quota_user_are_refused_before_any_page_is_fetched(
+    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, path: str, body: dict[str, Any], summarize_flag: str
+) -> None:
+    """The 402 comes first, so no page is fetched and then discarded (TASK-13864)."""
+    refuse_llm_work(monkeypatch)
+    response = context.client.post(path, json={**body, summarize_flag: True})
+    assert_llm_quota_402(response)
+    assert context.fetches == []
+    assert context.calls == []
+
+
+@pytest.mark.parametrize(("path", "body", "summarize_flag"), WEB_SUMMARY_REQUESTS)
+def test_scraping_without_summaries_is_not_refused(
+    context: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, path: str, body: dict[str, Any], summarize_flag: str
+) -> None:
+    """Without summaries there is no LLM work to refuse, so the page comes back."""
+    refuse_llm_work(monkeypatch)
+    response = context.client.post(path, json={**body, summarize_flag: False})
+    assert response.status_code == 200, response.text
+    assert context.fetches == ["https://example.com/a"]

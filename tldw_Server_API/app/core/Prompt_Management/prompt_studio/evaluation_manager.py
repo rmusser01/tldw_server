@@ -262,6 +262,7 @@ class EvaluationManager:
                     {
                         "status": "failed",
                         "completed_at": datetime.utcnow(),
+                        "test_run_ids": test_run_ids,
                         "error_message": f"{refusal.failure_code}: {refusal.detail['message']}",
                     },
                 )

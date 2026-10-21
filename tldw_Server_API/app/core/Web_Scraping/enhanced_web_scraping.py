@@ -17,6 +17,7 @@ Persistent caches:
 import asyncio
 import atexit
 import contextlib
+import contextvars
 import hashlib
 import json
 import os
@@ -42,7 +43,7 @@ from playwright.async_api import Browser, async_playwright
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from tldw_Server_API.app.core.config import load_and_log_configs
-from tldw_Server_API.app.core.exceptions import NetworkError
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, NetworkError
 from tldw_Server_API.app.core.http_client import afetch
 
 #
@@ -264,6 +265,8 @@ class ScrapingJob:
     error: Optional[str] = None
     metadata: dict[str, Any] = field(default_factory=dict)
     cancel_requested: bool = False
+    # The submitting request's context; the job runs in it (TASK-13864). Dropped when the job ends.
+    context: Optional[contextvars.Context] = field(default=None, repr=False, compare=False)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert job to dictionary"""
@@ -665,6 +668,7 @@ class ScrapingJobQueue:
             self._completed_jobs.pop(oldest_job_id, None)
 
     def _record_completed_job(self, job: ScrapingJob) -> None:
+        job.context = None
         self._completed_jobs[job.job_id] = job
         self._trim_completed_jobs()
 
@@ -704,6 +708,7 @@ class ScrapingJobQueue:
         async with self._lock:
             # Create future for job result
             future = asyncio.Future()
+            job.context = contextvars.copy_context()
             self._job_futures[job.job_id] = future
             self._pending_jobs[job.job_id] = job
 
@@ -755,8 +760,8 @@ class ScrapingJobQueue:
                     continue
                 logger.info(f"{worker_id} processing job {job.job_id}")
 
-                # Execute job (implement actual scraping logic)
-                result = await self._execute_job(job)
+                # Execute the job as its submitter: their user, and their admission if any (TASK-13864).
+                result = await asyncio.create_task(self._execute_job(job), context=job.context)
 
                 # Update job status
                 async with self._lock:
@@ -801,7 +806,7 @@ class ScrapingJobQueue:
 
             except asyncio.TimeoutError:
                 continue
-            except _WEBSCRAPE_NONCRITICAL_EXCEPTIONS as e:
+            except (*_WEBSCRAPE_NONCRITICAL_EXCEPTIONS, LLMQuotaExceededError) as e:
                 logger.error(f"{worker_id} error: {e}")
                 if job:
                     async with self._lock:

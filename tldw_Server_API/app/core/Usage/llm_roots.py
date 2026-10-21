@@ -58,6 +58,8 @@ def llm_call_root(user_id: Any, *, operation: str | None = None) -> Iterator[Non
     An owner that is not a number sets no user, and never clears one that is
     already set. A root is never admitted by the request that started it: its
     calls are quota-checked when they run (LLM usage accounting spec §4a, §4b).
+    A media ingest job that asks for analysis checks once when it starts, and
+    then marks itself admitted until it ends (TASK-13864).
     """
     overrides: dict[str, Any] = {"prechecked": False}
     resolved = as_quota_user_id(user_id)

@@ -107,3 +107,27 @@ async def test_background_evaluation_does_not_raise_the_refusal(monkeypatch: pyt
 
     # Only the start is written here: the generic handler does not overwrite the manager's llm_quota_exceeded record.
     assert [update["status"] for update in db.updates] == ["running"]
+
+
+@pytest.mark.asyncio
+async def test_a_refused_evaluation_keeps_the_links_to_the_cases_that_ran(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The failed record still points to the test runs stored before the refusal (TASK-13864)."""
+    db = _EvaluationDb()
+    calls: list[dict[str, Any]] = []
+
+    def _second_refused(self: EvaluationManager, **kwargs: Any) -> Any:
+        calls.append(kwargs)
+        if len(calls) > 1:
+            raise _refusal()
+        return "a"
+
+    monkeypatch.setattr(EvaluationManager, "_call_adapter_text", _second_refused)
+
+    with pytest.raises(LLMQuotaExceededError):
+        await EvaluationManager(db).run_evaluation_with_existing_record(
+            evaluation_id=5, prompt_id=1, test_case_ids=[2, 3], model="m"
+        )
+
+    assert len(db.runs) == 1
+    assert db.updates[-1]["status"] == "failed"
+    assert db.updates[-1]["test_run_ids"] == [1]
