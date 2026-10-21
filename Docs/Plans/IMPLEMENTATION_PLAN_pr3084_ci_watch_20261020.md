@@ -284,3 +284,12 @@ The minimal fixture correction awaits async React act around that exact initial 
 Current cc02 shared-ui-coverage2/16 job119344249482 fails the hash Back case with zero confirmations while2,089other cases pass. The unchanged complete16-case navigation file passes locally under V8, so no local red reproduction is claimed. Its final substring root-route wait also accepts the old /programmatic route, allowing router disposal before the asynchronous POP/blocker confirmation.
 
 The minimal correction requires the exact root route before unmount. All original confirmation-count, error, disposal and timeout checks remain, as does production code. The complete candidate16/16 passes with V8; ESLint0/0. Independent connected review and normal configured path hooks precede publication. No new architecture rule, dependency, baseline or allowance; no new ADR or PythonBandit scope. Hosted shard closure and all seven actual final-head required statuses remain pending.
+
+
+## WXT build child memory admission
+
+Current c99 Extension Research Workspace Parity job119351225684 fails before tests when production Chrome WXT exhausts the default approximately4GiB heap. Both shared profile wrappers inherit caller env, and zip independently performs a production build. The frontend8192 setting belongs to coverage reporting, not the extension build job; the earlier hypothesis was corrected after source review.
+
+Both WXT children now default absent NODE_OPTIONS to6144MiB while retaining explicit caller options, including empty, and leaving parent env unchanged. The same one-line default in each existing child boundary avoids a new abstraction and keeps the existing isolated live-tier environment policy. No runtime ownership/security rule, dependency, quality/coverage allowance or durable architecture decision changes; no new ADR or PythonBandit scope.
+
+The absent-option regressions first fail2with11passing; final complete connected build/zip/profile scope16/16passes. The actual Chrome production build with no parent NODE_OPTIONS exits0 in55.6seconds and exports50.45MB. Both scripts pass node syntax; ESLint build0/zip2inherited/test0, no new findings. Independent final connected review and five-path normal hooks precede publication. The heap cap does not bound totalRSS; Firefox/Edge/archive and actual parity browser scenarios remain hosted qualification, as do all seven final-head required statuses.
