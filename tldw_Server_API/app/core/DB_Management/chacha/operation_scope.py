@@ -213,6 +213,12 @@ def chacha_operation(
             _current_operation.reset(token)
 
 
+def current_operation_is_open() -> bool:
+    """Whether an open ChaCha operation owns this context's PostgreSQL checkouts."""
+    owner = _current_operation.get()
+    return owner is not None and not owner._closed
+
+
 class ChaChaOperationMiddleware:
     """Own the complete HTTP ASGI response, including stream/background work."""
 
