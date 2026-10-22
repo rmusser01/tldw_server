@@ -94,6 +94,8 @@ vi.mock("@/hooks/useMigration", () => ({
 }))
 
 vi.mock("@/hooks/useFeatureFlags", () => ({
+  FEATURE_FLAGS: { COMPARE_MODE: "ff_compareMode" },
+  useFeatureFlag: () => [false, () => undefined, true],
   useChatSidebar: () => [sidebarState.enabled]
 }))
 

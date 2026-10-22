@@ -70,6 +70,18 @@ describe("ParameterPresets guard", () => {
     expect(source).toContain("Presence penalty")
   })
 
+  // CC-09 (#3101): the Pro advanced row showed four unlabeled icons.
+  it("shows a visible Generation style label and option names when asked", () => {
+    render(React.createElement(ParameterPresets, { showLabel: true }))
+
+    expect(screen.getByText("Generation style")).toBeVisible()
+    const group = screen.getByRole("radiogroup", { name: "Generation style" })
+    for (const name of ["Creative", "Balanced", "Precise", "Custom"]) {
+      const label = within(group).getByText(name)
+      expect(label).not.toHaveClass("sr-only")
+    }
+  })
+
   it("labels compact segmented controls and icon-only options for assistive tech", () => {
     render(React.createElement(ParameterPresets, { compact: true }))
 

@@ -4487,6 +4487,9 @@
   "empty_connectAction": {
     "message": "Connect server"
   },
+  "empty_connectingDescription": {
+    "message": "Connecting to your tldw server. You can start writing your first message below."
+  },
   "composer_advancedCustomization": {
     "message": "Advanced customization"
   },
@@ -4594,5 +4597,20 @@
   },
   "composer_advancedPreferenceUnavailable": {
     "message": "Display preference unavailable. Advanced controls still work for this visit."
+  },
+  "composer_placeholderWithMentions": {
+    "message": "Type a message... (/ commands, @ mentions)"
+  },
+  "composer_placeholderCommands": {
+    "message": "Type a message... (/ for commands)"
+  },
+  "composer_connectingNotice": {
+    "message": "Connecting to your tldw server…"
+  },
+  "composer_providerStatusConnecting": {
+    "message": "Connecting…"
+  },
+  "composer_connectionPendingSend": {
+    "message": "Still connecting to your tldw server. Your draft has not been sent."
   }
 }

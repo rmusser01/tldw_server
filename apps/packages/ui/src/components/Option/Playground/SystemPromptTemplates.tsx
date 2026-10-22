@@ -583,6 +583,8 @@ type TemplatesButtonProps = {
   systemPrompt?: string;
   onSystemPromptChange?: (prompt: string) => void;
   className?: string;
+  /** "compact" matches the small composer toolbar controls beside it (CC-09). */
+  size?: "default" | "compact";
 };
 
 export const SystemPromptTemplatesButton: React.FC<TemplatesButtonProps> = ({
@@ -590,6 +592,7 @@ export const SystemPromptTemplatesButton: React.FC<TemplatesButtonProps> = ({
   systemPrompt,
   onSystemPromptChange,
   className,
+  size = "default",
 }) => {
   const { t } = useTranslation(["playground"]);
   const [open, setOpen] = React.useState(false);
@@ -600,9 +603,13 @@ export const SystemPromptTemplatesButton: React.FC<TemplatesButtonProps> = ({
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className={`flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-sm text-text-muted transition-colors hover:border-primary/50 hover:bg-surface-hover hover:text-text ${className || ""}`}
+          className={`flex items-center border border-border text-text-muted transition-colors hover:border-primary/50 hover:bg-surface-hover hover:text-text ${
+            size === "compact"
+              ? "gap-1 rounded-md px-2 py-1 text-xs font-medium"
+              : "gap-1.5 rounded-lg px-2.5 py-1.5 text-sm"
+          } ${className || ""}`}
         >
-          <BookText className="h-4 w-4" />
+          <BookText className={size === "compact" ? "h-3.5 w-3.5" : "h-4 w-4"} />
           <span className="hidden sm:inline">
             {t("playground:templates.button", "System prompts")}
           </span>

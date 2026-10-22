@@ -23,6 +23,7 @@ import {
 import { useShortcutConfig, formatShortcut } from "@/hooks/keyboard/useShortcutConfig"
 import { isMac } from "@/hooks/keyboard/useKeyboardShortcuts"
 import { useStartTutorial } from "@/hooks/useStartTutorial"
+import { FEATURE_FLAGS, useFeatureFlag } from "@/hooks/useFeatureFlags"
 import { useHelpModal, useTutorialStore } from "@/store/tutorials"
 import {
   getTutorialsForRoute,
@@ -241,6 +242,8 @@ export function PageHelpModal({
   const { t } = useTranslation(["common", "tutorials"])
   const location = useLocation()
   const { shortcuts } = useShortcutConfig()
+  // Compare stays hidden until it is verified (owner decision D4).
+  const [compareEnabled] = useFeatureFlag(FEATURE_FLAGS.COMPARE_MODE)
 
   // Get tutorials for current route
   const availableTutorials = useMemo(
@@ -351,13 +354,17 @@ export function PageHelpModal({
                   ),
                   keys: "Alt + Shift + A"
                 },
-                {
-                  label: t(
-                    "common:shortcuts.toggleCompare",
-                    "Toggle compare mode (when enabled)"
-                  ),
-                  keys: "Alt + Shift + C"
-                },
+                ...(compareEnabled
+                  ? [
+                      {
+                        label: t(
+                          "common:shortcuts.toggleCompare",
+                          "Toggle compare mode (when enabled)"
+                        ),
+                        keys: "Alt + Shift + C"
+                      }
+                    ]
+                  : []),
                 {
                   label: t(
                     "common:shortcuts.toggleModes",
@@ -463,7 +470,8 @@ export function PageHelpModal({
       scope,
       modeNavigationEnabled,
       sidebarToggleEnabled,
-      quickChatEnabled
+      quickChatEnabled,
+      compareEnabled
     ]
   )
 
