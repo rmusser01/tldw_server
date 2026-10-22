@@ -160,11 +160,17 @@ work (`history-turn-retry.ts`, `085d266b95`, `eb0c8c9e52`).
     are the Postgres variants.
   - NL-N1: the endpoint suite (5 of 8 red on dev), a real PostgreSQL test
     (pgserver) and the SQL-shape owner test.
-- **Ratchet baselines.**
-  - `a11y.json` was emptied by a11y-visual (AX-07, AX-16), and notes-layout
-    lowered its counts by analysis.
-  - Both need a live `bun run e2e:ux-regression` re-record. CI's advisory
-    ux-regression job reports the measured counts.
+- **Ratchet baselines, measured live.** Three runs of the accessibility and
+  request-budget ratchets (`--grep`, which skips the deferred43
+  instrumentation: its pinned node_modules hashes do not match this machine).
+  - The first run found an empty-library scroller with no focusable content,
+    a faded Send label that failed contrast, and lower request counts. All
+    three were fixed or recorded (`af6019d98a`).
+  - The next two runs passed all 7 checks.
+  - `a11y.json` is empty: no serious or critical violations in any scanned
+    state.
+  - Request budget: /notes 21 and /chat 22 API requests; the buddy polling
+    entries are removed.
 
 ## 5. Follow-ups
 
