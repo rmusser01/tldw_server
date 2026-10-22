@@ -366,11 +366,16 @@ describe("NotesManagerPage stage 40 advanced editing and navigation", () => {
     renderPage()
 
     await screen.findByPlaceholderText("Write your note here... (Markdown supported)")
-    for (const label of ["Formatting", "Assist", "Markdown + LaTeX supported"]) {
+    for (const label of ["Formatting", "Assist"]) {
       const element = screen.getAllByText(label)[0]
       expect(element, label).toHaveClass("text-[11px]", "text-text-muted")
       expect(element.className, label).not.toMatch(/ant-typography/)
     }
+    // The editor hint under the content field; its wording depends on whether
+    // a note is open (NO-04), its styling does not.
+    const hint = document.getElementById("notes-editor-content-help")
+    expect(hint).toHaveClass("text-[11px]", "text-text-muted")
+    expect(hint?.className).not.toMatch(/ant-typography/)
   }, 10000)
 
   // AX-15 (#3124): the active input mode was shown by button fill only.
