@@ -92,7 +92,8 @@ async def _chatbooks_cleanup_pass(env, monkeypatch):
     monkeypatch.setattr(cleanup, "ChatbookService", Service)
     monkeypatch.setattr(cleanup, "_enumerate_user_ids", lambda: [1])
     monkeypatch.setenv("CHATBOOKS_CLEANUP_INTERVAL_SEC", "1")
-    await asyncio.wait_for(cleanup.run_chatbooks_cleanup_loop(stop), timeout=30)
+    # The pass builds the ChaCha schema in a fresh database: 37 s once under a loaded sweep.
+    await asyncio.wait_for(cleanup.run_chatbooks_cleanup_loop(stop), timeout=60)
 
 
 async def _chatbooks_core_job(env, monkeypatch):
@@ -111,7 +112,7 @@ async def _chatbooks_core_job(env, monkeypatch):
     monkeypatch.setattr(core_worker, "JobManager", lambda: jobs)
     monkeypatch.setattr(core_worker, "ChatbookService", _ReadingChatbookService)
     monkeypatch.setenv("JOBS_POLL_INTERVAL_SECONDS", "0.05")
-    await asyncio.wait_for(core_worker.run_chatbooks_core_jobs_worker(stop), timeout=30)
+    await asyncio.wait_for(core_worker.run_chatbooks_core_jobs_worker(stop), timeout=60)
 
 
 async def _ingestion_notes_sync(env, monkeypatch):
