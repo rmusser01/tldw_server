@@ -491,7 +491,19 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
       </div>
 
       {/* Content area */}
-      <div className="min-h-0 flex-1 overflow-auto p-4" data-testid="notes-results-scroll">
+      {/* With no rows to focus, the scrolling area itself is the Tab stop so
+          keyboard users can scroll it (axe scrollable-region-focusable). */}
+      <div
+        className="min-h-0 flex-1 overflow-auto p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus"
+        data-testid="notes-results-scroll"
+        {...(hasNotes
+          ? {}
+          : {
+              tabIndex: 0,
+              role: 'region',
+              'aria-label': t('option:notesSearch.resultsRegionLabel', { defaultValue: 'Notes list' })
+            })}
+      >
       {isRefreshingRows && (
         <div className="sticky top-0 z-10 h-0" aria-hidden="true" data-testid="notes-list-refreshing">
           <div className="h-0.5 w-full animate-pulse rounded-full bg-primary/60" />

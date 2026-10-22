@@ -314,8 +314,9 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       isHistorySelectionPending ||
       (!isConnectionReady && !activeCharacterSendBlocker) ||
       (activeCharacterSendBlocker && characterChatSendBlocker.disabled === true)
-    // Dim (but keep) the plain Send action while the draft is empty. A
-    // disabled button already has its own muted style, so skip it then.
+    // Quiet (but keep) the plain Send action while the draft is empty: a
+    // default button rather than a faded primary one, so its label keeps its
+    // contrast. A disabled button already has its own muted style.
     const draftEmpty =
       !hasDraftContent &&
       !primaryDisabled &&
@@ -342,7 +343,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
           }`}
         >
           <Button
-            type="primary"
+            type={draftEmpty ? "default" : "primary"}
             size={controlSize}
             htmlType={
               activeCharacterSendBlocker || shouldQueuePrimaryAction
@@ -351,11 +352,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
             }
             onClick={handlePrimaryButtonClick}
             disabled={primaryDisabled}
-            className={
-              `${isMobileViewport ? "min-h-[44px] min-w-[44px]" : ""} ${
-                draftEmpty ? "opacity-60" : ""
-              }`.trim() || undefined
-            }
+            className={isMobileViewport ? "min-h-[44px] min-w-[44px]" : undefined}
             data-draft-empty={draftEmpty ? "true" : undefined}
             title={submitDisabledReason ?? primaryActionTitle}
             aria-label={primaryActionAriaLabel}

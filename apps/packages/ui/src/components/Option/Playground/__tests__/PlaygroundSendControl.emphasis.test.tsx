@@ -51,15 +51,17 @@ describe("PlaygroundSendControl emphasis", () => {
     const { rerender } = render(
       <PlaygroundSendControl {...casualDesktop} hasDraftContent={false} />
     )
-    expect(screen.getByRole("button", { name: "Send message" })).toHaveAttribute(
-      "data-draft-empty",
-      "true"
-    )
+    const quiet = screen.getByRole("button", { name: "Send message" })
+    expect(quiet).toHaveAttribute("data-draft-empty", "true")
+    // Quieter, but still readable: a plain button, not a faded primary one
+    // whose label fails contrast (axe color-contrast on /chat).
+    expect(quiet).not.toHaveClass("ant-btn-primary")
+    expect(quiet).not.toHaveClass("opacity-60")
 
     rerender(<PlaygroundSendControl {...casualDesktop} hasDraftContent />)
-    expect(
-      screen.getByRole("button", { name: "Send message" })
-    ).not.toHaveAttribute("data-draft-empty")
+    const ready = screen.getByRole("button", { name: "Send message" })
+    expect(ready).not.toHaveAttribute("data-draft-empty")
+    expect(ready).toHaveClass("ant-btn-primary")
   })
 
   it("does not dim Send a second time when it is already disabled", () => {

@@ -163,3 +163,22 @@ describe("NotesListPanel AX-03 keyboard access", () => {
     expect(description).toMatch(/Enter/)
   })
 })
+
+// axe scrollable-region-focusable: an empty library has no rows to focus, so
+// the scrolling results area itself must be reachable and named. With rows,
+// the rows stay the single Tab stop.
+describe("NotesListPanel results scroller", () => {
+  it("is a named Tab stop when there are no notes to focus", () => {
+    renderPanel({ notes: [], total: 0 })
+
+    const scroller = screen.getByTestId("notes-results-scroll")
+    expect(scroller).toHaveAttribute("tabindex", "0")
+    expect(scroller).toHaveAccessibleName("Notes list")
+  })
+
+  it("adds no Tab stop when the rows are focusable", () => {
+    renderPanel()
+
+    expect(screen.getByTestId("notes-results-scroll")).not.toHaveAttribute("tabindex")
+  })
+})

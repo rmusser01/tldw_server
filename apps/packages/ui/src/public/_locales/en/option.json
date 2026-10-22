@@ -7003,5 +7003,8 @@
   },
   "notesSearch_tagMatchAny": {
     "message": "Any of these tags"
+  },
+  "notesSearch_resultsRegionLabel": {
+    "message": "Notes list"
   }
 }
