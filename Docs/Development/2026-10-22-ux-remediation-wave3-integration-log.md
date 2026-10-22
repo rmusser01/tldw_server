@@ -202,3 +202,47 @@ work (`history-turn-retry.ts`, `085d266b95`, `eb0c8c9e52`).
   - NL-N1: tag tokens now match exactly. Several tokens default to "all", so
     Inbox plus a tag shows captured notes that have the tag, and a notebook
     with several tags shows notes that have all of them.
+
+## 6. CI fixes after the PR opened
+
+The first CI run on #3298 failed in suites that the local runs did not
+cover. Each fix follows the merged behaviour, not the older one.
+
+- **Real defects.**
+  - *History links (XP-05).* A `/chat?historySelection=…` link kept its
+    parameter in the address. The Playground removes it with
+    `history.replaceState`, which the router does not see, and the new chat
+    address sync then wrote the router's stale query back. The sync now
+    waits while the browser address still carries the handoff and drops it
+    once it is consumed (`historyHandoffState`, `withoutHistoryHandoff`).
+  - *Prompt review contrast.* Findings in the prompt-improvement sheet used
+    `bg-muted/50` behind muted text: 2.96:1 in dark, about 3:1 in light.
+    They now use surface-2 (5.1:1 light, 8.3:1 dark). The AX-19
+    reduced-motion CSS made the sheet open instantly, so axe measured text
+    that it had skipped mid-animation before.
+  - *Bundle budget.* The shared app shell measured 601.4 KB in CI. The
+    budget is now 604 KB (`d924bccb32`); it needs an owner look.
+- **Tests written on `dev` against the old behaviour.**
+  - Side-panel model validation (new on `dev` after the lanes branched): the
+    side panel now picks a model when none is chosen (XS-02), so the
+    missing-model cases mount with an empty catalog and a new case checks the
+    startup pick. The chip stays visible.
+  - The busy primary action is "Send after this reply" (XS-10).
+  - Study-pack sources are named by title (NE-08).
+  - The composition preview names the model "gpt-4o (OpenAI)"; the raw route
+    sits under Details in the runtime inspector (CC-06).
+  - A chat stream expects the `[DONE]` sentinel (CM-03).
+  - The sidepanel composer renders the response status node.
+  - The extension's English playground messages mirror 21 new keys.
+  - The NL-N1 422 test also checks which parameter was rejected
+    (test-quality ratchet).
+  - The four journeys that open a history link accept the saved chat's own
+    `?chat=` address and check that the handoff is gone.
+- **Failures that are not from this branch.**
+  - `test_history_selection_transactions.py`, the four
+    `native_admission_capture_refuses_*` cases (SQLite and PostgreSQL), fail
+    on `dev` `d47c9ccf58` too.
+  - `DataOpsPage.backup-restore` timed out once in a coverage shard (82 s;
+    24 s locally, where it passes). The branch does not touch Admin.
+  - The extension E2E job once timed out installing Playwright (apt mirror)
+    before any test ran.
