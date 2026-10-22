@@ -315,8 +315,8 @@ export function PageHelpModal({
             ? [
                 {
                   label: t(
-                    "common:shortcuts.toggleChatModeRag",
-                    "Switch normal / RAG chat mode"
+                    "common:shortcuts.toggleChatWithPage",
+                    "Toggle chat with current page"
                   ),
                   keys: formatShortcut(shortcuts.toggleChatMode)
                 },

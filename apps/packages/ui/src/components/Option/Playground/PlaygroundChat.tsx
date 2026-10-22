@@ -12,6 +12,7 @@ import { useMessageOption } from "@/hooks/useMessageOption"
 import { useDynamicUIActionBridge } from "@/hooks/chat/useDynamicUIActionBridge"
 import { assistantSelectionToCharacter } from "@/types/assistant-selection"
 import { PlaygroundEmpty } from "./PlaygroundEmpty"
+import { ServerChatLoadFailurePanel } from "./ServerChatLoadFailurePanel"
 import {
   PlaygroundMessage,
   type MessageResearchActions
@@ -539,12 +540,6 @@ export const PlaygroundChat = ({
     messages.length === 0 &&
     Boolean(serverChatId) &&
     serverChatLoadState === "failed"
-  const selectedServerChatLoadFailureMessage =
-    serverChatLoadError?.trim() ||
-    (t(
-      "playground:selectedServerChatLoadFailure",
-      "Failed to load the selected conversation."
-    ) as string)
   const showNoProvidersNotice =
     isConnected &&
     noProvidersConfigured &&
@@ -1209,11 +1204,7 @@ export const PlaygroundChat = ({
     <>
       <div className="relative flex w-full flex-col items-center pt-1 pb-4 sm:pt-8">
         {showSelectedServerChatLoadFailure ? (
-          <div className="mt-32 w-full px-6">
-            <div className="mx-auto max-w-xl rounded-xl border border-destructive/30 bg-destructive/5 px-5 py-4 text-center text-sm text-text">
-              {selectedServerChatLoadFailureMessage}
-            </div>
-          </div>
+          <ServerChatLoadFailurePanel serverChatId={serverChatId as string} technicalDetail={serverChatLoadError} />
         ) : showEmptyStarterRegion && (
           <div className="mt-1 w-full sm:mt-4">
             {chatModelsFailed && (

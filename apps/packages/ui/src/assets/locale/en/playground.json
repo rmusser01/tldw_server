@@ -602,7 +602,9 @@
       "serverInlineTitle": "Saved on your server",
       "serverInlineBody": "This chat is saved on your tldw server and on this device, so you can reopen it from server history, keep a long-term record, and analyze it alongside other conversations.",
       "serverUnconfirmedPill": "Save status unconfirmed",
-      "serverUnconfirmed": "This chat is linked to server history. Review retained outcomes and reload history to confirm the latest turn before sending again."
+      "serverUnconfirmed": "This chat is linked to server history. Review retained outcomes and reload history to confirm the latest turn before sending again.",
+      "serverNotLoadedPill": "Not loaded",
+      "serverNotLoaded": "This conversation couldn't be loaded. Your messages are safe on the server."
     },
     "conversationTags": "Conversation tags",
     "stateHelp": "Default state is “in-progress.” Update it as the conversation progresses.",
@@ -1727,5 +1729,20 @@
   },
   "shortcuts": {
     "openKeyboardHelp": "Open keyboard shortcuts (?)"
+  },
+  "serverChatLoadFailure": {
+    "title": "Couldn't load this conversation.",
+    "body": "Your messages are safe on the server.",
+    "retry": "Retry",
+    "openAnother": "Open another chat",
+    "details": "Technical details",
+    "toastBody": "Your messages are safe on the server. Reopen the chat to try again."
+  },
+  "search": {
+    "open": "Search this conversation",
+    "openWithShortcut": "Search this conversation ({{shortcut}})",
+    "placeholder": "Search messages in this conversation",
+    "matchCount": "{{current}} / {{total}}",
+    "noMatches": "No matches"
   }
 }

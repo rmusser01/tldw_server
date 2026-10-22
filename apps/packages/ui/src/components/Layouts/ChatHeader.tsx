@@ -145,7 +145,8 @@ export function ChatHeader({
       : resolvedPersistenceKind === "serverUnconfirmed"
         ? "border-warn/50 bg-warn/10 text-text"
       : resolvedPersistenceKind === "temporary" ||
-          resolvedPersistenceKind === "serverFailed"
+          resolvedPersistenceKind === "serverFailed" ||
+          resolvedPersistenceKind === "serverNotLoaded"
         ? "border-warn/50 bg-warn/10 text-text"
         : "border-border bg-surface2 text-text-muted"
   const canEditTitle =

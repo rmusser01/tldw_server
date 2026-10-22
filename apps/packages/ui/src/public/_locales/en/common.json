@@ -2074,5 +2074,53 @@
   },
   "help_shortcutList": {
     "message": "Shortcut list"
+  },
+  "commandPalette_toggleChatWithPage": {
+    "message": "Toggle chat with current page"
+  },
+  "commandPalette_toggleChatWithPageDesc": {
+    "message": "Answer using the page open in this browser tab"
+  },
+  "chatSidebar_state_inProgress": {
+    "message": "In progress"
+  },
+  "chatSidebar_state_resolved": {
+    "message": "Resolved"
+  },
+  "chatSidebar_state_backlog": {
+    "message": "Backlog"
+  },
+  "chatSidebar_state_nonViable": {
+    "message": "Not viable"
+  },
+  "chatSidebar_groups_today": {
+    "message": "Today"
+  },
+  "chatSidebar_groups_thisWeek": {
+    "message": "This week"
+  },
+  "chatSidebar_groups_older": {
+    "message": "Older"
+  },
+  "chatSidebar_movedToTrash": {
+    "message": "Moved to Trash"
+  },
+  "chatSidebar_undoTrash": {
+    "message": "Undo"
+  },
+  "chatSidebar_viewTrash": {
+    "message": "View Trash"
+  },
+  "chatSidebar_permanentlyDeleted": {
+    "message": "Chat permanently deleted."
+  },
+  "chatSidebar_noSearchMatches": {
+    "message": "No chats match “{{query}}”"
+  },
+  "chatSidebar_clearSearch": {
+    "message": "Clear search"
+  },
+  "shortcuts_toggleChatWithPage": {
+    "message": "Toggle chat with current page"
   }
 }

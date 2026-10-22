@@ -894,5 +894,10 @@
   },
   "companion": {
     "openChat": "Open chat"
+  },
+  "chatWithPage": {
+    "on": "Chat with current page is on",
+    "off": "Chat with current page is off",
+    "onDescription": "Your next messages are answered using the page open in this tab."
   }
 }

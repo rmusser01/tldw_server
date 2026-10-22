@@ -38,6 +38,7 @@ import {
 import { useConnectionActions } from "@/hooks/useConnectionState"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
+import { usePageChatModeToggle } from "@/components/Sidepanel/Chat/page-chat-mode"
 import { useTTS } from "@/hooks/useTTS"
 import { copilotResumeLastChat } from "@/services/app"
 import {
@@ -1335,9 +1336,7 @@ const SidepanelChatContent = ({
     input.select();
   }, [isDockedSidebar]);
 
-  const toggleChatMode = () => {
-    setChatMode(chatMode === "rag" ? "normal" : "rag")
-  }
+  const toggleChatMode = usePageChatModeToggle(chatMode, setChatMode)
 
   const toggleWebSearchMode = () => {
     setWebSearch(!webSearch)

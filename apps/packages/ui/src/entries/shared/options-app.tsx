@@ -28,11 +28,7 @@ export const OptionsApp: React.FC = () => {
     }
   }, [i18n, i18n.resolvedLanguage])
 
-  useEffect(() => {
-    document.title = t("common:titles.options", {
-      defaultValue: "tldw Assistant — Options"
-    })
-  }, [t])
+  // OptionsRouteShell names the tab after the route (XP-19).
 
   return (
     <AppShell

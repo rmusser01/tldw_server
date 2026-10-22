@@ -4595,9 +4595,6 @@
   "characterRail_pageLabel": {
     "message": "Page"
   },
-  "composer_advancedPreferenceUnavailable": {
-    "message": "Display preference unavailable. Advanced controls still work for this visit."
-  },
   "composer_placeholderWithMentions": {
     "message": "Type a message... (/ commands, @ mentions)"
   },
@@ -4612,5 +4609,44 @@
   },
   "composer_connectionPendingSend": {
     "message": "Still connecting to your tldw server. Your draft has not been sent."
+  },
+  "composer_persistence_serverNotLoadedPill": {
+    "message": "Not loaded"
+  },
+  "composer_persistence_serverNotLoaded": {
+    "message": "This conversation couldn't be loaded. Your messages are safe on the server."
+  },
+  "serverChatLoadFailure_title": {
+    "message": "Couldn't load this conversation."
+  },
+  "serverChatLoadFailure_body": {
+    "message": "Your messages are safe on the server."
+  },
+  "serverChatLoadFailure_retry": {
+    "message": "Retry"
+  },
+  "serverChatLoadFailure_openAnother": {
+    "message": "Open another chat"
+  },
+  "serverChatLoadFailure_details": {
+    "message": "Technical details"
+  },
+  "serverChatLoadFailure_toastBody": {
+    "message": "Your messages are safe on the server. Reopen the chat to try again."
+  },
+  "search_open": {
+    "message": "Search this conversation"
+  },
+  "search_openWithShortcut": {
+    "message": "Search this conversation ({{shortcut}})"
+  },
+  "search_placeholder": {
+    "message": "Search messages in this conversation"
+  },
+  "search_matchCount": {
+    "message": "{{current}} / {{total}}"
+  },
+  "search_noMatches": {
+    "message": "No matches"
   }
 }

@@ -508,6 +508,8 @@
     "newChat": "New Chat",
     "toggleKnowledgeSearch": "Toggle Search & Context",
     "toggleKnowledgeSearchDesc": "Search your knowledge base and context",
+    "toggleChatWithPage": "Toggle chat with current page",
+    "toggleChatWithPageDesc": "Answer using the page open in this browser tab",
     "toggleWebSearch": "Toggle Web Search",
     "toggleWebDesc": "Search the internet",
     "ingestPage": "Ingest Current Page",
@@ -642,7 +644,24 @@
     "foldersEmpty": "No folders yet. Create a folder to organize your chats.",
     "folderCreated": "Folder created successfully",
     "deletedDeviceCopyRetained": "Removed from server history. A cached copy remains on this device because it could not be removed.",
-    "navigation": "Navigation"
+    "navigation": "Navigation",
+    "state": {
+      "inProgress": "In progress",
+      "resolved": "Resolved",
+      "backlog": "Backlog",
+      "nonViable": "Not viable"
+    },
+    "groups": {
+      "today": "Today",
+      "thisWeek": "This week",
+      "older": "Older"
+    },
+    "movedToTrash": "Moved to Trash",
+    "undoTrash": "Undo",
+    "viewTrash": "View Trash",
+    "permanentlyDeleted": "Chat permanently deleted.",
+    "noSearchMatches": "No chats match “{{query}}”",
+    "clearSearch": "Clear search"
   },
   "knowledgeSidebar": {
     "title": "Knowledge history"
@@ -751,7 +770,7 @@
     "goToWorldBooks": "Go to World Books",
     "goToDictionaries": "Go to Dictionaries",
     "goToCharacters": "Go to Characters",
-    "toggleChatModeRag": "Switch normal / RAG chat mode",
+    "toggleChatWithPage": "Toggle chat with current page",
     "searchThread": "Search this conversation",
     "toggleArtifacts": "Toggle artifacts panel (when available)",
     "toggleCompare": "Toggle compare mode (when enabled)",

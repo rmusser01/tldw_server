@@ -1564,7 +1564,9 @@
     "trashGuidanceDescription": "Deleted notes wait here. Choose Restore next to a note to put it back with your notes.",
     "trashGuidanceShowList": "Show Trash",
     "trashGuidanceBack": "Back to notes",
-    "assistKeywordsSource": "Based on word frequency in this note. Tags you already use are ticked; tick any others you want to add."
+    "assistKeywordsSource": "Based on word frequency in this note. Tags you already use are ticked; tick any others you want to add.",
+    "shortcutFocusSearchDescription": "Focus the search input.",
+    "shortcutCommandPaletteDescription": "Open the command palette."
   },
   "tts": {
     "playground": "TTS Playground"

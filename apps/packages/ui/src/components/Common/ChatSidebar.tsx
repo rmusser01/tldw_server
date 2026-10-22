@@ -627,6 +627,10 @@ export function ChatSidebar({
                   readOnly={temporaryChat}
                   onConversationSelected={onConversationSelected}
                   onVisibleChatsChange={setVisibleServerChats}
+                  onClearSearch={() => {
+                    setSearchQuery("")
+                    searchInput.current?.focus()
+                  }}
                 />
                 </section>
               )}

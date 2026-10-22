@@ -38,6 +38,8 @@ import { promptBulkAddTags } from "@/components/Notes/NotesBulkAddTagsPrompt"
 import NotesSidebar from "@/components/Notes/NotesSidebar"
 import { useCanonicalConnectionConfig } from "@/hooks/useCanonicalConnectionConfig"
 import { createNotesGraphAuthorityScope, useNotesGraphAuthorityScope } from "@/components/Notes/hooks/useNotesGraphAuthorityScope"
+import { useNotesFormattingKeyDown } from "@/components/Notes/hooks/useNotesFormattingKeys"
+import { useNotesSelectionReport, type NotesSelectionListener } from "@/components/Notes/hooks/useNotesSelectionReport"
 import {
   useNotesKeywords,
   useNotesListManagement,
@@ -212,9 +214,11 @@ type NotesManagerPageProps = {
    * independent of the router; without it only the unmount backstop applies.
    */
   LeaveGuard?: React.ComponentType<NotesLeaveGuardState>
+  /** Told which note is open, so the route can keep its address in step (XP-05). */
+  onNoteSelectionChange?: NotesSelectionListener
 }
 
-const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null, LeaveGuard }) => {
+const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null, LeaveGuard, onNoteSelectionChange }) => {
   const transferFlashcards = useFlashcardsGenerateTransfer()
   const transferStudyPack = useStudyPackTransfer()
   const { t } = useTranslation(['option', 'common'])
@@ -363,6 +367,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     editorDisabled,
     onNoteRenamed: (event) => noteRenamedRef.current(event),
   })
+  useNotesSelectionReport(onNoteSelectionChange, { selectedId: ed.selectedId, title: ed.title, authorityScope: notesGraphAuthorityScope, hasDraft: ed.isDirty })
   const [hasActiveDraft, setHasActiveDraft] = React.useState(false)
   const resetEditorToEmptyState = React.useCallback(() => {
     setHasActiveDraft(false)
@@ -1979,6 +1984,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     event.preventDefault()
     handleWysiwygInput(event)
   }, [editorDisabled, handleWysiwygInput])
+  const handleMarkdownEditorKeyDown = useNotesFormattingKeyDown(wl.handleEditorKeyDown, applyMarkdownToolbarAction)
 
   const handleWysiwygPaste = React.useCallback((event: React.ClipboardEvent<HTMLDivElement>) => {
     if (editorDisabled) return
@@ -2912,7 +2918,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         handleWysiwygKeyDown={handleWysiwygKeyDown}
         handleWysiwygPaste={handleWysiwygPaste}
         handleEditorChange={handleEditorChange}
-        handleEditorKeyDown={wl.handleEditorKeyDown}
+        handleEditorKeyDown={handleMarkdownEditorKeyDown}
         handleEditorSelectionUpdate={handleEditorSelectionUpdate}
         applyWikilinkSuggestion={wl.applyWikilinkSuggestion}
       />

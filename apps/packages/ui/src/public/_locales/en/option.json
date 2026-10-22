@@ -6532,5 +6532,11 @@
   },
   "notesSearch_assistKeywordsSource": {
     "message": "Based on word frequency in this note. Tags you already use are ticked; tick any others you want to add."
+  },
+  "notesSearch_shortcutFocusSearchDescription": {
+    "message": "Focus the search input."
+  },
+  "notesSearch_shortcutCommandPaletteDescription": {
+    "message": "Open the command palette."
   }
 }
