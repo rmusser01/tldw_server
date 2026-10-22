@@ -265,6 +265,18 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
     expect(screen.getByTestId("notes-list-region").style.height).toBe("")
   })
 
+  // NO-01 frames /notes to the viewport, so the editor body has a definite
+  // height. A full-height split grid would clamp to it on narrow screens and
+  // its stacked editor and preview would spill under the word-count footer.
+  it("lets the stacked split view grow below lg and fills the height only side by side", async () => {
+    renderPage()
+    fireEvent.click(await screen.findByRole("button", { name: "Split" }))
+
+    const grid = await screen.findByTestId("notes-split-grid")
+    expect(grid.className.split(/\s+/)).not.toContain("h-full")
+    expect(grid.className).toContain("lg:h-full")
+  })
+
   // AX-15 (#3124): the list toggles must say whether the list is shown and
   // which region they control, not only flip a chevron.
   it("tells assistive technology whether the notes list is shown", async () => {

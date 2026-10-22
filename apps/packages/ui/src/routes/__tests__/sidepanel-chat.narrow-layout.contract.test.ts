@@ -60,6 +60,10 @@ describe("sidepanel chat narrow layout contract", () => {
     )
   })
 
+  it("keeps controls scrolled into view above the pinned composer (XS-09, WCAG 2.4.11)", () => {
+    expect(sidepanelChatSource).toContain("scrollPaddingBottom: stickyChatInput")
+  })
+
   it("allows the sticky composer and control rows to wrap within a 390px sidepanel", () => {
     expect(sidepanelChatSource).toContain(
       'className="absolute bottom-0 left-0 right-0 z-10 max-h-[60%] min-h-0 w-full min-w-0 overflow-y-auto overscroll-contain"',

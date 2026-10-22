@@ -3137,7 +3137,13 @@ const SidepanelChatContent = ({
                 "--composer-padding": composerPadding,
                 paddingBottom: stickyChatInput
                   ? "calc(var(--composer-padding) + env(safe-area-inset-bottom, 0px))"
-                  : "0px"
+                  : "0px",
+                // The pinned composer overlays the transcript (XS-09). Scrolling a
+                // message control into view, by keyboard focus or script, must
+                // stop above it so the control is not hidden (WCAG 2.4.11).
+                scrollPaddingBottom: stickyChatInput
+                  ? "calc(var(--composer-padding) + env(safe-area-inset-bottom, 0px))"
+                  : undefined
               } as React.CSSProperties
             }
           >

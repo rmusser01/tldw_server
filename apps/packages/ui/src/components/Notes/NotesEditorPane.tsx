@@ -1711,7 +1711,12 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               </Typography.Text>
             )
           ) : editorMode === 'split' ? (
-            <div className="grid h-full min-h-0 grid-cols-1 gap-3 lg:grid-cols-2">
+            // Full height only side by side: stacked below lg, the editor and
+            // preview keep their height and the body scrolls (NO-01 frame).
+            <div
+              className="grid min-h-0 grid-cols-1 gap-3 lg:h-full lg:grid-cols-2"
+              data-testid="notes-split-grid"
+            >
               <div className="flex min-h-0 flex-col">
                 <Typography.Text
                   type="secondary"
