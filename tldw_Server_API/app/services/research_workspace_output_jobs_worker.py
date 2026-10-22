@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
@@ -48,6 +49,7 @@ def _build_worker_config(*, worker_id: str, queue: str) -> WorkerConfig:
     )
 
 
+@owns_chacha_checkouts
 async def process_research_workspace_output_job(
     job: dict[str, Any],
     *,

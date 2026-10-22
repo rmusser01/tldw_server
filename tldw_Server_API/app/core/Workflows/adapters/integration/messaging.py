@@ -19,6 +19,7 @@ from fastapi import HTTPException
 from loguru import logger
 
 from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.Kanban_DB import (
     ConflictError,
@@ -603,6 +604,9 @@ async def run_kanban_adapter(config: dict[str, Any], context: dict[str, Any]) ->
     tags=["integration", "chatbooks"],
     config_model=ChatbooksConfig,
 )
+# Independent: a request's detached task (engine.continue_run) can run this after the
+# request has closed its operation.
+@owns_chacha_checkouts(independent=True)
 async def run_chatbooks_adapter(config: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
     """Export and import chatbooks within a workflow step.
 

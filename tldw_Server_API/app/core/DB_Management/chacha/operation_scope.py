@@ -6,12 +6,14 @@ Legacy thread-local and explicitly borrowed connections are never adopted.
 """
 
 import asyncio
-from collections.abc import Iterator
+import functools
+import inspect
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from threading import RLock, get_ident
-from typing import Any
+from typing import Any, TypeVar
 
 from loguru import logger
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -211,6 +213,40 @@ def chacha_operation(
                 raise
         finally:
             _current_operation.reset(token)
+
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def current_operation_is_open() -> bool:
+    """Whether an open ChaCha operation owns this context's PostgreSQL checkouts."""
+    owner = _current_operation.get()
+    return owner is not None and not owner._closed
+
+
+def owns_chacha_checkouts(func: _F | None = None, *, independent: bool = False) -> Any:
+    """Run ``func`` inside a ChaCha operation: the caller's, or its own outside one.
+
+    For a unit of work outside HTTP (a job handler, a cancel check, a call that opens
+    a handle of its own), so its PostgreSQL checkouts go back to the pool when it
+    returns, on whichever thread they were taken. Decorate the ``async def`` itself:
+    a lambda that returns a coroutine would leave the operation before the coroutine
+    runs, and so would ``@chacha_operation()`` on an ``async def``.
+
+    ``independent=True`` always opens a new operation. Use it for work that a detached
+    task can reach after the request that started it has closed its operation.
+    """
+    if func is None:
+        return functools.partial(owns_chacha_checkouts, independent=independent)
+    if inspect.iscoroutinefunction(func):
+
+        @functools.wraps(func)
+        async def owned(*args: Any, **kwargs: Any) -> Any:
+            with chacha_operation(independent=independent):
+                return await func(*args, **kwargs)
+
+        return owned
+    return chacha_operation(independent=independent)(func)
 
 
 class ChaChaOperationMiddleware:

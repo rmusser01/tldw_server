@@ -17,6 +17,7 @@ from tldw_Server_API.app.core.Chat_Macros.executor import ChatMacroExecutor, Mac
 from tldw_Server_API.app.core.Chat_Macros.repository import ChatMacroRepository
 from tldw_Server_API.app.core.Chat_Macros.service import ChatMacrosService
 from tldw_Server_API.app.core.Chat_Macros.storage import ChatMacroStorage
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation, owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 
@@ -78,14 +79,17 @@ async def handle_chat_macro_job(job: dict[str, Any]) -> dict[str, Any]:
             user_id_int,
             client_id=f"chat-macro-worker-{user_id_int}",
         )
-        executor = build_chat_macro_executor(chat_db=chat_db, user_id=user_id)
+        # The run is not wrapped in one operation: its branches write concurrently, and one
+        # operation would give them one connection and one transaction depth. Each ChaCha
+        # step owns its own operation instead (here, the executor and post-back).
+        executor = chacha_operation(independent=True)(build_chat_macro_executor)(chat_db=chat_db, user_id=user_id)
         run = await executor.execute_run(run_id)
         return {"macro_run_id": run.run_id, "status": run.status}
     except Exception:  # noqa: BLE001 - preserve the worker error after terminalizing the run
         if executor is not None:
             try:
                 await asyncio.to_thread(
-                    executor.repository.update_run_status,
+                    chacha_operation(independent=True)(executor.repository.update_run_status),
                     run_id,
                     status="failed",
                     error_code="unexpected_execution_error",
@@ -160,6 +164,7 @@ def build_chat_macro_executor(
     def _macro_loader(run: Any) -> Any:
         return _load_macro_definition_for_run(service, run)
 
+    @chacha_operation(independent=True)
     def _post_back(*, run_id: str, final_output: str, post_idempotency_key: str) -> str:
         return post_chat_macro_final_output(
             chat_db=chat_db,
@@ -278,6 +283,7 @@ def _validated_payload(job: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@owns_chacha_checkouts
 async def _mark_macro_run_cancelled(
     run_id: str,
     *,
