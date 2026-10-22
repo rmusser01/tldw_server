@@ -275,6 +275,7 @@ export function ChatHeader({
                 type="button"
                 onClick={onToggleSidebar}
                 aria-label={sidebarLabel}
+                aria-expanded={!sidebarCollapsed}
                 data-testid="chat-header-sidebar-toggle"
                 className={`shrink-0 rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text ${focusRingClasses}`}
                 title={sidebarLabel}

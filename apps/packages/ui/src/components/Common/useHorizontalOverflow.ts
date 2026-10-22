@@ -85,32 +85,3 @@ export const useHorizontalOverflow = (
 
   return state
 }
-
-const MAX_TABLE_NAME_LENGTH = 60
-
-const readTableName = (element: HTMLElement | null): string | null => {
-  const source =
-    element?.querySelector("caption") ?? element?.querySelector("th")
-  const text = source?.textContent?.replace(/\s+/g, " ").trim()
-  if (!text) return null
-  return text.length > MAX_TABLE_NAME_LENGTH
-    ? `${text.slice(0, MAX_TABLE_NAME_LENGTH - 1)}…`
-    : text
-}
-
-/**
- * A short name for a scrollable table, from its caption or else its first
- * header cell (XS-14), so several wide tables in one reply are not all
- * announced as the same "Table" region. Read only while `active`.
- */
-export const useTableName = (
-  ref: React.RefObject<HTMLElement>,
-  active: boolean
-): string | null => {
-  const [name, setName] = React.useState<string | null>(null)
-  React.useLayoutEffect(() => {
-    if (!active) return
-    setName(readTableName(ref.current))
-  }, [active, ref])
-  return name
-}

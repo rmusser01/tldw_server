@@ -1,4 +1,4 @@
-import { contrastRatio } from "./contrast"
+import { readableForeground } from "./contrast"
 import type { ThemeColorTokens, ThemeDefinition } from "./types"
 
 // ---------------------------------------------------------------------------
@@ -105,13 +105,7 @@ export function applyThemeTokens(tokens: ThemeColorTokens, theme: ThemeDefinitio
     ["primary", "--color-primary-foreground"],
     ["primaryStrong", "--color-primary-strong-foreground"]
   ] as const) {
-    style.setProperty(
-      cssVar,
-      contrastRatio("0 0 0", tokens[key]) >=
-        contrastRatio("255 255 255", tokens[key])
-        ? "0 0 0"
-        : "255 255 255"
-    )
+    style.setProperty(cssVar, readableForeground(tokens[key]))
   }
 
   // --- Shadows (raw CSS values) ---

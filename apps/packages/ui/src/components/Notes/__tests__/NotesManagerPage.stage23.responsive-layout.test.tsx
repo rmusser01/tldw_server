@@ -265,6 +265,68 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
     expect(screen.getByTestId("notes-list-region").style.height).toBe("")
   })
 
+  // AX-15 (#3124): the list toggles must say whether the list is shown and
+  // which region they control, not only flip a chevron.
+  it("tells assistive technology whether the notes list is shown", async () => {
+    const { rerender } = renderPage()
+
+    const desktopToggle = screen.getByTestId("notes-desktop-sidebar-toggle")
+    expect(desktopToggle).toHaveAttribute("aria-controls", "notes-list-region")
+    expect(desktopToggle).toHaveAttribute("aria-expanded", "true")
+
+    fireEvent.click(desktopToggle)
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-desktop-sidebar-toggle")).toHaveAttribute(
+        "aria-expanded",
+        "false"
+      )
+    })
+
+    setViewportWidth(375)
+    rerender(
+      <QueryClientProvider
+        client={
+          new QueryClient({
+            defaultOptions: {
+              queries: { retry: false },
+              mutations: { retry: false }
+            }
+          })
+        }
+      >
+        <NotesManagerPage />
+      </QueryClientProvider>
+    )
+
+    const browse = await screen.findByTestId("notes-mobile-open-list-button")
+    expect(browse).toHaveAttribute("aria-controls", "notes-list-region")
+    expect(browse).toHaveAttribute("aria-expanded", "false")
+
+    fireEvent.click(browse)
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-mobile-open-list-button")).toHaveAttribute(
+        "aria-expanded",
+        "true"
+      )
+    })
+  })
+
+  // AX-15 (#3124): the app sidebar's toggle is also called "Expand sidebar",
+  // so the notes toggle names the notes sidebar to stay distinct.
+  it("names the notes sidebar toggle apart from the app sidebar toggle", async () => {
+    renderPage()
+
+    const desktopToggle = screen.getByTestId("notes-desktop-sidebar-toggle")
+    expect(desktopToggle).toHaveAccessibleName("Collapse notes sidebar")
+
+    fireEvent.click(desktopToggle)
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-desktop-sidebar-toggle")).toHaveAccessibleName(
+        "Expand notes sidebar"
+      )
+    })
+  })
+
   it("restores desktop sidebar collapse state after returning from mobile", async () => {
     const { rerender } = renderPage()
     const listRegion = screen.getByTestId("notes-list-region")

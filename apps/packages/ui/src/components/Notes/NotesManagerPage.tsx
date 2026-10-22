@@ -125,6 +125,7 @@ import { buildNotesTimelineSections } from "@/components/Notes/notes-timeline"
 import { isNotesServerUnavailableError } from "@/components/Notes/notes-list-error"
 import { buildMoveToTrashConfirm, dismissNoteDeletedToast, findNoteTitleForConfirm } from "@/components/Notes/notes-trash"
 import NotesTrashGuidance from "@/components/Notes/NotesTrashGuidance"
+import { useLatchedFlag } from "./hooks/useLatchedFlag"
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
 
@@ -903,6 +904,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     kw.keywordMergeDraft != null ||
     imp.importModalOpen ||
     shortcutHelpOpen
+  const deferredOverlaysMounted = useLatchedFlag(hasDeferredOverlayOpen)
 
   // ---- Remaining logic that stays in the component ----
 
@@ -2727,7 +2729,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         <button
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           className="relative h-full w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors motion-reduce:transition-none rounded-r-lg"
-          aria-label={sidebarCollapsed ? t('option:notesSearch.expandSidebar', { defaultValue: 'Expand sidebar' }) : t('option:notesSearch.collapseSidebar', { defaultValue: 'Collapse sidebar' })}
+          aria-label={sidebarCollapsed ? t('option:notesSearch.expandSidebar', { defaultValue: 'Expand notes sidebar' }) : t('option:notesSearch.collapseSidebar', { defaultValue: 'Collapse notes sidebar' })}
           aria-expanded={!sidebarCollapsed}
           aria-controls={NOTES_LIST_REGION_ID}
           data-testid="notes-desktop-sidebar-toggle"
@@ -2929,7 +2931,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         }}
       />
       <input ref={imp.importInputRef} type="file" multiple accept=".json,.md,.markdown,.txt,application/json,text/markdown,text/plain" className="hidden" data-testid="notes-import-input" onChange={(event) => { void imp.handleImportInputChange(event) }} />
-      {hasDeferredOverlayOpen && (
+      {deferredOverlaysMounted && (
         <React.Suspense fallback={null}>
           <LazyNotesManagerOverlays
             kw={kw}

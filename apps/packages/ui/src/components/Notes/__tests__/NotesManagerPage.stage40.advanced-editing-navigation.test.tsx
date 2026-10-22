@@ -360,6 +360,34 @@ describe("NotesManagerPage stage 40 advanced editing and navigation", () => {
     expect(screen.queryByTestId("notes-wysiwyg-editor")).not.toBeInTheDocument()
   }, 10000)
 
+  // XP-15 (#3124): editor meta labels rendered at 14px in the body colour,
+  // louder than section headings, because antd Typography ignored text-[11px].
+  it("renders editor meta labels as small muted text", async () => {
+    renderPage()
+
+    await screen.findByPlaceholderText("Write your note here... (Markdown supported)")
+    for (const label of ["Formatting", "Assist", "Markdown + LaTeX supported"]) {
+      const element = screen.getAllByText(label)[0]
+      expect(element, label).toHaveClass("text-[11px]", "text-text-muted")
+      expect(element.className, label).not.toMatch(/ant-typography/)
+    }
+  }, 10000)
+
+  // AX-15 (#3124): the active input mode was shown by button fill only.
+  it("exposes the active input mode with aria-pressed", async () => {
+    renderPage()
+
+    const markdown = await screen.findByTestId("notes-input-mode-markdown")
+    const wysiwyg = screen.getByTestId("notes-input-mode-wysiwyg")
+    expect(markdown).toHaveAttribute("aria-pressed", "true")
+    expect(wysiwyg).toHaveAttribute("aria-pressed", "false")
+
+    fireEvent.click(wysiwyg)
+    expect(await screen.findByTestId("notes-wysiwyg-editor")).toBeInTheDocument()
+    expect(screen.getByTestId("notes-input-mode-markdown")).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByTestId("notes-input-mode-wysiwyg")).toHaveAttribute("aria-pressed", "true")
+  }, 10000)
+
   it("preserves markdown content when switching to WYSIWYG and back without edits", async () => {
     renderPage()
 

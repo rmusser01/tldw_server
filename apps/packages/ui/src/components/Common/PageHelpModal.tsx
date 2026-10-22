@@ -607,8 +607,17 @@ export function PageHelpModal({
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-4">
+        {/* Content: a focusable, labelled region so keyboard users can
+            scroll a list that has no focusable items of its own (AX-18). */}
+        <div
+          role="region"
+          aria-label={
+            activeTab === "tutorials"
+              ? t("common:help.tutorialList", "Tutorial list")
+              : t("common:help.shortcutList", "Shortcut list")
+          }
+          tabIndex={0}
+          className="flex-1 overflow-y-auto p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-focus">
           {activeTab === "tutorials" ? (
             <TutorialList
               tutorials={availableTutorials}

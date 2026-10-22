@@ -13,6 +13,14 @@ import { TtsClipsDrawer } from "./TtsClipsDrawer"
 import { useServerCapabilities } from "@/hooks/useServerCapabilities"
 import { CHAT_PATH } from "@/routes/route-paths"
 
+/**
+ * Keyboard focus ring for header controls. A box-shadow ring is used because
+ * antd's link reset removes outlines from <a> elements (AX-08).
+ */
+const HEADER_FOCUS_RING_CLASS =
+  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+const HEADER_ICON_CONTROL_CLASS = `rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2 ${HEADER_FOCUS_RING_CLASS}`
+
 type SidepanelHeaderSimpleProps = {
   chatReady?: boolean
   sidebarOpen?: boolean
@@ -227,7 +235,7 @@ export const SidepanelHeaderSimple = ({
             aria-label={sidebarToggleLabel}
             aria-expanded={sidebarOpen}
             onClick={handleSidebarToggle}
-            className="shrink-0 rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text"
+            className={`shrink-0 rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text ${HEADER_FOCUS_RING_CLASS}`}
             title={sidebarToggleLabel}
           >
             <Menu className="size-4" />
@@ -319,7 +327,7 @@ export const SidepanelHeaderSimple = ({
             type="button"
             onClick={() => setTtsClipsOpen(true)}
             aria-label={t("playground:ttsClips.title", "TTS clips")}
-            className="rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2"
+            className={HEADER_ICON_CONTROL_CLASS}
             title={t("playground:ttsClips.title", "TTS clips")}
             data-testid="chat-open-tts-clips"
           >
@@ -331,7 +339,7 @@ export const SidepanelHeaderSimple = ({
             <Link
               to="/persona"
               aria-label={t("sidepanel:persona.openPersona", "Open Persona Garden") as string}
-              className="rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2"
+              className={HEADER_ICON_CONTROL_CLASS}
               title={t("sidepanel:persona.openPersona", "Open Persona Garden")}
               data-testid="chat-open-persona"
             >
@@ -344,7 +352,7 @@ export const SidepanelHeaderSimple = ({
             type="button"
             onClick={openDashboard}
             aria-label={t("sidepanel:header.openDashboard", "Open dashboard")}
-            className="rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2"
+            className={HEADER_ICON_CONTROL_CLASS}
             title={t("sidepanel:header.openDashboard", "Open dashboard")}
             data-testid="chat-open-dashboard"
           >
@@ -358,7 +366,7 @@ export const SidepanelHeaderSimple = ({
             disabled={!chatReady}
             aria-describedby={fullChatHandoffDescriptionId}
             aria-label={openFullChatLabel}
-            className="rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2"
+            className={HEADER_ICON_CONTROL_CLASS}
             title={openFullChatDescription}
             data-testid="chat-open-full-screen"
           >
@@ -372,7 +380,7 @@ export const SidepanelHeaderSimple = ({
           <Link
             to="/settings"
             aria-label={t("sidepanel:header.openSettingsAria") as string}
-            className="rounded-md p-1.5 text-text-muted hover:bg-surface2 hover:text-text sm:p-2"
+            className={HEADER_ICON_CONTROL_CLASS}
             title={t("sidepanel:header.settingsShortLabel", "Settings")}
           >
             <CogIcon className="size-4" aria-hidden="true" />

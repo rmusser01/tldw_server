@@ -18,6 +18,7 @@ import { useStoreMessageOption } from "@/store/option"
 import { MermaidDiagramBlock } from "@/components/Common/MermaidDiagramBlock"
 import type { DataTable, DataTableColumn, DataTableSource } from "@/types/data-tables"
 import { queueDataTablesPrefill } from "@/utils/data-tables-prefill"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 
 const normalizeLanguage = (language?: string): string => {
   const lang = (language || "").toLowerCase()
@@ -205,7 +206,7 @@ export const ArtifactsPanel = () => {
     if (typeof document !== "undefined" && active?.id) {
       const origin = document.getElementById(`artifact-origin-${active.id}`)
       if (origin && typeof origin.scrollIntoView === "function") {
-        origin.scrollIntoView({ behavior: "smooth", block: "center" })
+        origin.scrollIntoView({ behavior: smoothScrollBehavior(), block: "center" })
         closeArtifact()
         focusArtifactsTrigger()
         return

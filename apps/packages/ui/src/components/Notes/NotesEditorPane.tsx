@@ -14,13 +14,14 @@ import {
   Code2 as CodeIcon,
   Paperclip as PaperclipIcon
 } from 'lucide-react'
-import { QuestionCircleOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import { UNAVAILABLE_STATE_LABEL, getDesignSystemState } from '@/design-system'
 import NotesEditorHeader from '@/components/Notes/NotesEditorHeader'
 import NotesStudioView from '@/components/Notes/NotesStudioView'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
 import TaskChecklistToggle from '@/components/Notes/TaskChecklistToggle'
+import NotesSectionHelpButton from '@/components/Notes/NotesSectionHelpButton'
+import { MetaText } from '@/components/Common/MetaText'
 import type { TaskChecklistTogglePayload } from '@/components/Notes/TaskChecklistPreview'
 import TaskActivityNotice from '@/components/Notes/TaskActivityNotice'
 import type { ActiveWikilinkQuery, WikilinkCandidate } from '@/components/Notes/wikilinks'
@@ -115,6 +116,7 @@ export interface NotesEditorPaneProps {
   // Layout
   isMobileViewport: boolean
   setMobileSidebarOpen: (open: boolean) => void
+  /** Whether the mobile notes list is open, for the Browse notes toggle. */
   mobileSidebarOpen?: boolean
 
   // Selection / identity
@@ -591,13 +593,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
 
   const renderHelpButton = React.useCallback(
     (label: string) => (
-      <button
-        type="button"
-        className="inline-flex items-center rounded-sm text-text-muted transition-colors hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-        aria-label={label}
-      >
-        <QuestionCircleOutlined className="text-[11px]" />
-      </button>
+      <NotesSectionHelpButton label={label} />
     ),
     []
   )
@@ -1443,6 +1439,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 <Button
                   size="small"
                   type={editorInputMode === 'markdown' ? 'primary' : 'text'}
+                  aria-pressed={editorInputMode === 'markdown'}
                   onClick={() => handleEditorInputModeChange('markdown')}
                   disabled={editorDisabled}
                   data-testid="notes-input-mode-markdown"
@@ -1454,6 +1451,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 <Button
                   size="small"
                   type={editorInputMode === 'wysiwyg' ? 'primary' : 'text'}
+                  aria-pressed={editorInputMode === 'wysiwyg'}
                   onClick={() => handleEditorInputModeChange('wysiwyg')}
                   disabled={editorDisabled}
                   data-testid="notes-input-mode-wysiwyg"
@@ -1464,14 +1462,11 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                 </Button>
               </div>
             )}
-            <Typography.Text
-              type="secondary"
-              className="text-[11px] mr-1 uppercase tracking-[0.08em]"
-            >
+            <MetaText className="mr-1 uppercase tracking-[0.08em]">
               {t('option:notesSearch.formattingLabel', {
                 defaultValue: 'Formatting'
               })}
-            </Typography.Text>
+            </MetaText>
             <Tooltip title={t('option:notesSearch.toolbarBoldTooltip', { defaultValue: 'Bold' })}>
               <Button
                 size="small"
@@ -1566,14 +1561,11 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
               />
             </Tooltip>
             <span className="mx-1 h-4 w-px bg-border" aria-hidden="true" />
-            <Typography.Text
-              type="secondary"
-              className="text-[11px] mr-1 uppercase tracking-[0.08em]"
-            >
+            <MetaText className="mr-1 uppercase tracking-[0.08em]">
               {t('option:notesSearch.assistLabel', {
                 defaultValue: 'Assist'
               })}
-            </Typography.Text>
+            </MetaText>
             <Tooltip
               title={t('option:notesSearch.assistSummarizeTooltip', {
                 defaultValue: 'Generate a concise summary draft'
@@ -1811,13 +1803,12 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                     )}
                   </>
                 )}
-                <Typography.Text
+                <MetaText
                   id={NOTES_EDITOR_CONTENT_HELP_ID}
-                  type="secondary"
-                  className="block text-[11px] mt-1 text-text-muted"
+                  className="block mt-1"
                 >
                   {notesEditorSupportHint(t, editorInputMode, showEmptyState, editorDisabled)}
-                </Typography.Text>
+                </MetaText>
               </div>
               <div className="flex min-h-0 flex-col">
                 {content.trim().length > 0 ? (
@@ -1946,13 +1937,12 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
                   )}
                 </>
               )}
-              <Typography.Text
+              <MetaText
                 id={NOTES_EDITOR_CONTENT_HELP_ID}
-                type="secondary"
-                className="block text-[11px] mt-1 text-text-muted"
+                className="block mt-1"
               >
                 {notesEditorSupportHint(t, editorInputMode, showEmptyState, editorDisabled)}
-              </Typography.Text>
+              </MetaText>
             </div>
           )}
         </div>

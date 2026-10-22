@@ -98,8 +98,8 @@
     "copyCsv": "Copy as CSV",
     "downloadCsv": "Download CSV",
     "scrollForMore": "Scroll for more columns →",
-    "regionLabel": "Table",
-    "regionLabelNamed": "Table: {{name}}"
+    "label": "Table",
+    "labelWithColumns": "Table: {{columns}}"
   },
   "webSearch": "Searching the web",
   "regenerate": "Regenerate",
@@ -718,7 +718,9 @@
     "pageHelp": "Page Help",
     "tutorials": "Tutorials",
     "shortcuts": "Shortcuts",
-    "tutorialsHint": "Complete tutorials to learn the interface"
+    "tutorialsHint": "Complete tutorials to learn the interface",
+    "tutorialList": "Tutorial list",
+    "shortcutList": "Shortcut list"
   },
   "shortcuts": {
     "title": "Keyboard Shortcuts",

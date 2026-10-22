@@ -208,6 +208,27 @@ describe("history-first sidebar navigation", () => {
     });
   });
 
+  // AX-15 (#3124): the rail and panel toggles only flipped their labels.
+  it.each([
+    [false, "true", "Collapse sidebar"],
+    [true, "false", "Expand sidebar"],
+  ] as const)(
+    "exposes whether the sidebar is expanded (collapsed=%s)",
+    (collapsed, expanded, name) => {
+      renderSidebar({ collapsed });
+
+      const toggle = screen.getByTestId("chat-sidebar-toggle");
+      expect(toggle).toHaveAccessibleName(name);
+      expect(toggle).toHaveAttribute("aria-expanded", expanded);
+      // The toggle names the sidebar it opens and closes.
+      const controlled = toggle.getAttribute("aria-controls");
+      expect(controlled).toBeTruthy();
+      expect(document.getElementById(String(controlled))).toBe(
+        screen.getByTestId("chat-sidebar"),
+      );
+    },
+  );
+
   it("names the global Server total while searching both sources", async () => {
     io.historyTotal = 60;
     renderSidebar();

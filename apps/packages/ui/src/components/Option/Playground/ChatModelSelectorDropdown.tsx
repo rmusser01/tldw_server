@@ -284,7 +284,7 @@ export const ChatModelSelectorDropdown = React.memo(
             aria-haspopup="menu"
             aria-expanded={modelDropdownOpen}
             data-testid="model-selector"
-            className={`inline-flex min-h-[44px] min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-full border px-2 text-[10px] transition-colors ${
+            className={`inline-flex min-h-[44px] min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-full border px-2 text-[11px] transition-colors ${
               statusWarning
                 ? "border-warn/50 bg-warn/10 text-text hover:bg-warn/20"
                 : "border-border bg-surface hover:bg-surface-hover"
@@ -319,7 +319,7 @@ export const ChatModelSelectorDropdown = React.memo(
             <span
               data-testid="model-selector-status"
               data-model-readiness={readinessShown ? modelReadiness?.state : undefined}
-              className={`min-w-0 truncate rounded-full px-1.5 py-0.5 text-[9px] ${
+              className={`min-w-0 truncate rounded-full px-1.5 py-0.5 text-[11px] ${
                 statusWarning
                   ? "bg-warn/10 text-text"
                   : readinessNeutral

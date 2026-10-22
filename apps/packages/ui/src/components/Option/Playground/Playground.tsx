@@ -161,6 +161,7 @@ import {
 } from "./mobile-composer-layout";
 import { buildPersonaGardenRoute } from "@/utils/persona-garden-route";
 import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
+import { smoothScrollBehavior } from "@/utils/reduced-motion";
 import {
   CHARACTER_CHAT_MODE_INTENT_EVENT,
   CHAT_ROUTE_REPLACEMENT_EVENT,
@@ -179,6 +180,7 @@ import type { Character } from "@/types/character";
 import { useKeepInterruptedHistoryTurns } from "@/hooks/chat/useKeepInterruptedHistoryTurns";
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
 import { isEditableTarget } from "@/utils/editable-target"
+import { useFocusReturn } from "./hooks/useFocusReturn";
 
 const readSidepanelChatWebUiHandoffFromLocation = () => {
   if (typeof window === "undefined") return null;
@@ -698,6 +700,17 @@ const PlaygroundContent = () => {
     "idle" | "dragging" | "error"
   >("idle");
   const [threadSearchOpen, setThreadSearchOpen] = React.useState(false);
+  const focusComposer = React.useCallback(() => {
+    window.dispatchEvent(new CustomEvent("tldw:focus-composer"));
+  }, []);
+  const {
+    rememberFocus: rememberThreadSearchOpener,
+    restoreFocus: restoreThreadSearchOpener,
+  } = useFocusReturn(focusComposer);
+  const closeThreadSearch = React.useCallback(() => {
+    setThreadSearchOpen(false);
+    restoreThreadSearchOpener();
+  }, [restoreThreadSearchOpener]);
   const [threadSearchQuery, setThreadSearchQuery] = React.useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState("");
   const [threadSearchActiveIndex, setThreadSearchActiveIndex] =
@@ -2144,7 +2157,7 @@ const PlaygroundContent = () => {
         `[data-message-id="${messageId}"], [data-server-message-id="${messageId}"]`,
       );
       if (!target) return false;
-      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : "smooth" });
+      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : smoothScrollBehavior() });
       return true;
     },
     [containerRef, findMessageIndex, historySelection, messages.length, pauseAutoScroll],
@@ -2161,7 +2174,7 @@ const PlaygroundContent = () => {
         `[data-testid="chat-message"][data-index="${index}"]`,
       );
       if (!target) return false;
-      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : "smooth" });
+      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : smoothScrollBehavior() });
       return true;
     },
     [containerRef, historySelection, messages.length, pauseAutoScroll],
@@ -2386,6 +2399,7 @@ const PlaygroundContent = () => {
         event.key.toLowerCase() === "f"
       ) {
         event.preventDefault();
+        if (!threadSearchOpen) rememberThreadSearchOpener();
         setThreadSearchOpen(true);
         requestAnimationFrame(() => {
           threadSearchInputRef.current?.focus();
@@ -2395,7 +2409,7 @@ const PlaygroundContent = () => {
       }
       if (threadSearchOpen && event.key === "Escape") {
         event.preventDefault();
-        setThreadSearchOpen(false);
+        closeThreadSearch();
         return;
       }
 
@@ -2436,7 +2450,9 @@ const PlaygroundContent = () => {
     artifactsOpen,
     closeArtifacts,
     compareFeatureEnabled,
+    closeThreadSearch,
     markArtifactsRead,
+    rememberThreadSearchOpener,
     setArtifactsOpen,
     threadSearchOpen,
   ]);
@@ -3981,7 +3997,7 @@ const PlaygroundContent = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setThreadSearchOpen(false)}
+                    onClick={closeThreadSearch}
                     title={t("common:close", "Close") as string}
                     className="inline-flex items-center rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text hover:bg-surface2"
                   >

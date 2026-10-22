@@ -4,6 +4,7 @@ import { Button, Checkbox, Input, Modal, Select, Typography } from "antd"
 import type { TFunction } from "i18next"
 
 import KeywordPickerModal from "@/components/Notes/KeywordPickerModal"
+import { renderTabWrappedDialog } from "@/components/Common/dialog-tab-wrap"
 
 import { useStartTutorial } from "@/hooks/useStartTutorial"
 
@@ -162,6 +163,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
     <>
       <Modal
         open={kw.keywordSuggestionOptions.length > 0}
+        modalRender={renderTabWrappedDialog}
         onCancel={kw.closeKeywordSuggestionModal}
         onOk={kw.applySelectedSuggestedKeywords}
         okText={t("option:notesSearch.assistKeywordsApplySelectedAction", {
@@ -260,6 +262,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
 
       <Modal
         open={kw.keywordManagerOpen}
+        modalRender={renderTabWrappedDialog}
         onCancel={kw.closeKeywordManager}
         title={t("option:notesSearch.keywordManagerTitle", {
           defaultValue: "Manage tags",
@@ -378,6 +381,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
 
       <Modal
         open={kw.keywordRenameDraft != null}
+        modalRender={renderTabWrappedDialog}
         onCancel={() => kw.setKeywordRenameDraft(null)}
         onOk={() => {
           void kw.submitKeywordRename()
@@ -421,6 +425,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
 
       <Modal
         open={kw.keywordMergeDraft != null}
+        modalRender={renderTabWrappedDialog}
         onCancel={() => kw.setKeywordMergeDraft(null)}
         onOk={() => {
           void kw.submitKeywordMerge()
@@ -496,6 +501,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
 
       <Modal
         open={imp.importModalOpen}
+        modalRender={renderTabWrappedDialog}
         onCancel={imp.closeImportModal}
         onOk={() => {
           void imp.confirmImport()
@@ -603,6 +609,7 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
 
       <Modal
         open={shortcutHelpOpen}
+        modalRender={renderTabWrappedDialog}
         focusable={{ focusTriggerAfterClose: !tourHandoff }}
         onCancel={() => setShortcutHelpOpen(false)}
         footer={null}

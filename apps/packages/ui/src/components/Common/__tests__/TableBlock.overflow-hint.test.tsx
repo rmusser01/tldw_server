@@ -9,33 +9,38 @@ import { TableBlock } from "../TableBlock"
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
-    t: (_key: string, fallback?: string, options?: Record<string, unknown>) =>
-      String(fallback ?? _key).replace(/\{\{(\w+)\}\}/g, (_match, name) =>
-        String(options?.[name] ?? "")
-      )
+    t: (
+      key: string,
+      fallback?: string | { defaultValue?: string; [name: string]: unknown },
+      options?: Record<string, unknown>
+    ) => {
+      const values = typeof fallback === "string" ? options : fallback
+      const template = typeof fallback === "string" ? fallback : fallback?.defaultValue ?? key
+      return template.replace(/\{\{(\w+)\}\}/g, (_match, name) => String(values?.[name] ?? ""))
+    }
   })
 }))
 
 const box = { scrollWidth: 0, clientWidth: 0 }
 
+// Markdown renders TableBlock as the table element, so it gets the table's
+// sections as children.
 const Table = () => (
   <TableBlock>
-    <table>
-      <thead>
-        <tr>
-          <th>Option</th>
-          <th>Pros</th>
-          <th>Cons</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr>
-          <td>A</td>
-          <td>Fast</td>
-          <td>Less flexible</td>
-        </tr>
-      </tbody>
-    </table>
+    <thead>
+      <tr>
+        <th>Option</th>
+        <th>Pros</th>
+        <th>Cons</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>A</td>
+        <td>Fast</td>
+        <td>Less flexible</td>
+      </tr>
+    </tbody>
   </TableBlock>
 )
 
@@ -61,7 +66,7 @@ describe("TableBlock horizontal overflow hint (XS-14)", () => {
     render(<Table />)
     expect(screen.getByText("Scroll for more columns →")).toBeInTheDocument()
     expect(screen.getByTestId("table-scroll-fade")).toBeInTheDocument()
-    const region = screen.getByRole("region", { name: "Table: Option" })
+    const region = screen.getByRole("region", { name: "Table: Option, Pros, Cons" })
     expect(region).toHaveAttribute("tabindex", "0")
     expect(region).toHaveClass("focus-visible:ring-2")
   })
@@ -71,15 +76,13 @@ describe("TableBlock horizontal overflow hint (XS-14)", () => {
     box.clientWidth = 320
     render(
       <TableBlock>
-        <table>
-          <caption>Pricing plans</caption>
-          <thead>
-            <tr>
-              <th>Plan</th>
-              <th>Price</th>
-            </tr>
-          </thead>
-        </table>
+        <caption>Pricing plans</caption>
+        <thead>
+          <tr>
+            <th>Plan</th>
+            <th>Price</th>
+          </tr>
+        </thead>
       </TableBlock>
     )
     expect(screen.getByRole("region", { name: "Table: Pricing plans" })).toBeInTheDocument()

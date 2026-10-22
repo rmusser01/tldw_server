@@ -37,6 +37,7 @@ import {
   Tooltip,
   message
 } from "antd"
+import { SidepanelPersistenceSwitch } from "./SidepanelPersistenceSwitch"
 import { useWebUI } from "~/store/webui"
 import { defaultEmbeddingModelForRag } from "~/services/tldw-server"
 import {
@@ -3931,20 +3932,15 @@ export const SidepanelForm = ({
                       const composerControlAreaNode = (
                         <div className="mt-2 flex min-w-0 flex-col gap-2">
                       <Tooltip title={persistenceTooltip}>
-                        <div className="flex items-center gap-2">
-                          <Switch
-                            size="small"
-                            checked={!temporaryChat}
-                            disabled={temporaryChatLocked || isFireFoxPrivateMode}
-                            onChange={(checked) =>
-                              handleToggleTemporaryChat(!checked)
-                            }
-                            aria-label={persistenceControlLabel}
-                          />
-                          <span className="text-xs text-text whitespace-nowrap">
-                            {temporaryChatToggleLabel}
-                          </span>
-                        </div>
+                        <SidepanelPersistenceSwitch
+                          checked={!temporaryChat}
+                          disabled={temporaryChatLocked || isFireFoxPrivateMode}
+                          onChange={(checked) =>
+                            handleToggleTemporaryChat(!checked)
+                          }
+                          ariaLabel={persistenceControlLabel}
+                          label={temporaryChatToggleLabel}
+                        />
                       </Tooltip>
                       <div className="flex w-full min-w-0 flex-row flex-wrap items-center justify-between gap-1.5">
                       {isProMode ? (
