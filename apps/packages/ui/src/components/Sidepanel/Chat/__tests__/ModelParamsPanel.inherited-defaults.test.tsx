@@ -134,6 +134,16 @@ describe("ModelParamsPanel inherited defaults (XS-16)", () => {
     ).toBeInTheDocument()
   })
 
+  it("gives the reset control at least a 24px target (WCAG 2.5.8)", () => {
+    useStoreChatModelSettings.getState().updateSetting("temperature", 1.2)
+    const panel = renderPanel()
+    const reset = within(field(panel, "Temperature")).getByRole("button", {
+      name: "Reset Temperature to default"
+    })
+    // jsdom has no layout, so check the Tailwind size classes (6 = 24px).
+    expect(reset).toHaveClass("h-6", "w-6")
+  })
+
   it("clears Top K back to the provider default instead of inventing 40", () => {
     useStoreChatModelSettings.getState().updateSetting("topK", 12)
     const panel = renderPanel()

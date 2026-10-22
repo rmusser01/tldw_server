@@ -102,7 +102,7 @@ export const ModelParamSliderField = ({
                 "Reset {{label}} to default",
                 { label }
               )}
-              className="inline-flex h-5 w-5 items-center justify-center rounded text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              className="inline-flex h-6 w-6 items-center justify-center rounded text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
             >
               <RotateCcw className="size-3" aria-hidden="true" />
             </button>
