@@ -5,6 +5,7 @@ import { getAssistantSelectionMode, isProtectedTrackedPersonaUnavailable } from 
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
 import { VirtualChatTimeline, type ChatTimelineNavigation } from "./VirtualChatTimeline"
+import { useCharacterChatSteeringScope } from "./hooks/useCharacterChatSteeringScope"
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "react-router-dom"
 import { useMessageOption } from "@/hooks/useMessageOption"
@@ -1017,6 +1018,7 @@ export const PlaygroundChat = ({
     serverChatCharacterId,
     serverChatId
   ])
+  useCharacterChatSteeringScope(characterIdentityEnabled)
   const latestAssistantMood = React.useMemo(() => {
     for (let index = messages.length - 1; index >= 0; index -= 1) {
       const message = messages[index]
