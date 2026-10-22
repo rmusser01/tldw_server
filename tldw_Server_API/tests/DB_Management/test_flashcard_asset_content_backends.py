@@ -12,6 +12,7 @@ from PIL import Image
 
 from tldw_Server_API.app.api.v1.endpoints import flashcards
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import BackendType, CharactersRAGDB
 
 
@@ -41,6 +42,7 @@ def asset_db(request, tmp_path):
 
 def _client(db):
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(flashcards.router, prefix="/api/v1")
     app.dependency_overrides[flashcards.get_chacha_db_for_user] = lambda: db
     return TestClient(app, raise_server_exceptions=False)

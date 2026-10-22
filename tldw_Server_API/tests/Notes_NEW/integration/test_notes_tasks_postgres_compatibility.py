@@ -18,6 +18,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_rate_limiter_dep
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseConfig
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, ConflictError
 from tldw_Server_API.app.core.MCP_unified.modules.base import ModuleConfig
 from tldw_Server_API.app.core.MCP_unified.modules.implementations.notes_module import NotesModule
@@ -289,6 +290,7 @@ def test_postgres_rest_reads_and_updates_bound_task_without_dataset_selector(
     )
 
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     endpoint = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.notes_tasks")
     app.include_router(endpoint.router, prefix="/api/v1/notes")
     app.dependency_overrides[get_request_user] = override_user
@@ -361,6 +363,7 @@ def test_postgres_rest_activity_after_bind_serializes_read_and_dismiss_timestamp
     )
 
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     endpoint = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.notes_tasks")
     app.include_router(endpoint.router, prefix="/api/v1/notes")
     app.dependency_overrides[get_request_user] = override_user
@@ -510,6 +513,7 @@ def checkbox_pg_api(pg_database_config: DatabaseConfig):
 
     from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     endpoint = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.notes_tasks")
     app.include_router(endpoint.router, prefix="/api/v1/notes")
     notes_endpoint = importlib.import_module("tldw_Server_API.app.api.v1.endpoints.notes")
