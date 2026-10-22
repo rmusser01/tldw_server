@@ -93,3 +93,47 @@ describe("tldw transport provider (CC-06)", () => {
     )
   })
 })
+
+// Ollama families such as mistral and qwen share a name with a provider key.
+// "mistral:latest" is a model, not provider "mistral" with model "latest".
+describe("model ids whose family is also a provider (CC-06)", () => {
+  it.each([
+    ["mistral:latest", "mistral:latest"],
+    ["qwen:7b", "qwen:7b"],
+    ["mistral:7b-instruct-q4_K_M", "mistral:7b-instruct-q4_K_M"],
+    ["mistral:instruct", "mistral:instruct"],
+    ["tldw:mistral:latest", "mistral:latest"],
+    ["ollama:mistral:latest", "mistral:latest"],
+    ["mistral:mistral-large-latest", "mistral-large-latest"],
+    ["Google: Gemini Buddy", "Google: Gemini Buddy"],
+    ["Mistral:Bot", "Mistral:Bot"]
+  ])("heads a message from %s as %s", (name, expected) => {
+    expect(formatChatMessageAuthorName(name)).toBe(expected)
+  })
+
+  it("keeps the family in a bare model name", () => {
+    expect(getChatModelLabelParts({ modelId: "mistral:latest" }).modelName).toBe("mistral:latest")
+    expect(getChatModelLabelParts({ modelId: "qwen:7b" }).modelName).toBe("qwen:7b")
+  })
+
+  it("names the supplied provider, not the family", () => {
+    expect(formatChatModelLabel({ modelId: "mistral:latest", provider: "ollama" })).toBe(
+      "mistral:latest (Ollama)"
+    )
+    expect(formatChatModelLabel({ modelId: "qwen:7b", provider: "ollama" })).toBe(
+      "qwen:7b (Ollama)"
+    )
+    expect(
+      formatChatModelLabel({ model: { model: "tldw:mistral:latest", provider: "ollama" } })
+    ).toBe("mistral:latest (Ollama)")
+  })
+
+  it("still drops a prefix that names the supplied provider", () => {
+    expect(formatChatModelLabel({ modelId: "ollama:mistral:latest", provider: "ollama" })).toBe(
+      "mistral:latest (Ollama)"
+    )
+    expect(
+      formatChatModelLabel({ modelId: "custom-openai-api:mock-gpt-4o", provider: "custom_openai_api" })
+    ).toBe("mock-gpt-4o (Custom OpenAI API)")
+  })
+})

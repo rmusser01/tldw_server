@@ -12,7 +12,7 @@ import {
   normalizeProviderAvailabilityKey,
   toProviderHealthSignal
 } from "@/services/tldw/model-provider-availability"
-import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
+import { splitChatModelId } from "@/utils/chat-model-id"
 
 export type ChatModelSendOutcome = "working" | "unreachable"
 
@@ -27,24 +27,20 @@ const toTrimmedString = (value: unknown): string => {
   return String(value).trim()
 }
 
-const stripInternalPrefix = (value: string): string =>
-  value.replace(/^tldw:/i, "").trim()
-
 /**
  * A stable key for one provider's model. Accepts a bare model id with a
- * separate provider, or a provider-qualified id such as `ollama:llama3`.
+ * separate provider, or a provider-qualified id such as `ollama:llama3`. Ollama
+ * ids such as `mistral:7b` and `qwen:7b` stay whole, so they get their own keys.
  */
 export const chatModelReadinessKey = (
   provider: unknown,
   model: unknown
 ): string | null => {
-  const rawModel = stripInternalPrefix(toTrimmedString(model))
-  if (!rawModel) return null
-  const selection = parseProviderQualifiedModelSelection(rawModel)
-  const modelId = stripInternalPrefix(selection.modelId).toLowerCase()
+  const parts = splitChatModelId(model, provider)
+  const modelId = parts.modelId.toLowerCase()
   if (!modelId) return null
   const providerKey =
-    normalizeProviderAvailabilityKey(toTrimmedString(provider) || selection.provider) ?? ""
+    normalizeProviderAvailabilityKey(parts.provider || toTrimmedString(provider)) ?? ""
   return `${providerKey}:${modelId}`
 }
 

@@ -10,7 +10,7 @@
 import { removeModelSuffix } from "@/db/model-provider-utils"
 import { getProviderDisplayName } from "@/utils/provider-registry"
 import { normalizeProviderAvailabilityKey } from "@/services/tldw/model-provider-availability"
-import { parseProviderQualifiedModelSelection } from "@/utils/resolve-api-provider"
+import { splitChatModelId, stripInternalModelPrefix } from "@/utils/chat-model-id"
 
 type ModelDescriptor = Record<string, unknown> | null | undefined
 
@@ -25,9 +25,6 @@ const toText = (value: unknown): string => {
   if (typeof value !== "string" && typeof value !== "number") return ""
   return String(value).trim()
 }
-
-const stripInternalPrefix = (value: string): string =>
-  value.replace(/^tldw:/i, "").trim()
 
 // "tldw" is the server transport, not a model provider.
 const UNKNOWN_PROVIDERS = new Set(["", "unknown", "other", "default", "tldw"])
@@ -49,6 +46,8 @@ export const formatChatProviderName = (provider: unknown): string => {
 /**
  * Split a model into its display name and provider name. Accepts a catalog
  * descriptor, a provider-qualified id (`ollama:llama3`, `tldw:llama3`) or both.
+ * A bare Ollama id such as `mistral:latest` keeps its family (see
+ * `splitChatModelId`).
  */
 export const getChatModelLabelParts = ({
   model,
@@ -59,20 +58,20 @@ export const getChatModelLabelParts = ({
   modelId?: unknown
   provider?: unknown
 }): ChatModelLabelParts => {
-  const rawId = stripInternalPrefix(
+  const rawId = stripInternalModelPrefix(
     toText(modelId) || toText(model?.model) || toText(model?.id) || toText(model?.name)
   )
-  const selection = parseProviderQualifiedModelSelection(rawId)
-  const nickname = stripInternalPrefix(toText(model?.nickname))
-  const modelName = nickname || stripInternalPrefix(selection.modelId) || rawId
-  const providerCandidates = [
+  const suppliedProviders = [
     provider,
     model?.provider,
-    (model?.details as Record<string, unknown> | undefined)?.provider,
-    selection.provider
+    (model?.details as Record<string, unknown> | undefined)?.provider
   ]
+  const providerHint = suppliedProviders.find((candidate) => formatChatProviderName(candidate))
+  const parts = splitChatModelId(rawId, providerHint)
+  const nickname = stripInternalModelPrefix(toText(model?.nickname))
+  const modelName = nickname || parts.modelId || rawId
   let providerName = ""
-  for (const candidate of providerCandidates) {
+  for (const candidate of [...suppliedProviders, parts.provider]) {
     providerName = formatChatProviderName(candidate)
     if (providerName) break
   }
@@ -93,15 +92,12 @@ const ACCOUNT_MODEL_PATH = /accounts\/[^/]+\/models\//g
 /**
  * The name in an assistant message header. A streaming reply is named after
  * the selected model key (`custom_openai_api:mock-gpt-4o`), a finished one
- * after the model; both read as the model name. Character and assistant names
- * pass through unchanged.
+ * after the model (`mistral:latest`); both read as the model name. Character
+ * and assistant names pass through unchanged.
  */
 export const formatChatMessageAuthorName = (name: unknown): string => {
   const raw = removeModelSuffix(toText(name).replace(ACCOUNT_MODEL_PATH, ""))
-  const internal = /^tldw:/i.test(raw)
-  const selection = parseProviderQualifiedModelSelection(stripInternalPrefix(raw))
-  if (!internal && !selection.isProviderQualified) return raw
-  return removeModelSuffix(
-    stripInternalPrefix(selection.modelId).replace(ACCOUNT_MODEL_PATH, "")
-  )
+  const parts = splitChatModelId(raw)
+  if (!/^tldw:/i.test(raw) && !parts.provider) return raw
+  return removeModelSuffix(parts.modelId.replace(ACCOUNT_MODEL_PATH, ""))
 }

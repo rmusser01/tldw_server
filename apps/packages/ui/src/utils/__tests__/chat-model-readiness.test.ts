@@ -35,6 +35,25 @@ describe("chatModelReadinessKey", () => {
   it("returns null without a model id", () => {
     expect(chatModelReadinessKey("ollama", "  ")).toBeNull()
   })
+
+  it("keeps Ollama models whose family is also a provider apart (CC-06)", () => {
+    expect(chatModelReadinessKey("ollama", "mistral:7b")).not.toBe(
+      chatModelReadinessKey("ollama", "qwen:7b")
+    )
+    expect(chatModelReadinessKey("ollama", "ollama:mistral:7b")).toBe(
+      chatModelReadinessKey("ollama", "mistral:7b")
+    )
+    expect(chatModelReadinessKey(undefined, "ollama:mistral:7b")).toBe(
+      chatModelReadinessKey("ollama", "mistral:7b")
+    )
+  })
+
+  it("does not mark one Ollama model unreachable after another one fails", () => {
+    recordChatModelSendOutcome("ollama", "mistral:7b", "unreachable")
+
+    expect(getChatModelSendOutcome("ollama", "mistral:7b")).toBe("unreachable")
+    expect(getChatModelSendOutcome("ollama", "qwen:7b")).toBeNull()
+  })
 })
 
 describe("isChatModelUnreachableError", () => {
