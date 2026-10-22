@@ -963,6 +963,16 @@ const ensureDesktopCockpitRailsVisible = async (page: Page) => {
   await restoreDesktopCockpitRail(page, 'right');
 };
 
+// The raw provider:model route sits under a collapsed Details disclosure (CC-06).
+const openRuntimeRouteDetails = async (runtimeInspector: Locator) => {
+  const details = runtimeInspector.locator('details').filter({ hasText: 'Provider route' });
+  await expect(details).toHaveCount(1);
+  if (!(await details.evaluate((element) => (element as HTMLDetailsElement).open))) {
+    await details.locator('summary').click();
+  }
+  await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
+};
+
 const assertRuntimeProviderSummary = async (runtimeInspector: Locator) => {
   const runtimeState = runtimeInspector.getByRole('region', { name: 'Runtime state' });
   await expect(runtimeState.getByRole('heading', { name: 'Chat settings' })).toBeVisible();
@@ -2248,7 +2258,7 @@ test.describe('/chat cockpit real-server parity', () => {
       const modelSettingsTrigger = runtimeInspector.locator(
         '[data-cockpit-model-settings-trigger]'
       );
-      await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
+      await openRuntimeRouteDetails(runtimeInspector);
       const modelSettingsOpenDetail = page.evaluate(
         () =>
           new Promise<{ settingsScope?: string | null }>((resolve) => {
@@ -3260,7 +3270,7 @@ test.describe('/chat cockpit real-server parity', () => {
 
     await expect(compositionPreview).toContainText(compositionScopeText(modelKey));
     expect(modelKey).toBe(chatModelSelection.key);
-    await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
+    await openRuntimeRouteDetails(runtimeInspector);
     await expect(runtimeInspector.getByText(modelKey, { exact: true })).toBeVisible();
 
     const prompt = `Cockpit model provider proof ${Date.now()}: answer in one short sentence.`;
