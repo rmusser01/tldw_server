@@ -30,6 +30,7 @@ from fastapi.testclient import TestClient
 from tldw_Server_API.app.api.v1.API_Deps import ChaCha_Notes_DB_Deps as deps
 from tldw_Server_API.app.api.v1.endpoints import character_chat_sessions as chats
 from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import CharacterRateLimiter
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 pytestmark = pytest.mark.integration
@@ -49,6 +50,7 @@ def _count(db: CharactersRAGDB, *, include_deleted: bool = True) -> int:
 
 def _client(db: CharactersRAGDB, monkeypatch: pytest.MonkeyPatch, *, user_id: int = 1):
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(chats.router, prefix="/api/v1/chats")
     app.dependency_overrides[deps.get_chacha_db_for_user] = lambda: db
     app.dependency_overrides[chats.get_request_user] = lambda: SimpleNamespace(id=user_id)

@@ -2,7 +2,7 @@
 id: TASK-13861
 title: Legacy thread-local PostgreSQL ChaCha checkouts leak (thread exit, long-lived
   threads, close_all_connections before reset)
-status: In Progress
+status: Done
 labels:
 - chat
 - postgres
@@ -20,7 +20,7 @@ Found while fixing TASK-13841 (measured on origin/dev 7c94a2efb1). (1) Thread ex
 - [x] #1 /chat/stream persistence is exercised on PostgreSQL first, and every production caller that reaches the legacy thread-local path on PostgreSQL is listed, with evidence
 - [x] #2 No PostgreSQL checkout outlives its thread or pins a pool slot outside an operation: such callers run inside chacha_operation or return their checkout
 - [x] #3 After CharactersRAGDB.close_all_connections() on psycopg_pool, no checkout it returned is left open without its reset
-- [ ] #4 Test apps over PostgreSQL ChaCha install ChaChaOperationMiddleware, or are shown not to leak
+- [x] #4 Test apps over PostgreSQL ChaCha install ChaChaOperationMiddleware, or are shown not to leak
 - [x] #5 CharactersRAGDB.close_all_connections() never closes the shared PostgreSQL content pool
 <!-- AC:END -->
 
@@ -47,19 +47,24 @@ ADR: required and added, Docs/ADR/080-chacha-postgres-checkouts-owned-by-entry-p
 AC1: /chat/stream exercised on PostgreSQL first (PR B), and every production caller that reaches the legacy path is listed with evidence and fix in the plan's Findings F2 and F11, plus PR B's review additions (the Workflows character_chat adapter, fixed; the notes adapter, TASK-13897). AC2: every listed caller now runs inside chacha_operation or returns its checkout on the thread that took it; each has a PostgreSQL test that fails on dev. Accepted bound: code nobody has wrapped falls back to the thread-exit return (at the next ChaCha call) and, for dropped handles, the GC-timed backstop (ADR-080).
 AC2 under Decision 2's recommendation (B5 done): a wrapped on-loop persona call holds no slot between calls, but still checks out on the event-loop thread, so when other work holds the whole pool it can stall the loop for up to pool_timeout; TASK-13896 moves those calls, and the voice assistant's, off the loop.
 PR C review m3 (no change, latent): @owns_chacha_checkouts on NotificationsService.deliver_chatbook runs outside the method's catch-all, so joining an inherited, already-closed operation (ClosedChaChaOperationError) or a failed checkout return at exit would raise out of the method instead of returning NotificationResult(status='failed'); no current caller can trigger it, because watchlists.py:5821 (run_in_threadpool) and :7728 run inside a live request's operation and briefing_delivery.py:350 runs from the Scheduler's own workers, which open none.
+PR D (test/chacha-pg-test-app-middleware): 31 test files / 41 bare FastAPI() apps over PostgreSQL ChaCha now install ChaChaOperationMiddleware (the task's grep found 29; test_character_shared_owner_contract.py hid one beside an app that has it; since the plan, dev added test_native_history_frozen_worldbooks.py and a third app in test_notes_tasks_postgres_compatibility.py, hence 31/41 rather than the plan's 30/39). Guard test test_chacha_test_apps_install_operation_middleware.py counts builders against installs per file, for the literal app = FastAPI(): on origin/dev ba84588d12 (PRs A-C merged) 1 failed (31 files listed), with the fix 1 passed. The other 30 files on PostgreSQL (the RAG file hangs on dev too, TASK-13900), 4 shards each: dev 921 passed, 4 skipped; with the middleware 921 passed, 4 skipped. test_conversation_quota_count_backends.py's [postgres-ordinary-workspace] case, which needs PR A's locking-read fix once the middleware is in, passes.
+Optional item done: pg_restricted_backend drops the role under lock_timeout 10s; on a leaked session it reports the role's sessions, terminates them, drops the role and fails. It keeps the teardown order #3084 introduced (close the admin pool, then a fresh admin backend for the drop). pytester probe: on dev TimeoutExpired after 90 s (DROP OWNED BY waiting on the leaked session, idle in transaction, seen in pg_stat_activity); with the fix 1 passed in 13.4 s (subprocess 1 passed, 1 error with the report). The fixture now has 29 users on dev (12 when the task was filed) plus D2's own test; those 30 files, 4 shards: 1002 passed, 1 skipped, 8 failed, and no teardown reported a leaked session. All 8 fail the same way without PR D: 3 Admin backup tests need pg_dump, which this host lacks (same on ba84588d12), and 5 arrived failing with #3084 (test_chacha_postgres_sequence_ownership.py::test_chacha_sync_continues_after_table_error_without_settling_caller and four test_history_selection_transactions.py metadata-capture cases): they fail identically on ba84588d12, on d47c9ccf58 (before PR C) and on eb0c8c9e52, the #3084 commit that added them, which has none of TASK-13861's code.
+Bandit: PR A B101 only in new tests; PR B unchanged from dev in product files (chat_helpers B311 x1, pre-existing), B101 and B105 (the voice test's 'valid-token') in new tests; PR C nothing in product files, B101 only in new tests; PR D B101 x1 in the guard, postgres.py unchanged (B101 x2, B404 x1, B603 x2, as on dev). Test-quality triage OK with all 14 new test files (the plan's 13 plus PR B's review test), baseline untouched. Docs: ADR-080 and the ChaCha DB guide (PR C), Docs/Published refreshed. Open follow-ups: TASK-13896, TASK-13897, TASK-13899, TASK-13900.
+PR D review fixes (#3300, round 1): the teardown test now takes pg_server, so it skips where PostgreSQL is unreachable (it failed there: {'passed': 0} != {'passed': 1}); the fixture's retry drop also runs under lock_timeout, and the first timeout now records and terminates every open transaction on the test's own database, whatever its role, so a lock held through an admin-DSN session no longer hangs the retry (new case [another-roles-session]: TimeoutExpired at 90 s before, passes in about 11 s after); the guard matches postgres in any case, pg_restricted_backend and pg_database_config, and any <name> = FastAPI( builder against <name>.add_middleware, flagging nothing new (34 files checked either way). The 4 skips in PR D's 921-passed sweeps were RUN_JOBS-gated tests in test_study_pack_endpoints_api.py; a re-run of 8 swept and fixture-user files with RUN_JOBS=1 gave 424 passed, 0 skipped. Filed TASK-13901 for the five tests that have failed on dev since #3084, and corrected TASK-13900's test name.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Outside HTTP, PostgreSQL ChaCha work used one thread-local checkout per thread per handle that nothing returned. PR A (#3293): a legacy checkout is closed by its own thread when that thread exits, and its slot comes back at the next ChaCha call; a checkout dropped on another thread (a collected handle, which happens only at cyclic GC, a backstop) waits until its owner thread exits, so no thread closes a live thread's connection; the finalizer never calls the pool and does nothing in a forked child; close_all_connections() neither closes the shared content pool (one MCP call used to break ChaCha until restart) nor leaves a returned checkout open without its reset, and on PostgreSQL leaves other live threads' checkouts to them; two locking reads that returned 400 inside every HTTP request on PostgreSQL see the operation's transaction. PR B (#3295): /chat/stream persistence, the voice assistant, every persona session call (8 off the loop, 13 on it, and the skill tool call's registry lookup) and the Workflows character_chat adapter's ChaCha calls run in their own chacha_operation, and a default-character insert race is fixed. PR C (#3297): each ChaCha-touching Jobs owner and cancel action, and the five background runners that opened per-call handles, own their checkouts (ADR-080, per worker rather than in WorkerSDK); the Chat_Macros run, whose branches write concurrently, gives each ChaCha call its own operation, because one shared operation rolled back its writes; the notes-graph cleanup is operation-aware. PR D: the 31 PostgreSQL ChaCha test files (41 apps) install the middleware, a guard keeps them, and pg_restricted_backend fails fast on a leaked session. Follow-ups: TASK-13896 (persona and voice assistant: run the on-loop ChaCha calls off the event loop, so a call waiting for a connection cannot stall the loop), TASK-13897 (the Workflows engine's detached tasks inherit the caller's ChaCha operation; the notes adapter is still exposed), TASK-13899 (serialize managed transactions per connection state, or fail loudly on overlap), TASK-13900 (RAG restricted Media DB test hang, not ChaCha).
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

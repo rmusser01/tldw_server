@@ -419,8 +419,45 @@ def pg_restricted_backend(pg_database_config):
         admin.get_pool().close_all()
         admin = DatabaseBackendFactory.create_backend(pg_database_config)
         try:
-            with admin.transaction() as conn:
-                conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
-                conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+            _drop_restricted_role(admin, role)
         finally:
             admin.get_pool().close_all()
+
+
+_RESTRICTED_ROLE_LOCK_TIMEOUT = "10s"
+
+
+def _drop_restricted_role(admin, role: str) -> None:
+    """Drop the role, failing fast and naming the sessions that still hold a lock.
+
+    A session the test leaked in a transaction keeps its locks, and ``DROP OWNED BY``
+    would wait for them until pytest-timeout ends the whole run. ``admin`` is
+    connected to the test's own database, so every other open transaction on it
+    belongs to the test, whichever role it runs as.
+    """
+    from psycopg import errors, sql
+
+    def drop() -> None:
+        with admin.transaction() as conn:
+            conn.execute(sql.SQL("SET LOCAL lock_timeout = {}").format(sql.Literal(_RESTRICTED_ROLE_LOCK_TIMEOUT)))
+            conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
+            conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+
+    try:
+        drop()
+        return
+    except errors.LockNotAvailable:
+        pass
+    others = (
+        "FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()"
+        " AND backend_type = 'client backend' AND state <> 'idle'"
+    )
+    with admin.transaction() as conn:
+        sessions = conn.execute(f"SELECT pid, usename, state, left(query, 120) AS query {others}").fetchall()
+        conn.execute(f"SELECT pg_terminate_backend(pid, 5000) {others}")
+    report = f"The test left {len(sessions)} session(s) of {role} or its database holding locks (a leaked checkout?): {sessions}"
+    try:
+        drop()
+    except errors.LockNotAvailable as exc:
+        raise AssertionError(f"{report}; still blocked after terminating them") from exc
+    raise AssertionError(report)

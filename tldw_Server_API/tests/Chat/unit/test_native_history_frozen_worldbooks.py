@@ -23,7 +23,7 @@ from tldw_Server_API.app.core.Chat.chat_service import apply_prompt_templating, 
 from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection, snapshot_to_wire
 from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key, prepare_native_history_message
 from tldw_Server_API.app.core.DB_Management.chacha.conversation_resume_store import build_materialized_behavior_settings
-from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware, chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 
@@ -696,6 +696,7 @@ async def frozen_chat_http(frozen_chat) -> AsyncIterator[tuple[httpx.AsyncClient
 
     principal = SimpleNamespace(id=1)
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(sessions_router, prefix="/api/v1/chats")
     app.include_router(characters_router, prefix="/api/v1/characters")
     app.dependency_overrides[get_chacha_db_for_user] = lambda: frozen_chat.db
