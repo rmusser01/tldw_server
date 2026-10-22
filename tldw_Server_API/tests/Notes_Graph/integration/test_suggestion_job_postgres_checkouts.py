@@ -77,7 +77,10 @@ def admitted_job(pg_database_config, tmp_path, monkeypatch):
     async def owner_database(_user_id, client_id=None):  # noqa: ARG001
         return notes
 
+    at_provider_call = []  # the checkouts out while the provider call runs
+
     def no_suggestions(**_kwargs):  # the provider call, the only part not under test
+        at_provider_call.append(outstanding())
         return SimpleNamespace(relationships=(), tags=(), validation_counts={}, input_tokens=0, output_tokens=0)
 
     monkeypatch.setattr(worker, "get_chacha_db_for_user_id", owner_database)
@@ -91,7 +94,7 @@ def admitted_job(pg_database_config, tmp_path, monkeypatch):
         return sorted(holders[key] for key, count in (taken - returned).items() for _ in range(count))
 
     try:
-        yield jobs, outstanding
+        yield jobs, outstanding, at_provider_call
     finally:
         notes.close_connection()
         pool.close_all()
@@ -113,7 +116,7 @@ async def _run_one_job(jobs, handler):
 
 
 async def test_the_suggestions_job_completes_and_returns_every_checkout(admitted_job):
-    jobs, outstanding = admitted_job
+    jobs, outstanding, at_provider_call = admitted_job
 
     async def handler(job, *, sdk):
         return await worker.handle_notes_graph_suggestions_job(job, jobs=jobs, worker_id=sdk.cfg.worker_id)
@@ -122,10 +125,13 @@ async def test_the_suggestions_job_completes_and_returns_every_checkout(admitted
 
     assert stored["status"] == "completed", stored.get("error_message")
     assert outstanding() == []
+    # The unwrapped job returns its checkout after every step, so none is held
+    # through the provider call; one operation around the job would hold one.
+    assert at_provider_call == [[]]
 
 
 async def test_the_suggestions_job_completes_when_an_operation_owns_its_checkouts(admitted_job):
-    jobs, outstanding = admitted_job
+    jobs, outstanding, _at_provider_call = admitted_job
 
     async def handler(job, *, sdk):
         with chacha_operation(independent=True):  # as an owner around the whole job would
