@@ -31,7 +31,18 @@
       "localFirst": "Local-first"
     },
     "saveFailed": "This model is selected for this tab. Your preference could not be saved.",
-    "retrySave": "Retry saving model"
+    "retrySave": "Retry saving model",
+    "change": "Change model",
+    "choose": "Choose model",
+    "group": {
+      "default": "Default",
+      "local": "Local"
+    },
+    "readiness": {
+      "notChecked": "Not checked",
+      "working": "Working",
+      "unreachable": "Unreachable"
+    }
   },
   "save": "Save",
   "saved": "Saved",

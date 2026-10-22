@@ -891,5 +891,8 @@
     "allModelsValue": "{{value}} (all models)",
     "allModelsHint": "Set for all models. Move the slider to change it for this model only.",
     "resetToDefault": "Reset {{label}} to default"
+  },
+  "companion": {
+    "openChat": "Open chat"
   }
 }

@@ -192,6 +192,7 @@ import { isFireFoxPrivateMode } from "@/utils/is-private-mode";
 import { handleChatInputKeyDown } from "@/utils/key-down";
 import { dispatchOpenAssistantSelect } from "@/utils/assistant-select-events";
 import { resolveStartupSelectedModel } from "@/utils/model-startup-selection";
+import { useComposerModelReadiness } from "./hooks/useComposerModelReadiness";
 import { trackOnboardingChatSubmitSuccess } from "@/utils/onboarding-ingestion-telemetry";
 import type { ChatModelUsability } from "@/utils/chat-model-availability";
 import { getProviderDisplayName } from "@/utils/provider-registry";
@@ -1473,6 +1474,7 @@ export const PlaygroundForm = ({
     providerLabel,
     modelSummaryLabel,
     apiModelLabel,
+    modelLabelParts,
     modelSelectorWarning,
     favoriteModels,
     favoriteModelsIsLoading,
@@ -1490,6 +1492,7 @@ export const PlaygroundForm = ({
     modelsError: composerModelsFailed,
     onRetryModels: () => { void retryComposerModels() },
   });
+  const composerModelReadiness = useComposerModelReadiness({ composerModels, selectedModel, selectedModelMeta, providerKey: resolvedProviderKey, onSelectModel: setSelectedModel });
   const cancelModelSelectorFocus = React.useCallback(() => {
     if (modelSelectorFocusFrameRef.current == null) return;
     window.cancelAnimationFrame(modelSelectorFocusFrameRef.current);
@@ -3467,16 +3470,18 @@ export const PlaygroundForm = ({
     <SelectedModelSaveFeedback failed={selectedModelSaveFailed} onRetry={retrySelectedModelSave} />
     <ChatModelSelectorDropdown
       apiModelLabel={apiModelLabel}
+      modelLabelParts={modelLabelParts}
       catalogControls={modelCatalogControls}
       connectionStatusLabel={connectionStatusLabel}
       connectionStatusWarning={
-        !isConnectionReady || connectionUxState === "connected_degraded"
+        !isConnectionReady || (!composerModelReadiness && connectionUxState === "connected_degraded")
       }
       modelUsabilityLabel={characterChatModelUsabilityLabel ?? undefined}
       modelUsabilityTitle={characterChatModelUsabilityTitle ?? undefined}
       modelUsabilityWarning={Boolean(
         characterChatModelUsability && !characterChatModelUsability.canSend
       )}
+      modelReadiness={composerModelReadiness}
       modelDropdownMenuItems={modelDropdownMenuItems}
       modelDropdownOpen={modelDropdownOpen}
       modelSearchQuery={modelSearchQuery}

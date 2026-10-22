@@ -19,6 +19,7 @@ import {
   Square,
 } from "lucide-react";
 import type { ChatModelUsabilityStatus } from "@/utils/chat-model-availability";
+import { formatChatModelLabel } from "@/utils/chat-model-label";
 
 type PlaygroundStatusStripCompositionStatus =
   | "idle"
@@ -160,12 +161,13 @@ export const PlaygroundStatusStrip = ({
                   : isDegraded
                     ? "degraded"
                     : "ready";
-  const routeLabel =
-    selectedProvider && hasSelectedModel
-      ? `${selectedProvider}:${selectedModel}`
-      : hasSelectedModel
-        ? selectedModel
-        : t("cockpit.noModelSelected", "No model selected");
+  // "model (Provider)", never a raw provider:model id (CC-06).
+  const routeLabel = hasSelectedModel
+    ? formatChatModelLabel({
+        modelId: selectedModel,
+        provider: selectedProvider,
+      })
+    : t("cockpit.noModelSelected", "No model selected");
   const runtimeLabel =
     runtimeState === "error"
       ? t("cockpit.error", ERROR_STATE_LABEL)

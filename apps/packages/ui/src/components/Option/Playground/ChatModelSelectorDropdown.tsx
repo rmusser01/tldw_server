@@ -5,15 +5,31 @@ import React from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
 import type { ModelSortMode } from "@/hooks/playground"
+import type { ComposerModelReadiness } from "./hooks/useComposerModelReadiness"
+
+// The search box, not the scope control's radio inputs, takes focus on open.
+const MODEL_SEARCH_INPUT = 'input:not([type="radio"]):not([type="checkbox"])'
 
 type ChatModelSelectorDropdownProps = {
   apiModelLabel: string
+  /**
+   * The selected model's name and provider. When given, the chip shows the
+   * model first and the provider second, truncating the provider before the
+   * model name (CC-06).
+   */
+  modelLabelParts?: { modelName: string; providerName: string } | null
   connectionStatusLabel: string
   connectionStatusWarning?: boolean
   catalogControls?: React.ReactNode
   modelUsabilityLabel?: string
   modelUsabilityTitle?: string
   modelUsabilityWarning?: boolean
+  /**
+   * The selected model's own readiness. When given, it replaces the server
+   * connection label for a connected session, so the chip never calls a model
+   * "Healthy" just because the tldw server answers (CC-01).
+   */
+  modelReadiness?: ComposerModelReadiness | null
   modelDropdownMenuItems: any[]
   modelDropdownOpen: boolean
   modelSearchQuery?: string
@@ -30,12 +46,14 @@ type ChatModelSelectorDropdownProps = {
 export const ChatModelSelectorDropdown = React.memo(
   function ChatModelSelectorDropdown({
     apiModelLabel,
+    modelLabelParts = null,
     catalogControls,
     connectionStatusLabel,
     connectionStatusWarning = false,
     modelUsabilityLabel,
     modelUsabilityTitle,
     modelUsabilityWarning = false,
+    modelReadiness = null,
     modelDropdownMenuItems,
     modelDropdownOpen,
     modelSearchQuery = "",
@@ -65,7 +83,7 @@ export const ChatModelSelectorDropdown = React.memo(
         if (!current || !popupRef.current?.isConnected) return
         const active = document.activeElement
         if (active !== openingFocus && active !== document.body) return
-        popupRef.current.querySelector<HTMLInputElement>("input")?.focus()
+        popupRef.current.querySelector<HTMLInputElement>(MODEL_SEARCH_INPUT)?.focus()
       })
       return () => {
         current = false
@@ -77,21 +95,54 @@ export const ChatModelSelectorDropdown = React.memo(
     // you cannot chat yet. Surface a truthful "No model selected" state instead.
     const noModelSelected = !selectedModel?.trim()
     const providerSelectionNeeded = !noModelSelected && modelSelectorWarning && !modelUsabilityWarning && !connectionStatusWarning
+    // The model's own readiness applies only when nothing more specific
+    // (offline server, missing provider, unusable model) is being shown.
+    const readinessShown = Boolean(
+      modelReadiness &&
+        !connectionStatusWarning &&
+        !providerSelectionNeeded &&
+        !modelUsabilityLabel &&
+        !noModelSelected
+    )
+    const readinessWarning = readinessShown && modelReadiness?.state === "unreachable"
+    const readinessNeutral = readinessShown && modelReadiness?.state === "not_checked"
     const statusLabel = connectionStatusWarning ? connectionStatusLabel :
       (providerSelectionNeeded
         ? t("playground:composer.chooseProvider", "Choose provider")
         : modelUsabilityLabel) ??
       (noModelSelected
         ? t("playground:composer.providerStatusNoModel", "No model selected")
-        : connectionStatusLabel)
-    const statusTitle = connectionStatusWarning ? connectionStatusLabel : providerSelectionNeeded ? apiModelLabel : modelUsabilityTitle ?? apiModelLabel
+        : readinessShown && modelReadiness
+          ? modelReadiness.label
+          : connectionStatusLabel)
+    const statusTitle = connectionStatusWarning ? connectionStatusLabel : providerSelectionNeeded ? apiModelLabel :
+      modelUsabilityTitle ?? (readinessShown && modelReadiness ? modelReadiness.title : apiModelLabel)
     const statusWarning =
       noModelSelected ||
       modelUsabilityWarning ||
       connectionStatusWarning ||
-      modelSelectorWarning
+      modelSelectorWarning ||
+      readinessWarning
+    const switchTarget = readinessShown ? modelReadiness?.switchTarget ?? null : null
+    const [switchAnnouncement, setSwitchAnnouncement] = React.useState("")
+    // The switch button unmounts once the new model is selected, so focus
+    // moves to the chip and the change is announced (CC-01).
+    const handleSwitchToTarget = React.useCallback(() => {
+      if (!switchTarget || !modelReadiness) return
+      modelReadiness.switchToTarget()
+      setSwitchAnnouncement(
+        String(
+          t("playground:composer.modelReadiness.switchedTo", {
+            defaultValue: "Switched to {{model}}",
+            model: switchTarget.modelLabel
+          } as never)
+        )
+      )
+      selectorRef.current?.focus()
+    }, [modelReadiness, switchTarget, t])
 
     return (
+      <>
       <Dropdown
         open={modelDropdownOpen}
         destroyOnHidden
@@ -117,7 +168,7 @@ export const ChatModelSelectorDropdown = React.memo(
             tabIndex={-1}
             onFocus={(event) => {
               if (event.target === event.currentTarget) {
-                event.currentTarget.querySelector<HTMLInputElement>("input")?.focus()
+                event.currentTarget.querySelector<HTMLInputElement>(MODEL_SEARCH_INPUT)?.focus()
               }
             }}
             onBlur={(event) => {
@@ -245,18 +296,43 @@ export const ChatModelSelectorDropdown = React.memo(
                 statusWarning ? "text-warn" : "text-text-subtle"
               }`}
             />
-            <span className="max-w-[120px] truncate">{apiModelLabel}</span>
+            {modelLabelParts?.modelName ? (
+              <>
+                <span
+                  data-testid="model-selector-model-name"
+                  className="min-w-0 max-w-[160px] truncate font-medium sm:max-w-[260px]"
+                >
+                  {modelLabelParts.modelName}
+                </span>
+                {modelLabelParts.providerName ? (
+                  <span
+                    data-testid="model-selector-provider-name"
+                    className="min-w-0 max-w-[96px] shrink-[4] truncate text-text-muted"
+                  >
+                    {modelLabelParts.providerName}
+                  </span>
+                ) : null}
+              </>
+            ) : (
+              <span className="max-w-[120px] truncate">{apiModelLabel}</span>
+            )}
             <span
+              data-testid="model-selector-status"
+              data-model-readiness={readinessShown ? modelReadiness?.state : undefined}
               className={`min-w-0 truncate rounded-full px-1.5 py-0.5 text-[9px] ${
                 statusWarning
                   ? "bg-warn/10 text-text"
-                  : "bg-success/10 text-text"
+                  : readinessNeutral
+                    ? "bg-surface2 text-text-muted"
+                    : "bg-success/10 text-text"
               }`}
               title={
-                t(
-                  "playground:composer.providerStatusTooltip",
-                  "Provider status"
-                ) as string
+                (readinessShown
+                  ? t("playground:composer.modelReadiness.tooltip", "Model status")
+                  : t(
+                      "playground:composer.providerStatusTooltip",
+                      "Provider status"
+                    )) as string
               }
             >
               {statusLabel}
@@ -264,6 +340,25 @@ export const ChatModelSelectorDropdown = React.memo(
           </button>
         </Tooltip>
       </Dropdown>
+      {switchTarget && modelReadiness ? (
+        <button
+          type="button"
+          data-testid="model-readiness-switch"
+          onClick={handleSwitchToTarget}
+          className="inline-flex min-h-[44px] min-w-0 max-w-full items-center rounded-full border border-border bg-surface px-2 text-[10px] text-text hover:bg-surface-hover"
+        >
+          <span className="truncate">{switchTarget.label}</span>
+        </button>
+      ) : null}
+      <span
+        role="status"
+        aria-live="polite"
+        data-testid="model-readiness-announcement"
+        className="sr-only"
+      >
+        {switchAnnouncement}
+      </span>
+      </>
     )
   }
 )

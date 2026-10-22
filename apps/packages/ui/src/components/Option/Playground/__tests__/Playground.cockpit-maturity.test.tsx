@@ -191,7 +191,7 @@ describe("Playground mature cockpit surfaces", () => {
 
     const status = screen.getByRole("status", { name: "Chat status" })
     expect(within(status).getByText("Streaming")).toBeInTheDocument()
-    expect(within(status).getByText("openai:gpt-4.1-mini")).toBeInTheDocument()
+    expect(within(status).getByText("gpt-4.1-mini (OpenAI)")).toBeInTheDocument()
     expect(within(status).queryByText("Context active")).toBeNull()
 
     fireEvent.click(

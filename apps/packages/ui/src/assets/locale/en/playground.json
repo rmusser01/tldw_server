@@ -754,7 +754,26 @@
     "placeholderCommands": "Type a message... (/ for commands)",
     "connectingNotice": "Connecting to your tldw server…",
     "providerStatusConnecting": "Connecting…",
-    "connectionPendingSend": "Still connecting to your tldw server. Your draft has not been sent."
+    "connectionPendingSend": "Still connecting to your tldw server. Your draft has not been sent.",
+    "modelCatalogSearchPlaceholder": "Search all models",
+    "modelScopeLabel": "Models to show",
+    "modelScopeReady": "Ready to use",
+    "modelScopeAll": "All models",
+    "modelNotSetUp": "Not set up",
+    "modelNotSetUpTitle": "This model's provider is not set up on your server yet.",
+    "modelReadiness": {
+      "notChecked": "Not checked",
+      "notCheckedTitle": "This model has not answered yet. Send a message to check it.",
+      "working": "Working",
+      "workingTitle": "This model answered recently.",
+      "unreachable": "Unreachable",
+      "unreachableTitle": "The last request to this model failed. Its provider may not be running. Choose another model.",
+      "switchTo": "Switch to {{model}}",
+      "switchedTo": "Switched to {{model}}",
+      "providerWorkingTitle": "Its provider answered recently.",
+      "providerUnreachableTitle": "Its provider has been failing. Choose another model.",
+      "tooltip": "Model status"
+    }
   },
   "tour": {
     "modelTitle": "Choose a Model",
@@ -1322,7 +1341,8 @@
     "runtimeRailTab": "Chat settings",
     "contextRailHiddenSummary": "Context hidden. Chat settings visible.",
     "runtimeRailHiddenSummary": "Chat settings hidden. Context visible.",
-    "cockpitRailsVisibleSummary": "Context and chat settings visible."
+    "cockpitRailsVisibleSummary": "Context and chat settings visible.",
+    "routeDetails": "Details"
   },
   "historySelection": {
     "retainedOutcomes": "Retained outcomes",
