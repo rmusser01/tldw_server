@@ -86,7 +86,6 @@ import {
   NOTES_EDITOR_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
   NOTE_TEMPLATES,
-  toSortableTimestamp,
   toNoteVersion,
   extractKeywords,
   normalizeTagList,
@@ -119,6 +118,13 @@ import {
 } from './notes-manager-utils'
 import { isEditableTarget } from "@/utils/editable-target"
 import { useConnectionsMemory } from './notes-connections'
+import { useNotesKeyboardNavigation } from "@/components/Notes/hooks/useNotesKeyboardNavigation"
+import { revealNotesListAndFocusSearch } from "@/components/Notes/hooks/useNotesOffCanvasList"
+import { focusActiveNotesListRow } from "@/components/Notes/notes-list-keyboard"
+import { buildNotesTimelineSections } from "@/components/Notes/notes-timeline"
+import { isNotesServerUnavailableError } from "@/components/Notes/notes-list-error"
+import { buildMoveToTrashConfirm, dismissNoteDeletedToast, findNoteTitleForConfirm } from "@/components/Notes/notes-trash"
+import NotesTrashGuidance from "@/components/Notes/NotesTrashGuidance"
 
 const LazyNotesManagerOverlays = React.lazy(() => import("./NotesManagerOverlays"))
 
@@ -349,6 +355,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     setMobileSidebarOpen,
     editorKeywords: kw.editorKeywords,
     setEditorKeywords: kw.setEditorKeywords,
+    knownKeywords: kw.allKeywords,
     keywordSuggestionReturnFocusRef: kw.keywordSuggestionReturnFocusRef,
     setKeywordSuggestionOptions: kw.setKeywordSuggestionOptions,
     setKeywordSuggestionSelection: kw.setKeywordSuggestionSelection,
@@ -412,8 +419,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     ed.resetEditor()
   }, [ed.resetEditor])
   const focusSearchInput = React.useCallback(() => {
-    searchInputRef.current?.focus()
-  }, [])
+    revealNotesListAndFocusSearch({ isMobileViewport, mobileSidebarOpen, sidebarCollapsed, setMobileSidebarOpen, setSidebarCollapsed, focusSearch: () => searchInputRef.current?.focus() })
+  }, [isMobileViewport, mobileSidebarOpen, sidebarCollapsed])
 
   React.useEffect(() => {
     if (ed.selectedId != null) {
@@ -453,6 +460,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [list.data, list.listMode, list.listViewMode, ed.pinnedNoteIdSet])
 
   const filteredCount = visibleNotes.length
+  const listKeyboard = useNotesKeyboardNavigation({ visibleNotes, selectedId: ed.selectedId, selectNote: ed.handleSelectNote, richEditorRef: ed.richEditorRef, contentTextareaRef: ed.contentTextareaRef, editorRegionId: NOTES_EDITOR_REGION_ID, listMode: list.listMode })
   const graphInitialFocusNoteId = React.useMemo(
     () =>
       resolveNotesGraphFocusNoteId(
@@ -1356,18 +1364,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
     if (target == null) { message.warning('No note selected'); return }
     const targetId = String(target)
     const inboundReferenceCount = await countInboundDeleteReferences(targetId)
-    const warningSuffix =
-      inboundReferenceCount > 0
-        ? `\n\nThis note is referenced by ${inboundReferenceCount} other note${
-            inboundReferenceCount === 1 ? '' : 's'
-          }. Deleting it will break those links.`
-        : ''
-    const ok = await confirmDanger({
-      title: 'Please confirm',
-      content: `Delete this note?${warningSuffix}`,
-      okText: 'Delete',
-      cancelText: 'Cancel'
-    })
+    const noteTitle = findNoteTitleForConfirm(targetId, { selectedId: ed.selectedId, selectedTitle: ed.title, rows: list.data })
+    const ok = await confirmDanger(buildMoveToTrashConfirm(t, { noteTitle, inboundReferenceCount }))
     if (!ok) return
     try {
       let expectedVersion: number | null = null
@@ -1430,6 +1428,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         )}` as any,
         method: 'POST' as any
       })
+      dismissNoteDeletedToast(message, target)
       message.success('Note restored')
       list.setListMode('active')
       list.setPage(1)
@@ -2371,35 +2370,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   // Timeline sections
   const timelineSections = React.useMemo(() => {
     if (list.listMode !== 'active') return [] as Array<{ key: string; label: string; notes: NoteListItem[] }>
-    const bucketMap = new Map<string, NoteListItem[]>()
-    for (const note of visibleNotes) {
-      const rawTimestamp = toSortableTimestamp(note.updated_at)
-      if (rawTimestamp <= 0) {
-        const fallback = bucketMap.get('unknown') || []
-        fallback.push(note)
-        bucketMap.set('unknown', fallback)
-        continue
-      }
-      const parsed = new Date(rawTimestamp)
-      const key = `${parsed.getUTCFullYear()}-${String(parsed.getUTCMonth() + 1).padStart(2, '0')}`
-      const bucket = bucketMap.get(key) || []
-      bucket.push(note)
-      bucketMap.set(key, bucket)
-    }
-    const orderedKeys = Array.from(bucketMap.keys()).sort((a, b) => {
-      if (a === 'unknown') return 1
-      if (b === 'unknown') return -1
-      return b.localeCompare(a)
-    })
-    return orderedKeys.map((key) => {
-      const notesForKey = bucketMap.get(key) || []
-      notesForKey.sort((a, b) => toSortableTimestamp(b.updated_at) - toSortableTimestamp(a.updated_at))
-      if (key === 'unknown') return { key, label: t('option:notesSearch.timelineUnknownDate', { defaultValue: 'Unknown date' }), notes: notesForKey }
-      const monthLabel = `${key}-01T00:00:00.000Z`
-      const parsed = new Date(monthLabel)
-      const label = Number.isNaN(parsed.getTime()) ? key : parsed.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })
-      return { key, label, notes: notesForKey }
-    })
+    return buildNotesTimelineSections(visibleNotes, { unknownLabel: t('option:notesSearch.timelineUnknownDate', { defaultValue: 'Unknown date' }) })
   }, [list.listMode, visibleNotes, t])
 
   // Search tips
@@ -2629,7 +2600,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
       window.requestAnimationFrame(() => {
         const target = document.getElementById(targetId) as HTMLElement | null
         if (!target) return
-        target.focus()
+        if (targetId !== NOTES_LIST_REGION_ID || !focusActiveNotesListRow(target)) target.focus()
         if (typeof window !== 'undefined') window.location.hash = targetId
       })
     },
@@ -2649,7 +2620,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         {t('option:notesSearch.shortcutSummaryText', { defaultValue: 'Keyboard shortcuts: Ctrl or Command plus S to save, question mark to open keyboard shortcuts help, Escape to close dialogs.' })}
       </p>
       {isMobileViewport && mobileSidebarOpen && (
-        <button type="button" aria-label={t('option:notesSearch.closeMobileSidebar', { defaultValue: 'Close notes list' })} data-testid="notes-mobile-sidebar-backdrop" className="absolute inset-0 z-30 bg-black/35" onClick={() => setMobileSidebarOpen(false)} />
+        <button type="button" aria-label={t('option:notesSearch.closeMobileSidebar', { defaultValue: 'Close notes list' })} data-testid="notes-mobile-sidebar-backdrop" tabIndex={-1} aria-hidden="true" className="absolute inset-0 z-30 bg-black/35" onClick={() => setMobileSidebarOpen(false)} />
       )}
       <NotesSidebar
         isMobileViewport={isMobileViewport}
@@ -2690,6 +2661,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         searchTipsContent={searchTipsContent}
         query={list.query}
         isFetching={list.isFetching}
+        isPlaceholderData={list.isPlaceholderData}
         hasListError={list.isError}
         listErrorMessage={list.listErrorMessage}
         isStaleResults={list.isError && Array.isArray(list.data) && list.data.length > 0}
@@ -2721,6 +2693,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         handleSelectNote={async (id) => {
           await ed.handleSelectNote(id)
         }}
+        handleOpenNoteFromKeyboard={listKeyboard.openNoteAndFocusEditor}
         handleClearFilters={list.handleClearFilters}
         handleKeywordFilterSearch={kw.handleKeywordFilterSearch}
         handleKeywordFilterChange={kw.handleKeywordFilterChange}
@@ -2755,6 +2728,8 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
           onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
           className="relative h-full w-6 bg-surface border-y border-r border-border hover:bg-surface2 flex items-center justify-center group transition-colors motion-reduce:transition-none rounded-r-lg"
           aria-label={sidebarCollapsed ? t('option:notesSearch.expandSidebar', { defaultValue: 'Expand sidebar' }) : t('option:notesSearch.collapseSidebar', { defaultValue: 'Collapse sidebar' })}
+          aria-expanded={!sidebarCollapsed}
+          aria-controls={NOTES_LIST_REGION_ID}
           data-testid="notes-desktop-sidebar-toggle"
         >
           <div className="flex items-center justify-center w-full h-full">
@@ -2785,10 +2760,13 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
             void handleNewNote()
           }}
         />
+      ) : list.listMode === 'trash' && showEditorEmptyState ? (
+        <NotesTrashGuidance isMobileViewport={isMobileViewport} onShowTrashList={() => setMobileSidebarOpen(true)} onBackToNotes={() => { void ed.switchListMode('active') }} />
       ) : (
       <NotesEditorPane
         isMobileViewport={isMobileViewport}
         setMobileSidebarOpen={setMobileSidebarOpen}
+        mobileSidebarOpen={mobileSidebarOpen}
         selectedId={ed.selectedId}
         showEmptyState={showEditorEmptyState}
         title={ed.title}
@@ -2796,6 +2774,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         editorDisabled={editorDisabled || ed.loadingSelection}
         isDirty={ed.isDirty}
         isOnline={isOnline}
+        notesServerUnavailable={list.isError && isNotesServerUnavailableError(list.error)}
         loadingDetail={ed.loadingDetail}
         saving={ed.saving}
         backlinkConversationId={ed.backlinkConversationId}

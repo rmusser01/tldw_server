@@ -2537,6 +2537,43 @@ async def create_note(
         handle_db_errors(e, "note")
 
 
+_LEGACY_ALIASES_DESCRIPTION = (
+    "If true (the default), also return the page in the deprecated `notes` and `results` arrays, "
+    "which repeat `items`. Pass false to leave them out and cut the response to about a third."
+)
+
+
+def _notes_list_payload(
+    notes_data: list[dict[str, Any]],
+    *,
+    limit: int,
+    offset: int,
+    total: int | None,
+    legacy_aliases: bool,
+) -> dict[str, Any]:
+    """Build a notes list response (NS-04).
+
+    ``items`` always carries the page. ``notes`` and ``results`` repeat it for
+    older clients and are ``null`` when ``legacy_aliases`` is false.
+    """
+    alias_rows = notes_data if legacy_aliases else None
+    return {
+        "notes": alias_rows,
+        "items": notes_data,
+        "results": alias_rows,
+        "count": len(notes_data),
+        "limit": limit,
+        "offset": offset,
+        "total": total,
+        "pagination": build_offset_pagination_meta(
+            limit=limit,
+            offset=offset,
+            total=total,
+            count=len(notes_data),
+        ),
+    }
+
+
 @router.get(
     "/",
     response_model=NotesListResponse,
@@ -2548,6 +2585,9 @@ async def list_notes(
         limit: int = Query(100, ge=1, le=1000, description="Number of notes to return"),
         offset: int = Query(0, ge=0, description="Offset for pagination"),
         include_keywords: bool = Query(False, description="If true, include linked keywords inline per note"),
+        legacy_aliases: Annotated[
+            bool, Query(description=_LEGACY_ALIASES_DESCRIPTION)
+        ] = True,
         # Annotated keeps real Python defaults, so direct calls (tests, internal
         # callers) that omit the sort get "last_modified"/"desc", not a Query object.
         sort_by: Annotated[
@@ -2587,22 +2627,9 @@ async def list_notes(
             total = db.count_notes()
         except _NOTES_NONCRITICAL_EXCEPTIONS:
             total = None
-        # Back-compat aliases for list consumers
-        return {
-            "notes": notes_data,
-            "items": notes_data,
-            "results": notes_data,
-            "count": len(notes_data),
-            "limit": limit,
-            "offset": offset,
-            "total": total,
-            "pagination": build_offset_pagination_meta(
-                limit=limit,
-                offset=offset,
-                total=total,
-                count=len(notes_data),
-            ),
-        }
+        return _notes_list_payload(
+            notes_data, limit=limit, offset=offset, total=total, legacy_aliases=legacy_aliases
+        )
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "notes list")
 
@@ -2618,6 +2645,9 @@ async def list_deleted_notes(
         limit: int = Query(100, ge=1, le=1000, description="Number of trashed notes to return"),
         offset: int = Query(0, ge=0, description="Offset for pagination"),
         include_keywords: bool = Query(False, description="If true, include linked keywords inline per note"),
+        legacy_aliases: Annotated[
+            bool, Query(description=_LEGACY_ALIASES_DESCRIPTION)
+        ] = True,
         # Annotated keeps real Python defaults, so direct calls (tests, internal
         # callers) that omit the sort get "last_modified"/"desc", not a Query object.
         sort_by: Annotated[
@@ -2659,21 +2689,9 @@ async def list_deleted_notes(
         except _NOTES_NONCRITICAL_EXCEPTIONS:
             total = None
 
-        return {
-            "notes": notes_data,
-            "items": notes_data,
-            "results": notes_data,
-            "count": len(notes_data),
-            "limit": limit,
-            "offset": offset,
-            "total": total,
-            "pagination": build_offset_pagination_meta(
-                limit=limit,
-                offset=offset,
-                total=total,
-                count=len(notes_data),
-            ),
-        }
+        return _notes_list_payload(
+            notes_data, limit=limit, offset=offset, total=total, legacy_aliases=legacy_aliases
+        )
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "deleted notes list")
 
@@ -2853,6 +2871,9 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
         limit: int = Query(10, ge=1, le=100, description="Number of results to return"),
         offset: int = Query(0, ge=0, description="Result offset for pagination"),
         include_keywords: bool = Query(False, description="If true, include linked keywords inline per note"),
+        legacy_aliases: Annotated[
+            bool, Query(description=_LEGACY_ALIASES_DESCRIPTION)
+        ] = True,
         title_only: bool = Query(
             False,
             description=(
@@ -2923,21 +2944,9 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 _attach_keywords_bulk(db, notes_data)
             except _NOTES_NONCRITICAL_EXCEPTIONS as outer_err:
                 logger.warning(f"Attaching keywords for notes search failed: {outer_err}")
-        return {
-            "notes": notes_data,
-            "items": notes_data,
-            "results": notes_data,
-            "count": len(notes_data),
-            "limit": limit,
-            "offset": offset,
-            "total": total,
-            "pagination": build_offset_pagination_meta(
-                limit=limit,
-                offset=offset,
-                total=total,
-                count=len(notes_data),
-            ),
-        }
+        return _notes_list_payload(
+            notes_data, limit=limit, offset=offset, total=total, legacy_aliases=legacy_aliases
+        )
     except _NOTES_NONCRITICAL_EXCEPTIONS as e:
         handle_db_errors(e, "notes search")
 

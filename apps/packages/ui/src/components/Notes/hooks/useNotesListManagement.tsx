@@ -34,6 +34,7 @@ import {
   promptModal,
 } from '../notes-manager-utils'
 import type { ConfirmDangerOptions } from '@/components/Common/confirm-danger'
+import { isSameNotesListRowsKind } from '../notes-list-cache'
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
 type NotesAuthorityScope = string | null | undefined
@@ -262,6 +263,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
         params.append('tokens', v)
       }
     })
+    // `items` is all the list reads; skip the duplicate arrays (NS-04).
+    params.set('legacy_aliases', 'false')
 
     const abs = await bgRequest<any>({
       path: `/api/v1/notes/search/?${params.toString()}` as any,
@@ -336,6 +339,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
       params.set('include_keywords', 'true')
       params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
       params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
+      params.set('legacy_aliases', 'false')
       const res = await bgRequest<any>({
         path: `/api/v1/notes/trash?${params.toString()}` as any,
         method: 'GET' as any
@@ -401,6 +405,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     params.set('include_keywords', 'true')
     params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
     params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
+    params.set('legacy_aliases', 'false')
     const res = await bgRequest<any>({
       path: `/api/v1/notes/?${params.toString()}` as `/${string}`,
       method: 'GET' as any
@@ -444,9 +449,11 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     queryKey: listQueryKey,
     queryFn: fetchNotes,
     placeholderData: (previousData, previousQuery) => {
+      const previousKey = previousQuery?.queryKey ?? []
+      // Trash or another collection must not show the previous list's rows (NS-04).
+      if (!isSameNotesListRowsKind(previousKey, listQueryKey)) return undefined
       if (authorityScope === undefined) return previousData
       if (authorityScope === null) return undefined
-      const previousKey = previousQuery?.queryKey ?? []
       return previousKey.at(-4) === 'authority' &&
         previousKey.at(-3) === authorityScope &&
         previousKey.at(-2) === 'generation' &&

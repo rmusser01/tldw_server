@@ -48,6 +48,7 @@ import { notesEditorSupportHint } from './notes-editor-hints'
 import { useConnectionsDisclosure, type ConnectionsMemory } from './notes-connections'
 import {
   NOTES_EDITOR_REGION_ID,
+  NOTES_LIST_REGION_ID,
   NOTES_SHORTCUTS_SUMMARY_ID,
   NOTES_WYSIWYG_INPUT_ENABLED,
   NOTE_TEMPLATES,
@@ -58,6 +59,7 @@ import {
 } from './notes-manager-utils'
 import { NOTES_TITLE_SUGGEST_STRATEGY_SETTING } from '@/services/settings/ui-settings'
 import { setSetting } from '@/services/settings/registry'
+import NotesServerUnavailableBanner from './NotesServerUnavailableBanner'
 
 // Headings and lists need the typography styles to be visible: Tailwind's
 // preflight resets <h2> to body text and removes list bullets. Matches the
@@ -113,6 +115,7 @@ export interface NotesEditorPaneProps {
   // Layout
   isMobileViewport: boolean
   setMobileSidebarOpen: (open: boolean) => void
+  mobileSidebarOpen?: boolean
 
   // Selection / identity
   selectedId: string | number | null
@@ -123,6 +126,8 @@ export interface NotesEditorPaneProps {
   editorDisabled: boolean
   isDirty: boolean
   isOnline: boolean
+  /** The notes list cannot reach the server; edits fall back to this device (NL-16). */
+  notesServerUnavailable?: boolean
   loadingDetail: boolean
   saving: boolean
 
@@ -339,12 +344,14 @@ export const NotesEditorEmptyState: React.FC<{
 const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
   isMobileViewport,
   setMobileSidebarOpen,
+  mobileSidebarOpen = false,
   selectedId,
   showEmptyState,
   title,
   content,
   editorDisabled,
   isDirty,
+  notesServerUnavailable = false,
   isOnline,
   loadingDetail,
   saving,
@@ -673,6 +680,8 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
           <Button
             size="large"
             onClick={() => setMobileSidebarOpen(true)}
+            aria-expanded={mobileSidebarOpen}
+            aria-controls={NOTES_LIST_REGION_ID}
             data-testid="notes-mobile-open-list-button"
             className="min-h-[44px]"
           >
@@ -755,6 +764,7 @@ const NotesEditorPane: React.FC<NotesEditorPaneProps> = ({
         studioBadgeLabel={studioBadgeLabel}
       />
       <div className="flex-1 flex flex-col px-4 py-3 overflow-auto" data-testid="notes-editor-body">
+        {notesServerUnavailable && <NotesServerUnavailableBanner />}
         {showStudioMarkdownOnlyNotice ? (
           <div className="mb-3 flex items-center justify-between gap-3 rounded border border-warn/40 bg-warn/10 px-3 py-2 text-sm text-warn">
             <span>

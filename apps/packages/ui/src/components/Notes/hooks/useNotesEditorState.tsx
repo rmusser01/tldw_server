@@ -91,7 +91,6 @@ import {
   EMPTY_WYSIWYG_HTML,
   buildSummaryDraft,
   buildOutlineDraft,
-  suggestKeywordsDraft,
   NOTE_ASSIST_STOP_WORDS,
   toAttachmentMarkdown,
 } from '../notes-manager-utils'
@@ -101,6 +100,8 @@ import { notesAuthoritySetting } from '../notes-authority-storage'
 import { useNotesAuthorityState } from './useNotesAuthorityState'
 import { createNotesGraphAuthorityScope } from './useNotesGraphAuthorityScope'
 import type { NoteRenamedEvent } from './useNotesWikilinkRename'
+import { useNotesListSaveRefresh } from './useNotesListSaveRefresh'
+import { suggestNoteKeywords } from '../notes-keyword-suggestions'
 
 type ConfirmDanger = (options: ConfirmDangerOptions) => Promise<boolean>
 type NotesOwnedRequestOptions = {
@@ -132,6 +133,8 @@ export interface UseNotesEditorStateDeps {
   /** From keyword hook */
   editorKeywords: string[]
   setEditorKeywords: React.Dispatch<React.SetStateAction<string[]>>
+  /** Every tag in use, so "Suggest tags" can prefer existing ones (NL-17). */
+  knownKeywords?: string[]
   keywordSuggestionReturnFocusRef: React.MutableRefObject<HTMLElement | null>
   setKeywordSuggestionOptions: React.Dispatch<React.SetStateAction<string[]>>
   setKeywordSuggestionSelection: React.Dispatch<React.SetStateAction<string[]>>
@@ -228,6 +231,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
     setKeywordSuggestionSelection,
     editorDisabled,
   } = deps
+  const syncSavedNoteToList = useNotesListSaveRefresh(deps.queryClient, refetch)
   const callerCapabilities = useCallerCapabilities()
   const callerCapabilitiesRef = React.useRef(callerCapabilities)
   callerCapabilitiesRef.current = callerCapabilities
@@ -1855,8 +1859,8 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           }
           result = true
           if (trigger === 'leave') return true
-          await refetch()
-          if (!isCurrent()) return (result = false)
+          // Update the row in place; the list refreshes in the background (NS-04).
+          syncSavedNoteToList(noteId, updated, { title: snapshot.title, content: snapshot.content, keywords: snapshot.editorKeywords }, { authorityScope: requestAuthorityScope })
           if (updatedVersion == null) {
             try {
               const latest = await request({
@@ -1966,6 +1970,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       refetch,
       refreshTaskStateForNote,
       remoteVersionInfo,
+      syncSavedNoteToList,
       setDirtyFlag,
       setMonitoringNotice,
       setOfflineDraftQueue,
@@ -2426,7 +2431,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       setAssistLoadingAction(action)
       try {
         if (action === 'suggest_keywords') {
-          const suggestedKeywords = suggestKeywordsDraft(sourceContent, editorKeywords)
+          const { suggestions: suggestedKeywords, preselected } = suggestNoteKeywords(sourceContent, editorKeywords, deps.knownKeywords)
           if (suggestedKeywords.length === 0) {
             message.warning(
               t('option:notesSearch.assistKeywordsNoResult', {
@@ -2438,7 +2443,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
           keywordSuggestionReturnFocusRef.current =
             document.activeElement instanceof HTMLElement ? document.activeElement : null
           setKeywordSuggestionOptions(suggestedKeywords)
-          setKeywordSuggestionSelection(suggestedKeywords)
+          setKeywordSuggestionSelection(preselected)
           return
         }
 
@@ -2504,6 +2509,7 @@ export function useNotesEditorState(deps: UseNotesEditorStateDeps) {
       content,
       editorDisabled,
       editorKeywords,
+      deps.knownKeywords,
       keywordSuggestionReturnFocusRef,
       message,
       setContentDirty,

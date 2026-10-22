@@ -5,12 +5,15 @@ import {
   Network as NetworkIcon,
   Plus as PlusIcon,
   Search as SearchIcon,
+  X as CloseIcon,
 } from 'lucide-react'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 import { useTranslation } from 'react-i18next'
 import NotesListPanel from '@/components/Notes/NotesListPanel'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
 import NotesCollectionControls from '@/components/Notes/NotesCollectionControls'
+import NotesTagFilterSelect from '@/components/Notes/NotesTagFilterSelect'
+import NotesListErrorMessage from '@/components/Notes/NotesListErrorMessage'
 import type { NoteListItem } from '@/components/Notes/notes-manager-types'
 import type {
   NotesSortOption,
@@ -24,6 +27,11 @@ import { useHasContentBelow } from './hooks/useHasContentBelow'
 import type { ServerCapabilities } from '@/services/tldw/server-capabilities'
 import type { NotesRecentOpenedEntry } from '@/services/settings/ui-settings'
 import { CAPTURED_NOTE_KEYWORD } from '@/services/notes-capture'
+import {
+  NOTES_SEARCH_INPUT_ATTR,
+  useNotesOffCanvasList,
+} from './hooks/useNotesOffCanvasList'
+import { focusActiveNotesListRow } from './notes-list-keyboard'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -96,6 +104,8 @@ export interface NotesSidebarProps {
 
   // Fetching / online
   isFetching: boolean
+  /** The rows belong to the previous page or search while this one loads. */
+  isPlaceholderData?: boolean
   hasListError?: boolean
   listErrorMessage?: string | null
   isStaleResults?: boolean
@@ -133,6 +143,8 @@ export interface NotesSidebarProps {
   handleNewNote: () => Promise<void>
   switchListMode: (mode: 'active' | 'trash') => void
   handleSelectNote: (id: string | number) => Promise<void>
+  /** Enter on a list row: open the note and focus the editor (AX-03). */
+  handleOpenNoteFromKeyboard?: (id: string | number) => Promise<void>
   handleClearFilters: () => void
   handleKeywordFilterSearch: (text: string) => void
   handleKeywordFilterChange: (vals: string[] | string) => void
@@ -230,6 +242,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
 
   // Fetching / online
   isFetching,
+  isPlaceholderData = false,
   hasListError = false,
   listErrorMessage = null,
   isStaleResults = false,
@@ -267,6 +280,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   handleNewNote,
   switchListMode,
   handleSelectNote,
+  handleOpenNoteFromKeyboard,
   handleClearFilters,
   handleKeywordFilterSearch,
   handleKeywordFilterChange,
@@ -306,6 +320,12 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
     if (!controls) return
     controls.scrollTop += Math.max(1, Math.floor(controls.clientHeight * 0.8))
   }, [])
+  const offCanvas = useNotesOffCanvasList({
+    isMobileViewport,
+    mobileSidebarOpen,
+    sidebarCollapsed,
+    setMobileSidebarOpen,
+  })
   const renderHelpButton = React.useCallback(
     (label: string) => (
       <button
@@ -325,10 +345,16 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
     keywordTokens.length +
     (selectedNotebookId != null ? 1 : 0) +
     (queryInput.trim() ? 1 : 0)
+  // With no rows yet, "0 total" would be wrong while the first page loads (NL-16).
+  const isLoadingFirstRows = isFetching && filteredCount === 0
   const headerCountLabel = hasListError
     ? t('option:notesSearch.headerRefreshFailed', {
         defaultValue: 'Refresh failed'
       })
+    : isLoadingFirstRows
+      ? t('option:notesSearch.headerLoading', {
+          defaultValue: 'Loading…'
+        })
     : hasActiveFilters
       ? t('option:notesSearch.headerCount', {
           defaultValue: '{{visible}} of {{total}}',
@@ -363,10 +389,12 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
         })}
       </div>
       <div className="mt-1 text-text-muted">
-        {listErrorMessage ||
-          t('option:notesSearch.listErrorFallback', {
+        <NotesListErrorMessage
+          message={listErrorMessage}
+          fallback={t('option:notesSearch.listErrorFallback', {
             defaultValue: 'The notes list is unavailable right now.'
           })}
+        />
       </div>
       <Button size="small" className="mt-3" onClick={retryList}>
         {t('common:retry', { defaultValue: 'Retry' })}
@@ -376,13 +404,18 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
 
   return (
       <aside
+        ref={offCanvas.asideRef}
         id={NOTES_LIST_REGION_ID}
         tabIndex={-1}
-        role="region"
+        role={offCanvas.isModal ? 'dialog' : 'region'}
+        aria-modal={offCanvas.isModal || undefined}
+        aria-hidden={offCanvas.hidden || undefined}
         aria-label={t('option:notesSearch.notesListRegionLabel', {
           defaultValue: 'Notes list'
         })}
         data-testid="notes-list-region"
+        data-notes-list-dialog={offCanvas.isModal || undefined}
+        onKeyDown={offCanvas.handleKeyDown}
         className={
           isMobileViewport
             ? `absolute left-0 top-0 z-40 h-full w-[min(92vw,420px)] max-w-full transform border-r border-border bg-surface shadow-xl transition-transform duration-300 ease-in-out motion-reduce:transition-none focus:outline-none focus:ring-2 focus:ring-focus ${
@@ -409,30 +442,53 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
             {/* ---- Always visible: Header row ---- */}
             <div className="flex items-center justify-between mb-3">
               <div className="flex min-w-0 items-baseline">
-                <div className="text-xs uppercase tracking-[0.16em] text-text-muted">
-                  {t('option:notesSearch.headerLabel', { defaultValue: 'Notes' })}
+                <div
+                  className="text-xs uppercase tracking-[0.16em] text-text-muted"
+                  data-testid="notes-sidebar-header-label"
+                >
+                  {listMode === 'trash'
+                    ? t('option:notesSearch.trashHeaderLabel', { defaultValue: 'Trash' })
+                    : t('option:notesSearch.headerLabel', { defaultValue: 'Notes' })}
                 </div>
-                <span className="ml-2 text-xs uppercase tracking-[0.16em] text-text-subtle">
+                <span
+                  className="ml-2 text-xs uppercase tracking-[0.16em] text-text-subtle"
+                  data-testid="notes-header-count"
+                >
                   {headerCountLabel}
                 </span>
               </div>
-              <Tooltip
-                title={t('option:notesSearch.newTooltip', {
-                  defaultValue: 'Create a new note'
-                })}
-              >
-                <Button
-                  type="text"
-                  shape="circle"
-                  onClick={() => void handleNewNote()}
-                  className="flex items-center justify-center"
-                  icon={(<PlusIcon className="w-4 h-4" />)}
-                  aria-label={t('option:notesSearch.new', {
-                    defaultValue: 'New note'
+              <div className="flex items-center gap-1">
+                <Tooltip
+                  title={t('option:notesSearch.newTooltip', {
+                    defaultValue: 'Create a new note'
                   })}
-                  data-testid="notes-new-note-button"
-                />
-              </Tooltip>
+                >
+                  <Button
+                    type="text"
+                    shape="circle"
+                    onClick={() => void handleNewNote()}
+                    className="flex items-center justify-center"
+                    icon={(<PlusIcon className="w-4 h-4" />)}
+                    aria-label={t('option:notesSearch.new', {
+                      defaultValue: 'New note'
+                    })}
+                    data-testid="notes-new-note-button"
+                  />
+                </Tooltip>
+                {isMobileViewport && (
+                  <Button
+                    type="text"
+                    shape="circle"
+                    onClick={() => setMobileSidebarOpen(false)}
+                    className="flex items-center justify-center"
+                    icon={(<CloseIcon className="w-4 h-4" aria-hidden="true" />)}
+                    aria-label={t('option:notesSearch.closeMobileSidebar', {
+                      defaultValue: 'Close notes list'
+                    })}
+                    data-testid="notes-mobile-sidebar-close"
+                  />
+                )}
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -674,7 +730,25 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                           setQuery(queryInput)
                           setPage(1)
                         }}
+                        onKeyDown={(event) => {
+                          if (event.key !== 'Escape' || event.altKey || event.ctrlKey || event.metaKey) return
+                          // First Escape clears the search; the next one moves to the results (AX-03).
+                          if (queryInput.length > 0) {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            clearSearchQueryTimeout()
+                            setQueryInput('')
+                            setQuery('')
+                            setPage(1)
+                            return
+                          }
+                          // In the mobile dialog an empty-search Escape closes the list instead.
+                          if (offCanvas.isModal) return
+                          const aside = offCanvas.asideRef.current
+                          if (focusActiveNotesListRow(aside)) event.preventDefault()
+                        }}
                         ref={searchInputRef}
+                        {...{ [NOTES_SEARCH_INPUT_ATTR]: '' }}
                       />
                     </div>
                     <Select
@@ -772,26 +846,17 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                         </Button>
                       </Popover>
                     </div>
-                    <Select
-                      mode="tags"
-                      allowClear
-                      placeholder={t('option:notesSearch.keywordsPlaceholder', {
-                        defaultValue: 'Filter by tag'
-                      })}
-                      aria-label={t('option:notesSearch.keywordFilterAriaLabel', {
-                        defaultValue: 'Filter by tag'
-                      })}
-                      className="w-full"
+                    <NotesTagFilterSelect
                       value={keywordTokens}
-                      onSearch={handleKeywordFilterSearch}
-                      onChange={handleKeywordFilterChange}
-                      options={keywordOptions.map((keyword) => ({
-                        label: renderKeywordLabelWithFrequency(keyword, {
+                      options={keywordOptions}
+                      renderOptionLabel={(keyword) =>
+                        renderKeywordLabelWithFrequency(keyword, {
                           includeCount: true,
                           testIdPrefix: 'notes-keyword-filter-option-label'
-                        }),
-                        value: keyword
-                      }))}
+                        })
+                      }
+                      onSearch={handleKeywordFilterSearch}
+                      onChange={handleKeywordFilterChange}
                     />
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex items-center gap-1">
@@ -1074,7 +1139,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       </>
                     )}
                   </div>
-                ) : isFetching ? (
+                ) : isFetching && (visibleNotes.length === 0 || isPlaceholderData) ? (
                   <div className="mb-3 inline-flex items-center gap-2 text-xs text-text-muted">
                     <Spin size="small" />
                     <span>
@@ -1244,6 +1309,7 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 bulkSelectedIds={bulkSelectedIds}
                 isOnline={isOnline}
                 isFetching={isFetching}
+                isPlaceholderData={isPlaceholderData}
                 hasError={hasListError}
                 errorMessage={listErrorMessage}
                 isStaleResults={isStaleResults}
@@ -1259,6 +1325,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 pinnedNoteIds={pinnedNoteIds}
                 onSelectNote={(id) => {
                   void handleSelectNote(id)
+                }}
+                onOpenNoteFromKeyboard={(id) => {
+                  void (handleOpenNoteFromKeyboard ?? handleSelectNote)(id)
                 }}
                 onToggleBulkSelection={handleToggleBulkSelection}
                 onTogglePinned={(id) => {

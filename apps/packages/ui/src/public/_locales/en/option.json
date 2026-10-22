@@ -6469,5 +6469,68 @@
   },
   "notesSearch_taskChipTooltip": {
     "message": "Open the list to check off tasks. Changes update the note text and your task list."
+  },
+  "notesSearch_closeMobileSidebar": {
+    "message": "Close notes list"
+  },
+  "notesSearch_listRowKeyboardHint": {
+    "message": "Press Enter to open. Use the arrow keys to move between notes, X to select, and P to pin."
+  },
+  "notesSearch_tagFilterNoMatch": {
+    "message": "No tag named \"{{query}}\""
+  },
+  "notesSearch_tagFilterNoTags": {
+    "message": "No tags yet"
+  },
+  "notesSearch_headerLoading": {
+    "message": "Loading…"
+  },
+  "notesSearch_loadErrorUnreachable": {
+    "message": "Could not reach the notes server."
+  },
+  "notesSearch_loadErrorDetails": {
+    "message": "Details"
+  },
+  "notesSearch_serverUnavailableTitle": {
+    "message": "Notes server unavailable"
+  },
+  "notesSearch_serverUnavailableDescription": {
+    "message": "You can keep writing. Your edits are kept on this device and saved when the server is back."
+  },
+  "notesSearch_moveToTrashConfirmTitle": {
+    "message": "Move to Trash?"
+  },
+  "notesSearch_moveToTrashConfirmOk": {
+    "message": "Move to Trash"
+  },
+  "notesSearch_moveToTrashConfirmNamed": {
+    "message": "Move \"{{title}}\" to Trash? You can restore it from Trash."
+  },
+  "notesSearch_moveToTrashConfirmUnnamed": {
+    "message": "Move this note to Trash? You can restore it from Trash."
+  },
+  "notesSearch_moveToTrashLinkedOne": {
+    "message": "This note is linked from 1 other note. That link will not work while the note is in Trash."
+  },
+  "notesSearch_moveToTrashLinkedMany": {
+    "message": "This note is linked from {{count}} other notes. Those links will not work while the note is in Trash."
+  },
+  "notesSearch_trashHeaderLabel": {
+    "message": "Trash"
+  },
+  "notesSearch_trashGuidanceTitle": {
+    "message": "Trash"
+  },
+  "notesSearch_trashGuidanceDescription": {
+    "message": "Deleted notes wait here. Choose Restore next to a note to put it back with your notes."
+  },
+  "notesSearch_trashGuidanceShowList": {
+    "message": "Show Trash"
+  },
+  "notesSearch_trashGuidanceBack": {
+    "message": "Back to notes"
+  },
+  "notesSearch_assistKeywordsSource": {
+    "message": "Based on word frequency in this note. Tags you already use are ticked; tick any others you want to add."
   }
 }
