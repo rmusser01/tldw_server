@@ -211,6 +211,7 @@ export const FlashcardEditDrawer: React.FC<FlashcardEditDrawerProps> = ({
       const rawValues = (await form.validateFields()) as FlashcardUpdate
       const values = normalizeFlashcardTemplateFields({
         ...rawValues,
+        deck_id: rawValues.deck_id ?? null,
         tags: normalizeOptionalFlashcardTags(rawValues.tags)
       })
       await onSave(values)

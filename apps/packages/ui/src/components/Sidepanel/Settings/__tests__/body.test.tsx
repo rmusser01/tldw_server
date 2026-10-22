@@ -37,6 +37,7 @@ describe("SettingsBody", () => {
   afterEach(() => {
     storage.values.clear()
     storage.write.mockReset()
+    vi.unstubAllGlobals()
     runtimeGlobals.browser = originalBrowser
     runtimeGlobals.chrome = originalChrome
   })

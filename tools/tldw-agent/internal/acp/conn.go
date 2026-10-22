@@ -23,12 +23,13 @@ type Conn struct {
 
 	writeMu sync.Mutex
 
-	pending   map[string]chan *RPCMessage
-	pendingMu sync.Mutex
-	nextID    int64
-	closeErr  atomic.Value
-	closeOnce sync.Once
-	closed    chan struct{}
+	pending           map[string]chan *RPCMessage
+	responseObservers map[string]func()
+	pendingMu         sync.Mutex
+	nextID            int64
+	closeErr          atomic.Value
+	closeOnce         sync.Once
+	closed            chan struct{}
 
 	handler      RequestHandler
 	notification NotificationHandler
@@ -37,10 +38,11 @@ type Conn struct {
 // NewConn creates a new ACP connection.
 func NewConn(r io.Reader, w io.Writer) *Conn {
 	return &Conn{
-		reader:  bufio.NewReader(r),
-		writer:  w,
-		pending: make(map[string]chan *RPCMessage),
-		closed:  make(chan struct{}),
+		reader:            bufio.NewReader(r),
+		writer:            w,
+		pending:           make(map[string]chan *RPCMessage),
+		responseObservers: make(map[string]func()),
+		closed:            make(chan struct{}),
 	}
 }
 
@@ -113,6 +115,11 @@ func (c *Conn) Call(ctx context.Context, method string, params interface{}) (*RP
 
 // CallRaw sends a request with raw params and waits for a response.
 func (c *Conn) CallRaw(ctx context.Context, method string, params json.RawMessage) (*RPCMessage, error) {
+	return c.callRaw(ctx, method, params, nil)
+}
+
+// callRaw closes an internal observer at the exact matched read boundary.
+func (c *Conn) callRaw(ctx context.Context, method string, params json.RawMessage, onResponse func()) (*RPCMessage, error) {
 	select {
 	case <-c.closed:
 		return nil, c.connectionClosedErr()
@@ -133,7 +140,15 @@ func (c *Conn) CallRaw(ctx context.Context, method string, params json.RawMessag
 	key := string(idRaw)
 	c.pendingMu.Lock()
 	c.pending[key] = respCh
+	if onResponse != nil {
+		c.responseObservers[key] = onResponse
+	}
 	c.pendingMu.Unlock()
+	defer func() {
+		c.pendingMu.Lock()
+		delete(c.responseObservers, key)
+		c.pendingMu.Unlock()
+	}()
 
 	if err := c.SendMessage(msg); err != nil {
 		c.pendingMu.Lock()
@@ -222,11 +237,17 @@ func (c *Conn) deliverResponse(msg *RPCMessage) {
 	key := string(msg.ID)
 	c.pendingMu.Lock()
 	ch, ok := c.pending[key]
+	var observer func()
 	if ok {
 		delete(c.pending, key)
+		observer = c.responseObservers[key]
+		delete(c.responseObservers, key)
 	}
 	c.pendingMu.Unlock()
 	if ok {
+		if observer != nil {
+			observer()
+		}
 		ch <- msg
 	}
 }
@@ -240,6 +261,7 @@ func (c *Conn) markClosed(err error) {
 		c.pendingMu.Lock()
 		pending := c.pending
 		c.pending = make(map[string]chan *RPCMessage)
+		c.responseObservers = make(map[string]func())
 		c.pendingMu.Unlock()
 		for _, ch := range pending {
 			close(ch)

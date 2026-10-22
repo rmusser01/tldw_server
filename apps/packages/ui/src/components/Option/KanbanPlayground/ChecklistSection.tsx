@@ -13,24 +13,18 @@ import {
 import { Plus, Trash2 } from "lucide-react"
 
 import type { ChecklistWithItems, ChecklistItem } from "@/types/kanban"
-import {
-  listChecklists,
-  createChecklist,
-  updateChecklist,
-  deleteChecklist,
-  createChecklistItem,
-  updateChecklistItem,
-  deleteChecklistItem,
-  generateClientId
-} from "@/services/kanban"
+import { generateClientId } from "@/services/kanban"
+import { useKanbanScope } from "./KanbanScope"
 
 interface ChecklistSectionProps {
   cardId: number
 }
 
 export const ChecklistSection = ({ cardId }: ChecklistSectionProps) => {
+  const { api, key, isActive } = useKanbanScope()
+  const { listChecklists, createChecklist } = api
   const queryClient = useQueryClient()
-  const queryKey = ["kanban-card-checklists", cardId]
+  const queryKey = key("kanban-card-checklists", cardId)
 
   const { data: checklists = [], isError } = useQuery({
     queryKey,
@@ -47,11 +41,13 @@ export const ChecklistSection = ({ cardId }: ChecklistSectionProps) => {
     mutationFn: (title: string) =>
       createChecklist(cardId, { title, client_id: generateClientId() }),
     onSuccess: () => {
+      if (!isActive()) return
       invalidate()
       setAddingChecklist(false)
       setNewChecklistTitle("")
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to create checklist. Please try again.")
     }
   })
@@ -125,6 +121,8 @@ const SingleChecklist = ({
   checklist: ChecklistWithItems
   onChanged: () => void
 }) => {
+  const { api, isActive } = useKanbanScope()
+  const { updateChecklist, deleteChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem } = api
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleValue, setTitleValue] = useState(checklist.title)
   const [addingItem, setAddingItem] = useState(false)
@@ -137,18 +135,21 @@ const SingleChecklist = ({
   const updateTitleMutation = useMutation({
     mutationFn: (title: string) => updateChecklist(checklist.id, { title }),
     onSuccess: () => {
+      if (!isActive()) return
       setEditingTitle(false)
       onChanged()
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to rename checklist. Please try again.")
     }
   })
 
   const deleteMutation = useMutation({
     mutationFn: () => deleteChecklist(checklist.id),
-    onSuccess: onChanged,
+    onSuccess: () => { if (isActive()) onChanged() },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to delete checklist. Please try again.")
     }
   })
@@ -160,10 +161,12 @@ const SingleChecklist = ({
         client_id: generateClientId()
       }),
     onSuccess: () => {
+      if (!isActive()) return
       setNewItemContent("")
       onChanged()
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to add item. Please try again.")
     }
   })
@@ -171,8 +174,9 @@ const SingleChecklist = ({
   const toggleItemMutation = useMutation({
     mutationFn: ({ itemId, checked }: { itemId: number; checked: boolean }) =>
       updateChecklistItem(itemId, { checked }),
-    onSuccess: onChanged,
+    onSuccess: () => { if (isActive()) onChanged() },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to update item. Please try again.")
     }
   })
@@ -180,16 +184,18 @@ const SingleChecklist = ({
   const updateItemContentMutation = useMutation({
     mutationFn: ({ itemId, content }: { itemId: number; content: string }) =>
       updateChecklistItem(itemId, { content }),
-    onSuccess: onChanged,
+    onSuccess: () => { if (isActive()) onChanged() },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to update item. Please try again.")
     }
   })
 
   const deleteItemMutation = useMutation({
     mutationFn: (itemId: number) => deleteChecklistItem(itemId),
-    onSuccess: onChanged,
+    onSuccess: () => { if (isActive()) onChanged() },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to delete item. Please try again.")
     }
   })

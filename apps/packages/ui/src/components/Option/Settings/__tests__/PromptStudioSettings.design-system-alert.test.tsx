@@ -3,6 +3,9 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { PromptStudioSettings } from "../prompt-studio"
+vi.mock("@/hooks/usePromptLocalAuthority", () => ({
+  usePromptLocalAuthority: () => ({ ownerId: "fixture-owner", ready: true })
+}))
 
 const expectDesignSystemAlert = (text: string | RegExp) => {
   const node =
@@ -121,7 +124,8 @@ vi.mock("@/services/prompt-studio", () => ({
 }))
 
 vi.mock("@/services/prompt-studio-settings", () => ({
-  getPromptStudioDefaults: vi.fn(),
+  getPromptStudioDefaults: async () => queryState.defaults.data,
+  getPromptStudioDefaultsForOwner: async () => queryState.defaults.data,
   setPromptStudioDefaults: vi.fn()
 }))
 

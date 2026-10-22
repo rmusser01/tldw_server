@@ -1,5 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
+import { useQueryClient } from "@tanstack/react-query"
 import {
   AutoComplete,
   Card,
@@ -35,7 +36,7 @@ import {
   type SandboxAdminRuntimeDiagnosticsItem,
   type SandboxAdminRuntimeDiagnosticsResponse
 } from "@/services/tldw/TldwApiClient"
-import { useSystemStats } from "@/services/tldw/adminQueries"
+import { adminKeys, useSystemStats } from "@/services/tldw/adminQueries"
 import { getDesignSystemState } from "@/design-system"
 
 /** Format a stat value for display — handles objects, arrays, booleans, numbers */
@@ -237,11 +238,15 @@ const MonitoringDashboardPage: React.FC = () => {
   // System overview state. System stats are shared admin reference data
   // (B-S4/F11): the query hook dedupes fetches with the other admin
   // surfaces inside the stale window; security status stays page-local.
+  const queryClient = useQueryClient()
   const systemStatsQuery = useSystemStats()
-  const systemStats = (systemStatsQuery.data as DashboardRecord | null) ?? null
+  const systemStats = systemStatsQuery.isError ? null : (systemStatsQuery.data as DashboardRecord | null) ?? null
   const statsLoading = systemStatsQuery.isFetching
+  const statsError = systemStatsQuery.error ? sanitizeAdminErrorMessage(systemStatsQuery.error, "System statistics unavailable") : null
   const [securityStatus, setSecurityStatus] = useState<DashboardRecord | null>(null)
   const [securityLoading, setSecurityLoading] = useState(false)
+  const [securityError, setSecurityError] = useState<string | null>(null)
+  const securityRequest = useRef(0)
   const [sandboxDiagnostics, setSandboxDiagnostics] = useState<SandboxAdminRuntimeDiagnosticsResponse | null>(null)
   const [sandboxDiagnosticsLoading, setSandboxDiagnosticsLoading] = useState(false)
   const [sandboxDiagnosticsError, setSandboxDiagnosticsError] = useState<SandboxDiagnosticsErrorState | null>(null)
@@ -292,14 +297,20 @@ const MonitoringDashboardPage: React.FC = () => {
   }, [systemStatsQuery.error, markAdminGuardFromError])
 
   const loadSecurityStatus = useCallback(async () => {
+    const request = ++securityRequest.current
     setSecurityLoading(true)
     try {
       const status = await tldwClient.getSecurityAlertStatus()
+      if (request !== securityRequest.current) return
       setIfChanged(setSecurityStatus, status)
+      setSecurityError(null)
     } catch (err) {
+      if (request !== securityRequest.current) return
+      setSecurityStatus(null)
+      setSecurityError(sanitizeAdminErrorMessage(err, "Security alert status unavailable"))
       markAdminGuardFromError(err)
     } finally {
-      setSecurityLoading(false)
+      if (request === securityRequest.current) setSecurityLoading(false)
     }
   }, [markAdminGuardFromError])
 
@@ -453,8 +464,12 @@ const MonitoringDashboardPage: React.FC = () => {
   // Live datasets (system stats + security status) — cheap, polled by auto-refresh.
   // The stats refetch is forced (it bypasses the shared stale window) so the
   // B-S2 polling contract keeps seeing fresh numbers on every tick.
-  // `refetch` is observer-stable, so this callback doesn't churn the timers.
-  const refetchSystemStats = systemStatsQuery.refetch
+  const queryRefetchSystemStats = systemStatsQuery.refetch
+  const refetchSystemStats = useCallback(() => {
+    // Replace even an initial pending fetch; existing waiters follow the new generation.
+    void queryClient.cancelQueries({ queryKey: adminKeys.systemStats, exact: true }, { silent: true, revert: false })
+    return queryRefetchSystemStats()
+  }, [queryClient, queryRefetchSystemStats])
   const refreshLive = useCallback(() => {
     void refetchSystemStats()
     void loadSecurityStatus()
@@ -838,12 +853,30 @@ const MonitoringDashboardPage: React.FC = () => {
         <Space size="small" align="center">
           {/* Owns its 10s tick internally (C-S1) so staleness updates never
               re-render the page or its tables. */}
-          <RefreshedAtLabel at={lastRefreshedAt} t={t} />
+          <RefreshedAtLabel at={lastRefreshedAt} t={t} label={t("settings:adminMonitoring.refreshRequested", "Refresh requested")} />
           <Select size="small" value={autoRefreshInterval} onChange={setAutoRefreshInterval} style={{ width: 90 }} options={[{ value: 0, label: t("settings:adminMonitoring.refreshOff", "Off") }, { value: 30, label: t("settings:adminMonitoring.refresh30s", "30s") }, { value: 60, label: t("settings:adminMonitoring.refresh1min", "1min") }, { value: 300, label: t("settings:adminMonitoring.refresh5min", "5min") }]} />
           <Button size="small" onClick={refreshAll}>{t("common:refresh", "Refresh")}</Button>
         </Space>
       }>
         <Space orientation="vertical" style={{ width: "100%" }} size="middle">
+          {statsError && (
+            <RecoveryCallout
+              state="unavailable"
+              title={t("settings:adminMonitoring.systemStatsUnavailable", "System statistics unavailable")}
+              message={statsError}
+              role="alert"
+              primaryAction={{ label: t("common:retry", "Retry"), onClick: () => void refetchSystemStats() }}
+            />
+          )}
+          {securityError && (
+            <RecoveryCallout
+              state="unavailable"
+              title={t("settings:adminMonitoring.securityStatusUnavailable", "Security alert status unavailable")}
+              message={securityError}
+              role="alert"
+              primaryAction={{ label: t("common:retry", "Retry"), onClick: () => void loadSecurityStatus() }}
+            />
+          )}
           {systemStats && (
             <div>
               <strong>{t("settings:adminMonitoring.systemStatsLabel", "System Stats:")}</strong>
@@ -856,7 +889,7 @@ const MonitoringDashboardPage: React.FC = () => {
               <Table dataSource={Object.entries(securityStatus).map(([key, value]) => ({ key, field: key, rawValue: value }))} columns={[{ title: t("settings:adminMonitoring.colField", "Field"), dataIndex: "field", key: "field", render: (s: string) => formatStatKey(s) }, { title: t("settings:adminMonitoring.colValue", "Value"), dataIndex: "rawValue", key: "value", render: (v: unknown) => formatStatValue(v) }]} rowKey="key" pagination={false} size="small" />
             </div>
           )}
-          {!systemStats && !securityStatus && !statsLoading && !securityLoading && (
+          {!systemStats && !securityStatus && !statsLoading && !securityLoading && !statsError && !securityError && (
             <Alert title={t("settings:adminMonitoring.systemDataEmpty", "No system data available yet.")} />
           )}
         </Space>

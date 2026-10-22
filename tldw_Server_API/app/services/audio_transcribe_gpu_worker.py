@@ -3,8 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-from functools import partial
-from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -15,59 +13,20 @@ from tldw_Server_API.app.core.Usage.audio_quota import (
     finish_job,
     increment_jobs_started,
 )
-from tldw_Server_API.app.services.audio_jobs_worker import stage_after_transcription
+from tldw_Server_API.app.services.audio_jobs_worker import (
+    _handle_audio_transcribe_stage,
+    hand_off,
+    stage_after_transcription,
+    start_lease_renewal,
+    stop_lease_renewal,
+)
 
 DOMAIN = "audio"
 
 
 async def _handle_gpu_audio_transcribe_stage(payload: dict[str, Any]) -> dict[str, Any]:
-    """
-    Handle the GPU `audio_transcribe` stage for a single job payload.
-
-    This mirrors the CPU worker's behavior but delegates STT to the shared
-    registry/adapter helper (`run_stt_job_via_registry`) so that provider
-    selection and normalized artifacts stay consistent across entrypoints.
-    """
-    wav_path = payload.get("wav_path")
-    if not wav_path:
-        raise ValueError("missing wav_path in payload")
-
-    raw_model = payload.get("model")
-    model = (raw_model.strip() if isinstance(raw_model, str) else raw_model) or None
-    hotwords = payload.get("hotwords")
-    temp_dir = payload.get("temp_dir")
-    # Constrain adapter file access to the job's temp dir for path safety.
-    base_dir = Path(temp_dir) if temp_dir else None
-
-    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (  # type: ignore
-        run_stt_job_via_registry,
-    )
-
-    artifact = await asyncio.to_thread(
-        partial(
-            run_stt_job_via_registry,
-            wav_path,
-            model,
-            None,
-            hotwords=hotwords,
-            base_dir=base_dir,
-        )
-    )
-
-    segments_list = artifact.get("segments") or []
-    if not isinstance(segments_list, list):
-        raise ValueError("unexpected transcription result format; expected list of segments")
-
-    text_merged = artifact.get("text")
-    if not isinstance(text_merged, str) or not text_merged.strip():
-        text_merged = " ".join(
-            (seg.get("Text", "").strip() if isinstance(seg, dict) else "") for seg in segments_list
-        ).strip()
-
-    updated_payload = dict(payload)
-    updated_payload["segments"] = segments_list
-    updated_payload["text"] = text_merged
-    updated_payload["normalized_stt"] = artifact
+    """The GPU `audio_transcribe` stage: the same transcription and payload as the in-process worker's."""
+    updated_payload, _next_type = await _handle_audio_transcribe_stage(payload)
     return updated_payload
 
 
@@ -95,12 +54,17 @@ async def run_audio_transcribe_gpu_worker(stop_event: asyncio.Event | None = Non
         job = None
         owner = None
         acquired_slot = False
+        renewal: asyncio.Task | None = None
         try:
             job = jm.acquire_next_job(domain=DOMAIN, queue="transcribe", lease_seconds=lease_seconds, worker_id=worker_id)
             if not job:
                 await asyncio.sleep(poll_sleep)
                 continue
-            owner = job.get("owner_user_id") or "0"
+            owner = job.get("owner_user_id")
+            if not owner:
+                # As the in-process worker does: a job without an owner fails instead of running as user 0.
+                jm.fail_job(int(job["id"]), error="missing owner_user_id", retryable=False, worker_id=worker_id, lease_id=str(job.get("lease_id")))
+                continue
 
             # Only process audio_transcribe jobs here
             jtype = str(job.get("job_type") or "").lower()
@@ -117,19 +81,23 @@ async def run_audio_transcribe_gpu_worker(stop_event: asyncio.Event | None = Non
             with contextlib.suppress(Exception):
                 await increment_jobs_started(int(owner))
 
+            renewal = start_lease_renewal(jm, job, worker_id=worker_id, lease_seconds=lease_seconds)
             payload: dict[str, Any] = job.get("payload") or {}
             updated_payload = await _handle_gpu_audio_transcribe_stage(payload)
 
-            # Complete and enqueue next stage
-            jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(job.get("lease_id")))
-            jm.create_job(
-                domain=DOMAIN,
-                queue="default",
-                job_type=stage_after_transcription(payload),
-                payload=updated_payload,
-                owner_user_id=str(owner),
-                priority=5,
-            )
+            next_type = stage_after_transcription(payload)
+            failure = await hand_off(jm, job, next_type, updated_payload, worker_id=worker_id)
+            if failure is not None:
+                lease_id = str(job.get("lease_id"))
+                jm.fail_job(
+                    int(job["id"]),
+                    error=str(failure),
+                    retryable=failure.retryable,
+                    error_code=failure.failure_code,
+                    worker_id=worker_id,
+                    lease_id=lease_id,
+                    completion_token=lease_id,
+                )
 
         except Exception as e:
             try:
@@ -139,6 +107,7 @@ async def run_audio_transcribe_gpu_worker(stop_event: asyncio.Event | None = Non
                 logger.debug("Audio GPU worker failed to mark job as failed")
             logger.error("Audio GPU worker error")
         finally:
+            await stop_lease_renewal(renewal)
             try:
                 if acquired_slot and owner is not None:
                     await finish_job(int(owner))

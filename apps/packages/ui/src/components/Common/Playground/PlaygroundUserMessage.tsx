@@ -1,10 +1,11 @@
+import { ChatAttachmentImage } from "./ChatAttachmentImage"
 import { useTTS } from "@/hooks/useTTS"
 import { useStorage } from "@plasmohq/storage/hook"
 import React from "react"
 import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
 import { useTranslation } from "react-i18next"
 import { EditMessageForm } from "./EditMessageForm"
-import { Image, Popover, Tooltip } from "antd"
+import { Popover, Tooltip } from "antd"
 import {
   CheckIcon,
   CopyIcon,
@@ -438,11 +439,9 @@ export const PlaygroundUserMessageBubble: React.FC<Props> = (props) => {
             {props.images
               .filter((image) => image.length > 0)
               .map((image, index) => (
-                <Image
+                <ChatAttachmentImage
                   key={index}
                   src={image}
-                  alt="Uploaded Image"
-                  width={180}
                   className="rounded-lg relative"
                 />
               ))}

@@ -403,7 +403,10 @@ describe("live Tier UAT runner contract", () => {
   })
 
   it("builds the browser extension only for runs that include ux-regression", () => {
-    const baseEnv = { NODE_ENV: "test" as const, PATH: process.env.PATH, HOME: "/home/runner" }
+    const baseEnv = {
+      NODE_ENV: "test" as const, PATH: process.env.PATH, HOME: "/home/runner",
+      NODE_OPTIONS: "--require /tmp/untrusted-preload.js --max-old-space-size=1024",
+    }
     const extensionRoot = path.resolve(frontendRoot, "../extension")
     const builtDir = path.join(extensionRoot, ".output/chrome-mv3")
 
@@ -417,7 +420,10 @@ describe("live Tier UAT runner contract", () => {
       args: ["run", "build:chrome:prod"],
       cwd: extensionRoot,
     })
-    expect(build?.command?.env).toEqual({ PATH: process.env.PATH, HOME: "/home/runner" })
+    expect(build?.command?.env).toEqual({
+      PATH: process.env.PATH, HOME: "/home/runner",
+      NODE_OPTIONS: "--max-old-space-size=6144",
+    })
 
     // A prebuilt directory replaces the build step but is still handed to the specs.
     const prebuilt = resolveExtensionBuild({
@@ -451,6 +457,9 @@ describe("live Tier UAT runner contract", () => {
     })
     expect(commands.playwrightRun.env[EXTENSION_DIR_ENV]).toBe(builtDir)
     expect(commands.playwrightList.env[EXTENSION_DIR_ENV]).toBe(builtDir)
+    for (const runtime of [commands.frontend, commands.backend, commands.mockOpenai, commands.playwrightList, commands.playwrightRun]) {
+      expect(runtime.env).not.toHaveProperty("NODE_OPTIONS")
+    }
   })
 
   it("stops only registered process groups in reverse startup order", async () => {

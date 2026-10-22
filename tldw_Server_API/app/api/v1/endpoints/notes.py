@@ -2578,7 +2578,8 @@ def _notes_list_payload(
     "/",
     response_model=NotesListResponse,
     summary="List all notes for the current user",
-    tags=["notes"]
+    tags=["notes"],
+    dependencies=[Depends(require_expected_user)],
 )
 async def list_notes(
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
@@ -2856,13 +2857,15 @@ async def create_note_folder(
     "/search",
     response_model=NotesListResponse,
     summary="Search notes for the current user",
-    tags=["notes"]
+    tags=["notes"],
+    dependencies=[Depends(require_expected_user)],
 )
 @router.get(
     "/search/",
     response_model=NotesListResponse,
     summary="Search notes for the current user",
-    tags=["notes"]
+    tags=["notes"],
+    dependencies=[Depends(require_expected_user)],
 )
 async def search_notes_endpoint(  # Renamed to avoid conflict with imported search_notes
         query: Optional[str] = Query(None, min_length=1, description="Search term for notes"),

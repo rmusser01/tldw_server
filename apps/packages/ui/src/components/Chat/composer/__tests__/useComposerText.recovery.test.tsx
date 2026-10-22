@@ -149,6 +149,9 @@ const deployedWebAfterSend = (
     "normalizeChatSubmitResult",
     "messageForModel",
     "clearImportedSidepanelContext",
+    "draftOwnership",
+    "pageContextRevisionRef",
+    "pageContextRevision",
     `${webAfterSendCode}; return afterSend;`
   )(
     attempt,
@@ -157,7 +160,10 @@ const deployedWebAfterSend = (
     isChatSubmitSuccess,
     normalizeChatSubmitResult,
     undefined,
-    vi.fn()
+    vi.fn(),
+    composer.captureDraftOwnership(),
+    { current: { revision: 0 } },
+    0
   ) as (
     result: import("@/hooks/chat/chat-action-utils").ChatSubmitResult
   ) => void
@@ -844,7 +850,8 @@ describe("retained fresh composer recovery", () => {
       act(() => view.result.current.restorePromptAssistAttempt(attempt))
       expect(view.result.current.form.values).toEqual({
         message: "  ORIGINAL COMPOSER TEXT  ",
-        image: "original-image"
+        image: "original-image",
+        imageFilename: ""
       })
       expect(view.result.current.promptAssistSavedAttemptId).toBeNull()
     }
@@ -944,10 +951,10 @@ describe("retained fresh composer recovery", () => {
   })
 
   it.each(["compact", "WebUI"])(
-    "the actual %s callback restores explicit failed and skipped text",
+    "the actual %s callback restores explicit preflight refusals and skipped text",
     async (surface) => {
       for (const outcome of [
-        { status: "failed", errorMessage: "unconfirmed send" },
+        { status: "failed", errorMessage: "preflight refused before admission", restoreDraft: true },
         { status: "skipped", reason: "choose a model" }
       ] as const) {
         const view = mount(
@@ -975,6 +982,24 @@ describe("retained fresh composer recovery", () => {
         expect(view.result.current.promptAssistSavedAttemptId).toBeNull()
         view.unmount()
       }
+    }
+  )
+
+  it.each(["compact", "WebUI"] as const)(
+    "the actual %s callback does not restore a failed send without a no-admission flag",
+    async surface => {
+      const view = mount(surface === "compact" ? "tldw:sidepanelChatDraft:active" : root, surface === "compact")
+      await settle()
+      act(() => view.result.current.setMessageValue("UNCONFIRMED DELIVERY"))
+      let attempt!: number
+      act(() => { attempt = view.result.current.beginPromptAssistReset() })
+      await settle()
+      act(() => (surface === "compact" ? deployedAfterSend : deployedWebAfterSend)(attempt, view.result.current)(
+        { status: "failed", errorMessage: "provider failed after possible admission" }
+      ))
+      expect(view.result.current.form.values.message).toBe("")
+      expect(view.result.current.promptAssistSavedAttemptId).toBeNull()
+      view.unmount()
     }
   )
 

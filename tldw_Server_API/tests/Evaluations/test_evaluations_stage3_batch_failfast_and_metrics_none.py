@@ -457,7 +457,7 @@ async def test_execute_evaluation_handles_metrics_none(tmp_path, monkeypatch):
     runner = EvaluationRunner(str(tmp_path / "evals_stage3.db"), max_concurrent_evals=2, eval_timeout=10)
 
     monkeypatch.setattr(runner.db, "update_run_status", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(runner.db, "update_run_progress", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(runner.db, "update_run_progress", lambda *_args, **_kwargs: True)
 
     captured_results: dict[str, object] = {}
 

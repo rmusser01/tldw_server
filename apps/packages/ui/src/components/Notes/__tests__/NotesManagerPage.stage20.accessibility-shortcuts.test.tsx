@@ -128,7 +128,8 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
   }
 }))
 
-vi.mock("@/utils/safe-storage", () => ({
+vi.mock("@/utils/safe-storage", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/utils/safe-storage")>(),
   createSafeStorage: () => ({
     get: mockStorageGet,
     set: mockStorageSet,

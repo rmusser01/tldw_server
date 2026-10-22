@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { PlaygroundUserMessageBubble } from "../PlaygroundUserMessage"
@@ -16,8 +16,9 @@ vi.mock("@plasmohq/storage/hook", () => ({
 }))
 
 vi.mock("antd", () => ({
-  Image: ({ src, alt }: { src?: string; alt?: string }) => (
-    <span role="img" aria-label={alt ?? ""} data-src={src ?? ""} />
+  Image: ({ src, alt, onError }: { src?: string; alt?: string; onError?: () => void }) => (
+    // eslint-disable-next-line @next/next/no-img-element -- Native img delivers the browser error event instead of a non-image placeholder.
+    <img alt={alt ?? ""} src={src ?? ""} onError={onError} />
   ),
   Tooltip: ({ children }: { children?: React.ReactNode }) => <>{children}</>
 }))
@@ -175,4 +176,10 @@ describe("Playground user message turn styling", () => {
 
     expect(bubble().className).not.toContain("max-w-[75%]")
   })
+
+it("retains the question and names an unavailable attachment after image failure", () => {
+  renderUserMessage({ images: ["http://chat.test/missing.png"], messageId: "missing-attachment" })
+  fireEvent.error(screen.getByRole("img", { name: "Uploaded Image" }))
+  expect(screen.getByRole("status")).toHaveTextContent("Image unavailable. Attach this image again before continuing.")
+  expect(screen.getByText("Review this research plan.")).toBeVisible()
 })

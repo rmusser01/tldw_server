@@ -25,6 +25,7 @@ const previousCharacter = {
 } as Character
 const previousPrompt: Prompt = {
   id: "previous-prompt",
+  ownerId: "alice",
   title: "Previous behavior",
   content: "Use the previous behavior.",
   is_system: true,
@@ -46,6 +47,9 @@ const snapshot = (
 const createDeps = (
   overrides: Partial<UsePromptTemplatesDeps> = {}
 ): UsePromptTemplatesDeps => ({
+  promptOwnerId: "alice",
+  promptOwnerReady: true,
+  promptOwnerBoundaryKey: "alice",
   startupTemplatesRaw: "[]",
   setStartupTemplatesRaw: vi.fn(),
   promptLibrary: [previousPrompt],
@@ -71,6 +75,7 @@ const createDeps = (
 })
 const conflictingBundle = (rolePlay: StartupTemplateRolePlayMetadata) =>
   createStartupTemplateBundle({
+    ownerId: "alice",
     name: "Imported setup",
     source: "role-play-setup",
     selectedModel: null,
@@ -344,6 +349,7 @@ describe("saved roleplay snapshot authority", () => {
   it("keeps legacy character and library-prompt restoration when no snapshot was saved", async () => {
     const deps = createDeps()
     const legacy = createStartupTemplateBundle({
+      ownerId: "alice",
       name: "Legacy",
       selectedModel: null,
       character: previousCharacter,

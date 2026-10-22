@@ -63,6 +63,26 @@ def test_fallback_pool_closes_overflow_connections_on_return(monkeypatch) -> Non
 
 
 @pytest.mark.unit
+def test_fallback_pool_close_preserves_borrowers_until_return(monkeypatch) -> None:
+    """Closing a pool must not free a connection while its borrower still uses it."""
+    _configure_fake_psycopg(monkeypatch)
+    pool = pg_backend.PostgreSQLConnectionPool(
+        DatabaseConfig(backend_type=BackendType.POSTGRESQL, pool_size=2)
+    )
+    idle = pool.get_connection()
+    borrowed = pool.get_connection()
+    pool.return_connection(idle)
+
+    pool.close_all()
+
+    assert (idle.closed, borrowed.closed) == (True, False)  # nosec B101 - Pytest pool-lifetime regression assertion.
+    with pytest.raises(pg_backend.DatabaseError, match="Connection pool is closed"):
+        pool.get_connection()
+    pool.return_connection(borrowed)
+    assert borrowed.close_calls == 1  # nosec B101 - Pytest pool-lifetime regression assertion.
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("operation", ["discard_connection", "invalidate_connection"], ids=[
     "discard-poisoned-checkout", "invalidate-poisoned-checkout",
 ])

@@ -21,7 +21,7 @@ and available to the Chat API as `provider/model`.
 
 ## Editing the Catalog
 
-- Format: JSON object by provider, then model id → `{prompt: number, completion: number}` (USD per 1K tokens).
+- Format: JSON object by provider, then model id → `{prompt: number, completion: number}` (USD per 1K tokens), with optional `cache_read` and `cache_write`: the prompt-cache read and write rates, also per 1K tokens. Without them, cached tokens cost the `prompt` rate. An override replaces the whole entry, so an override of an entry that has cache rates must repeat them.
 - Example (OpenAI text models only):
 
 ```
@@ -39,7 +39,7 @@ Tip: Keep values conservative if you’re unsure, then update with exact rates f
 
 ## Provider Quick Links
 
-- Anthropic: https://docs.claude.com/en/docs/about-claude/models/overview
+- Anthropic: https://platform.claude.com/docs/en/about-claude/pricing (model IDs: https://platform.claude.com/docs/en/about-claude/models/overview)
 - OpenAI (text models): https://platform.openai.com/docs/pricing
 - Z.ai: https://docs.z.ai/guides/overview/pricing
 - Moonshot (Kimi): https://platform.moonshot.ai/docs/pricing/chat#generation-model-kimi-k2
@@ -50,13 +50,13 @@ Tip: Keep values conservative if you’re unsure, then update with exact rates f
 
 These examples illustrate the expected shape. Replace with current values from the linked pages above.
 
-Anthropic (Claude 4.5/4.1 family):
+Anthropic (keys are API model IDs; an override repeats the cache rates):
 ```
 {
   "anthropic": {
-    "claude-opus-4.1":   { "prompt": 0.015,  "completion": 0.075 },
-    "claude-sonnet-4.5": { "prompt": 0.003,  "completion": 0.015 },
-    "claude-haiku-4.5":  { "prompt": 0.001,  "completion": 0.005 }
+    "claude-opus-4-7":   { "prompt": 0.005, "completion": 0.025, "cache_read": 0.0005, "cache_write": 0.00625 },
+    "claude-sonnet-4-6": { "prompt": 0.003, "completion": 0.015, "cache_read": 0.0003, "cache_write": 0.00375 },
+    "claude-haiku-4-5":  { "prompt": 0.001, "completion": 0.005, "cache_read": 0.0001, "cache_write": 0.00125 }
   }
 }
 ```

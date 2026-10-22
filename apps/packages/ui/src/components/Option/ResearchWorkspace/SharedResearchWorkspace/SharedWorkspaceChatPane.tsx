@@ -18,6 +18,15 @@ import { formatSharedActionReason } from "./shared-action-reason"
 
 type ChatModel = Awaited<ReturnType<typeof fetchChatModels>>[number]
 
+// Stage 3 (WP-07): rendered-history cap. The shared transcript rendered every
+// loaded message; cap rendering to the newest K messages and reveal older
+// windows on demand ("Show older messages"), alongside the existing
+// server-side "Load older messages" pagination below. Virtualization is
+// deferred: the cap bounds rendered markdown shells to K=200 — the same
+// order as the virtualized panes' worst-case expanded window — so revisit it
+// only if profiling still shows markdown cost dominating under the cap.
+export const SHARED_WORKSPACE_CHAT_RENDER_WINDOW = 200
+
 type SharedWorkspaceChatPaneProps = {
   controller: SharedResearchWorkspaceController
   onPreviewCitation: (
@@ -81,6 +90,25 @@ export const SharedWorkspaceChatPane: React.FC<
     messageId: string
     top: number
   } | null>(null)
+  // Newest-K render window (WP-07): grows downward in steps of K on "Show
+  // older messages"; new messages keep arriving inside the newest window
+  // without growing it (the window slides up once the transcript exceeds the
+  // limit).
+  const [renderWindowLimit, setRenderWindowLimit] = React.useState(
+    SHARED_WORKSPACE_CHAT_RENDER_WINDOW
+  )
+  const visibleMessageCount = Math.min(
+    state.messages.length,
+    renderWindowLimit
+  )
+  const visibleMessages = React.useMemo(
+    () => state.messages.slice(state.messages.length - visibleMessageCount),
+    [state.messages, visibleMessageCount]
+  )
+  const hiddenOlderMessageCount = Math.max(
+    0,
+    state.messages.length - visibleMessageCount
+  )
   const generationDefault = state.bootstrap?.generation_default
 
   React.useEffect(() => {
@@ -394,7 +422,25 @@ export const SharedWorkspaceChatPane: React.FC<
               {t("sharedWorkspace.loadOlder", "Load older messages")}
             </button>
           ) : null}
-          {state.messages.map((message) => (
+          {hiddenOlderMessageCount > 0 ? (
+            <button
+              type="button"
+              onClick={() =>
+                setRenderWindowLimit(
+                  (current) => current + SHARED_WORKSPACE_CHAT_RENDER_WINDOW
+                )
+              }
+              className="mx-auto h-9 rounded-md px-3 text-xs font-medium text-primary outline-none hover:bg-surface2 focus-visible:ring-2 focus-visible:ring-focus"
+              aria-label={t(
+                "sharedWorkspace.showOlder",
+                "Show older messages"
+              )}
+            >
+              {t("sharedWorkspace.showOlder", "Show older messages")} (
+              {hiddenOlderMessageCount})
+            </button>
+          ) : null}
+          {visibleMessages.map((message) => (
             <article
               key={message.message_id}
               data-message-id={message.message_id}

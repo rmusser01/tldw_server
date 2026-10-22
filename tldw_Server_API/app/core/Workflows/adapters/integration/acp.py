@@ -16,6 +16,7 @@ from tldw_Server_API.app.core.Agent_Client_Protocol.runner_client import (
     get_runner_client,
 )
 from tldw_Server_API.app.core.Chat.prompt_template_manager import apply_template_to_string
+from tldw_Server_API.app.core.DB_Management.ACP_Sessions_DB import ACPSessionsDB
 from tldw_Server_API.app.core.exceptions import AdapterError
 from tldw_Server_API.app.core.Workflows.adapters._common import extract_openai_content, resolve_context_user_id
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
@@ -292,9 +293,10 @@ async def _record_workflow_prompt(
     session_id: str,
     prompt: list[dict[str, Any]],
     result: dict[str, Any],
+    assistant_text: str | None = None,
 ) -> None:
     store = await get_acp_session_store()
-    await store.record_prompt(session_id, prompt, result)
+    await store.record_prompt(session_id, prompt, result, assistant_text=assistant_text)
 
 
 @registry.register(
@@ -485,9 +487,10 @@ async def run_acp_stage_adapter(config: dict[str, Any], context: dict[str, Any])
         return _maybe_raise_if_configured(result, bool(config.get("fail_on_error")))
 
     timeout_seconds = int(config.get("timeout_seconds") or 300)
+    native_text: list[str] = []
     try:
         raw_response = await asyncio.wait_for(
-            runner.prompt(session_id, prompt_payload),
+            runner.prompt(session_id, prompt_payload, on_native_text=native_text.append),
             timeout=float(timeout_seconds),
         )
     except ACPGovernanceDeniedError as exc:
@@ -550,6 +553,7 @@ async def run_acp_stage_adapter(config: dict[str, Any], context: dict[str, Any])
             session_id=str(session_id),
             prompt=prompt_payload,
             result=response,
+            assistant_text="".join(native_text) if native_text else None,
         )
     except _ACP_STAGE_NONCRITICAL_EXCEPTIONS:
         logger.warning(
@@ -572,7 +576,9 @@ async def run_acp_stage_adapter(config: dict[str, Any], context: dict[str, Any])
         "usage": usage,
         "governance": governance,
     }
-    extracted = extract_openai_content(response)
+    extracted = extract_openai_content(response) or ACPSessionsDB.select_assistant_text(
+        response, "".join(native_text) if native_text else None,
+    )
     if extracted:
         result["text"] = extracted
     return _validate_acp_output_contract(result)

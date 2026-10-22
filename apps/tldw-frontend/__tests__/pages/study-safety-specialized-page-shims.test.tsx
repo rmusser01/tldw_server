@@ -35,20 +35,18 @@ import VNAssetsPage from "@web/pages/vn-assets"
 import VNPlayPage from "@web/pages/vn-play"
 
 describe("study, safety, and specialized Next page shims", () => {
-  it("keeps claims-review as a content-review redirect page", () => {
+  it("keeps claims-review as a client-only decision workflow page", () => {
     render(<ClaimsReviewPage />)
 
-    expect(screen.getByTestId("route-redirect")).toHaveAttribute(
-      "data-to",
-      "/content-review"
-    )
+    expect(screen.getByTestId("dynamic-next-page")).toBeInTheDocument()
+    expect(screen.queryByTestId("route-redirect")).not.toBeInTheDocument()
   })
 
   it("keeps VN labs routes as client-only Next dynamic pages", () => {
     render(<VNAssetsPage />)
     render(<VNPlayPage />)
 
-    expect(dynamicCalls.filter((call) => call.ssr === false)).toHaveLength(2)
+    expect(dynamicCalls.filter((call) => call.ssr === false)).toHaveLength(3)
     expect(screen.getAllByTestId("dynamic-next-page")).toHaveLength(2)
   })
 })

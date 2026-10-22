@@ -514,6 +514,13 @@ const buildFields = ({
   if (typeof video.captions === "boolean" && fields.timestamp_option == null) {
     fields.timestamp_option = video.captions;
   }
+  if (
+    mediaType === "pdf" &&
+    typeof document.ocr === "boolean" &&
+    fields.enable_ocr == null
+  ) {
+    fields.enable_ocr = document.ocr;
+  }
   if (typeof document.ocr === "boolean" && fields.pdf_parsing_engine == null) {
     fields.pdf_parsing_engine = document.ocr ? "pymupdf4llm" : "";
   }
@@ -1227,6 +1234,7 @@ const runDirectQuickIngestBatch = async (
           method: "POST",
           fields: serializeUploadFields(fields),
           file: uploadFile,
+          fileFieldName: "files",
           timeoutMs: DIRECT_INGEST_TIMEOUT_MS,
           ...DIRECT_QUICK_INGEST_TRANSPORT,
         });

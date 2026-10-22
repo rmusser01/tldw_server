@@ -21,6 +21,7 @@ import {
 import { formatAdminDateTime } from "./admin-format"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 import { Alert } from "@/components/ui/primitives"
+import { isValidEmailAddress, normalizeEmailAddress } from "../Watchlists/JobsTab/email-utils"
 
 const { TextArea } = Input
 
@@ -46,6 +47,7 @@ const MaintenanceBannerForm: React.FC<{
       <Space>
         <span>{t("settings:adminMaintenance.maintToggleLabel", "Maintenance Mode:")}</span>
         <Switch
+          aria-label={t("settings:adminMaintenance.maintenanceModeLabel", "Maintenance mode")}
           checked={enabled}
           onChange={(checked) => setEnabled(checked)}
           checkedChildren={t("settings:adminMaintenance.maintOn", "ON")}
@@ -53,8 +55,9 @@ const MaintenanceBannerForm: React.FC<{
         />
       </Space>
       <div>
-        <label style={{ display: "block", marginBottom: 4, fontWeight: 500 }}>{t("settings:adminMaintenance.maintMessageLabel", "Message:")}</label>
+        <label htmlFor="maintenance-message" style={{ display: "block", marginBottom: 4, fontWeight: 500 }}>{t("settings:adminMaintenance.maintMessageLabel", "Message:")}</label>
         <TextArea
+          id="maintenance-message"
           rows={2}
           value={message}
           onChange={(e) => setMessage(e.target.value)}
@@ -62,11 +65,12 @@ const MaintenanceBannerForm: React.FC<{
         />
       </div>
       <div>
-        <label style={{ display: "block", marginBottom: 4, fontWeight: 500 }}>{t("settings:adminMaintenance.maintAllowlistLabel", "Allowlist (comma-separated IPs or usernames):")}</label>
+        <label htmlFor="maintenance-allowlist" style={{ display: "block", marginBottom: 4, fontWeight: 500 }}>{t("settings:adminMaintenance.maintAllowlistIdsEmailsLabel", "Allowed user IDs or emails (comma-separated):")}</label>
         <Input
+          id="maintenance-allowlist"
           value={allowlist}
           onChange={(e) => setAllowlist(e.target.value)}
-          placeholder={t("settings:adminMaintenance.maintAllowlistPlaceholder", "e.g. 192.168.1.1, admin")}
+          placeholder={t("settings:adminMaintenance.maintAllowlistIdsEmailsPlaceholder", "e.g. 7, alice@example.com")}
         />
       </div>
       <Button
@@ -78,6 +82,23 @@ const MaintenanceBannerForm: React.FC<{
       </Button>
     </Space>
   )
+}
+type MaintenanceFlag = {
+  key: string; scope?: string; org_id?: number | null; user_id?: number | null;
+  target_user_ids?: number[]; rollout_percent?: number; variant_value?: string | null;
+}
+
+const getFlagTarget = (flag: MaintenanceFlag): {
+  scope: "global" | "org" | "user"; org_id?: number; user_id?: number;
+} | null => {
+  if (typeof flag.key !== "string" || !flag.key.trim()) return null
+  const scope = flag.scope
+  if (scope !== "global" && scope !== "org" && scope !== "user") return null
+  for (const id of [flag.org_id, flag.user_id]) {
+    if (id != null && (typeof id !== "number" || !Number.isSafeInteger(id) || id <= 0)) return null
+  }
+  if ((scope === "org" && flag.org_id == null) || (scope === "user" && flag.user_id == null)) return null
+  return { scope, org_id: flag.org_id ?? undefined, user_id: flag.user_id ?? undefined }
 }
 
 const MaintenancePage: React.FC = () => {
@@ -125,8 +146,7 @@ const MaintenancePage: React.FC = () => {
       const state = await tldwClient.getMaintenanceState()
       setMaintEnabled(!!state?.enabled)
       setMaintMessage(state?.message || "")
-      setMaintAllowlist((state?.allowlist || []).join(", "))
-      // Re-seed the banner form with the freshly loaded snapshot.
+      setMaintAllowlist([...(state?.allowlist_user_ids ?? []), ...(state?.allowlist_emails ?? [])].join(", "))
       setMaintStateRevision((n) => n + 1)
     } catch (err) {
       markAdminGuardFromError(err)
@@ -146,10 +166,17 @@ const MaintenancePage: React.FC = () => {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean)
+      const userIds = allowlistArr.filter((entry) => /^\d+$/.test(entry)).map(Number)
+      const emails = allowlistArr.filter((entry) => !/^\d+$/.test(entry))
+      if (userIds.some((id) => !Number.isSafeInteger(id) || id <= 0) || emails.some((email) => !isValidEmailAddress(email))) {
+        message.error(t("settings:adminMaintenance.allowlistIdsEmailsInvalid", "Enter positive user IDs or valid email addresses"))
+        return
+      }
       await tldwClient.updateMaintenanceState({
         enabled: values.enabled,
         message: values.message || undefined,
-        allowlist: allowlistArr.length > 0 ? allowlistArr : undefined
+        allowlist_user_ids: userIds,
+        allowlist_emails: emails.map(normalizeEmailAddress)
       })
       message.success(t("settings:adminMaintenance.maintUpdated", "Maintenance state updated"))
     } catch (err: any) {
@@ -173,13 +200,18 @@ const MaintenancePage: React.FC = () => {
     }
   }, [markAdminGuardFromError])
 
-  const handleToggleFlag = async (flagKey: string, enabled: boolean) => {
+  const handleToggleFlag = async (flag: MaintenanceFlag, enabled: boolean) => {
+    const target = getFlagTarget(flag)
+    if (!target || !Array.isArray(flag.target_user_ids) || flag.target_user_ids.some((id) => !Number.isSafeInteger(id) || id <= 0) || typeof flag.rollout_percent !== "number" || !Number.isInteger(flag.rollout_percent) || flag.rollout_percent < 0 || flag.rollout_percent > 100 || !(flag.variant_value === null || typeof flag.variant_value === "string")) {
+      message.error(t("settings:adminMaintenance.flagDetailsRequired", "Reload complete flag details before changing this flag"))
+      return
+    }
     try {
-      await tldwClient.updateFeatureFlag(flagKey, { enabled })
+      await tldwClient.updateFeatureFlag(flag.key, { enabled, ...target, target_user_ids: flag.target_user_ids, rollout_percent: flag.rollout_percent, variant_value: flag.variant_value })
       message.success(
         t("settings:adminMaintenance.flagToggled", {
           defaultValue: 'Flag "{{flag}}" {{state}}',
-          flag: flagKey,
+          flag: flag.key,
           state: enabled
             ? t("settings:adminMaintenance.flagStateEnabled", "enabled")
             : t("settings:adminMaintenance.flagStateDisabled", "disabled")
@@ -191,13 +223,18 @@ const MaintenancePage: React.FC = () => {
     }
   }
 
-  const handleDeleteFlag = async (flagKey: string) => {
+  const handleDeleteFlag = async (flag: MaintenanceFlag) => {
+    const target = getFlagTarget(flag)
+    if (!target) {
+      message.error(t("settings:adminMaintenance.flagTargetRequired", "Reload a valid flag target before deleting"))
+      return
+    }
     try {
-      await tldwClient.deleteFeatureFlag(flagKey)
+      await tldwClient.deleteFeatureFlag(flag.key, target)
       message.success(
         t("settings:adminMaintenance.flagDeleted", {
           defaultValue: 'Flag "{{flag}}" deleted',
-          flag: flagKey
+          flag: flag.key
         })
       )
       await loadFeatureFlags()
@@ -227,7 +264,7 @@ const MaintenancePage: React.FC = () => {
       await tldwClient.createIncident({
         title: values.title.trim(),
         severity: values.severity || undefined,
-        description: values.description?.trim() || undefined
+        summary: values.description?.trim() || undefined
       })
       incidentForm.resetFields()
       message.success(t("settings:adminMaintenance.incidentCreated", "Incident created"))
@@ -278,7 +315,7 @@ const MaintenancePage: React.FC = () => {
     setStartingRotation(true)
     try {
       await tldwClient.createRotationRun()
-      message.success(t("settings:adminMaintenance.rotationStarted", "Rotation run started"))
+      message.success(t("settings:adminMaintenance.rotationPreviewQueued", "Rotation preview queued"))
       await loadRotationRuns()
     } catch (err: any) {
       message.error(sanitizeAdminErrorMessage(err, t("settings:adminMaintenance.rotationStartFailed", "Failed to start rotation run")))
@@ -308,13 +345,28 @@ const MaintenancePage: React.FC = () => {
       render: (key: string) => <code>{key}</code>
     },
     {
+      title: t("settings:adminMaintenance.colTarget", "Target"),
+      key: "target",
+      render: (_: unknown, record: MaintenanceFlag) => {
+        const target = getFlagTarget(record)
+        if (!target) return t("settings:adminMaintenance.unknownFlagTarget", "Unknown target")
+        const organization = target.org_id == null ? null : `${t("settings:adminMaintenance.scopeOrganization", "Organization")} #${target.org_id}`
+        const user = target.user_id == null ? null : `${t("settings:adminMaintenance.scopeUser", "User")} #${target.user_id}`
+        if (target.scope === "org") return [organization, user].filter(Boolean).join(" · ")
+        if (target.scope === "user") return [user, organization].filter(Boolean).join(" · ")
+        if (!organization && !user) return t("settings:adminMaintenance.scopeGlobal", "Server-wide")
+        return [t("settings:adminMaintenance.globalFlag", "Global flag"), organization, user].filter(Boolean).join(" · ")
+      }
+    },
+    {
       title: t("settings:adminMaintenance.colEnabled", "Enabled"),
       dataIndex: "enabled",
       key: "enabled",
-      render: (enabled: boolean, record: any) => (
+      render: (enabled: boolean, record: MaintenanceFlag) => (
         <Switch
           checked={!!enabled}
-          onChange={(checked) => handleToggleFlag(record.key, checked)}
+          disabled={!getFlagTarget(record)}
+          onChange={(checked) => handleToggleFlag(record, checked)}
         />
       )
     },
@@ -327,9 +379,9 @@ const MaintenancePage: React.FC = () => {
             defaultValue: 'Delete flag "{{flag}}"?',
             flag: record.key
           })}
-          onConfirm={() => handleDeleteFlag(record.key)}
+          onConfirm={() => handleDeleteFlag(record)}
         >
-          <Button size="small" danger>{t("common:delete", "Delete")}</Button>
+          <Button size="small" danger disabled={!getFlagTarget(record)}>{t("common:delete", "Delete")}</Button>
         </Popconfirm>
       )
     }
@@ -379,8 +431,8 @@ const MaintenancePage: React.FC = () => {
             onChange={(val) => handleUpdateIncidentStatus(record.id, val)}
             options={[
               { value: "investigating", label: t("settings:adminMaintenance.statusInvestigating", "Investigating") },
-              { value: "identified", label: t("settings:adminMaintenance.statusIdentified", "Identified") },
-              { value: "monitoring", label: t("settings:adminMaintenance.statusMonitoring", "Monitoring") },
+              { value: "open", label: t("settings:adminMaintenance.statusOpen", "Open") },
+              { value: "mitigating", label: t("settings:adminMaintenance.statusMitigating", "Mitigating") },
               { value: "resolved", label: t("settings:adminMaintenance.statusResolved", "Resolved") }
             ]}
           />
@@ -398,6 +450,10 @@ const MaintenancePage: React.FC = () => {
   // ── Rotation Runs Table Columns ──
 
   const rotationColumns = [
+    { title: t("settings:adminMaintenance.colMode", "Mode"), dataIndex: "mode", key: "mode" },
+    { title: t("settings:adminMaintenance.colScope", "Scope"), dataIndex: "scope_summary", key: "scope_summary" },
+    { title: t("settings:adminMaintenance.colAffected", "Affected"), dataIndex: "affected_count", key: "affected_count", render: (value: number | null) => value ?? "\u2014" },
+    { title: t("settings:adminMaintenance.colFailure", "Failure"), dataIndex: "error_message", key: "error_message", render: (value: string | null) => value ? sanitizeAdminErrorMessage({ message: value }, "Operation failed") : "\u2014" },
     {
       title: t("settings:adminMaintenance.colId", "ID"),
       dataIndex: "id",
@@ -408,7 +464,7 @@ const MaintenancePage: React.FC = () => {
       dataIndex: "status",
       key: "status",
       render: (status: string) => {
-        const color = status === "completed" ? "green" : status === "running" ? "blue" : status === "failed" ? "red" : "default"
+        const color = status === "complete" ? "green" : status === "running" ? "blue" : status === "failed" ? "red" : "default"
         return <Tag color={color}>{status || t("settings:adminMaintenance.statusUnknown", "unknown")}</Tag>
       }
     },
@@ -471,7 +527,7 @@ const MaintenancePage: React.FC = () => {
         <Table
           dataSource={flags}
           columns={flagColumns}
-          rowKey="key"
+          rowKey={(record: MaintenanceFlag) => `${record.key}:${record.scope}:${record.org_id ?? ""}:${record.user_id ?? ""}`}
           loading={flagsLoading}
           pagination={false}
           size="small"
@@ -545,7 +601,7 @@ const MaintenancePage: React.FC = () => {
                     onClick={handleStartRotation}
                     loading={startingRotation}
                   >
-                    {t("settings:adminMaintenance.startRun", "Start Run")}
+                    {t("settings:adminMaintenance.previewRotation", "Preview rotation")}
                   </Button>
                   <Button onClick={() => loadRotationRuns()} size="small">
                     {t("common:refresh", "Refresh")}

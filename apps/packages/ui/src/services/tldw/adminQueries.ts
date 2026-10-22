@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
-import { tldwClient } from "./TldwApiClient"
+import { deriveConnectionAuthorityId } from "@/services/chat-surface-scope"
+import { tldwClient, type TldwConfig } from "./TldwApiClient"
 
 /**
  * Query keys + thin hooks for admin reference data (admin perf B-S4 / F11).
@@ -33,10 +34,10 @@ export const adminKeys = {
   governorCoverage: ["admin", "governor-coverage"] as const
 }
 
-export const useSystemStats = (options?: { timeoutMs?: number }) =>
+export const useSystemStats = (options?: { timeoutMs?: number; configSnapshot?: TldwConfig }) =>
   useQuery({
-    queryKey: adminKeys.systemStats,
-    queryFn: () => tldwClient.getSystemStats(options)
+    queryKey: options?.configSnapshot ? [...adminKeys.systemStats, deriveConnectionAuthorityId(options.configSnapshot)] : adminKeys.systemStats,
+    queryFn: ({ signal }) => tldwClient.getSystemStats({ ...options, abortSignal: signal })
   })
 
 export const useUsersPage = (page: number, limit: number, search?: string) =>
@@ -45,14 +46,14 @@ export const useUsersPage = (page: number, limit: number, search?: string) =>
     queryFn: () => tldwClient.listAdminUsers({ page, limit, search })
   })
 
-export const useAdminRoles = () =>
+export const useAdminRoles = (config?: TldwConfig) =>
   useQuery({
-    queryKey: adminKeys.roles,
-    queryFn: () => tldwClient.listAdminRoles()
+    queryKey: config ? [...adminKeys.roles, deriveConnectionAuthorityId(config)] : adminKeys.roles,
+    queryFn: ({ signal }) => tldwClient.listAdminRoles({ ...(config ? { configSnapshot: config } : {}), abortSignal: signal })
   })
 
-export const useAdminPermissions = () =>
+export const useAdminPermissions = (config?: TldwConfig) =>
   useQuery({
-    queryKey: adminKeys.permissions,
-    queryFn: () => tldwClient.listPermissions()
+    queryKey: config ? [...adminKeys.permissions, deriveConnectionAuthorityId(config)] : adminKeys.permissions,
+    queryFn: ({ signal }) => tldwClient.listPermissions({ ...(config ? { configSnapshot: config } : {}), abortSignal: signal })
   })

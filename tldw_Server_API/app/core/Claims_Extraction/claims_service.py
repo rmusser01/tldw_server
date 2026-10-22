@@ -68,7 +68,7 @@ from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.db_path_utils import get_user_media_db_path
 from tldw_Server_API.app.core.DB_Management.media_db.api import managed_media_database
 from tldw_Server_API.app.core.DB_Management.Watchlists_DB import WatchlistsDatabase
-from tldw_Server_API.app.core.exceptions import EgressPolicyError, RetryExhaustedError
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMQuotaExceededError, RetryExhaustedError
 from tldw_Server_API.app.core.Jobs.worker_utils import jobs_manager_from_env
 from tldw_Server_API.app.core.Setup import setup_manager
 from tldw_Server_API.app.core.AuthNZ.platform_admin import PLATFORM_ADMIN_ROLES
@@ -610,6 +610,8 @@ def _fva_claims_analyze_call(
     try:
         response = perform_chat_api_call(**call_kwargs)
         return coerce_llm_response_text(response)
+    except LLMQuotaExceededError:
+        raise  # the user's limit: not an empty reply for the verifier to score without the LLM
     except _CLAIMS_NONCRITICAL_EXCEPTIONS as exc:
         logger.warning(f"FVA analyze function failed: {exc}")
         return ""
@@ -2842,6 +2844,7 @@ async def review_claim(
             expected_version=int(payload.get("review_version")),
             action_ip=action_ip,
             action_user_agent=action_user_agent,
+            actor_user_id=principal.user_id if principal.user_id is not None else int(current_user.id),
         )
         if updated is None:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Claim not found")
@@ -2991,6 +2994,7 @@ def bulk_review_claims(
                 expected_version=int(claim_row.get("review_version") or 1),
                 action_ip=action_ip,
                 action_user_agent=action_user_agent,
+                actor_user_id=principal.user_id if principal.user_id is not None else int(current_user.id),
             )
             if isinstance(updated, dict) and updated.get("conflict"):
                 conflicts.append(int(cid))

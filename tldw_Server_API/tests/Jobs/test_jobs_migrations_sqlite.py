@@ -4,6 +4,7 @@ import importlib
 import json
 import math
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -24,6 +25,9 @@ from tldw_Server_API.app.core.Jobs.operations.contracts import (
     admin_webhook_disposition_marker_matches,
     prepared_disposition_fingerprint,
     project_admin_webhook_disposition_marker,
+)
+from tldw_Server_API.app.core.Notes_Graph.semantic_observability import (
+    deserialize_semantic_health_snapshots,
 )
 
 _LEGACY_DELIVERY_ID = "00000000-0000-4000-8000-000000000001"
@@ -147,6 +151,300 @@ def _insert_legacy_canonical_archive(
             _LEGACY_APPLIED_AT,
         ),
     )
+
+NOW = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
+
+
+def _complete_semantic_health_totals() -> str:
+    return json.dumps(
+        [
+            {
+                "backend": backend,
+                "indexed_notes": 0,
+                "excluded_notes": 0,
+                "failed_notes": 0,
+                "dirty_notes": 0,
+                "pending_notes": 0,
+                "stale_generations": 0,
+                "cleanup_backlog": 0,
+                "cleanup_retries": 0,
+                "oldest_cleanup_created_at": None,
+            }
+            for backend in ("chromadb", "pgvector", "unavailable")
+        ]
+    )
+
+
+def test_sqlite_semantic_health_sweep_checkpoint_is_durable_and_cas_fenced(
+    tmp_path,
+):
+    db_path = ensure_jobs_tables(tmp_path / "jobs_semantic_health.db")
+    with sqlite3.connect(db_path) as conn:
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(notes_semantic_health_sweep)").fetchall()}
+        assert columns == {
+            "singleton_id",
+            "revision",
+            "after_owner_id",
+            "after_dataset_id",
+            "totals_json",
+            "updated_at",
+            "last_completed_at",
+        }
+        assert conn.execute(
+            "SELECT singleton_id,revision,after_owner_id,after_dataset_id,totals_json FROM notes_semantic_health_sweep"
+        ).fetchone() == (1, 0, None, None, "[]")
+
+    totals = _complete_semantic_health_totals()
+    manager = JobManager(db_path)
+    assert manager.checkpoint_notes_semantic_health_sweep(
+        expected_revision=0,
+        after_owner_id=1,
+        after_dataset_id="dataset-a",
+        totals_json=totals,
+        completed=False,
+        now=NOW,
+    )
+
+    restarted = JobManager(db_path)
+    assert restarted.get_notes_semantic_health_sweep() == {
+        "revision": 1,
+        "after_owner_id": 1,
+        "after_dataset_id": "dataset-a",
+        "totals_json": totals,
+        "updated_at": NOW,
+        "last_completed_at": None,
+    }
+    assert not restarted.checkpoint_notes_semantic_health_sweep(
+        expected_revision=0,
+        after_owner_id=9,
+        after_dataset_id=None,
+        totals_json=totals,
+        completed=False,
+        now=NOW,
+    )
+    assert restarted.checkpoint_notes_semantic_health_sweep(
+        expected_revision=1,
+        after_owner_id=None,
+        after_dataset_id=None,
+        totals_json="[]",
+        completed=True,
+        now=NOW,
+    )
+    assert restarted.get_notes_semantic_health_sweep() == {
+        "revision": 2,
+        "after_owner_id": None,
+        "after_dataset_id": None,
+        "totals_json": "[]",
+        "updated_at": NOW,
+        "last_completed_at": NOW,
+    }
+
+
+@pytest.mark.parametrize(
+    "totals",
+    [
+        json.dumps([{"backend": "chromadb", "indexed_notes": 1}]),
+        json.dumps(
+            [
+                {
+                    "backend": "chromadb",
+                    "indexed_notes": 0,
+                    "excluded_notes": 0,
+                    "failed_notes": 0,
+                    "dirty_notes": 0,
+                    "pending_notes": 0,
+                    "stale_generations": 0,
+                    "cleanup_backlog": 0,
+                    "cleanup_retries": 0,
+                    "oldest_cleanup_created_at": "not-a-timestamp",
+                }
+            ]
+        ),
+        _complete_semantic_health_totals().replace('"indexed_notes": 0', '"indexed_notes": true', 1),
+        _complete_semantic_health_totals().replace('"backend": "chromadb"', '"backend": "other"', 1),
+        _complete_semantic_health_totals().replace(
+            '"oldest_cleanup_created_at": null',
+            '"oldest_cleanup_created_at": null, "extra": 1',
+            1,
+        ),
+        json.dumps(json.loads(_complete_semantic_health_totals())[:2]),
+        json.dumps(
+            [
+                json.loads(_complete_semantic_health_totals())[0],
+                json.loads(_complete_semantic_health_totals())[0],
+                json.loads(_complete_semantic_health_totals())[2],
+            ]
+        ),
+    ],
+    ids=(
+        "sparse-fields",
+        "malformed-timestamp",
+        "invalid-count-type",
+        "invalid-backend",
+        "extra-field",
+        "sparse-backends",
+        "duplicate-backend",
+    ),
+)
+def test_sqlite_semantic_health_checkpoint_rejects_totals_that_cannot_deserialize(
+    tmp_path,
+    totals: str,
+) -> None:
+    manager = JobManager(tmp_path / "invalid_semantic_health.db")
+
+    with pytest.raises(ValueError):
+        manager.checkpoint_notes_semantic_health_sweep(
+            expected_revision=0,
+            after_owner_id=1,
+            after_dataset_id=None,
+            totals_json=totals,
+            completed=False,
+            now=NOW,
+        )
+
+    assert manager.get_notes_semantic_health_sweep()["revision"] == 0
+
+
+@pytest.mark.parametrize(
+    ("after_owner_id", "after_dataset_id", "totals_json"),
+    [
+        (None, None, _complete_semantic_health_totals()),
+        (1, None, "[]"),
+        (None, "dataset-a", "[]"),
+    ],
+    ids=("totals-without-owner", "owner-without-totals", "dataset-without-owner"),
+)
+def test_sqlite_semantic_health_checkpoint_rejects_incoherent_phase(
+    tmp_path,
+    after_owner_id: int | None,
+    after_dataset_id: str | None,
+    totals_json: str,
+) -> None:
+    manager = JobManager(tmp_path / "semantic_health_round_trip.db")
+
+    with pytest.raises(ValueError):
+        manager.checkpoint_notes_semantic_health_sweep(
+            expected_revision=0,
+            after_owner_id=after_owner_id,
+            after_dataset_id=after_dataset_id,
+            totals_json=totals_json,
+            completed=False,
+            now=NOW,
+        )
+
+    assert manager.get_notes_semantic_health_sweep()["revision"] == 0
+
+
+def test_accepted_semantic_health_checkpoint_totals_always_deserialize(tmp_path) -> None:
+    manager = JobManager(tmp_path / "semantic_health_accepted_round_trip.db")
+    totals = _complete_semantic_health_totals()
+
+    assert manager.checkpoint_notes_semantic_health_sweep(
+        expected_revision=0,
+        after_owner_id=1,
+        after_dataset_id=None,
+        totals_json=totals,
+        completed=False,
+        now=NOW,
+    )
+
+    snapshots = deserialize_semantic_health_snapshots(manager.get_notes_semantic_health_sweep()["totals_json"])
+    assert {snapshot.backend for snapshot in snapshots} == {"chromadb", "pgvector", "unavailable"}
+
+
+def test_sqlite_semantic_health_checkpoint_persists_exact_owner_keyset_cursor(
+    tmp_path,
+) -> None:
+    manager = JobManager(tmp_path / "semantic_health_keyset.db")
+    totals = _complete_semantic_health_totals()
+
+    assert manager.checkpoint_notes_semantic_health_sweep(
+        expected_revision=0,
+        after_owner_id=17,
+        after_dataset_id="dataset-a",
+        totals_json=totals,
+        completed=False,
+        now=NOW,
+    )
+
+    assert JobManager(manager.db_path).get_notes_semantic_health_sweep() == {
+        "revision": 1,
+        "after_owner_id": 17,
+        "after_dataset_id": "dataset-a",
+        "totals_json": totals,
+        "updated_at": NOW,
+        "last_completed_at": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "after_owner_id",
+    (True, False, 2.5, "2", "2_0", 0, -1),
+    ids=("true", "false", "real", "numeric-text", "numeric-like-text", "zero", "negative"),
+)
+def test_sqlite_semantic_health_checkpoint_rejects_non_exact_owner_cursor(
+    tmp_path,
+    after_owner_id: object,
+) -> None:
+    manager = JobManager(tmp_path / "semantic_health_invalid_owner_write.db")
+
+    with pytest.raises(ValueError):
+        manager.checkpoint_notes_semantic_health_sweep(
+            expected_revision=0,
+            after_owner_id=after_owner_id,  # type: ignore[arg-type]
+            after_dataset_id=None,
+            totals_json=_complete_semantic_health_totals(),
+            completed=False,
+            now=NOW,
+        )
+
+
+@pytest.mark.parametrize(
+    "after_dataset_id",
+    ("   ", " dataset-a", "dataset-a ", "\tdataset-a", "dataset-a\n"),
+    ids=("whitespace", "leading-space", "trailing-space", "leading-tab", "trailing-newline"),
+)
+def test_sqlite_semantic_health_checkpoint_rejects_noncanonical_dataset_cursor(
+    tmp_path,
+    after_dataset_id: str,
+) -> None:
+    manager = JobManager(tmp_path / "semantic_health_invalid_dataset_write.db")
+
+    with pytest.raises(ValueError):
+        manager.checkpoint_notes_semantic_health_sweep(
+            expected_revision=0,
+            after_owner_id=1,
+            after_dataset_id=after_dataset_id,
+            totals_json=_complete_semantic_health_totals(),
+            completed=False,
+            now=NOW,
+        )
+
+
+@pytest.mark.parametrize(
+    "after_owner_id",
+    (2.5, "2", "2_0", "true", sqlite3.Binary(b"2"), 0, -1),
+    ids=(
+        "real",
+        "numeric-text",
+        "numeric-like-text",
+        "boolean-like",
+        "blob",
+        "zero",
+        "negative",
+    ),
+)
+def test_sqlite_semantic_health_schema_rejects_invalid_owner_cursor_storage(
+    tmp_path,
+    after_owner_id: object,
+) -> None:
+    db_path = ensure_jobs_tables(tmp_path / "semantic_health_owner_storage.db")
+
+    with sqlite3.connect(db_path) as conn, pytest.raises(sqlite3.IntegrityError):
+        conn.execute(
+            "UPDATE notes_semantic_health_sweep SET after_owner_id=? WHERE singleton_id=1",
+            (after_owner_id,),
+        )
 
 
 def test_sqlite_schema_persists_owner_scoped_idempotency_receipts(tmp_path):

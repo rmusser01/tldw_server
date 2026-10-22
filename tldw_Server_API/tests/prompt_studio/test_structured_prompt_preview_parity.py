@@ -1,4 +1,5 @@
 import pytest
+from fastapi import HTTPException
 
 from tldw_Server_API.app.api.v1.endpoints.prompt_studio.prompt_studio_prompts import (
     preview_prompt,
@@ -190,3 +191,30 @@ async def test_recipe_preview_returns_exact_single_text_without_messages(isolate
     assert preview_data.assembled_messages == []
     assert preview_data.legacy_system_prompt == preview_data.rendered_text
     assert preview_data.legacy_user_prompt == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("schema_version", [1, 2])
+async def test_c02_invalid_preview_has_actionable_safe_guidance(isolated_db, schema_version):
+    project = isolated_db.create_project(name="C02 invalid preview", user_id="test-user")
+    definition = _make_prompt_definition_payload() if schema_version == 1 else _make_recipe_definition_payload()
+    definition["blocks"][-1]["content"] = "PRIVATE_SOURCE_SENTINEL {{undeclared_private_name}}"
+    definition["blocks"][-1]["is_template"] = True
+
+    with pytest.raises(HTTPException) as caught:
+        await preview_prompt(
+            StructuredPromptPreviewRequest(
+                project_id=project["id"],
+                prompt_format="structured",
+                prompt_schema_version=schema_version,
+                prompt_definition=definition,
+            ),
+            db=isolated_db,
+            security_config=None,
+            user_context={"user_id": "test-user", "client_id": "test-client", "is_admin": False},
+        )
+
+    assert caught.value.status_code == 400  # nosec B101 - Pytest checks the public validation status.
+    assert caught.value.detail == (  # nosec B101 - Exact fixed guidance also excludes private source/name values.
+        "Invalid structured prompt definition. Check schema version, block roles, and declared template variables."
+    )

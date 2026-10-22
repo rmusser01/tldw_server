@@ -203,6 +203,16 @@ class ConversationSettingsTargetMissing(RuntimeError):
     """Force rollback when settings outlive their live conversation target."""
 
 
+class SemanticAPIError(RuntimeError):
+    """Stable HTTP-facing semantic application error."""
+
+    def __init__(self, status_code: int, code: str) -> None:
+        self.status_code = status_code
+        self.code = code
+        self.failure_code = code
+        super().__init__(code)
+
+
 class WebhookError(TransactionPassthroughError):
     """Expected webhook domain failure with no caller-controlled message text."""
 
@@ -923,13 +933,19 @@ class ChatBadRequestError(ChatAPIError):
 
 
 class ChatRateLimitError(ChatAPIError):
-    """Raised when a chat provider rate-limits a request."""
+    """Raised when a chat provider rate-limits a request.
+
+    ``quota_exhausted`` is True when the provider said the account's billing quota is spent
+    (OpenAI ``insufficient_quota``), so waiting will not help. It is a bool, never upstream text.
+    """
 
     def __init__(
         self,
         message: str = "Rate limit exceeded with the chat provider.",
         provider: str | None = None,
+        quota_exhausted: bool = False,
     ) -> None:
+        self.quota_exhausted = quota_exhausted is True
         super().__init__(message, status_code=429, provider=provider)
 
 
@@ -1732,6 +1748,10 @@ class ToolCatalogConflictError(AdminDataOpsError):
 
 class UnknownBackupDatasetError(AdminDataOpsError):
     """Raised when a backup request references an unknown dataset."""
+
+
+class UnsupportedBackupBackendError(AdminDataOpsError):
+    """Requested dataset scope has no compatible backup/restore implementation."""
 
 
 class InvalidBackupUserIdError(AdminDataOpsError):

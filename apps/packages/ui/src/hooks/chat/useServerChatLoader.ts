@@ -897,86 +897,82 @@ export const useServerChatLoader = ({
           let personaMemoryMode = serverChatPersonaMemoryMode
           let restoreAssistantSelection = true
 
+          // Required identity errors use the loader failure path; profile enrichment stays optional.
           if (!serverChatMetaLoaded) {
-            try {
-              const chat = await tldwClient.getChat(
-                serverChatId,
-                forkOwner?.kind === "native"
-                  ? { scope: forkOwner.scope, requestScope: forkOwner.request_scope, signal: snapshot.scopeSignal }
-                  : { scope, signal: snapshot.scopeSignal, requestScope: snapshot.requestScope }
-              )
-              if (!canCommitCurrentLoad()) {
-                return
-              }
-              const validatedServerChatId = validateCachedServerChatId({
-                cachedId: serverChatId,
-                serverScope: {
-                  scope_type: String((chat as any)?.scope_type || ""),
-                  workspace_id:
-                    typeof (chat as any)?.workspace_id === "string"
-                      ? (chat as any).workspace_id
-                      : null
-                },
-                expectedScope: scope || { type: "global" }
-              })
-              if (!validatedServerChatId) {
-                if (selectionRef.current) {
-                  await rejectCurrentOwner("server_chat_scope_mismatch")
-                } else {
-                setMessages([])
-                setHistory([])
-                setServerChatTitle(null)
-                setIsLoading(false)
-                setServerChatId(null)
-                }
-                return
-              }
-              savedRoleplay = readSavedRoleplayPresentation(chat)
-              useStoreMessageOption.getState().setServerChatRoleplaySetup(savedRoleplay)
-              const meta = chat as unknown as Record<string, unknown>
-              chatTitle = String(meta?.title || chatTitle || "")
-              const resolvedAssistantIdentity =
-                resolveServerChatAssistantIdentity(meta)
-              assistantKind = resolvedAssistantIdentity.assistantKind
-              assistantId = resolvedAssistantIdentity.assistantId
-              characterId = resolvedAssistantIdentity.characterId
-              personaMemoryMode = resolvedAssistantIdentity.personaMemoryMode
-              restoreAssistantSelection = getSelectedAssistantOperationRevision() === ownedSelectionRevision
-              setServerChatTitle(chatTitle || "")
-              setServerChatCharacterId(characterId)
-              setServerChatAssistantKind(assistantKind)
-              setServerChatAssistantId(assistantId)
-              setServerChatPersonaMemoryMode(personaMemoryMode)
-              setServerChatState(
-                normalizeConversationState(
-                  (meta?.state as string | null | undefined) ??
-                    (meta?.conversation_state as string | null | undefined)
-                )
-              )
-              setServerChatVersion(
-                typeof meta?.version === "number" ? meta.version : null
-              )
-              setServerChatTopic(
-                typeof meta?.topic_label === "string"
-                  ? meta.topic_label
-                  : null
-              )
-              setServerChatClusterId(
-                typeof meta?.cluster_id === "string" ? meta.cluster_id : null
-              )
-              setServerChatSource(
-                typeof meta?.source === "string" ? meta.source : null
-              )
-              setServerChatExternalRef(
-                typeof meta?.external_ref === "string"
-                  ? meta.external_ref
-                  : null
-              )
-              setServerChatMetaLoaded(true)
-            } catch (error) {
-              if (isMissingServerChatReferenceError(error) || isDeniedServerChatError(error)) throw error
-              // ignore metadata failures; still try to load messages
+            const chat = await tldwClient.getChat(
+              serverChatId,
+              forkOwner?.kind === "native"
+                ? { scope: forkOwner.scope, requestScope: forkOwner.request_scope, signal: snapshot.scopeSignal }
+                : { scope, signal: snapshot.scopeSignal, requestScope: snapshot.requestScope }
+            )
+            if (!canCommitCurrentLoad()) {
+              return
             }
+            const validatedServerChatId = validateCachedServerChatId({
+              cachedId: serverChatId,
+              serverScope: {
+                scope_type: String((chat as any)?.scope_type || ""),
+                workspace_id:
+                  typeof (chat as any)?.workspace_id === "string"
+                    ? (chat as any).workspace_id
+                    : null
+              },
+              expectedScope: scope || { type: "global" }
+            })
+            if (!validatedServerChatId) {
+              if (selectionRef.current) {
+                await rejectCurrentOwner("server_chat_scope_mismatch")
+              } else {
+              setMessages([])
+              setHistory([])
+              setServerChatTitle(null)
+              setIsLoading(false)
+              setServerChatId(null)
+              }
+              return
+            }
+            savedRoleplay = readSavedRoleplayPresentation(chat)
+            useStoreMessageOption.getState().setServerChatRoleplaySetup(savedRoleplay)
+            const meta = chat as unknown as Record<string, unknown>
+            chatTitle = String(meta?.title || chatTitle || "")
+            const resolvedAssistantIdentity =
+              resolveServerChatAssistantIdentity(meta)
+            assistantKind = resolvedAssistantIdentity.assistantKind
+            assistantId = resolvedAssistantIdentity.assistantId
+            characterId = resolvedAssistantIdentity.characterId
+            personaMemoryMode = resolvedAssistantIdentity.personaMemoryMode
+            restoreAssistantSelection = getSelectedAssistantOperationRevision() === ownedSelectionRevision
+            setServerChatTitle(chatTitle || "")
+            setServerChatCharacterId(characterId)
+            setServerChatAssistantKind(assistantKind)
+            setServerChatAssistantId(assistantId)
+            setServerChatPersonaMemoryMode(personaMemoryMode)
+            setServerChatState(
+              normalizeConversationState(
+                (meta?.state as string | null | undefined) ??
+                  (meta?.conversation_state as string | null | undefined)
+              )
+            )
+            setServerChatVersion(
+              typeof meta?.version === "number" ? meta.version : null
+            )
+            setServerChatTopic(
+              typeof meta?.topic_label === "string"
+                ? meta.topic_label
+                : null
+            )
+            setServerChatClusterId(
+              typeof meta?.cluster_id === "string" ? meta.cluster_id : null
+            )
+            setServerChatSource(
+              typeof meta?.source === "string" ? meta.source : null
+            )
+            setServerChatExternalRef(
+              typeof meta?.external_ref === "string"
+                ? meta.external_ref
+                : null
+            )
+            setServerChatMetaLoaded(true)
           }
 
           const deferredAssistantPresentationPromise = (async () => {

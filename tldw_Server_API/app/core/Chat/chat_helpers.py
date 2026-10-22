@@ -251,7 +251,18 @@ async def _ensure_default_character(
             if fetched:
                 return fetched, fetched.get("id")
             return None, None
-        except (CharactersRAGDBError, InputError, ConflictError) as db_error:
+        except ConflictError:
+            # A concurrent first request created it between our read and our insert.
+            try:
+                fetched = db.get_character_card_by_name(DEFAULT_CHARACTER_NAME)
+            except (CharactersRAGDBError, InputError) as read_error:
+                logger.warning("Default character '{}' could not be read back: {}", DEFAULT_CHARACTER_NAME, read_error)
+                return None, None
+            if fetched:
+                return fetched, fetched.get("id")
+            logger.error("Default character '{}' conflicted but could not be read back", DEFAULT_CHARACTER_NAME)
+            return None, None
+        except (CharactersRAGDBError, InputError) as db_error:
             logger.error("Failed to ensure default character '{}': {}", DEFAULT_CHARACTER_NAME, db_error)
             return None, None
         except Exception as exc:  # pragma: no cover - defensive guard

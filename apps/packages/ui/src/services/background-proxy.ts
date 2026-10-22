@@ -779,7 +779,7 @@ export const createDirectRuntime = (
   initialConfig?: DirectConfigSnapshot,
   onDispatch?: () => void
 ) => {
-  let originalConfig: TldwConfig | undefined
+  let originalConfig: TldwConfig | undefined = initialConfig ? { ...initialConfig } : undefined
   let hasInitialConfig = typeof initialConfig !== "undefined"
   const account = new AbortController()
   const releaseAccount = watchChatAccountChanges(invalidated => {

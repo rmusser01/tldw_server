@@ -9,6 +9,7 @@ import { resolveOptionsHref } from "@/utils/browser-runtime"
 import { requestSettingsNavigation } from "@/utils/settings-return"
 import { linkServerChatMirror, reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { HistorySelectionContext, useHistorySelection, useHistorySelectionContext, type HistorySelectionController } from "@/hooks/chat/useHistorySelection"
+import { useKeepInterruptedHistoryTurns } from "@/hooks/chat/useKeepInterruptedHistoryTurns"
 import { SidepanelSendGateContext, type SidepanelSendGate } from "@/hooks/chat/sidepanel-send-gate"
 import type { HistorySelectionCaptureV1 } from "@/types/history-selection"
 import { HistorySelectionReview } from "@/components/Common/Playground/HistorySelectionReview"
@@ -636,6 +637,10 @@ const SidepanelChatContent = ({
     setTemporaryChat,
     sidepanelTemporaryChat,
     stopStreamingRequest,
+    getRecoveryRetryContext,
+    retryRecoveredHistoryTurn,
+    getSavedQuestionReview,
+    retrySavedQuestion,
     temporaryChat,
     clearChat,
     queuedMessages,
@@ -657,6 +662,11 @@ const SidepanelChatContent = ({
     webSearch,
     setWebSearch
   } = useMessage()
+  const hideKeptHistoryTurn = useKeepInterruptedHistoryTurns({
+    selection: historySelection,
+    messages,
+    setMessages
+  })
   const [selectedCharacter] =
     useSelectedCharacter<Character | null>(null)
   const [selectedAssistant] = useSelectedAssistant(null)
@@ -3292,7 +3302,7 @@ const SidepanelChatContent = ({
                 </div>
               ) : null}
               <div className={historySelection.status === "idle" || freshnessNotice ? undefined : "pt-12"}>
-                <HistorySelectionReview selection={historySelection} onExpand={expandSelectedHistory} onBind={() => void historySelection.loadConversation({ historyId, serverChatId, bindUnbound: true })} />
+                <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={getSavedQuestionReview} onRetrySavedQuestion={retrySavedQuestion} onExpand={expandSelectedHistory} onBind={() => void historySelection.bindUnavailableConversation()} />
               </div>
               <SidePanelBody
                 scrollParentRef={containerRef}

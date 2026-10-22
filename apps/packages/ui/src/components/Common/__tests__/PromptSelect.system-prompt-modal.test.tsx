@@ -82,6 +82,7 @@ vi.mock("@/db/dexie/helpers", () => ({
   markPromptSyncError: (...args: unknown[]) =>
     mocks.markPromptSyncError(...args),
   getAllPrompts: mocks.getAllPrompts,
+  getSharedLocalPrompts: async () => (await mocks.getAllPrompts()).filter((prompt: any) => prompt.ownerId == null && !prompt.serverId && !prompt.studioProjectId && !prompt.studioPromptId && !prompt.serverLibraryId && !prompt.serverLibraryUuid),
   getPromptById: mocks.getPromptById
 }))
 

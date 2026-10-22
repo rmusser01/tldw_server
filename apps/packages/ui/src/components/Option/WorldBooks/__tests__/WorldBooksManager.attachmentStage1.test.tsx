@@ -35,7 +35,7 @@ const {
     updateWorldBook: vi.fn(async () => ({})),
     deleteWorldBook: vi.fn(async () => ({})),
     listCharacters: vi.fn(async () => []),
-    listCharacterWorldBooks: vi.fn(async () => []),
+    listCharacterWorldBooks: vi.fn(async (..._args: Parameters<typeof import("@/services/tldw/TldwApiClient").tldwClient.listCharacterWorldBooks>) => []),
     listWorldBookEntries: vi.fn(async () => ({ entries: [] })),
     addWorldBookEntry: vi.fn(async () => ({})),
     updateWorldBookEntry: vi.fn(async () => ({})),

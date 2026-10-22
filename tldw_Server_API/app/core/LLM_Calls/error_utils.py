@@ -98,6 +98,31 @@ def log_provider_failure(
     )
 
 
+# Upstream error codes that mean the account's billing quota is spent, not a rate limit.
+_SPENT_QUOTA_ERROR_CODES = frozenset({"insufficient_quota"})
+
+
+def upstream_quota_exhausted(exc: BaseException | None) -> bool:
+    """Whether a failed upstream reply says the billing quota is spent (OpenAI ``insufficient_quota``).
+
+    Only the body's ``error.type`` and ``error.code`` are compared with a fixed allowlist, and only
+    a bool comes back, so no upstream text is kept. No reply, an unread (streamed) body, or a body
+    that is not JSON gives False.
+    """
+
+    try:
+        body = exc.response.json()
+    except _ERROR_UTILS_NONCRITICAL_EXCEPTIONS:
+        return False
+    error = body.get("error") if isinstance(body, dict) else None
+    if not isinstance(error, dict):
+        return False
+    return any(
+        isinstance(error.get(key), str) and error.get(key) in _SPENT_QUOTA_ERROR_CODES
+        for key in ("type", "code")
+    )
+
+
 def build_sanitized_chat_error(
     provider: str,
     *,
@@ -106,8 +131,13 @@ def build_sanitized_chat_error(
     rate_limit_statuses: tuple[int, ...] = (429,),
     bad_request_statuses: tuple[int, ...] = (400, 404, 422),
     treat_other_4xx_as_bad_request: bool = True,
+    upstream: BaseException | None = None,
 ) -> ChatAPIError:
-    """Build one typed public error without reflecting untrusted upstream text."""
+    """Build one typed public error without reflecting untrusted upstream text.
+
+    ``upstream`` is the failed upstream call's exception. It is read only to tell a spent
+    billing quota from a rate limit (``upstream_quota_exhausted``).
+    """
 
     safe_provider = _bounded_log_label(provider)
     if status_code in auth_statuses:
@@ -116,7 +146,10 @@ def build_sanitized_chat_error(
             status_code=status_code or 401,
         )
     if status_code in rate_limit_statuses:
-        return ChatRateLimitError(provider=safe_provider)
+        return ChatRateLimitError(
+            provider=safe_provider,
+            quota_exhausted=upstream_quota_exhausted(upstream),
+        )
     if status_code in bad_request_statuses or (
         treat_other_4xx_as_bad_request
         and status_code is not None
@@ -329,5 +362,6 @@ def raise_chat_error_from_http(
             rate_limit_statuses=rate_limit_statuses,
             bad_request_statuses=bad_request_statuses,
             treat_other_4xx_as_bad_request=treat_other_4xx_as_bad_request,
+            upstream=exc,
         )
     )

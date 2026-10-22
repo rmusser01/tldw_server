@@ -92,7 +92,12 @@ export const ACPPlaygroundHeader: React.FC<ACPPlaygroundHeaderProps> = ({
             <button
               type="button"
               onClick={onToggleLeftPane}
-              className="hidden rounded-lg p-2 text-text-muted transition-colors hover:bg-surface2 hover:text-text lg:block"
+              className="rounded-lg p-2 text-text-muted transition-colors hover:bg-surface2 hover:text-text"
+              aria-label={
+                leftPaneOpen
+                  ? t("playground:acp.hideSessions", "Hide sessions")
+                  : t("playground:acp.showSessions", "Show sessions")
+              }
               aria-pressed={leftPaneOpen}
             >
               {leftPaneOpen ? (
@@ -193,7 +198,12 @@ export const ACPPlaygroundHeader: React.FC<ACPPlaygroundHeaderProps> = ({
             <button
               type="button"
               onClick={onToggleRightPane}
-              className="hidden rounded-lg p-2 text-text-muted transition-colors hover:bg-surface2 hover:text-text lg:block"
+              className="rounded-lg p-2 text-text-muted transition-colors hover:bg-surface2 hover:text-text"
+              aria-label={
+                rightPaneOpen
+                  ? t("playground:acp.hideTools", "Hide tools")
+                  : t("playground:acp.showTools", "Show tools")
+              }
               aria-pressed={rightPaneOpen}
             >
               {rightPaneOpen ? (

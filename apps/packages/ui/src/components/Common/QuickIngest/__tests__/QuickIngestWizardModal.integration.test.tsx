@@ -1099,7 +1099,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       if (invalidProvider) {
         await user.type(provider, invalidProvider)
       }
-      await user.click(screen.getByRole("button", { name: "Next", exact: true }))
+      await user.click(screen.getByRole("button", { name: "Next" }))
 
       expect(screen.queryByText("Ready to Process")).not.toBeInTheDocument()
       expect(provider).toHaveFocus()
@@ -1111,7 +1111,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       await user.clear(provider)
       await user.type(provider, "llama.cpp")
       expect(provider).not.toHaveAttribute("aria-invalid", "true")
-      await user.click(screen.getByRole("button", { name: "Next", exact: true }))
+      await user.click(screen.getByRole("button", { name: "Next" }))
       expect(screen.getByText("Ready to Process")).toBeInTheDocument()
     }
   )
@@ -1125,7 +1125,7 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       />
     )
     await user.click(screen.getByRole("button", { name: /quick preset/i }))
-    await user.click(screen.getByRole("button", { name: "Next", exact: true }))
+    await user.click(screen.getByRole("button", { name: "Next" }))
 
     expect(screen.getByText("Ready to Process")).toBeInTheDocument()
   })
@@ -1139,10 +1139,10 @@ describe("QuickIngestWizardModal — full wizard flow integration", () => {
       />
     )
     await user.type(screen.getByRole("combobox", { name: "Analysis provider" }), "llama.cpp")
-    await user.click(screen.getByRole("button", { name: "Next", exact: true }))
+    await user.click(screen.getByRole("button", { name: "Next" }))
     await user.click(screen.getByRole("button", { name: "Back to Settings" }))
     await user.click(screen.getByRole("button", { name: "Clear analysis provider" }))
-    await user.click(screen.getByRole("button", { name: "Next", exact: true }))
+    await user.click(screen.getByRole("button", { name: "Next" }))
 
     expect(screen.queryByText("Ready to Process")).not.toBeInTheDocument()
     expect(screen.getByRole("combobox", { name: "Analysis provider" })).toHaveFocus()

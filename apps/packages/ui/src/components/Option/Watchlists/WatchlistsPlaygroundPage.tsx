@@ -689,8 +689,25 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   }, [])
 
   const toggleSecondaryExpanded = useCallback((key: string) => {
+    const destination = key === "monitors" ? "jobs" : key === "activity" ? "runs" : "templates"
+    if (secondaryExpanded[key] && activeTab === destination) {
+      setActiveTab(SECONDARY_IN_PRIMARY[destination] as typeof activeTab)
+    }
     setSecondaryExpanded((prev) => {
       const next = { ...prev, [key]: !prev[key] }
+      writeSecondaryExpanded(next)
+      return next
+    })
+  }, [activeTab, secondaryExpanded, setActiveTab])
+
+  const useProgressiveLayout =
+    !showAllViews && !iaExperimentEnabled && !watchlistsBasicsTutorialActive
+
+  const expandSecondarySection = useCallback((key: string) => {
+    const sectionKey = key === "jobs" ? "monitors" : key === "runs" ? "activity" : "templates"
+    setSecondaryExpanded((prev) => {
+      if (prev[sectionKey]) return prev
+      const next = { ...prev, [sectionKey]: true }
       writeSecondaryExpanded(next)
       return next
     })
@@ -698,30 +715,21 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
 
   // Navigate to a tab, auto-expanding inline secondary sections in progressive mode
   const navigateToTab = useCallback((key: string) => {
-    const isProgressive =
-      !isConstrained &&
-      !showAllViews &&
-      !iaExperimentEnabled &&
-      !watchlistsBasicsTutorialActive
-    if (isProgressive && SECONDARY_IN_PRIMARY[key]) {
+    if (!isConstrained && useProgressiveLayout && SECONDARY_IN_PRIMARY[key]) {
       const primaryTab = SECONDARY_IN_PRIMARY[key]
       setActiveTab(primaryTab as typeof activeTab)
-      const sectionKey = key === "jobs" ? "monitors" : key === "runs" ? "activity" : "templates"
-      setSecondaryExpanded((prev) => {
-        const next = { ...prev, [sectionKey]: true }
-        writeSecondaryExpanded(next)
-        return next
-      })
+      expandSecondarySection(key)
       return
     }
     setActiveTab(key as typeof activeTab)
-  }, [
-    iaExperimentEnabled,
-    isConstrained,
-    setActiveTab,
-    showAllViews,
-    watchlistsBasicsTutorialActive
-  ])
+  }, [expandSecondarySection, isConstrained, setActiveTab, useProgressiveLayout])
+
+  useEffect(() => {
+    // Child handoffs select canonical secondary tabs directly through the store.
+    if (!isConstrained && useProgressiveLayout && SECONDARY_IN_PRIMARY[activeTab]) {
+      expandSecondarySection(activeTab)
+    }
+  }, [activeTab, expandSecondarySection, isConstrained, useProgressiveLayout])
 
   const navigateFromHelp = useCallback((key: string) => {
     closeHelpThen(() => {
@@ -1818,8 +1826,6 @@ export const WatchlistsPlaygroundPage: React.FC = () => {
   ]
 
   // Resolve which tab set to render based on mode
-  const useProgressiveLayout =
-    !showAllViews && !iaExperimentEnabled && !watchlistsBasicsTutorialActive
   const renderedTabItems: TabsProps["items"] = useProgressiveLayout
     ? progressiveTabItems
     : iaExperimentEnabled

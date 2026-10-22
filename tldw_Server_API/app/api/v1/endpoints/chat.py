@@ -68,7 +68,6 @@ from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
 from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError
 from tldw_Server_API.app.core.Utils.base64url import SignatureMismatchError, verify_signed_token
 from tldw_Server_API.app.core.Utils.image_validation import (
-    DATA_URI_REDACT_RE,
     get_max_base64_bytes,
     validate_image_url,
 )
@@ -124,6 +123,7 @@ from tldw_Server_API.app.api.v1.schemas.chat_request_schemas import (
     ChatCompletionRequest,
     ChatCompletionResponse,
     ChatCompletionSystemMessageParam,
+    ChatCompletionUserMessageParam,
     RagContext,
     get_api_keys,  # noqa: F401 - legacy tests patch this endpoint symbol
 )
@@ -1024,6 +1024,59 @@ def _provider_credential_error_code(exc: BaseException) -> str | None:
     if status_code == status.HTTP_401_UNAUTHORIZED:
         return "provider_authentication_failed"
     return None
+
+
+async def _existing_input_validation_request(
+    request_data: ChatCompletionRequest, request: Request, current_user: User,
+    db: CharactersRAGDB, scope_type: str | None, workspace_id: str | None,
+) -> ChatCompletionRequest:
+    """Apply normal size, policy and accounting checks to the canonical saved text."""
+    from tldw_Server_API.app.core.Chat.history_context import selected_unanswered_text_question
+    from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
+
+    selection = request_data.tldw_history_server_existing_input_v1.model_dump(mode="json")
+    owner = native_history_owner_key(request, current_user.id)
+    if selection["owner_key"] != owner:
+        raise HTTPException(409, detail={"code": "owner_conversation_mismatch"})
+    supplied_scope = _resolve_conversation_scope(scope_type, workspace_id) if scope_type is not None or workspace_id is not None else None
+
+    def read_question() -> str:
+        _verify_conversation_ownership(db, request_data.conversation_id, current_user, supplied_scope,
+            use_stored_scope=supplied_scope is None, conceal_foreign=True)
+        with db.transaction() as conn:
+            snapshot, content = db.validate_history_selection(request_data.conversation_id, selection,
+                owner_client_id=str(current_user.id), owner_key=owner, conn=conn)
+            return selected_unanswered_text_question(snapshot, content, selection)["message"]
+
+    try:
+        text = await asyncio.to_thread(read_question)
+    except HistorySelectionError as exc:
+        raise HTTPException(409, detail={"code": exc.code}) from exc
+    try:
+        message = ChatCompletionUserMessageParam(role="user", content=text)
+    except ValidationError as exc:
+        raise HTTPException(413, detail="Saved question exceeds the supported message size.") from exc
+    return request_data.model_copy(deep=True, update={"messages": [message]})
+
+
+def _admitted_native_provider_error_response(
+    admission: dict[str, Any], error_code: str,
+) -> StreamingResponse:
+    """Keep an accepted input identifiable when provider preparation fails."""
+    code = error_code if error_code in _PROVIDER_CREDENTIAL_MESSAGES else "provider_configuration_invalid"
+    # Freeze only server-owned metadata and allow-listed public error copy.
+    frames = (
+        {"tldw_history_admission_v1": admission},
+        {"error": {"code": code, "message": _PROVIDER_CREDENTIAL_MESSAGES[code]}},
+    )
+    encoded = tuple("data: " + json.dumps(frame) + "\n\n" for frame in frames)
+
+    async def failed_stream():
+        for frame in encoded:
+            yield frame
+        yield sse_done()
+
+    return StreamingResponse(failed_stream(), media_type="text/event-stream")
 
 
 def _provider_credential_http_exception(exc: BaseException) -> HTTPException:
@@ -2217,7 +2270,7 @@ def _chat_macro_completion_response(
     return StreamingResponse(
         iter(frames),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        headers={"Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no"},
     )
 
 
@@ -3513,11 +3566,18 @@ async def create_chat_completion(
         except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
             user_base_dir = None
 
+    native_history_selection = request_data.tldw_history_selection_v1 or request_data.tldw_history_server_existing_input_v1
+    validation_request_data = request_data
+    if request_data.tldw_history_server_existing_input_v1 is not None:
+        validation_request_data = await _existing_input_validation_request(
+            request_data, request, current_user, chat_db, scope_type, workspace_id,
+        )
+
     # Validate request payload using helper function before routing so auto model
     # selection sees the finalized request shape, including validated/injected tools.
     validation_start = time.time()
     is_valid, error_message = await validate_request_payload(
-        request_data,
+        validation_request_data,
         max_messages=MAX_MESSAGES_PER_REQUEST,
         max_images=MAX_IMAGES_PER_REQUEST,
         max_text_length=MAX_TEXT_LENGTH,
@@ -3566,7 +3626,7 @@ async def create_chat_completion(
             provider_hint = request_data.api_provider or _get_default_provider()
             request_data.tools = validate_tool_definitions(tools_as_dicts, provider=provider_hint)
         if (
-            request_data.tldw_history_selection_v1 is None
+            native_history_selection is None
             and user_base_dir is not None
             and current_user
             and getattr(current_user, "id", None) is not None
@@ -3710,6 +3770,7 @@ async def create_chat_completion(
         _billing_enforcer: LimitEnforcer | None = None
         _billing_enforcer_entered = False
         chat_macro_intent: dict[str, Any] | None = None
+        native_stream_failure: HTTPException | None = None
 
         _track_request_cm = metrics.track_request(
             provider=provider, model=model, streaming=request_data.stream, client_id=client_id
@@ -3970,7 +4031,7 @@ async def create_chat_completion(
             # Recompute request payload after slash command injection and revalidate/rate-limit
             validation_start = time.time()
             is_valid, error_message = await validate_request_payload(
-                request_data,
+                validation_request_data,
                 max_messages=MAX_MESSAGES_PER_REQUEST,
                 max_images=MAX_IMAGES_PER_REQUEST,
                 max_text_length=MAX_TEXT_LENGTH,
@@ -3986,7 +4047,7 @@ async def create_chat_completion(
                     raise HTTPException(status_code=status.HTTP_413_CONTENT_TOO_LARGE, detail=error_message)
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_message)
 
-            request_json = json.dumps(request_data.model_dump())
+            request_json = json.dumps(validation_request_data.model_dump())
             request_json_bytes = request_json.encode()
             metrics.metrics.request_size_bytes.record(len(request_json_bytes))
 
@@ -4068,7 +4129,7 @@ async def create_chat_completion(
 
             if rg_ready:
                 # Estimate tokens for rate limiting (heuristic).
-                estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json))
+                estimated_tokens = estimate_tokens_from_json(request_json)
                 try:
                     # Derive policy_id from middleware route_map when present.
                     policy_id = str(
@@ -4183,7 +4244,7 @@ async def create_chat_completion(
                 active_count = await _increment_active_request(user_id)
                 try:
                     # Estimate tokens for rate limiting (heuristic).
-                    estimated_tokens = estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json))
+                    estimated_tokens = estimate_tokens_from_json(request_json)
 
                     # In TEST_MODE, avoid cross-test flakiness by scoping limiter to this request
                     # when no explicit conversation_id is provided. This prevents cumulative
@@ -4294,7 +4355,7 @@ async def create_chat_completion(
             # check below: both need the same estimate for this request body.
             try:
                 _estimated_request_tokens = (
-                    estimate_tokens_from_json(_sanitize_json_for_rate_limit(request_json)) if request_json else 1000
+                    estimate_tokens_from_json(request_json) if request_json else 1000
                 )
             except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                 _estimated_request_tokens = 1000
@@ -4451,8 +4512,10 @@ async def create_chat_completion(
                     mon = get_topic_monitoring_service()
                 except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
                     mon = None
+                original_saved_content = (validation_request_data.messages[0].content
+                    if request_data.tldw_history_server_existing_input_v1 is not None else None)
                 await moderate_input_messages(
-                    request_data=request_data,
+                    request_data=validation_request_data,
                     request=request,
                     moderation_service=moderation,
                     topic_monitoring_service=mon,
@@ -4466,6 +4529,12 @@ async def create_chat_completion(
                     dependent_user_id=_dep_user_id,
                     chat_type=input_moderation_chat_type,
                 )
+                if request_data.tldw_history_server_existing_input_v1 is not None and (
+                    len(validation_request_data.messages) != 1
+                    or validation_request_data.messages[0].role != "user"
+                    or validation_request_data.messages[0].content != original_saved_content
+                ):
+                    raise HTTPException(403, detail="The saved question cannot be replayed under the current input policy.")
             except MandatoryAuditWriteError as exc:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -4492,6 +4561,7 @@ async def create_chat_completion(
             persona_budget_tokens_used = int(_PERSONA_EXEMPLAR_DEFAULT_BUDGET)
             persona_budget_auto_adjusted = False
             persona_budget_adjustment_reason: str | None = None
+            history_admission: dict[str, Any] | None = None
 
             try:
                 # In TEST_MODE or when explicitly enabled via config/env, allow
@@ -4615,7 +4685,7 @@ async def create_chat_completion(
                     if any(str(provider_api_key).lower().startswith(p) for p in invalid_patterns):
                         raise _provider_credential_http_exception_for_code("provider_authentication_failed")
 
-                if request_data.tldw_history_selection_v1 is None:
+                if native_history_selection is None:
                     await asyncio.to_thread(
                         save_workspace_chat_model_selection,
                         chat_db=chat_db,
@@ -4630,7 +4700,7 @@ async def create_chat_completion(
 
                 # --- Character/Conversation Context, History, and Current Turn ---
                 continuation_runtime: dict[str, Any] = {}
-                if request_data.tldw_history_selection_v1 is not None:
+                if native_history_selection is not None:
                     from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
                     from tldw_Server_API.app.core.Chat.persistence_service import (
                         native_history_owner_key,
@@ -4645,7 +4715,7 @@ async def create_chat_completion(
                     if _active_message_sync_service(current_user, history_scope) is not None:
                         raise HTTPException(409, detail={"code": "sync_owner_unsupported", "status": "unsupported_history_capability"})
                     history_owner = native_history_owner_key(request, current_user.id)
-                    if request_data.tldw_history_selection_v1.owner_key != history_owner:
+                    if native_history_selection.owner_key != history_owner:
                         raise HTTPException(409, detail={"code": "owner_conversation_mismatch"})
                     from tldw_Server_API.app.core.Chat.history_context import require_history_skill_absence
                     if user_base_dir is None:
@@ -4680,10 +4750,14 @@ async def create_chat_completion(
                 )
                 completion_save_message = _save_message_turn_to_db
                 history_admission = continuation_runtime.get("tldw_history_admission_v1")
-                if history_admission is not None:
+                existing_input_selection = continuation_runtime.get("tldw_history_server_existing_input_v1")
+                if request_data.tldw_history_server_existing_input_v1 is not None and existing_input_selection is None:
+                    raise HTTPException(409, detail={"code": "unsupported_history_existing_input"})
+                if history_admission is not None or existing_input_selection is not None:
                     from tldw_Server_API.app.core.Chat.persistence_service import prepare_native_history_message
-                    reference = {key: history_admission[key] for key in ("version", "owner_key", "conversation_id",
+                    reference = ({key: history_admission[key] for key in ("version", "owner_key", "conversation_id",
                         "input_message_id", "input_message_revision", "selection_digest")}
+                        if history_admission is not None else None)
                     continue_prefix = continuation_runtime.get("history_continue_prefix")
                     async def completion_save_message(db, cid, payload, use_transaction=False):
                         if payload.get("role") == "system":
@@ -4695,16 +4769,21 @@ async def create_chat_completion(
                         prepared = await prepare_native_history_message(payload, cid, _process_content_for_db_sync)
                         prepared["extra_metadata"].update(assistant_generation_extra(payload))
                         prepared["id"] = str(uuid.uuid4())
-                        prepared["parent_message_id"] = reference["input_message_id"]
+                        prepared["parent_message_id"] = (reference["input_message_id"] if reference is not None
+                            else existing_input_selection["messages"][-1]["id"])
+                        settle = db.settle_history_admission if reference is not None else db.settle_selected_existing_input
+                        proof = reference if reference is not None else existing_input_selection
                         try:
-                            return await asyncio.to_thread(db.settle_history_admission, cid, reference, prepared,
-                                owner_client_id=str(current_user.id), owner_key=history_owner)
+                            options = {"require_unanswered": True} if reference is None else {}
+                            return await asyncio.to_thread(settle, cid, proof, prepared,
+                                owner_client_id=str(current_user.id), owner_key=history_owner, **options)
                         except HistorySelectionError as exc:
                             raise HTTPException(409, detail={"code": exc.code}) from exc
-                    await asyncio.to_thread(save_workspace_chat_model_selection, chat_db=chat_db,
-                        conversation_id=final_conversation_id, owner_client_id=user_id, provider=target_api_provider,
-                        model=model, save_to_db=request_data.save_to_db, explicit_provider_requested=explicit_provider_requested,
-                        explicit_model_requested=explicit_model_requested)
+                    if history_admission is not None:
+                        await asyncio.to_thread(save_workspace_chat_model_selection, chat_db=chat_db,
+                            conversation_id=final_conversation_id, owner_client_id=user_id, provider=target_api_provider,
+                            model=model, save_to_db=request_data.save_to_db, explicit_provider_requested=explicit_provider_requested,
+                            explicit_model_requested=explicit_model_requested)
                 continuation_meta = (
                     continuation_runtime.get("tldw_continuation")
                     if isinstance(continuation_runtime.get("tldw_continuation"), dict)
@@ -4850,7 +4929,7 @@ async def create_chat_completion(
                             }
                             for item in runtime_guidance["rejected_exemplars"]
                         ]
-                elif persona_strategy != "off" and character_db_id_for_context is not None and history_admission is None:
+                elif persona_strategy != "off" and character_db_id_for_context is not None and native_history_selection is None:
                     user_turn_text = _extract_latest_user_turn_text(getattr(request_data, "messages", []))
                     if user_turn_text:
                         budget_override = getattr(request_data, "persona_exemplar_budget_tokens", None)
@@ -4933,7 +5012,7 @@ async def create_chat_completion(
                     if persona_budget_adjustment_reason:
                         persona_debug_meta["budget_adjustment_reason"] = persona_budget_adjustment_reason
 
-                if history_admission is None and user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
+                if native_history_selection is None and user_base_dir is not None and current_user and getattr(current_user, "id", None) is not None:
                     final_system_message = await build_system_message_with_skills_async(
                         final_system_message,
                         current_user.id,
@@ -5194,7 +5273,7 @@ async def create_chat_completion(
                 if admission_queue is not None:
                     try:
                         # Estimate tokens for queue gating (sanitize base64 payloads)
-                        est_tokens_for_queue = _estimate_tokens_for_queue(request_json)
+                        est_tokens_for_queue = estimate_tokens_from_json(request_json)
                         # Use user_id for per-client fairness; HIGH priority for streaming
                         priority = RequestPriority.HIGH if bool(request_data.stream) else RequestPriority.NORMAL
                         # Use request_id generated for this call
@@ -5508,7 +5587,7 @@ async def create_chat_completion(
                             character_card_for_context=character_card_for_context,
                             chat_db=chat_db,
                             save_message_fn=completion_save_message,
-                            history_persistence_ack=history_admission is not None,
+                            history_persistence_ack=history_admission is not None or existing_input_selection is not None,
                             system_message_id=system_message_id,
                             user_message_id=continuation_runtime.get("user_message_id"),
                             audit_service=audit_service,
@@ -5969,14 +6048,29 @@ async def create_chat_completion(
             # Important: preserve HTTPException status codes raised from deeper layers
             # before a broad Exception handler can catch and normalize them.
             except ProviderCredentialTerminalError as credential_error:
+                if request_data.stream and history_admission is not None:
+                    native_stream_failure = _provider_credential_http_exception_for_code(_provider_credential_error_code(credential_error) or "provider_configuration_invalid")
+                    return _admitted_native_provider_error_response(
+                        history_admission, _provider_credential_error_code(credential_error) or "provider_configuration_invalid",
+                    )
                 raise_detached_error(
                     _provider_credential_http_exception_for_code(credential_error.code)
                 )
 
             except ByokResolutionError as credential_error:
+                if request_data.stream and history_admission is not None:
+                    native_stream_failure = _provider_credential_http_exception_for_code(_provider_credential_error_code(credential_error) or "provider_configuration_invalid")
+                    return _admitted_native_provider_error_response(
+                        history_admission, _provider_credential_error_code(credential_error) or "provider_configuration_invalid",
+                    )
                 raise_detached_error(_provider_credential_http_exception(credential_error))
 
             except (ChatAuthenticationError, ChatConfigurationError) as provider_error:
+                if request_data.stream and history_admission is not None:
+                    native_stream_failure = _provider_credential_http_exception_for_code(_provider_credential_error_code(provider_error) or "provider_configuration_invalid")
+                    return _admitted_native_provider_error_response(
+                        history_admission, _provider_credential_error_code(provider_error) or "provider_configuration_invalid",
+                    )
                 raise_detached_error(_provider_credential_http_exception(provider_error))
 
             except HTTPException as e_http:
@@ -5995,6 +6089,10 @@ async def create_chat_completion(
                         type(e_http).__name__,
                         extra={"request_id": request_id, "status_code": e_http.status_code}
                     )
+                provider_failure_code = _provider_credential_error_code(e_http)
+                if request_data.stream and history_admission is not None and provider_failure_code is not None:
+                    native_stream_failure = _provider_credential_http_exception_for_code(provider_failure_code)
+                    return _admitted_native_provider_error_response(history_admission, provider_failure_code)
                 # Allow-list expected HTTP errors raised intentionally by the endpoint
                 allowed_statuses = {
                     status.HTTP_400_BAD_REQUEST,
@@ -6232,6 +6330,9 @@ async def create_chat_completion(
                         client_detail = "An unexpected internal server error occurred."
                     else:
                         client_detail = "An internal server error occurred."
+                if request_data.stream and history_admission is not None and error_code in _PROVIDER_CREDENTIAL_MESSAGES:
+                    native_stream_failure = _provider_credential_http_exception_for_code(error_code)
+                    return _admitted_native_provider_error_response(history_admission, error_code)
                 raise_detached_error(
                     HTTPException(status_code=err_status, detail=client_detail)
                 )
@@ -6239,6 +6340,9 @@ async def create_chat_completion(
         finally:
             try:
                 exc_type, exc_value, exc_tb = sys.exc_info()
+                if exc_type is None and native_stream_failure is not None:
+                    # Returning a receipt-bearing error stream still exits as a failed request.
+                    exc_type, exc_value, exc_tb = HTTPException, native_stream_failure, None
                 if exc_type is not None and _rg_handle_id and not rg_finalized:
                     try:
                         gov = getattr(request.app.state, "rg_governor", None) if request is not None else None
@@ -6325,18 +6429,6 @@ async def get_chat_queue_activity(
         return {"enabled": True, "error": "Queue activity unavailable"}
 
 
-def _sanitize_json_for_rate_limit(request_json: str) -> str:
-    """Redact base64 image payloads to avoid inflating token estimates.
-
-    Replaces data:image...;base64,<payload> with a small placeholder so that
-    token estimation reflects text size, not binary data.
-    """
-    try:
-        return DATA_URI_REDACT_RE.sub(r"\1<omitted>", request_json)
-    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-        return request_json
-
-
 def _build_streaming_commit_cb(
     rg_handle_id: str | None,
     request: Request | None,
@@ -6412,15 +6504,6 @@ def _build_streaming_commit_cb(
         return _durable_and_rg()
 
     return _commit
-
-
-def _estimate_tokens_for_queue(request_json: str) -> int:
-    """Estimate tokens for queue admission, ignoring base64 payload bulk."""
-    try:
-        sanitized = _sanitize_json_for_rate_limit(request_json)
-        return max(1, len(sanitized) // 4)
-    except _CHAT_ENDPOINT_NONCRITICAL_EXCEPTIONS:
-        return 1
 
 
 def _coerce_datetime(value: Any) -> datetime | None:
@@ -8340,7 +8423,8 @@ async def get_conversation_citations(
         ) from exc
 
 
-@router.post("/conversations/{conversation_id}/history/selection", response_model=HistoryCaptureResultV1, dependencies=[Depends(require_expected_user)])
+@router.post("/conversations/{conversation_id}/history/selection", response_model=HistoryCaptureResultV1,
+             dependencies=[Depends(require_expected_user)])
 async def capture_conversation_history(
     request: Request,
     body: HistoryCaptureRequestV1,
@@ -8354,18 +8438,20 @@ async def capture_conversation_history(
     db: CharactersRAGDB = Depends(get_chacha_db_for_user),
     current_user: User = Depends(get_request_user),
 ):
-    """Capture a complete owner-bound history manifest and selected content."""
+    """Capture owner-bound history after one-time valid legacy dictionary binding."""
     from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection, snapshot_to_wire
     from tldw_Server_API.app.core.Chat.persistence_service import native_history_owner_key
 
     scope = _resolve_conversation_scope(scope_type, workspace_id)
     conversation = _verify_conversation_ownership(db, conversation_id, current_user, scope)
-    # A capture is a read and the capability handshake for versioned writes. A Sync v2
+    # Capture normally reads; valid legacy dictionary IDs may first acquire frozen
+    # settings authority under owner lock/CAS. It never appends a message. A Sync v2
     # owner passes it for client-managed turns, whose admission and settlement publish
     # their envelopes (character_messages.send_message). A chat bound to a character
     # takes server-settled turns (the server owns its input and result writes), which
     # that owner cannot use yet, so the handshake still refuses it, before any dispatch.
-    if conversation.get("assistant_kind") == "character" or conversation.get("character_id") is not None:
+    if (body.required_capability == "tldw_history_server_existing_input_v1"
+            or conversation.get("assistant_kind") == "character" or conversation.get("character_id") is not None):
         from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
 
         if _active_message_sync_service(current_user, scope) is not None:
@@ -8375,31 +8461,48 @@ async def capture_conversation_history(
     if view["conversation_id"] != conversation_id or view["owner_key"] not in {None, owner}:
         raise HTTPException(409, detail={"status": "invalid_history", "code": "owner_conversation_mismatch"})
     view["owner_key"] = owner
+    capability = ({"acknowledged_capability": body.required_capability}
+                  if body.required_capability else {})
     try:
         with db.transaction() as conn:
+            if body.purpose == "send" and (conversation.get("assistant_kind") == "character" or conversation.get("character_id") is not None):
+                from tldw_Server_API.app.core.Character_Chat.character_conversation_factory import (
+                    bind_legacy_assigned_dictionaries,
+                )
+
+                bind_legacy_assigned_dictionaries(db, conn, conversation_id=conversation_id, owner_user_id=str(current_user.id),
+                    owner_key=owner, view=view, scope_type=scope.scope_type, workspace_id=scope.workspace_id)
             snap = db.get_conversation_history_snapshot(conversation_id, owner_client_id=str(current_user.id),
                 owner_key=owner, projection_id=view["interpretation"].get("projection_id"), conn=conn)
             wire = snapshot_to_wire(snap)
             result = resolve_history_selection(wire, view, body.purpose, "")
             if result["status"] != "ready":
-                return {**result, "snapshot": wire, "view": view}
+                return {**result, "snapshot": wire, "view": view, **capability}
             content = db.get_conversation_history_selected_content(conversation_id,
                 [row["id"] for row in result["rows"]], snapshot=snap, owner_client_id=str(current_user.id),
                 owner_key=owner, conn=conn)
-            capability = {}
             if include_native_completion and body.purpose == "send":
                 from tldw_Server_API.app.api.v1.endpoints.character_messages import _active_message_sync_service
 
-                capability = {"native_completion_v1": {
+                capability.update({"native_completion_v1": {
                     "policy": "selected_history_v1",
                     "supported": _active_message_sync_service(current_user, scope) is None,
                     "storage_context_digest": snap.storage_context_digest,
-                }}
+                }})
+            proof = {}
+            if body.accepted_input_admission is not None:
+                proof["validated_admission"] = db.validate_history_admission(
+                    conversation_id, body.accepted_input_admission.model_dump(mode="json"), snapshot=snap,
+                    owner_client_id=str(current_user.id), owner_key=owner, conn=conn,
+                )
             return {"status": "captured", "snapshot": wire, "view": view, "purpose": body.purpose,
                     "rows": result["rows"], "selected_content": content,
-                    "storage_context_digest": snap.storage_context_digest, **capability}
+                    "storage_context_digest": snap.storage_context_digest, **capability, **proof}
     except HistorySelectionError as exc:
-        raise HTTPException(409, detail={"status": "stale_selection", "code": exc.code}) from exc
+        failure = "unsupported_history_capability" if exc.code.startswith("unsupported_history_context") else "stale_selection"
+        raise HTTPException(409, detail={"status": failure, "code": exc.code}) from exc
+    except ConflictError as exc:
+        raise HTTPException(409, detail={"status": "stale_selection", "code": "stale_settings"}) from exc
 
 
 @router.post("/conversations/{conversation_id}/history/legacy-projection", dependencies=[Depends(require_expected_user)])

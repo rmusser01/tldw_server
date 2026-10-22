@@ -40,6 +40,7 @@ from tldw_Server_API.app.core.AuthNZ.repos.data_subject_requests_repo import (
     AuthnzDataSubjectRequestsRepo,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
+from tldw_Server_API.app.core.exceptions import UnsupportedBackupBackendError
 from tldw_Server_API.app.services.admin_backup_schedules_service import (
     AdminBackupSchedulesService,
 )
@@ -320,6 +321,8 @@ async def create_backup(
                 created_at=item.created_at,
             )
         )
+    except UnsupportedBackupBackendError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         if str(exc) == "unknown_dataset":
             raise HTTPException(status_code=400, detail="unknown_dataset") from exc
@@ -382,6 +385,8 @@ async def restore_backup(
             },
         )
         return BackupRestoreResponse(status="restored", message=result)
+    except UnsupportedBackupBackendError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         if str(exc) == "unknown_dataset":
             raise HTTPException(status_code=400, detail="unknown_dataset") from exc

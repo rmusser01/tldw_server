@@ -512,9 +512,6 @@ export const PlaygroundChat = ({
       }
     >()
   )
-  React.useEffect(() => {
-    researchActionsCacheRef.current.clear()
-  }, [conversationInstanceId])
   const getRowResearchActions = React.useCallback(
     (
       messageId: string | undefined,
@@ -1098,21 +1095,9 @@ export const PlaygroundChat = ({
     (message: any, index: number) => resolveCharacterMessageType(message, index, Boolean(serverChatId && characterIdentityEnabled)),
     [serverChatId, characterIdentityEnabled]
   )
-  const getPreviousUserMessage = React.useCallback(
-    (index: number) => {
-      for (let i = index - 1; i >= 0; i--) {
-        const candidate = messages[i]
-        if (
-          !candidate?.isBot &&
-          !isImageGenerationMessageType(resolveTimelineMessageType(candidate))
-        ) {
-          return candidate
-        }
-      }
-      return null
-    },
-    [messages]
-  )
+  // Previous user message per index, precomputed in one forward pass per
+  // `messages` identity so row rendering is O(1) per row instead of an O(n)
+  // backward scan per row (WP-05).
   const previousUserMessageByIndex = React.useMemo(() => {
     const map = new Map<number, (typeof messages)[number] | null>()
     let previous: (typeof messages)[number] | null = null
@@ -1129,6 +1114,12 @@ export const PlaygroundChat = ({
     }
     return map
   }, [messages])
+  // O(1) lookup over the precomputed map; kept as a function for the
+  // compare-cluster child API (per-block lookups in PlaygroundCompareCluster).
+  const getPreviousUserMessage = React.useCallback(
+    (index: number) => previousUserMessageByIndex.get(index) ?? null,
+    [previousUserMessageByIndex]
+  )
   const modelMetaById = React.useMemo(() => {
     const map = new Map<string, { label: string; provider: string }>()
     const models = (chatModels as any[]) || []
@@ -1442,7 +1433,7 @@ export const PlaygroundChat = ({
                 generationInfo={message?.generationInfo}
                 toolCalls={message?.toolCalls}
                 toolResults={message?.toolResults}
-                isStreaming={streaming}
+                isStreaming={streaming && block.index === messages.length - 1}
                 reasoningTimeTaken={message?.reasoning_time_taken}
                 openReasoning={openReasoning}
                 modelImage={message?.modelImage}

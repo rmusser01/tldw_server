@@ -329,10 +329,7 @@ export const ChatModelSelectorDropdown = React.memo(
               title={
                 (readinessShown
                   ? t("playground:composer.modelReadiness.tooltip", "Model status")
-                  : t(
-                      "playground:composer.providerStatusTooltip",
-                      "Provider status"
-                    )) as string
+                  : t("playground:composer.statusTooltip", "Status")) as string
               }
             >
               {statusLabel}

@@ -4839,3 +4839,15 @@ async def test_exhausted_retryable_optimization_attempt_ends_failed(
         assert factory.instances[0].close_count == 1
     finally:
         db.close_connection()
+
+
+def test_llm_quota_refusal_is_bounded_and_not_retryable() -> None:
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    bounded = jobs_worker._bounded_optimization_error(
+        LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+    )
+
+    _assert_safe_job_error(bounded, code="llm_quota_exceeded", retryable=False)

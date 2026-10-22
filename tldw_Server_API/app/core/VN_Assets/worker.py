@@ -22,6 +22,7 @@ from tldw_Server_API.app.core.exceptions import LegacyDisplayReconciliationError
 from tldw_Server_API.app.core.Image_Generation.adapter_registry import get_registry
 from tldw_Server_API.app.core.Image_Generation.adapters.base import ImageGenRequest
 from tldw_Server_API.app.core.Image_Generation.config import get_image_generation_config, resolve_image_generation_model
+from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig
 from tldw_Server_API.app.core.Storage.file_integrity import generated_file_bytes_match
 from tldw_Server_API.app.core.Storage.generated_file_helpers import save_and_register_vn_asset_image
 from tldw_Server_API.app.core.VN_Assets.concurrency import get_default_backend_generation_gate
@@ -67,6 +68,7 @@ class VNAssetGenerationWorker:
         *,
         repo: VNAssetPacksRepository,
         jobs_manager: Any,
+        worker_config: WorkerConfig | None = None,
         image_registry: Any | None = None,
         backend_gate: Any | None = None,
         save_vn_asset_image: Any | None = None,
@@ -78,6 +80,7 @@ class VNAssetGenerationWorker:
     ) -> None:
         self.repo = repo
         self.jobs_manager = jobs_manager
+        self.worker_config = worker_config
         self.repo.legacy_activity_reader = build_legacy_activity_reader(jobs_manager)
         self.image_registry = image_registry or get_registry()
         self.backend_gate = backend_gate or get_default_backend_generation_gate()
@@ -381,10 +384,22 @@ class VNAssetGenerationWorker:
                 raise
             legacy_status = SLOT_STATUS_FAILED
             definitive_replay_failure = isinstance(exc, VNAssetGenerationError) and not exc.retryable
-            if (recipe_version == 1 or definitive_replay_failure or not _job_has_retry_remaining(job)) and (
-                not reconciling or definitive_replay_failure
-            ) and not (
-                isinstance(exc, VNAssetGenerationError) and exc.retryable
+            if recipe_version == 1 and job is not None:
+                await self.repo.run_worker_replay_operation(
+                    partial(self._require_current_job_lease, job, user_id=user_id)
+                )
+            config = self.worker_config or WorkerConfig
+            retryable = config.retry_on_exception and bool(getattr(exc, "retryable", True))
+            retry_remaining = retryable and _job_has_retry_remaining(job)
+            quarantine_threshold = getattr(self.jobs_manager, "retry_quarantine_threshold", None)
+            if retry_remaining and job is not None and callable(quarantine_threshold):
+                error_code = str(getattr(exc, "failure_code", "worker_exception") or "worker_exception")
+                streak = int(job.get("failure_streak_count") or 0) + 1 if job.get("failure_streak_code") == error_code else 1
+                backoff = int(getattr(exc, "backoff_seconds", config.retry_backoff_seconds))
+                retry_remaining = streak < quarantine_threshold(backoff_seconds=backoff)
+            retryable_inline = job is None and isinstance(exc, VNAssetGenerationError) and exc.retryable
+            if not retry_remaining and not retryable_inline and (
+                job is not None or not reconciling or definitive_replay_failure
             ):
                 await self.repo.run_worker_replay_operation(partial(
                     self._record_generation_failure,

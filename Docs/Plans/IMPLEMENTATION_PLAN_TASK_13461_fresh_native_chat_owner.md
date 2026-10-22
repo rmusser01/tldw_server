@@ -23,4 +23,11 @@ reopen, and unchanged explicit-selection cancellation.
 **Success Criteria**: Focused and sibling tests and frontend typecheck pass;
 baseline failures are recorded rather than concealed; review comments addressed.
 **Tests**: Vitest ownership/sibling suites, production frontend tsc, diff checks.
-**Status**: In Progress
+**Status**: Complete
+
+PR [#3195](https://github.com/rmusser01/tldw_server/pull/3195) merged into
+`dev` as `27ce9763870e5fb5de40dece8e2744b6b2475c28` on October 5, 2026 UTC.
+All seven required contexts and all 46 critical browser tests passed on the
+reviewed `9ddabf00` head. The bounded Notes shard retry passed without changing
+its production code or relaxing the baseline comparator. Qodo was unavailable
+(out of credits); independent reviews completed with no remaining findings.

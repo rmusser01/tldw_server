@@ -74,7 +74,7 @@ describe("background proxy web token refresh", () => {
     await storeRefreshRotationIfCurrent(storage, config, config.refreshToken, {
       accessToken: `${jwtForUser(42)}-rotated`, refreshToken: "rotated-refresh"
     })
-    const fetchSpy = vi.fn(async () => new Response("unauthorized", { status: 401 }))
+    const fetchSpy = vi.fn<typeof fetch>(async () => new Response("unauthorized", { status: 401 }))
     vi.stubGlobal("fetch", fetchSpy)
     const { bgRequest } = await importProxy()
     await expect(bgRequest({
@@ -382,7 +382,7 @@ describe("background proxy web token refresh", () => {
           accessToken: "must-not-leak"
         }
       }
-      const fetchSpy = vi.fn(async () =>
+      const fetchSpy = vi.fn<typeof fetch>(async () =>
         new Response(JSON.stringify({ ok: true }), {
           status: 200,
           headers: { "content-type": "application/json" }
@@ -429,7 +429,7 @@ describe("background proxy web token refresh", () => {
           authSource: "cookie-session"
         }
       }
-      const fetchSpy = vi.fn(async () =>
+      const fetchSpy = vi.fn<typeof fetch>(async () =>
         new Response(JSON.stringify({ ok: true }), {
           status: 200,
           headers: { "content-type": "application/json" }
@@ -686,7 +686,7 @@ describe("background proxy web token refresh", () => {
     "/api/v1/rag/search",
     "/api/v1/research/websearch"
   ])("allows a checked target for the exact execution route %s", async (path) => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -800,7 +800,7 @@ describe("background proxy web token refresh", () => {
     }
     mocks.runtimeApiKey = "captured-runtime-key"
     mocks.nextRuntimeApiKey = "later-runtime-key"
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {
         status: 200,
         headers: { "content-type": "text/event-stream" }
@@ -850,7 +850,7 @@ describe("background proxy web token refresh", () => {
   })
 
   it("binds a direct stream to the checked target and expected user", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response('data: {"ok":true}\n\ndata: [DONE]\n\n', {
         status: 200,
         headers: { "content-type": "text/event-stream" }
@@ -1806,7 +1806,7 @@ describe("background proxy web token refresh", () => {
   })
 
   it("uses the current direct credential while preserving the checked user binding", async () => {
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -2187,7 +2187,7 @@ describe("background proxy web token refresh", () => {
       apiKey: "stored-key"
     }
     mocks.runtimeApiKey = "conflicting-runtime-key"
-    const fetchSpy = vi.fn(async () =>
+    const fetchSpy = vi.fn<typeof fetch>(async () =>
       new Response(JSON.stringify({ ok: true }), {
         status: 200,
         headers: { "content-type": "application/json" }

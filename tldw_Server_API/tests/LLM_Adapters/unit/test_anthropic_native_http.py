@@ -82,3 +82,37 @@ def test_anthropic_adapter_native_http_streaming(monkeypatch):
     chunks = list(a.stream({"messages": [{"role": "user", "content": "hi"}], "model": "claude-sonnet", "api_key": "k", "max_tokens": 32, "stream": True}))
     assert any(c.startswith("data: ") for c in chunks)
     assert sum(1 for c in chunks if "[DONE]" in c) == 1
+
+
+def test_anthropic_adapter_usage_counts_and_keeps_prompt_cache_tokens(monkeypatch):
+    """input_tokens is only the uncached remainder: prompt_tokens adds the cache fields, which stay in the block (TASK-13858)."""
+    import tldw_Server_API.app.core.LLM_Calls.providers.anthropic_adapter as anth_mod
+    from tldw_Server_API.app.core.LLM_Calls.providers.anthropic_adapter import AnthropicAdapter
+    from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
+
+    message = {
+        "type": "message",
+        "id": "msg-cached",
+        "model": "claude-sonnet-4-6",
+        "content": [{"type": "text", "text": "ok"}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 3, "cache_creation_input_tokens": 2000, "cache_read_input_tokens": 60000, "output_tokens": 100},
+    }
+
+    class _CachedClient(_FakeClient):
+        def post(self, url: str, json: dict[str, Any], headers: dict[str, str]):
+            return _FakeResponse(200, message)
+
+    monkeypatch.setattr(anth_mod, "http_client_factory", lambda *a, **k: _CachedClient())
+    r = AnthropicAdapter().chat({"messages": [{"role": "user", "content": "hi"}], "model": "claude-sonnet-4-6", "api_key": "k", "max_tokens": 32})
+
+    assert r["usage"] == {
+        "prompt_tokens": 62003,
+        "completion_tokens": 100,
+        "total_tokens": 62103,
+        "cache_creation_input_tokens": 2000,
+        "cache_read_input_tokens": 60000,
+    }
+    # What the chat pipeline and the provider recorder cost: only the 3 uncached tokens at the input rate.
+    normalized = normalize_llm_usage(provider="anthropic", usage=r["usage"])
+    assert (normalized.billable_input_tokens, normalized.cache_read_input_tokens, normalized.cache_write_input_tokens) == (3, 60000, 2000)

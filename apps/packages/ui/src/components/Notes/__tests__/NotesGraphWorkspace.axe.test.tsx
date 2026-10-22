@@ -27,9 +27,61 @@ describe("Notes graph Task 11 accessibility", () => {
           degree: 0,
           tag_count: 0,
           primary_source_id: null
+        },
+        {
+          id: "note:b",
+          type: "note" as const,
+          label: "Beta",
+          created_at: null,
+          deleted: false,
+          degree: 1,
+          tag_count: 0,
+          primary_source_id: null
         }
       ],
-      edges: [],
+      edges: [
+        {
+          id: "semantic:a:b",
+          source: "note:a",
+          target: "note:b",
+          type: "semantic" as const,
+          directed: false,
+          weight: 0.81234,
+          label: null,
+          evidence: {
+            similarity: 0.81234,
+            qualitative_band: "high" as const,
+            source_note_id: "note:a",
+            target_note_id: "note:b",
+            source_content_version: 2,
+            target_content_version: 5,
+            generation_id: "generation-with-a-long-stable-identifier",
+            semantic_index_revision: 8,
+            configuration_revision: 3,
+            normalization_version: "normalize-v1",
+            chunker_version: "chunk-v1",
+            provider_label: "Provider with a long localized display label",
+            model_label: "Embedding model with a long revision label",
+            model_revision: "model-r1",
+            excerpt_pairs: [
+              {
+                source: {
+                  field: "content" as const,
+                  start_code_point: 0,
+                  end_code_point: 12,
+                  text: "A long source excerpt remains readable without overlapping adjacent content."
+                },
+                target: {
+                  field: "content" as const,
+                  start_code_point: 0,
+                  end_code_point: 12,
+                  text: "A long target excerpt stacks in narrow inspectors and reflows when space permits."
+                }
+              }
+            ]
+          }
+        }
+      ],
       truncated: false,
       truncated_by: [],
       has_more: false,
@@ -39,16 +91,21 @@ describe("Notes graph Task 11 accessibility", () => {
       active_note_count: 1,
       all_notes_note_cap: 20,
       all_notes_eligible: true,
-      suggestions_authorized: false
+      suggestions_authorized: false,
+      manual_link_authorized: true
     }
     const { container } = render(
       <NotesGraphInspector
         graph={graph}
         selectedNodeId="note:a"
+        selectedEdgeId="semantic:a:b"
         suggestionsAuthorized={false}
+        manualLinkAuthorized
         isOnline
         controller={{ suggestions: [] } as never}
         onSelectNode={vi.fn()}
+        onSelectEdge={vi.fn()}
+        onCreateManualLink={vi.fn().mockResolvedValue(true)}
         onAnnounce={vi.fn()}
         onDecideSuggestion={vi.fn().mockResolvedValue(true)}
       />
@@ -108,7 +165,8 @@ describe("Notes graph Task 11 accessibility", () => {
       active_note_count: 2,
       all_notes_note_cap: 20,
       all_notes_eligible: true,
-      suggestions_authorized: false
+      suggestions_authorized: false,
+      manual_link_authorized: false
     }
     const { container } = render(
       <NotesGraphRelationshipsView

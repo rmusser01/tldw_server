@@ -149,8 +149,16 @@ export const CharacterSelect: React.FC<Props> = ({
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
   const clearChat = useClearChat()
   const captureSelectionFence = useHistorySelectionContext()?.fence
-  const messages = useStoreMessageOption((state) => state.messages)
-  const serverChatId = useStoreMessageOption((state) => state.serverChatId)
+  // Derived boolean subscription (WP-06): the component only consumes the
+  // transcript through hasActiveChat, so subscribing to the boolean keeps
+  // message-text updates (streaming flushes) from re-rendering this tree.
+  const hasActiveChat = useStoreMessageOption(
+    (state) =>
+      Boolean(state.serverChatId) ||
+      state.messages.some(
+        (message) => message.messageType !== "character:greeting"
+      )
+  )
   const [userDisplayName, setUserDisplayName] = useStorage(
     "chatUserDisplayName",
     ""
@@ -434,12 +442,6 @@ export const CharacterSelect: React.FC<Props> = ({
       ),
     [selectedCharacter?.extensions, selectedCharacterStored?.extensions]
   )
-  const hasActiveChat = useMemo(() => {
-    if (serverChatId) return true
-    return messages.some(
-      (message) => message.messageType !== "character:greeting"
-    )
-  }, [messages, serverChatId])
   const hasUserPersonaImage = useMemo(() => {
     return (
       typeof userPersonaImage === "string" &&

@@ -323,3 +323,136 @@ document, produced with the exact commands in "How to re-run", quoting deltas
 against the tables above; the PENDING-MANUAL rows are filled in by their
 consuming batches (M1/M2 → W4, M3 → W5). This file is the program's single
 accumulating record — do not fork it per batch.
+
+## Batch W1 (TASK-13521) — 2026-10-15
+
+Appended per the change protocol above. Every number in this section comes
+from an actual re-run at the W1 branch HEAD (no transcription from earlier
+stage reports — the precedence rule applied to this batch too). The frozen
+W0 tables above are untouched and remain the program baseline.
+
+- Branch / HEAD: `codex/webui-perf-w1-chat-streaming` @ `07427bd044`
+  (base: dev merge `3b68f2dbc2`, which includes the W0 harness)
+- Backlog task: TASK-13521
+- Run date: 2026-10-15 (e2e report timestamp); all commands from
+  "How to re-run every number in this document"
+
+### Family A re-run — and a binding drift note on the frozen 502 figure
+
+Re-run of `streaming-render.bench.test.ts` at HEAD:
+
+| Metric | Run 1 | Run 2 | Run 3 |
+|---|---|---|---|
+| seedMessages | 200 | 200 | 200 |
+| chunksStreamed | 500 | 500 | 500 |
+| storeSubscriberNotifications | 3 | 3 | 3 |
+| messageUpdateNotifications | 2 | 2 | 2 |
+| transcriptArrayMapClones | 1 | 1 | 1 |
+| streamPhaseMs | 5.19 | 5.17 | 4.09 |
+| msPerChunk | 0.0104 | 0.0103 | 0.0082 |
+| finalAssistantChars | 4890 | 4890 | 4890 |
+
+**Drift attribution (binding).** The frozen Family A figure of 502 store
+notifications / 501 message updates / 501 map clones was **stale already at
+W1's branch point**. Interim dev work on the same files (the TASK-13511
+frontend-perf-arch lineage, merged into dev via PR #3210 before W1 branched)
+had already added 80 ms streaming coalescing to the sidepanel path:
+`STREAMING_UPDATE_INTERVAL_MS = 80` in `useChatActions.ts` and
+`useCharacterChatMode.ts`, plus a `streamingScheduler` in `useMessage.tsx`
+(verified in the tree at merge base `3b68f2dbc2`). At the branch point this
+bench already read ~3 store notifications / 2 map clones — not 502/501.
+
+**W1 Stage 1's own delta** (commit `52809b6571`; attribution verified
+both-sides against the diff in stage review): transcript-array map clones
+2 → 1, with per-token (and per-flush) clones 0 — the single surviving clone
+is the once-per-stream final-text commit, reached via a last-index slice
+replacement instead of a full-transcript `.map`. Stage 1 also unified the
+inline throttles into the shared `streamingThrottle` helper adopted across
+all three chat paths (`useMessage.tsx` ×4 scheduler sites,
+`useChatActions.ts`, `useCharacterChatMode.ts`). Store notifications were
+3 → 3 across the stage — the 502→~3 notification drop predates W1 entirely.
+
+### Family B re-run at HEAD (canned 100-chunk sidepanel stream)
+
+`bunx playwright test tests/e2e/performance-streaming.spec.ts` — 3 runs:
+
+| Run | chunksServed | chunksApplied | storeSubscriberNotifications | messageUpdateNotifications | domMutations | longTasks | ttftMs | streamPhaseMs | msPerChunk | minChunkGapMs | maxChunkGapMs | domNodeCount |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 100 | 15 | 19 | 16 | 49 | 0 | 138.7 | 1196.8 | 79.79 | 55.9 | 123.5 | 196 |
+| 2 | 100 | 15 | 19 | 16 | 51 | 0 | 145.0 | 1180.0 | 78.67 | 44.0 | 110.6 | 196 |
+| 3 | 100 | 15 | 19 | 16 | 49 | 0 | 231.5 | 1232.4 | 82.16 | 75.5 | 152.7 | 196 |
+
+(`msPerChunk` is per APPLIED chunk, per the label-ambiguity note in Family B
+above.)
+
+Comparison against the frozen Family B table:
+
+- Count metrics are **identical** (100/15/19/16): the coalescing visible in
+  the packaged sidepanel path predates W1 (it was already observable at W0
+  baseline capture, per the baseline's own `chunksApplied` note), and W1 did
+  not change the throttle cadence on this path.
+- `domMutations` is the one metric that moved: **77–83 → 49–51** (~40% fewer
+  mutation records inside the stream window), consistent with Stage 2's
+  isStreaming last-row narrowing plus row memoization (unchanged rows no
+  longer re-render per flush). Recorded as an observation — the unit suites,
+  not this e2e, pin the render-count mechanics.
+- `longTasks`: **0 in every baseline run and 0 in every HEAD run.**
+
+**Stage 3's deferred success criterion, evaluated here (honest ruling).**
+Stage 3 deferred its "long-task count ≥ 50% drop vs baseline during
+streaming" criterion to this re-run. Verdict: **not-discriminating (0 → 0)**
+— the canned stream at this transcript size produced zero main-thread long
+tasks (> 50 ms) both before virtualization (frozen baseline, all 3 runs) and
+at HEAD (all 3 runs). Per the batch-final ruling this is recorded as
+not-discriminating rather than claimed as a pass. The virtualization work's
+effect is instead pinned by unit window assertions: 1,000-message ChatPane
+and 1,000-block PlaygroundChat transcripts render bounded windows (< 60
+shells) in `ChatPane.virtualization.test.tsx` and
+`VirtualChatTimeline.window.test.tsx`.
+
+### Per-stage attribution (what THIS branch landed vs pre-landed interim work)
+
+| Stage | Commit | Landed by W1 | Already at branch point (TASK-13511 lineage) |
+|---|---|---|---|
+| Task 0 | `c8c12161cb` | Extracted shared sidepanel mock-server helper for extension e2e specs (test-only; enables perf-spec reuse; no perf delta) | — |
+| Stage 1 (WP-01) | `52809b6571` | Map clones 2 → 1 (per-token clones 0; survivor = once-per-stream final commit); unified `streamingThrottle` helper across all three chat paths (3 adoption sites + 4 scheduler sites in useMessage) | The 80 ms coalescing itself (502 → ~3 notifications, clones 501 → 2) |
+| Stage 2 (WP-02/03/09) | `6747b1da64` | isStreaming narrowed to last row (both parents); highlightText memo; mount-time handler-cache guard fix | React.memo + comparator, per-row stable callbacks, EMPTY_IMAGES, previousUserMessageByIndex map (`dfa4dcc014`) |
+| Stage 3 (WP-03/04/07) | `9d73e06724` | ChatPane virtualization (> 100-row gate) + stableMessageId + per-message retrieval-diagnostics cache; SharedWorkspaceChatPane K=200 render cap + window reveal | PlaygroundChat virtualization (VirtualChatTimeline, already on dev; pinned by new window tests) |
+| Stage 4 (WP-05/06/08/10/11) | `4899049c07` | KnowledgeQA 250 ms query debounce + submit-flush; CharacterSelect derived-boolean selectors (both variants); LayoutShellContext value memo; ResultsList memoized row; PlaygroundChat O(1) prev-user lookup | body.tsx previousUserMessageByIndex O(1) map (pre-existing) |
+| Stage 5 (WP-13/14) | `07427bd044` | Trust-panel derivation memos + Set-deduped `textToStringList` (research.tsx); WP-13 no-change dispositions verified + review-signed-off | — |
+
+### Documented gaps (honest)
+
+- **(a) No web-e2e scroll-through DOM-bound spec exists.** There is no web
+  playground e2e infra in-repo (extension perf specs are sidepanel-only), so
+  transcript virtualization on the web panes is covered by unit window
+  assertions in both panes, not by a DOM-bound e2e.
+- **(b) SharedWorkspaceChatPane virtualization deferred** per the cap-first
+  ruling: the K=200 newest-message render cap bounds markdown shells to the
+  virtualized panes' worst-case expanded window; evidence and the revisit
+  trigger (profile markdown cost under the cap) are documented in-component.
+- **(c) KnowledgeQA full state/actions context split deferred** (15 consumer
+  files exceed the split threshold); the query debounce + submit-flush
+  landed.
+- **(d) WP-13 no-change dispositions** (ChatWorkflowsPage composite
+  `role-step_index-index` key with load-bearing index suffix;
+  VNScriptsWorkbench static-order id-less primitive lists) — verified and
+  signed off in Stage 5 review; recorded here for whole-branch visibility.
+- **(e) WP-12 (flashcards) deferred** per the program index; no W1 change.
+
+### Other verification at HEAD (2026-10-15)
+
+- Family C1 workspace-persist bench: green, **bit-identical** to the frozen
+  baseline — 31 stringify calls / 2,451,167 B / 2 setItem calls / 121,470 B
+  across 3 runs (durations 12.94 / 13.61 / 13.08 ms). W1 touched no
+  persistence code (that is W2's scope).
+- Family C2 history bench: not run — W2's bench per the program split.
+- Family D `bun run build:prod` at HEAD: `[bundle-budget] shared _app:
+  596.1 KB gzip (budget 600.0 KB, 35 files)`; `heaviest route:
+  /__debug__/mermaid-chat-cards 875.8 KB gzip`; `[bundle-budget] ok`. Versus
+  the frozen baseline: shared shell +2.7 KB (34 → 35 files, still inside
+  budget — headroom now 3.9 KB), heaviest route −21.4 KB. Budget gate PASS;
+  no budget raise performed.
+- tsc: `apps/tldw-frontend` `tsc --noEmit` → 0 errors; `apps/packages/ui`
+  scoped `tsc --noEmit` (8 GB heap) → 400 errors, the identical pre-existing
+  set carried since Stage 1, with 0 errors in W1-touched files.

@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.Character_Chat.character_rate_limiter import Chara
 from tldw_Server_API.app.core.Chat.history_selection import resolve_history_selection
 from tldw_Server_API.app.core.config import settings
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB, CharactersRAGDBError
 
 pytestmark = pytest.mark.integration
@@ -137,6 +138,8 @@ def _client(
     limiter: CharacterRateLimiter | None = None,
 ) -> TestClient:
     app = FastAPI()
+    # As in main.py: each request owns its PostgreSQL checkout and returns it when the response ends.
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(chats.router, prefix="/api/v1/chats")
     app.include_router(messages_api.router, prefix="/api/v1")
     app.include_router(chat_api.router, prefix="/api/v1/chat")
@@ -762,8 +765,17 @@ def owners(request: pytest.FixtureRequest, tmp_path: Path) -> Iterator[SimpleNam
     try:
         yield SimpleNamespace(first=first, second=second, postgres=request.param == "postgres")
     finally:
-        first.close_all_connections()
-        second.close_all_connections()
+        try:
+            if backend is not None:
+                # The test reads through both handles on this thread, outside any operation, so each
+                # handle's checkout is left in a transaction. End it while the shared pool is open:
+                # close_all_connections() closes the pool before psycopg_pool's queued reset runs, and
+                # a transaction left open then blocks pg_restricted_backend's DROP OWNED BY.
+                for handle in (first, second):
+                    handle.get_connection().rollback()
+        finally:
+            first.close_all_connections()
+            second.close_all_connections()
 
 
 def test_another_owner_reusing_ids_never_touches_the_first_owners_chat(

@@ -162,7 +162,9 @@ def split_claims_sentences(
         pattern = r"(?<=[。！？!?])\s*"
         default_min = 8
     else:
-        pattern = r"(?<=[\.!?…؟])\s+"
+        # Keep title/name whitespace intact for alignment against the original chunk.
+        honorific_guard = "".join(rf"(?<!\b{title}\.)" for title in ("Mr", "Mrs", "Dr", "Ms", "Prof"))
+        pattern = rf"(?i){honorific_guard}(?<=[\.!?…؟])\s+"
         default_min = 12
 
     try:

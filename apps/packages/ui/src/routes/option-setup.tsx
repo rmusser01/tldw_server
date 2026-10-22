@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next"
 
 import { PageAssistLoader } from "@/components/Common/PageAssistLoader"
 import { SetupEntryChoice } from "@/components/Option/Onboarding/SetupEntryChoice"
+import { MultiUserExitPanel } from "@/components/Option/Onboarding/steps/MultiUserExitPanel"
 import {
   isMutableWebUiSetupState,
   shouldShowSetupEntryChoice
@@ -44,8 +45,15 @@ const OptionSetup = () => {
   const [testing, setTesting] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const connectionRequired = connectionConfigured === false && !connectionChecking && !setupError
-  const setupChoiceRequired = connectionRequired || shouldShowSetupEntryChoice(state, metadata)
+  const isMultiUserServer = metadata?.auth_mode === "multi_user"
+  const setupCompleted =
+    state?.status === "completed" &&
+    metadata?.setup_completed === true &&
+    metadata.setup_required === false
+  const setupChoiceRequired =
+    !isMultiUserServer && (connectionRequired || shouldShowSetupEntryChoice(state, metadata))
   const showWizard =
+    !isMultiUserServer &&
     setupEntryMode === "webui" && isMutableWebUiSetupState(state)
   const shouldShowChoice = setupChoiceRequired && !showWizard
   const showLoader = loading && !state
@@ -83,6 +91,50 @@ const OptionSetup = () => {
           />
         </div>
       ) : null}
+      {isMultiUserServer ? (
+        <section className="mx-auto mb-4 w-full max-w-3xl">
+          <MultiUserExitPanel
+            metadata={metadata}
+            onOpenConnectionSettings={() => navigate("/settings/tldw")}
+          />
+          <button
+            type="button"
+            className="mt-4 rounded-md px-3 py-2 text-sm text-text-muted underline hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            onClick={() => navigate("/")}>
+            {t("setupRoute.returnHomeAction", "Return home")}
+          </button>
+        </section>
+      ) : null}
+      {!isMultiUserServer && setupCompleted ? (
+        <section className="mx-auto mb-4 w-full max-w-3xl rounded-lg border border-border bg-surface p-4 text-text shadow-sm">
+          <h2 className="text-base font-semibold text-text">
+            {t("setupRoute.completedTitle", "Setup complete")}
+          </h2>
+          <p className="mt-1 text-sm text-text-muted">
+            {t(
+              "setupRoute.completedMessage",
+              "First-run setup is complete. Manage your existing connection in settings or return home."
+            )}
+          </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              onClick={() => navigate("/settings/tldw")}>
+              {t(
+                "setupRoute.connectionSettingsAction",
+                "Open connection settings"
+              )}
+            </button>
+            <button
+              type="button"
+              className="rounded-md px-3 py-2 text-sm text-text-muted underline hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              onClick={() => navigate("/")}>
+              {t("setupRoute.returnHomeAction", "Return home")}
+            </button>
+          </div>
+        </section>
+      ) : null}
       {setupErrorMessage ? (
         <p
           className="mx-auto mb-4 w-full max-w-3xl rounded-md border border-danger/40 bg-danger/10 p-3 text-sm text-danger"
@@ -91,7 +143,10 @@ const OptionSetup = () => {
           {setupErrorMessage}
         </p>
       ) : null}
-      {!shouldShowChoice && !showWizard ? (
+      {!isMultiUserServer &&
+      !setupCompleted &&
+      !shouldShowChoice &&
+      !showWizard ? (
         <section className="mx-auto mb-4 w-full max-w-3xl rounded-lg border border-border bg-surface p-4 text-text shadow-sm">
           <div className="flex flex-col gap-4">
             <div>
@@ -218,7 +273,10 @@ const OptionSetup = () => {
           </div>
         </section>
       ) : null}
-      {!shouldShowChoice && !showWizard ? (
+      {!isMultiUserServer &&
+      !setupCompleted &&
+      !shouldShowChoice &&
+      !showWizard ? (
         <SetupRequiredPanel
           className="mx-auto mb-4 w-full max-w-3xl"
           title={t("setupRoute.recoveryTitle", "Setup operator recovery")}

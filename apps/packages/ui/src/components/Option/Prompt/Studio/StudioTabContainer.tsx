@@ -19,9 +19,10 @@ import {
 import React, { Suspense, useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useSearchParams } from "react-router-dom"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { QueryClientProvider, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   usePromptStudioStore,
+  PromptStudioStoreProvider,
   type StudioSubTab
 } from "@/store/prompt-studio"
 import {
@@ -30,7 +31,7 @@ import {
   listProjects
 } from "@/services/prompt-studio"
 import {
-  getPromptStudioDefaults,
+  getPromptStudioDefaultsForOwner,
   setPromptStudioDefaults
 } from "@/services/prompt-studio-settings"
 import {
@@ -38,6 +39,8 @@ import {
   isPromptStudioStatusEvent
 } from "@/services/prompt-studio-stream"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority"
+import { createQueryClient } from "@/services/query-client"
 import { useMobile } from "@/hooks/useMediaQuery"
 import { useServerOnline } from "@/hooks/useServerOnline"
 import FeatureEmptyState from "@/components/Common/FeatureEmptyState"
@@ -109,6 +112,31 @@ const normalizeSettingsProjects = (
 }
 
 export const StudioTabContainer: React.FC = () => {
+  const authority = usePromptLocalAuthority()
+  const isOnline = useServerOnline()
+  const { t } = useTranslation(["settings", "common"])
+  if (!authority.ready || !authority.ownerId) {
+    if (!isOnline) {
+      return <WorkspaceConnectionGate featureName={t("settings:managePrompts.studio.title", { defaultValue: "Prompt Studio" })}><div /></WorkspaceConnectionGate>
+    }
+    return <div role="status">{t("common:loading.title", { defaultValue: "Loading..." })}</div>
+  }
+  return <StudioOwnerWorkspace key={authority.ownerId} ownerId={authority.ownerId} />
+}
+
+const StudioOwnerWorkspace = ({ ownerId }: { ownerId: string }) => {
+  const [queryClient] = useState(createQueryClient)
+  useEffect(() => () => queryClient.clear(), [queryClient])
+  return (
+    <QueryClientProvider client={queryClient}>
+      <PromptStudioStoreProvider>
+        <StudioTabContent ownerId={ownerId} />
+      </PromptStudioStoreProvider>
+    </QueryClientProvider>
+  )
+}
+
+const StudioTabContent = ({ ownerId }: { ownerId: string }) => {
   const { t } = useTranslation(["settings", "common", "option"])
   const [searchParams, setSearchParams] = useSearchParams()
   const isOnline = useServerOnline()
@@ -150,7 +178,7 @@ export const StudioTabContainer: React.FC = () => {
 
   const { data: settingsDefaultsResponse } = useQuery({
     queryKey: ["prompt-studio", "settings-defaults"],
-    queryFn: getPromptStudioDefaults,
+    queryFn: () => getPromptStudioDefaultsForOwner(ownerId),
     enabled: isOnline && hasStudio === true
   })
 
@@ -175,7 +203,7 @@ export const StudioTabContainer: React.FC = () => {
     mutationFn: (updates: {
       defaultProjectId?: number | null
       autoSyncWorkspacePrompts?: boolean
-    }) => setPromptStudioDefaults(updates),
+    }) => setPromptStudioDefaults(updates, ownerId),
     onSuccess: (nextDefaults, updates) => {
       queryClient.setQueryData(["prompt-studio", "settings-defaults"], nextDefaults)
       if (

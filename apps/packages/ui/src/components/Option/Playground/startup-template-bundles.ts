@@ -58,6 +58,8 @@ export type RolePlaySetupPreviewDescription = {
 }
 
 export type StartupTemplateBundle = {
+  /** Opaque account identity; credentials are never stored in a bundle. */
+  ownerId?: string
   id: string
   name: string
   createdAt: number
@@ -76,6 +78,7 @@ export type StartupTemplateBundle = {
 }
 
 export type StartupTemplateCreateInput = {
+  ownerId?: string | null
   name: string
   source?: StartupTemplateBundleSource
   selectedModel: string | null
@@ -393,6 +396,7 @@ export const createStartupTemplateBundle = (
   const character = normalizeCharacter(input.character)
   const rolePlay = normalizeRolePlayMetadata(input.rolePlay)
   return {
+    ...(input.ownerId ? { ownerId: input.ownerId } : {}),
     id: options?.id ?? createTemplateId(),
     name: sanitizeStartupTemplateName(input.name),
     createdAt: now,
@@ -425,6 +429,7 @@ export const normalizeStartupTemplateBundle = (
   const record = value as Record<string, unknown>
   const id = normalizeNullableString(record.id)
   if (!id) return null
+  if (record.ownerId != null && !normalizeNullableString(record.ownerId)) return null
 
   const createdAt =
     typeof record.createdAt === "number" && Number.isFinite(record.createdAt)
@@ -438,6 +443,7 @@ export const normalizeStartupTemplateBundle = (
   const rolePlay = normalizeRolePlayMetadata(record.rolePlay)
 
   return {
+    ...(normalizeNullableString(record.ownerId) ? { ownerId: normalizeNullableString(record.ownerId)! } : {}),
     id,
     name: sanitizeStartupTemplateName(normalizeString(record.name)),
     createdAt,
@@ -495,6 +501,17 @@ export const removeStartupTemplateBundle = (
   existing: StartupTemplateBundle[],
   id: string
 ): StartupTemplateBundle[] => existing.filter((entry) => entry.id !== id)
+
+/** Unowned linked copies are ambiguous; retain them in storage without adoption. */
+export const isStartupTemplateOwnedBy = (
+  template: StartupTemplateBundle,
+  ownerId: string | null,
+): boolean => {
+  if (template.ownerId != null) return template.ownerId === ownerId
+  return template.selectedSystemPromptId == null &&
+    template.promptStudioPromptId == null &&
+    template.promptSource !== "prompt-library" && template.promptSource !== "prompt-studio"
+}
 
 export const isRolePlayRelevantBundle = (
   template: StartupTemplateBundle

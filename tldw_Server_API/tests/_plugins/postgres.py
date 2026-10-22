@@ -323,6 +323,15 @@ def pg_database_config_session(pg_temp_db_session):
 
 
 @pytest.fixture(scope="function")
+def pg_secondary_database_config(pg_server):
+    """Give a restore target its own per-test database and official cleanup."""
+    from contextlib import closing
+
+    with closing(_temp_db_generator(pg_server)) as databases:
+        yield pg_database_config.__wrapped__(next(databases))
+
+
+@pytest.fixture(scope="function")
 def pg_restricted_backend(pg_database_config):
     """Yield a PostgreSQL backend whose role cannot bypass row-level security.
 
@@ -401,11 +410,17 @@ def pg_restricted_backend(pg_database_config):
         assert not flags["rolsuper"], f"{role} unexpectedly holds SUPERUSER"
         assert not flags["rolbypassrls"], f"{role} unexpectedly holds BYPASSRLS"
 
+        # Provisioning must not leave an idle writer during an offline handoff.
+        admin.get_pool().close_all()
         yield backend
     finally:
         if backend is not None:
             backend.get_pool().close_all()
-        with admin.transaction() as conn:
-            conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
-            conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
         admin.get_pool().close_all()
+        admin = DatabaseBackendFactory.create_backend(pg_database_config)
+        try:
+            with admin.transaction() as conn:
+                conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
+                conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+        finally:
+            admin.get_pool().close_all()

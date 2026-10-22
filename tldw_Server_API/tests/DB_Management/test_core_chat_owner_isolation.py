@@ -15,7 +15,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from tldw_Server_API.app.core.Chat.history_selection import (
+    HistorySelectionError,
+    resolve_history_selection,
+    snapshot_to_wire,
+)
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
+from tldw_Server_API.app.core.DB_Management.db_errors import NotFoundError
 
 pytestmark = pytest.mark.integration
 
@@ -171,3 +177,26 @@ def test_postgres_question_search_empty_query_keeps_result_contract(pg_restricte
             }
         finally:
             instance.close_all_connections()
+
+
+def test_foreign_owner_cannot_regenerate_selected_question(chats):
+    """The restricted PostgreSQL role must refuse a foreign selected-input write."""
+    owner_key = "server:test/account:1"
+    snapshot = snapshot_to_wire(chats.alice.get_conversation_history_snapshot(
+        chats.conversation, owner_client_id=ALICE, owner_key=owner_key
+    ))
+    resolved = resolve_history_selection(snapshot, {
+        "owner_key": owner_key,
+        "conversation_id": chats.conversation,
+        "interpretation": {"kind": "parent_graph_v1"},
+        "cursor": {"kind": "after_message", "message_id": chats.message},
+        "selection_revision": 1,
+    }, "send", "prepared-private-request")
+    assert resolved["status"] == "ready"  # nosec B101 # pytest contract assertion
+    with pytest.raises((HistorySelectionError, NotFoundError)):
+        chats.bob.settle_selected_existing_input(
+            chats.conversation, resolved["selection"],
+            {"id": "foreign-alternative", "sender": "assistant", "content": "must not save"},
+            owner_client_id=BOB, owner_key=owner_key,
+        )
+    assert chats.alice.get_message_by_id("foreign-alternative") is None  # nosec B101 # pytest contract assertion

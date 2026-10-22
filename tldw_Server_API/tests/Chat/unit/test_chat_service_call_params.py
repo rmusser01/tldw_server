@@ -875,3 +875,15 @@ def test_private_history_proof_never_reaches_provider_extensions(field):
     assert field not in params
     assert params["extra_body"] == {"provider_extension": 7}
     assert params["extra_headers"] == {"X-Provider-Extension": "kept"}
+
+
+@pytest.mark.parametrize("location", ["direct", "extra_body", "extra_headers"])
+def test_b02_existing_input_selection_never_reaches_provider(location):
+    field = "tldw_history_server_existing_input_v1"
+    values = {field: {"owner_key": "private-owner"}} if location == "direct" else {location: {field.replace("_", "-"): "private", "safe": "kept"}}
+    req = ChatCompletionRequest.model_construct(model="gpt-4o-mini", messages=[], **values)
+    params = build_call_params_from_request(request_data=req, target_api_provider="openai", provider_api_key="test",
+        templated_llm_payload=[], final_system_message=None, app_config=None)
+    assert field not in params  # nosec B101 - Internal selection authority stays server-side.
+    if location != "direct":
+        assert params[location] == {"safe": "kept"}  # nosec B101 - Strip only private envelopes, retaining provider extensions.

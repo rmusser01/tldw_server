@@ -32,7 +32,6 @@ from fastapi.encoders import jsonable_encoder
 from loguru import logger
 from starlette.responses import StreamingResponse
 
-from tldw_Server_API.app.core.Character_Chat.constants import DEFAULT_CHARACTER_NAME
 from tldw_Server_API.app.core.Audit.unified_audit_service import (
     AuditEventType,
     MandatoryAuditWriteError,
@@ -46,6 +45,7 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
 from tldw_Server_API.app.core.Character_Chat.Character_Chat_Lib_facade import replace_placeholders
+from tldw_Server_API.app.core.Character_Chat.constants import DEFAULT_CHARACTER_NAME
 from tldw_Server_API.app.core.Character_Chat.modules.character_utils import (
     map_sender_to_role,
     sanitize_sender_name,
@@ -96,7 +96,10 @@ from tldw_Server_API.app.core.Chat.persistence_service import (
     save_assistant_message,
     save_tool_messages,
 )
-from tldw_Server_API.app.core.Chat.prompt_cost_envelope import build_prompt_cost_envelope
+from tldw_Server_API.app.core.Chat.prompt_cost_envelope import (
+    build_prompt_cost_envelope,
+    estimate_segment_tokens,
+)
 from tldw_Server_API.app.core.Chat.prompt_cost_guardrails import (
     PromptCostGuardrailDecision,
     evaluate_prompt_cost_guardrails,
@@ -223,7 +226,6 @@ from tldw_Server_API.app.core.Usage.pricing_catalog import (
 )
 from tldw_Server_API.app.core.Usage.usage_tracker import log_llm_usage
 from tldw_Server_API.app.core.Utils.cpu_bound_handler import process_large_json_async
-from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
 
 _CHAT_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ChatAPIError,
@@ -847,7 +849,8 @@ async def resolve_input_moderation_chat_type(
     loop: Any,
 ) -> str:
     """Resolve chat_type for input moderation from request fields and saved conversation state."""
-    if getattr(request_data, "tldw_history_selection_v1", None) is not None:
+    if (getattr(request_data, "tldw_history_selection_v1", None) is not None
+            or getattr(request_data, "tldw_history_server_existing_input_v1", None) is not None):
         conversation = await loop.run_in_executor(None, chat_db.get_conversation_by_id, request_data.conversation_id)
         return "character" if conversation and (conversation.get("character_id") or conversation.get("assistant_kind")) else "regular"
     default_character_id = await _resolve_default_character_id(chat_db, loop)
@@ -2788,6 +2791,7 @@ def build_call_params_from_request(
             "stream",
             "save_to_db",
             "tldw_history_selection_v1",
+            "tldw_history_server_existing_input_v1",
             "tldw_history_branch",
             "tldw_history_edit_v1",
             "tldw_history_admission_v1",
@@ -2910,6 +2914,7 @@ def build_call_params_from_request(
                     "tldw_history_branch",
                     "tldw_history_edit_v1",
                     "tldw_history_admission_v1",
+                    "tldw_history_server_existing_input_v1",
                 }
             }
     billing_prompt_cache_intent = getattr(request_data, "billing_prompt_cache_intent", None)
@@ -3027,61 +3032,21 @@ def inject_research_context_into_prompt(
 
 
 def estimate_tokens_from_json(request_json: str) -> int:
-    """Rough estimate: assume ~4 chars per token for rate limiting.
+    """Heuristic prompt size for rate limits, quotas, billing and queue admission.
 
-    This matches the existing heuristic in the endpoint.
+    The chat path's one estimate (``estimate_segment_tokens``: data:image payloads
+    redacted, four characters per token rounded up), never below 1.
     """
     try:
-        sanitized = _sanitize_data_uris(request_json)
-        return max(1, len(sanitized) // 4)
+        return max(1, estimate_segment_tokens(request_json))
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         return 1
 
 
-def _sanitize_data_uris(text: str) -> str:
-    """Redact data URI payloads to avoid inflating token estimates."""
-    try:
-        return DATA_URI_REDACT_RE.sub(r"\1<omitted>", text)
-    except _CHAT_NONCRITICAL_EXCEPTIONS:
-        return text
-
-
-def _sanitize_messages_for_token_estimate(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Return a copy of messages with base64 image payloads replaced."""
-    sanitized: list[dict[str, Any]] = []
-    for msg in messages or []:
-        if not isinstance(msg, dict):
-            continue
-        msg_copy = msg.copy()
-        content = msg_copy.get("content")
-        if isinstance(content, list):
-            new_parts: list[Any] = []
-            for part in content:
-                if not isinstance(part, dict):
-                    new_parts.append(part)
-                    continue
-                if part.get("type") == "image_url":
-                    image_url = part.get("image_url") or {}
-                    if isinstance(image_url, dict):
-                        url_val = image_url.get("url")
-                        if isinstance(url_val, str) and url_val.startswith("data:image"):
-                            new_image_url = dict(image_url)
-                            new_image_url["url"] = "data:image/omitted"
-                            new_parts.append({**part, "image_url": new_image_url})
-                            continue
-                new_parts.append(part)
-            msg_copy["content"] = new_parts
-        elif isinstance(content, str):
-            msg_copy["content"] = _sanitize_data_uris(content)
-        sanitized.append(msg_copy)
-    return sanitized
-
-
 def _estimate_tokens_from_messages(messages: list[dict[str, Any]]) -> int:
-    """Estimate tokens from message payloads with base64 redaction."""
+    """The same estimate for a message list, taken over its JSON."""
     try:
-        sanitized = _sanitize_messages_for_token_estimate(messages)
-        return max(1, len(_json.dumps(sanitized, default=str)) // 4)
+        return estimate_tokens_from_json(_json.dumps(messages, default=str))
     except _CHAT_NONCRITICAL_EXCEPTIONS:
         return 1
 
@@ -4256,8 +4221,9 @@ async def build_context_and_messages(
     continue_prefix: str | None = None
     reuse_saved_turn = explicit_failed_retry or regenerate_reply_id is not None
 
-    history_selection = getattr(request_data, "tldw_history_selection_v1", None)
-    if history_selection is not None and explicit_failed_retry:
+    server_existing_input = getattr(request_data, "tldw_history_server_existing_input_v1", None)
+    history_selection = getattr(request_data, "tldw_history_selection_v1", None) or server_existing_input
+    if history_selection is not None and (explicit_failed_retry or (server_existing_input is not None and (regenerate_reply_id is not None or continue_reply_id is not None))):
         raise HTTPException(409, detail={"status": "unsupported_history_capability", "code": "unsupported_history_legacy_retry"})
     versioned = history_selection is not None
     history_runtime = runtime_state or {}
@@ -4267,7 +4233,10 @@ async def build_context_and_messages(
     history_snapshot = None
     admission = None
     if versioned:
-        from tldw_Server_API.app.core.Chat.history_context import project_history_context
+        from tldw_Server_API.app.core.Chat.history_context import (
+            project_history_context,
+            selected_unanswered_text_question,
+        )
         from tldw_Server_API.app.core.Chat.history_selection import HistorySelectionError, HistorySelectionSnapshotV1
 
         if getattr(request_data, "prompt_template_name", None) not in (None, "", DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name):
@@ -4281,7 +4250,7 @@ async def build_context_and_messages(
         def accept_history() -> tuple[
             HistorySelectionSnapshotV1,
             tuple[dict[str, Any], ...],
-            dict[str, Any],
+            dict[str, Any] | None,
             dict[str, Any],
             tuple[dict[str, Any] | None, int | None, dict[str, Any]],
         ]:
@@ -4300,14 +4269,32 @@ async def build_context_and_messages(
                     conn=conn,
                     history_edit=edit_target,
                 )
+                question = (selected_unanswered_text_question(snap, content, selection)
+                    if server_existing_input is not None else None)
                 context = project_history_context(state, character_override=getattr(request_data, "character_id", None))
+                dictionary_plan = context[2].pop("history_dictionary_plan", None)
+                if dictionary_plan is not None:
+                    from tldw_Server_API.app.core.Character_Chat.frozen_dictionary_context import (
+                        transform_frozen_user_content,
+                    )
+                    from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import InputError
+
+                    try:
+                        context[2]["history_dictionary_user_content"] = transform_frozen_user_content(
+                            ([{"role": "user", "content": question["message"]}] if question is not None
+                                else [message.model_dump(exclude_none=True) for message in request_data.messages]), dictionary_plan,
+                        )
+                    except InputError as exc:
+                        raise HistorySelectionError("unsupported_history_context_dictionaries") from exc
                 _format_selected_history_messages(snap, content, context[0] or {})
                 reused_reply_id = regenerate_reply_id if regenerate_reply_id is not None else continue_reply_id
                 unsupported_code = (
                     "unsupported_history_continuation" if continue_reply_id is not None
                     else "unsupported_history_regeneration"
                 )
-                if reused_reply_id is not None:
+                if server_existing_input is not None:
+                    accepted = None
+                elif reused_reply_id is not None:
                     if getattr(request_data, "tldw_history_branch", None) is not True:
                         raise HistorySelectionError(unsupported_code)
                     inputs = [
@@ -4879,10 +4866,19 @@ async def build_context_and_messages(
     if versioned:
         if regenerate_reply_id is not None or continue_reply_id is not None:
             overlap_cut = len(request_messages)
-        historical_msgs.extend(_format_selected_history_messages(history_snapshot, selected_content, character_card))
-        assistant_parent_message_id = admission["input_message_id"]
+        formatted_history = _format_selected_history_messages(history_snapshot, selected_content, character_card)
+        if server_existing_input is not None:
+            existing_dictionary_content = assistant_context.pop("history_dictionary_user_content", [])
+            if existing_dictionary_content:
+                formatted_history[-1]["content"] = existing_dictionary_content[0]
+        historical_msgs.extend(formatted_history)
+        assistant_parent_message_id = (selected_content[-1]["id"] if server_existing_input is not None
+            else admission["input_message_id"])
         runtime_state["assistant_parent_message_id"] = assistant_parent_message_id
-        runtime_state["tldw_history_admission_v1"] = admission
+        if server_existing_input is not None:
+            runtime_state["tldw_history_server_existing_input_v1"] = history_selection.model_dump(mode="json")
+        else:
+            runtime_state["tldw_history_admission_v1"] = admission
         if continue_prefix is not None:
             runtime_state["history_continue_prefix"] = continue_prefix
 
@@ -4906,7 +4902,7 @@ async def build_context_and_messages(
         except ConflictError as exc:
             raise HTTPException(status_code=409, detail="The saved reply changed. Reload before regenerating.") from exc
 
-    persisted_user_message_id: str | None = admission["input_message_id"] if versioned else retry_user_message_id
+    persisted_user_message_id: str | None = assistant_parent_message_id if versioned else retry_user_message_id
     system_block_id = str(_uuid.uuid4())
     if (should_persist and retry_system_messages
             and _extract_system_messages(retry_system_messages) != _extract_system_messages(saved_retry_system_messages)):
@@ -4938,6 +4934,7 @@ async def build_context_and_messages(
                 detail="Unable to save updated retry instructions. Try again.",
             ) from exc
     current_turn: list[dict[str, Any]] = list(retry_system_messages)
+    dictionary_user_content = iter(assistant_context.pop("history_dictionary_user_content", []))
     for index, msg_dict in enumerate(request_messages[overlap_cut:], start=overlap_cut):
         role = msg_dict.get("role")
         msg_for_db = msg_dict.copy()
@@ -4954,6 +4951,8 @@ async def build_context_and_messages(
             if role == "user":
                 persisted_user_message_id = str(saved_message_id) if saved_message_id else None
         msg_for_llm = msg_dict.copy()
+        if versioned and role == "user":
+            msg_for_llm["content"] = next(dictionary_user_content, msg_for_llm.get("content"))
         if role == "assistant" and character_card and character_card.get("name"):
             name = sanitize_sender_name(character_card.get("name"))
             if name:
@@ -4995,6 +4994,14 @@ async def build_context_and_messages(
     historical_msgs_for_payload = historical_msgs
 
     llm_payload_messages = historical_msgs_for_payload + current_turn
+    if versioned and assistant_context.get("history_world_book_plan") is not None:
+        from tldw_Server_API.app.core.Character_Chat.world_book_prompt_context import (
+            build_frozen_world_book_prompt_context,
+        )
+
+        character_card["_history_world_book_context"] = build_frozen_world_book_prompt_context(
+            llm_payload_messages, assistant_context["history_world_book_plan"],
+        )
 
     return character_card, character_db_id, conv_id, conversation_created, llm_payload_messages, should_persist
 
@@ -5068,7 +5075,8 @@ def apply_prompt_templating(
 
     Returns (final_system_message, templated_llm_payload)
     """
-    active_template = (DEFAULT_RAW_PASSTHROUGH_TEMPLATE if getattr(request_data, "tldw_history_selection_v1", None) is not None
+    active_template = (DEFAULT_RAW_PASSTHROUGH_TEMPLATE if (getattr(request_data, "tldw_history_selection_v1", None) is not None
+            or getattr(request_data, "tldw_history_server_existing_input_v1", None) is not None)
         else load_template(getattr(request_data, "prompt_template_name", None) or DEFAULT_RAW_PASSTHROUGH_TEMPLATE.name))
     template_data: dict[str, Any] = {}
     if character_card:
@@ -5114,6 +5122,12 @@ def apply_prompt_templating(
     elif character_card and character_card.get("system_prompt"):
         final_system_message = character_card.get("system_prompt")
         logger.debug("Using character system prompt summary {}", text_summary(final_system_message))
+
+    if (getattr(request_data, "tldw_history_selection_v1", None) is not None
+            or getattr(request_data, "tldw_history_server_existing_input_v1", None) is not None):
+        lore = character_card.get("_history_world_book_context")
+        if lore is not None and lore.text:
+            final_system_message = "\n\n".join(part for part in (final_system_message, lore.text) if part)
 
     logger.debug("Final system message summary {}", text_summary(final_system_message))
 
@@ -5720,7 +5734,7 @@ async def execute_streaming_call(
             _terminal_stream_error(error_payload),
             media_type="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
+                "Cache-Control": "no-cache, no-transform",
                 "X-Accel-Buffering": "no",
             },
         )
@@ -5809,7 +5823,7 @@ async def execute_streaming_call(
                             ),
                             media_type="text/event-stream",
                             headers={
-                                "Cache-Control": "no-cache",
+                                "Cache-Control": "no-cache, no-transform",
                                 "X-Accel-Buffering": "no",
                             },
                         )
@@ -5864,7 +5878,7 @@ async def execute_streaming_call(
                 _terminal_stream_error(error_payload),
                 media_type="text/event-stream",
                 headers={
-                    "Cache-Control": "no-cache",
+                    "Cache-Control": "no-cache, no-transform",
                     "X-Accel-Buffering": "no",
                 },
             )
@@ -6782,7 +6796,7 @@ async def execute_streaming_call(
             _gen(),
             media_type="text/event-stream",
             headers={
-                "Cache-Control": "no-cache",
+                "Cache-Control": "no-cache, no-transform",
                 "X-Accel-Buffering": "no",
             },
         )
@@ -6792,7 +6806,7 @@ async def execute_streaming_call(
         streaming_generator,
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },

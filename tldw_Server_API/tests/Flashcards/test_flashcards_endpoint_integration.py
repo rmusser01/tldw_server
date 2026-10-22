@@ -5698,3 +5698,33 @@ def test_flashcard_tag_suggestions_rejects_limit_over_max(
     )
 
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize("expected_user", [None, "1", "2", "invalid"])
+def test_deck_update_checks_optional_expected_user(
+    client_with_flashcards_db, monkeypatch, expected_user
+):
+    """A stale owner assertion must fail before a real deck can be renamed."""
+    from tldw_Server_API.app.api.v1.API_Deps import auth_deps
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    async def observed_principal(_request):
+        return AuthPrincipal(kind="user", user_id=1)
+
+    monkeypatch.setattr(auth_deps, "get_auth_principal", observed_principal)
+    client = client_with_flashcards_db
+    created = client.post("/api/v1/flashcards/decks", json={"name": "Opening name"})
+    assert created.status_code == 200  # nosec B101 - New pytest fixture setup contract.
+    original = created.json()
+    headers = {} if expected_user is None else {"X-TLDW-Expected-User-ID": expected_user}
+    response = client.patch(
+        f"/api/v1/flashcards/decks/{original['id']}",
+        json={"name": "Reviewed name", "expected_version": original["version"]},
+        headers=headers,
+    )
+    allowed = expected_user in (None, "1")
+    assert response.status_code == (200 if allowed else 412)  # nosec B101 - New pytest owner-boundary contract.
+    current = next(deck for deck in client.get("/api/v1/flashcards/decks").json() if deck["id"] == original["id"])
+    assert current["name"] == ("Reviewed name" if allowed else "Opening name")  # nosec B101 - New pytest persistence contract.
+    if not allowed:
+        assert current["version"] == original["version"]  # nosec B101 - Denial must leave the real version unchanged.

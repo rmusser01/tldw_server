@@ -217,6 +217,8 @@ const RUNTIME_REQUEST_TIMEOUT_MS = 8_000
 const RUNTIME_AUTH_METADATA_KEY = "tldwRuntimeAuthMetadata"
 const MANUAL_SESSION_API_KEY = "tldwManualSessionApiKey"
 const MANUAL_SESSION_CREDENTIAL_LOCK = "tldw:manual-session-credential"
+const COOKIE_SESSION_CONFIG_LOCK = "tldw:cookie-session-config"
+type VerifiedCookieSessionConfig = TldwConfig & { verificationRevision?: string }
 const LEGACY_RUNTIME_KEYS = [
   "apiKey",
   "tldwRuntimeSessionSingleUserApiKey",
@@ -396,40 +398,56 @@ const seedTldwConfigFromRuntime = async (
   if (typeof window === "undefined" || !isCurrent()) return "unavailable"
 
   const storage = createSafeStorage()
-  const payload = await fetchRuntimeConfig()
-  if (!isCurrent()) return "unavailable"
-  if (!payload) return "retry"
-  if (
-    payload?.runtimeAuth?.available !== true ||
-    payload.runtimeAuth.authMode !== "single-user" ||
-    payload.runtimeAuth.transport !== "cookie-session"
-  ) {
-    return "unavailable"
-  }
-
-  if (!(await bootstrapCookieSession(isCurrent)))
-    return isCurrent() ? "retry" : "unavailable"
+  invalidateCookieSessionConfig()
+  let verified = false
+  let previousCookieConfig: VerifiedCookieSessionConfig | undefined
+  let previousCookieConfigRead = false
 
   try {
+    previousCookieConfig = await storage.get<VerifiedCookieSessionConfig>(
+      COOKIE_SESSION_CONFIG_KEY
+    )
+    previousCookieConfigRead = true
+    const payload = await fetchRuntimeConfig()
+    if (!isCurrent()) return "unavailable"
+    if (!payload) return "retry"
+    if (
+      payload.runtimeAuth?.available !== true ||
+      payload.runtimeAuth.authMode !== "single-user" ||
+      payload.runtimeAuth.transport !== "cookie-session"
+    ) {
+      return "unavailable"
+    }
+
+    if (!(await bootstrapCookieSession(isCurrent))) return isCurrent() ? "retry" : "unavailable"
+
     const existing =
       (await storage.get<TldwConfig>("tldwConfig").catch(() => null)) || null
     const quickstartWebUiServerUrl = getQuickstartWebUiServerUrl()
     if (!quickstartWebUiServerUrl || !isCurrent()) return "unavailable"
 
-    const next: TldwConfig = {
+    const next: VerifiedCookieSessionConfig = {
       authMode: "single-user",
       authSource: "cookie-session",
-      serverUrl: quickstartWebUiServerUrl
+      serverUrl: quickstartWebUiServerUrl,
+      verificationRevision: globalThis.crypto.randomUUID()
     }
 
     if (existing?.apiKey && !hasCompleteManualDeviceKey(existing)) {
       const { apiKey: _ambiguousSecret, ...safeExisting } = existing
       await storage.set("tldwConfig", safeExisting)
     }
-    if (!isCurrent()) return "unavailable"
-    await storage.set(COOKIE_SESSION_CONFIG_KEY, next)
+    const publish = async () => {
+      if (isCurrent()) await storage.set(COOKIE_SESSION_CONFIG_KEY, next)
+    }
+    if (typeof navigator !== "undefined" && navigator.locks?.request) {
+      await navigator.locks.request(COOKIE_SESSION_CONFIG_LOCK, publish)
+    } else {
+      await publish()
+    }
     if (!isCurrent()) return "unavailable"
     activateCookieSessionConfig()
+    verified = true
     clearRuntimeAuth()
     clearRuntimeAuthOverride()
     removeLegacyRuntimeSecrets()
@@ -438,6 +456,27 @@ const seedTldwConfigFromRuntime = async (
   } catch {
     // Leave existing manual configuration intact if client storage is unavailable.
     return "retry"
+  } finally {
+    // Only invalidate the verification observed before this document's probe.
+    // Without a shared lock, leave cleanup to authenticated requests/logout;
+    // this document remains locally untrusted rather than racing a peer save.
+    if (
+      !verified &&
+      previousCookieConfigRead &&
+      typeof navigator !== "undefined" &&
+      navigator.locks?.request
+    ) {
+      await navigator.locks.request(COOKIE_SESSION_CONFIG_LOCK, async () => {
+        const current = await storage.get<VerifiedCookieSessionConfig>(
+          COOKIE_SESSION_CONFIG_KEY
+        )
+        if (
+          current?.verificationRevision === previousCookieConfig?.verificationRevision
+        ) {
+          await storage.remove(COOKIE_SESSION_CONFIG_KEY)
+        }
+      }).catch(() => undefined)
+    }
   }
 }
 
@@ -584,9 +623,6 @@ export const runtimeBootstrapReady: Promise<void> = (async () => {
     }
   })
   invalidateCookieSessionConfig()
-  await createSafeStorage()
-    .remove(COOKIE_SESSION_CONFIG_KEY)
-    .catch(() => undefined)
   const outcome = await seedTldwConfigFromRuntime(initialIsCurrent).catch(
     () => "retry"
   )

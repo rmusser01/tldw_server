@@ -105,7 +105,7 @@ export const TldwSettings = ({ onDirtyChange, onSavingChange, onOpenDiagnostics,
   const [authMode, setAuthMode] = useState<'single-user' | 'multi-user'>('single-user')
   const [authSource, setAuthSource] = useState<TldwConfig['authSource']>()
   const [rememberApiKey, setRememberApiKey] = useState(true)
-  const { isLoggedIn, setIsLoggedIn, signInTargetSaved, refreshLoginStatus } = useSettingsLoginStatus(form, !initializing)
+  const { isLoggedIn, setIsLoggedIn, loggedInUsername, signInTargetSaved, refreshLoginStatus } = useSettingsLoginStatus(form, !initializing)
   const authAttempt = useRef<AbortController | null>(null)
   const saveAttempt = useRef<AbortController | null>(null)
   const initialSave = useRef<InitialChatSetupAttempt | null>(null)
@@ -477,7 +477,12 @@ export const TldwSettings = ({ onDirtyChange, onSavingChange, onOpenDiagnostics,
       initialSetup?.cancel()
       // Ant Design displays field validation failures beside the inputs.
       if (error && typeof error === 'object' && 'errorFields' in error) return
-      message.error(t("settings:saveFailed"))
+      const apiKeyRejected = error instanceof Error &&
+        error.message === "API key validation failed" &&
+        "status" in error && error.status === 401
+      message.error(apiKeyRejected
+        ? t("settings:onboarding.errors.invalidApiKey", "Invalid API key. Please check your key and try again.")
+        : t("settings:saveFailed"))
       console.error('Failed to save config:', error)
     } finally {
       if (saveAttempt.current === attempt) saveAttempt.current = null
@@ -610,7 +615,7 @@ export const TldwSettings = ({ onDirtyChange, onSavingChange, onOpenDiagnostics,
     setTestingConnection(true)
     setConnectionStatus(null)
     setConnectionDetail("")
-    setCoreStatus("checking")
+    setCoreStatus("unknown")
     setRagStatus("unknown")
 
     let values: any = {}
@@ -620,6 +625,7 @@ export const TldwSettings = ({ onDirtyChange, onSavingChange, onOpenDiagnostics,
       if (errors?.errorFields?.length) {
         return
       }
+      setCoreStatus("checking")
       let success = false
 
       const baseUrl = String(values.serverUrl || '').replace(/\/$/, '')
@@ -1165,6 +1171,7 @@ export const TldwSettings = ({ onDirtyChange, onSavingChange, onOpenDiagnostics,
             }}
             signInTargetSaved={signInTargetSaved}
             isLoggedIn={isLoggedIn}
+            loggedInUsername={loggedInUsername}
             setIsLoggedIn={setIsLoggedIn}
             refreshLoginStatus={refreshLoginStatus}
             loginMethod={loginMethod}

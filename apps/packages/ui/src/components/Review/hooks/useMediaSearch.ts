@@ -720,7 +720,11 @@ export function useMediaSearch(deps: UseMediaSearchDeps) {
       boostFields.content,
       searchMode,
       metadataMatchMode,
-      JSON.stringify(metadataFilters),
+      JSON.stringify(
+        normalizeMetadataSearchFilters(metadataFilters).map(
+          ({ field, op, value }) => ({ field, op, value }),
+        ),
+      ),
       page,
       pageSize
     ],

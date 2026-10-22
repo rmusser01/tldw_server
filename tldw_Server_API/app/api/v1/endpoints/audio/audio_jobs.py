@@ -7,6 +7,7 @@ import json
 import os
 import tempfile
 import threading
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -305,6 +306,8 @@ async def submit_audio_job(
             job_type=job_type,
             payload=payload,
             owner_user_id=str(current_user.id),
+            # Every stage of this pipeline shares it, so DELETE /jobs/{job_id} can find and cancel them all.
+            batch_group=f"audio-pipeline:{uuid.uuid4().hex}",
             priority=5,
             max_retries=3,
             request_id=rid,
@@ -376,6 +379,65 @@ async def get_audio_job(
             f"Failed to fetch job: job_id={job_id}, user_id={getattr(current_user, 'id', None)}"
         )
         raise HTTPException(status_code=500, detail="Failed to fetch job") from None
+
+
+# The audio pipeline's stages. Other jobs in the audio domain, such as long-form TTS, are not cancelled here.
+_PIPELINE_JOB_TYPES = frozenset(
+    {"audio_download", "audio_convert", "audio_transcribe", "audio_chunk", "audio_analyze", "audio_store"}
+)
+
+
+class CancelAudioJobResponse(BaseModel):
+    job_id: int
+    cancelled: int = Field(..., description="How many queued or running stages were cancelled")
+
+
+@router.delete("/jobs/{job_id}", response_model=CancelAudioJobResponse, summary="Cancel an audio job's pipeline")
+async def cancel_audio_job(
+    job_id: int,
+    current_user: Annotated[User, Depends(get_request_user)],
+    jm: Annotated[JobManager, Depends(get_job_manager)],
+    principal: Annotated[AuthPrincipal, Depends(get_auth_principal)],
+):
+    """
+    Cancel every queued or running stage of the pipeline this job belongs to (owner or admin).
+
+    Pass the id that /jobs/submit returned, or any stage's id. A stage that is running finishes its current
+    step, and nothing after it runs. Other audio jobs, such as long-form TTS, are not handled here (404).
+    """
+    try:
+        job = jm.get_job(int(job_id))
+        if not job or str(job.get("domain") or "") != "audio" or job.get("job_type") not in _PIPELINE_JOB_TYPES:
+            raise HTTPException(status_code=404, detail="Job not found")
+        owner = str(job.get("owner_user_id") or "")
+        if not (_principal_has_admin_claims(principal) or owner == str(current_user.id)):
+            raise HTTPException(status_code=403, detail="Not authorized for this job")
+        group = job.get("batch_group")
+        cancelled = 0
+        # A stage can hand off between a pass's list and its cancels; the next pass finds the stage it queued.
+        # A pipeline has six stages, so six passes are enough.
+        for attempt in range(6):
+            stages = (
+                jm.list_jobs(domain="audio", owner_user_id=owner, batch_group=group, limit=50)
+                if group
+                else [jm.get_job(int(job_id)) or {}]
+            )
+            active = [
+                stage
+                for stage in stages
+                if stage.get("status") in {"queued", "processing"} and stage.get("job_type") in _PIPELINE_JOB_TYPES
+            ]
+            if not active:
+                if attempt == 0:
+                    raise HTTPException(status_code=400, detail="Nothing to cancel: the pipeline has finished")
+                break
+            cancelled += sum(1 for stage in active if jm.cancel_job(int(stage["id"]), reason="pipeline_cancelled"))
+        return CancelAudioJobResponse(job_id=int(job_id), cancelled=cancelled)
+    except HTTPException:
+        raise
+    except _AUDIO_JOBS_NONCRITICAL_EXCEPTIONS:
+        logger.exception(f"Failed to cancel job: job_id={job_id}")
+        raise HTTPException(status_code=500, detail="Failed to cancel job") from None
 
 
 @router.get(

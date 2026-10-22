@@ -81,8 +81,25 @@ describe("saved reply action availability (CM-01)", () => {
     expect(savedReplyRegenerateUnavailableReason(availability.regenerate, t)).toMatch(/still loading/)
   })
 
+  // The send path regenerates a device history (local owner) through its own
+  // boundary; Continue still needs a native saved reply.
+  it("offers Regenerate but not Continue for a local owner", () => {
+    expect(savedReplyActionAvailability({ historySelection: ready({}, { kind: "local" }), messages: visible }))
+      .toEqual({ regenerate: null, continue: "unsupported" })
+  })
+
+  it("does not offer Regenerate for a local reply that does not answer the question before it", () => {
+    const capture = captured()
+    const historySelection = controller({
+      status: "ready",
+      owner: { kind: "local" },
+      view,
+      capture: { ...capture, rows: [capture.rows[0], { ...capture.rows[1], parent_id: "elsewhere" }] }
+    })
+    expect(savedReplyActionAvailability({ historySelection, messages: visible }).regenerate).toBe("unsupported")
+  })
+
   it.each([
-    ["a local owner", ready({}, { kind: "local" })],
     ["a legacy linear history", ready({ interpretation: { kind: "legacy_linear_v1", projection_id: "p" } })],
     ["a history that needs review", controller({ status: "legacy_review_required", owner: { kind: "native" } })],
     ["an unsupported selection", controller({ status: "unsupported_history_capability", owner: { kind: "native" } })]

@@ -1,3 +1,5 @@
+import { assertPromptOwnedBy, isPromptOwnedBy, resolvePromptOwnerId } from "@/services/prompt-local-owner"
+import type { CapturedPromptOwnerScope } from "@/services/prompt-local-owner"
 import {
   assertNoPendingLocalSettingsWrite,
   isReadableOnDeviceHistory,
@@ -570,23 +572,44 @@ export class PageAssistDatabase {
   }
 
   // Prompts Methods
-  async getAllPrompts(): Promise<Prompts> {
+  /** Read shared, unlinked legacy data without probing authenticated ownership. */
+  async getSharedLocalPrompts(deleted = false): Promise<Prompts> {
+    return await db.prompts
+      .filter(p => p.ownerId == null && isPromptOwnedBy(p, null) && !!p.deletedAt === deleted)
+      .reverse()
+      .sortBy(deleted ? 'deletedAt' : 'createdAt');
+  }
+
+  async getAllPrompts(expectedOwnerId?: string | null): Promise<Prompts> {
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
     // Only return non-deleted prompts
     return await db.prompts
-      .filter(p => !p.deletedAt)
+      .filter(p => !p.deletedAt && isPromptOwnedBy(p, ownerId))
       .reverse()
       .sortBy('createdAt');
   }
 
-  async getDeletedPrompts(): Promise<Prompts> {
+  async getDeletedPrompts(expectedOwnerId?: string | null): Promise<Prompts> {
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
     // Return soft-deleted prompts (trash)
     return await db.prompts
-      .filter(p => !!p.deletedAt)
+      .filter(p => !!p.deletedAt && isPromptOwnedBy(p, ownerId))
       .reverse()
       .sortBy('deletedAt');
   }
 
-  async addPrompt(prompt: Prompt) {
+  /** Copy historical storage verbatim; migration has no authority to claim links. */
+  async migrateLegacyPrompt(prompt: Prompt) {
+    await db.prompts.add(prompt);
+  }
+
+  async countStoredPromptsForMigration(): Promise<number> {
+    return (await db.prompts.toArray()).length;
+  }
+
+  async addPrompt(prompt: Prompt, expectedOwnerId?: string | null) {
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
+    if (prompt.ownerId && prompt.ownerId !== ownerId) throw new Error("Prompt account changed");
     const mergedKeywords = prompt.keywords ?? prompt.tags;
     const now = Date.now();
     const normalizedUsageCount =
@@ -595,6 +618,7 @@ export class PageAssistDatabase {
         : 0;
     const normalized: Prompt = {
       ...prompt,
+      ownerId,
       title: prompt.title || prompt.name,
       name: prompt.name ?? prompt.title,
       tags: mergedKeywords ?? prompt.tags,
@@ -618,17 +642,23 @@ export class PageAssistDatabase {
   }
 
   async deletePrompt(id: string) {
+    assertPromptOwnedBy(await db.prompts.get(id), await resolvePromptOwnerId());
     // Soft delete: set deletedAt timestamp
     const now = Date.now();
     await db.prompts.update(id, { deletedAt: now, updatedAt: now });
   }
 
-  async permanentlyDeletePrompt(id: string) {
+  async permanentlyDeletePrompt(id: string, expectedOwnerId?: string | null) {
+    assertPromptOwnedBy(await db.prompts.get(id), await resolvePromptOwnerId(expectedOwnerId));
     // Hard delete: remove from database entirely
     await db.prompts.delete(id);
   }
 
-  async restorePromptSnapshot(snapshot: Prompt) {
+  async restorePromptSnapshot(snapshot: Prompt, expectedOwnerId?: string | null) {
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
+    const existing = await db.prompts.get(snapshot.id);
+    assertPromptOwnedBy(existing, ownerId);
+    if (snapshot.ownerId !== existing.ownerId) throw new Error("Prompt owner cannot change");
     if (!(await db.prompts.get(snapshot.id))) {
       throw new Error('prompt_snapshot_target_missing');
     }
@@ -636,24 +666,27 @@ export class PageAssistDatabase {
   }
 
   async restorePrompt(id: string) {
+    assertPromptOwnedBy(await db.prompts.get(id), await resolvePromptOwnerId());
     // Restore from trash: clear deletedAt
     const now = Date.now();
     await db.prompts.update(id, { deletedAt: null, updatedAt: now });
   }
 
-  async emptyTrash(): Promise<number> {
+  async emptyTrash(expectedOwnerId?: string | null): Promise<number> {
     // Permanently delete all trashed prompts
-    const deleted = await db.prompts.filter(p => !!p.deletedAt).toArray();
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
+    const deleted = await db.prompts.filter(p => !!p.deletedAt && isPromptOwnedBy(p, ownerId)).toArray();
     const ids = deleted.map(p => p.id);
     await db.prompts.bulkDelete(ids);
     return ids.length;
   }
 
-  async autoCleanupTrash(maxAgeDays: number = 30): Promise<number> {
+  async autoCleanupTrash(maxAgeDays: number = 30, expectedOwnerId?: string | null): Promise<number> {
     // Auto-purge prompts deleted more than maxAgeDays ago
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
     const cutoff = Date.now() - (maxAgeDays * 24 * 60 * 60 * 1000);
     const expired = await db.prompts
-      .filter(p => !!p.deletedAt && p.deletedAt < cutoff)
+      .filter(p => !!p.deletedAt && p.deletedAt < cutoff && isPromptOwnedBy(p, ownerId))
       .toArray();
     const ids = expired.map(p => p.id);
     await db.prompts.bulkDelete(ids);
@@ -672,10 +705,12 @@ export class PageAssistDatabase {
       favorite?: boolean
       usageCount?: number
       lastUsedAt?: number | null
-    }
+    },
+    expectedOwnerId?: string | null
   ) {
     const existing = await db.prompts.get(id);
     if (!existing) return;
+    assertPromptOwnedBy(existing, await resolvePromptOwnerId(expectedOwnerId));
 
     const mergedKeywords = updates.keywords ?? updates.tags;
     const resolvedUsageCount =
@@ -691,6 +726,7 @@ export class PageAssistDatabase {
     const merged: Prompt = {
       ...existing,
       ...updates,
+      ownerId: existing.ownerId,
       title: updates.name ?? updates.title ?? existing.title,
       name: updates.name ?? existing.name ?? existing.title,
       content: updates.content ?? existing.content,
@@ -723,6 +759,7 @@ export class PageAssistDatabase {
   }
 
   async incrementPromptUsage(id: string) {
+    assertPromptOwnedBy(await db.prompts.get(id), await resolvePromptOwnerId());
     const existing = await db.prompts.get(id);
     if (!existing || existing.deletedAt) return null;
 
@@ -744,45 +781,32 @@ export class PageAssistDatabase {
     };
   }
 
-  async getPromptById(id: string): Promise<Prompt | undefined> {
-    return await db.prompts.get(id);
+  async getPromptById(id: string, expectedOwnerId?: string | null): Promise<Prompt | undefined> {
+    const prompt = await db.prompts.get(id);
+    const ownerId = await resolvePromptOwnerId(expectedOwnerId);
+    return prompt && isPromptOwnedBy(prompt, ownerId) ? prompt : undefined;
   }
 
   // ─── Prompt Sync Methods ───
 
   async getPromptByServerId(serverId: number): Promise<Prompt | undefined> {
-    return await db.prompts
-      .where('serverId')
-      .equals(serverId)
-      .first();
+    return (await this.getAllPrompts()).find(p => p.serverId === serverId);
   }
 
   async getPromptsBySyncStatus(status: PromptSyncStatus): Promise<Prompts> {
-    return await db.prompts
-      .where('syncStatus')
-      .equals(status)
-      .filter(p => !p.deletedAt)
-      .toArray();
+    return (await this.getAllPrompts()).filter(p => p.syncStatus === status);
   }
 
   async getPromptsByStudioProject(projectId: number): Promise<Prompts> {
-    return await db.prompts
-      .where('studioProjectId')
-      .equals(projectId)
-      .filter(p => !p.deletedAt)
-      .toArray();
+    return (await this.getAllPrompts()).filter(p => p.studioProjectId === projectId);
   }
 
   async getSyncedPrompts(): Promise<Prompts> {
-    return await db.prompts
-      .filter(p => !p.deletedAt && !!p.serverId)
-      .toArray();
+    return (await this.getAllPrompts()).filter(p => !!p.serverId);
   }
 
   async getLocalOnlyPrompts(): Promise<Prompts> {
-    return await db.prompts
-      .filter(p => !p.deletedAt && !p.serverId && p.syncStatus !== 'synced')
-      .toArray();
+    return (await this.getAllPrompts()).filter(p => !p.serverId && p.syncStatus !== 'synced');
   }
 
   async updatePromptSyncStatus(id: string, updates: {
@@ -792,9 +816,10 @@ export class PageAssistDatabase {
     studioPromptId?: number | null;
     lastSyncedAt?: number | null;
     serverUpdatedAt?: string | null;
-  }) {
+  }, expectedOwnerId?: string | null) {
     const existing = await db.prompts.get(id);
     if (!existing) return;
+    assertPromptOwnedBy(existing, await resolvePromptOwnerId(expectedOwnerId));
 
     await db.prompts.update(id, {
       ...updates,
@@ -846,6 +871,15 @@ export class PageAssistDatabase {
         const destination = await db.chatHistories.get(history.id);
         if (destination?.local_settings_guard)
           history.local_settings_guard = destination.local_settings_guard;
+        if (destination && (destination.local_owner_key != null || destination.server_scope_key != null || destination.server_chat_id != null || destination.message_source === "server")) {
+          // Restoring public data cannot clear or redirect an existing trusted owner.
+          Object.assign(history, {
+            local_owner_key: destination.local_owner_key,
+            server_scope_key: destination.server_scope_key,
+            server_chat_id: destination.server_chat_id,
+            message_source: destination.message_source
+          });
+        }
       }
       if (!mergeData && !replaceExisting) {
         (await db.chatHistories.toArray()).forEach(assertNoPendingLocalSettingsWrite);
@@ -882,12 +916,12 @@ export class PageAssistDatabase {
   async importPromptsV2(data: Prompt[], options: {
     replaceExisting?: boolean;
     mergeData?: boolean;
+    expectedOwnerId?: string | null;
+    ownerScope?: CapturedPromptOwnerScope;
   } = {}) {
     const { replaceExisting = false, mergeData = true } = options;
-
-    if (!mergeData && !replaceExisting) {
-      await db.prompts.clear();
-    }
+    options.ownerScope?.assertCurrent();
+    const ownerId = options.ownerScope ? options.ownerScope.ownerId : await resolvePromptOwnerId(options.expectedOwnerId);
 
     // Normalize all prompts first
     const normalizedPrompts = data.map(prompt => {
@@ -902,6 +936,17 @@ export class PageAssistDatabase {
           : null;
       return {
         ...prompt,
+        // Imports are content copies, never authority to another account's link.
+        ownerId,
+        serverId: null,
+        studioProjectId: null,
+        studioPromptId: null,
+        serverLibraryId: null,
+        serverLibraryUuid: null,
+        syncStatus: 'local',
+        sourceSystem: 'workspace',
+        lastSyncedAt: null,
+        serverUpdatedAt: null,
         title: prompt.title || prompt.name,
         name: prompt.name ?? prompt.title,
         tags: mergedKeywords ?? prompt.tags,
@@ -917,12 +962,25 @@ export class PageAssistDatabase {
 
     // Use transaction for atomic batch operations
     await db.transaction('rw', db.prompts, async () => {
+      const foreign = await db.prompts.filter(p => !isPromptOwnedBy(p, ownerId)).toArray();
+      options.ownerScope?.assertCurrent();
+      const foreignIds = new Set(foreign.map(p => p.id));
+      const allowed = normalizedPrompts.filter(p => !foreignIds.has(p.id));
       if (replaceExisting) {
-        // Replace mode should fully replace the existing prompt dataset.
-        await db.prompts.clear();
-        await db.prompts.bulkPut(normalizedPrompts);
-        imported = normalizedPrompts.length;
+        const visible = await db.prompts.filter(p => isPromptOwnedBy(p, ownerId)).toArray();
+        options.ownerScope?.assertCurrent();
+        await db.prompts.bulkDelete(visible.map(p => p.id));
+        options.ownerScope?.assertCurrent();
+        await db.prompts.bulkPut(allowed);
+        imported = allowed.length;
+        skipped = normalizedPrompts.length - allowed.length;
         return;
+      }
+
+      if (!mergeData) {
+        const visible = await db.prompts.filter(p => isPromptOwnedBy(p, ownerId)).toArray();
+        options.ownerScope?.assertCurrent();
+        await db.prompts.bulkDelete(visible.map(p => p.id));
       }
 
       // Filter out existing prompts
@@ -930,7 +988,8 @@ export class PageAssistDatabase {
         (await db.prompts.where('id').anyOf(normalizedPrompts.map(p => p.id)).toArray())
           .map(p => p.id)
       );
-      const newPrompts = normalizedPrompts.filter(p => !existingIds.has(p.id));
+      const newPrompts = allowed.filter(p => !existingIds.has(p.id));
+      options.ownerScope?.assertCurrent();
       skipped = normalizedPrompts.length - newPrompts.length;
       if (newPrompts.length > 0) {
         await db.prompts.bulkPut(newPrompts);

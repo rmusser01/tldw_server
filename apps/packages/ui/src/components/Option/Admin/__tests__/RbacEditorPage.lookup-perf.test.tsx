@@ -85,7 +85,7 @@ const openUserPermissions = async (userRoles: unknown[]) => {
   fireEvent.click(await screen.findByText("alice"))
 
   await waitFor(() => {
-    expect(apiMock.listUserOverrides).toHaveBeenCalledWith(10)
+    expect(apiMock.listUserOverrides).toHaveBeenCalledWith(10, expect.objectContaining({ configSnapshot: expect.objectContaining({ serverUrl: "https://admin-fixture.example.test", authMode: "single-user" }), abortSignal: expect.any(AbortSignal) }))
   })
 }
 
@@ -95,6 +95,8 @@ describe("RbacEditorPage lookup performance (C-S3)", () => {
     apiMock.getRolePermissionMatrix.mockResolvedValue({
       roles: [],
       permissions: [],
+      grants: [],
+      total_roles: 0,
       grid: {}
     })
     apiMock.listPermissionCategories.mockResolvedValue([])
@@ -161,3 +163,7 @@ describe("RbacEditorPage lookup performance (C-S3)", () => {
     20_000
   )
 })
+
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({
+  useCanonicalConnectionConfig: () => ({ config: { serverUrl: "https://admin-fixture.example.test", authMode: "single-user", apiKey: "fixture-only" }, authorityLoading: false, loading: false })
+}))

@@ -7,6 +7,7 @@ import { useSidepanelChatHandoffImport } from "../../../Option/Playground/hooks/
 import { encodeSidepanelChatWebUiHandoff, SIDEPANEL_CHAT_WEBUI_HANDOFF_SOURCE } from "@/services/tldw/sidepanel-chat-webui-handoff"
 import type { SidepanelChatHandoffPackage } from "@/services/sidepanel-chat-handoff"
 import { Storage } from "@plasmohq/storage"
+import { REFRESH_ROTATION_KEY } from "@/services/tldw/single-user-credential"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 
 const handoffIO = vi.hoisted(() => ({ read: vi.fn(), consume: vi.fn() }))
@@ -55,6 +56,7 @@ vi.mock("@/services/service-prompts", async (importOriginal) => ({
 
 
 import { useComposerText } from "../hooks/useComposerText"
+import { usePlaygroundAttachments } from "@/components/Option/Playground/hooks/usePlaygroundAttachments"
 
 const verifiedScope = (user: string): FixtureOwnerScope => ({
   scopeKey: user,
@@ -87,8 +89,124 @@ const switchTo = async (user: string) => {
 
 describe.each([false, true])("composer account ownership using the real draft registry (tabScoped=%s)", tabScopedDraft => {
   const mount = () => renderHook(() => useComposerText({ draftKey, tabScopedDraft, textareaRef: React.createRef<HTMLTextAreaElement>() }))
-  beforeEach(() => { vi.useFakeTimers(); localStorage.clear(); sessionStorage.clear(); authority.user = "alice"; authority.org = null; authority.error = null; authority.resolveOnce = null })
-  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers() })
+  beforeEach(() => { vi.stubGlobal("Image", class { src = ""; decode = () => Promise.resolve() }); vi.useFakeTimers(); localStorage.clear(); sessionStorage.clear(); authority.user = "alice"; authority.org = null; authority.error = null; authority.resolveOnce = null })
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers() })
+
+  it("keeps the next dropped image after the previous image commits", async () => {
+    const readers: FileReader[] = []
+    let secondStarted: () => void
+    const secondRead = new Promise<void>((resolve) => {
+      secondStarted = resolve
+    })
+    vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(function (
+      this: FileReader
+    ) {
+      readers.push(this)
+      if (readers.length === 2) secondStarted!()
+    })
+    const { result, rerender } = renderHook(
+      ({ files }: { files: File[] }) => {
+        const composer = useComposerText({
+          draftKey,
+          tabScopedDraft,
+          textareaRef: React.createRef<HTMLTextAreaElement>()
+        })
+        const attachments = usePlaygroundAttachments({
+          chatMode: "chat",
+          setFieldValue: composer.form.setFieldValue,
+          captureImageOwnership: () =>
+            composer.captureDraftOwnership().isImageCurrent,
+          handleFileUpload: async () => {},
+          notifyImageAttachmentDisabled: vi.fn()
+        })
+        attachments.useDroppedFiles(files)
+        return composer
+      },
+      { initialProps: { files: [] } }
+    )
+    await settle()
+    rerender({
+      files: [
+        new File(["old"], "old.png", { type: "image/png" }),
+        new File(["new"], "new.png", { type: "image/png" })
+      ]
+    })
+    await act(async () => {
+      Object.defineProperty(readers[0], "result", {
+        value: "data:image/png;base64,b2xk"
+      })
+      readers[0].dispatchEvent(new ProgressEvent("load"))
+      // Start the real sequential next read before React commits the first image.
+      await secondRead
+    })
+    await act(async () => {
+      Object.defineProperty(readers[1], "result", {
+        value: "data:image/png;base64,bmV3"
+      })
+      readers[1].dispatchEvent(new ProgressEvent("load"))
+      await Promise.resolve()
+    })
+    await settle()
+    expect(result.current.form.values.image).toBe("data:image/png;base64,bmV3")
+    expect(result.current.form.values.imageFilename).toBe("new.png")
+  })
+
+  it.each(["logout", "reset", "typing"])(
+    "fences a pending image read correctly across %s",
+    async (change) => {
+      const pendingReaders: FileReader[] = []
+      vi.spyOn(FileReader.prototype, "readAsDataURL").mockImplementation(
+        function (this: FileReader) {
+          pendingReaders.push(this)
+        }
+      )
+      const { result } = renderHook(() => {
+        const composer = useComposerText({
+          draftKey,
+          tabScopedDraft,
+          textareaRef: React.createRef<HTMLTextAreaElement>()
+        })
+        const attachments = usePlaygroundAttachments({
+          chatMode: "chat",
+          setFieldValue: composer.form.setFieldValue,
+          captureImageOwnership: () =>
+            composer.captureDraftOwnership().isImageCurrent,
+          handleFileUpload: async () => {},
+          notifyImageAttachmentDisabled: vi.fn()
+        })
+        return { composer, attachments }
+      })
+      await settle()
+      let pending: Promise<void>
+      act(() => {
+        pending = result.current.attachments.onInputChange(
+          new File(["private"], "alice-private.png", { type: "image/png" })
+        )
+      })
+      if (change === "logout") {
+        await switchTo("bob")
+        await settle()
+      }
+      if (change === "reset") act(() => result.current.composer.form.reset())
+      if (change === "typing")
+        act(() => result.current.composer.setMessageValue("New caption"))
+      await act(async () => {
+        Object.defineProperty(pendingReaders[0], "result", {
+          value: "data:image/png;base64,YWxpY2U="
+        })
+        pendingReaders[0].dispatchEvent(new ProgressEvent("load"))
+        await pending!
+      })
+      expect(result.current.composer.form.values.image).toBe(
+        change === "typing" ? "data:image/png;base64,YWxpY2U=" : ""
+      )
+      expect(result.current.composer.form.values.imageFilename).toBe(
+        change === "typing" ? "alice-private.png" : ""
+      )
+      if (change === "typing")
+        expect(result.current.composer.form.values.message).toBe("New caption")
+    }
+  )
 
   // Actual owner hook, composer and browser storage registry/shim. Only verified
   // account resolution is scripted; no live backend or credential verification.
@@ -227,11 +345,11 @@ describe.each([false, true])("composer account ownership using the real draft re
   it("clears an active message and image on logout and never restores them for Bob", async () => {
     const { result } = mount()
     await settle()
-    act(() => { result.current.setMessageValue("ALICE PRIVATE"); result.current.form.setFieldValue("image", "alice-image") })
+    act(() => { result.current.setMessageValue("ALICE PRIVATE"); result.current.form.setFieldValue("image", "alice-image"); result.current.form.setFieldValue("imageFilename", "alice-private.png") })
     await settle()
     await switchTo("bob")
     await settle()
-    expect(result.current.form.values).toEqual({ message: "", image: "" })
+    expect(result.current.form.values).toEqual({ message: "", image: "", imageFilename: "" })
   })
 
   it("recovers each owner's draft on reload and reciprocal login", async () => {
@@ -259,6 +377,77 @@ describe.each([false, true])("composer account ownership using the real draft re
     expect(view.result.current.form.values.message).toBe("ALICE PRIVATE")
   })
 
+  it("restores a persisted draft after expired refresh hides the composer and the same owner signs in", async () => {
+    let view = mount()
+    await settle()
+    act(() => view.result.current.setMessageValue("ALICE UNSENT BEFORE EXPIRY"))
+    await settle()
+    expect(view.result.current.draftSaved).toBe(true)
+    act(() => {
+      authority.error = { code: "service_prompt_scope_unresolved" }
+      window.dispatchEvent(new CustomEvent("tldw:config-updated", {
+        detail: { refreshSessionInvalidated: true }
+      }))
+    })
+    await settle()
+    expect(view.result.current.form.values.message).toBe("")
+    view.unmount()
+    authority.error = null
+    view = mount()
+    await settle()
+    expect(view.result.current.form.values.message).toBe("ALICE UNSENT BEFORE EXPIRY")
+  })
+
+  it("reverifies an unresolved draft owner after storage-only token renewal", async () => {
+    authority.error = new TypeError("Failed to fetch")
+    const view = mount()
+    await settle()
+    act(() => view.result.current.setMessageValue("ALICE WAITING FOR VERIFICATION"))
+    await settle()
+    expect(view.result.current.draftReady).toBe(false)
+    authority.error = null
+    await act(async () => {
+      await new Storage({ area: "local" }).set(REFRESH_ROTATION_KEY, {
+        accessToken: "renewed-access", refreshToken: "renewed-refresh"
+      })
+    })
+    await settle()
+    expect(view.result.current.draftReady).toBe(true)
+    expect(view.result.current.form.values.message).toBe("ALICE WAITING FOR VERIFICATION")
+    expect(view.result.current.draftSaved).toBe(true)
+  })
+
+  it("does not reset a verified draft owner on storage-only token renewal", async () => {
+    const view = mount()
+    await settle()
+    act(() => view.result.current.setMessageValue("VERIFIED ALICE DRAFT"))
+    await settle()
+    authority.error = { status: 401 }
+    await act(async () => {
+      await new Storage({ area: "local" }).set(REFRESH_ROTATION_KEY, {
+        accessToken: "renewed-access", refreshToken: "renewed-refresh"
+      })
+    })
+    await settle()
+    expect(view.result.current.form.values.message).toBe("VERIFIED ALICE DRAFT")
+    expect(view.result.current.draftReady).toBe(true)
+  })
+
+  it("does not persist pending text if token renewal still cannot verify its owner", async () => {
+    authority.error = { status: 401 }
+    const view = mount()
+    await settle()
+    act(() => view.result.current.setMessageValue("UNVERIFIED PENDING TEXT"))
+    await act(async () => {
+      await new Storage({ area: "local" }).set(REFRESH_ROTATION_KEY, {
+        accessToken: "renewed-access", refreshToken: "renewed-refresh"
+      })
+    })
+    await settle()
+    expect(view.result.current.draftReady).toBe(false)
+    expect(ownerRecordKeys()).toEqual([])
+  })
+
   it("keeps unsaved edits on an ordinary same-principal config update", async () => {
     const { result } = mount()
     await settle()
@@ -284,7 +473,7 @@ describe.each([false, true])("composer account ownership using the real draft re
       window.dispatchEvent(new Event(event))
     })
     await act(async () => { await vi.dynamicImportSettled() })
-    expect(result.current.form.values).toEqual({ message: "ALICE PENDING", image: "alice-image" })
+    expect(result.current.form.values).toEqual({ message: "ALICE PENDING", image: "alice-image", imageFilename: "" })
     expect(result.current.draftOwnerVerificationState).toBe("ready")
     expect(result.current.draftReady).toBe(true)
     expect(localStorage.getItem(ownerKey)).toContain("ALICE SAVED")
@@ -295,7 +484,7 @@ describe.each([false, true])("composer account ownership using the real draft re
     authority.resolveOnce = null
     act(() => window.dispatchEvent(new Event(event)))
     await settle()
-    expect(result.current.form.values).toEqual({ message: "ALICE PENDING", image: "alice-image" })
+    expect(result.current.form.values).toEqual({ message: "ALICE PENDING", image: "alice-image", imageFilename: "" })
   })
 
   it.each([
@@ -312,7 +501,7 @@ describe.each([false, true])("composer account ownership using the real draft re
       window.dispatchEvent(new Event("focus"))
     })
     await settle()
-    expect(result.current.form.values).toEqual({ message: "", image: "" })
+    expect(result.current.form.values).toEqual({ message: "", image: "", imageFilename: "" })
     expect(result.current.draftOwnerVerificationState).toBe("error")
     expect(result.current.draftReady).toBe(false)
     expect(ownerRecordKeys()).toEqual([])
@@ -332,7 +521,7 @@ describe.each([false, true])("composer account ownership using the real draft re
       window.dispatchEvent(new CustomEvent(event, { detail }))
     })
     await settle()
-    expect(result.current.form.values).toEqual({ message: "", image: "" })
+    expect(result.current.form.values).toEqual({ message: "", image: "", imageFilename: "" })
     expect(ownerRecordKeys()).toEqual([])
   })
 

@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useStore } from "zustand"
 import { AdvancedFilters } from "./components/AdvancedFilters"
@@ -53,24 +53,66 @@ export function Repo2TxtPage() {
     return nodes.filter((node) => node.path.toLowerCase().includes(query))
   }, [nodes, filterText])
 
-  const syncNodesIntoStore = (nextNodes: RepoTreeNode[]) => {
-    store.getState().setNodes(nextNodes)
-  }
+  const activeOperation = useRef<AbortController | null>(null)
+  useEffect(() => () => activeOperation.current?.abort(), [])
 
-  const handleSelectProvider = (nextProvider: Exclude<ProviderKind, null>) => {
-    setProviderKind(nextProvider)
+  const resetSource = () => {
     setProvider(null)
     setSourceLoaded(false)
     setOutput("")
     setStatusMessage("")
-    syncNodesIntoStore([])
+    store.getState().setNodes([])
+  }
+
+  const runOperation = async (work: (signal: AbortSignal) => Promise<void>) => {
+    const controller = new AbortController()
+    activeOperation.current?.abort()
+    activeOperation.current = controller
+    setBusy(true)
+    setOutput("")
+    setStatusMessage("")
+    try {
+      await work(controller.signal)
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setStatusMessage(
+          error instanceof Error
+            ? error.message
+            : t("option:repo2txt.errors.generate", {
+                defaultValue: "Failed to generate output."
+              })
+        )
+      }
+    } finally {
+      if (activeOperation.current === controller) {
+        activeOperation.current = null
+        setBusy(false)
+      }
+    }
+  }
+
+  const handleCancel = () => {
+    activeOperation.current?.abort()
+    activeOperation.current = null
+    setBusy(false)
+    setOutput("")
+    setStatusMessage(
+      t("option:repo2txt.status.cancelled", {
+        defaultValue: "Cancelled. No output was generated."
+      })
+    )
+  }
+
+  const handleSelectProvider = (nextProvider: Exclude<ProviderKind, null>) => {
+    setProviderKind(nextProvider)
+    resetSource()
   }
 
   const handleLoadGithub = async () => {
-    setBusy(true)
-    setStatusMessage("")
-    try {
+    resetSource()
+    await runOperation(async (signal) => {
       const GitHubProvider = await loadGitHubProvider()
+      signal.throwIfAborted()
       const githubProvider = new GitHubProvider()
       if (!githubProvider.validateUrl(githubUrl)) {
         throw new Error(
@@ -79,10 +121,10 @@ export function Repo2TxtPage() {
           })
         )
       }
-
-      const tree = await githubProvider.fetchTree(githubUrl)
+      const tree = await githubProvider.fetchTree(githubUrl, { signal })
+      signal.throwIfAborted()
       setProvider(githubProvider)
-      syncNodesIntoStore(tree)
+      store.getState().setNodes(tree)
       setSourceLoaded(tree.length > 0)
       setStatusMessage(
         t("option:repo2txt.status.loadedTree", {
@@ -90,45 +132,28 @@ export function Repo2TxtPage() {
           count: tree.length
         })
       )
-    } catch (error) {
-      console.error("Failed to load GitHub repository.", error)
-      setSourceLoaded(false)
-      setStatusMessage(
-        error instanceof Error
-          ? error.message
-          : t("option:repo2txt.errors.loadGithub", {
-              defaultValue: "Failed to load GitHub repository."
-            })
-      )
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   const handleLocalFilesSelected = async (files: FileList) => {
-    setBusy(true)
-    setStatusMessage("")
-    try {
+    resetSource()
+    await runOperation(async (signal) => {
       const LocalProvider = await loadLocalProvider()
+      signal.throwIfAborted()
       const localProvider = new LocalProvider()
       const firstFile = files[0]
-      const looksLikeZip = files.length === 1 && /\.zip$/i.test(firstFile?.name ?? "")
-
-      if (looksLikeZip) {
-        await localProvider.initialize({
-          source: "zip",
-          zipFile: firstFile
-        })
-      } else {
-        await localProvider.initialize({
-          source: "directory",
-          files
-        })
-      }
-
+      const looksLikeZip =
+        files.length === 1 && /\.zip$/i.test(firstFile?.name ?? "")
+      await localProvider.initialize(
+        looksLikeZip
+          ? { source: "zip", zipFile: firstFile, signal }
+          : { source: "directory", files, signal }
+      )
+      signal.throwIfAborted()
       const tree = await localProvider.fetchTree("local://directory")
+      signal.throwIfAborted()
       setProvider(localProvider)
-      syncNodesIntoStore(tree)
+      store.getState().setNodes(tree)
       setSourceLoaded(tree.length > 0)
       setStatusMessage(
         t("option:repo2txt.status.loadedLocal", {
@@ -136,32 +161,20 @@ export function Repo2TxtPage() {
           count: tree.length
         })
       )
-    } catch (error) {
-      console.error("Failed to load local files.", error)
-      setSourceLoaded(false)
-      setStatusMessage(
-        error instanceof Error
-          ? error.message
-          : t("option:repo2txt.errors.loadLocal", {
-              defaultValue: "Failed to load local files."
-            })
-      )
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   const handleTogglePath = (path: string) => {
     store.getState().togglePath(path)
+    setOutput("")
+    setStatusMessage("")
   }
 
   const handleGenerate = async () => {
     if (!provider) return
-
-    const selectedNodes = nodes.filter(
-      (node) => node.type === "blob" && selectedPaths.has(node.path)
-    )
-
+    const selectedNodes = nodes
+      .filter((node) => node.type === "blob" && selectedPaths.has(node.path))
+      .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0))
     if (selectedNodes.length === 0) {
       setOutput("")
       setStatusMessage(
@@ -171,51 +184,47 @@ export function Repo2TxtPage() {
       )
       return
     }
-
-    setBusy(true)
-    setStatusMessage("")
-    try {
+    await runOperation(async (signal) => {
       const fetchFilesWithConcurrency = await loadFetchFilesWithConcurrency()
+      signal.throwIfAborted()
       const fileContents = await fetchFilesWithConcurrency({
         nodes: selectedNodes,
         provider,
         limit: 5,
+        signal,
         onProgress: (completed, total) => {
-          setStatusMessage(
-            t("option:repo2txt.status.fetchingFiles", {
-              defaultValue: "Fetching files ({{completed}}/{{total}})...",
-              completed,
-              total
-            })
-          )
+          if (!signal.aborted)
+            setStatusMessage(
+              t("option:repo2txt.status.fetchingFiles", {
+                defaultValue: "Fetching files ({{completed}}/{{total}})...",
+                completed,
+                total
+              })
+            )
         }
       })
+      signal.throwIfAborted()
       const Formatter = await loadFormatter()
+      signal.throwIfAborted()
       const formatted = await Formatter.formatAsync(
         toDisplayTree(selectedNodes),
-        fileContents
+        fileContents,
+        undefined,
+        signal
       )
-      setOutput(`${formatted.directoryTree}\n\n${formatted.fileContents}`)
+      signal.throwIfAborted()
+      const text = `${formatted.directoryTree}\n\n${formatted.fileContents}`
+      setOutput(text)
       setStatusMessage(
-        t("option:repo2txt.status.generated", {
+        t("option:repo2txt.status.generatedBounded", {
           defaultValue:
-            "Generated output for {{count}} files ({{tokenCount}} tokens).",
+            "Generated {{count}} files; {{bytes}} UTF-8 output bytes ({{tokenCount}} tokens).",
           count: selectedNodes.length,
+          bytes: new TextEncoder().encode(text).byteLength,
           tokenCount: formatted.tokenCount
         })
       )
-    } catch (error) {
-      console.error("Failed to generate output.", error)
-      setStatusMessage(
-        error instanceof Error
-          ? error.message
-          : t("option:repo2txt.errors.generate", {
-              defaultValue: "Failed to generate output."
-            })
-      )
-    } finally {
-      setBusy(false)
-    }
+    })
   }
 
   const handleCopy = async () => {
@@ -236,10 +245,7 @@ export function Repo2TxtPage() {
   }
 
   return (
-    <section
-      data-testid="repo2txt-route-root"
-      className="space-y-4"
-    >
+    <section data-testid="repo2txt-route-root" className="space-y-4">
       <div
         data-testid="repo2txt-provider-panel"
         className="space-y-3 rounded border p-3"
@@ -249,7 +255,10 @@ export function Repo2TxtPage() {
           githubUrl={githubUrl}
           busy={busy}
           onSelectProvider={handleSelectProvider}
-          onGithubUrlChange={setGithubUrl}
+          onGithubUrlChange={(value) => {
+            setGithubUrl(value)
+            resetSource()
+          }}
           onLoadGithub={handleLoadGithub}
           onLocalFilesSelected={handleLocalFilesSelected}
         />
@@ -263,21 +272,16 @@ export function Repo2TxtPage() {
           nodes={filteredNodes}
           selectedPaths={selectedPaths}
           onTogglePath={handleTogglePath}
+          disabled={busy}
         />
         {statusMessage && (
-          <p
-            role="status"
-            className="text-xs text-text-subtle"
-          >
+          <p role="status" className="text-xs text-text-subtle">
             {statusMessage}
           </p>
         )}
       </div>
 
-      <div
-        data-testid="repo2txt-output-panel"
-        className="rounded border p-3"
-      >
+      <div data-testid="repo2txt-output-panel" className="rounded border p-3">
         <OutputPanel
           output={output}
           busy={busy}
@@ -285,6 +289,7 @@ export function Repo2TxtPage() {
           onGenerate={handleGenerate}
           onCopy={handleCopy}
           onDownload={handleDownload}
+          onCancel={handleCancel}
         />
       </div>
     </section>

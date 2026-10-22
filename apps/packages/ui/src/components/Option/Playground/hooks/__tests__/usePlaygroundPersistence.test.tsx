@@ -115,6 +115,7 @@ const buildDeps = (overrides: Partial<UsePlaygroundPersistenceDeps> = {}) => {
     serverChatSource: null,
     setServerChatSource: vi.fn(state.setServerChatSource),
     setServerChatVersion: vi.fn(state.setServerChatVersion),
+    setServerChatMetaLoaded: vi.fn(state.setServerChatMetaLoaded),
     setServerChatCharacterId: vi.fn(state.setServerChatCharacterId),
     setServerChatAssistantKind: vi.fn(state.setServerChatAssistantKind),
     setServerChatAssistantId: vi.fn((id: string | number | null) =>

@@ -41,6 +41,12 @@ vi.mock("../LlamacppInventoryPanel", async (importOriginal) => {
   }
 })
 
+const connection = vi.hoisted(() => ({
+  config: { serverUrl: "http://admin-fixture.test", authMode: "single-user", apiKey: "fixture-admin-owner" },
+  authorityLoading: false
+}))
+vi.mock("@/hooks/useCanonicalConnectionConfig", () => ({ useCanonicalConnectionConfig: () => connection }))
+
 const apiMock = vi.hoisted(() => ({
   getLlamacppConfig: vi.fn(),
   getLlamacppStatus: vi.fn(),
@@ -275,7 +281,8 @@ describe("LlamacppAdminPage render isolation", () => {
         n_gpu_layers: 0,
         tensor_split: [38, 62],
         host: "0.0.0.0"
-      })
+      }),
+      expect.objectContaining({ configSnapshot: connection.config, abortSignal: expect.any(AbortSignal) })
     )
   })
 })

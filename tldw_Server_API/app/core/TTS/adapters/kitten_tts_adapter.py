@@ -13,7 +13,7 @@ from loguru import logger
 from ..streaming_audio_writer import AudioNormalizer, StreamingAudioWriter
 from ..tts_exceptions import TTSGenerationError, TTSProviderInitializationError, TTSProviderNotConfiguredError
 from ..tts_validation import validate_tts_request
-from ..utils import parse_bool
+from ..utils import hold_tts_engine, parse_bool
 from ..vendors.kittentts_compat import (
     DEFAULT_REPO_ID,
     DEFAULT_VOICE_ALIASES,
@@ -91,7 +91,7 @@ class KittenTTSAdapter(TTSAdapter):
         return normalize_repo_id(request_model or self.model_name or DEFAULT_REPO_ID)
 
     async def _load_runtime_for_model(self, model_name: str) -> KittenRuntime:
-        async with self._runtime_lock:
+        async with hold_tts_engine(self._runtime_lock) as run:
             active_repo = getattr(self._runtime_assets, "repo_id", None)
             if self._runtime is not None and active_repo == model_name:
                 self._runtime_load_failed = False
@@ -100,14 +100,14 @@ class KittenTTSAdapter(TTSAdapter):
             try:
                 configured_revision = self.model_revision if model_name == self.model_name else None
                 resolved_revision = resolve_model_revision(model_name, configured_revision)
-                assets = await asyncio.to_thread(
+                assets = await run(
                     download_model_assets,
                     model_name,
                     cache_dir=self.cache_dir,
                     auto_download=self.auto_download,
                     revision=resolved_revision,
                 )
-                runtime = await asyncio.to_thread(KittenRuntime, assets)
+                runtime = await run(KittenRuntime, assets)
             except Exception as exc:
                 self._runtime_load_failed = True
                 raise TTSProviderInitializationError(

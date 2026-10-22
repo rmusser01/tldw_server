@@ -66,7 +66,7 @@ def test_get_prompt_studio_user_unauthenticated_401(monkeypatch):
 
 
     async def fake_get_request_user(*_args, **_kwargs):
-        raise RuntimeError("should_not_be_called")
+        raise HTTPException(status_code=401, detail="Authentication required")
 
     monkeypatch.setattr(deps, "get_request_user", fake_get_request_user, raising=True)
 

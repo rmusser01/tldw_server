@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.Explainer_DB import ExplainerDatabase
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
 from tldw_Server_API.app.core.Explainer.jobs import (
     EXPLAINER_DOMAIN,
     EXPLAINER_JOB_TYPE,
@@ -971,3 +972,45 @@ async def test_configured_generator_calls_the_provider_off_the_event_loop_thread
 
     assert result["children"][0]["title"] == "Child"
     assert seen and seen[0] != threading.get_ident()
+
+
+@pytest.mark.asyncio()
+@pytest.mark.parametrize(
+    ("error", "expected_code"),
+    [
+        (RuntimeError("provider unavailable"), "generation_failed"),
+        (
+            LLMQuotaExceededError(
+                category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+            ),
+            "llm_quota_exceeded",
+        ),
+    ],
+)
+async def test_job_handler_records_the_failure_code_on_the_node(
+    explainer_repo: ExplainerRepository,
+    error: Exception,
+    expected_code: str,
+) -> None:
+    """The node's error metadata says why generation failed, as the job's error code does (TASK-13638)."""
+    session = _create_session(explainer_repo)
+    node_id = session.root_node_ids[0]
+
+    async def failing_generator(_prompt):
+        raise error
+
+    with pytest.raises(type(error)):
+        await handle_explainer_node_expansion_job(
+            {
+                "id": 103,
+                "job_type": EXPLAINER_JOB_TYPE,
+                "owner_user_id": "7",
+                "payload": {"session_id": session.id, "node_id": node_id, "intent": "explain"},
+            },
+            repo=explainer_repo,
+            generator=failing_generator,
+        )
+
+    loaded = explainer_repo.get_session(session.id, owner_user_id="7")
+    assert loaded is not None
+    assert loaded.nodes[node_id].generation_metadata["error"] == expected_code

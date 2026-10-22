@@ -12,7 +12,8 @@ import pytest
 from tldw_Server_API.app.api.v1.endpoints import messages as messages_endpoint
 from tldw_Server_API.app.api.v1.schemas.anthropic_messages import AnthropicMessagesRequest
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
-from tldw_Server_API.app.core.Usage import llm_accounting
+from tldw_Server_API.app.core.Usage import llm_accounting, usage_tracker
+from tldw_Server_API.app.core.Usage.pricing_catalog import reset_pricing_catalog
 
 pytestmark = pytest.mark.unit
 
@@ -79,6 +80,14 @@ class _Runtime:
         """Nothing to close."""
 
 
+def _stub_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the test's loop the accounting loop, and stub the endpoint's credentials and base URL."""
+    monkeypatch.setattr(llm_accounting, "_accounting_loop", asyncio.get_running_loop())
+    monkeypatch.setattr(messages_endpoint, "derive_trusted_credential_scope", lambda _r, user: (user.id_int, [], [], False))
+    monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _Runtime)
+    monkeypatch.setattr(messages_endpoint, "_resolve_messages_base_url", lambda _p, _c: "http://provider.test/v1")
+
+
 @pytest.fixture
 async def rows(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     """Capture what would be written, and make the test's loop the accounting loop."""
@@ -89,11 +98,37 @@ async def rows(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
         captured.append(kwargs)
 
     monkeypatch.setattr("tldw_Server_API.app.core.Usage.usage_tracker.log_llm_usage", _fake_log)
-    monkeypatch.setattr(llm_accounting, "_accounting_loop", asyncio.get_running_loop())
-    monkeypatch.setattr(messages_endpoint, "derive_trusted_credential_scope", lambda _r, user: (user.id_int, [], [], False))
-    monkeypatch.setattr(messages_endpoint, "ProviderCredentialRuntime", _Runtime)
-    monkeypatch.setattr(messages_endpoint, "_resolve_messages_base_url", lambda _p, _c: "http://provider.test/v1")
+    _stub_endpoint(monkeypatch)
     return captured
+
+
+@pytest.fixture
+async def costed_rows(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Capture the llm_usage_log rows the real recorder would insert, costed by the shipped pricing catalog."""
+    captured: list[dict[str, Any]] = []
+
+    class _Repo:
+        """Stands in for AuthnzUsageRepo and keeps the inserted rows."""
+
+        def __init__(self, _pool: Any) -> None:
+            """No database."""
+
+        async def insert_llm_usage_log(self, **kwargs: Any) -> None:
+            """Record the row instead of writing it."""
+            captured.append(kwargs)
+
+    async def _none() -> None:
+        """No pool and no daily ledger."""
+
+    monkeypatch.setenv("LLM_USAGE_ENABLED", "true")
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    reset_pricing_catalog()
+    monkeypatch.setattr(usage_tracker, "get_db_pool", _none)
+    monkeypatch.setattr(usage_tracker, "_get_tokens_daily_ledger", _none)
+    monkeypatch.setattr(usage_tracker, "AuthnzUsageRepo", _Repo)
+    _stub_endpoint(monkeypatch)
+    yield captured
+    reset_pricing_catalog()
 
 
 async def _call(model: str, *, stream: bool) -> Any:
@@ -212,6 +247,22 @@ async def test_a_cached_native_stream_counts_its_cached_input_as_prompt_tokens(r
     )
     assert (row["prompt_tokens"], row["completion_tokens"]) == (62003, 100)
     assert row["usage_metadata"]["cache_read_input_tokens"] == 60000
+
+
+async def test_a_cached_native_reply_is_costed_at_the_cache_rates(costed_rows, monkeypatch) -> None:
+    """Cache reads and writes cost Anthropic's cache rates, not the input rate (TASK-13858)."""
+    monkeypatch.setattr(messages_endpoint, "_native_post_json", _native_reply({**CACHED_USAGE, "output_tokens": 100}))
+    with scoped_context(user_id=5):
+        response = await _call("anthropic/claude-sonnet-4-6", stream=False)
+    assert response.status_code == 200
+    await llm_accounting.drain_accounting()
+    (row,) = costed_rows
+    assert (row["prompt_tokens"], row["cache_read_input_tokens"], row["cache_write_input_tokens"]) == (62003, 60000, 2000)
+    assert row["billable_input_tokens"] == 3
+    # Sonnet 4.6 per 1K tokens: input $0.003, cache read $0.0003 (0.1x), 5-minute cache write $0.00375 (1.25x).
+    assert row["prompt_cost_usd"] == pytest.approx((3 * 0.003 + 60000 * 0.0003 + 2000 * 0.00375) / 1000)
+    assert row["completion_cost_usd"] == pytest.approx(100 * 0.015 / 1000)
+    assert row["estimated"] is False
 
 
 async def test_a_native_stream_closed_early_still_records_one_row(rows, monkeypatch) -> None:

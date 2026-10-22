@@ -165,6 +165,8 @@ class UnifiedEvaluationService:
         self.circuit_breaker = CircuitBreaker(
             name="evaluation_service",
             config=CircuitBreakerConfig(
+                # The runner bounds each example; a batch is not a single provider call.
+                timeout=None,
                 failure_threshold=5,
                 recovery_timeout=60.0,
                 expected_exception=Exception
@@ -316,7 +318,8 @@ class UnifiedEvaluationService:
                     "rag": "rag",
                     "response_quality": "response_quality",
                 }
-                eval_spec_payload.setdefault("sub_type", sub_type_map[eval_type_value])
+                if eval_spec_payload.get("sub_type") is None:
+                    eval_spec_payload["sub_type"] = sub_type_map[eval_type_value]
                 eval_type_value = "model_graded"
 
             # If inline dataset provided, create it first
@@ -586,7 +589,7 @@ class UnifiedEvaluationService:
             run = self.db.get_run(run_id, created_by=created_by)
             current_status = normalize_run_status(run.get("status") if run else None)
             transitioned_to_cancelled = can_transition_run_status(current_status, "cancelled")
-            if transitioned_to_cancelled:
+            if transitioned_to_cancelled and current_status != "cancelled":
                 self.db.update_run_status(run_id, "cancelled")
             if (
                 transitioned_to_cancelled
@@ -606,11 +609,14 @@ class UnifiedEvaluationService:
         except _UNIFIED_EVAL_NONCRITICAL_EXCEPTIONS as e:
             logger.error(f"Evaluation run {run_id} failed: {e}")
 
-            # Update run status
-            self.db.update_run_status(run_id, "failed", error_message=str(e))
+            run = self.db.get_run(run_id, created_by=created_by)
+            current_status = normalize_run_status(run.get("status") if run else None)
+            transitioned_to_failed = can_transition_run_status(current_status, "failed")
+            if transitioned_to_failed and current_status != "failed":
+                self.db.update_run_status(run_id, "failed", error_message=str(e))
 
             # Send failure webhook
-            if eval_config.get("webhook_url") and self.enable_webhooks and getattr(self, "webhook_manager", None):
+            if transitioned_to_failed and eval_config.get("webhook_url") and self.enable_webhooks and getattr(self, "webhook_manager", None):
                 effective_webhook_user = webhook_user_id_from_value(webhook_user_id) or webhook_user_id_from_value(created_by) or created_by
                 await self.webhook_manager.send_webhook(
                     user_id=effective_webhook_user,

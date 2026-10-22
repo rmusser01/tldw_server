@@ -175,6 +175,7 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
 
 export type PlaygroundSendBlocker = {
   active: boolean
+  disabled?: boolean
   title: string
   actionLabel: string
   onAction: () => void
@@ -311,7 +312,8 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       compareNeedsMoreModels ||
       isPreparingDocuments ||
       isHistorySelectionPending ||
-      (!isConnectionReady && !activeCharacterSendBlocker)
+      (!isConnectionReady && !activeCharacterSendBlocker) ||
+      (activeCharacterSendBlocker && characterChatSendBlocker.disabled === true)
     // Dim (but keep) the plain Send action while the draft is empty. A
     // disabled button already has its own muted style, so skip it then.
     const draftEmpty =

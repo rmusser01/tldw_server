@@ -2050,7 +2050,7 @@ class MetricsRegistry:
                 return
 
             definition = self.metrics[metric_name]
-            label_key = self._normalize_label_key(labels)
+            label_key = tuple(sorted((labels or {}).items()))
             store_sample = True
 
             if definition.type == MetricType.COUNTER and value < 0:

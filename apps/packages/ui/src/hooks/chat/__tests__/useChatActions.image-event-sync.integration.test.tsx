@@ -331,6 +331,7 @@ const createHookOptions = (
     ragSources: [],
     ragAdvancedOptions: {},
     serverChatId: "server-chat-1",
+    serverChatMetaLoaded: true,
     serverChatTitle: "Image Sync Chat",
     serverChatCharacterId: null,
     serverChatAssistantKind: null,
@@ -484,7 +485,7 @@ describe("useChatActions image event sync integration", () => {
   })
 
   it("captures owner scope for a first local image generation even when server mirroring is off", async () => {
-    const { options } = createHookOptions({ historyId: null, serverChatId: null })
+    const { options } = createHookOptions({ historyId: null, serverChatId: null, serverChatMetaLoaded: false })
     const { result } = renderHook(() => useChatActions(options))
     await invokeImageSubmit(result.current.onSubmit, "off")
     expect(normalChatModeMock.mock.calls[0]?.[6].servicePromptSnapshot?.requestScope).toEqual({

@@ -120,3 +120,14 @@ func TestBundledRunnerConfigExposesClaudeExternalAdapterProfile(t *testing.T) {
 		t.Fatalf("runtime backend = %q", agent.RuntimeBackend)
 	}
 }
+
+func TestOptionalConfigMissingStillUsesDefaults(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing.yaml")
+	cfg, err := LoadFrom(path)
+	if err != nil || !reflect.DeepEqual(cfg, Default()) {
+		t.Fatalf("Legacy optional missing file changed: config=%v error=%v", cfg, err)
+	}
+	if _, err := LoadFromRequired(path); !os.IsNotExist(err) {
+		t.Fatalf("Explicit missing file must return its read error: %v", err)
+	}
+}

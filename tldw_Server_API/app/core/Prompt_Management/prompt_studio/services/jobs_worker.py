@@ -65,7 +65,7 @@ from tldw_Server_API.app.core.DB_Management.DB_Manager import (
 )
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.DB_Management.PromptStudioDatabase import DatabaseError
-from tldw_Server_API.app.core.exceptions import raise_detached_error
+from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
@@ -645,6 +645,8 @@ async def _owner_membership_scope(user_id: int) -> tuple[list[int], list[int]]:
 def _bounded_optimization_error(exc: BaseException) -> PromptStudioJobError:
     if isinstance(exc, PromptStudioJobError):
         return exc
+    if isinstance(exc, LLMQuotaExceededError):
+        return PromptStudioJobError("LLM quota exceeded", retryable=False, failure_code=exc.failure_code)
     if isinstance(exc, ByokResolutionError):
         code = str(getattr(exc, "policy_code", None) or exc.code)
         return PromptStudioJobError(

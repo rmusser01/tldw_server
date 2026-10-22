@@ -75,6 +75,8 @@ type SharedCharacterFormRenderer = (props: {
   worldBookFieldContext: {
     options: CharacterWorldBookOption[]
     loading: boolean
+    error?: boolean
+    retry?: () => void
     editCharacterNumericId: number | null
   }
   isSubmitting: boolean
@@ -223,6 +225,8 @@ export type CharacterDialogsProps = {
   // world book options (shared by create + edit)
   worldBookOptions: CharacterWorldBookOption[]
   worldBookOptionsLoading: boolean
+  worldBookOptionsError?: boolean
+  retryWorldBookOptions?: () => void
 
   // --- generation preview ---
   isGenerating: boolean
@@ -425,6 +429,8 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
     dismissEditDraft,
     worldBookOptions,
     worldBookOptionsLoading,
+    worldBookOptionsError,
+    retryWorldBookOptions,
     // generation
     isGenerating,
     generatingField,
@@ -1430,6 +1436,8 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
           worldBookFieldContext: {
             options: worldBookOptions,
             loading: worldBookOptionsLoading,
+            error: worldBookOptionsError,
+            retry: retryWorldBookOptions,
             editCharacterNumericId
           },
           isSubmitting: creating,
@@ -1589,6 +1597,8 @@ export const CharacterDialogs: React.FC<CharacterDialogsProps> = (props) => {
           worldBookFieldContext: {
             options: worldBookOptions,
             loading: worldBookOptionsLoading,
+            error: worldBookOptionsError,
+            retry: retryWorldBookOptions,
             editCharacterNumericId
           },
           isSubmitting: updating,

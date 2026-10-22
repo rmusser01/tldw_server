@@ -935,6 +935,9 @@ describe("Playground thread search integration", () => {
 
 vi.mock("@/db/dexie/history-selection", () => ({
   ensureLocalProfileId: async () => "profile",
+  bindUnboundLocalHistory: async () => {
+    throw new Error("Fixture history is already owned")
+  },
   getLocalHistoryOwner: async (id: string) => ({
     kind: "local",
     profile_id: "profile",
@@ -1110,7 +1113,7 @@ describe("Playground H1 URL initialization with the mounted session/controller",
 
   it.each([
     { name: "missing history", details: null, code: "owner_conversation_mismatch" },
-    { name: "unowned history", details: { id: "chat-one", message_source: "branch" }, code: "owner_conversation_mismatch" },
+    { name: "unowned history", details: { id: "chat-one", message_source: "branch" }, code: "unbound_local_history" },
     { name: "unbound server mirror", details: { id: "chat-one", message_source: "server", server_chat_id: "foreign-chat" }, code: "unbound_server_mirror" }
   ])("rejects a bookmarked $name without publishing selected rows", async ({ details, code }) => {
     const reference = seed()
@@ -1231,7 +1234,10 @@ describe("Playground H1 URL initialization with the mounted session/controller",
       "/chat?historySelection=" + encodeURIComponent(JSON.stringify(reference))
     )
     let page = render(<Playground />)
-    await waitFor(() => expect(h1.controller?.status).toBe("pending_unknown"))
+    await waitFor(() => {
+      expect(h1.controller?.error).toBeNull()
+      expect(h1.controller?.status).toBe("pending_unknown")
+    })
     page.unmount()
     page = render(<Playground />)
     await waitFor(() =>

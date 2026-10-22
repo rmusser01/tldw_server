@@ -32,6 +32,9 @@ const inputs = vi.hoisted(() => ({
   modelWrite: null as null | (() => Promise<void>),
   accountCurrent: vi.fn(() => true),
   conversationWrite: vi.fn(async (_patch: unknown) => null),
+  templateText: "Selected template instructions",
+  templateRead: null as null | (() => Promise<string>),
+  settingsRead: null as null | (() => Promise<{ temperature: number }>),
 }))
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -96,7 +99,7 @@ vi.mock("@/services/tldw-server", async original => ({
   systemPromptForNonRagOption: async () => "",
 }))
 vi.mock("@/services/model-settings", () => ({
-  getAllModelSettings: async () => ({ temperature: 0.7 }),
+  getAllModelSettings: async () => inputs.settingsRead?.() ?? ({ temperature: 0.7 }),
 }))
 vi.mock("@/services/ocr", () => ({ getOCRLanguage: async () => null }))
 vi.mock("@/services/actor-settings", async original => ({
@@ -104,10 +107,13 @@ vi.mock("@/services/actor-settings", async original => ({
   getActorSettingsForChatWithCharacterFallback: async () => null,
   saveActorSettingsForChat: vi.fn(async () => true),
 }))
-vi.mock("@/components/Common/system-prompt-utils", () => ({
-  resolveSelectedSystemPromptContent: vi.fn(async (id?: string | null) =>
-    id ? "Selected template instructions" : ""),
-}))
+vi.mock("@/components/Common/system-prompt-utils", async original => {
+  const actual = await original<typeof import("@/components/Common/system-prompt-utils")>()
+  const read = vi.fn(async (id?: string | null) => id ? await (inputs.templateRead?.() ?? inputs.templateText) : "")
+  return { ...actual, resolveSelectedSystemPromptContent: read,
+    resolveEffectiveSystemPromptState: (params: Parameters<typeof actual.resolveEffectiveSystemPromptState>[0]) =>
+      actual.resolveEffectiveSystemPromptState({ ...params, getPromptByIdFn: async id => ({ id, content: await read(id) }) as any }) }
+})
 vi.mock("@/services/tldw/TldwApiClient", () => ({
   tldwClient: {
     initialize: async () => undefined,
@@ -139,7 +145,13 @@ vi.mock("@/components/Common/ProviderIcon", () => ({
 
 // Keep ordinary prompt assembly and text/image formatters real; stop only at
 // the network/persistence pipeline so these editor tests never contact an API.
-vi.mock("@/db/dexie/helpers", () => ({ getPromptById: async () => null }))
+vi.mock("@/db/dexie/helpers", () => ({
+  getPromptById: async (id: string) => {
+    if (!id) return undefined
+    const content = await (inputs.templateRead?.() ?? inputs.templateText)
+    return { id, title: "Selected template", content, system_prompt: content, is_system: true, createdAt: 0 }
+  },
+}))
 vi.mock("@/utils/model", () => ({ getSelectedModelName: async () => "gemma" }))
 vi.mock("@/hooks/chat-modes/chatModePipeline", () => ({
   runChatPipeline: async (...args: unknown[]) => {
@@ -247,6 +259,9 @@ describe("Conversation prompt editor through real model settings Save", () => {
     inputs.modelWrite = null
     inputs.conversationWrite.mockReset().mockResolvedValue(null)
     inputs.accountCurrent.mockReset().mockReturnValue(true)
+    inputs.templateText = "Selected template instructions"
+    inputs.templateRead = null
+    inputs.settingsRead = null
     useStoreChatModelSettings.getState().reset()
     useStoreChatModelSettings
       .getState()
@@ -261,7 +276,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     useActorStore.getState().reset()
     useStoreMessageOption.getState().startNewChatDraft(false)
     vi.mocked(saveActorSettingsForChat).mockReset().mockResolvedValue(true)
-    vi.mocked(resolveSelectedSystemPromptContent).mockReset().mockImplementation(async id => id ? "Selected template instructions" : "")
+    vi.mocked(resolveSelectedSystemPromptContent).mockReset().mockImplementation(async id => id ? await (inputs.templateRead?.() ?? inputs.templateText) : "")
   })
 
   it.each([false, true])("forwards only native close completion and unmounts the editor (drawer=%s)", async useDrawer => {
@@ -628,6 +643,47 @@ describe("Conversation prompt editor through real model settings Save", () => {
     expect(editor).toHaveValue(instruction)
   })
 
+  it("C01 settings metadata loading preserves the selected Conversation tab", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const view = await mountSettings(undefined, client)
+    expect(screen.getByRole("tab", { name: "Conversation" })).toHaveAttribute("aria-selected", "true")
+    let finish!: (value: { temperature: number }) => void
+    inputs.settingsRead = () => new Promise(resolve => { finish = resolve })
+    inputs.character = { id: "42", name: "Late loaded character" }
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <ConfigProvider theme={{ token: { motion: false } }}>
+          <CurrentChatModelSettings open setOpen={view.close} />
+        </ConfigProvider>
+      </QueryClientProvider>
+    )
+    await waitFor(() => expect(finish).toBeTypeOf("function"))
+    await act(async () => { finish({ temperature: 0.7 }) })
+    const conversation = await screen.findByRole("tab", { name: "Conversation" })
+    expect(conversation).toHaveAttribute("aria-selected", "true")
+    expect(screen.getByPlaceholderText("Enter System Prompt")).toBeVisible()
+    expect(view.close).not.toHaveBeenCalled()
+  })
+
+  it("C01 settings metadata tab state resets for a new dialog opening", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const close = vi.fn()
+    const body = (open: boolean) => (
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <QueryClientProvider client={client}>
+          <CurrentChatModelSettings open={open} setOpen={close} />
+        </QueryClientProvider>
+      </ConfigProvider>
+    )
+    const view = render(body(true))
+    fireEvent.click(await screen.findByRole("tab", { name: "Conversation" }))
+    await screen.findByPlaceholderText("Enter System Prompt")
+    view.rerender(body(false))
+    view.rerender(body(true))
+    expect(await screen.findByRole("tab", { name: "Model" })).toHaveAttribute("aria-selected", "true")
+    expect(close).not.toHaveBeenCalled()
+  })
+
   it("keeps generation settings through a cached dialog remount and Save", async () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -862,6 +918,98 @@ describe("Conversation prompt editor through real model settings Save", () => {
     )
   })
 
+  it.each([
+    { raw: "", cached: false },
+    { raw: "", cached: true },
+    { raw: " \n ", cached: false },
+    { raw: " \n ", cached: true },
+  ])("C01 a cleared override displays the selected instruction (raw=$raw cached=$cached)", async ({ raw, cached }) => {
+    inputs.selectedSystemPrompt = "pirate-template"
+    useStoreChatModelSettings.getState().setSystemPrompt(raw)
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    if (cached) await client.prefetchQuery({ queryKey: ["fetchModelConfig2", true, null], queryFn: getAllModelSettings })
+    const view = await mountSettings(undefined, client)
+    await waitFor(() => expect(view.editor).toHaveValue("Selected template instructions"))
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBe(raw)
+    view.unmount()
+    client.clear()
+  })
+
+  it("C01 reopening the same selected template retains its instruction with cached settings", async () => {
+    inputs.selectedSystemPrompt = "pirate-template"
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const first = await mountSettings(undefined, client)
+    await waitFor(() => expect(first.editor).toHaveValue("Selected template instructions"))
+    first.unmount()
+    const reopened = await mountSettings(undefined, client)
+    expect(reopened.editor).toHaveValue("Selected template instructions")
+    reopened.unmount()
+    client.clear()
+  })
+
+  it("C01 a same-ID template edit is resolved again on dialog reopening", async () => {
+    inputs.selectedSystemPrompt = "pirate-template"
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const first = await mountSettings(undefined, client)
+    await waitFor(() => expect(first.editor).toHaveValue("Selected template instructions"))
+    first.unmount()
+    inputs.templateText = "Edited pirate instructions: ARRR"
+    const reopened = await mountSettings(undefined, client)
+    await waitFor(() => expect(reopened.editor).toHaveValue("Edited pirate instructions: ARRR"))
+    reopened.unmount()
+    client.clear()
+  })
+
+  it.each(["typed edit", "account change"])("C01 a delayed instruction cannot overwrite %s", async boundary => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    await client.prefetchQuery({ queryKey: ["fetchModelConfig2", true, null], queryFn: getAllModelSettings })
+    let finish!: (value: string) => void
+    inputs.selectedSystemPrompt = "pirate-template"
+    const view = await mountSettings(undefined, client)
+    await waitFor(() => expect(view.editor).toHaveValue(inputs.templateText))
+    inputs.templateRead = () => new Promise(resolve => { finish = resolve })
+    fireEvent.click(screen.getByRole("button", { name: "Reset to template" }))
+    await waitFor(() => expect(finish).toBeTypeOf("function"))
+    if (boundary === "typed edit") fireEvent.change(view.editor, { target: { value: "Newer user instruction" } })
+    else act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
+    await act(async () => { finish("Retired private instruction"); await Promise.resolve() })
+    if (boundary === "typed edit") expect(view.editor).toHaveValue("Newer user instruction")
+    else {
+      expect(view.close).toHaveBeenCalledWith(false)
+      expect(screen.queryByPlaceholderText("Enter System Prompt")).not.toBeInTheDocument()
+    }
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBeUndefined()
+    view.unmount()
+    client.clear()
+  })
+
+  it("C01 Reset finishing after dialog unmount cannot restore a retired instruction", async () => {
+    inputs.selectedSystemPrompt = "pirate-template"
+    const view = await mountSettings()
+    await waitFor(() => expect(view.editor).toHaveValue("Selected template instructions"))
+    let finish!: (value: string) => void
+    inputs.templateRead = () => new Promise(resolve => { finish = resolve })
+    fireEvent.click(screen.getByRole("button", { name: "Reset to template" }))
+    expect(finish).toBeTypeOf("function")
+    view.unmount()
+    act(() => window.dispatchEvent(new Event("tldw:auth-principal-changed")))
+    await act(async () => { finish("Retired private instruction"); await Promise.resolve() })
+    expect(useStoreChatModelSettings.getState().systemPrompt).toBeUndefined()
+  })
+
+  it("C01 cached defaults cannot hide the newly selected instruction", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    await client.prefetchQuery({
+      queryKey: ["fetchModelConfig2", true, null],
+      queryFn: getAllModelSettings,
+    })
+    inputs.selectedSystemPrompt = "pirate-template"
+    const reopened = await mountSettings(undefined, client)
+    await waitFor(() => expect(reopened.editor).toHaveValue("Selected template instructions"))
+    reopened.unmount()
+    client.clear()
+  })
+
   it.each([null, "template-1"])(
     "stages the reset value until Save (template=%s)",
     async (template) => {
@@ -1007,7 +1155,7 @@ describe("Conversation prompt editor through real model settings Save", () => {
     })
     expect(screen.queryByRole("button", { name: /^save$/i })).not.toBeInTheDocument()
     expect(saveActorSettingsForChat).not.toHaveBeenCalled()
-    expect(close).not.toHaveBeenCalled()
+    expect(close).toHaveBeenCalledWith(false)
     expect(useStoreChatModelSettings.getState().systemPrompt).toBeUndefined()
     act(() => useStoreMessageOption.getState().startNewChatDraft(false))
     fireEvent.click(await screen.findByRole("button", { name: /^save$/i }))

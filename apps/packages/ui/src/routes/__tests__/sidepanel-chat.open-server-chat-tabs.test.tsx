@@ -38,7 +38,7 @@ const io = vi.hoisted(() => ({
 
 /** The question and answer each fake server chat holds. */
 const transcript = (chatId: string) => [`${chatId} question`, `${chatId} answer`]
-const displayFor = (chatId: string) => {
+const displayFor = (chatId: string): Pick<SidepanelChatSnapshot, "history" | "messages"> => {
   const [question, answer] = transcript(chatId)
   return {
     history: [

@@ -726,3 +726,50 @@ class TestFVABatchResult:
         assert result.status_changes["verified->contested"] == 1
         assert result.total_time_ms == 500.0
         assert result.budget_exhausted is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_process_batch_does_not_drop_an_llm_quota_refusal():
+    """A refused claim fails the batch; it is not silently left out of the results (TASK-13638)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    verifier = MockVerifier()
+    verifier.verify = AsyncMock(
+        side_effect=LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+    )
+    pipeline = FVAPipeline(MockClaimsEngine(verifier), MockRetriever())
+
+    with pytest.raises(LLMQuotaExceededError):
+        await pipeline.process_batch(claims=[MockClaim(id="1", text="Claim 1")], query="test", documents=[])
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_process_claim_lets_an_adjudication_refusal_through():
+    """A refusal during adjudication fails the claim; it does not keep the unchallenged verdict (TASK-13862)."""
+    from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
+
+    low_confidence = MockClaimVerification(
+        claim=MockClaim(id="1", text="Test"),
+        confidence=0.5,
+        evidence=[MockEvidence(doc_id="1", snippet="Evidence")],
+    )
+    claims_engine = MockClaimsEngine(MockVerifier(verification=low_confidence))
+    claims_engine._analyze = AsyncMock(
+        side_effect=LLMQuotaExceededError(
+            category="llm_tokens_month", current=0, limit=0, message="Monthly LLM token limit reached", retry_after=60
+        )
+    )
+    anti_docs = [Document(id="anti_1", content="Contradicting evidence", metadata={}, score=0.7)]
+    pipeline = FVAPipeline(claims_engine, MockRetriever(documents=anti_docs))
+
+    with pytest.raises(LLMQuotaExceededError) as refused:
+        await pipeline.process_claim(
+            claim=MockClaim(id="1", text="Test claim"),
+            query="test",
+            documents=[Document(id="1", content="Support", metadata={}, score=0.8)],
+        )
+    assert refused.value.detail["category"] == "llm_tokens_month"

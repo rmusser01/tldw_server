@@ -106,11 +106,11 @@ describe("authenticated Watchlists artifacts", () => {
     vi.stubGlobal("fetch", fetchMock)
 
     await expect(fetchWatchlistArtifactText("/api/v1/watchlists/runs/9/audio/script/download"))
-      .rejects.toMatchObject<Partial<WatchlistArtifactError>>({ kind: "missing", status: 404 })
+      .rejects.toMatchObject({ kind: "missing", status: 404 } satisfies Partial<WatchlistArtifactError>)
     await expect(fetchWatchlistArtifactText("/api/v1/watchlists/runs/9/audio/script/download"))
-      .rejects.toMatchObject<Partial<WatchlistArtifactError>>({ kind: "auth", status: 403 })
+      .rejects.toMatchObject({ kind: "auth", status: 403 } satisfies Partial<WatchlistArtifactError>)
     await expect(fetchWatchlistArtifactText("/api/v1/watchlists/runs/9/audio/script/download"))
-      .rejects.toMatchObject<Partial<WatchlistArtifactError>>({ kind: "network" })
+      .rejects.toMatchObject({ kind: "network" } satisfies Partial<WatchlistArtifactError>)
   })
 
   it("creates and revokes object URLs through one shared lifecycle", () => {

@@ -195,6 +195,24 @@ const AVAILABLE: SavedReplyActionAvailability = Object.freeze({
  * A reply that stopped early in a saved chat is retried from the question
  * before it (CS-04); that path does not need the reply to be saved.
  */
+/**
+ * Whether a device history (local owner) can regenerate its last answer. The
+ * send path regenerates it through its own boundary, as long as the captured
+ * history ends with an answer to the question before it (any order for a
+ * legacy linear history). Native histories need a saved-reply target instead.
+ */
+const localHistoryRegenerateReady = (state: SelectionState): boolean => {
+  if (state?.status !== "ready" || state.owner?.kind !== "local" || state.capture?.status !== "captured")
+    return false
+  const answer = state.capture.rows.at(-1)
+  const question = state.capture.rows.at(-2)
+  return (
+    answer?.role === "assistant" &&
+    question?.role === "user" &&
+    (state.view?.interpretation.kind === "legacy_linear_v1" || answer.parent_id === question.id)
+  )
+}
+
 const isRetryableInterruptedReply = (visible: readonly Message[]) => {
   const reply = visible.at(-1)
   const question = visible.at(-2)
@@ -228,9 +246,11 @@ export const savedReplyActionAvailability = ({
   const refused = target ? refusedActions(target) : undefined
   return {
     regenerate:
-      (target && !refused?.has("regenerate")) || isRetryableInterruptedReply(messages)
-        ? null
-        : "unsupported",
+      refused?.has("regenerate")
+        ? "unsupported"
+        : target || localHistoryRegenerateReady(state) || isRetryableInterruptedReply(messages)
+          ? null
+          : "unsupported",
     continue:
       target && !refused?.has("continue") && isContinuableReply(target.replyContent)
         ? null

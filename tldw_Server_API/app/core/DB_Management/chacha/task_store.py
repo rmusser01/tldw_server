@@ -2932,6 +2932,18 @@ class TaskStore:
             fn=_read_activity,
         )
 
+    def _require_task_activity_event(
+        self, conn: TaskConnection, *, owner_user_id: str, dataset_id: str, event_id: str
+    ) -> None:
+        """Require the exact owned event and keep its parent alive through the state write."""
+        lock_clause = " FOR KEY SHARE" if self._db.backend_type == BackendType.POSTGRESQL else ""
+        row = self._read(
+            "SELECT id FROM task_events WHERE owner_user_id = ? AND dataset_id = ? AND id = ?" + lock_clause,  # nosec B608: lock clause is fixed backend-specific SQL.
+            (owner_user_id, dataset_id, event_id), conn=conn,
+        ).fetchone()
+        if row is None:
+            raise ConflictError("Task event not found.", entity="tasks", entity_id=event_id)  # noqa: TRY003
+
     def mark_task_activity_read(
         self,
         *,
@@ -2950,6 +2962,9 @@ class TaskStore:
         def _execute_read(transaction_conn: TaskConnection) -> dict[str, Any]:
             self._require_authorized_write_scope(
                 transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
+            self._require_task_activity_event(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset, event_id=event_id
             )
             self._execute(
                 transaction_conn,
@@ -3005,6 +3020,9 @@ class TaskStore:
         def _execute_dismiss(transaction_conn: TaskConnection) -> dict[str, Any]:
             self._require_authorized_write_scope(
                 transaction_conn, owner_user_id=owner, dataset_id=dataset
+            )
+            self._require_task_activity_event(
+                transaction_conn, owner_user_id=owner, dataset_id=dataset, event_id=event_id
             )
             self._execute(
                 transaction_conn,

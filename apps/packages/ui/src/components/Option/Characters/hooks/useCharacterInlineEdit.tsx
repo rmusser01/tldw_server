@@ -24,6 +24,7 @@ export function useCharacterInlineEdit(deps: UseCharacterInlineEditDeps) {
     value: string
     originalValue: string
   } | null>(null)
+  const inlineSaveInFlightRef = React.useRef(false)
   const inlineEditInputRef = React.useRef<InputRef>(null)
   const inlineEditTriggerRef = React.useRef<HTMLElement | null>(null)
   const inlineEditFocusKeyRef = React.useRef<string | null>(null)
@@ -57,6 +58,9 @@ export function useCharacterInlineEdit(deps: UseCharacterInlineEditDeps) {
       version?: number
     }) => {
       return await tldwClient.updateCharacter(id, { [field]: value }, version)
+    },
+    onSettled: () => {
+      inlineSaveInFlightRef.current = false
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["tldw:listCharacters"] })
@@ -92,7 +96,7 @@ export function useCharacterInlineEdit(deps: UseCharacterInlineEditDeps) {
   )
 
   const saveInlineEdit = React.useCallback(() => {
-    if (!inlineEdit) return
+    if (!inlineEdit || inlineSaveInFlightRef.current) return
     const trimmedValue = inlineEdit.value.trim()
 
     // Validate name field
@@ -116,6 +120,7 @@ export function useCharacterInlineEdit(deps: UseCharacterInlineEditDeps) {
       (c: any) => String(c.id || c.slug || c.name) === inlineEdit.id
     )
 
+    inlineSaveInFlightRef.current = true
     inlineUpdateCharacter({
       id: inlineEdit.id,
       field: inlineEdit.field,

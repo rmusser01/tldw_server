@@ -20,6 +20,7 @@ from typing import Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.Chat.prompt_cost_envelope import estimate_segment_tokens
 from tldw_Server_API.app.core.Usage.llm_accounting import submit_accounting
 from tldw_Server_API.app.core.Usage.llm_call_context import (
     accounted_call,
@@ -28,7 +29,6 @@ from tldw_Server_API.app.core.Usage.llm_call_context import (
     in_accounted_call,
 )
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_user_async, check_user_sync, user_to_check
-from tldw_Server_API.app.core.Utils.image_validation import DATA_URI_REDACT_RE
 
 _ACCOUNTED_METHODS = ("chat", "achat", "stream", "astream")
 _MARK = "__llm_accounted__"
@@ -61,12 +61,12 @@ def _plan_call() -> _CallPlan | None:
 
 
 def _approx_tokens(char_count: int) -> int:
-    """Four characters per token, the estimate the chat endpoint already uses."""
+    """The completion-side 4 chars/token estimate (rounded down)."""
     return max(1, char_count // 4) if char_count > 0 else 0
 
 
 def _prompt_estimate(request: Any) -> int:
-    """Estimated prompt tokens: the messages plus the system prompt, with image payloads redacted."""
+    """Estimated prompt tokens: the messages plus the system prompt, by the chat path's estimate."""
     try:
         if not isinstance(request, dict):
             return 1
@@ -74,7 +74,7 @@ def _prompt_estimate(request: Any) -> int:
         system_message = request.get("system_message")
         if isinstance(system_message, str):
             text += system_message
-        return max(1, len(DATA_URI_REDACT_RE.sub(r"\1<omitted>", text)) // 4)
+        return max(1, estimate_segment_tokens(text))
     except Exception:  # noqa: BLE001 - an estimate must never fail a call
         return 1
 

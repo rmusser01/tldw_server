@@ -28,8 +28,14 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock("@/services/prompt-studio-settings", () => ({
+  getPromptStudioDefaultsForOwner: (...args: unknown[]) => mocks.getDefaults(...args),
   getPromptStudioDefaults: (...args: unknown[]) => mocks.getDefaults(...args),
   setPromptStudioDefaults: (...args: unknown[]) => mocks.setDefaults(...args)
+}))
+
+vi.mock("@/services/recipe-persistence-uncertainty", async original => ({
+  ...await original(),
+  resolveRecipePersistenceOwnerView: async () => ({ ownerId: "recipe-owner:sha256:" + "a".repeat(64), authorizationRevision: "test-owner" })
 }))
 
 vi.mock("@/services/prompt-studio", () => ({
@@ -188,6 +194,10 @@ const getV1IntegerValue = (
 describe("prompt-sync structured prompt support", () => {
   beforeEach(() => {
     state.prompts.clear()
+    vi.spyOn(state.prompts, "set").mockImplementation((id, row) => {
+      if (!row.ownerId) row.ownerId = owner
+      return Map.prototype.set.call(state.prompts, id, row)
+    })
 
     mocks.getDefaults.mockReset().mockResolvedValue({
       defaultProjectId: null,
@@ -209,18 +219,25 @@ describe("prompt-sync structured prompt support", () => {
     mocks.promptAdd.mockImplementation(async (prompt: any) => {
       state.prompts.set(prompt.id, prompt)
     })
-    mocks.promptGet.mockImplementation(async (id: string) =>
-      state.prompts.get(id)
-    )
+    mocks.promptGet.mockImplementation(async (id: string) => state.prompts.get(id))
     mocks.promptUpdate.mockImplementation(
-      async (id: string, updates: Record<string, unknown>) => {
+      async (id: string, updates: Record<string, unknown> | ((row: Record<string, unknown>) => void)) => {
         const current = state.prompts.get(id)
-        if (!current) return
-        state.prompts.set(id, { ...current, ...updates })
+        if (!current) return 0
+        const next = { ...current }
+        if (typeof updates === "function") updates(next)
+        else Object.assign(next, updates)
+        state.prompts.set(id, next)
+        return 1
       }
     )
     mocks.promptWhere.mockImplementation((field: string) => ({
       equals: (value: unknown) => ({
+        filter: (predicate: (prompt: any) => boolean) => ({
+          first: async () => Array.from(state.prompts.values()).find(
+            prompt => prompt?.[field] === value && predicate(prompt)
+          )
+        }),
         first: async () => {
           for (const prompt of state.prompts.values()) {
             if (prompt?.[field] === value) return prompt
@@ -302,7 +319,7 @@ describe("prompt-sync structured prompt support", () => {
           }
         ]
       }),
-      { recipePersistence: { mode: "capture" } }
+      { recipePersistence: { mode: "owner", expectedOwnerId: owner } }
     )
   })
 
@@ -367,7 +384,7 @@ describe("prompt-sync structured prompt support", () => {
         prompt_schema_version: 1,
         prompt_definition: canonicalDefinition
       }),
-      { recipePersistence: { mode: "capture" } }
+      { recipePersistence: { mode: "owner", expectedOwnerId: owner } }
     )
   })
 
@@ -376,8 +393,9 @@ describe("prompt-sync structured prompt support", () => {
     async (testCase) => {
       const definition = makeV1IntegerDefinition(testCase)
       const definitionBefore = JSON.stringify(definition)
-      const original = {
-        id: `push-${testCase.name}`,
+     const original = {
+        ownerId: owner,
+       id: `push-${testCase.name}`,
         title: "V1 integer prompt",
         name: "V1 integer prompt",
         content: "Explain {{topic}}.",
@@ -452,8 +470,9 @@ describe("prompt-sync structured prompt support", () => {
   it.each(v1IntegerSyncCases.filter((testCase) => !testCase.sync_eligible))(
     "auto-sync rejects v1 integers before defaults, requests, or writes: $name",
     async (testCase) => {
-      const original = {
-        id: `auto-${testCase.name}`,
+     const original = {
+        ownerId: owner,
+       id: `auto-${testCase.name}`,
         title: "V1 integer prompt",
         content: "Explain {{topic}}.",
         user_prompt: "Explain {{topic}}.",
@@ -573,8 +592,9 @@ describe("prompt-sync structured prompt support", () => {
     async (testCase) => {
       const definition = makeV1IntegerDefinition(testCase)
       const definitionBefore = JSON.stringify(definition)
-      const original = {
-        id: "existing-local-id",
+     const original = {
+        ownerId: owner,
+       id: "existing-local-id",
         title: "Good local record",
         content: "Explain {{topic}}.",
         user_prompt: "Explain {{topic}}.",
@@ -704,8 +724,9 @@ describe("prompt-sync structured prompt support", () => {
     "local conflict validation enforces the exact v1 integer sync contract: $name",
     async (testCase) => {
       const definition = makeV1IntegerDefinition(testCase)
-      const original = {
-        id: `local-conflict-${testCase.name}`,
+     const original = {
+        ownerId: owner,
+       id: `local-conflict-${testCase.name}`,
         title: "V1 integer prompt",
         name: "V1 integer prompt",
         content: "Explain {{topic}}.",
@@ -759,8 +780,9 @@ describe("prompt-sync structured prompt support", () => {
     async (testCase) => {
       const localDefinition = makeDefinition("Explain {{topic}}.")
       if (testCase.field === "order") localDefinition.blocks[0].order = 42
-      const original = {
-        id: `server-conflict-${testCase.name}`,
+     const original = {
+        ownerId: owner,
+       id: `server-conflict-${testCase.name}`,
         title: "V1 integer prompt",
         name: "V1 integer prompt",
         content: "Explain {{topic}}.",
@@ -939,8 +961,9 @@ describe("prompt-sync structured prompt support", () => {
       ...makeRecipeDefinition(),
       runtime_values: { topic: "PRIVATE_LOCAL_VALUE" }
     }
-    const original = {
-      id: "unsafe-local-recipe",
+   const original = {
+      ownerId: owner,
+     id: "unsafe-local-recipe",
       title: "Unsafe Recipe",
       name: "Unsafe Recipe",
       content: "safe snapshot",
@@ -983,8 +1006,9 @@ describe("prompt-sync structured prompt support", () => {
   ])(
     "rejects invalid local transport identity (%s) before any request",
     async (_caseName, definition, outerVersion) => {
-      const original = {
-        id: `invalid-local-${outerVersion}-${_caseName}`,
+     const original = {
+        ownerId: owner,
+       id: `invalid-local-${outerVersion}-${_caseName}`,
         title: "Invalid Local Recipe",
         name: "Invalid Local Recipe",
         content: "safe snapshot",
@@ -1013,8 +1037,9 @@ describe("prompt-sync structured prompt support", () => {
 
   it("rejects a malicious server recipe without overwriting a good local record", async () => {
     const goodDefinition = makeRecipeDefinition("Keep {{topic}} safe.")
-    const original = {
-      id: "good-local-recipe",
+   const original = {
+      ownerId: owner,
+     id: "good-local-recipe",
       title: "Good Recipe",
       name: "Good Recipe",
       content: "## Objective\n\nKeep {{topic}} safe.",
@@ -1067,8 +1092,9 @@ describe("prompt-sync structured prompt support", () => {
     "%s rejects mismatched server transport identity without local or link mutation",
     async (operation) => {
       const goodDefinition = makeRecipeDefinition("Keep {{topic}} safe.")
-      const original = {
-        id: `server-mismatch-${operation}`,
+     const original = {
+        ownerId: owner,
+       id: `server-mismatch-${operation}`,
         title: "Good Recipe",
         name: "Good Recipe",
         content: "safe snapshot",

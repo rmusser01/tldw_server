@@ -95,7 +95,7 @@ async def _activate_admin_after_membership(users_db, user_id: int) -> None:
     """Enable admin login only after canonical membership is verified."""
     try:
         await _ensure_admin_role_membership(user_id)
-        await users_db.update_user(user_id, is_active=True, is_superuser=True)
+        await users_db.update_user(user_id, is_active=True, is_superuser=True, is_verified=True)
     except _AUTHNZ_ADMIN_CREATION_EXCEPTIONS:
         await _disable_admin_login(users_db, user_id)
         raise
@@ -561,6 +561,7 @@ async def setup_database():
                 ensure_generated_files_table_pg,
                 ensure_notification_permissions_pg,
                 ensure_org_provider_secrets_pg,
+                ensure_org_stt_settings_pg,
                 ensure_sharing_tables_pg,
                 ensure_storage_quota_overrides_backfill_pg,
                 ensure_usage_tables_pg,
@@ -573,6 +574,9 @@ async def setup_database():
             # Ensure core AuthNZ tables (audit_logs, sessions, registration_codes, RBAC, orgs/teams)
             if not await ensure_authnz_core_tables_pg(pool):
                 raise RuntimeError("Failed to ensure Postgres AuthNZ core tables")
+
+            if not await ensure_org_stt_settings_pg(pool):
+                raise RuntimeError("Failed to ensure Postgres org STT settings")
 
             if not await ensure_storage_quota_overrides_backfill_pg(pool):
                 logger.warning("Postgres storage quota backfill did not complete; it will retry at the next start")

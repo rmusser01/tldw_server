@@ -31,7 +31,7 @@ from ..tts_exceptions import (
     TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
-from ..utils import parse_bool, run_tts_blocking_call, run_tts_blocking_next
+from ..utils import hold_tts_engine, parse_bool, run_tts_blocking_call
 from .base import (
     AudioFormat,
     ProviderStatus,
@@ -75,24 +75,10 @@ class NeuTTSAdapter(TTSAdapter):
     async def initialize(self) -> bool:
         """Initialize NeuTTS Air engine and dependencies."""
         try:
-            # Lazy import of vendored engine to avoid global import failures
-            from tldw_Server_API.app.core.TTS.vendors.neuttsair.neutts import NeuTTSAir as _NeuTTSAir
-
-            # Create engine instance
             logger.info(
                 f"NeuTTS: loading backbone={self.backbone_repo} codec={self.codec_repo}"
             )
-            # Respect auto_download toggle from provider config (default True)
-            auto_download = parse_bool(self.config.get("auto_download", True), default=True)
-            # ponytail: loads on the loop, once per process. On a worker thread the registry's 5 s
-            # capability-listing timeout would cancel a slow load and mark NeuTTS failed (TASK-13857).
-            self._engine = _NeuTTSAir(
-                backbone_repo=self.backbone_repo,
-                backbone_device=self.backbone_device,
-                codec_repo=self.codec_repo,
-                codec_device=self.codec_device,
-                auto_download=auto_download,
-            )
+            self._engine = await run_tts_blocking_call(self._load_engine)
             try:
                 from ..tts_resource_manager import get_resource_manager
                 resource_manager = await get_resource_manager()
@@ -147,6 +133,20 @@ class NeuTTSAdapter(TTSAdapter):
                 provider=self.provider_name,
                 details={"error": str(e)},
             ) from e
+
+    def _load_engine(self) -> Any:
+        """Import the vendored NeuTTS engine and load its model; blocks, so it runs on a worker thread."""
+        # Lazy import of vendored engine to avoid global import failures
+        from tldw_Server_API.app.core.TTS.vendors.neuttsair.neutts import NeuTTSAir
+
+        return NeuTTSAir(
+            backbone_repo=self.backbone_repo,
+            backbone_device=self.backbone_device,
+            codec_repo=self.codec_repo,
+            codec_device=self.codec_device,
+            # Respect auto_download toggle from provider config (default True)
+            auto_download=parse_bool(self.config.get("auto_download", True), default=True),
+        )
 
     async def get_capabilities(self) -> TTSCapabilities:
         return TTSCapabilities(
@@ -363,14 +363,11 @@ class NeuTTSAdapter(TTSAdapter):
             chunk_idx = 0
             try:
                 # The generator drives the engine between chunks, so the stream holds the lock until it ends.
-                await self._engine_lock.acquire()
-                call: asyncio.Future | None = None
-                try:
+                async with hold_tts_engine(self._engine_lock) as run:
                     chunks = self._engine.infer_stream(request.text, ref_codes, ref_text)  # type: ignore
                     done = object()
                     while True:
-                        call = asyncio.ensure_future(run_tts_blocking_next(chunks, done))
-                        chunk = await asyncio.shield(call)
+                        chunk = await run(next, chunks, done)
                         if chunk is done:
                             break
                         if chunk is None or len(chunk) == 0:
@@ -381,8 +378,6 @@ class NeuTTSAdapter(TTSAdapter):
                         encoded = writer.write_chunk(normalized)
                         if encoded:
                             yield encoded
-                finally:
-                    self._release_engine_when_done(call)
                 # Finalize
                 final_bytes = writer.write_chunk(finalize=True)
                 if final_bytes:
@@ -410,29 +405,8 @@ class NeuTTSAdapter(TTSAdapter):
 
     async def _engine_call(self, func: Callable[..., Any], *args: Any) -> Any:
         """Run one engine call on a worker thread, holding the engine lock until it returns."""
-        await self._engine_lock.acquire()
-        call = asyncio.ensure_future(run_tts_blocking_call(func, *args))
-        try:
-            return await asyncio.shield(call)
-        finally:
-            self._release_engine_when_done(call)
-
-    def _release_engine_when_done(self, call: asyncio.Future | None) -> None:
-        """Release the engine lock now, or when an engine call still running on its thread returns.
-
-        A cancelled caller (a client disconnect) cannot stop that thread, so handing the engine to
-        the next caller before it returns would run two calls on one llama-cpp context.
-        """
-        if call is None or call.done():
-            self._engine_lock.release()
-            return
-
-        def _release(finished: asyncio.Future) -> None:
-            self._engine_lock.release()
-            if not finished.cancelled():
-                finished.exception()  # its caller is gone; don't log the error as never retrieved
-
-        call.add_done_callback(_release)
+        async with hold_tts_engine(self._engine_lock) as run:
+            return await run(func, *args)
 
     def _maybe_override_engine(self, extras: dict[str, Any]):
         """Allow per-request override of model repos/devices via extra_params."""

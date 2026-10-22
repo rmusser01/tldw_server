@@ -1617,19 +1617,19 @@ export default defineBackground({
         if (Array.isArray(files) && files.length > 0) {
           for (const item of files) {
             const result = appendUploadFile(item, item.fieldName || "files");
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           }
         } else if (file?.data !== undefined && file?.data !== null) {
           const trimmedFieldName =
             typeof fileFieldName === "string" ? fileFieldName.trim() : "";
           if (trimmedFieldName) {
             const result = appendUploadFile(file, trimmedFieldName);
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           } else {
             const result = appendUploadFile(file, "files", {
               appendLegacyFileAlias: true,
             });
-            if (!result.ok) return result;
+            if (result.ok === false) return result;
           }
         }
         const headers: Record<string, string> = { ...requestHeaders };
