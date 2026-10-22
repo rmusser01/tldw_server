@@ -47,6 +47,19 @@ const memory = vi.hoisted(() => {
 
 vi.mock("../schema", () => ({ db: memory }))
 
+// Dev's ownerId contract: getPromptById resolves the prompt-owner account
+// BEFORE any read; without a resolvable owner the wrapper throws
+// "Prompt account is unavailable" and never reaches the Dexie read or the
+// legacy fallback this file characterizes. Provide the fixed owner view the
+// newer Dexie ownership suite (prompt-account-ownership.test.ts) uses.
+vi.mock("@/services/recipe-persistence-uncertainty", () => ({
+  clearRecipePersistenceScoped: () => {},
+  resolveRecipePersistenceOwnerView: async () => ({
+    ownerId: "recipe-owner:sha256:" + "a".repeat(64),
+    authorizationRevision: "revision"
+  })
+}))
+
 import { getPromptById, getSessionFiles, getSessionFilesInfo } from "../helpers"
 
 const promptFixture = (id: string, extra: Record<string, unknown> = {}) => ({
