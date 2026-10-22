@@ -6994,5 +6994,14 @@
   },
   "notesSearch_graphSemanticVersionUnavailable": {
     "message": "Unavailable"
+  },
+  "notesSearch_tagMatchLabel": {
+    "message": "Show notes with"
+  },
+  "notesSearch_tagMatchAll": {
+    "message": "All these tags"
+  },
+  "notesSearch_tagMatchAny": {
+    "message": "Any of these tags"
   }
 }

@@ -1711,7 +1711,10 @@
     "semanticRenewConsent": "Review consent and rebuild",
     "semanticRenewStarted": "Consent renewed and semantic index rebuild started.",
     "semanticEndpoint": "Endpoint destination",
-    "semanticBackendChangeRequiresDelete": "Vector storage changed. Delete the existing index before setting it up again."
+    "semanticBackendChangeRequiresDelete": "Vector storage changed. Delete the existing index before setting it up again.",
+    "tagMatchLabel": "Show notes with",
+    "tagMatchAll": "All these tags",
+    "tagMatchAny": "Any of these tags"
   },
   "tts": {
     "playground": "TTS Playground"

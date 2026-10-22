@@ -12,6 +12,7 @@ import NotesListPanel from '@/components/Notes/NotesListPanel'
 import CollapsibleSection from '@/components/Notes/CollapsibleSection'
 import NotesCollectionControls from '@/components/Notes/NotesCollectionControls'
 import NotesTagFilterSelect from '@/components/Notes/NotesTagFilterSelect'
+import type { NotesTagMatch } from '@/components/Notes/hooks/useNotesListManagement'
 import NotesListErrorMessage from '@/components/Notes/NotesListErrorMessage'
 import NotesSectionHelpButton from '@/components/Notes/NotesSectionHelpButton'
 import { MetaText } from '@/components/Common/MetaText'
@@ -77,6 +78,10 @@ export interface NotesSidebarProps {
   keywordTokens: string[]
   keywordOptions: string[]
   availableKeywords: string[]
+  /** How several tag filters combine (NL-N1); the choice shows once two or more apply. */
+  tagMatch?: NotesTagMatch
+  tagMatchApplies?: boolean
+  onTagMatchChange?: (match: NotesTagMatch) => void
 
   // Notebook
   notebookOptions: NotebookFilterOption[]
@@ -215,6 +220,9 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
   keywordTokens,
   keywordOptions,
   availableKeywords,
+  tagMatch = 'all',
+  tagMatchApplies = false,
+  onTagMatchChange,
 
   // Notebook
   notebookOptions,
@@ -859,6 +867,34 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                       onSearch={handleKeywordFilterSearch}
                       onChange={handleKeywordFilterChange}
                     />
+                    {tagMatchApplies && onTagMatchChange ? (
+                      <div
+                        role="group"
+                        aria-labelledby="notes-tag-match-label"
+                        className="flex flex-wrap items-center gap-1 text-xs"
+                        data-testid="notes-tag-match"
+                      >
+                        <span id="notes-tag-match-label" className="text-text-muted">
+                          {t('option:notesSearch.tagMatchLabel', { defaultValue: 'Show notes with' })}
+                        </span>
+                        {([
+                          ['all', t('option:notesSearch.tagMatchAll', { defaultValue: 'All these tags' })],
+                          ['any', t('option:notesSearch.tagMatchAny', { defaultValue: 'Any of these tags' })]
+                        ] as const).map(([value, label]) => (
+                          <Button
+                            key={value}
+                            size="small"
+                            type={tagMatch === value ? 'primary' : 'default'}
+                            aria-pressed={tagMatch === value}
+                            onClick={() => onTagMatchChange(value)}
+                            className="text-xs"
+                            data-testid={`notes-tag-match-${value}`}
+                          >
+                            {label}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : null}
                     <div className="flex items-center justify-between gap-2">
                       <div className="inline-flex items-center gap-1">
                         <Button

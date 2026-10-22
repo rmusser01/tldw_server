@@ -2869,7 +2869,10 @@ async def create_note_folder(
 )
 async def search_notes_endpoint(  # Renamed to avoid conflict with imported search_notes
         query: Optional[str] = Query(None, min_length=1, description="Search term for notes"),
-        tokens: Optional[list[str]] = Query(None, description="Keyword tokens to filter notes"),
+        tokens: Optional[list[str]] = Query(
+            None,
+            description="Keyword tokens to filter notes. Each token matches a keyword exactly, ignoring case.",
+        ),
         db: CharactersRAGDB = Depends(get_chacha_db_for_user),
         limit: int = Query(10, ge=1, le=100, description="Number of results to return"),
         offset: int = Query(0, ge=0, description="Result offset for pagination"),
@@ -2877,6 +2880,15 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
         legacy_aliases: Annotated[
             bool, Query(description=_LEGACY_ALIASES_DESCRIPTION)
         ] = True,
+        tokens_match: Annotated[
+            Literal["all", "any"],
+            Query(
+                description=(
+                    "With several tokens: 'all' (default) keeps notes that have every token, "
+                    "'any' keeps notes that have at least one."
+                )
+            ),
+        ] = "all",
         title_only: bool = Query(
             False,
             description=(
@@ -2919,12 +2931,14 @@ async def search_notes_endpoint(  # Renamed to avoid conflict with imported sear
                 search_term=query_term or None,
                 keyword_tokens=token_list,
                 limit=limit,
-                offset=offset
+                offset=offset,
+                match=tokens_match,
             )
             try:
                 total = db.count_notes_matching_keywords(
                     search_term=query_term or None,
                     keyword_tokens=token_list,
+                    match=tokens_match,
                 )
             except _NOTES_NONCRITICAL_EXCEPTIONS:
                 total = offset + len(notes_data)

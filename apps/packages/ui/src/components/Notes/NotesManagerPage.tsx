@@ -2816,6 +2816,12 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
         keywordTokens={kw.keywordTokens}
         keywordOptions={kw.keywordOptions}
         availableKeywords={kw.availableKeywords}
+        tagMatch={list.tagMatch}
+        tagMatchApplies={list.effectiveKeywordTokens.length > 1}
+        onTagMatchChange={(match) => {
+          list.setTagMatch(match)
+          list.setPage(1)
+        }}
         notebookOptions={list.notebookOptions}
         selectedNotebookId={list.selectedNotebookId}
         selectedNotebook={list.selectedNotebook}

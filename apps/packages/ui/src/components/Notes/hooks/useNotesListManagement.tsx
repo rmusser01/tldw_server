@@ -88,6 +88,12 @@ const useAuthorityOwnedState = <T,>(
   return [value, setValue]
 }
 
+/**
+ * How several tag filters combine (NL-N1): "all" keeps notes that have every
+ * tag, "any" keeps notes that have at least one. Tags match exactly.
+ */
+export type NotesTagMatch = 'all' | 'any'
+
 export interface UseNotesListManagementDeps {
   authorityScope?: string | null
   isOnline: boolean
@@ -116,6 +122,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
   } = deps
 
   // ---- list state ----
+  const [tagMatch, setTagMatch] = React.useState<NotesTagMatch>('all')
   const [query, setQuery] = React.useState('')
   const [queryInput, setQueryInput] = React.useState('')
   const [searchTipsQuery, setSearchTipsQuery] = React.useState('')
@@ -257,12 +264,15 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     params.set('include_keywords', 'true')
     params.set('sort_by', NOTE_SORT_API_PARAMS[sortOption].sortBy)
     params.set('sort_order', NOTE_SORT_API_PARAMS[sortOption].sortOrder)
+    let tokenCount = 0
     toks.forEach((tok) => {
       const v = tok.trim()
       if (v.length > 0) {
         params.append('tokens', v)
+        tokenCount += 1
       }
     })
+    if (tokenCount > 1) params.set('tokens_match', tagMatch)
     // `items` is all the list reads; skip the duplicate arrays (NS-04).
     params.set('legacy_aliases', 'false')
 
@@ -300,7 +310,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     }
 
     return { items: sortNoteRows(items, sortOption), total: totalVal }
-  }, [authorityOwner, isCurrentAuthority, sortOption])
+  }, [authorityOwner, isCurrentAuthority, sortOption, tagMatch])
 
   const fetchNotes = React.useCallback(async (): Promise<NoteListItem[]> => {
     const requestOwner = authorityOwner
@@ -434,6 +444,7 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     sortOption,
     selectedNotebookId ?? 'none',
     effectiveKeywordTokens.join('|'),
+    tagMatch,
     ...(authorityScope === undefined
       ? []
       : ['authority', authorityScope, 'generation', authorityOwner.generation])
@@ -1260,6 +1271,8 @@ export function useNotesListManagement(deps: UseNotesListManagementDeps) {
     selectedNotebook,
     // derived
     effectiveKeywordTokens,
+    tagMatch,
+    setTagMatch,
     rawNotes, filteredCount,
     orderedVisibleNoteIds,
     bulkSelectedIdSet, selectedBulkNotes,

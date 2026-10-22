@@ -170,6 +170,12 @@ const tokenFilters = () =>
     .filter((path) => path.startsWith("/api/v1/notes/search"))
     .map((path) => new URLSearchParams(path.split("?")[1]).getAll("tokens"))
 
+const tagSearches = () =>
+  mockBgRequest.mock.calls
+    .map(([request]) => String(request?.path || ""))
+    .filter((path) => path.startsWith("/api/v1/notes/search"))
+    .map((path) => new URLSearchParams(path.split("?")[1]))
+
 const typeIntoTagFilter = async (text: string) => {
   const input = screen.getByRole("combobox", { name: "Filter by tag" })
   fireEvent.mouseDown(input)
@@ -240,5 +246,52 @@ describe("NotesManagerPage NL-08 tag filter", { timeout: 60_000 }, () => {
     })
 
     expect(tokenFilters().flat()).not.toContain("zzz")
+  })
+
+  // NL-N1: several tags narrow the list (all of them) unless the reader asks
+  // for any of them.
+  const pickTag = async (partial: string, tag: string) => {
+    await typeIntoTagFilter(partial)
+    fireEvent.click(await screen.findByTestId(`notes-keyword-filter-option-label-${tag}`))
+    await waitFor(() => {
+      expect(tokenFilters().some((tokens) => tokens.includes(tag))).toBe(true)
+    })
+  }
+
+  it("offers no match choice for a single tag", async () => {
+    renderPage()
+    await screen.findByTestId("notes-open-button-n-thesis")
+
+    await pickTag("thes", "thesis")
+
+    expect(screen.queryByRole("group", { name: "Show notes with" })).not.toBeInTheDocument()
+    expect(tagSearches().at(-1)?.has("tokens_match")).toBe(false)
+  })
+
+  it("keeps notes with all chosen tags by default and switches to any", async () => {
+    renderPage()
+    await screen.findByTestId("notes-open-button-n-thesis")
+
+    await pickTag("thes", "thesis")
+    await pickTag("read", "reading")
+
+    await waitFor(() => {
+      const last = tagSearches().at(-1)
+      expect(last?.getAll("tokens")).toEqual(["thesis", "reading"])
+      expect(last?.get("tokens_match")).toBe("all")
+    })
+    const group = screen.getByRole("group", { name: "Show notes with" })
+    const all = screen.getByRole("button", { name: "All these tags" })
+    const any = screen.getByRole("button", { name: "Any of these tags" })
+    expect(group).toContainElement(all)
+    expect(all).toHaveAttribute("aria-pressed", "true")
+    expect(any).toHaveAttribute("aria-pressed", "false")
+
+    fireEvent.click(any)
+
+    await waitFor(() => {
+      expect(tagSearches().at(-1)?.get("tokens_match")).toBe("any")
+    })
+    expect(screen.getByRole("button", { name: "Any of these tags" })).toHaveAttribute("aria-pressed", "true")
   })
 })
