@@ -760,6 +760,9 @@
       "unreachable": "Unreachable",
       "unreachableTitle": "The last request to this model failed. Its provider may not be running. Choose another model.",
       "switchTo": "Switch to {{model}}",
+      "switchedTo": "Switched to {{model}}",
+      "providerWorkingTitle": "Its provider answered recently.",
+      "providerUnreachableTitle": "Its provider has been failing. Choose another model.",
       "tooltip": "Model status"
     }
   },

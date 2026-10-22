@@ -120,4 +120,32 @@ describe("Playground model readiness chip (CC-01, #3111)", { timeout: 90_000 }, 
       screen.getByRole("button", { name: `Switch to ${FAKE_MODEL} (Custom OpenAI API)` })
     ).toBeInTheDocument()
   })
+
+  // The switch button disappears once the new model is selected; focus must
+  // not fall to the page, and the change must be announced.
+  it("CC-01: a one-click switch moves focus to the model chip and announces the new model", async () => {
+    const server = twoProviderServer({
+      status: "circuit_open",
+      success_count: 0,
+      failure_count: 6,
+      consecutive_failures: 6
+    })
+    const view = await renderPlayground({ server, persistedModel: `ollama:${OLLAMA_MODEL}` })
+
+    const switchButton = await screen.findByRole(
+      "button",
+      { name: `Switch to ${FAKE_MODEL} (Custom OpenAI API)` },
+      HARNESS_WAIT
+    )
+    await view.user.click(switchButton)
+
+    await waitFor(
+      () => expect(screen.queryByTestId("model-readiness-switch")).toBeNull(),
+      HARNESS_WAIT
+    )
+    expect(document.activeElement).toBe(screen.getByTestId("model-selector"))
+    expect(screen.getByTestId("model-readiness-announcement")).toHaveTextContent(
+      `Switched to ${FAKE_MODEL} (Custom OpenAI API)`
+    )
+  })
 })

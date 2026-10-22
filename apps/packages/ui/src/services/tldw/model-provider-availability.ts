@@ -93,10 +93,19 @@ export const normalizeProviderAvailabilityKey = (
 }
 
 /**
+ * The failure streak at which the server marks a provider unhealthy
+ * (`provider_manager.py`). The chat path also records client-side errors such
+ * as a 400 for an over-long prompt, so fewer failures prove nothing about the
+ * provider.
+ */
+const PROVIDER_UNHEALTHY_FAILURE_STREAK = 3
+
+/**
  * Reduce the server's provider health report to a claim the UI can make.
- * "healthy" counts only once the provider has answered at least once, and a
- * provider whose latest calls failed is unreachable even before the server's
- * periodic re-evaluation changes its status.
+ * "healthy" counts only once the provider has answered at least once. A
+ * provider that reached the server's failure streak is unreachable even before
+ * the server's periodic re-evaluation changes its status; a shorter streak
+ * makes no claim either way.
  */
 export const toProviderHealthSignal = (health: unknown): ProviderHealthSignal => {
   if (typeof health === "string") {
@@ -112,7 +121,8 @@ export const toProviderHealthSignal = (health: unknown): ProviderHealthSignal =>
   if (status === "unhealthy" || status === "circuit_open" || status === "open") {
     return "unreachable"
   }
-  if (consecutiveFailures > 0) return "unreachable"
+  if (consecutiveFailures >= PROVIDER_UNHEALTHY_FAILURE_STREAK) return "unreachable"
+  if (consecutiveFailures > 0) return "unknown"
   if ((status === "healthy" || status === "degraded") && successCount > 0) {
     return "working"
   }

@@ -93,11 +93,24 @@ describe("toProviderHealthSignal", () => {
     expect(toProviderHealthSignal({ status: "healthy", success_count: 3 })).toBe("working")
   })
 
-  it("is unreachable when the circuit is open or the latest calls failed", () => {
+  it("is unreachable when the circuit is open or the server's failure streak is reached", () => {
     expect(toProviderHealthSignal({ status: "circuit_open", success_count: 9 })).toBe("unreachable")
+    expect(toProviderHealthSignal({ status: "unhealthy", success_count: 9 })).toBe("unreachable")
+    expect(
+      toProviderHealthSignal({ status: "healthy", success_count: 2, consecutive_failures: 3 })
+    ).toBe("unreachable")
+  })
+
+  // The chat path records a failure for client-side errors too (a 400 for an
+  // over-long prompt, a content filter); one or two of those must not mark
+  // every model of the provider unreachable for every user.
+  it("makes no claim after one or two failures below the server's threshold", () => {
     expect(
       toProviderHealthSignal({ status: "healthy", success_count: 2, consecutive_failures: 1 })
-    ).toBe("unreachable")
+    ).toBe("unknown")
+    expect(
+      toProviderHealthSignal({ status: "healthy", success_count: 2, consecutive_failures: 2 })
+    ).toBe("unknown")
   })
 })
 

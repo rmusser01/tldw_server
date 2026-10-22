@@ -124,6 +124,22 @@ export const ChatModelSelectorDropdown = React.memo(
       modelSelectorWarning ||
       readinessWarning
     const switchTarget = readinessShown ? modelReadiness?.switchTarget ?? null : null
+    const [switchAnnouncement, setSwitchAnnouncement] = React.useState("")
+    // The switch button unmounts once the new model is selected, so focus
+    // moves to the chip and the change is announced (CC-01).
+    const handleSwitchToTarget = React.useCallback(() => {
+      if (!switchTarget || !modelReadiness) return
+      modelReadiness.switchToTarget()
+      setSwitchAnnouncement(
+        String(
+          t("playground:composer.modelReadiness.switchedTo", {
+            defaultValue: "Switched to {{model}}",
+            model: switchTarget.modelLabel
+          } as never)
+        )
+      )
+      selectorRef.current?.focus()
+    }, [modelReadiness, switchTarget, t])
 
     return (
       <>
@@ -328,12 +344,20 @@ export const ChatModelSelectorDropdown = React.memo(
         <button
           type="button"
           data-testid="model-readiness-switch"
-          onClick={modelReadiness.switchToTarget}
+          onClick={handleSwitchToTarget}
           className="inline-flex min-h-[44px] min-w-0 max-w-full items-center rounded-full border border-border bg-surface px-2 text-[10px] text-text hover:bg-surface-hover"
         >
           <span className="truncate">{switchTarget.label}</span>
         </button>
       ) : null}
+      <span
+        role="status"
+        aria-live="polite"
+        data-testid="model-readiness-announcement"
+        className="sr-only"
+      >
+        {switchAnnouncement}
+      </span>
       </>
     )
   }

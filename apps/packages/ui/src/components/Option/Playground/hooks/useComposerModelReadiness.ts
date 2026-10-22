@@ -9,6 +9,7 @@ import {
 } from "@/hooks/playground/modelSelectorUtils"
 import {
   chatModelReadinessKey,
+  getChatModelSendOutcome,
   getChatModelSendOutcomesVersion,
   resolveChatModelReadinessState,
   subscribeChatModelSendOutcomes,
@@ -82,6 +83,10 @@ export function useComposerModelReadiness({
       provider,
       modelId
     })
+    // Without a send from this session the state comes from the server's
+    // report on the whole provider, so the copy must not claim this model
+    // answered or failed.
+    const fromProviderReport = getChatModelSendOutcome(provider, modelId) === null
 
     let switchTarget: ComposerModelSwitchTarget | null = null
     if (state === "unreachable") {
@@ -122,18 +127,32 @@ export function useComposerModelReadiness({
       },
       working: {
         label: String(t("playground:composer.modelReadiness.working", "Working")),
-        title: String(
-          t("playground:composer.modelReadiness.workingTitle", "This model answered recently.")
-        )
+        title: fromProviderReport
+          ? String(
+              t(
+                "playground:composer.modelReadiness.providerWorkingTitle",
+                "Its provider answered recently."
+              )
+            )
+          : String(
+              t("playground:composer.modelReadiness.workingTitle", "This model answered recently.")
+            )
       },
       unreachable: {
         label: String(t("playground:composer.modelReadiness.unreachable", "Unreachable")),
-        title: String(
-          t(
-            "playground:composer.modelReadiness.unreachableTitle",
-            "The last request to this model failed. Its provider may not be running. Choose another model."
-          )
-        )
+        title: fromProviderReport
+          ? String(
+              t(
+                "playground:composer.modelReadiness.providerUnreachableTitle",
+                "Its provider has been failing. Choose another model."
+              )
+            )
+          : String(
+              t(
+                "playground:composer.modelReadiness.unreachableTitle",
+                "The last request to this model failed. Its provider may not be running. Choose another model."
+              )
+            )
       }
     }
     return { state, ...copy[state], switchTarget }
