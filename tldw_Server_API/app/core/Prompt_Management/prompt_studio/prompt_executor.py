@@ -203,6 +203,7 @@ class PromptExecutor:
                 "prompt_id": prompt_id,
                 "inputs": test_inputs,
                 "error": str(e),
+                **({"error_code": e.code} if isinstance(e, StructuredPromptAssemblyError) else {}),
                 "model": model_config.get("model"),
                 "provider": model_config.get("provider"),
                 "execution_time_ms": execution_time,
@@ -597,6 +598,16 @@ class PromptExecutor:
         prepared_inputs = self._prepare_prompt_inputs(inputs)
         if prompt.get("prompt_format") == "structured" and prompt.get("prompt_definition"):
             return self._build_structured_prompt_request(prompt, signature, prepared_inputs)
+
+        # Check original tokens before rendering so replacement text stays literal.
+        for match in self._PLACEHOLDER_PATTERN.finditer(prompt.get("user_prompt") or ""):
+            name = next(value for value in match.groupdict().values() if value is not None)
+            if name not in prepared_inputs or not prepared_inputs[name].strip():
+                raise StructuredPromptAssemblyError(
+                    "missing_required_variable",
+                    f"Missing required variable: {name}",
+                    variable_name=name,
+                )
 
         final_prompt = self._build_prompt(prompt, signature, prepared_inputs)
         return {

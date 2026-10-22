@@ -988,6 +988,8 @@ async def test_admin_health_multi_provider_timeouts_retain_real_worker_admission
         await asyncio.gather(task, return_exceptions=True)
         await _wait_for_thread_state(lambda: pool.active_count == 0)
 
+    # Recovery checks released capacity, not the synthetic 50ms timeout.
+    monkeypatch.setattr(admin_llm_providers, "_provider_health_timeout_seconds", lambda: 1.0)
     recovery = await asyncio.wait_for(
         admin_llm_providers.admin_llm_providers_health(
             admin_llm_providers_service=service,

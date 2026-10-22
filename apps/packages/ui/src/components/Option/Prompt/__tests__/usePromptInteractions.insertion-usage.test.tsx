@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { act, cleanup, renderHook } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -9,7 +9,7 @@ import { usePromptInteractions } from "../hooks/usePromptInteractions";
 
 // The deployed library interaction hook, router, QueryClient and option setters
 // are real. Usage recording and unrelated library/service discovery are the I/O
-// doubles. No full PromptBody, native browser navigation or database assertion.
+// doubles. The captured owner remains current through usage recording before publication.
 vi.mock("@/hooks/useMessageOption", async () => {
   const { useStoreMessageOption: store } = await import("@/store/option");
   return { useMessageOption: () => store.getState() };
@@ -22,6 +22,14 @@ vi.mock("@/services/prompt-studio", () => ({
   hasPromptStudio: async () => false,
   getPrompt: vi.fn(),
   getLlmProviders: async () => ({ providers: [] }),
+}));
+const ownerId = "recipe-owner:sha256:" + "a".repeat(64);
+vi.mock("@/services/recipe-persistence-uncertainty", async (original) => ({
+  ...await original(),
+  resolveRecipePersistenceOwnerView: async () => ({
+    ownerId: "recipe-owner:sha256:" + "a".repeat(64),
+    authorizationRevision: "current"
+  })
 }));
 const clients = new Set<QueryClient>();
 const userText = "  Exact library question\n";
@@ -48,6 +56,7 @@ const mount = (markUsed: (id: string) => Promise<void>) => {
       interactions: usePromptInteractions({
         queryClient,
         isOnline: false,
+        expectedOwnerId: ownerId,
         t: (key, options) => String(options?.defaultValue ?? key),
         getPromptTexts: (record: {
           systemText?: string;
@@ -79,9 +88,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("library insertion does not await best-effort usage", () => {
+describe("library insertion retains captured ownership through usage recording", () => {
   it.each(["system", "quick", "both"] as const)(
-    "applies %s and navigates before held usage recording resolves",
+    "applies %s and navigates only after owned usage recording resolves",
     async (choice) => {
       const usage = deferred();
       const markUsed = vi.fn(() => usage.promise);
@@ -102,7 +111,11 @@ describe("library insertion does not await best-effort usage", () => {
           view.result.current.interactions.handleInsertChoice(choice);
       });
       try {
-        expect(markUsed).toHaveBeenCalledExactlyOnceWith("library-prompt");
+        await waitFor(() => expect(markUsed).toHaveBeenCalledExactlyOnceWith("library-prompt"));
+        expect(view.result.current.path).toBe("/prompt");
+        expect(useStoreMessageOption.getState().selectedSystemPrompt).toBeNull();
+        expect(useStoreMessageOption.getState().selectedQuickPrompt).toBeNull();
+        await act(async () => { usage.resolve(); await completion; });
         expect(view.result.current.path).toBe("/chat");
         expect(useStoreMessageOption.getState().selectedSystemPrompt).toBe(
           choice === "quick" ? undefined : "library-prompt",
@@ -119,7 +132,7 @@ describe("library insertion does not await best-effort usage", () => {
       }
     },
   );
-  it("publishes a quick-only library prompt and navigates before its held usage record resolves", async () => {
+  it("publishes a quick-only library prompt only after owned usage recording resolves", async () => {
     const usage = deferred();
     const markUsed = vi.fn(() => usage.promise);
     const view = mount(markUsed);
@@ -131,7 +144,11 @@ describe("library insertion does not await best-effort usage", () => {
       });
     });
     try {
-      expect(markUsed).toHaveBeenCalledExactlyOnceWith("quick-library-prompt");
+      await waitFor(() => expect(markUsed).toHaveBeenCalledExactlyOnceWith("quick-library-prompt"));
+      expect(view.result.current.path).toBe("/prompt");
+      expect(useStoreMessageOption.getState().selectedSystemPrompt).toBeNull();
+      expect(useStoreMessageOption.getState().selectedQuickPrompt).toBeNull();
+      await act(async () => { usage.resolve(); await completion; });
       expect(view.result.current.path).toBe("/chat");
       expect(useStoreMessageOption.getState().selectedQuickPrompt).toBe(
         userText,

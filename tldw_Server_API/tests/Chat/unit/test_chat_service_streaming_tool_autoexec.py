@@ -1004,3 +1004,30 @@ def test_emit_chat_run_first_rollout_metrics_propagates_unexpected_failures(
         )
 
     warning.assert_not_called()
+@pytest.mark.asyncio
+@pytest.mark.unit
+@pytest.mark.parametrize("unified, reject", [(False, False), (True, False), (False, True)])
+async def test_chat_sse_forbids_proxy_compression(monkeypatch, unified, reject):
+    """Proxies must forward each Chat frame while generation is still running."""
+    monkeypatch.setenv("STREAMS_UNIFIED", "1" if unified else "0")
+    monkeypatch.setattr(chat_service, "should_auto_execute_tools", lambda: reject)
+
+    async def save_message_fn(*_args, **_kwargs):
+        return "message-stream-header"
+
+    response = await _run_execute_streaming_call(
+        llm_call_func=_content_stream,
+        save_message_fn=save_message_fn,
+        cleaned_args_overrides={
+            "n": 2 if reject else 1,
+            **(
+                {"tools": [{"type": "function", "function": {"name": "notes.search", "parameters": {}}}]}
+                if reject
+                else {}
+            ),
+        },
+    )
+    try:
+        assert "no-transform" in response.headers["cache-control"]  # nosec B101: Required SSE proxy behavior.
+    finally:
+        await _collect_sse_chunks(response)

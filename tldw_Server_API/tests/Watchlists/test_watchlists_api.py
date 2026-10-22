@@ -305,6 +305,28 @@ def test_sources_check_now_reports_run_errors_and_missing_sources(client_with_us
     assert by_source[999999]["status"] == "not_found"
 
 
+@pytest.mark.parametrize("source_status", ["error:403", "error:extraction", "partial:extraction", "error"])
+def test_sources_check_now_preserves_source_failure_status(client_with_user, monkeypatch, source_status):
+    from tldw_Server_API.app.api.v1.endpoints import watchlists as endpoints
+
+    async def failed_run(user_id, _job_id, **kwargs):
+        db = WatchlistsDatabase.for_user(user_id)
+        for source_id in kwargs["source_ids_override"]:
+            db.update_source_scrape_meta(source_id, status=source_status)
+        return {"run_id": None, "status": "failed"}
+
+    monkeypatch.setattr(endpoints, "run_watchlist_job", failed_run)
+    response = client_with_user.post("/api/v1/watchlists/sources", json={
+        "name": "Failed source", "url": "https://example.com/failure.xml", "source_type": "rss",
+    })
+    assert response.status_code == 200  # nosec B101 - Pytest source-failure regression assertion.
+    checked = client_with_user.post("/api/v1/watchlists/sources/check-now", json={"source_ids": [response.json()["id"]]})
+    assert checked.status_code == 200  # nosec B101 - Pytest source-failure regression assertion.
+    payload = checked.json()
+    assert payload["success"] == 0 and payload["failed"] == 1  # nosec B101 - Pytest source-failure regression assertion.
+    assert payload["items"][0]["status"] == "error"  # nosec B101 - Pytest source-failure regression assertion.
+
+
 def test_source_group_validation_and_idempotent_create(client_with_user):
 
     c = client_with_user
@@ -1861,3 +1883,57 @@ def test_output_summaries_return_a_quota_refusal_as_402(client_with_user, monkey
     r = c.get("/api/v1/watchlists/outputs", params={"run_id": run_id})
     assert r.status_code == 200, r.text
     assert r.json()["total"] == 0
+
+
+def _over_quota_run(c, monkeypatch) -> tuple[int, list[list[dict]]]:
+    """A finished run for a user over an LLM quota; returns the run id and the summary calls made."""
+    from tldw_Server_API.app.api.v1.endpoints import watchlists as watchlists_endpoint
+    from tldw_Server_API.tests.helpers.llm_quota import refuse_llm_work
+
+    monkeypatch.setenv("TEST_MODE", "1")
+    summarized: list[list[dict]] = []
+
+    async def _summarize(items, **_kwargs):
+        summarized.append(items)
+        return items
+
+    monkeypatch.setattr(watchlists_endpoint, "summarize_items_for_output", _summarize)
+    r = c.post(
+        "/api/v1/watchlists/sources",
+        json={"name": "Quota Feed", "url": "https://example.com/quota.xml", "source_type": "rss", "tags": ["quota"]},
+    )
+    assert r.status_code == 200, r.text
+    r = c.post("/api/v1/watchlists/jobs", json={"name": "Quota Digest", "scope": {"tags": ["quota"]}})
+    assert r.status_code == 200, r.text
+    r = c.post(f"/api/v1/watchlists/jobs/{r.json()['id']}/run")
+    assert r.status_code == 200, r.text
+    refuse_llm_work(monkeypatch)
+    return int(r.json()["id"]), summarized
+
+
+def test_output_summaries_refuse_an_over_quota_user_before_any_summary(client_with_user, monkeypatch):
+    """An over-quota user asking for summaries gets the 402 before any summary call (TASK-13864)."""
+    from tldw_Server_API.tests.helpers.llm_quota import assert_llm_quota_402
+
+    c = client_with_user
+    run_id, summarized = _over_quota_run(c, monkeypatch)
+
+    r = c.post("/api/v1/watchlists/outputs", json={"run_id": run_id, "summarize": True, "llm_provider": "openai"})
+
+    assert_llm_quota_402(r)
+    assert summarized == []
+    r = c.get("/api/v1/watchlists/outputs", params={"run_id": run_id})
+    assert r.status_code == 200, r.text
+    assert r.json()["total"] == 0
+
+
+def test_output_without_summaries_is_not_refused_for_an_over_quota_user(client_with_user, monkeypatch):
+    """Without summarize there is no LLM work to refuse, so the output is written (TASK-13864)."""
+    c = client_with_user
+    run_id, summarized = _over_quota_run(c, monkeypatch)
+
+    r = c.post("/api/v1/watchlists/outputs", json={"run_id": run_id, "summarize": False})
+
+    assert r.status_code == 200, r.text
+    assert r.json()["run_id"] == run_id
+    assert summarized == []

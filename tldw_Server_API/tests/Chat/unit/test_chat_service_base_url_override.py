@@ -138,6 +138,27 @@ def test_chat_request_cannot_select_local_transport_or_scope() -> None:
     assert internal == {}
 
 
+@pytest.mark.parametrize("stream", [False, True], ids=["chat", "stream"])
+def test_a_custom_provider_without_a_base_url_is_a_configuration_error(
+    monkeypatch: pytest.MonkeyPatch,
+    stream: bool,
+) -> None:
+    """A caller with no credential handle gets the error a credentialed caller already gets."""
+    from tldw_Server_API.app.core.LLM_Calls.providers import custom_openai_adapter
+
+    monkeypatch.setattr(custom_openai_adapter, "resolve_trusted_provider_endpoint", lambda _name: None)
+
+    with pytest.raises(ChatConfigurationError):
+        result = chat_service.perform_chat_api_call(
+            api_provider="custom-openai-api-2",
+            messages=[{"role": "user", "content": "hi"}],
+            model="model",
+            stream=stream,
+        )
+        if stream:
+            list(result)
+
+
 def test_dns_unresolved_maps_to_sanitized_reachability_error() -> None:
     mapped = chat_service._map_provider_egress_error(
         "custom-openai-api",

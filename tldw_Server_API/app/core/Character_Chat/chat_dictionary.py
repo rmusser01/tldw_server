@@ -30,6 +30,8 @@ import random
 import re
 import sqlite3
 import warnings
+from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional, Union
@@ -492,6 +494,56 @@ class ChatDictionaryEntry:
         return entry
 
 
+def process_dictionary_entries(
+    text: str,
+    entries: list[ChatDictionaryEntry],
+    *,
+    max_iterations: int,
+    token_budget: Optional[int],
+    count_tokens: Callable[[str], int],
+    on_replacement: Optional[Callable[[ChatDictionaryEntry, int], None]] = None,
+) -> tuple[str, dict[str, Any]]:
+    """Apply the existing iterative replacement loop to detached entry objects."""
+    if len(text) > MAX_CHAT_DICTIONARY_TEXT_LENGTH:
+        raise InputError(f"Input text exceeds maximum length ({len(text)} > {MAX_CHAT_DICTIONARY_TEXT_LENGTH})")
+    stats = {
+        "replacements": 0, "iterations": 0, "entries_used": [],
+        "token_budget_exceeded": False, "token_budget_used": token_budget,  # nosec B105 - Token-budget status flags contain no credentials.
+    }
+    if not entries:
+        return text, stats
+    for _iteration in range(max_iterations):
+        iteration_replacements = 0
+        for entry in entries:
+            if entry.matches(text):
+                original_max = entry.max_replacements
+                if token_budget is not None and original_max == 0:
+                    entry.max_replacements = 1
+                try:
+                    new_text, count = entry.apply_replacement(text)
+                finally:
+                    entry.max_replacements = original_max
+                if count > 0:
+                    text = new_text
+                    iteration_replacements += count
+                    stats["replacements"] += count
+                    if entry.entry_id not in stats["entries_used"]:
+                        stats["entries_used"].append(entry.entry_id)
+                    if on_replacement is not None:
+                        on_replacement(entry, count)
+                    if token_budget and count_tokens(text) > token_budget:
+                        warnings.warn(
+                            f"Token budget ({token_budget}) exceeded after {stats['replacements']} replacements",
+                            TokenBudgetExceededWarning, stacklevel=2,
+                        )
+                        stats["token_budget_exceeded"] = True
+                        return text, stats
+        stats["iterations"] += 1
+        if iteration_replacements == 0:
+            break
+    return text, stats
+
+
 class ChatDictionaryService:
     """
     Service class for managing chat dictionaries in a multi-user environment.
@@ -522,177 +574,106 @@ class ChatDictionaryService:
         self._usage_counts: dict[int, int] = {}
         self._last_used_at: dict[int, datetime] = {}
 
+    @contextmanager
+    def _connection(self):
+        """Use the backend's supported transaction while preserving SQLite contexts."""
+        if self.db.backend_type == BackendType.POSTGRESQL:
+            with self.db.transaction() as conn:
+                yield conn
+        else:
+            with self.db.get_connection() as conn:
+                yield conn
+
     def _init_tables(self):
         """Initialize dictionary tables in the user's database if they don't exist."""
-        backend_type = getattr(self.db, "backend_type", BackendType.SQLITE)
         try:
-            with self.db.get_connection() as conn:
-                if backend_type == BackendType.POSTGRESQL:
-                    conn.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS chat_dictionaries (
-                            id SERIAL PRIMARY KEY,
-                            name TEXT NOT NULL UNIQUE,
-                            description TEXT,
-                            category TEXT,
-                            tags TEXT,
-                            included_dictionary_ids TEXT,
-                            is_active BOOLEAN DEFAULT TRUE,
-                            default_token_budget INTEGER NULL,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            usage_count INTEGER DEFAULT 0,
-                            last_used_at TIMESTAMP NULL,
-                            version INTEGER DEFAULT 1,
-                            deleted BOOLEAN DEFAULT FALSE
-                        )
-                        """
-                    )
-
-                    conn.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS dictionary_entries (
-                            id SERIAL PRIMARY KEY,
-                            dictionary_id INTEGER NOT NULL,
-                            key TEXT NOT NULL,
-                            content TEXT NOT NULL,
-                            is_regex BOOLEAN DEFAULT FALSE,
-                            probability REAL DEFAULT 1.0,
-                            max_replacements INTEGER DEFAULT 1,
-                            group_name TEXT,
-                            timed_effects TEXT DEFAULT '{}',
-                            enabled BOOLEAN DEFAULT TRUE,
-                            case_sensitive BOOLEAN DEFAULT TRUE,
-                            sort_order INTEGER,
-                            usage_count INTEGER DEFAULT 0,
-                            last_used_at TIMESTAMP NULL,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            FOREIGN KEY (dictionary_id) REFERENCES chat_dictionaries(id) ON DELETE CASCADE
-                        )
-                        """
-                    )
-
-                    conn.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS dictionary_transform_activity (
-                            id SERIAL PRIMARY KEY,
-                            dictionary_id INTEGER NOT NULL,
-                            chat_id TEXT NULL,
-                            entries_used TEXT NOT NULL,
-                            replacements INTEGER DEFAULT 0,
-                            iterations INTEGER DEFAULT 0,
-                            token_budget_used INTEGER NULL,
-                            original_text_preview TEXT NOT NULL,
-                            processed_text_preview TEXT NOT NULL,
-                            processing_time_ms REAL NULL,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            FOREIGN KEY (dictionary_id) REFERENCES chat_dictionaries(id) ON DELETE CASCADE
-                        )
-                        """
-                    )
-
-                    conn.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS dictionary_version_history (
-                            id SERIAL PRIMARY KEY,
-                            dictionary_id INTEGER NOT NULL,
-                            revision INTEGER NOT NULL,
-                            source_dictionary_version INTEGER NULL,
-                            change_type TEXT NOT NULL,
-                            summary TEXT NULL,
-                            entry_count INTEGER DEFAULT 0,
-                            dictionary_snapshot TEXT NOT NULL,
-                            entries_snapshot TEXT NOT NULL,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            UNIQUE(dictionary_id, revision),
-                            FOREIGN KEY (dictionary_id) REFERENCES chat_dictionaries(id) ON DELETE CASCADE
-                        )
-                        """
-                    )
-                else:
-                    conn.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS chat_dictionaries (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            name TEXT NOT NULL UNIQUE,
-                            description TEXT,
-                            category TEXT,
-                            tags TEXT,
-                            included_dictionary_ids TEXT,
-                            is_active BOOLEAN DEFAULT 1,
-                            default_token_budget INTEGER,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            usage_count INTEGER DEFAULT 0,
-                            last_used_at TIMESTAMP NULL,
-                            version INTEGER DEFAULT 1,
-                            deleted BOOLEAN DEFAULT 0
-                        )
+            if self.db.backend_type == BackendType.POSTGRESQL:
+                with self.db.transaction() as conn:
+                    self.db._verify_dictionary_schema_postgres(conn)
+                return
+            with self._connection() as conn:
+                conn.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS chat_dictionaries (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        name TEXT NOT NULL UNIQUE,
+                        description TEXT,
+                        category TEXT,
+                        tags TEXT,
+                        included_dictionary_ids TEXT,
+                        is_active BOOLEAN DEFAULT 1,
+                        default_token_budget INTEGER,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        usage_count INTEGER DEFAULT 0,
+                        last_used_at TIMESTAMP NULL,
+                        version INTEGER DEFAULT 1,
+                        deleted BOOLEAN DEFAULT 0
                     )
+                """
+                )
 
-                    conn.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS dictionary_entries (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            dictionary_id INTEGER NOT NULL,
-                            key TEXT NOT NULL,
-                            content TEXT NOT NULL,
-                            is_regex BOOLEAN DEFAULT 0,
-                            probability REAL DEFAULT 1.0,
-                            max_replacements INTEGER DEFAULT 1,
-                            group_name TEXT,
-                            timed_effects TEXT DEFAULT '{"sticky": 0, "cooldown": 0, "delay": 0}',
-                            enabled BOOLEAN DEFAULT 1,
-                            case_sensitive BOOLEAN DEFAULT 1,
-                            sort_order INTEGER,
-                            usage_count INTEGER DEFAULT 0,
-                            last_used_at TIMESTAMP NULL,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            FOREIGN KEY (dictionary_id) REFERENCES chat_dictionaries(id) ON DELETE CASCADE
-                        )
-                        """
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS dictionary_entries (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        dictionary_id INTEGER NOT NULL,
+                        key TEXT NOT NULL,
+                        content TEXT NOT NULL,
+                        is_regex BOOLEAN DEFAULT 0,
+                        probability REAL DEFAULT 1.0,
+                        max_replacements INTEGER DEFAULT 1,
+                        group_name TEXT,
+                        timed_effects TEXT DEFAULT '{"sticky": 0, "cooldown": 0, "delay": 0}',
+                        enabled BOOLEAN DEFAULT 1,
+                        case_sensitive BOOLEAN DEFAULT 1,
+                        sort_order INTEGER,
+                        usage_count INTEGER DEFAULT 0,
+                        last_used_at TIMESTAMP NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (dictionary_id) REFERENCES chat_dictionaries(id) ON DELETE CASCADE
                     )
+                    """
+                )
 
-                    conn.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS dictionary_transform_activity (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            dictionary_id INTEGER NOT NULL,
-                            chat_id TEXT,
-                            entries_used TEXT NOT NULL,
-                            replacements INTEGER DEFAULT 0,
-                            iterations INTEGER DEFAULT 0,
-                            token_budget_used INTEGER,
-                            original_text_preview TEXT NOT NULL,
-                            processed_text_preview TEXT NOT NULL,
-                            processing_time_ms REAL,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            FOREIGN KEY (dictionary_id) REFERENCES chat_dictionaries(id) ON DELETE CASCADE
-                        )
-                        """
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS dictionary_transform_activity (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        dictionary_id INTEGER NOT NULL,
+                        chat_id TEXT,
+                        entries_used TEXT NOT NULL,
+                        replacements INTEGER DEFAULT 0,
+                        iterations INTEGER DEFAULT 0,
+                        token_budget_used INTEGER,
+                        original_text_preview TEXT NOT NULL,
+                        processed_text_preview TEXT NOT NULL,
+                        processing_time_ms REAL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (dictionary_id) REFERENCES chat_dictionaries(id) ON DELETE CASCADE
                     )
+                    """
+                )
 
-                    conn.execute(
-                        """
-                        CREATE TABLE IF NOT EXISTS dictionary_version_history (
-                            id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            dictionary_id INTEGER NOT NULL,
-                            revision INTEGER NOT NULL,
-                            source_dictionary_version INTEGER,
-                            change_type TEXT NOT NULL,
-                            summary TEXT,
-                            entry_count INTEGER DEFAULT 0,
-                            dictionary_snapshot TEXT NOT NULL,
-                            entries_snapshot TEXT NOT NULL,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            UNIQUE(dictionary_id, revision),
-                            FOREIGN KEY (dictionary_id) REFERENCES chat_dictionaries(id) ON DELETE CASCADE
-                        )
-                        """
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS dictionary_version_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        dictionary_id INTEGER NOT NULL,
+                        revision INTEGER NOT NULL,
+                        source_dictionary_version INTEGER,
+                        change_type TEXT NOT NULL,
+                        summary TEXT,
+                        entry_count INTEGER DEFAULT 0,
+                        dictionary_snapshot TEXT NOT NULL,
+                        entries_snapshot TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(dictionary_id, revision),
+                        FOREIGN KEY (dictionary_id) REFERENCES chat_dictionaries(id) ON DELETE CASCADE
                     )
+                    """
+                )
 
                 # Ensure legacy schemas are upgraded before creating indexes
                 # that depend on upgraded columns.
@@ -1107,7 +1088,7 @@ class ChatDictionaryService:
             ConflictError: If a dictionary with this name already exists
         """
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 normalized_includes = self._validate_included_dictionary_ids(
                     conn,
                     dictionary_id=None,
@@ -1193,7 +1174,7 @@ class ChatDictionaryService:
             Dictionary data or None if not found
         """
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 if dictionary_id:
                     cursor = conn.execute(
                         "SELECT * FROM chat_dictionaries WHERE id = ? AND deleted = ?", (dictionary_id, False)
@@ -1225,7 +1206,7 @@ class ChatDictionaryService:
             List of dictionary data
         """
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 query = "SELECT * FROM chat_dictionaries WHERE deleted = ?"
                 params: list[Any] = [False]
                 if not include_inactive:
@@ -1248,7 +1229,7 @@ class ChatDictionaryService:
             List of dictionary data including an `entry_count` key per dictionary.
         """
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 query = """
                     SELECT
                         d.*,
@@ -1839,7 +1820,7 @@ class ChatDictionaryService:
                 params.append(self._serialize_dictionary_tags(tags))
                 changed_fields.append("tags")
             if update_included_dictionary_ids:
-                with self.db.get_connection() as conn:
+                with self._connection() as conn:
                     normalized_includes = self._validate_included_dictionary_ids(
                         conn,
                         dictionary_id=int(dictionary_id) if dictionary_id is not None else None,
@@ -1866,7 +1847,7 @@ class ChatDictionaryService:
             if expected_version is not None:
                 params.append(int(expected_version))
 
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 set_clause = _build_safe_update_clause(updates, _DICTIONARY_UPDATE_FIELDS)
                 where_clause = "id = ? AND deleted = ?"
                 if expected_version is not None:
@@ -1935,7 +1916,7 @@ class ChatDictionaryService:
             True if deleted successfully
         """
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 existing_row = conn.execute(
                     "SELECT id, deleted FROM chat_dictionaries WHERE id = ?",
                     (dictionary_id,),
@@ -2059,7 +2040,7 @@ class ChatDictionaryService:
 
             timed_effects_json = json.dumps(timed_effects or {"sticky": 0, "cooldown": 0, "delay": 0})
 
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 next_sort_order_row = conn.execute(
                     "SELECT COALESCE(MAX(sort_order), 0) + 1 AS next_sort_order "
                     "FROM dictionary_entries WHERE dictionary_id = ?",
@@ -2157,7 +2138,7 @@ class ChatDictionaryService:
             List of dictionaries representing entries
         """
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 query = (
                     "SELECT e.* FROM dictionary_entries e JOIN chat_dictionaries d ON e.dictionary_id = d.id "
                     "WHERE d.deleted = ?"
@@ -2212,7 +2193,7 @@ class ChatDictionaryService:
             Dictionary representing the entry or None if not found
         """
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 query = (
                     "SELECT e.* FROM dictionary_entries e JOIN chat_dictionaries d ON e.dictionary_id = d.id "
                     "WHERE d.deleted = ? AND e.id = ?"
@@ -2261,7 +2242,7 @@ class ChatDictionaryService:
             return self._entry_cache
 
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 query = (
                     "SELECT e.* FROM dictionary_entries e JOIN chat_dictionaries d ON e.dictionary_id = d.id "
                     "WHERE d.deleted = ?"
@@ -2323,7 +2304,7 @@ class ChatDictionaryService:
         """
         target_dictionary_id = self._coerce_positive_int(dictionary_id)
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 rows = conn.execute(
                     """
                     SELECT id, name, included_dictionary_ids
@@ -2405,7 +2386,7 @@ class ChatDictionaryService:
 
         entries: list[ChatDictionaryEntry] = []
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 for dictionary_id in dictionary_order:
                     query = (
                         "SELECT e.* FROM dictionary_entries e JOIN chat_dictionaries d ON e.dictionary_id = d.id "
@@ -2521,7 +2502,7 @@ class ChatDictionaryService:
             updates.append("updated_at = CURRENT_TIMESTAMP")
             params.append(entry_id)
 
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 dictionary_id_row = conn.execute(
                     "SELECT dictionary_id FROM dictionary_entries WHERE id = ?",
                     (entry_id,),
@@ -2567,7 +2548,7 @@ class ChatDictionaryService:
             True if deleted successfully
         """
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 dictionary_id_row = conn.execute(
                     "SELECT dictionary_id FROM dictionary_entries WHERE id = ?",
                     (entry_id,),
@@ -2634,7 +2615,7 @@ class ChatDictionaryService:
                 normalized_entry_ids.append(entry_id)
                 seen.add(entry_id)
 
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 rows = conn.execute(
                     "SELECT id FROM dictionary_entries WHERE dictionary_id = ?",
                     (dictionary_id,),
@@ -2691,7 +2672,7 @@ class ChatDictionaryService:
     def _record_dictionary_usage(self, dictionary_id: int) -> None:
         """Persist usage metrics for a dictionary, best-effort."""
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 conn.execute(
                     """
                     UPDATE chat_dictionaries
@@ -2737,7 +2718,7 @@ class ChatDictionaryService:
                     """
         usage_update_sql = usage_update_sql_template.format_map(locals())  # nosec B608
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 conn.execute(
                     usage_update_sql,
                     tuple([False, *normalized_ids]),
@@ -2751,7 +2732,7 @@ class ChatDictionaryService:
         if not usage_counts:
             return
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 for entry_id, increment in usage_counts.items():
                     if entry_id <= 0:
                         continue
@@ -2777,7 +2758,7 @@ class ChatDictionaryService:
     ) -> Optional[int]:
         """Resolve fallback token budget from dictionary metadata when request omits it."""
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 if dictionary_id is not None:
                     row = conn.execute(
                         """
@@ -2848,7 +2829,7 @@ class ChatDictionaryService:
                     """
         budget_lookup_sql = budget_lookup_sql_template.format_map(locals())  # nosec B608
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 rows = conn.execute(
                     budget_lookup_sql,
                     tuple([False, True, *normalized_ids]),
@@ -2897,7 +2878,7 @@ class ChatDictionaryService:
                 seen.add(coerced_entry_id)
             original_preview = original_text[:280]
             processed_preview = processed_text[:280]
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 conn.execute(
                     """
                     INSERT INTO dictionary_transform_activity (
@@ -3001,7 +2982,7 @@ class ChatDictionaryService:
         safe_dictionary_id = int(dictionary_id)
         safe_limit = max(1, int(limit))
         safe_offset = max(0, int(offset))
-        with self.db.get_connection() as conn:
+        with self._connection() as conn:
             count_row = conn.execute(
                 """
                 SELECT COUNT(1)
@@ -3085,6 +3066,144 @@ class ChatDictionaryService:
 
             return events, total
 
+    @classmethod
+    def snapshot_assigned_dictionaries(cls, conn: Any, root_ids: list[int]) -> dict[str, Any]:
+        """Capture only assigned roots/includes inside the caller's owner transaction.
+
+        This does not initialize tables, commit, update usage, or load global
+        active entries. Bound row/byte reads before executable content crosses
+        the database boundary; the settings authority supplies its digest.
+        """
+        from tldw_Server_API.app.core.Character_Chat.character_behavior_snapshot import DEFAULT_MAX_SNAPSHOT_BYTES
+        from tldw_Server_API.app.core.Character_Chat.frozen_dictionary_context import (
+            MAX_FROZEN_DICTIONARIES,
+            MAX_FROZEN_DICTIONARY_ENTRIES,
+            validate_frozen_dictionary_plan,
+        )
+
+        catalog_owner = None
+        if getattr(getattr(conn, "_backend", None), "backend_type", None) == BackendType.POSTGRESQL:
+            db = conn._db
+            catalog_owner = db.owner_user_id
+            tenant = conn.execute("SELECT current_setting('app.current_user_id', true) AS owner").fetchone()
+            if not catalog_owner or tenant["owner"] != catalog_owner:
+                raise InputError("Assigned dictionaries require the current catalog owner.")
+            db._verify_dictionary_schema_postgres(conn)
+        captured: dict[int, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
+        total_entries = 0
+        total_bytes = 0
+
+        def read(dictionary_id: int, *, required: bool) -> tuple[dict[str, Any], list[dict[str, Any]]] | None:
+            nonlocal total_entries, total_bytes
+            if dictionary_id in captured:
+                return captured[dictionary_id]
+            row = conn.execute(
+                "SELECT id, version, is_active, default_token_budget, included_dictionary_ids "  # nosec B608 - fixed owner suffix; values remain bound
+                "FROM chat_dictionaries WHERE id = ? AND deleted = ?"
+                + (" AND client_id = ?" if catalog_owner is not None else ""),
+                (dictionary_id, False, catalog_owner) if catalog_owner is not None else (dictionary_id, False),
+            ).fetchone()
+            if row is None:
+                if required or catalog_owner is not None:
+                    raise InputError(f"Assigned dictionary {dictionary_id} is unavailable.")
+                return None
+            data = dict(row)
+            if (type(data["id"]) is not int or data["id"] != dictionary_id
+                    or type(data["version"]) is not int or data["version"] <= 0
+                    or type(data["is_active"]) not in (int, bool) or data["is_active"] not in (0, 1)):
+                raise InputError("Invalid assigned dictionary source binding.")
+            budget = data["default_token_budget"]
+            if budget is not None and (type(budget) is not int or budget <= 0):
+                raise InputError("Invalid assigned dictionary default budget.")
+            includes = data["included_dictionary_ids"]
+            try:
+                includes = json.loads(includes) if isinstance(includes, str) else includes
+            except ValueError as exc:
+                raise InputError("Invalid assigned dictionary includes.") from exc
+            if includes is None:
+                includes = []
+            if (not isinstance(includes, list) or len(includes) > MAX_FROZEN_DICTIONARIES
+                    or any(type(item) is not int or item <= 0 for item in includes)):
+                raise InputError("Invalid assigned dictionary includes.")
+            data["included_dictionary_ids"] = list(dict.fromkeys(includes))
+            if len(captured) >= MAX_FROZEN_DICTIONARIES:
+                raise InputError("Too many assigned dictionary sources.")
+            entries: list[dict[str, Any]] = []
+            captured[dictionary_id] = data, entries
+            if not data["is_active"]:
+                return data, entries
+            estimate = conn.execute(
+                "SELECT COUNT(*) AS entry_count, COALESCE(SUM(4 * (LENGTH(key) + LENGTH(content) "
+                "+ LENGTH(COALESCE(timed_effects, '')) + LENGTH(COALESCE(group_name, ''))) + 256), 0) AS entry_bytes "
+                "FROM dictionary_entries WHERE dictionary_id = ? AND enabled = ?",
+                (dictionary_id, True),
+            ).fetchone()
+            estimate = dict(estimate)
+            total_entries += int(estimate["entry_count"])
+            total_bytes += int(estimate["entry_bytes"])
+            if total_entries > MAX_FROZEN_DICTIONARY_ENTRIES or total_bytes > DEFAULT_MAX_SNAPSHOT_BYTES:
+                raise InputError("Assigned dictionary content exceeds the snapshot limit.")
+            rows = conn.execute(
+                "SELECT id, dictionary_id, key, content, is_regex, probability, max_replacements, "
+                "group_name, timed_effects, enabled, case_sensitive, created_at "
+                "FROM dictionary_entries WHERE dictionary_id = ? AND enabled = ? "
+                "ORDER BY COALESCE(sort_order, id), id LIMIT ?",
+                (dictionary_id, True, MAX_FROZEN_DICTIONARY_ENTRIES + 1),
+            ).fetchall()
+            if len(rows) > MAX_FROZEN_DICTIONARY_ENTRIES:
+                raise InputError("Too many assigned dictionary entries.")
+            for row in rows:
+                entry = dict(row)
+                for flag in ("is_regex", "enabled", "case_sensitive"):
+                    if type(entry[flag]) not in (int, bool) or entry[flag] not in (0, 1):
+                        raise InputError("Invalid dictionary entry flag.")
+                    entry[flag] = bool(entry[flag])
+                try:
+                    if isinstance(entry["probability"], bool):
+                        raise ValueError("Boolean probability is not canonical.")
+                    entry["probability"] = float(entry["probability"])
+                    effects = entry["timed_effects"]
+                    entry["timed_effects"] = json.loads(effects) if isinstance(effects, str) else effects
+                except (TypeError, ValueError) as exc:
+                    raise InputError("Invalid assigned dictionary entry configuration.") from exc
+                created = entry["created_at"]
+                entry["created_at"] = created.isoformat() if isinstance(created, datetime) else str(created).replace(" ", "T")
+                entries.append(entry)
+            return data, entries
+
+        def visit(dictionary_id: int, visiting: set[int], visited: set[int],
+                  ordered: list[tuple[dict[str, Any], list[dict[str, Any]]]], *, required: bool = False) -> None:
+            if dictionary_id in visiting:
+                raise InputError("Assigned dictionary include cycle.")
+            if dictionary_id in visited:
+                return
+            source = read(dictionary_id, required=required)
+            if source is None or not source[0]["is_active"]:
+                return
+            visiting.add(dictionary_id)
+            for included_id in source[0]["included_dictionary_ids"]:
+                visit(included_id, visiting, visited, ordered)
+            visiting.remove(dictionary_id)
+            visited.add(dictionary_id)
+            ordered.append(source)
+
+        passes = []
+        for root_id in root_ids:
+            ordered: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+            visit(root_id, set(), set(), ordered, required=True)
+            budgets = [data["default_token_budget"] for data, _entries in ordered]
+            budgets = [budget for budget in budgets if budget is not None]
+            passes.append({
+                "root_id": root_id,
+                "sources": [{"id": data["id"], "version": data["version"]} for data, _entries in ordered],
+                "token_budget": min(budgets) if budgets else None,
+                "entries": [entry for _data, entries in ordered for entry in entries],
+            })
+        plan = {"root_ids": root_ids, "passes": passes}
+        if catalog_owner is not None:
+            plan["catalog_owner"] = catalog_owner
+        return validate_frozen_dictionary_plan(plan, root_ids)
+
     def process_text(
         self,
         text: str,
@@ -3166,13 +3285,6 @@ class ChatDictionaryService:
             # Return a string-like result that also supports ['processed_text'] access
             return _ProcessedTextResult(text, empty_stats)
 
-        stats = {
-            "replacements": 0,
-            "iterations": 0,
-            "entries_used": [],
-            "token_budget_exceeded": False,
-            "token_budget_used": effective_token_budget,
-        }
         entry_usage_increments: dict[int, int] = {}
         dictionary_replacements: dict[int, int] = {}
         dictionary_entries_used: dict[int, set[int]] = {}
@@ -3180,68 +3292,19 @@ class ChatDictionaryService:
         # Track usage for all dictionaries included in this processing pass.
         self._record_dictionary_usage_for_processing(processing_dictionary_ids)
 
-        for _iteration in range(max_iterations):
-            iteration_replacements = 0
+        def track_replacement(entry: ChatDictionaryEntry, count: int) -> None:
+            entry_dictionary_id = self._coerce_dictionary_id(getattr(entry, "dictionary_id", None))
+            if isinstance(entry.entry_id, int) and entry.entry_id > 0:
+                entry_usage_increments[entry.entry_id] = entry_usage_increments.get(entry.entry_id, 0) + count
+                if entry_dictionary_id is not None:
+                    dictionary_entries_used.setdefault(entry_dictionary_id, set()).add(entry.entry_id)
+            if entry_dictionary_id is not None:
+                dictionary_replacements[entry_dictionary_id] = dictionary_replacements.get(entry_dictionary_id, 0) + count
 
-            for entry in entries:
-                if entry.matches(text):
-                    entry_dictionary_id = self._coerce_dictionary_id(getattr(entry, "dictionary_id", None))
-                    # If enforcing a token budget, replace incrementally (one per entry per pass)
-                    original_max = entry.max_replacements
-                    if effective_token_budget is not None and original_max == 0:
-                        entry.max_replacements = 1
-                    try:
-                        new_text, count = entry.apply_replacement(text)
-                    finally:
-                        entry.max_replacements = original_max
-                    if count > 0:
-                        text = new_text
-                        iteration_replacements += count
-                        stats["replacements"] += count
-
-                        if entry.entry_id not in stats["entries_used"]:
-                            stats["entries_used"].append(entry.entry_id)
-                        if isinstance(entry.entry_id, int) and entry.entry_id > 0:
-                            entry_usage_increments[entry.entry_id] = (
-                                entry_usage_increments.get(entry.entry_id, 0) + count
-                            )
-                            if entry_dictionary_id is not None:
-                                dictionary_entries_used.setdefault(entry_dictionary_id, set()).add(entry.entry_id)
-                        if entry_dictionary_id is not None:
-                            dictionary_replacements[entry_dictionary_id] = (
-                                dictionary_replacements.get(entry_dictionary_id, 0) + count
-                            )
-
-                        # Check token budget
-                        if effective_token_budget and self.count_tokens(text) > effective_token_budget:
-                            warnings.warn(
-                                (
-                                    f"Token budget ({effective_token_budget}) exceeded "
-                                    f"after {stats['replacements']} replacements"
-                                ),
-                                TokenBudgetExceededWarning, stacklevel=2,
-                            )
-                            stats["token_budget_exceeded"] = True
-                            self._record_entry_usage_counts(entry_usage_increments)
-                            self._record_transform_activity_snapshot(
-                                dictionary_id=dictionary_id,
-                                original_text=original_text,
-                                processed_text=text,
-                                stats=stats,
-                                dictionary_replacements=dictionary_replacements,
-                                dictionary_entries_used=dictionary_entries_used,
-                                token_budget_used=effective_token_budget,
-                                chat_id=chat_id,
-                            )
-                            if return_stats:
-                                return text, stats
-                            return _ProcessedTextResult(text, stats)
-
-            stats["iterations"] += 1
-
-            # Stop if no replacements were made in this iteration
-            if iteration_replacements == 0:
-                break
+        text, stats = process_dictionary_entries(
+            text, entries, max_iterations=max_iterations, token_budget=effective_token_budget,
+            count_tokens=self.count_tokens, on_replacement=track_replacement,
+        )
         self._record_entry_usage_counts(entry_usage_increments)
         self._record_transform_activity_snapshot(
             dictionary_id=dictionary_id,
@@ -3361,7 +3424,7 @@ class ChatDictionaryService:
                             record_snapshot=False,
                         )
 
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 self._create_dictionary_version_snapshot(
                     conn,
                     int(dict_id),
@@ -3437,7 +3500,7 @@ class ChatDictionaryService:
     def _get_entry_dict_id(self, entry_id: int) -> Optional[int]:
         """Get the dictionary ID for an entry."""
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 cursor = conn.execute("SELECT dictionary_id FROM dictionary_entries WHERE id = ?", (entry_id,))
                 row = cursor.fetchone()
                 return row["dictionary_id"] if row else None
@@ -3475,7 +3538,7 @@ class ChatDictionaryService:
         Backward-compatible query patterns that minimize DB calls to align with legacy tests.
         """
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 if dictionary_id is None:
                     # Combined counts to reduce number of execute calls
                     row = conn.execute(
@@ -3573,7 +3636,7 @@ class ChatDictionaryService:
         """
         try:
             added_count = 0
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 for e in entries:
                     pattern = e.get("pattern") or e.get("key")
                     replacement = e.get("replacement") or e.get("content", "")
@@ -3664,7 +3727,7 @@ class ChatDictionaryService:
         """
         try:
             term = query or ""
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 q = [
                     "SELECT e.*, d.name as dictionary_name FROM dictionary_entries e JOIN chat_dictionaries d ON e.dictionary_id = d.id",
                     "WHERE d.deleted = ?",
@@ -3715,7 +3778,7 @@ class ChatDictionaryService:
 
     def toggle_entry_active(self, entry_id: int, is_active: Optional[bool] = None) -> bool:
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 if is_active is None:
                     cur = conn.execute("SELECT enabled FROM dictionary_entries WHERE id = ?", (entry_id,))
                     row = cur.fetchone()
@@ -3743,14 +3806,14 @@ class ChatDictionaryService:
         if not info:
             raise InputError(f"Dictionary {dictionary_id} not found")
         entries = self.get_entries(dictionary_id, active_only=False)
+        for entry in entries:
+            entry["timed_effects"] = safe_parse_json_dict(entry.get("timed_effects"), "timed_effects")
         return {
             "name": info["name"],
             "description": info.get("description"),
             "category": self._normalize_dictionary_category(info.get("category")),
             "tags": self._normalize_dictionary_tags(info.get("tags")),
-            "included_dictionary_ids": self._normalize_included_dictionary_ids(
-                info.get("included_dictionary_ids")
-            ),
+            "included_dictionary_ids": self._normalize_included_dictionary_ids(info.get("included_dictionary_ids")),
             "default_token_budget": self._coerce_positive_int(info.get("default_token_budget")),
             "entries": entries,
         }
@@ -3772,19 +3835,45 @@ class ChatDictionaryService:
         )
         try:
             for e in data.get("entries", []):
+                probability = e.get("probability", 1.0)
+                # JSON 1 and 1.0 both mean certainty; keep older percentage values above 1.
+                if (
+                    isinstance(probability, (int, float))
+                    and not isinstance(probability, bool)
+                    and 0 <= probability <= 1
+                ):
+                    probability = float(probability)
+                timed_effects = e.get("timed_effects")
+                if isinstance(timed_effects, str):
+                    try:
+                        timed_effects = json.loads(timed_effects)
+                    except json.JSONDecodeError as exc:
+                        raise InputError("Invalid dictionary timing JSON") from exc
+                if timed_effects is not None and (
+                    not isinstance(timed_effects, dict)
+                    or any(
+                        key not in {"sticky", "cooldown", "delay"}
+                        or not isinstance(value, int)
+                        or isinstance(value, bool)
+                        or value < 0
+                        for key, value in timed_effects.items()
+                    )
+                ):
+                    raise InputError("Dictionary timing must contain nonnegative integer durations")
                 self.add_entry(
                     dict_id,
                     pattern=e.get("pattern") or e.get("key"),
                     replacement=e.get("replacement") or e.get("content", ""),
                     type=e.get("type", "literal"),
-                    probability=e.get("probability", 1.0),
+                    probability=probability,
+                    timed_effects=timed_effects,
                     group=e.get("group") or e.get("group_name"),
                     max_replacements=e.get("max_replacements", 1),
                     enabled=e.get("enabled", True),
                     case_sensitive=e.get("case_sensitive", True),
                     record_snapshot=False,
                 )
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 self._create_dictionary_version_snapshot(
                     conn,
                     int(dict_id),
@@ -3865,7 +3954,7 @@ class ChatDictionaryService:
 
             # Add entries to new dictionary
             if entries:
-                with self.db.get_connection() as conn:
+                with self._connection() as conn:
                     for e in entries:
                         timed_effects_json = json.dumps(
                             e.get("timed_effects", {"sticky": 0, "cooldown": 0, "delay": 0})
@@ -3912,7 +4001,7 @@ class ChatDictionaryService:
     def get_usage_statistics(self, dictionary_id: int) -> dict[str, Any]:
         """Return usage statistics for a dictionary."""
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 row = conn.execute(
                     """
                     SELECT usage_count, last_used_at
@@ -3958,7 +4047,7 @@ class ChatDictionaryService:
         safe_limit = max(1, min(int(limit), 100))
         safe_offset = max(0, int(offset))
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 rows = conn.execute(
                     """
                     SELECT
@@ -4019,7 +4108,7 @@ class ChatDictionaryService:
     ) -> Optional[dict[str, Any]]:
         """Return a specific dictionary revision snapshot."""
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 row = conn.execute(
                     """
                     SELECT
@@ -4088,7 +4177,7 @@ class ChatDictionaryService:
         default_token_budget = self._coerce_positive_int(dictionary_snapshot.get("default_token_budget"))
 
         try:
-            with self.db.get_connection() as conn:
+            with self._connection() as conn:
                 existing_row = conn.execute(
                     "SELECT id FROM chat_dictionaries WHERE id = ? AND deleted = ?",
                     (int(dictionary_id), False),

@@ -43,7 +43,8 @@ const loadOptionRoutesForPath = async (
   if (
     pathname === "/media-multi" ||
     pathname === "/review" ||
-    pathname === "/content-review"
+    pathname === "/content-review" ||
+    pathname === "/claims-review"
   ) {
     const module = await import("./option-media-review-route-registry")
     return module.optionMediaReviewRoutes

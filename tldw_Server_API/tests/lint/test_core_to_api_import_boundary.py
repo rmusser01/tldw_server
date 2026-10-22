@@ -103,8 +103,6 @@ CORE_TO_API_BASELINE = frozenset({
     "tldw_Server_API/app/core/MCP_unified/tests/test_rag_module.py",
     "tldw_Server_API/app/core/MCP_unified/tests/test_refresh_token.py",
     "tldw_Server_API/app/core/Monitoring/topic_monitoring_service.py",
-    "tldw_Server_API/app/core/Notes_Graph/formatters.py",
-    "tldw_Server_API/app/core/Notes_Graph/graph_service.py",
     "tldw_Server_API/app/core/Persona/archetype_loader.py",
     "tldw_Server_API/app/core/Persona/live_tts.py",
     "tldw_Server_API/app/core/PrivilegeMaps/service.py",

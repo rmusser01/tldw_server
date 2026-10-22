@@ -8,6 +8,7 @@
 import { protectedEditRequestSchema } from "@/services/__tests__/history-edit-fixture"
 import type { HistoryAdmissionV1 } from "@/types/history-selection"
 import { resolveHistorySelection, selectionDigest } from "@/utils/history-selection"
+import { isDeepStrictEqual } from "node:util"
 
 export const FAKE_SERVER_URL = "http://tldw.test"
 export const FAKE_API_KEY = "harness-api-key"
@@ -36,6 +37,7 @@ export type FakeChatMessage = {
   parent_message_id?: string | null
   created_at: string
   version: number
+  existing_selection_intent?: JsonBody
 }
 
 export type FakeChat = {
@@ -404,9 +406,12 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
       storage_context_digest: "storage",
       interpretation_status: { kind: "parent_graph_v1" as const }
     }
+    const acknowledgement = request.required_capability === "tldw_history_existing_input_v1"
+      ? { acknowledged_capability: "tldw_history_existing_input_v1" }
+      : {}
     const resolved = resolveHistorySelection(snapshot as never, view, request.purpose, "")
     if (resolved.status !== "ready") {
-      return { status: resolved.status, code: resolved.code, snapshot, view }
+      return { status: resolved.status, code: resolved.code, snapshot, view, ...acknowledgement }
     }
     const text = new Map(chat.messages.map((message) => [message.id, message.content]))
     return {
@@ -416,6 +421,7 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
       rows: resolved.rows,
       purpose: request.purpose,
       storage_context_digest: "storage",
+      ...acknowledgement,
       selected_content: resolved.rows.map((row: { id: string; revision: string }) => ({
         id: row.id,
         revision: row.revision,
@@ -578,6 +584,8 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
     const capture = path.match(/^\/api\/v1\/chat\/conversations\/([^/]+)\/history\/selection$/)
     if (capture && method === "POST") {
       const chat = chats.get(decodeURIComponent(capture[1]))
+      if (body?.required_capability && body.required_capability !== "tldw_history_existing_input_v1")
+        return json({ detail: "Unsupported required capability" }, 422)
       return chat ? json(captureSelection(chat, body)) : json({ detail: "Chat not found" }, 404)
     }
     if ((path === "/api/v1/chats/" || path === "/api/v1/chats") && method === "GET") {
@@ -605,6 +613,46 @@ export const createFakeTldwServer = ({ catalog = DEFAULT_CATALOG }: { catalog?: 
         } catch (error) { return editRefusal(error) }
         const selection = body?.tldw_history_selection_v1
         const admission = body?.tldw_history_admission_v1
+        const existingSelection = body?.tldw_history_existing_input_v1
+        if (existingSelection) {
+          const question = existingSelection.messages?.at(-1)
+          const savedQuestion = chat.messages.find((row) => row.id === question?.id)
+          const intent = structuredClone(body)
+          const prior = chat.messages.find((row) => row.id === body?.id)
+          if (prior) return isDeepStrictEqual(prior.existing_selection_intent, intent) &&
+            savedQuestion?.role === "user" &&
+            String(savedQuestion.version) === question?.revision &&
+            prior.role === "assistant" && prior.parent_message_id === question?.id &&
+            prior.content === body?.content && prior.version === 1
+            ? json(messageRow(prior), 201)
+            : json({ detail: { status: "stale_selection", code: "message_id_conflict" } }, 409)
+          const fresh = captureSelection(chat, {
+            purpose: "send",
+            view: {
+              view_session_id: "settlement", owner_key: existingSelection.owner_key,
+              conversation_id: chat.id, interpretation: existingSelection.interpretation,
+              cursor: existingSelection.cursor, selection_revision: existingSelection.selection_revision
+            }
+          })
+          const resolved = fresh.status === "captured"
+            ? resolveHistorySelection(fresh.snapshot as never, fresh.view, "send", existingSelection.request_context_digest)
+            : null
+          if (!body?.id || body?.role !== "assistant" ||
+              existingSelection.owner_key !== "harness-native-owner" ||
+              existingSelection.conversation_id !== chat.id || existingSelection.purpose !== "send" ||
+              existingSelection.cursor?.kind !== "after_message" ||
+              existingSelection.cursor?.message_id !== question?.id ||
+              !savedQuestion || savedQuestion.role !== "user" ||
+              body.parent_message_id !== undefined && body.parent_message_id !== question?.id ||
+              resolved?.status !== "ready" ||
+              resolved.selection.selection_digest !== existingSelection.selection_digest)
+            return json({ detail: { status: "stale_selection", code: "invalid_selection" } }, 409)
+          const reply = appendMessage(chat, {
+            id: body.id, role: "assistant", content: String(body.content ?? ""),
+            parent_message_id: question.id, existing_selection_intent: intent
+          })
+          return json(messageRow(reply), 201)
+        }
         // Like append_selected_history_input: the input follows the last
         // selected message, whatever the cursor kind.
         const parent = selection

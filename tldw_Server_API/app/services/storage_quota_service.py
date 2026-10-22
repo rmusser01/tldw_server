@@ -26,6 +26,8 @@ from tldw_Server_API.app.core.AuthNZ.repos.generated_files_repo import (
     is_vn_item_source_ref,
 )
 from tldw_Server_API.app.core.AuthNZ.repos.storage_quotas_repo import (
+    DEFAULT_HARD_LIMIT_PCT,
+    DEFAULT_SOFT_LIMIT_PCT,
     AuthnzStorageQuotasRepo,
 )
 
@@ -586,6 +588,10 @@ class StorageQuotaService:
             "remaining_mb": view["available_mb"],
             "usage_pct": view["usage_percentage"] if view["usage_percentage"] is not None else 0.0,
             "has_quota": quota is not None,
+            "at_soft_limit": view["usage_percentage"] is not None
+            and view["usage_percentage"] >= DEFAULT_SOFT_LIMIT_PCT,
+            "at_hard_limit": view["usage_percentage"] is not None
+            and view["usage_percentage"] >= DEFAULT_HARD_LIMIT_PCT,
         }
 
     async def get_storage_breakdown(self, user_id: int) -> dict[str, Any]:
@@ -659,7 +665,13 @@ class StorageQuotaService:
         try:
             await repo.ensure_tables()
             if quota_mb is None:
-                await repo.delete_override(user_id=int(user_id), key=STORAGE_QUOTA_KEY)
+                async with self.db_pool.transaction() as conn:
+                    gateway = VersionedUserWriteGateway(
+                        "postgres" if self._is_postgres_backend() else "sqlite"
+                    )
+                    floor = await gateway.capture_floor(conn, user_id=int(user_id))
+                    await repo.delete_override(user_id=int(user_id), key=STORAGE_QUOTA_KEY, db_conn=conn)
+                    await gateway.final_touch(conn, user_id=int(user_id), version_floor=floor)
             else:
                 await repo.upsert_override(
                     user_id=int(user_id), key=STORAGE_QUOTA_KEY, value=int(quota_mb), updated_by=updated_by

@@ -42,6 +42,34 @@ describe("Chat state when its route is unmounted", () => {
     expect(settings.getEffectiveSettings("llama:one").topK).toBe(12)
   }
 
+  it.each([
+    ["logout", () => new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } })],
+    ["credentials", () => new Event("tldw:auth-credentials-changed")],
+    ["authority", () => new CustomEvent("tldw:config-updated", { detail: { authorityChanged: true } })],
+    ["other tab", () => new StorageEvent("storage", { key: "tldwConfig",
+      oldValue: JSON.stringify(config("alice")), newValue: JSON.stringify(config("bob")) })]
+  ] as const)("A01: retires the automatic tab history reference on %s while Chat is unmounted", (_kind, event) => {
+    sessionStorage.setItem("tldw-h1-playground-reference", "alice-reference")
+    sessionStorage.setItem("other-view-reference", "keep-other-view")
+
+    window.dispatchEvent(event())
+
+    expect(sessionStorage.getItem("tldw-h1-playground-reference")).toBeNull()
+    expect(sessionStorage.getItem("other-view-reference")).toBe("keep-other-view")
+    expectCleared()
+  })
+
+  it("A01: retains the automatic tab history reference during same-account token rotation", () => {
+    sessionStorage.setItem("tldw-h1-playground-reference", "alice-reference")
+
+    window.dispatchEvent(new StorageEvent("storage", { key: "tldwConfig",
+      oldValue: JSON.stringify(config("alice")), newValue: JSON.stringify(config("alice", 2)) }))
+    window.dispatchEvent(new CustomEvent("tldw:config-updated", { detail: { authorityChanged: false } }))
+
+    expect(sessionStorage.getItem("tldw-h1-playground-reference")).toBe("alice-reference")
+    expect(usePlaygroundSessionStore.getState().serverChatId).toBe("alice-chat")
+  })
+
   it("clears both live surfaces and the recovery selection on logout without a mounted Chat hook", () => {
     window.dispatchEvent(new CustomEvent("tldw:auth-principal-changed", { detail: { kind: "logout" } }))
     expectCleared()

@@ -1,7 +1,13 @@
+import time
+
 import pytest
+import redis.asyncio as aioredis
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
 
 pytestmark = pytest.mark.rate_limit
 
+from tldw_Server_API.app.core.Infrastructure.redis_factory import InMemoryAsyncRedis
 from tldw_Server_API.app.core.Resource_Governance import RedisResourceGovernor, RGRequest
 
 
@@ -70,3 +76,163 @@ async def test_fallback_memory_requests_allows_when_redis_broken(monkeypatch):
     d2, h2 = await rg.reserve(req, op_id="f2")
     # Memory fallback should enforce rpm=1
     assert (not d2.allowed) and (h2 is None)
+
+
+def _redis_down_client() -> aioredis.Redis:
+    """A real redis-py client whose server is gone: every command raises redis.exceptions.ConnectionError.
+
+    Nothing listens on port 1, and retries are off, so each command fails at once.
+    """
+    return aioredis.Redis(host="127.0.0.1", port=1, socket_connect_timeout=0.2, retry=Retry(NoBackoff(), 0), decode_responses=True)
+
+
+def _governor(policy: dict, ns: str, time_source=time.time) -> RedisResourceGovernor:
+    class _Loader:
+        def get_policy(self, pid):
+            return policy
+
+    return RedisResourceGovernor(policy_loader=_Loader(), ns=ns, time_source=time_source)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("category, limits", [("requests", {"rpm": 5}), ("tokens", {"per_min": 5})])
+@pytest.mark.parametrize("fail_mode, admitted", [("fail_open", True), ("fallback_memory", True), ("fail_closed", False)])
+async def test_reserve_honours_the_fail_mode_when_redis_raises_connection_error(category, limits, fail_mode, admitted):
+    rg = _governor({category: limits, "scopes": ["user"], "fail_mode": fail_mode}, ns=f"rg_down_{category}_{fail_mode}")
+    rg._client = _redis_down_client()  # the worker connected once; Redis has gone away since
+    req = RGRequest(entity="user:x", categories={category: {"units": 1}}, tags={"policy_id": "p"})
+
+    decision, handle = await rg.reserve(req)
+
+    assert (decision.allowed, handle is not None) == (admitted, admitted)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_mode", ["fail_open", "fail_closed", "fallback_memory"])
+async def test_renew_and_commit_survive_redis_raising_connection_error(fail_mode, monkeypatch):
+    # The RG conftest's test-only lease purge would drop the in-process lease for us; production never runs it.
+    monkeypatch.delenv("RG_TEST_PURGE_LEASES_BEFORE_RESERVE")
+    rg = _governor({"jobs": {"max_concurrent": 1, "ttl_sec": 60}, "scopes": ["user"], "fail_mode": fail_mode}, ns=f"rg_down_lease_{fail_mode}")
+    rg._client = InMemoryAsyncRedis()
+    req = RGRequest(entity="user:x", categories={"jobs": {"units": 1}}, tags={"policy_id": "p"})
+    decision, handle = await rg.reserve(req)
+    assert decision.allowed and handle
+
+    rg._client = _redis_down_client()  # Redis goes away while the lease is held
+    await rg.renew(handle, 60)
+    await rg.commit(handle)  # the request ends: its only slot frees, with Redis still down
+    again, again_handle = await rg.reserve(req)
+
+    assert again.allowed and again_handle
+
+
+@pytest.mark.asyncio
+async def test_peek_reports_unknown_headroom_when_redis_raises_connection_error():
+    rg = _governor({"requests": {"rpm": 5}, "scopes": ["user"]}, ns="rg_down_peek")
+    rg._client = _redis_down_client()
+
+    # Ingress headers and the character rate limiter's usage stats read this; it must not raise.
+    assert await rg.peek_with_policy("user:x", ["requests"], "p") == {"requests": {"remaining": None, "reset": None}}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_mode", ["fail_open", "fail_closed", "fallback_memory"])
+async def test_a_lease_committed_while_redis_is_down_frees_its_slot(fail_mode, monkeypatch):
+    # The RG conftest's test-only lease purge would drop the in-process lease for us; production never runs it.
+    monkeypatch.delenv("RG_TEST_PURGE_LEASES_BEFORE_RESERVE")
+    rg = _governor({"jobs": {"max_concurrent": 1, "ttl_sec": 60}, "scopes": ["user"], "fail_mode": fail_mode}, ns=f"rg_down_free_{fail_mode}")
+    rg._client = InMemoryAsyncRedis()
+    req = RGRequest(entity="user:x", categories={"jobs": {"units": 1}}, tags={"policy_id": "p"})
+    _decision, handle = await rg.reserve(req)
+
+    rg._client = _redis_down_client()
+    await rg.commit(handle)
+    decision, again = await rg.reserve(req)
+
+    assert decision.allowed and again
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_mode", ["fail_open", "fail_closed", "fallback_memory"])
+async def test_leases_count_per_worker_while_redis_is_down(fail_mode, monkeypatch):
+    # The RG conftest's test-only lease purge drops the in-process leases once Redis is down; production never runs it.
+    monkeypatch.delenv("RG_TEST_PURGE_LEASES_BEFORE_RESERVE")
+    rg = _governor({"jobs": {"max_concurrent": 1, "ttl_sec": 60}, "scopes": ["user"], "fail_mode": fail_mode}, ns=f"rg_down_count_{fail_mode}")
+    rg._client = _redis_down_client()
+    req = RGRequest(entity="user:x", categories={"jobs": {"units": 1}}, tags={"policy_id": "p"})
+
+    first, handle = await rg.reserve(req)
+    second, _ = await rg.reserve(req)
+    await rg.commit(handle)
+    third, _ = await rg.reserve(req)
+
+    assert [first.allowed, second.allowed, third.allowed] == [True, False, True]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fail_mode", ["fail_open", "fail_closed", "fallback_memory"])
+async def test_renew_while_redis_is_down_keeps_the_lease(fail_mode, monkeypatch):
+    monkeypatch.delenv("RG_TEST_PURGE_LEASES_BEFORE_RESERVE")
+    now = [1000.0]
+    rg = _governor(
+        {"jobs": {"max_concurrent": 1, "ttl_sec": 60}, "scopes": ["user"], "fail_mode": fail_mode},
+        ns=f"rg_down_renew_{fail_mode}",
+        time_source=lambda: now[0],
+    )
+    rg._client = _redis_down_client()
+    req = RGRequest(entity="user:x", categories={"jobs": {"units": 1}}, tags={"policy_id": "p"})
+    first, handle = await rg.reserve(req)  # the lease runs to 1060
+
+    now[0] = 1050.0
+    await rg.renew(handle, 60)  # now to 1110
+    now[0] = 1070.0
+    second, _ = await rg.reserve(req)
+
+    assert first.allowed and not second.allowed
+
+
+@pytest.mark.asyncio
+# Not fallback_memory: there the memory governor holds the lease, which Redis does not see once it returns (ADR-078).
+@pytest.mark.parametrize("fail_mode", ["fail_open", "fail_closed"])
+async def test_renew_after_redis_returns_keeps_a_lease_taken_during_the_outage(fail_mode, monkeypatch):
+    monkeypatch.delenv("RG_TEST_PURGE_LEASES_BEFORE_RESERVE")
+    now = [1000.0]
+    rg = _governor(
+        {"jobs": {"max_concurrent": 1, "ttl_sec": 60}, "scopes": ["user"], "fail_mode": fail_mode},
+        ns=f"rg_back_renew_{fail_mode}",
+        time_source=lambda: now[0],
+    )
+    rg._client = _redis_down_client()
+    req = RGRequest(entity="user:x", categories={"jobs": {"units": 1}}, tags={"policy_id": "p"})
+    first, handle = await rg.reserve(req)  # held by this worker only; the lease runs to 1060
+
+    rg._client = InMemoryAsyncRedis()  # Redis is back, with no record of the lease
+    now[0] = 1050.0
+    await rg.renew(handle, 60)  # now to 1110
+    now[0] = 1070.0
+    second, _ = await rg.reserve(req)
+
+    assert first.allowed and not second.allowed
+
+
+@pytest.mark.asyncio
+async def test_a_redis_outage_is_logged_as_a_warning_once_a_minute(monkeypatch):
+    from loguru import logger
+
+    from tldw_Server_API.app.core.Resource_Governance import policy_eval
+
+    monkeypatch.setattr(policy_eval, "_last_redis_warning", {}, raising=False)  # no warning sent yet
+    rg = _governor({"requests": {"rpm": 5}, "scopes": ["user"], "fail_mode": "fail_open"}, ns="rg_down_warn")
+    rg._client = _redis_down_client()
+    req = RGRequest(entity="user:x", categories={"requests": {"units": 1}}, tags={"policy_id": "p"})
+    seen = []
+    sink = logger.add(lambda m: seen.append(m.record["message"]), level="WARNING")
+    try:
+        await rg.reserve(req)
+        await rg.reserve(req)
+    finally:
+        logger.remove(sink)
+
+    assert [m for m in seen if "Redis" in m] == [
+        "Resource Governor Redis backend 'rg_down_warn' is failing (ConnectionError); this worker enforces its limits on its own until it recovers"
+    ]

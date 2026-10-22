@@ -77,6 +77,8 @@ type SharedCharacterFormProps = {
   worldBookFieldContext: {
     options: CharacterWorldBookOption[]
     loading: boolean
+    error?: boolean
+    retry?: () => void
     editCharacterNumericId: number | null
   }
   isSubmitting: boolean
@@ -793,6 +795,8 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
     previewCharacterWorldBooks,
     previewCharacterWorldBooksLoading,
     worldBookOptionsLoading,
+    worldBookOptionsError,
+    refetchWorldBookOptions,
     worldBookOptions,
     tagUsageData,
     allTags,
@@ -1388,6 +1392,8 @@ export const CharactersManager: React.FC<CharactersManagerProps> = ({
         dismissEditDraft={dismissEditDraft}
         worldBookOptions={worldBookOptions}
         worldBookOptionsLoading={worldBookOptionsLoading}
+        worldBookOptionsError={Boolean(worldBookOptionsError)}
+        retryWorldBookOptions={refetchWorldBookOptions}
         // generation
         isGenerating={isGenerating}
         generatingField={generatingField}

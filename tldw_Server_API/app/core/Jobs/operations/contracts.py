@@ -1356,6 +1356,24 @@ class IdempotentOperationAdmission:
         return cls(job=job, disposition=IdempotentOperationDisposition.CONVERGED)
 
 
+def normalize_acquire_job_types(
+    job_type: str | None,
+    job_types: tuple[str, ...] | None,
+) -> tuple[str, ...] | None:
+    """Validate the additive allowed-set filter without changing scalar selection."""
+    if job_types is None:
+        return None
+    if job_type is not None:
+        raise ValueError("job_type and job_types are mutually exclusive")
+    if not isinstance(job_types, tuple) or not job_types:
+        raise ValueError("job_types must be a nonempty tuple")
+    for value in job_types:
+        _bounded_identity(value, field_name="job_types member", maximum=128)
+    if len(job_types) != len(set(job_types)):
+        raise ValueError("job_types must contain unique members")
+    return job_types
+
+
 @dataclass(frozen=True)
 class AcquireJobCommand:
     """Backend-neutral command payload for acquiring one eligible Jobs row."""
@@ -1371,8 +1389,12 @@ class AcquireJobCommand:
     priority_direction: str = "ASC"
     tie_break: str | None = None
     single_update: bool = False
+    job_types: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "job_types", normalize_acquire_job_types(self.job_type, self.job_types)
+        )
         if self.priority_direction not in {"ASC", "DESC"}:
             raise ValueError("priority_direction must be ASC or DESC")
         if self.tie_break not in {None, "fifo", "lifo"}:

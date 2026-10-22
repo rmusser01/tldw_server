@@ -63,6 +63,14 @@ const renderOpenGlobalPalette = async (): Promise<HTMLElement[]> => {
 }
 
 describe("CommandPalette route target governance", () => {
+  it("exposes Claims review as a real navigation command", async () => {
+    const navigationOptions = await renderOpenGlobalPalette()
+    const claimsOption = navigationOptions.find((option) => option.getAttribute("data-command-id") === "nav-claims-review")
+    expect(claimsOption).toBeDefined()
+    expect(claimsOption).toHaveAttribute("data-target-path", "/claims-review")
+    expect(within(claimsOption!).getByText(getRouteCommandPaletteLabel("/claims-review"))).toBeInTheDocument()
+  })
+
   it("uses route-owned command label overrides for settings routes", () => {
     expect(getRouteCommandPaletteLabel("/settings/health")).toBe(
       "Go to Health & Diagnostics"

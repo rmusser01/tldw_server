@@ -119,7 +119,7 @@ describe("OutputPreviewDrawer audio support", () => {
     })
 
     expect(serviceMocks.downloadWatchlistOutput).not.toHaveBeenCalled()
-    expect(screen.getByText("Audio playback")).toBeInTheDocument()
+    expect(await screen.findByText("Audio playback")).toBeInTheDocument()
     expect(screen.getByTestId("output-preview-provenance")).toHaveTextContent(
       "Monitor #7 • Run #9 • Artifact: Audio briefing"
     )
@@ -186,7 +186,7 @@ describe("OutputPreviewDrawer audio support", () => {
       )
     })
 
-    expect(screen.getByText("Audio artifacts")).toBeInTheDocument()
+    expect(await screen.findByText("Audio artifacts")).toBeInTheDocument()
     expect(screen.getByText("Completed")).toBeInTheDocument()
     expect(screen.getByText("Stale")).toBeInTheDocument()
     expect(screen.getByText("Superseded by wla_new")).toBeInTheDocument()
@@ -286,7 +286,7 @@ describe("OutputPreviewDrawer audio support", () => {
       expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledWith(9)
     })
 
-    expect(screen.getByText("Completed")).toBeInTheDocument()
+    expect(await screen.findByText("Completed")).toBeInTheDocument()
     expect(screen.getByText("Final mix")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Download Final mix" })).toBeEnabled()
   })
@@ -398,7 +398,7 @@ describe("OutputPreviewDrawer audio support", () => {
       expect(serviceMocks.getWatchlistRunAudio).toHaveBeenCalledWith(9)
     })
 
-    expect(screen.getByText("Running")).toBeInTheDocument()
+    expect(await screen.findByText("Running")).toBeInTheDocument()
     expect(screen.getByText("Briefing script")).toBeInTheDocument()
     expect(screen.getByText(/Speaker B voice is still pending/)).toBeInTheDocument()
     expect(screen.getByText("Queue: workflows")).toBeInTheDocument()
@@ -586,7 +586,7 @@ describe("OutputPreviewDrawer audio support", () => {
       expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42)
     })
 
-    expect(screen.getByText("Audio artifacts")).toBeInTheDocument()
+    expect(await screen.findByText("Audio artifacts")).toBeInTheDocument()
     expect(screen.getByText("Enqueue failed")).toBeInTheDocument()
     expect(screen.getByText(/Error:/)).toBeInTheDocument()
     expect(screen.queryByText(/value_to_redact/)).not.toBeInTheDocument()
@@ -615,7 +615,7 @@ describe("OutputPreviewDrawer audio support", () => {
       expect(serviceMocks.downloadWatchlistOutput).toHaveBeenCalledWith(42)
     })
 
-    expect(screen.getByText("Queue unavailable")).toBeInTheDocument()
+    expect(await screen.findByText("Queue unavailable")).toBeInTheDocument()
     expect(screen.getByText("Fallback: workflows_queue_has_no_workers")).toBeInTheDocument()
     expect(serviceMocks.getWatchlistRunAudio).not.toHaveBeenCalled()
   })

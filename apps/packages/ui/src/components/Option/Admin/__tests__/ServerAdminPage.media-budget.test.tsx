@@ -70,7 +70,7 @@ vi.mock("@/components/Common/PageShell", () => ({
  */
 const selectMediaBudgetUser = async (optionLabel: string) => {
   const mediaBudgetCard = (
-    screen.getByText("Media ingestion budget").closest(".ant-card") as HTMLElement
+    (await screen.findByText("Media ingestion budget")).closest(".ant-card") as HTMLElement
   )
   const userSelect = (
     within(mediaBudgetCard).getByText("User").closest(".ant-select") as HTMLElement
@@ -251,7 +251,7 @@ describe("ServerAdminPage media budget diagnostics", () => {
         sessions: { active: 2, unique_users: 2 }
       })
 
-    renderPage(<ServerAdminPage />)
+    await act(async () => { renderPage(<ServerAdminPage />) })
 
     const timeoutMessage = await screen.findByText(
       "System statistics took longer than 10 seconds. Retry to try again."
@@ -267,11 +267,17 @@ describe("ServerAdminPage media budget diagnostics", () => {
       expect(apiMock.getSystemStats).toHaveBeenCalledTimes(2)
     })
 
+    const configSnapshot = {
+      serverUrl: "http://127.0.0.1:8000", authMode: "single-user",
+      apiKey: undefined, accessToken: undefined, refreshToken: undefined,
+      orgId: undefined, authSource: undefined
+    }
     expect(apiMock.getSystemStats).toHaveBeenNthCalledWith(1, {
-      timeoutMs: 10000
+      timeoutMs: 10000, configSnapshot, abortSignal: expect.any(AbortSignal)
     })
     expect(apiMock.getSystemStats).toHaveBeenNthCalledWith(2, {
-      timeoutMs: 10000
+      timeoutMs: 10000, configSnapshot, abortSignal: expect.any(AbortSignal)
     })
+    expect(apiMock.getSystemStats.mock.calls[1][0].abortSignal.aborted).toBe(false)
   }, 15000)
 })

@@ -87,8 +87,9 @@ const hasReasoningProgress = (chunk: unknown): boolean => {
   )
 }
 
+// The native Chat display withholds typed reasoning; only answer text is visible.
 const hasVisibleAssistantProgress = (chunk: unknown): boolean =>
-  extractTokenFromChunk(chunk).length > 0 || hasReasoningProgress(chunk)
+  extractTokenFromChunk(chunk).length > 0;
 
 const readErrorMessage = (error: unknown, fallback = "Aborted"): string => {
   const seen = new Set<unknown>()

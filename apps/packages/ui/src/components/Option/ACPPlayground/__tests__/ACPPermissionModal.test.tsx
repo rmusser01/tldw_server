@@ -57,6 +57,7 @@ describe("ACPPermissionModal", () => {
         pendingPermissions={pendingPermissions}
         approvePermission={vi.fn()}
         denyPermission={vi.fn()}
+        stopOperation={vi.fn()}
       />
     )
 
@@ -74,6 +75,7 @@ describe("ACPPermissionModal", () => {
         pendingPermissions={pendingPermissions}
         approvePermission={approvePermission}
         denyPermission={denyPermission}
+        stopOperation={vi.fn()}
       />
     )
 
@@ -94,6 +96,7 @@ describe("ACPPermissionModal", () => {
         pendingPermissions={pendingPermissions}
         approvePermission={vi.fn()}
         denyPermission={vi.fn()}
+        stopOperation={vi.fn()}
       />
     )
 
@@ -114,6 +117,7 @@ describe("ACPPermissionModal", () => {
         pendingPermissions={pendingPermissions}
         approvePermission={vi.fn()}
         denyPermission={vi.fn()}
+        stopOperation={vi.fn()}
       />
     )
 
@@ -123,6 +127,7 @@ describe("ACPPermissionModal", () => {
           pendingPermissions={[]}
           approvePermission={vi.fn()}
           denyPermission={vi.fn()}
+          stopOperation={vi.fn()}
         />
       )
     ).not.toThrow()
@@ -141,6 +146,7 @@ describe("ACPPermissionModal", () => {
         pendingPermissions={[pendingPermissions[0]]}
         approvePermission={vi.fn()}
         denyPermission={vi.fn()}
+        stopOperation={vi.fn()}
       />
     )
 
@@ -155,11 +161,29 @@ describe("ACPPermissionModal", () => {
         pendingPermissions={[nextPermission]}
         approvePermission={vi.fn()}
         denyPermission={vi.fn()}
+        stopOperation={vi.fn()}
       />
     )
 
     expect(screen.getByRole("checkbox")).not.toBeChecked()
     expect(screen.getByRole("button", { name: "Show details" })).toBeInTheDocument()
     expect(screen.queryByText(/policy_cache/)).not.toBeInTheDocument()
+  })
+  it("lets Stop cancel the operation from inside the permission dialog", () => {
+    const stopOperation = vi.fn()
+    const approvePermission = vi.fn()
+    const denyPermission = vi.fn()
+    render(
+      <ACPPermissionModal
+        pendingPermissions={pendingPermissions}
+        approvePermission={approvePermission}
+        denyPermission={denyPermission}
+        stopOperation={stopOperation}
+      />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Stop", exact: true }))
+    expect(stopOperation).toHaveBeenCalledTimes(1)
+    expect(approvePermission).not.toHaveBeenCalled()
+    expect(denyPermission).not.toHaveBeenCalled()
   })
 })

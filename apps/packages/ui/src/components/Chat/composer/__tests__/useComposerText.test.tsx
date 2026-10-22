@@ -18,6 +18,37 @@ describe("useComposerText", () => {
     window.localStorage.clear()
   })
 
+  it.each(["", "data:image/png;base64,replacement"])(
+    "clears the image filename when the selected image becomes %s",
+    (nextImage) => {
+      const { result } = renderHook(() => useComposerText({
+        draftKey: "tldw:test:image-filename",
+        textareaRef: createRef()
+      }))
+      act(() => {
+        result.current.form.setFieldValue("image", "data:image/png;base64,original")
+        result.current.form.setFieldValue("imageFilename", "private-diagram.png")
+      })
+      act(() => result.current.form.setFieldValue("image", nextImage))
+      expect(result.current.form.values.imageFilename).toBe("")
+      expect(result.current.form.values.image).toBe(nextImage)
+    }
+  )
+
+  it("clears filename metadata through the existing composer reset", () => {
+    const { result } = renderHook(() => useComposerText({
+      draftKey: "tldw:test:image-reset",
+      textareaRef: createRef()
+    }))
+    act(() => {
+      result.current.form.setFieldValue("image", "data:image/png;base64,original")
+      result.current.form.setFieldValue("imageFilename", "private-diagram.png")
+    })
+    act(() => result.current.form.reset())
+    expect(result.current.form.values.imageFilename).toBe("")
+    expect(result.current.form.values.image).toBe("")
+  })
+
   it("initializes with an empty message", () => {
     const { result } = renderHook(() =>
       useComposerText({
@@ -325,7 +356,7 @@ describe("useComposerText", () => {
     let retained = false
     await act(async () => { retained = await result.current.retainCurrentDraft() })
     expect(retained).toBe(true)
-    expect(result.current.form.getValues()).toEqual({ message: "  UNSENT\nexact  ", image: "" })
+    expect(result.current.form.getValues()).toEqual({ message: "  UNSENT\nexact  ", image: "", imageFilename: "" })
     const stored = JSON.parse(window.localStorage.getItem(`registry:draft:${draftKey}:owner:unit-owner`)!)
     expect(stored).toMatchObject({ value: { content: "  UNSENT\nexact  ", metadata: { collapsedRange: { start: 2, end: 7 }, wasExpanded: true } } })
   })
@@ -339,7 +370,7 @@ describe("useComposerText", () => {
     await waitFor(() => expect(result.current.draftReady).toBe(true))
     act(() => result.current.form.setValues({ message: "Keep this", image: "data:image/png;base64,abc" }))
     expect(await result.current.retainCurrentDraft()).toBe(false)
-    expect(result.current.form.getValues()).toEqual({ message: "Keep this", image: "data:image/png;base64,abc" })
+    expect(result.current.form.getValues()).toEqual({ message: "Keep this", image: "data:image/png;base64,abc", imageFilename: "" })
   })
 
 })

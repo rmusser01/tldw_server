@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import {
   classifyAudioError,
@@ -10,6 +10,7 @@ import {
   type SttComparisonConfig,
   type SttComparisonMetadata
 } from "@/components/Option/Audio/comparison-provenance"
+import { resolveServicePromptScope } from "@/services/service-prompts"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
 export interface ComparisonResult {
@@ -53,11 +54,19 @@ function cloneConfig(config?: SttComparisonConfig): SttComparisonConfig | undefi
   }
 }
 
-export function useComparisonTranscribe() {
+export function useComparisonTranscribe(isCurrentOwner: () => boolean) {
   const [results, setResults] = useState<ComparisonResult[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const resultsRef = useRef<ComparisonResult[]>([])
   const nextResultId = useRef(0)
+  const epoch = useRef(0)
+  const controllers = useRef(new Set<AbortController>())
+  const retire = useCallback(() => {
+    epoch.current++
+    for (const controller of controllers.current) controller.abort()
+    controllers.current.clear()
+  }, [])
+  useEffect(() => retire, [retire])
 
   const createResultId = useCallback((model: string) => {
     nextResultId.current += 1
@@ -79,12 +88,18 @@ export function useComparisonTranscribe() {
       model: string,
       sttOptions: Record<string, unknown>
     ) => {
+      if (!isCurrentOwner()) return
+      const lease = epoch.current
+      const controller = new AbortController()
+      controllers.current.add(controller)
+      setIsRunning(true)
+      const current = () => isCurrentOwner() && epoch.current === lease && !controller.signal.aborted
       const requestOptions = { ...sttOptions }
       const config = buildSttComparisonConfig(model, requestOptions)
       const createdAt = new Date().toISOString()
       const baseMetadata: SttComparisonMetadata = {
         createdAt,
-        audioSourceLabel: "Recorded audio",
+        audioSourceLabel: typeof File !== "undefined" && blob instanceof File ? blob.name : "Recorded audio",
         audioSizeBytes: blob.size
       }
       updateResult(resultId, {
@@ -103,10 +118,13 @@ export function useComparisonTranscribe() {
       })
       const start = performance.now()
       try {
+        const requestScope = await resolveServicePromptScope()
+        if (!current()) return
         const response = await tldwClient.transcribeAudio(blob, {
           ...requestOptions,
-          model
+          model, signal: controller.signal, requestScope
         })
+        if (!current()) return
         const normalized = normalizeSttResponse(response)
         const text = normalized.text
         const latencyMs = performance.now() - start
@@ -129,6 +147,7 @@ export function useComparisonTranscribe() {
           }
         })
       } catch (err: unknown) {
+        if (!current()) return
         const classified = classifyAudioError(err)
         const latencyMs = performance.now() - start
         updateResult(resultId, {
@@ -146,13 +165,17 @@ export function useComparisonTranscribe() {
             errorCategory: classified.category
           }
         })
+      } finally {
+        controllers.current.delete(controller)
+        if (epoch.current === lease) setIsRunning(controllers.current.size > 0)
       }
     },
-    [updateResult]
+    [updateResult, isCurrentOwner]
   )
 
   const transcribeAll = useCallback(
     async (blob: Blob, models: string[], sttOptions: Record<string, unknown>) => {
+      if (!isCurrentOwner()) return
       const existing = resultsRef.current
       const existingForSelectedModels = existing.filter((result) =>
         models.includes(result.model)
@@ -168,7 +191,7 @@ export function useComparisonTranscribe() {
         config: buildSttComparisonConfig(model, sttOptions),
         metadata: {
           createdAt: new Date().toISOString(),
-          audioSourceLabel: "Recorded audio",
+          audioSourceLabel: typeof File !== "undefined" && blob instanceof File ? blob.name : "Recorded audio",
           audioSizeBytes: blob.size
         },
         requestOptions: cloneRequestOptions(sttOptions)
@@ -186,6 +209,7 @@ export function useComparisonTranscribe() {
       setResults(nextResults)
       if (rowsToRun.length === 0) return
       setIsRunning(true)
+      const lease = epoch.current
 
       try {
         await Promise.allSettled(
@@ -199,10 +223,10 @@ export function useComparisonTranscribe() {
           )
         )
       } finally {
-        setIsRunning(false)
+        if (epoch.current === lease) setIsRunning(controllers.current.size > 0)
       }
     },
-    [createResultId, runSingleTranscription]
+    [createResultId, runSingleTranscription, isCurrentOwner]
   )
 
   const retryModel = useCallback(
@@ -266,10 +290,11 @@ export function useComparisonTranscribe() {
   }, [])
 
   const clearResults = useCallback(() => {
+    retire()
     resultsRef.current = []
     setResults([])
     setIsRunning(false)
-  }, [])
+  }, [retire])
 
   return {
     results,

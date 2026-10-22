@@ -35,7 +35,7 @@ from tldw_Server_API.app.core.DB_Management.Workflows_Scheduler_DB import (
     WorkflowSchedule,
     WorkflowsSchedulerDB,
 )
-from tldw_Server_API.app.core.Scheduler import Scheduler, get_global_scheduler
+from tldw_Server_API.app.core.Scheduler import Scheduler, SchedulerError, get_global_scheduler
 from tldw_Server_API.app.core.Scheduler.handlers import (
     watchlists as _ensure_watchlists,  # noqa: F401  # register watchlist_run
 )
@@ -66,6 +66,7 @@ _WORKFLOWS_SCHED_NONCRITICAL_EXCEPTIONS = (
     ValueError,
     UnicodeDecodeError,
     BackendDatabaseError,
+    SchedulerError,
 )
 
 
@@ -107,6 +108,15 @@ def resolve_schedule_submission_target(payload: dict[str, Any]) -> tuple[str, st
     if isinstance(inputs, dict) and inputs.get("watchlist_job_id"):
         return "watchlist_run", "watchlists"
     return "workflow_run", "workflows"
+
+
+async def ensure_schedule_queue_worker(core: Scheduler, queue_name: str) -> None:
+    """Require real queue capacity without downscaling existing workers."""
+    pool = core.worker_pool
+    workers = pool.get_status().get("workers_by_queue", {}) if pool else {}
+    if workers.get(queue_name, 0) < 1:
+        if await core.scale_workers(1, queue_name) < 1:
+            raise SchedulerError(f"No worker capacity for queue {queue_name}")
 
 
 class _WFRecurringScheduler:
@@ -607,6 +617,7 @@ class _WFRecurringScheduler:
                 logger.warning("Core Scheduler not initialized; skipping schedule run")
                 return
             handler_name, queue_name = resolve_schedule_submission_target(payload)
+            await ensure_schedule_queue_worker(self._core_scheduler, queue_name)
             task_id = await self._core_scheduler.submit(
                 handler=handler_name,
                 payload=payload,

@@ -174,6 +174,7 @@ export const PlaygroundAttachmentButton: React.FC<PlaygroundAttachmentButtonProp
 
 export type PlaygroundSendBlocker = {
   active: boolean
+  disabled?: boolean
   title: string
   actionLabel: string
   onAction: () => void
@@ -330,7 +331,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                 : "submit"
             }
             onClick={handlePrimaryButtonClick}
-            disabled={Boolean(submitDisabledReason) || compareNeedsMoreModels || isPreparingDocuments || isHistorySelectionPending || (!isConnectionReady && !activeCharacterSendBlocker)}
+            disabled={Boolean(submitDisabledReason) || compareNeedsMoreModels || isPreparingDocuments || isHistorySelectionPending || (!isConnectionReady && !activeCharacterSendBlocker) || (activeCharacterSendBlocker && characterChatSendBlocker.disabled === true)}
             className={
               isMobileViewport
                 ? "min-h-[44px] min-w-[44px]"

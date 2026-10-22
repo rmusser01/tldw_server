@@ -20,6 +20,7 @@ vi.mock("@/services/tts-provider", () => ({
   resolveTtsProviderContext: vi.fn(async () => ({
     provider: "openai",
     utterance: "Hello world.",
+    normalizeText: (text: string) => text,
     playbackSpeed: 1,
     synthesize: mocks.synthesize,
     supported: true,
@@ -110,7 +111,10 @@ describe("useTTS cancel-during-playback", () => {
     mocks.runtime.id = "extension-id"
     vi.stubGlobal("chrome", undefined)
     vi.mocked(resolveTtsProviderContext).mockResolvedValueOnce({
-      provider: "browser", utterance: "Hello world.", playbackSpeed: 1,
+      provider: "browser",
+      utterance: "Hello world.",
+      normalizeText: (text: string) => text,
+      playbackSpeed: 1,
       supported: true
     })
     const { result } = renderHook(() => useTTS())
@@ -175,6 +179,7 @@ describe("useTTS cancel-during-playback", () => {
       context.resolve({
         provider: "openai",
         utterance: "old",
+        normalizeText: (text: string) => text,
         playbackSpeed: 1,
         supported: true,
         synthesize: mocks.synthesize
@@ -277,6 +282,7 @@ describe("useTTS cancel-during-playback", () => {
     vi.mocked(resolveTtsProviderContext).mockResolvedValueOnce({
       provider: "browser",
       utterance: "browser voice",
+      normalizeText: (text: string) => text,
       playbackSpeed: 1,
       supported: true
     })
@@ -304,6 +310,7 @@ describe("useTTS cancel-during-playback", () => {
       vi.mocked(resolveTtsProviderContext).mockResolvedValueOnce({
         provider: "browser",
         utterance: "browser voice",
+        normalizeText: (text: string) => text,
         playbackSpeed: 1,
         supported: true
       })

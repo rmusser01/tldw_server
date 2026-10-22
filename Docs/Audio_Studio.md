@@ -100,12 +100,13 @@ Provider requests are normalized before they are persisted in Jobs:
 
 ### ACE-Step
 
-ACE-Step is planned as the `ace_step` music provider behind the shared external HTTP adapter system. Treat this configuration as the target provider shape for the later music adapter slice rather than a prerequisite for the spoken-audio stabilization work.
+ACE-Step is the `ace_step` music provider. Set `AUDIO_STUDIO_ACE_STEP_API_VERSION=1.5` for the official ACE-Step 1.5 asynchronous API. The default `legacy` preserves existing `/generate` services. Version 1.5 submits once to `/release_task`, polls that task through `/query_result`, and downloads its same-origin `/v1/audio` result within the configured overall timeout. Handled adapter protocol, HTTP and timeout failures are not automatically resubmitted; inspect the service before using an explicit user Retry. The upstream task ID is not durably reconciled after worker process loss or lease recovery, so duplicate prevention across those failures is not qualified.
 
 ```bash
 AUDIO_STUDIO_EXTERNAL_ENDPOINT_ALLOWLIST=
 AUDIO_STUDIO_ALLOW_HTTP_ENDPOINTS=false
 AUDIO_STUDIO_ACE_STEP_BASE_URL=
+AUDIO_STUDIO_ACE_STEP_API_VERSION=legacy
 AUDIO_STUDIO_ACE_STEP_TIMEOUT_SECONDS=60
 AUDIO_STUDIO_ACE_STEP_API_KEY=
 ```

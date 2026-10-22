@@ -1,11 +1,12 @@
 import React from "react"
-import { Modal, Select, Empty, Skeleton, Space, Button, Input, notification } from "antd"
+import { Modal, Select, Empty, Skeleton, Space, Button, Input, Alert, notification } from "antd"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { FolderOpen } from "lucide-react"
-import { getAvailableProjects } from "@/services/prompt-sync"
+import { getAvailableProjectsForOwner } from "@/services/prompt-sync"
 import { createProject } from "@/services/prompt-studio"
 import { useServerOnline } from "@/hooks/useServerOnline"
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority"
 
 interface ProjectSelectorProps {
   open: boolean
@@ -25,13 +26,14 @@ export const ProjectSelector: React.FC<ProjectSelectorProps> = ({
   const { t } = useTranslation(["settings", "common"])
   const queryClient = useQueryClient()
   const isOnline = useServerOnline()
+  const { ownerId, ready } = usePromptLocalAuthority()
   const [selectedProjectId, setSelectedProjectId] = React.useState<number | null>(null)
   const [newProjectName, setNewProjectName] = React.useState("")
 
-  const { data: projects, isLoading } = useQuery({
-    queryKey: ["prompt-studio", "projects-for-sync"],
-    queryFn: getAvailableProjects,
-    enabled: open && isOnline
+  const { data: projects, isLoading, error } = useQuery({
+    queryKey: ["prompt-studio", "projects-for-sync", ownerId],
+    queryFn: () => getAvailableProjectsForOwner(ownerId!),
+    enabled: open && isOnline && ready && Boolean(ownerId)
   })
 
   const handleConfirm = () => {
@@ -49,13 +51,14 @@ export const ProjectSelector: React.FC<ProjectSelectorProps> = ({
 
   const { mutate: createProjectMutation, isPending: isCreatingProject } = useMutation({
     mutationFn: async (name: string) => {
+      if (!ownerId || !ready) throw new Error("Prompt project owner is unavailable")
       return await createProject({
         name,
         description: t(
           "settings:managePrompts.sync.autoCreatedProjectDescription",
           "Created from the Prompts sync selector."
         )
-      })
+      }, undefined, { recipePersistence: { mode: "owner", expectedOwnerId: ownerId } })
     },
     onSuccess: async (response) => {
       const project = (response as any)?.data?.data || (response as any)?.data
@@ -109,6 +112,12 @@ export const ProjectSelector: React.FC<ProjectSelectorProps> = ({
         />
       ) : isLoading ? (
         <Skeleton active paragraph={{ rows: 3 }} />
+      ) : error ? (
+        <Alert
+          type="error"
+          title={t("settings:managePrompts.sync.loadProjectsError", "Failed to load projects")}
+          description={error.message}
+        />
       ) : !projects || projects.length === 0 ? (
         <div className="space-y-4">
           <Empty

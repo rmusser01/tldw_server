@@ -1,4 +1,5 @@
 import React from "react"
+import { useQueryClient } from "@tanstack/react-query"
 
 import {
   appendManagedBlocklist,
@@ -80,6 +81,7 @@ const hasManagedLintMetadata = (item: BlocklistManagedItem): boolean =>
   item.ok !== undefined
 
 export function useBlocklist(): BlocklistState {
+  const queryClient = useQueryClient()
   const [rawText, setRawText] = React.useState("")
   const [rawLint, setRawLint] = React.useState<BlocklistLintResponse | null>(null)
   const [pendingRawPreview, setPendingRawPreview] = React.useState<RawReplacePreview | null>(null)
@@ -144,6 +146,7 @@ export function useBlocklist(): BlocklistState {
     try {
       const lines = normalizeRawLines(preview.nextText)
       await updateBlocklist(lines)
+      await queryClient.invalidateQueries({ queryKey: ["moderation-policy"] })
       const nextText = lines.join("\n")
       setRawText(nextText)
       setRawBaseline(nextText)
@@ -158,7 +161,7 @@ export function useBlocklist(): BlocklistState {
     } finally {
       setLoading(false)
     }
-  }, [pendingRawPreview])
+  }, [pendingRawPreview, queryClient])
 
   const cancelRawReplace = React.useCallback(() => {
     setPendingRawPreview(null)
@@ -172,6 +175,7 @@ export function useBlocklist(): BlocklistState {
       const previousText = normalizeRawText(rawReplaceUndo.previousText)
       const lines = normalizeRawLines(previousText)
       await updateBlocklist(lines)
+      await queryClient.invalidateQueries({ queryKey: ["moderation-policy"] })
       setRawText(previousText)
       setRawBaseline(previousText)
       rawBaselineRef.current = previousText
@@ -182,7 +186,7 @@ export function useBlocklist(): BlocklistState {
     } finally {
       setLoading(false)
     }
-  }, [rawReplaceUndo])
+  }, [rawReplaceUndo, queryClient])
 
   const saveRaw = React.useCallback(async () => {
     await previewRawReplace(rawText)
@@ -240,12 +244,13 @@ export function useBlocklist(): BlocklistState {
     setLoading(true)
     try {
       await appendManagedBlocklist(managedVersion, line)
+      await queryClient.invalidateQueries({ queryKey: ["moderation-policy"] })
       setManagedLine("")
       await loadManagedState()
     } finally {
       setLoading(false)
     }
-  }, [managedVersion, managedLine, loadManagedState])
+  }, [managedVersion, managedLine, loadManagedState, queryClient])
 
   const appendLine = React.useCallback(async (line: string) => {
     if (!managedVersion) throw new Error("Load the managed blocklist first")
@@ -254,23 +259,25 @@ export function useBlocklist(): BlocklistState {
     setLoading(true)
     try {
       await appendManagedBlocklist(managedVersion, trimmed)
+      await queryClient.invalidateQueries({ queryKey: ["moderation-policy"] })
       setManagedLine("")
       await loadManagedState()
     } finally {
       setLoading(false)
     }
-  }, [managedVersion, loadManagedState])
+  }, [managedVersion, loadManagedState, queryClient])
 
   const deleteManaged = React.useCallback(async (itemId: number) => {
     if (!managedVersion) return
     setLoading(true)
     try {
       await deleteManagedBlocklistItem(managedVersion, itemId)
+      await queryClient.invalidateQueries({ queryKey: ["moderation-policy"] })
       await loadManagedState()
     } finally {
       setLoading(false)
     }
-  }, [managedVersion, loadManagedState])
+  }, [managedVersion, loadManagedState, queryClient])
 
   const lintManagedLine = React.useCallback(async () => {
     if (!managedLine.trim()) throw new Error("Enter a line to lint")

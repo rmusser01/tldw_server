@@ -22,6 +22,7 @@ def build_flashcard_verification_units(cards: list[dict[str, Any]]) -> list[Arti
                     unit_id=f"flashcard:{index}:front",
                     text=front,
                     claims=[front],
+                    metadata={"requires_semantic_verification": True},
                 )
             )
         if back:

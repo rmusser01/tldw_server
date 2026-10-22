@@ -83,7 +83,9 @@ export const readQuickIngestRequestScope = (value: unknown): ServicePromptReques
   if (config.authSource != null && config.authSource !== "manual" && config.authSource !== "cookie-session") return null
   return { config: {
     serverUrl: config.serverUrl, authMode: config.authMode,
-    ...(config.authSource ? { authSource: config.authSource } : {}),
+    ...(config.authSource ? {
+      authSource: config.authSource === "manual" ? "manual" as const : "cookie-session" as const
+    } : {}),
     ...(typeof config.orgId === "number" ? { orgId: config.orgId } : {}),
     ...(config.authMode === "single-user" ? { expectedSingleUserApiKeyScope: config.expectedSingleUserApiKeyScope as string } : {})
   }, userId: config.authMode === "single-user" ? null : raw.userId as string | number }

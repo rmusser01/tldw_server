@@ -14,6 +14,7 @@ import { isPlaceholderApiKey } from "@/utils/api-key"
 
 export type RecipePersistenceRequestPolicy =
   | Readonly<{ mode: "capture" }>
+  | Readonly<{ mode: "owner"; expectedOwnerId: string }>
   | Readonly<{
       mode: "require"
       expectedOwnerId: string

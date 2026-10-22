@@ -142,7 +142,10 @@ describe("TldwApiClient captured request scope", () => {
     mocks.bgRequest.mockResolvedValue([])
 
     const baseClient = new TldwApiClientBase()
-    vi.spyOn(baseClient, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
+    vi.spyOn(baseClient, "resolveApiPath").mockImplementation(async (_key, paths) => {
+      if (!paths[0]?.startsWith("/")) throw new Error("Expected a relative API path fixture")
+      return `/${paths[0].slice(1)}` as const
+    })
     await TldwApiClientBase.prototype.listCharacters.call(baseClient, { limit: 5 })
 
     expect(mocks.bgRequest.mock.calls[0]?.[0]).toMatchObject({
@@ -151,7 +154,10 @@ describe("TldwApiClient captured request scope", () => {
     })
 
     const domainClient = new TldwApiClientBase()
-    vi.spyOn(domainClient, "resolveApiPath").mockImplementation(async (_key, paths) => paths[0])
+    vi.spyOn(domainClient, "resolveApiPath").mockImplementation(async (_key, paths) => {
+      if (!paths[0]?.startsWith("/")) throw new Error("Expected a relative API path fixture")
+      return `/${paths[0].slice(1)}` as const
+    })
     await characterMethods.listCharacters.call(domainClient, { limit: 5 })
 
     expect(mocks.bgRequest.mock.calls[1]?.[0]).toMatchObject({
@@ -655,4 +661,15 @@ it.each(["getMessage", "editMessage"])("native %s refuses pre-aborted owner requ
     : (client.editMessage as any)("m1", "Exact", 1, "chat", options)
   await expect(pending).rejects.toMatchObject({ name: "AbortError" })
   expect(mocks.bgRequest).not.toHaveBeenCalled()
+})
+it.each([[true, false], [false, false], [true, true], [false, true]])("preserves native greeting seed query and captured scope (enabled=%s, base=%s)", async (enabled, base) => {
+  const client = base ? new TldwApiClientBase() : new TldwApiClient()
+  const signal = new AbortController().signal
+  mocks.bgRequest.mockReset()
+  mocks.bgRequest.mockResolvedValueOnce({ id: "seeded-chat" })
+  await client.createChat({ character_id: 12 }, { requestScope, signal, seedFirstMessage: enabled, greetingStrategy: "alternate_index", alternateIndex: 2 } as Parameters<typeof client.createChat>[1])
+  expect(mocks.bgRequest).toHaveBeenCalledWith(expect.objectContaining({
+    path: `/api/v1/chats/?seed_first_message=${enabled}&greeting_strategy=alternate_index&alternate_index=2`,
+    method: "POST", body: { character_id: 12, scope_type: "global" }, abortSignal: signal, ...expectedScopeFields
+  }))
 })

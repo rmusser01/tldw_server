@@ -30,6 +30,11 @@ import {
 
 const { request } = vi.hoisted(() => ({ request: vi.fn() }))
 vi.mock("@/services/background-proxy", () => ({ bgRequest: request }))
+vi.mock("@/services/note-semantic-index", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/services/note-semantic-index")>()),
+  getNotesSemanticCapabilities: vi.fn().mockRejectedValue({ status: 503 }),
+  getNotesSemanticStatus: vi.fn().mockRejectedValue({ status: 503 })
+}))
 // Cytoscape requires a real canvas. Keep workspace, query hook, service validation,
 // toolbar, inspector and translation real; assertions target those consumers.
 vi.mock("../NotesGraphCanvas", async () => {
@@ -153,7 +158,17 @@ describe("Notes Graph permission boundary", () => {
         "a",
         1,
         120,
-        480
+        480,
+        false,
+        [
+          "manual",
+          "wikilink",
+          "backlink",
+          "tag_membership",
+          "source_membership"
+        ],
+        null,
+        null
       ] as const
       await expect(
         client.fetchQuery({

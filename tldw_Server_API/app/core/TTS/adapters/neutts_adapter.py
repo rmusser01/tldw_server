@@ -31,7 +31,7 @@ from ..tts_exceptions import (
     TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
-from ..utils import parse_bool, run_tts_blocking_call, run_tts_blocking_next
+from ..utils import hold_tts_engine, parse_bool, run_tts_blocking_call
 from .base import (
     AudioFormat,
     ProviderStatus,
@@ -363,14 +363,11 @@ class NeuTTSAdapter(TTSAdapter):
             chunk_idx = 0
             try:
                 # The generator drives the engine between chunks, so the stream holds the lock until it ends.
-                await self._engine_lock.acquire()
-                call: asyncio.Future | None = None
-                try:
+                async with hold_tts_engine(self._engine_lock) as run:
                     chunks = self._engine.infer_stream(request.text, ref_codes, ref_text)  # type: ignore
                     done = object()
                     while True:
-                        call = asyncio.ensure_future(run_tts_blocking_next(chunks, done))
-                        chunk = await asyncio.shield(call)
+                        chunk = await run(next, chunks, done)
                         if chunk is done:
                             break
                         if chunk is None or len(chunk) == 0:
@@ -381,8 +378,6 @@ class NeuTTSAdapter(TTSAdapter):
                         encoded = writer.write_chunk(normalized)
                         if encoded:
                             yield encoded
-                finally:
-                    self._release_engine_when_done(call)
                 # Finalize
                 final_bytes = writer.write_chunk(finalize=True)
                 if final_bytes:
@@ -410,29 +405,8 @@ class NeuTTSAdapter(TTSAdapter):
 
     async def _engine_call(self, func: Callable[..., Any], *args: Any) -> Any:
         """Run one engine call on a worker thread, holding the engine lock until it returns."""
-        await self._engine_lock.acquire()
-        call = asyncio.ensure_future(run_tts_blocking_call(func, *args))
-        try:
-            return await asyncio.shield(call)
-        finally:
-            self._release_engine_when_done(call)
-
-    def _release_engine_when_done(self, call: asyncio.Future | None) -> None:
-        """Release the engine lock now, or when an engine call still running on its thread returns.
-
-        A cancelled caller (a client disconnect) cannot stop that thread, so handing the engine to
-        the next caller before it returns would run two calls on one llama-cpp context.
-        """
-        if call is None or call.done():
-            self._engine_lock.release()
-            return
-
-        def _release(finished: asyncio.Future) -> None:
-            self._engine_lock.release()
-            if not finished.cancelled():
-                finished.exception()  # its caller is gone; don't log the error as never retrieved
-
-        call.add_done_callback(_release)
+        async with hold_tts_engine(self._engine_lock) as run:
+            return await run(func, *args)
 
     def _maybe_override_engine(self, extras: dict[str, Any]):
         """Allow per-request override of model repos/devices via extra_params."""

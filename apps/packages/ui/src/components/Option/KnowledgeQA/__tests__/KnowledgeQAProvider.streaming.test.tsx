@@ -88,6 +88,27 @@ describe("KnowledgeQAProvider streaming search", () => {
     })
   })
 
+  it.each([true, false])("honors the selected QA timeout for generation=%s", async (generation) => {
+    ragSearchStreamMock.mockImplementation(async function* () {
+      yield { type: "contexts", contexts: [{ id: "cedar", excerpt: "Cedar opens in January." }] }
+      yield { type: "delta", text: "Cedar opens in January [1]." }
+      yield completeEvent(true)
+    })
+    render(<KnowledgeQAProvider><ContextProbe /></KnowledgeQAProvider>)
+    await act(async () => { await latestContext!.selectThread("local-selected-timeout") })
+    act(() => {
+      latestContext!.setQuery("When does Cedar open?")
+      latestContext!.updateSetting("enable_generation", generation)
+      latestContext!.updateSetting("timeout_seconds", 45)
+    })
+    await act(async () => { await latestContext!.search() })
+    expect(generation ? ragSearchStreamMock : ragSearchMock).toHaveBeenCalledWith(
+      "When does Cedar open?",
+      expect.objectContaining({ timeoutMs: 45000, signal: expect.any(AbortSignal) })
+    )
+    expect(latestContext!.error).toBeNull()
+  })
+
   it("keeps received answer and evidence when the user cancels a partial stream", async () => {
     ragSearchStreamMock.mockImplementation(async function* (_query: string, options: { signal: AbortSignal }) {
       yield { type: "contexts", contexts: [{ id: "cedar", excerpt: "Cedar opens in January." }] }

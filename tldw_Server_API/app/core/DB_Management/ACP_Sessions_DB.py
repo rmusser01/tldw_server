@@ -1161,11 +1161,20 @@ class ACPSessionsDB:
     # Message recording
     # ------------------------------------------------------------------
 
+    @classmethod
+    def select_assistant_text(cls, result: dict[str, Any], assistant_text: str | None = None) -> str:
+        """Choose legacy final content first, then exact captured native text."""
+        final_text = cls._normalize_text_content(result.get("content"))
+        if final_text:
+            return final_text
+        return assistant_text if isinstance(assistant_text, str) else ""
+
     def record_prompt(
         self,
         session_id: str,
         prompt: list[dict[str, Any]],
         result: dict[str, Any],
+        *, assistant_text: str | None = None,
     ) -> dict[str, Any] | None:
         """Record a prompt+response exchange and update token counters.
 
@@ -1204,7 +1213,7 @@ class ACPSessionsDB:
                 inserted += 1
 
             # Insert assistant response
-            assistant_text = self._normalize_text_content(result.get("content")) or ""
+            assistant_text = self.select_assistant_text(result, assistant_text)
             conn.execute(
                 "INSERT INTO session_messages (session_id, message_index, role, content, timestamp, raw_data)"
                 " VALUES (?, ?, ?, ?, ?, ?)",
@@ -1213,10 +1222,20 @@ class ACPSessionsDB:
             inserted += 1
 
             # Extract token usage
-            usage = result.get("usage") or {}
-            p_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
-            c_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
-            t_tokens = p_tokens + c_tokens
+            usage = result.get("usage")
+            usage = usage if isinstance(usage, dict) else {}
+
+            def reported_tokens(*names: str) -> int | None:
+                for name in names:
+                    value = usage.get(name)
+                    if type(value) is int and value >= 0:
+                        return value
+                return None
+
+            p_tokens = reported_tokens("prompt_tokens", "input_tokens", "inputTokens") or 0
+            c_tokens = reported_tokens("completion_tokens", "output_tokens", "outputTokens") or 0
+            reported_total = reported_tokens("total_tokens", "totalTokens")
+            t_tokens = reported_total if reported_total is not None else p_tokens + c_tokens
 
             # Update session counters
             conn.execute(

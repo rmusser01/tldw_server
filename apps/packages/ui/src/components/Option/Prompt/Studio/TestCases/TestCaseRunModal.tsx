@@ -1,5 +1,5 @@
 import { useMutation, useQuery } from "@tanstack/react-query"
-import { Modal, Select, notification, Spin, Table } from "antd"
+import { Form, Modal, Select, notification, Spin, Table } from "antd"
 import { Play, CheckCircle2, XCircle, Clock } from "lucide-react"
 import React, { useState } from "react"
 import { useTranslation } from "react-i18next"
@@ -11,6 +11,7 @@ import {
 } from "@/services/prompt-studio"
 import { Button } from "@/components/Common/Button"
 import { Alert, Badge } from "@/components/ui/primitives"
+import { StudioModelTargetFields, useStudioModelTarget } from "../StudioModelTargetFields"
 
 type TestCaseRunModalProps = {
   open: boolean
@@ -26,6 +27,8 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
   onClose
 }) => {
   const { t } = useTranslation(["settings", "common"])
+  const [form] = Form.useForm()
+  const modelTarget = useStudioModelTarget(open, form)
   const [selectedPromptId, setSelectedPromptId] = useState<number | null>(null)
   const [results, setResults] = useState<TestRunResult[] | null>(null)
 
@@ -40,13 +43,23 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
 
   // Run mutation
   const runMutation = useMutation({
-    mutationFn: () =>
-      runTestCases({
+    mutationFn: async () => {
+      const target = modelTarget.resolveTarget()
+      const response = await runTestCases({
         prompt_id: selectedPromptId!,
-        test_case_ids: testCaseIds
-      }),
-    onSuccess: (response) => {
-      const data = (response as any)?.data?.data ?? []
+        test_case_ids: testCaseIds,
+        provider: target.provider,
+        model: target.model
+      })
+      if (response.ok === false) throw new Error(response.error || "Request failed")
+      const payload = response.data
+      const data = payload
+        ? "results" in payload ? payload.results : payload.data
+        : undefined
+      if (!Array.isArray(data)) throw new Error("Test run returned no results")
+      return data
+    },
+    onSuccess: (data) => {
       setResults(data)
       notification.success({
         message: t("managePrompts.studio.testCases.runComplete", {
@@ -56,7 +69,7 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
     },
     onError: (error: any) => {
       notification.error({
-        message: t("common:error", { defaultValue: "Error" }),
+        message: t("common:error.label", { defaultValue: "Error" }),
         description: error?.message || t("common:unknownError")
       })
     }
@@ -76,16 +89,30 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
   }
 
   const handleClose = () => {
+    runMutation.reset()
     setResults(null)
     setSelectedPromptId(null)
+    form.resetFields()
     onClose()
   }
 
   const passCount = results?.filter((r) => r.passed).length ?? 0
   const failCount = results?.filter((r) => r.passed === false).length ?? 0
+  const ungradedCount = results?.filter((r) => r.passed == null && !r.error && !r.actual?.error).length ?? 0
+
+  const responseText = (value?: Record<string, unknown>) => {
+    if (!value) return undefined
+    return typeof value.response === "string" ? value.response : JSON.stringify(value)
+  }
+  const resultError = (record: TestRunResult) => record.error ||
+    (typeof record.actual?.error === "string" ? record.actual.error : undefined)
+  const executionSeconds = (record: TestRunResult) =>
+    typeof record.execution_time_ms === "number"
+      ? record.execution_time_ms / 1000
+      : record.execution_time
 
   const renderResultStatusBadge = (record: TestRunResult) => {
-    if (record.error) {
+    if (resultError(record)) {
       return (
         <Badge variant="danger" size="sm">
           <XCircle className="size-3" aria-hidden="true" />
@@ -156,12 +183,13 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
             />
 
             <div>
-              <label className="block text-sm font-medium mb-2">
+              <label htmlFor="studio-run-prompt" className="block text-sm font-medium mb-2">
                 {t("managePrompts.studio.testCases.selectPromptToRun", {
                   defaultValue: "Select Prompt to Run Against"
                 })}
               </label>
               <Select
+                id="studio-run-prompt"
                 placeholder={t(
                   "managePrompts.studio.testCases.form.selectPrompt",
                   {
@@ -177,7 +205,19 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
                 }))}
               />
             </div>
+            <Form form={form} layout="vertical">
+              <StudioModelTargetFields target={modelTarget} />
+            </Form>
           </>
+        )}
+
+        {runMutation.isError && (
+          <Alert
+            variant="error"
+            title={t("common:error.label", { defaultValue: "Error" })}
+          >
+            {runMutation.error?.message || t("common:unknownError")}
+          </Alert>
         )}
 
         {runMutation.isPending && (
@@ -216,6 +256,11 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
                   })}
                 </Badge>
               )}
+              {ungradedCount > 0 && (
+                <Badge size="sm">{t("managePrompts.studio.testCases.results.ungradedCount", {
+                  defaultValue: "{{count}} ungraded", count: ungradedCount
+                })}</Badge>
+              )}
             </div>
 
             {/* Results table */}
@@ -248,14 +293,19 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
                   }),
                   dataIndex: "output",
                   render: (output, record) =>
-                    record.error ? (
-                      <span className="text-danger text-sm">{record.error}</span>
+                    resultError(record) ? (
+                      <span className="text-danger text-sm">{resultError(record)}</span>
                     ) : (
                       <pre className="text-xs whitespace-pre-wrap max-h-20 overflow-auto">
-                        {output?.substring(0, 200)}
-                        {output && output.length > 200 && "..."}
+                        {(responseText(record.actual) ?? output)?.substring(0, 200)}
+                        {(responseText(record.actual) ?? output)?.length > 200 && "..."}
                       </pre>
                     )
+                },
+                {
+                  title: t("managePrompts.studio.testCases.columns.expected", { defaultValue: "Expected" }),
+                  key: "expected",
+                  render: (_, record) => <pre className="text-xs whitespace-pre-wrap max-h-20 overflow-auto">{responseText(record.expected) ?? "-"}</pre>
                 },
                 {
                   title: t("managePrompts.studio.testCases.columns.time", {
@@ -264,10 +314,10 @@ export const TestCaseRunModal: React.FC<TestCaseRunModalProps> = ({
                   key: "time",
                   width: 80,
                   render: (_, record) =>
-                    record.execution_time ? (
+                    executionSeconds(record) !== undefined ? (
                       <span className="flex items-center gap-1 text-xs text-text-muted">
                         <Clock className="size-3" />
-                        {record.execution_time.toFixed(2)}s
+                        {executionSeconds(record)?.toFixed(2)}s
                       </span>
                     ) : (
                       "-"

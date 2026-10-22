@@ -35,8 +35,9 @@ describe("classifyError", () => {
   // -------------------------------------------------------------------------
   describe("queue-full category", () => {
     it.each([
-      "HTTP 429 Too Many Requests",
       "User 1 has reached the maximum concurrent job limit (5)",
+      "HTTP 429: concurrent job limit reached",
+      "Maximum concurrent jobs reached",
     ])('returns queue-full guidance for "%s"', (msg) => {
       const result = classifyError(msg)
       expect(result.classification).toBe("server")
@@ -44,6 +45,34 @@ describe("classifyError", () => {
       expect(result.badgeLabel).toContain("Queue Full")
       expect(result.userMessage).toContain("maximum number of ingest jobs")
     })
+  })
+
+  describe("daily ingestion quota", () => {
+    it.each([
+      "Daily ingestion size budget exceeded.",
+      "429: Daily ingestion size budget exceeded.",
+      "HTTP 429: Daily ingestion size budget exceeded.",
+    ])('explains the daily upload allowance and permits a manual recovery for "%s"', (msg) => {
+      const result = classifyError(msg)
+      expect(result.classification).toBe("server")
+      expect(result.badgeLabel).toContain("Daily upload limit")
+      expect(result.userMessage).toContain("daily upload")
+      expect(result.suggestion).toContain("administrator")
+      expect(result.retryable).toBe(true)
+    })
+  })
+
+  describe("request throttling", () => {
+    it.each(["HTTP 429 Too Many Requests", "429", "Too many requests"])(
+      'does not invent an ingest-job limit for "%s"', (msg) => {
+        const result = classifyError(msg)
+        expect(result.classification).toBe("server")
+        expect(result.badgeLabel).toContain("Rate limit")
+        expect(result.userMessage).toContain("limiting requests")
+        expect(result.userMessage).not.toContain("ingest jobs")
+        expect(result.retryable).toBe(false)
+      }
+    )
   })
 
   // -------------------------------------------------------------------------

@@ -416,6 +416,7 @@ export const SidepanelForm = ({
     draftOwnerKey,
     isDraftOwnerCurrent,
     captureCompletionGuard,
+    captureDraftOwnership,
     captureStopGuard,
     retainCurrentDraft,
     clearDraft,
@@ -1352,7 +1353,7 @@ export const SidepanelForm = ({
       ? [
           {
             id: "image",
-            label: t("playground:actions.upload", "Attach image"),
+            label: form.values.imageFilename || t("playground:actions.upload", "Attach image"),
             previewSrc: form.values.image,
             onRemove: () => {
               form.setFieldValue("image", "")
@@ -1381,8 +1382,10 @@ export const SidepanelForm = ({
   // base64 encoding); we supply Sidepanel-specific toast callbacks.
   const attachmentHandler = useComposerAttachments({
     chatMode: "normal",
+    captureImageOwnership: () => captureDraftOwnership().isImageCurrent,
     setImageField: (base64) => form.setFieldValue("image", base64),
     onImageAccepted: (file) => {
+      form.setFieldValue("imageFilename", file.name)
       message.success({
         content: t("sidepanel:composer.imageUploaded", {
           defaultValue: "Image added: {{name}}",
@@ -1407,7 +1410,7 @@ export const SidepanelForm = ({
       message.error({
         content: t(
           "sidepanel:composer.imageUploadError",
-          "Failed to process image"
+          "This image could not be opened. Choose a valid image file."
         ),
         duration: 3
       })
@@ -1968,37 +1971,73 @@ export const SidepanelForm = ({
     if (draftReady && keyboardShortcutsEnabled) onComposerReady?.();
   }, [draftReady, keyboardShortcutsEnabled, onComposerReady]);
 
-  const ensureEmbeddingModelAvailable = async (): Promise<boolean> => {
+  const contextKeyFor = (mode = chatMode, searchEnabled = webSearch) =>
+    JSON.stringify([
+      selectedModel,
+      mode,
+      searchEnabled,
+      selectedSystemPrompt,
+      toolChoice,
+      useOCR,
+      temporaryChat,
+      selectedCharacterId,
+      conversationContextSettings,
+      selectedDocuments.map((doc) => [doc.id, doc.title, doc.url]),
+      currentDocumentSelectionKey,
+      ragPinnedResults,
+      replyTarget,
+      chatWithWebsiteEmbedding,
+      imageBackendDefaultTrimmed,
+    ]);
+  const contextKey = contextKeyFor();
+  const contextRevisionRef = React.useRef({ key: contextKey, revision: 0 });
+  React.useLayoutEffect(() => {
+    if (contextRevisionRef.current.key !== contextKey) {
+      contextRevisionRef.current = {
+        key: contextKey,
+        revision: contextRevisionRef.current.revision + 1,
+      };
+    }
+  }, [contextKey]);
+
+  const ensureEmbeddingModelAvailable = async (
+    isCurrent: () => boolean,
+    mode: string,
+    searchEnabled: boolean,
+  ): Promise<boolean> => {
     // Fast path: no RAG or web search enabled
-    if (chatMode !== "rag" && !webSearch) {
-      return true
+    if (mode !== "rag" && !searchEnabled) {
+      return true;
     }
 
-    let defaultEM: string | null | undefined
+    let defaultEM: string | null | undefined;
 
     // When chatting with the current page via embeddings, require a default embedding model
-    if (chatMode === "rag" && chatWithWebsiteEmbedding) {
-      defaultEM = await defaultEmbeddingModelForRag()
+    if (mode === "rag" && chatWithWebsiteEmbedding) {
+      defaultEM = await defaultEmbeddingModelForRag();
+      if (!isCurrent()) return false;
       if (!defaultEM) {
-        form.setFieldError("message", t("formError.noEmbeddingModel"))
-        return false
+        form.setFieldError("message", t("formError.noEmbeddingModel"));
+        return false;
       }
     }
 
     // When web search is enabled and not in simple-search mode, also require an embedding model
-    if (webSearch) {
+    if (searchEnabled) {
       if (typeof defaultEM === "undefined") {
-        defaultEM = await defaultEmbeddingModelForRag()
+        defaultEM = await defaultEmbeddingModelForRag();
+        if (!isCurrent()) return false;
       }
-      const simpleSearch = await getIsSimpleInternetSearch()
+      const simpleSearch = await getIsSimpleInternetSearch();
+      if (!isCurrent()) return false;
       if (!defaultEM && !simpleSearch) {
-        form.setFieldError("message", t("formError.noEmbeddingModel"))
-        return false
+        form.setFieldError("message", t("formError.noEmbeddingModel"));
+        return false;
       }
     }
 
-    return true
-  }
+    return true;
+  };
 
   const buildPinnedMessage = React.useCallback(
     (message: string, options?: { ignorePinnedResults?: boolean }) => {
@@ -2099,7 +2138,17 @@ export const SidepanelForm = ({
     }
     const connectionGeneration = connectionGenerationRef.current
     const submittedKnowledgeMentionRevision = knowledgeMentionRevision.current
+    const draftOwnership = captureDraftOwnership()
+    const contextRevision = contextRevisionRef.current.revision
+    let ownSlashKey: string | null = null
+    const contextIsCurrent = () => draftOwnership.isCurrent() &&
+      (contextRevisionRef.current.revision === contextRevision ||
+        (ownSlashKey !== null && contextRevisionRef.current.revision === contextRevision + 1 &&
+          contextRevisionRef.current.key === ownSlashKey))
+    if (!contextIsCurrent()) return
     const intent = resolveSubmissionIntent(rawMessage, options)
+    const effective = useStoreMessageOption.getState()
+    if (intent.handled) ownSlashKey = contextKeyFor(effective.chatMode, effective.webSearch)
     if (intent.invalidImageCommand) {
       notification.error({
         message: t("error", { defaultValue: "Error" }),
@@ -2116,6 +2165,7 @@ export const SidepanelForm = ({
       return
     }
     const savedRoleplay = isSavedRoleplayConversation(greetingHistorySelection)
+    if (!intent.isImageCommand && !savedRoleplay && !draftOwnership.normalizeMessage(intent.message)) return
     const trimmed = savedRoleplay ? intent.message : intent.combinedMessage.trim()
     if (
       !intent.isImageCommand &&
@@ -2144,7 +2194,7 @@ export const SidepanelForm = ({
           selectedModel: selectedModel ?? "",
           selectionSource: { model: "global", toolChoice: "global" }
         })
-    const preparationIsCurrent = () => connectionReadyRef.current && connectionGenerationRef.current === connectionGeneration && completionIsCurrent() && form.getRevision() === inputRevision && dispatchIsCurrent() &&
+    const preparationIsCurrent = () => contextIsCurrent() && connectionReadyRef.current && connectionGenerationRef.current === connectionGeneration && completionIsCurrent() && form.getRevision() === inputRevision && dispatchIsCurrent() &&
       (!documentPreparation || (!documentPreparation.controller.signal.aborted && currentDocumentSelectionKeyRef.current === documentPreparation.selectionKey))
     if (
       savedRoleplay &&
@@ -2181,14 +2231,12 @@ export const SidepanelForm = ({
       selectionKey: string
       isCurrent: () => boolean
     } | null = null
-    if (!intent.isImageCommand) {
-      documentPreparation = {
-        controller: new AbortController(),
-        selectionKey: currentDocumentSelectionKeyRef.current,
-        isCurrent: () => preparationIsCurrent() && sceneCapture?.isCurrent() !== false
-      }
-      sidepanelDocumentPreparationRef.current = documentPreparation
+    documentPreparation = {
+      controller: new AbortController(),
+      selectionKey: currentDocumentSelectionKeyRef.current,
+      isCurrent: () => preparationIsCurrent() && sceneCapture?.isCurrent() !== false
     }
+    sidepanelDocumentPreparationRef.current = documentPreparation
     try {
       if (!intent.isImageCommand) {
         try {
@@ -2231,7 +2279,7 @@ export const SidepanelForm = ({
         }
       }
       if (!intent.isImageCommand && !savedRoleplay) {
-        const hasEmbedding = await ensureEmbeddingModelAvailable()
+        const hasEmbedding = await ensureEmbeddingModelAvailable(preparationIsCurrent, effective.chatMode, effective.webSearch)
         if (!preparationIsCurrent() || actorSceneSend?.isCurrent() === false) return
         if (!hasEmbedding) {
           return
@@ -2373,9 +2421,10 @@ export const SidepanelForm = ({
           textAreaFocus()
         },
         afterSend: (result) => {
+          const outcome = normalizeChatSubmitResult(result)
           if (
             promptAssistAttemptId !== null &&
-            isChatSubmitSuccess(normalizeChatSubmitResult(result))
+            isChatSubmitSuccess(outcome)
           ) {
             markPromptAssistAttemptSaved(promptAssistAttemptId, result !== undefined)
             // Legacy void outcomes can include a swallowed failure.
@@ -2385,7 +2434,8 @@ export const SidepanelForm = ({
               setContextFiles(current => current === contextFiles ? [] : current)
               if (knowledgeMentionRevision.current === submittedKnowledgeMentionRevision) setKnowledgeMentionActive(false)
             }
-          } else if (promptAssistAttemptId !== null) {
+          } else if (promptAssistAttemptId !== null &&
+            (outcome.status === "skipped" || (outcome.status === "failed" && outcome.restoreDraft))) {
             restorePromptAssistAttempt(promptAssistAttemptId)
           }
         },

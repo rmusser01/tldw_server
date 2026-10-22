@@ -12,6 +12,7 @@ safety-net rule is that no configuration can produce a permanent 429.
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -37,6 +38,27 @@ def log_lookup_failure(policy_id: str, exc: BaseException) -> None:
     if key not in _warned_lookup_errors:
         _warned_lookup_errors.add(key)
         logger.error("Resource Governor policy store lookup for {!r} failed: {!r}; treating it as undefined", policy_id, exc)
+
+
+_REDIS_WARNING_INTERVAL_SEC = 60.0
+_last_redis_warning: dict[str, float] = {}
+
+
+def log_redis_failure(ns: str, exc: BaseException) -> None:
+    """Warn that the Redis backend ``ns`` is failing, at most once a minute per worker process and namespace.
+
+    Called where a Redis error leaves this worker enforcing limits on its own: Redis unreachable, or
+    answering reads but rejecting writes (READONLY, OOM). The Redis governor's own logger is off unless
+    RG_DEBUG is set, so the warning is logged here.
+    """
+    now = time.monotonic()
+    if now - _last_redis_warning.get(ns, -math.inf) >= _REDIS_WARNING_INTERVAL_SEC:
+        _last_redis_warning[ns] = now
+        logger.warning(
+            "Resource Governor Redis backend {!r} is failing ({}); this worker enforces its limits on its own until it recovers",
+            ns,
+            type(exc).__name__,
+        )
 
 
 def _lookup(get_policy: Callable[[str], Mapping[str, Any] | None], policy_id: str) -> dict[str, Any]:

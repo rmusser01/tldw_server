@@ -27,6 +27,23 @@ export type NativeHistoryRegenerate = NativeHistoryEditResend & {
   input_message_revision: string
 }
 
+/** A local selected input branches without changing its original transcript. */
+export type HistoryEditAndSendBoundary = {
+  targetId: string
+  owner: HistoryOwnerV1
+  originView: HistoryViewSelectionV1
+  originIsCurrent: () => boolean
+}
+
+export type HistoryRegenerateBoundary = {
+  answerId: string
+  questionId: string
+  questionRevision: string
+  owner: HistoryOwnerV1
+  originView: HistoryViewSelectionV1
+  originIsCurrent: () => boolean
+}
+
 /** One operation owns its adapter and immutable pending intent across display navigation. */
 export interface HistorySendTurn {
   owner: HistoryOwnerV1
@@ -47,6 +64,8 @@ export interface HistorySendTurn {
   retryAdmission?: HistoryAdmissionReferenceV1
   historyBranch?: boolean
   historyEdit?: HistoryEditTargetV1
+  existingSelection?: boolean
+  stageSettlementPayload?: (message: StoredMessage) => Promise<void>
   selection?: HistorySelectionV1
   input?: StoredMessage
   resultId?: string

@@ -348,6 +348,7 @@ export const resolveTldwRequestPlan = async (
         normalizedPath: string | undefined;
         isAbsolute: boolean;
         sameOriginAbsoluteUrl: boolean;
+        samePageOriginRequest: boolean;
         hostedMode: boolean;
         cookieSession: boolean;
         url: string;
@@ -505,6 +506,7 @@ export const resolveTldwRequestPlan = async (
       normalizedPath,
       isAbsolute,
       sameOriginAbsoluteUrl,
+      samePageOriginRequest: (!isAbsolute && transport?.kind === "same-origin") || samePageOriginAbsoluteUrl,
       hostedMode,
       cookieSession,
       url,
@@ -804,6 +806,7 @@ const performTldwRequest = async (
     fetchFn,
     normalizedPath,
     sameOriginAbsoluteUrl,
+    samePageOriginRequest,
     hostedMode,
     cookieSession,
     url: resolvedUrl,
@@ -819,6 +822,7 @@ const performTldwRequest = async (
       ? ""
       : String(getRuntimeSingleUserApiKeyOverride() || "").trim();
   let recipeSnapshot: RecipeRequestSnapshotResolution | null = null;
+  let ownerRequestPrincipal: string | number | null = null;
   if (payload.recipePersistence) {
     const snapshotInput = {
       config: cfg,
@@ -842,6 +846,7 @@ const performTldwRequest = async (
       const authenticatedPrincipal = await runtime.getAuthenticatedPrincipal(
         recipeSnapshot.snapshot,
       );
+      ownerRequestPrincipal = authenticatedPrincipal;
       recipeSnapshot = resolveRecipeRequestSnapshot({
         ...snapshotInput,
         authenticatedPrincipalId: authenticatedPrincipal,
@@ -856,6 +861,29 @@ const performTldwRequest = async (
         status: recipeSnapshot.authenticationError.status,
         error: recipeSnapshot.authenticationError.error,
       };
+    }
+
+    // Ordinary prompt copies require captured account ownership without the
+    // recipe-specific delivery reservation. Keep v2's require path intact.
+    if (payload.recipePersistence.mode === "owner") {
+      const expectedOwnerId = payload.recipePersistence.expectedOwnerId;
+      if (
+        !/^recipe-owner:sha256:[0-9a-f]{64}$/.test(expectedOwnerId) ||
+        !recipeSnapshot.view ||
+        recipeSnapshot.view.ownerId !== expectedOwnerId
+      ) {
+        return {
+          ok: false,
+          status: 412,
+          error: "Request prompt owner is unavailable or changed",
+        };
+      }
+      if (ownerRequestPrincipal != null) {
+        for (const key of Object.keys(h)) {
+          if (key.toLowerCase() === "x-tldw-expected-user-id") delete h[key];
+        }
+        h["X-TLDW-Expected-User-ID"] = String(ownerRequestPrincipal);
+      }
     }
 
     if (payload.recipePersistence.mode === "require") {
@@ -891,6 +919,19 @@ const performTldwRequest = async (
     if (authFailure) {
       return { ok: false, status: authFailure.status, error: authFailure.error };
     }
+  }
+
+  if (
+    !recipeSnapshot &&
+    noAuth &&
+    isUnsafeMethod(method) &&
+    samePageOriginRequest
+  ) {
+    for (const key of Object.keys(h)) {
+      if (key.toLowerCase() === "x-csrf-token") delete h[key];
+    }
+    const csrfToken = readBrowserCookie("csrf_token");
+    if (csrfToken) h["X-CSRF-Token"] = csrfToken;
   }
 
   const controller = new AbortController();

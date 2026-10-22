@@ -87,7 +87,7 @@ def history_branch_leaves(
     parents = {row["id"]: row.get("parent_id") for row in nodes}
     if interpretation_status.get("kind") == "legacy_linear_v1":
         path = tuple(interpretation_status.get("ordered_path_ids") or ())
-        parents.update(zip(path, (None, *path[:-1]), strict=True))
+        parents.update(zip(path, (None, *path)[:-1], strict=True))
     children: dict[str | None, list[str]] = {}
     for row in nodes:
         children.setdefault(parents[row["id"]], []).append(row["id"])

@@ -21,7 +21,7 @@ const messageOpenMock = vi.fn()
 const navigateMock = vi.fn()
 const trackMetricMock = vi.fn()
 const testI18n = createInstance().use(ICUWithInterpolation)
-const render: typeof renderComponent = (ui, options) => renderComponent(ui, {
+const render = (ui: Parameters<typeof renderComponent>[0], options?: Parameters<typeof renderComponent>[1]) => renderComponent(ui, {
   ...options,
   wrapper: ({ children }) => <I18nextProvider i18n={testI18n}>{children}</I18nextProvider>,
 })

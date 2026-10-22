@@ -148,7 +148,7 @@ it.each([`native-history-v1:sha256:${"c".repeat(64)}`, ""])(
     }
     const before = structuredClone(capture)
     const message = formatSelectedHistory(capture).messages[1]
-    expect(message.generationInfo).toBeUndefined()
+    expect(message.generationInfo).toEqual(ownerKey ? { interrupted: true, stopped: false } : undefined)
     expect(message.messageType).toBeUndefined()
     expect(message.modelId).toBeUndefined()
     expect(message.metadataExtra).toEqual(

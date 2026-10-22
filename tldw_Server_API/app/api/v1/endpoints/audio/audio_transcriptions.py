@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse, Response
 from loguru import logger
 import soundfile as sf
 from starlette import status
-from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, get_auth_principal, get_db_transaction, get_request_user, TokenScopeGuard, User
+from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit, require_expected_user, get_auth_principal, get_db_transaction, get_request_user, TokenScopeGuard, User
 
 from tldw_Server_API.app.api.v1.API_Deps.billing_deps import get_billing_org_id, require_within_limit
 from tldw_Server_API.app.core.Resource_Governance import cost_units
@@ -491,6 +491,7 @@ def _dictation_error_detail(
     summary="Transcribes audio into text (OpenAI Compatible)",
     responses=_OPENAI_AUDIO_TRANSCRIPT_RESPONSES,
     dependencies=[
+        Depends(require_expected_user),
         Depends(check_rate_limit),
         Depends(
             TokenScopeGuard("any", require_if_present=True, endpoint_id="audio.transcriptions", count_as="call")
@@ -600,8 +601,8 @@ async def create_transcription(
         "audio/opus",
         "audio/webm",
     }
-    ctype = (file.content_type or "").lower()
-    if ctype and ctype not in allowed_types:
+    ctype = (file.content_type or "").split(";", 1)[0].strip().lower()
+    if file.content_type and ctype not in allowed_types:
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=f"Unsupported media type: {file.content_type}"
         )
@@ -655,6 +656,28 @@ async def create_transcription(
         )
 
         model = resolve_default_transcription_model("whisper-1")
+
+    from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Transcription_Lib import (
+        parse_transcription_model,
+    )
+
+    requested_provider, _, requested_variant = parse_transcription_model(model or "")
+    if requested_provider == "parakeet" and requested_variant == "onnx":
+        from tldw_Server_API.app.core.Ingestion_Media_Processing.Audio.Audio_Files import (
+            check_transcription_model_status,
+        )
+
+        if check_transcription_model_status(model or "").get("usable") is False:
+            metrics_provider = "parakeet"
+            _emit_error_metrics(status_label="model_unavailable", reason="model_unavailable")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=_dictation_error_detail(
+                    http_status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail_status="model_unavailable",
+                    message="The configured Parakeet ONNX model is not available. Check the Audio Setup Guide before retrying.",
+                ),
+            )
 
     # Before any heavy work, enforce concurrent jobs cap per user
     ok_job, msg_job = await _audio_shim_attr("can_start_job")(current_user.id)

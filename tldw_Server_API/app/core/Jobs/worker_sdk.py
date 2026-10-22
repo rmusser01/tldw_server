@@ -29,6 +29,7 @@ from .operations.contracts import (
     PreparedDispositionOrigin,
     PreparedDispositionResult,
     PreparedJobDisposition,
+    normalize_acquire_job_types,
 )
 
 try:
@@ -800,6 +801,7 @@ class WorkerSDK:
         acquire_guard: Callable[[dict[str, Any]], Awaitable[bool]] | None = None,
         owner_user_id: str | None = None,
         job_type: str | None = None,
+        job_types: tuple[str, ...] | None = None,
         on_completed: CompletionCallback | None = None,
         on_completion_rejected: CompletionCallback | None = None,
         on_failed: FailureCallback | None = None,
@@ -808,8 +810,11 @@ class WorkerSDK:
 
         handler should accept a job dict and return a result dict (or None) to finalize.
         Completion callbacks run after the durable completion attempt and receive
-        the acquired job plus the normalized result.
+        the acquired job plus the normalized result. An optional `job_types`
+        tuple restricts selection within the same serial claim loop.
         """
+        job_types = normalize_acquire_job_types(job_type, job_types)
+        type_filter = {"job_types": job_types} if job_types is not None else {}
         backoff = max(1, int(self.cfg.backoff_base_seconds))
         backoff_max = max(backoff, int(self.cfg.backoff_max_seconds))
         enforce = self.jm.should_enforce_leases()
@@ -822,6 +827,7 @@ class WorkerSDK:
                     worker_id=self.cfg.worker_id,
                     owner_user_id=owner_user_id,
                     job_type=job_type,
+                    **type_filter,
                 )
             except _WORKER_SDK_NONCRITICAL_EXCEPTIONS as e:
                 logger.debug(f"Acquire error: {e}")

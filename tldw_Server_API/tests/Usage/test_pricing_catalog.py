@@ -120,3 +120,45 @@ def test_compute_costs_clamps_billable_input_tokens_to_uncached_remainder(
     assert completion_cost == 0.0
     assert total_cost == pytest.approx(prompt_cost)
     assert estimated is False
+
+
+# Anthropic list prices per 1K tokens: prompt, completion, cache hit, 5-minute cache write.
+# Source: platform.claude.com/docs/en/about-claude/pricing, fetched 2026-10-20 (TASK-13858).
+_FABLE_5_1 = {"prompt": 0.01, "completion": 0.05, "cache_read": 0.00025, "cache_write": 0.0125}
+_FABLE_5 = {"prompt": 0.01, "completion": 0.05, "cache_read": 0.001, "cache_write": 0.0125}
+_OPUS_5_5 = {"prompt": 0.004, "completion": 0.02, "cache_read": 0.0002, "cache_write": 0.005}
+_OPUS_5 = {"prompt": 0.005, "completion": 0.025, "cache_read": 0.0005, "cache_write": 0.00625}
+_OPUS_4_1 = {"prompt": 0.015, "completion": 0.075, "cache_read": 0.0015, "cache_write": 0.01875}
+_SONNET_5_5 = {"prompt": 0.002, "completion": 0.01, "cache_read": 0.0001, "cache_write": 0.0025}
+_SONNET_5 = {"prompt": 0.002, "completion": 0.01, "cache_read": 0.0002, "cache_write": 0.0025}
+_SONNET_4 = {"prompt": 0.003, "completion": 0.015, "cache_read": 0.0003, "cache_write": 0.00375}
+_HAIKU_4_5 = {"prompt": 0.001, "completion": 0.005, "cache_read": 0.0001, "cache_write": 0.00125}
+
+
+@pytest.mark.parametrize(
+    ("model", "rates"),
+    [
+        ("claude-fable-5-1", _FABLE_5_1),
+        ("claude-fable-5", _FABLE_5),
+        ("claude-opus-5-5", _OPUS_5_5),
+        ("claude-opus-5", _OPUS_5),
+        ("claude-opus-4-8", _OPUS_5),
+        ("claude-opus-4-7", _OPUS_5),
+        ("claude-opus-4-5", _OPUS_5),
+        ("claude-opus-4-5-20251101", _OPUS_5),
+        ("claude-opus-4-1-20250805", _OPUS_4_1),
+        ("claude-sonnet-5-5", _SONNET_5_5),
+        ("claude-sonnet-5", _SONNET_5),
+        ("claude-sonnet-4-6", _SONNET_4),
+        ("claude-sonnet-4-5-20250929", _SONNET_4),
+        ("claude-haiku-4-5-20251001", _HAIKU_4_5),
+    ],
+)
+def test_anthropic_model_ids_get_their_list_prices_and_cache_rates(
+    model: str, rates: dict[str, float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+
+    got, _estimated = PricingCatalog().get_rate_details("anthropic", model)
+
+    assert got == pytest.approx(rates)

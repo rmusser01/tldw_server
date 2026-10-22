@@ -408,10 +408,28 @@ describe("public article capture through actual scoped direct transport", () => 
     await expect(pending).rejects.toMatchObject({ name: "AbortError" })
   })
 
+  it("dispatches a canonical media version write with the captured principal", async () => {
+    const body = { content: "Edited capture", prompt: "", analysis_content: "" }
+    await bgRequest({
+      ...requestScopeFields(options().requestScope),
+      path: "/api/v1/media/71/versions" as never,
+      method: "POST",
+      body
+    })
+    expect(boundary.fetch).toHaveBeenCalledTimes(1)
+    const [url, init] = boundary.fetch.mock.calls[0]
+    expect(String(url)).toBe("https://clips.example/api/v1/media/71/versions")
+    expect(init.method).toBe("POST")
+    expect(new Headers(init.headers).get("X-TLDW-Expected-User-ID")).toBe("7")
+    expect(new Headers(init.headers).get("Authorization")).toBe(`Bearer ${config().accessToken}`)
+    expect(JSON.parse(init.body)).toEqual(body)
+    expect(boundary.sendMessage).not.toHaveBeenCalled()
+  })
+
   it.each([
     ["/api/v1/media/ingest-web-content", "GET"],
     ["/api/v1/media/ingest-web-content/extra", "POST"],
-    ["/api/v1/media/71/versions", "POST"],
+    ["/api/v1/media/71/versions", "PUT"],
     ["/api/v1/media/71/versions/0", "GET"],
     ["/api/v1/media/71/versions/-1", "GET"],
     ["/api/v1/media/71/versions/advanced", "GET"],

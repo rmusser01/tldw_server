@@ -8,7 +8,7 @@ vi.mock("@plasmohq/storage", () => import("../../../../../tldw-frontend/extensio
 vi.mock("@plasmohq/storage/hook", async importOriginal => {
   const actual = await importOriginal<typeof import("@plasmohq/storage/hook")>()
   const web = await import("../../../../../tldw-frontend/extension/shims/plasmo-storage-hook")
-  return { useStorage: (...args: Parameters<typeof web.useStorage>) => authority.plasmo ? actual.useStorage(...args) : web.useStorage(...args) }
+  return { useStorage: (...args: Parameters<typeof web.useStorage>) => authority.plasmo ? Reflect.apply(actual.useStorage, undefined, args) : web.useStorage(...args) }
 })
 vi.mock("@/services/service-prompts", async importOriginal => ({
   ...await importOriginal<typeof import("@/services/service-prompts")>(),

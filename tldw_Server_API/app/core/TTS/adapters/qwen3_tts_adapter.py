@@ -32,7 +32,7 @@ from ..tts_exceptions import (
     TTSStreamingError,
     TTSValidationError,
 )
-from ..utils import parse_bool, resolve_qwen3_runtime_name
+from ..utils import hold_tts_engine, parse_bool, resolve_qwen3_runtime_name
 from .base import (
     AudioFormat,
     TTSAdapter,
@@ -635,10 +635,10 @@ class Qwen3TTSAdapter(TTSAdapter):
         load_id = self.model_path or model_id
         if load_id in self._pipelines:
             return self._pipelines[load_id]
-        async with self._pipeline_lock:
+        async with hold_tts_engine(self._pipeline_lock) as run:
             if load_id in self._pipelines:
                 return self._pipelines[load_id]
-            pipeline = await asyncio.to_thread(self._build_pipeline, load_id)
+            pipeline = await run(self._build_pipeline, load_id)
             self._pipelines[load_id] = pipeline
             # Register pipeline with resource manager for cache tracking (best-effort)
             try:

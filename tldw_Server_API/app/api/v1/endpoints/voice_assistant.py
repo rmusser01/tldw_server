@@ -61,6 +61,7 @@ from tldw_Server_API.app.api.v1.schemas.voice_assistant_schemas import (
     WSWorkflowProgressMessage,
 )
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_request_user, User
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.TTS.tts_exceptions import TTSError
 from tldw_Server_API.app.core.TTS.tts_request_resolution import (
@@ -1099,11 +1100,13 @@ async def websocket_voice_assistant(
 
         # Initialize DB + load user commands for persistence
         try:
-            db = await get_chacha_db_for_user_id(user_id, client_id="voice_assistant")
-            save_voice_session(db, session)
-            registry = get_voice_command_registry()
-            registry.load_defaults()
-            registry.refresh_user_commands(db, user_id, include_disabled=True)
+            # A WebSocket runs outside the HTTP operation middleware: own this step's checkouts.
+            with chacha_operation(independent=True):
+                db = await get_chacha_db_for_user_id(user_id, client_id="voice_assistant")
+                save_voice_session(db, session)
+                registry = get_voice_command_registry()
+                registry.load_defaults()
+                registry.refresh_user_commands(db, user_id, include_disabled=True)
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             logger.warning("Voice assistant DB init failed")
 
@@ -1405,13 +1408,14 @@ async def _process_text_command(
     db: Optional[CharactersRAGDB] = None,
 ) -> None:
     """Process text through Intent -> Action -> TTS pipeline."""
-    # Process command
-    result, _ = await router_instance.process_command(
-        text=text,
-        user_id=user_id,
-        session_id=session_id,
-        db=db,
-    )
+    # A WebSocket runs outside the HTTP operation middleware: this command owns its checkouts.
+    with chacha_operation(independent=True):
+        result, _ = await router_instance.process_command(
+            text=text,
+            user_id=user_id,
+            session_id=session_id,
+            db=db,
+        )
 
     # Send intent
     await websocket.send_json(

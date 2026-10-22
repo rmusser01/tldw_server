@@ -1,5 +1,6 @@
 import { createWithEqualityFn } from "zustand/traditional"
 import type {
+  AudioStudioAdmissionIntent,
   AudioStudioClip,
   AudioStudioClipType,
   AudioStudioProject as ServiceAudioStudioProject,
@@ -72,6 +73,7 @@ export type AudioStudioRevisionConflict = {
 }
 
 type AudioStudioStore = {
+  jobIntents: Record<string, AudioStudioAdmissionIntent>
   activeWorkflow: AudioStudioWorkflow
   projects: AudioStudioProject[]
   activeProjectId: string | null
@@ -99,8 +101,8 @@ const normalizeProject = (
   title: project.title,
   workflow: project.workflow,
   status: project.status,
-  sections: project.sections ?? [],
-  tracks: project.tracks ?? [],
+  sections: (project.sections ?? []).map((section) => ({ ...section, order: section.order ?? section.order_index ?? 0 })),
+  tracks: (project.tracks ?? []).map((track) => ({ ...track, order: track.order ?? track.order_index ?? 0 })),
   clips: project.clips ?? [],
   settings: project.settings ?? {}
 })
@@ -114,6 +116,7 @@ const resolveActiveProject = (
 ) => projects.find((project) => project.project_id === activeProjectId) ?? null
 
 const initialState = {
+  jobIntents: {} as Record<string, AudioStudioAdmissionIntent>,
   activeWorkflow: "narration" as AudioStudioWorkflow,
   projects: [] as AudioStudioProject[],
   activeProjectId: null as string | null,
@@ -140,12 +143,7 @@ export const useAudioStudioStore = createWithEqualityFn<AudioStudioStore>(
       }),
 
     setProjects: (projects) => {
-      const normalized = projects.map(normalizeProject)
-      const activeProjectId = get().activeProjectId
-      set({
-        projects: normalized,
-        activeProject: resolveActiveProject(normalized, activeProjectId)
-      })
+      for (const project of projects) get().upsertProjectFromServer(project)
     },
 
     setActiveProjectId: (projectId) =>
@@ -155,11 +153,11 @@ export const useAudioStudioStore = createWithEqualityFn<AudioStudioStore>(
       })),
 
     upsertProjectFromServer: (project) => {
-      const incoming = normalizeProject(project)
       const state = get()
       const existing = state.projects.find(
-        (candidate) => candidate.project_id === incoming.project_id
+        (candidate) => candidate.project_id === project.project_id
       )
+      const incoming = normalizeProject({ ...existing, ...project })
       const isDirty = Boolean(state.dirtyProjectIds[incoming.project_id])
       const hasRevisionConflict =
         isDirty &&
@@ -180,6 +178,8 @@ export const useAudioStudioStore = createWithEqualityFn<AudioStudioStore>(
         })
         return
       }
+
+      if (isDirty) return
 
       const projects = existing
         ? state.projects.map((candidate) =>

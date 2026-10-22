@@ -7,6 +7,8 @@ import { useEffect } from "react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { useAntdNotification } from "@/hooks/useAntdNotification"
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority"
+import { capturePromptOwnerScope } from "@/services/prompt-local-owner"
 import {
   cancelRun,
   createRun,
@@ -106,21 +108,29 @@ export function useRunDetail(
 ) {
   const setQuotaSnapshot = useEvaluationsStore((s) => s.setQuotaSnapshot)
   const setIsPolling = useEvaluationsStore((s) => s.setIsPolling)
+  const queryClient = useQueryClient()
+  const authority = usePromptLocalAuthority()
   const enablePolling = options?.enablePolling !== false
   const captureQuota = options?.captureQuota !== false
 
   const query = useQuery({
-    queryKey: ["evaluations", "run", runId],
+    queryKey: ["evaluations", "run", runId, authority.boundaryKey, authority.ready ? authority.ownerId : null],
     queryFn: async () => {
-      const resp = await getRun(runId as string)
-      // Parse quota from headers
-      if (captureQuota) {
-        const snapshot = parseQuotaSnapshot(resp?.headers as any)
-        if (snapshot) setQuotaSnapshot(snapshot)
+      const owner = await capturePromptOwnerScope(authority.ownerId)
+      try {
+        owner.assertCurrent()
+        const resp = await getRun(runId as string)
+        owner.assertCurrent()
+        if (captureQuota) {
+          const snapshot = parseQuotaSnapshot(resp?.headers as any)
+          if (snapshot) setQuotaSnapshot(snapshot)
+        }
+        return resp
+      } finally {
+        owner.release()
       }
-      return resp
     },
-    enabled: !!runId,
+    enabled: !!runId && authority.ready && !!authority.ownerId,
     refetchInterval: enablePolling
       ? (query) => {
         const status = (query?.state?.data as any)?.data?.status
@@ -130,6 +140,16 @@ export function useRunDetail(
       }
       : false
   })
+
+  const observedRun = query.data?.ok ? query.data.data : undefined
+  useEffect(() => {
+    if (authority.ready && authority.ownerId && observedRun?.id === runId &&
+        typeof observedRun.eval_id === "string" && observedRun.eval_id && observedRun.status) {
+      void queryClient.invalidateQueries({
+        queryKey: ["evaluations", "runs", observedRun.eval_id]
+      })
+    }
+  }, [queryClient, runId, authority.ready, authority.ownerId, observedRun?.id, observedRun?.eval_id, observedRun?.status])
 
   const isPolling = !!runId && ["running", "pending"].includes(
     String(query.data?.data?.status).toLowerCase()

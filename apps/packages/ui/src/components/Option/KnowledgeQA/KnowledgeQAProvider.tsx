@@ -2575,7 +2575,7 @@ function OwnedKnowledgeQAProvider({
           dispatch({ type: "ADD_MESSAGE", payload: userMessage })
         }
 
-        const { options } = buildRagSearchRequest({
+        const { options, timeoutMs } = buildRagSearchRequest({
           ...effectiveSettings,
           query: trimmedQuery,
           enable_web_fallback: effectiveSettings.enable_web_fallback,
@@ -2686,6 +2686,7 @@ function OwnedKnowledgeQAProvider({
               ) => AsyncGenerator<any, void, unknown>
             }).ragSearchStream(trimmedQuery, {
               ...options,
+              timeoutMs,
               signal: abortController.signal,
             })) {
               if (isStaleSearchRequest()) {
@@ -2806,6 +2807,7 @@ function OwnedKnowledgeQAProvider({
           dispatch({ type: "SET_QUERY_STAGE", payload: "ranking" })
           const response = await tldwClient.ragSearch(trimmedQuery, {
             ...options,
+            timeoutMs,
             signal: abortController.signal,
           })
           if (isStaleSearchRequest()) {
@@ -3079,15 +3081,20 @@ function OwnedKnowledgeQAProvider({
     })
   }, [message, state.isSearching])
 
-  const search = useCallback(async () => {
-    const queryLength = state.query.trim().length
+  const search = useCallback(async (queryOverride?: string) => {
+    // SearchBar keeps the raw query in local state and syncs the reducer on a
+    // 250ms debounce; on submit it passes its current text explicitly so the
+    // request never waits on (or races) that sync (WP-08).
+    const queryText =
+      typeof queryOverride === "string" ? queryOverride : state.query
+    const queryLength = queryText.trim().length
     if (queryLength > 0) {
       void trackKnowledgeQaSearchMetric({
         type: "search_submit",
         query_length: queryLength,
       })
     }
-    await runKnowledgeQuery(state.query, true)
+    await runKnowledgeQuery(queryText, true)
   }, [state.query, runKnowledgeQuery])
 
   const rerunWithTokenLimit = useCallback(

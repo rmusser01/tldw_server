@@ -163,13 +163,6 @@ const STATUS_ICONS: Record<string, React.ReactNode> = {
   triage: <XCircle className="h-3.5 w-3.5" />,
 }
 
-const navigateOptionRoute = (path: string) => {
-  if (typeof window === "undefined") {
-    return
-  }
-  window.location.hash = path
-}
-
 const normalizeWorkspaceFilterId = (value: unknown): string | null => {
   if (typeof value !== "string") {
     return null
@@ -1280,7 +1273,9 @@ const AgentTasksSetupDescription: React.FC<{
   issues,
   showAgentRegistry = true,
   showResearchWorkspace = false
-}) => (
+}) => {
+  const navigate = useNavigate()
+  return (
   <div className="space-y-3">
     {body ? <div>{body}</div> : null}
     <ul className="m-0 space-y-2 pl-4">
@@ -1296,7 +1291,7 @@ const AgentTasksSetupDescription: React.FC<{
         <Button
           size="small"
           icon={<ExternalLink className="h-3 w-3" />}
-          onClick={() => navigateOptionRoute("/agents")}
+          onClick={() => navigate("/agents")}
         >
           Open Agent Registry
         </Button>
@@ -1305,7 +1300,7 @@ const AgentTasksSetupDescription: React.FC<{
         <Button
           size="small"
           icon={<ExternalLink className="h-3 w-3" />}
-          onClick={() => navigateOptionRoute(RESEARCH_WORKSPACE_PATH)}
+          onClick={() => navigate(RESEARCH_WORKSPACE_PATH)}
         >
           Open Research Workspace
         </Button>
@@ -1313,13 +1308,14 @@ const AgentTasksSetupDescription: React.FC<{
       <Button
         size="small"
         icon={<ExternalLink className="h-3 w-3" />}
-        onClick={() => navigateOptionRoute("/acp-playground")}
+        onClick={() => navigate("/acp-playground")}
       >
         Open ACP Playground
       </Button>
     </div>
   </div>
 )
+}
 
 const TaskDiagnostics: React.FC<{ task: TaskDetailItem }> = ({ task }) => {
   const runs = task.runs ?? []
@@ -1375,15 +1371,16 @@ const TaskDiagnostics: React.FC<{ task: TaskDetailItem }> = ({ task }) => {
   )
 }
 
-const openRunSessionRoute = (run: RunItem, view?: string) => {
+const openRunSessionRoute = (navigate: ReturnType<typeof useNavigate>, run: RunItem, view?: string) => {
   const sessionId = run.session?.session_id || run.session_id
   if (!sessionId) return
   const params = new URLSearchParams({ session: sessionId })
   if (view) params.set("view", view)
-  navigateOptionRoute(`/acp-playground?${params.toString()}`)
+  navigate(`/acp-playground?${params.toString()}`)
 }
 
 const RunDiagnostics: React.FC<{ run: RunItem }> = ({ run }) => {
+  const navigate = useNavigate()
   const sessionId = run.session?.session_id || run.session_id
   const failureContext = run.failure_context
   return (
@@ -1436,7 +1433,7 @@ const RunDiagnostics: React.FC<{ run: RunItem }> = ({ run }) => {
           <Button
             size="small"
             icon={<ExternalLink className="h-3 w-3" />}
-            onClick={() => openRunSessionRoute(run)}
+            onClick={() => openRunSessionRoute(navigate, run)}
           >
             Open session
           </Button>
@@ -1444,7 +1441,7 @@ const RunDiagnostics: React.FC<{ run: RunItem }> = ({ run }) => {
             <Button
               size="small"
               icon={<ExternalLink className="h-3 w-3" />}
-              onClick={() => openRunSessionRoute(run, "diagnostics")}
+              onClick={() => openRunSessionRoute(navigate, run, "diagnostics")}
             >
               Open diagnostics
             </Button>
@@ -1453,7 +1450,7 @@ const RunDiagnostics: React.FC<{ run: RunItem }> = ({ run }) => {
             <Button
               size="small"
               icon={<ExternalLink className="h-3 w-3" />}
-              onClick={() => openRunSessionRoute(run, "artifacts")}
+              onClick={() => openRunSessionRoute(navigate, run, "artifacts")}
             >
               Open artifacts
             </Button>
@@ -1462,7 +1459,7 @@ const RunDiagnostics: React.FC<{ run: RunItem }> = ({ run }) => {
             <Button
               size="small"
               icon={<ExternalLink className="h-3 w-3" />}
-              onClick={() => openRunSessionRoute(run, "audit")}
+              onClick={() => openRunSessionRoute(navigate, run, "audit")}
             >
               Open audit
             </Button>
@@ -1480,6 +1477,16 @@ const TaskCard: React.FC<{
   onReview: (taskId: number, approved: boolean) => Promise<void>
   onInspectTask: (taskId: number) => Promise<void>
 }> = ({ task, allTasks, onDispatchRun, onReview, onInspectTask }) => {
+  const [dispatching, setDispatching] = useState(false)
+  const dispatch = async () => {
+    if (dispatching) return
+    setDispatching(true)
+    try {
+      await onDispatchRun(task.id)
+    } finally {
+      setDispatching(false)
+    }
+  }
   const depTask = task.dependency_id
     ? allTasks.find((t) => t.id === task.dependency_id)
     : null
@@ -1523,14 +1530,16 @@ const TaskCard: React.FC<{
         >
           Inspect
         </Button>
-        {task.status === "todo" && (
+        {(task.status === "todo" || task.status === "triage") && (
           <Button
             size="small"
             type="primary"
             icon={<Play className="h-3 w-3" />}
-            onClick={() => void onDispatchRun(task.id)}
+            disabled={dispatching}
+            loading={dispatching}
+            onClick={() => void dispatch()}
           >
-            Run
+            {dispatching ? "Running..." : task.status === "triage" ? "Retry" : "Run"}
           </Button>
         )}
         {task.status === "review" && (

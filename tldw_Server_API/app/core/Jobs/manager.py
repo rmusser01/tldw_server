@@ -73,6 +73,7 @@ from .migrations import (
     slides_archive_projection_ready_sqlite,
     slides_archive_values_equal,
 )
+from .notes_semantic_health import validate_notes_semantic_health_checkpoint
 from .operations.contracts import (
     ADMIN_WEBHOOK_DELIVERY_DOMAIN,
     ADMIN_WEBHOOK_DELIVERY_JOB_TYPE,
@@ -107,6 +108,7 @@ from .operations.contracts import (
     canonical_admin_webhook_idempotency_key,
     canonical_admin_webhook_row_matches,
     is_admin_webhook_delivery_queue,
+    normalize_acquire_job_types,
 )
 from .operations.postgres import acquire_job as _postgres_acquire_job
 from .operations.postgres import admit_idempotent_operation as _postgres_admit_idempotent_operation
@@ -685,6 +687,7 @@ class JobManager:
         "admin_webhooks": ("delivery",),
         # Long-form TTS jobs (off "default", read unfiltered by the pipeline); GPU transcription.
         "audio": ("tts", "transcribe"),
+        "notes": ("graph-suggestions", "semantic-index"),
     }
 
     # --- Shutdown/acquisition gate (process-wide) ---
@@ -890,6 +893,99 @@ class JobManager:
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 conn.rollback()
         return cur
+
+    @staticmethod
+    def _normalize_notes_semantic_health_sweep_row(row: Any) -> dict[str, Any]:
+        data = dict(row)
+        data.pop("singleton_id", None)
+        data["revision"] = int(data.get("revision") or 0)
+        for field_name in ("updated_at", "last_completed_at"):
+            value = _parse_dt(data.get(field_name))
+            if value is not None:
+                value = value.replace(tzinfo=_tz.utc) if value.tzinfo is None else value.astimezone(_tz.utc)
+            data[field_name] = value
+        return data
+
+    def get_notes_semantic_health_sweep(self) -> dict[str, Any]:
+        """Read the durable singleton cursor for Notes semantic health aggregation."""
+
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute("SELECT * FROM notes_semantic_health_sweep WHERE singleton_id=1")
+                    row = cur.fetchone()
+            else:
+                row = conn.execute("SELECT * FROM notes_semantic_health_sweep WHERE singleton_id=1").fetchone()
+            if row is None:
+                raise RuntimeError("Notes semantic health sweep singleton is missing")
+            return self._normalize_notes_semantic_health_sweep_row(row)
+        finally:
+            conn.close()
+
+    def checkpoint_notes_semantic_health_sweep(
+        self,
+        *,
+        expected_revision: int,
+        after_owner_id: int | None,
+        after_dataset_id: str | None,
+        totals_json: str,
+        completed: bool,
+        now: datetime,
+    ) -> bool:
+        """CAS one content-free partial page or reset one completed sweep."""
+
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision < 0:
+            raise ValueError("semantic health revision must be nonnegative")
+        validate_notes_semantic_health_checkpoint(
+            after_owner_id=after_owner_id,
+            after_dataset_id=after_dataset_id,
+            totals_json=totals_json,
+        )
+        if completed and after_owner_id is not None:
+            raise ValueError("completed semantic health checkpoint must be reset")
+        now_utc = _require_aware_utc(now, field_name="now")
+        conn = self._connect()
+        try:
+            if self.backend == "postgres":
+                with conn, self._pg_cursor(conn) as cur:
+                    cur.execute(
+                        "UPDATE notes_semantic_health_sweep SET revision=revision+1,"
+                        "after_owner_id=%s,after_dataset_id=%s,"
+                        "totals_json=%s,updated_at=%s,"
+                        "last_completed_at=CASE WHEN %s THEN %s ELSE last_completed_at END "
+                        "WHERE singleton_id=1 AND revision=%s",
+                        (
+                            after_owner_id,
+                            after_dataset_id,
+                            totals_json,
+                            now_utc,
+                            completed,
+                            now_utc,
+                            expected_revision,
+                        ),
+                    )
+                    return bool(cur.rowcount == 1)
+            with conn:
+                result = conn.execute(
+                    "UPDATE notes_semantic_health_sweep SET revision=revision+1,"
+                    "after_owner_id=?,after_dataset_id=?,"
+                    "totals_json=?,updated_at=?,"
+                    "last_completed_at=CASE WHEN ? THEN ? ELSE last_completed_at END "
+                    "WHERE singleton_id=1 AND revision=?",
+                    (
+                        after_owner_id,
+                        after_dataset_id,
+                        totals_json,
+                        _sqlite_utc(now_utc),
+                        int(completed),
+                        _sqlite_utc(now_utc),
+                        expected_revision,
+                    ),
+                )
+                return bool(result.rowcount == 1)
+        finally:
+            conn.close()
 
     @staticmethod
     def _normalize_slides_reconciliation_row(row: Any) -> dict[str, Any]:
@@ -5945,6 +6041,7 @@ class JobManager:
         queue: str | None = None,
         owner_user_id: str | None = None,
         job_type: str | None = None,
+        job_types: tuple[str, ...] | None = None,
     ) -> int:
         """Recover expired processing leases with their lifecycle side effects.
 
@@ -5954,6 +6051,7 @@ class JobManager:
         emit duplicate lifecycle events.
         """
 
+        job_types = normalize_acquire_job_types(job_type, job_types)
         counters_enabled = JobManager._is_truthy(os.getenv("JOBS_COUNTERS_ENABLED", ""))
         outbox_enabled = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
         batch_size = JobManager._expired_recovery_batch_size()
@@ -5972,6 +6070,9 @@ class JobManager:
                     if value is not None:
                         where.append(f"{column} = %s")
                         params.append(value)
+                if job_types is not None:
+                    where.append("job_type = ANY(%s)")
+                    params.append(list(job_types))
                 with conn, self._pg_cursor(conn) as cur:
                     counter_deltas: dict[tuple[str, str, str], tuple[int, int]] = {}
                     cur.execute(
@@ -6123,6 +6224,9 @@ class JobManager:
                     if value is not None:
                         where.append(f"{column} = ?")
                         params.append(value)
+                if job_types is not None:
+                    where.append(f"job_type IN ({', '.join('?' for _ in job_types)})")
+                    params.extend(job_types)
                 scoped_where = " AND ".join(where)
                 # Healthy acquisitions pay only a scoped read; take the write
                 # lock only when an expired row may need recovery.
@@ -6303,6 +6407,7 @@ class JobManager:
         worker_id: str,
         owner_user_id: str | None = None,
         job_type: str | None = None,
+        job_types: tuple[str, ...] | None = None,
     ) -> dict[str, Any] | None:
         """Atomically acquire the next eligible job and start a lease.
 
@@ -6314,8 +6419,11 @@ class JobManager:
         acquires only ready queued jobs.
 
         When provided, `job_type` restricts acquisition to matching jobs in the
-        selected domain and queue.
+        selected domain and queue. Alternatively, `job_types` selects one job
+        from an allowed tuple using the same atomic queue ordering.
         """
+        job_types = normalize_acquire_job_types(job_type, job_types)
+        type_filter = {"job_types": job_types} if job_types is not None else {}
         # Honor global acquire gate for graceful shutdown
         _test_mode = _is_test_mode()
         if _test_mode:
@@ -6377,7 +6485,7 @@ class JobManager:
             req = 0
         if req <= 0 and JobManager._is_truthy(os.getenv("JOBS_ADAPTIVE_LEASE_ENABLE", "")):
             try:
-                req = self._adaptive_lease_seconds(domain, queue, job_type)
+                req = self._adaptive_lease_seconds(domain, queue, job_type, **type_filter)
             except _JOB_NONCRITICAL_EXCEPTIONS:
                 req = 30
         lease_seconds = max(1, min(max_lease, int(req)))
@@ -6386,6 +6494,7 @@ class JobManager:
             queue=queue,
             owner_user_id=owner_user_id,
             job_type=job_type,
+            **type_filter,
         )
         self._reconcile_terminal_dependents(**reconciliation_scope)
         conn = self._connect()
@@ -6403,6 +6512,7 @@ class JobManager:
                         lease_id=str(_uuid.uuid4()),
                         owner_user_id=owner_user_id,
                         job_type=job_type,
+                        job_types=job_types,
                         max_inflight_quota=max_inflight,
                         priority_direction=self._priority_dir_for(domain, backend="pg"),
                         tie_break=self._tie_break_for(domain, backend="pg"),
@@ -6427,6 +6537,7 @@ class JobManager:
                         lease_id=str(_uuid.uuid4()),
                         owner_user_id=owner_user_id,
                         job_type=job_type,
+                        job_types=job_types,
                         max_inflight_quota=max_inflight,
                         priority_direction=self._priority_dir_for(domain, backend="sqlite"),
                         tie_break=self._tie_break_for(domain, backend="sqlite"),
@@ -7923,12 +8034,16 @@ class JobManager:
             _close_connection_nonfatal(conn, operation="job completion")
         return bool(res_ok)
 
-    def _adaptive_lease_seconds(self, domain: str, queue: str, job_type: str | None) -> int:
+    def _adaptive_lease_seconds(
+        self, domain: str, queue: str, job_type: str | None,
+        *, job_types: tuple[str, ...] | None = None,
+    ) -> int:
         """Compute adaptive lease seconds based on recent P95 durations with headroom.
 
         Works for both backends; uses percentile_cont on PG and a simple
         approximate percentile for SQLite.
         """
+        job_types = normalize_acquire_job_types(job_type, job_types)
         headroom = float(os.getenv("JOBS_ADAPTIVE_LEASE_HEADROOM", "1.3") or "1.3")
         window_h = int(os.getenv("JOBS_ADAPTIVE_LEASE_WINDOW_HOURS", "6") or "6")
         min_s = int(os.getenv("JOBS_ADAPTIVE_LEASE_MIN_SECONDS", "15") or "15")
@@ -7946,6 +8061,9 @@ class JobManager:
                     if job_type:
                         q += " AND job_type=%s"
                         params.append(job_type)
+                    elif job_types is not None:
+                        q += " AND job_type = ANY(%s)"
+                        params.append(list(job_types))
                     cur.execute(q, tuple(params))
                     row = cur.fetchone()
                     if row and (row.get("p95") is not None):
@@ -7959,6 +8077,9 @@ class JobManager:
                 if job_type:
                     query += " AND job_type=?"
                     params2.append(job_type)
+                elif job_types is not None:
+                    query += f" AND job_type IN ({', '.join('?' for _ in job_types)})"
+                    params2.extend(job_types)
                 vals = [float(r[0]) for r in conn.execute(query, tuple(params2)).fetchall() if r and r[0] is not None]
                 if vals:
                     vals.sort()
@@ -8178,6 +8299,18 @@ class JobManager:
             with contextlib.suppress(_JOB_NONCRITICAL_EXCEPTIONS):
                 conn.close()
 
+    def retry_quarantine_threshold(self, *, backoff_seconds: int) -> int:
+        """Return fail_job's quarantine cutoff, retaining backend test-mode policy.
+
+        This reads the operation-time setting; it does not change a job or lease.
+        Invalid configured values propagate as they do in failure finalization.
+        """
+        raw = os.getenv("JOBS_QUARANTINE_THRESHOLD")
+        threshold = int(raw or "2")
+        if _is_test_mode() and int(backoff_seconds) <= 0 and (self.backend == "postgres" or raw is None):
+            return max(threshold, 10**9)
+        return threshold
+
     def fail_job(
         self,
         job_id: int,
@@ -8280,12 +8413,7 @@ class JobManager:
                                     if _outbox and delay < 3:
                                         delay = 3
                             # Poison message quarantine check: increment failure_streak_* and quarantine if threshold reached
-                            base_thresh = int(os.getenv("JOBS_QUARANTINE_THRESHOLD", "2") or "2")
-                            # In TEST_MODE with zero backoff (unit-style retry loops), avoid quarantining to allow timeline growth
-                            if test_mode and int(backoff_seconds) <= 0:
-                                thresh = max(base_thresh, 10**9)
-                            else:
-                                thresh = base_thresh
+                            thresh = self.retry_quarantine_threshold(backoff_seconds=backoff_seconds)
                             if not quarantine:
                                 thresh = 10**9
                             # Update retry path with failure streak bookkeeping
@@ -8863,8 +8991,7 @@ class JobManager:
                             else secrets.randbelow(max(1, exp_backoff // 4) + 1)
                         )
                         delay = exp_backoff + jitter
-                        base_thresh = int(os.getenv("JOBS_QUARANTINE_THRESHOLD", "2") or "2")
-                        thresh = base_thresh
+                        thresh = self.retry_quarantine_threshold(backoff_seconds=backoff_seconds)
                         if test_mode:
                             _outbox = JobManager._is_truthy(os.getenv("JOBS_EVENTS_OUTBOX", ""))
                             if not _outbox and exp_backoff <= 1:
@@ -8875,12 +9002,6 @@ class JobManager:
                             except _JOB_NONCRITICAL_EXCEPTIONS:
                                 if _outbox and delay < 3:
                                     delay = 3
-                            if test_mode and int(backoff_seconds) <= 0:
-                                # Respect explicit threshold in tests; otherwise, avoid quarantining to allow timeline growth
-                                if os.getenv("JOBS_QUARANTINE_THRESHOLD") is None:
-                                    thresh = max(base_thresh, 10**9)
-                                else:
-                                    thresh = base_thresh
                         if not quarantine:
                             thresh = 10**9
                         # SQLite retry path with failure streak bookkeeping
@@ -9426,6 +9547,7 @@ class JobManager:
         expected_domain: str | None = None,
         expected_job_type: str | None = None,
         cascade_dependents: bool = True,
+        queued_only: bool = False,
     ) -> bool:
         """Request cancellation or cancel queued jobs immediately.
 
@@ -9434,6 +9556,7 @@ class JobManager:
         Internal maintenance callers may disable immediate dependent cascading
         so reconciliation remains bounded.
 
+        queued_only also compares queued status under the cancellation row lock.
         Emits gauge updates on successful cancellation for the job's domain/queue/job_type.
         """
         conn = self._connect()
@@ -9458,6 +9581,8 @@ class JobManager:
             if expected_job_type is not None:
                 clauses.append(f"job_type = {placeholder}")
                 values.append(str(expected_job_type))
+            if queued_only:
+                clauses.append("status = 'queued'")
             return " AND ".join(clauses), values
 
         def _event_job(row: dict[str, Any]) -> dict[str, Any]:

@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 
 import pytest
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError
+from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError, ChatConfigurationError
 from tldw_Server_API.app.core.exceptions import EgressPolicyError
 
 
@@ -137,10 +137,10 @@ def test_numbered_custom_openai_adapters_require_explicit_base_url(monkeypatch):
     for env_key in (*custom_openai_endpoint_env_keys(2), *custom_openai_endpoint_env_keys(37)):
         monkeypatch.delenv(env_key, raising=False)
 
-    with pytest.raises(RuntimeError, match="requires an explicit base URL"):
+    with pytest.raises(ChatConfigurationError, match="requires an explicit base URL"):
         CustomOpenAIAdapter2()._resolve_base({"app_config": {}})
 
-    with pytest.raises(RuntimeError, match="requires an explicit base URL"):
+    with pytest.raises(ChatConfigurationError, match="requires an explicit base URL"):
         make_custom_openai_adapter_class(37)()._resolve_base({"app_config": {}})
 
 

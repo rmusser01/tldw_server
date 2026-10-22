@@ -3,15 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Popover, Button, Input, Checkbox, Popconfirm, message } from "antd"
 import { Plus, Edit2, Trash2, Tag } from "lucide-react"
 
-import {
-  listLabels,
-  createLabel,
-  updateLabel,
-  deleteLabel,
-  assignLabelToCard,
-  removeLabelFromCard,
-  generateClientId
-} from "@/services/kanban"
+import { generateClientId } from "@/services/kanban"
+import { useKanbanScope } from "./KanbanScope"
 import type { Label } from "@/types/kanban"
 
 const PRESET_COLORS: { hex: string; name: string }[] = [
@@ -41,6 +34,8 @@ export const LabelManager = ({
   children
 }: LabelManagerProps) => {
   const queryClient = useQueryClient()
+  const { api, key, isActive } = useKanbanScope()
+  const { listLabels, createLabel, updateLabel, deleteLabel, assignLabelToCard, removeLabelFromCard } = api
   const [open, setOpen] = useState(false)
 
   // Creating new label
@@ -53,15 +48,15 @@ export const LabelManager = ({
   const [editColor, setEditColor] = useState("")
 
   const { data: labels = [] } = useQuery({
-    queryKey: ["kanban-board-labels", boardId],
+    queryKey: key("kanban-board-labels", boardId),
     queryFn: () => listLabels(boardId),
     enabled: open,
     staleTime: 30 * 1000
   })
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["kanban-board-labels", boardId] })
-    queryClient.invalidateQueries({ queryKey: ["kanban-board", boardId] })
+    queryClient.invalidateQueries({ queryKey: key("kanban-board-labels", boardId) })
+    queryClient.invalidateQueries({ queryKey: key("kanban-board", boardId) })
     onChanged?.()
   }
 
@@ -73,10 +68,12 @@ export const LabelManager = ({
         client_id: generateClientId()
       }),
     onSuccess: () => {
+      if (!isActive()) return
       setNewLabelName("")
       invalidate()
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to create label. Please try again.")
     }
   })
@@ -85,34 +82,39 @@ export const LabelManager = ({
     mutationFn: ({ id, data }: { id: number; data: { name?: string; color?: string } }) =>
       updateLabel(id, data),
     onSuccess: () => {
+      if (!isActive()) return
       setEditingId(null)
       invalidate()
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to update label. Please try again.")
     }
   })
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteLabel(id),
-    onSuccess: () => invalidate(),
+    onSuccess: () => { if (isActive()) invalidate() },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to delete label. Please try again.")
     }
   })
 
   const assignMutation = useMutation({
     mutationFn: (labelId: number) => assignLabelToCard(cardId, labelId),
-    onSuccess: () => invalidate(),
+    onSuccess: () => { if (isActive()) invalidate() },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to update label assignment. Please try again.")
     }
   })
 
   const removeMutation = useMutation({
     mutationFn: (labelId: number) => removeLabelFromCard(cardId, labelId),
-    onSuccess: () => invalidate(),
+    onSuccess: () => { if (isActive()) invalidate() },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to update label assignment. Please try again.")
     }
   })

@@ -53,6 +53,11 @@ from tldw_Server_API.app.core.AuthNZ.jwt_service import JWTService
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings as get_auth_settings
 from tldw_Server_API.app.api.v1.endpoints import workflows as wf_mod
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
+from tldw_Server_API.tests.Workflows.test_workflow_expected_user import (
+    private_workflow_paths as private_workflow_paths,
+    single_user_cookie_client as single_user_cookie_client,
+    workflow_accounts as workflow_accounts,
+)
 
 
 pytestmark = pytest.mark.integration
@@ -313,13 +318,15 @@ def test_get_run_normalizes_falsey_status(
     assert response.json()["status"] == "queued"
 
 
-def test_run_adhoc_requires_workflows_scope_like_saved_run(tmp_path):
-    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+def test_run_adhoc_requires_workflows_scope_like_saved_run(workflow_accounts):
+    context = workflow_accounts
+    db = context.db
+    account = context.accounts["bob"]
     workflow_id = db.create_definition(
         tenant_id="default",
         name="scope-check",
         version=1,
-        owner_id="1",
+        owner_id=str(account["id"]),
         visibility="private",
         description=None,
         tags=[],
@@ -330,79 +337,42 @@ def test_run_adhoc_requires_workflows_scope_like_saved_run(tmp_path):
         },
     )
 
-    async def override_user():
-        return User(
-            id=1,
-            username="tester",
-            email="t@e.com",
-            is_active=True,
-            is_admin=False,
-            roles=["user"],
-            tenant_id="default",
-        )
-
-    def override_db():
-        return db
-
-    app.dependency_overrides[get_request_user] = override_user
-    app.dependency_overrides[wf_mod._get_db] = override_db
-
     jwt_service = JWTService(get_auth_settings())
     token = jwt_service.create_virtual_access_token(
-        user_id=1,
-        username="tester",
+        user_id=account["id"],
+        username="bob",
         role="user",
         scope="not-workflows",
         ttl_minutes=5,
     )
 
     headers = {"Authorization": f"Bearer {token}"}
-    client = TestClient(app, headers=headers)
-    try:
-        saved_resp = client.post(f"/api/v1/workflows/{workflow_id}/run", json={"inputs": {}})
-        adhoc_resp = client.post(
-            "/api/v1/workflows/run",
-            json={
-                "definition": {
-                    "name": "adhoc",
-                    "version": 1,
-                    "steps": [{"id": "s1", "type": "prompt", "config": {"template": "hi"}}],
-                },
-                "inputs": {},
+    client = context.client
+    saved_resp = client.post(f"/api/v1/workflows/{workflow_id}/run", headers=headers, json={"inputs": {}})
+    adhoc_resp = client.post(
+        "/api/v1/workflows/run",
+        headers=headers,
+        json={
+            "definition": {
+                "name": "adhoc",
+                "version": 1,
+                "steps": [{"id": "s1", "type": "prompt", "config": {"template": "hi"}}],
             },
-        )
-    finally:
-        client.close()
-        app.dependency_overrides.clear()
+            "inputs": {},
+        },
+    )
 
-    assert saved_resp.status_code == 403
-    assert adhoc_resp.status_code == 403
+    assert saved_resp.status_code == 403, saved_resp.json()  # nosec B101 - Pytest workflow recovery regression assertion.
+    assert adhoc_resp.status_code == 403, adhoc_resp.json()  # nosec B101 - Pytest workflow recovery regression assertion.
 
 
-def test_run_adhoc_rejects_virtual_key_excluded_by_endpoint_allowlist(tmp_path):
-    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
-
-    async def override_user():
-        return User(
-            id=1,
-            username="tester",
-            email="t@e.com",
-            is_active=True,
-            is_admin=False,
-            roles=["user"],
-            tenant_id="default",
-        )
-
-    def override_db():
-        return db
-
-    app.dependency_overrides[get_request_user] = override_user
-    app.dependency_overrides[wf_mod._get_db] = override_db
-
+def test_run_adhoc_rejects_virtual_key_excluded_by_endpoint_allowlist(workflow_accounts):
+    context = workflow_accounts
+    account = context.accounts["bob"]
     jwt_service = JWTService(get_auth_settings())
     token = jwt_service.create_virtual_access_token(
-        user_id=1,
-        username="tester",
+        user_id=account["id"],
+        username="bob",
         role="user",
         scope="workflows",
         ttl_minutes=5,
@@ -410,24 +380,21 @@ def test_run_adhoc_rejects_virtual_key_excluded_by_endpoint_allowlist(tmp_path):
     )
 
     headers = {"Authorization": f"Bearer {token}"}
-    client = TestClient(app, headers=headers)
-    try:
-        adhoc_resp = client.post(
-            "/api/v1/workflows/run",
-            json={
-                "definition": {
-                    "name": "adhoc",
-                    "version": 1,
-                    "steps": [{"id": "s1", "type": "prompt", "config": {"template": "hi"}}],
-                },
-                "inputs": {},
+    client = context.client
+    adhoc_resp = client.post(
+        "/api/v1/workflows/run",
+        headers=headers,
+        json={
+            "definition": {
+                "name": "adhoc",
+                "version": 1,
+                "steps": [{"id": "s1", "type": "prompt", "config": {"template": "hi"}}],
             },
-        )
-    finally:
-        client.close()
-        app.dependency_overrides.clear()
+            "inputs": {},
+        },
+    )
 
-    assert adhoc_resp.status_code == 403
+    assert adhoc_resp.status_code == 403, adhoc_resp.json()  # nosec B101 - Pytest workflow recovery regression assertion.
 
 
 def test_adhoc_limits_and_validation(client_with_workflows_db: TestClient):

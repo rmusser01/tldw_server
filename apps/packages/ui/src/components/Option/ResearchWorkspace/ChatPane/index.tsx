@@ -29,9 +29,9 @@ import {
 } from "lucide-react"
 import { Modal, Tag, Tooltip, Input, Slider, Switch, Button, message } from "antd"
 import type { InputRef } from "antd"
+import { useVirtualizer } from "@tanstack/react-virtual"
 import {
   DEGRADED_STATE_LABEL,
-  READY_STATE_LABEL,
   getDesignSystemState
 } from "@/design-system"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
@@ -43,6 +43,18 @@ import {
 import { useWorkspaceStore } from "@/store/workspace"
 import { useStoreMessageOption } from "@/store/option"
 import type { Message } from "@/store/option"
+import { generateID } from "@/db/dexie/helpers"
+import {
+  buildRetrievalDiagnostics,
+  extractCitationMediaId,
+  isRecord,
+  normalizeConfidenceScore,
+  normalizeText,
+  extractStringCandidate,
+  toFiniteNumber,
+  toPositiveInt,
+  type RetrievalDiagnostics
+} from "./retrieval-diagnostics"
 import type { WorkspaceCapabilitiesResponse } from "@/services/tldw/domains/workspace-api"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useSmartScroll } from "@/hooks/useSmartScroll"
@@ -98,17 +110,31 @@ import { WORKSPACE_TASK_SOURCE_CONTEXT_LIMIT } from "../workspace-task-prefill"
 const { TextArea } = Input
 const VISIBLE_SOURCE_TAG_COUNT = 5
 
-type RetrievalDiagnostics = {
-  chunkCount: number | null
-  sourceCount: number | null
-  sourceLabels: string[]
-  averageRelevanceScore: number | null
-  faithfulnessScore: number | null
-  promptTokens: number | null
-  completionTokens: number | null
-  totalTokens: number | null
-  costUsd: number | null
-  confidenceLevel: "high" | "medium" | "low" | null
+// Stage 3 (WP-04): windowed transcript rendering. Below this row count the
+// transcript keeps plain flow layout (matching the web Playground's
+// VirtualChatTimeline enable gate); above it only the visible window plus
+// overscan mounts.
+const CHAT_VIRTUALIZATION_MIN_MESSAGES = 100
+
+// Stable row identity for messages that reach the transcript without id or
+// serverMessageId (older persisted sessions): the fallback is keyed by
+// message object identity, so a given object resolves to one id for its
+// lifetime. Replaces the former index-templated React-key fallback (WP-04),
+// which re-keyed every row after any splice and defeated reconciliation.
+const transientMessageIdFallbacks = new WeakMap<object, string>()
+const stableMessageId = (
+  message: Pick<Message, "id" | "serverMessageId">
+): string => {
+  const direct = message.id?.trim()
+  if (direct) return direct
+  const server = message.serverMessageId?.trim()
+  if (server) return `server:${server}`
+  let fallback = transientMessageIdFallbacks.get(message)
+  if (!fallback) {
+    fallback = `transient:${generateID()}`
+    transientMessageIdFallbacks.set(message, fallback)
+  }
+  return fallback
 }
 
 type ChatModePreference = "normal" | "rag"
@@ -320,43 +346,6 @@ const getSourceTagColor = (
   return "blue"
 }
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null
-
-const toPositiveInt = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
-    return value
-  }
-  if (typeof value === "string") {
-    const parsed = Number.parseInt(value, 10)
-    if (Number.isInteger(parsed) && parsed > 0) {
-      return parsed
-    }
-  }
-  return null
-}
-
-const toFiniteNumber = (value: unknown): number | null => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value
-  }
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number.parseFloat(value)
-    if (Number.isFinite(parsed)) {
-      return parsed
-    }
-  }
-  return null
-}
-
-const normalizeText = (value: unknown): string =>
-  typeof value === "string" ? value.trim().toLowerCase() : ""
-
-const extractStringCandidate = (value: unknown): string => {
-  if (typeof value !== "string") return ""
-  return value.trim()
-}
-
 const extractSourceFullText = (detail: unknown): string => {
   if (!isRecord(detail)) return ""
   const content = isRecord(detail.content) ? detail.content : null
@@ -381,31 +370,6 @@ const extractSourceFullText = (detail: unknown): string => {
   }
 
   return ""
-}
-
-const extractCitationMediaId = (citation: unknown): number | null => {
-  if (!isRecord(citation)) return null
-  const metadata = isRecord(citation.metadata) ? citation.metadata : null
-  const includeMediaIds = Array.isArray(metadata?.include_media_ids)
-    ? metadata?.include_media_ids
-    : []
-  const mediaCandidates: unknown[] = [
-    citation.mediaId,
-    citation.media_id,
-    citation.mediaID,
-    metadata?.mediaId,
-    metadata?.media_id,
-    metadata?.mediaID,
-    ...includeMediaIds
-  ]
-
-  for (const candidate of mediaCandidates) {
-    const mediaId = toPositiveInt(candidate)
-    if (mediaId !== null) {
-      return mediaId
-    }
-  }
-  return null
 }
 
 const findSourceIdFromCitation = (
@@ -464,284 +428,6 @@ const findSourceIdFromCitation = (
   }
 
   return null
-}
-
-const extractSourceScore = (source: unknown): number | null => {
-  if (!isRecord(source)) return null
-  const metadata = isRecord(source.metadata) ? source.metadata : null
-  const scoreCandidates: unknown[] = [
-    source.score,
-    source.relevance,
-    source.relevance_score,
-    source.similarity,
-    source.rerank_score,
-    metadata?.score,
-    metadata?.relevance,
-    metadata?.relevance_score,
-    metadata?.similarity,
-    metadata?.rerank_score
-  ]
-
-  for (const candidate of scoreCandidates) {
-    const parsed = toFiniteNumber(candidate)
-    if (parsed !== null) {
-      return parsed
-    }
-  }
-  return null
-}
-
-const extractSourceLabel = (source: unknown): string | null => {
-  if (!isRecord(source)) return null
-  const metadata = isRecord(source.metadata) ? source.metadata : null
-  const candidates: unknown[] = [
-    source.name,
-    source.title,
-    source.source,
-    source.url,
-    metadata?.title,
-    metadata?.source,
-    metadata?.url
-  ]
-
-  for (const candidate of candidates) {
-    const normalized = extractStringCandidate(candidate)
-    if (normalized.length > 0) {
-      return normalized
-    }
-  }
-
-  return null
-}
-
-const normalizeConfidenceScore = (score: number | null): number | null => {
-  if (score === null || !Number.isFinite(score)) {
-    return null
-  }
-  if (score > 1 && score <= 100) {
-    return score / 100
-  }
-  if (score < 0) {
-    return 0
-  }
-  if (score > 1) {
-    return 1
-  }
-  return score
-}
-
-const getConfidenceLevel = (
-  score: number | null
-): RetrievalDiagnostics["confidenceLevel"] => {
-  const normalized = normalizeConfidenceScore(score)
-  if (normalized === null) {
-    return null
-  }
-  if (normalized >= 0.8) {
-    return "high"
-  }
-  if (normalized >= 0.55) {
-    return "medium"
-  }
-  return "low"
-}
-
-const getNumericField = (
-  generationInfo: unknown,
-  paths: Array<string[]>
-): number | null => {
-  if (!isRecord(generationInfo)) return null
-
-  for (const path of paths) {
-    let current: unknown = generationInfo
-    for (const key of path) {
-      if (!isRecord(current)) {
-        current = undefined
-        break
-      }
-      current = current[key]
-    }
-    const parsed = toFiniteNumber(current)
-    if (parsed !== null) {
-      return parsed
-    }
-  }
-
-  return null
-}
-
-const buildRetrievalDiagnostics = (
-  messageSources: unknown[] | undefined,
-  generationInfo: unknown
-): RetrievalDiagnostics | null => {
-  const sources = Array.isArray(messageSources) ? messageSources : []
-
-  const chunkCountFromGeneration = getNumericField(generationInfo, [
-    ["retrieval", "chunks_retrieved"],
-    ["retrieval", "chunk_count"],
-    ["retrieval", "chunks"],
-    ["chunks_retrieved"],
-    ["chunk_count"],
-    ["retrieved_chunks"],
-    ["context_chunks"]
-  ])
-
-  const sourceCountFromGeneration = getNumericField(generationInfo, [
-    ["retrieval", "source_count"],
-    ["retrieval", "sources_used"],
-    ["source_count"],
-    ["sources_used"]
-  ])
-
-  const avgScoreFromGeneration = getNumericField(generationInfo, [
-    ["retrieval", "avg_relevance_score"],
-    ["retrieval", "average_relevance_score"],
-    ["avg_relevance_score"],
-    ["average_relevance_score"],
-    ["relevance_score"]
-  ])
-  const faithfulnessScore = getNumericField(generationInfo, [
-    ["faithfulness", "score"],
-    ["faithfulness", "faithfulness_score"],
-    ["faithfulness", "overall_score"],
-    ["faithfulness_score"],
-    ["claim_verification", "faithfulness_score"],
-    ["retrieval", "faithfulness_score"],
-    ["confidence"],
-    ["confidence_score"]
-  ])
-  const promptTokensFromGeneration = getNumericField(generationInfo, [
-    ["usage", "prompt_tokens"],
-    ["usage", "input_tokens"],
-    ["prompt_tokens"],
-    ["input_tokens"],
-    ["prompt_eval_count"]
-  ])
-  const completionTokensFromGeneration = getNumericField(generationInfo, [
-    ["usage", "completion_tokens"],
-    ["usage", "output_tokens"],
-    ["completion_tokens"],
-    ["output_tokens"],
-    ["eval_count"]
-  ])
-  const totalTokensFromGeneration = getNumericField(generationInfo, [
-    ["usage", "total_tokens"],
-    ["total_tokens"],
-    ["total_token_count"]
-  ])
-  const costUsdFromGeneration = getNumericField(generationInfo, [
-    ["usage", "total_cost_usd"],
-    ["usage", "estimated_cost_usd"],
-    ["usage", "cost_usd"],
-    ["pricing", "total_cost_usd"],
-    ["pricing", "estimated_cost_usd"],
-    ["pricing", "cost_usd"],
-    ["total_cost_usd"],
-    ["estimated_cost_usd"],
-    ["cost_usd"],
-    ["total_cost"],
-    ["estimated_cost"]
-  ])
-
-  const uniqueSourceKeys = new Set<string>()
-  const uniqueSourceLabels = new Set<string>()
-  for (const source of sources) {
-    if (!isRecord(source)) continue
-    const sourceLabel = extractSourceLabel(source)
-    if (sourceLabel) {
-      uniqueSourceLabels.add(sourceLabel)
-    }
-
-    const mediaId = extractCitationMediaId(source)
-    if (mediaId !== null) {
-      uniqueSourceKeys.add(`media:${mediaId}`)
-    } else {
-      const metadata = isRecord(source.metadata) ? source.metadata : null
-      const label = normalizeText(
-        source.name || source.url || metadata?.source || metadata?.title
-      )
-      if (label) {
-        uniqueSourceKeys.add(`label:${label}`)
-      }
-    }
-  }
-
-  const sourceScores = sources
-    .map((source) => extractSourceScore(source))
-    .filter((score): score is number => score !== null)
-
-  const averageScoreFromSources =
-    sourceScores.length > 0
-      ? sourceScores.reduce((sum, score) => sum + score, 0) /
-        sourceScores.length
-      : null
-
-  const diagnostics: RetrievalDiagnostics = {
-    chunkCount:
-      chunkCountFromGeneration !== null
-        ? Math.max(0, Math.round(chunkCountFromGeneration))
-        : sources.length > 0
-          ? sources.length
-          : null,
-    sourceCount:
-      sourceCountFromGeneration !== null
-        ? Math.max(0, Math.round(sourceCountFromGeneration))
-        : uniqueSourceKeys.size > 0
-          ? uniqueSourceKeys.size
-          : null,
-    sourceLabels: Array.from(uniqueSourceLabels),
-    averageRelevanceScore:
-      avgScoreFromGeneration !== null
-        ? avgScoreFromGeneration
-        : averageScoreFromSources,
-    faithfulnessScore,
-    promptTokens:
-      promptTokensFromGeneration !== null
-        ? Math.max(0, Math.round(promptTokensFromGeneration))
-        : null,
-    completionTokens:
-      completionTokensFromGeneration !== null
-        ? Math.max(0, Math.round(completionTokensFromGeneration))
-        : null,
-    totalTokens:
-      totalTokensFromGeneration !== null
-        ? Math.max(0, Math.round(totalTokensFromGeneration))
-        : promptTokensFromGeneration !== null ||
-            completionTokensFromGeneration !== null
-          ? Math.max(
-              0,
-              Math.round(
-                (promptTokensFromGeneration || 0) +
-                  (completionTokensFromGeneration || 0)
-              )
-            )
-          : null,
-    costUsd:
-      costUsdFromGeneration !== null && costUsdFromGeneration >= 0
-        ? costUsdFromGeneration
-        : null,
-    confidenceLevel: getConfidenceLevel(
-      faithfulnessScore !== null
-        ? faithfulnessScore
-        : avgScoreFromGeneration !== null
-          ? avgScoreFromGeneration
-          : averageScoreFromSources
-    )
-  }
-
-  if (
-    diagnostics.chunkCount === null &&
-    diagnostics.sourceCount === null &&
-    diagnostics.averageRelevanceScore === null &&
-    diagnostics.faithfulnessScore === null &&
-    diagnostics.sourceLabels.length === 0 &&
-    diagnostics.totalTokens === null &&
-    diagnostics.costUsd === null
-  ) {
-    return null
-  }
-
-  return diagnostics
 }
 
 /**
@@ -1702,6 +1388,82 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
   const { containerRef, isAutoScrollToBottom, autoScrollToBottom } =
     useSmartScroll(messages, streaming, 120)
 
+  // Stage 3 (WP-04): windowed transcript rendering. Copies the proven
+  // Sidepanel/Chat/body.tsx useVirtualizer wiring (overscan 3,
+  // measureElement, stable getItemKey) onto the smart-scroll container, gated
+  // by the same >100-row threshold the web Playground's VirtualChatTimeline
+  // uses so short conversations keep plain flow layout. Stream
+  // stick-to-bottom behavior is preserved by useSmartScroll above (its
+  // messages-effect pins the container to the bottom during streaming, which
+  // slides the virtual window to the end index where the streaming row
+  // mounts).
+  const chatVirtualizationEnabled =
+    messages.length > CHAT_VIRTUALIZATION_MIN_MESSAGES
+  const chatRowVirtualizer = useVirtualizer({
+    count: messages.length,
+    enabled: chatVirtualizationEnabled,
+    getScrollElement: () => containerRef.current,
+    getItemKey: (index) => stableMessageId(messages[index]),
+    estimateSize: () => 120,
+    overscan: 3,
+    measureElement: (el) => el?.getBoundingClientRect().height || 120
+  })
+  const chatVirtualRows = chatVirtualizationEnabled
+    ? chatRowVirtualizer.getVirtualItems()
+    : null
+  // Flow-layout rows for the non-virtualized path share the virtual row
+  // shape so the transcript body below has a single render loop.
+  const chatRenderRows: Array<{
+    index: number
+    key: React.Key
+    start: number
+  }> =
+    chatVirtualRows ??
+    messages.map((message, index) => ({
+      index,
+      key: stableMessageId(message),
+      start: 0
+    }))
+
+  // Per-message retrieval diagnostics cache (WP-04): buildRetrievalDiagnostics
+  // walks every source object per bot row. Memoizing by message id and
+  // sources/generationInfo identity keeps streaming flushes (which replace
+  // only the last message object, Stage 1) from recomputing diagnostics for
+  // every older bot row. Cleared when the workspace session changes (see the
+  // conversationInstanceId effect below).
+  const retrievalDiagnosticsCacheRef = React.useRef(
+    new Map<
+      string,
+      {
+        sources: unknown
+        generationInfo: unknown
+        diagnostics: RetrievalDiagnostics | null
+      }
+    >()
+  )
+  const getRowRetrievalDiagnostics = React.useCallback((message: Message) => {
+    if (!message.isBot) return null
+    const key = stableMessageId(message)
+    const cached = retrievalDiagnosticsCacheRef.current.get(key)
+    if (
+      cached &&
+      cached.sources === message.sources &&
+      cached.generationInfo === message.generationInfo
+    ) {
+      return cached.diagnostics
+    }
+    const diagnostics = buildRetrievalDiagnostics(
+      message.sources,
+      message.generationInfo
+    )
+    retrievalDiagnosticsCacheRef.current.set(key, {
+      sources: message.sources,
+      generationInfo: message.generationInfo,
+      diagnostics
+    })
+    return diagnostics
+  }, [])
+
   const sourceScopeSources = useSelectedSourceScopeSources()
   const queryableSelectedSources = React.useMemo(
     () =>
@@ -2211,9 +1973,33 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
     setStreaming
   ])
 
+  // Chat search focus targets may point at a row outside the virtualized
+  // window (WP-04): scroll its index into range first. The range change
+  // re-mounts the row and re-runs this effect (chatFocusTargetInRange flips),
+  // which then reveals and highlights the mounted element as before.
+  const chatFocusTargetIndex = React.useMemo(() => {
+    const messageId = chatFocusTarget?.messageId
+    if (!messageId) return -1
+    return messages.findIndex(
+      (message, index) =>
+        getWorkspaceChatSearchMessageId(message, index) === messageId
+    )
+  }, [chatFocusTarget?.messageId, messages])
+  const chatFocusTargetInRange =
+    !chatVirtualizationEnabled ||
+    (chatVirtualRows?.some((row) => row.index === chatFocusTargetIndex) ??
+      false)
+
   React.useEffect(() => {
     const targetMessageId = chatFocusTarget?.messageId
     if (!targetMessageId) return
+
+    if (chatFocusTargetIndex >= 0 && !chatFocusTargetInRange) {
+      chatRowVirtualizer.scrollToIndex(chatFocusTargetIndex, {
+        align: "center"
+      })
+      return
+    }
 
     const targetElement = chatMessageItemRefs.current[targetMessageId]
     if (!targetElement) {
@@ -2236,7 +2022,13 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
       window.clearTimeout(revealTimer)
       window.clearTimeout(highlightTimer)
     }
-  }, [chatFocusTarget, clearChatFocusTarget])
+  }, [
+    chatFocusTarget,
+    chatFocusTargetIndex,
+    chatFocusTargetInRange,
+    chatRowVirtualizer,
+    clearChatFocusTarget
+  ])
 
   const captureRequests = React.useRef(new Set<AbortController>())
   React.useEffect(
@@ -3324,16 +3116,19 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         getDesignSystemState("degraded")?.label ?? DEGRADED_STATE_LABEL
       )
     }
-    return t(
-      "playground:composer.providerStatusReady",
-      getDesignSystemState("ready")?.label ?? READY_STATE_LABEL
-    )
+    return t("playground:composer.serverStatusConnected", "Server connected")
   }, [connectionUxState, isConnectionReady, t])
   const connectionStatusWarning =
     !isConnectionReady || connectionUxState === "connected_degraded"
 
   // Conversation instance ID (use workspace ID or fallback)
   const conversationInstanceId = workspaceSessionId
+  // The per-message diagnostics cache is conversation-scoped: clear it when
+  // the workspace session changes so ids from a previous conversation cannot
+  // pin stale entries.
+  React.useEffect(() => {
+    retrievalDiagnosticsCacheRef.current.clear()
+  }, [conversationInstanceId])
   const hasConnectionFailure =
     connectionState.phase === ConnectionPhase.ERROR &&
     !connectionState.isChecking
@@ -3573,10 +3368,23 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
         >
           <div className={`mx-auto w-full ${contentMaxWidthClass} pb-6`}>
             {hasMessages ? (
-              <div className="space-y-4 py-4">
-                {messages.map((msg, idx) => {
+              <div className="py-4">
+                <div
+                  style={
+                    chatVirtualRows
+                      ? {
+                          height: chatRowVirtualizer.getTotalSize(),
+                          width: "100%",
+                          position: "relative"
+                        }
+                      : undefined
+                  }
+                >
+                {chatRenderRows.map((virtualRow) => {
+                  const idx = virtualRow.index
+                  const msg = messages[idx]
                   const diagnostics = msg.isBot
-                    ? buildRetrievalDiagnostics(msg.sources, msg.generationInfo)
+                    ? getRowRetrievalDiagnostics(msg)
                     : null
                   const chatSearchMessageId = getWorkspaceChatSearchMessageId(
                     msg,
@@ -3587,15 +3395,35 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
 
                   return (
                     <div
-                      key={msg.id || `msg-${idx}`}
-                      data-chat-message-id={chatSearchMessageId}
-                      ref={(element) => {
-                        chatMessageItemRefs.current[chatSearchMessageId] = element
-                      }}
-                      className={`space-y-2 rounded-md transition ${
-                        isHighlighted ? "ring-2 ring-primary/40 bg-primary/5 p-1.5" : ""
-                      }`}
+                      key={virtualRow.key}
+                      ref={
+                        chatVirtualRows
+                          ? chatRowVirtualizer.measureElement
+                          : undefined
+                      }
+                      data-index={idx}
+                      style={
+                        chatVirtualRows
+                          ? {
+                              position: "absolute",
+                              top: 0,
+                              left: 0,
+                              transform: `translateY(${virtualRow.start}px)`,
+                              width: "100%"
+                            }
+                          : undefined
+                      }
+                      className="pb-4"
                     >
+                      <div
+                        data-chat-message-id={chatSearchMessageId}
+                        ref={(element) => {
+                          chatMessageItemRefs.current[chatSearchMessageId] = element
+                        }}
+                        className={`space-y-2 rounded-md transition ${
+                          isHighlighted ? "ring-2 ring-primary/40 bg-primary/5 p-1.5" : ""
+                        }`}
+                      >
                       <PlaygroundMessage
                         isBot={msg.isBot}
                         message={msg.message}
@@ -3707,9 +3535,11 @@ export const ChatPane: React.FC<ChatPaneProps> = ({
                           <RetrievalDiagnosticsPanel diagnostics={diagnostics} />
                         </div>
                       )}
+                      </div>
                     </div>
                   )
                 })}
+                </div>
               </div>
             ) : (
               <div className="flex min-h-full flex-col justify-end">

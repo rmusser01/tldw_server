@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import tempfile
+import zipfile
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
@@ -37,6 +38,7 @@ from tldw_Server_API.app.core.exceptions import (
     BundleSchemaIncompatibleError,
 )
 from tldw_Server_API.app.services import admin_bundle_service as svc
+from tldw_Server_API.app.services import admin_scope_service
 
 router = APIRouter()
 
@@ -118,6 +120,9 @@ def _handle_bundle_error(exc: BundleError) -> HTTPException:
     """Map domain exceptions to HTTP responses using structured error_code."""
     code = getattr(exc, "error_code", "bundle_error")
 
+    if code == "unsupported_backup_backend":
+        return HTTPException(status_code=422, detail=str(exc))
+
     # --- Export errors ---
     if isinstance(exc, BundleExportError):
         if code == "vector_store_export_not_supported":
@@ -177,7 +182,9 @@ async def create_bundle(
     try:
         # Validate datasets
         if payload.datasets:
-            all_known = {"media", "chacha", "prompts", "evaluations", "audit", "authnz"}
+            all_known = {"media", "chacha", "prompts", "evaluations", "audit", "authnz", "postgresql"}
+            if any(ds.strip().lower() == "postgresql" for ds in payload.datasets):
+                admin_scope_service.require_platform_admin(principal)
             for ds in payload.datasets:
                 if ds.strip().lower() not in all_known:
                     raise HTTPException(status_code=400, detail="unknown_dataset")
@@ -245,7 +252,13 @@ async def list_bundles(
         if user_id is not None:
             await _enforce_admin_user_scope(principal, user_id, require_hierarchy=False)
 
-        items, total = await asyncio.to_thread(svc.list_bundles, user_id=user_id, limit=limit, offset=offset)
+        items, total = await asyncio.to_thread(
+            svc.list_bundles,
+            user_id=user_id,
+            limit=limit,
+            offset=offset,
+            include_database=admin_scope_service.is_platform_admin(principal),
+        )
         return BundleListResponse(
             items=[_metadata_to_item(m) for m in items],
             total=total,
@@ -292,6 +305,13 @@ async def import_bundle(
                     break
                 tmp.write(chunk)
             tmp_path = tmp.name
+
+        try:
+            manifest = await asyncio.to_thread(svc._read_manifest_from_zip, tmp_path)
+        except (OSError, ValueError, zipfile.BadZipFile) as exc:
+            raise BundleImportError("invalid_bundle", error_code="invalid_bundle") from exc
+        if isinstance(manifest, dict) and svc.is_postgresql_bundle(manifest):
+            admin_scope_service.require_platform_admin(principal)
 
         admin_uid = getattr(principal, "user_id", 0) or 0
         try:
@@ -356,6 +376,8 @@ async def get_bundle_metadata(
 ) -> BundleMetadataResponse:
     try:
         meta = await asyncio.to_thread(svc.get_bundle_metadata, bundle_id)
+        if meta.requires_platform_admin:
+            admin_scope_service.require_platform_admin(principal)
         return BundleMetadataResponse(item=_metadata_to_item(meta))
     except BundleError as exc:
         raise _handle_bundle_error(exc) from exc
@@ -385,6 +407,9 @@ async def download_bundle(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> FileResponse:
     try:
+        meta = await asyncio.to_thread(svc.get_bundle_metadata, bundle_id)
+        if meta.requires_platform_admin:
+            admin_scope_service.require_platform_admin(principal)
         path = await asyncio.to_thread(svc.get_bundle_path, bundle_id)
 
         await _emit_admin_audit_event(
@@ -422,6 +447,9 @@ async def delete_bundle_endpoint(
     principal: AuthPrincipal = Depends(get_auth_principal),
 ) -> BundleDeleteResponse:
     try:
+        meta = await asyncio.to_thread(svc.get_bundle_metadata, bundle_id)
+        if meta.requires_platform_admin:
+            admin_scope_service.require_platform_admin(principal)
         await asyncio.to_thread(svc.delete_bundle, bundle_id)
 
         await _emit_admin_audit_event(

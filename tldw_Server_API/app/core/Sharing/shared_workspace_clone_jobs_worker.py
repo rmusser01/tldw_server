@@ -23,6 +23,7 @@ from pydantic import ValidationError
 from tldw_Server_API.app.api.v1.schemas.shared_workspace_recipient_schemas import (
     SharedWorkspaceCloneResult as SharedWorkspaceCloneResultModel,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.Jobs.operations.contracts import (
     TerminalOperationResultPatchCommand,
     TerminalOperationResultPatchOutcome,
@@ -484,6 +485,7 @@ def _serialize_clone_result(
     return validated.model_dump(mode="json")
 
 
+@owns_chacha_checkouts
 async def handle_shared_workspace_clone_job(
     job: dict[str, Any],
     *,

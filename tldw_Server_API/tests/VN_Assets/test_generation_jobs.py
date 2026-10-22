@@ -4506,16 +4506,17 @@ async def test_generation_api_keeps_event_loop_responsive_during_recipe_capture(
     service = VNAssetPackService(chacha_db, owner_user_id=1, jobs_manager=fake_jobs)
     pack = service.create_pack(VNAssetPackCreate(title="Async Capture", primary_character_id=character_id))
     service.create_slot(pack.id, VNAssetSlotCreate(asset_type="sprite", slot_key="sprite.primary"))
-    loop = asyncio.get_running_loop()
-    entered = asyncio.Event()
+    entered = threading.Event()
     release = threading.Event()
-    capture_unblocked = threading.Event()
     original = service_module.build_authored_recipe
+    loop = asyncio.get_running_loop()
+    release_observed: list[bool] = []
 
     def slow_recipe(*args: Any, **kwargs: Any) -> dict[str, Any]:
-        loop.call_soon_threadsafe(entered.set)
-        release.wait(timeout=5)
-        capture_unblocked.set()
+        entered.set()
+        # The loop must release capture while the worker is blocked.
+        loop.call_soon_threadsafe(release.set)
+        release_observed.append(release.wait(timeout=2))
         return original(*args, **kwargs)
 
     monkeypatch.setattr(service_module, "build_authored_recipe", slow_recipe)
@@ -4527,17 +4528,14 @@ async def test_generation_api_keeps_event_loop_responsive_during_recipe_capture(
     url = f"/api/v1/vn/vn-assets/packs/{pack.id}/generate"
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        request_task = asyncio.create_task(client.post(url, json={"idempotency_key": "capture-offload"}))
         try:
-            # Timeouts bound a broken test; progress is checked before capture is released.
-            await asyncio.wait_for(entered.wait(), timeout=10)
-            assert not capture_unblocked.is_set()
-            assert not request_task.done()
+            response = await client.post(url, json={"idempotency_key": "capture-offload"})
         finally:
             release.set()
-            response = await request_task
 
     assert response.status_code == 202
+    assert entered.is_set()  # nosec B101 - Pytest event-loop release and cleanup regression assertion.
+    assert release_observed == [True]  # nosec B101 - Pytest event-loop release and cleanup regression assertion.
 
 
 def test_generation_api_enqueues_parent_job(

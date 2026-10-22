@@ -217,7 +217,7 @@ describe("exact startup application Retry with the actual model device boundary"
     await deviceStorage.remove("selectedModel")
   })
   const mountApplication = () => {
-    const deps = createDeps()
+    const deps = createDeps({ promptOwnerId: "alice", promptOwnerReady: true, promptOwnerBoundaryKey: "alice" })
     const view = renderHook(() => {
       const first = useSelectedModel()
       const second = useSelectedModel()
@@ -267,6 +267,7 @@ describe("exact startup application Retry with the actual model device boundary"
     await ready(view)
     const record = {
       id: "library-original",
+      ownerId: "alice",
       title: "Original",
       content: "Frozen reviewed behavior"
     } as Prompt
@@ -274,6 +275,7 @@ describe("exact startup application Retry with the actual model device boundary"
     view.rerender()
     const proposal = createStartupTemplateBundle({
       name: "Exact Retry",
+      ownerId: "alice",
       selectedModel: "openai:next",
       selectedSystemPromptId: record.id,
       systemPrompt: "Saved fallback"

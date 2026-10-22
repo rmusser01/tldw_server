@@ -136,7 +136,7 @@ describe("ServerAdminPage design-system states", () => {
   const docsUrl = "https://github.com/rmusser01/tldw_server#documentation--resources"
 
   beforeEach(() => {
-    vi.clearAllMocks()
+    vi.resetAllMocks()
     apiMock.getConfig.mockReset()
     mockMatchMedia()
     resolveBaseAdminCalls()
@@ -144,14 +144,42 @@ describe("ServerAdminPage design-system states", () => {
   })
 
   afterEach(() => {
+    adminQueryClients.splice(0).forEach(client => client.clear())
     vi.restoreAllMocks()
   })
 
   it("loads multi-user creation controls under Strict Mode", async () => {
     apiMock.getConfig.mockResolvedValue({ serverUrl: "http://127.0.0.1:8000", authMode: "multi-user" })
-    renderPage(<React.StrictMode><ServerAdminPage /></React.StrictMode>)
+    let resolveRetired!: (value: unknown) => void
+    const currentStats = {
+      users: { total: 41, active: 2, admins: 1, verified: 2, new_last_30d: 0 },
+      storage: {}, sessions: {}
+    }
+    apiMock.getSystemStats
+      .mockImplementationOnce(() => new Promise(resolve => { resolveRetired = resolve }))
+      .mockResolvedValueOnce(currentStats)
+    await act(async () => {
+      renderPage(<React.StrictMode><ServerAdminPage /></React.StrictMode>)
+    })
     expect(await screen.findByRole("button", { name: "Create user" })).toBeVisible()
-    expect(apiMock.getSystemStats).toHaveBeenCalledOnce()
+    await waitFor(() => expect(apiMock.getSystemStats).toHaveBeenCalledTimes(2))
+    const [retired, current] = apiMock.getSystemStats.mock.calls.map(([options]) => options)
+    const configSnapshot = {
+      serverUrl: "http://127.0.0.1:8000", authMode: "multi-user",
+      apiKey: undefined, accessToken: undefined, refreshToken: undefined,
+      orgId: undefined, authSource: undefined
+    }
+    for (const options of [retired, current]) {
+      expect(options).toEqual({ timeoutMs: 10000, configSnapshot, abortSignal: expect.any(AbortSignal) })
+    }
+    expect(retired.abortSignal.aborted).toBe(true)
+    expect(current.abortSignal).not.toBe(retired.abortSignal)
+    expect(current.abortSignal.aborted).toBe(false)
+    const statsCard = (await screen.findByText("System statistics")).closest(".ant-card") as HTMLElement
+    expect(await within(statsCard).findByText("41")).toBeVisible()
+    await act(async () => { resolveRetired({ ...currentStats, users: { total: 999 } }) })
+    expect(within(statsCard).getByText("41")).toBeVisible()
+    expect(within(statsCard).queryByText("999")).not.toBeInTheDocument()
   })
 
   it("does not start dashboard requests when a config lookup resolves after unmount", async () => {
@@ -256,7 +284,9 @@ describe("ServerAdminPage design-system states", () => {
         sessions: { active: 2, unique_users: 2 }
       })
 
-    renderPage(<ServerAdminPage />)
+    await act(async () => {
+      renderPage(<ServerAdminPage />)
+    })
 
     const errorLabel = await screen.findByText("Error")
     expect(errorLabel).toBeInTheDocument()
@@ -282,7 +312,8 @@ describe("ServerAdminPage design-system states", () => {
 
     renderPage(<ServerAdminPage />)
 
-    expect(await screen.findByText("Empty")).toBeInTheDocument()
+    const budgetMessage = await screen.findByText("Select a user to inspect media ingestion limits and usage.")
+    expect(within(budgetMessage.closest("section") as HTMLElement).getByText("Empty")).toBeInTheDocument()
     expect(
       screen.getByText("Select a user to inspect media ingestion limits and usage.")
     ).toBeInTheDocument()
@@ -322,7 +353,7 @@ describe("ServerAdminPage design-system states", () => {
 
     // Diagnostics only fire after an explicit user selection (B-S5); the
     // mousedown handler lives on the `.ant-select` root in antd v6.
-    const mediaBudgetCard = screen.getByText("Media ingestion budget").closest(
+    const mediaBudgetCard = (await screen.findByText("Media ingestion budget")).closest(
       ".ant-card"
     ) as HTMLElement
     const userSelect = (

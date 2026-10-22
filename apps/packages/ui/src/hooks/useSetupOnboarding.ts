@@ -368,11 +368,51 @@ export function useSetupOnboarding(options: UseSetupOnboardingOptions = {}) {
       const owner = await requireOwner()
       const response = await tldwClient.saveSetupProvider(payload, owner.requestOptions)
       assertOwner(owner)
-      await refresh().catch(() => undefined)
+      if (
+        response.status === "saved" &&
+        (response.make_default ?? payload.make_default ?? true) &&
+        (state?.status === "not_started" || state?.status === "in_progress")
+      ) {
+        const baseUrl = response.base_url ?? payload.base_url ?? null
+        if (baseUrl) {
+          let url: URL
+          try {
+            url = new URL(baseUrl)
+          } catch {
+            throw new Error(
+              "Provider settings were saved; use a plain HTTP(S) base URL to remember onboarding progress."
+            )
+          }
+          if (
+            !/^https?:$/.test(url.protocol) ||
+            url.username ||
+            url.password ||
+            url.search ||
+            url.hash
+          ) {
+            throw new Error(
+              "Provider settings were saved; use a plain HTTP(S) base URL without credentials, query parameters, or fragments to remember onboarding progress."
+            )
+          }
+        }
+        await saveStep({
+          step: "providers",
+          data: {
+            acknowledged: false,
+            default_provider: response.provider_key,
+            default_model: response.model ?? payload.model ?? "",
+            default_base_url: baseUrl,
+            default_provider_credential_configured:
+              response.credential_configured === true
+          }
+        })
+      } else {
+        await refresh().catch(() => undefined)
+      }
       assertOwner(owner)
       return response
     },
-    [assertOwner, refresh, requireOwner]
+    [assertOwner, requireOwner, refresh, saveStep, state?.status]
   )
 
   const validateProvider = React.useCallback(

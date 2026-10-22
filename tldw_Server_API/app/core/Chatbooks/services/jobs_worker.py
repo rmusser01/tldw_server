@@ -49,6 +49,7 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
 from tldw_Server_API.app.core.Chatbooks.openwebui_hydration_jobs import (
     OPENWEBUI_ATTACHMENT_HYDRATION_JOB_TYPE,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
 from tldw_Server_API.app.core.Jobs.manager import JobManager
@@ -515,6 +516,7 @@ async def _handle_import(service: ChatbookService, payload: dict[str, Any], job_
     raise ChatbooksJobError(str(msg), retryable=False)
 
 
+@owns_chacha_checkouts
 async def _handle_job(job: dict[str, Any]) -> dict[str, Any]:
     payload = job.get("payload") or {}
     if not isinstance(payload, dict):

@@ -55,6 +55,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import (
 
 from tldw_Server_API.app.api.v1.API_Deps.Collections_DB_Deps import get_collections_db_for_user
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
+from tldw_Server_API.app.api.v1.API_Deps.usage_quota_deps import enforce_llm_quota
 from tldw_Server_API.app.api.v1.API_Deps.Watchlists_DB_Deps import get_watchlists_db_for_user
 from tldw_Server_API.app.api.v1.endpoints._pagination_utils import build_offset_pagination_meta
 from tldw_Server_API.app.core.AuthNZ.api_key_manager import get_api_key_manager
@@ -2438,7 +2439,7 @@ async def check_sources_now(
                 try:
                     refreshed = db.get_source(source_id)
                     status_value = str(getattr(refreshed, "status", "") or "").lower()
-                    if status_value in {"error", "deferred", "forum_disabled"}:
+                    if status_value.startswith(("error", "partial:")) or status_value in {"deferred", "forum_disabled"}:
                         active_results[source_id] = SourceCheckNowItem(
                             source_id=source_id,
                             status="error",
@@ -7192,6 +7193,8 @@ async def create_output(
                 status_code=400,
                 detail="llm_provider_required: set llm_provider in request or job output_prefs.llm.provider",
             )
+        # Usage quotas (LLM usage accounting spec §4a), before any summary call and before the output is written.
+        await enforce_llm_quota(current_user.id)
         items_for_summary = [
             {
                 "id": getattr(it, "id", None),

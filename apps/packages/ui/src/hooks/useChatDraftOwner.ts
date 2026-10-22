@@ -2,10 +2,13 @@ import React from "react"
 import { serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
 export { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
+import { Storage } from "@plasmohq/storage"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { isServicePromptScopeUnresolvedError, resolveServicePromptScope } from "@/services/service-prompts"
 import type { ServicePromptScope } from "@/services/service-prompts"
 import { isRequestConfigScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
+import { REFRESH_ROTATION_KEY } from "@/services/tldw/single-user-credential"
+import { safeStorageSerde } from "@/utils/safe-storage"
 
 type DraftOwner = { key: string; serverScopeKey: string; requestScope: ServicePromptScope }
 
@@ -71,6 +74,13 @@ export const useChatDraftOwner = (
       accountChangeRef.current?.(invalidated, source)
       void resolve(invalidated, source)
     })
+    const rotationStorage = new Storage({ area: "local", serde: safeStorageSerde })
+    const rotationWatch = {
+      [REFRESH_ROTATION_KEY]: () => {
+        if (mounted && !currentOwner.current) void resolve()
+      }
+    }
+    void rotationStorage.watch(rotationWatch)
     const revalidate = () => { void resolve() }
     retryRef.current = revalidate
     window.addEventListener("focus", revalidate)
@@ -82,6 +92,7 @@ export const useChatDraftOwner = (
       currentOwner.current = null
       retryRef.current = null
       stop()
+      void rotationStorage.unwatch(rotationWatch)
       window.removeEventListener("focus", revalidate)
       window.removeEventListener("pageshow", revalidate)
     }

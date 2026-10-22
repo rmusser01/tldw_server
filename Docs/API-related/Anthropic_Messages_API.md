@@ -20,6 +20,7 @@
 ## Provider Selection
 - `model` is required. Supports `provider/model` prefixes (example: `anthropic/claude-3-7-sonnet-20250219`).
 - `api_provider` can force a provider when the model has no prefix.
+- A model with no prefix and no `api_provider` that appears in exactly one provider's pricing catalog is sent to that provider, whatever the default provider is. Since TASK-13858 this includes `claude-opus-5-5`, `claude-opus-4-8`, `claude-opus-4-5`, `claude-sonnet-5-5`, `claude-sonnet-5` and `claude-fable-5-1`, which now go to `anthropic`. So a client that sends bare Claude model names, such as Claude Code pointed at this server, now reaches Anthropic even when the default provider is local: the request fails without an Anthropic key, and with one the prompt is sent to Anthropic. To keep such a name on a local provider, prefix it (`llama.cpp/<model>`) or set `api_provider`.
 - llama.cpp base URL comes from `llama_api.api_ip` or `llama_api.api_base_url`.
 
 ## Request Highlights

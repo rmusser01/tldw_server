@@ -1,3 +1,6 @@
+import { usePromptInventory } from "@/hooks/usePromptInventory"
+import { usePromptLocalAuthority } from "@/hooks/usePromptLocalAuthority"
+import { resolvePromptOwnerId } from "@/services/prompt-local-owner"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Dropdown, Empty, Input, Modal, Tooltip } from "antd"
 import type { InputRef } from "antd"
@@ -6,7 +9,7 @@ import type { ItemType, MenuItemType } from "antd/es/menu/interface"
 import { BookIcon, CloudIcon, ComputerIcon, ZapIcon, Search } from "lucide-react"
 import React, { useState, useMemo, useRef, useEffect } from "react"
 import { useTranslation } from "react-i18next"
-import { getAllPrompts, upsertServerLibraryPromptCopy } from "@/db/dexie/helpers"
+import { upsertServerLibraryPromptCopy } from "@/db/dexie/helpers"
 import { getDesignSystemState } from "@/design-system"
 import { useStorage } from "@plasmohq/storage/hook"
 import {
@@ -102,7 +105,13 @@ type RecipeSystemPromptUndoSnapshot = SystemPromptUndoSnapshot & {
   selectedSystemPrompt: string | undefined
 }
 
-export const PromptSelect: React.FC<Props> = ({
+export const PromptSelect: React.FC<Props> = (props) => {
+  const authority = usePromptLocalAuthority()
+  return <PromptSelectForOwner key={authority.ready ? authority.ownerId ?? "local" : "resolving"} {...props} expectedOwnerId={authority.ownerId} />
+}
+
+const PromptSelectForOwner: React.FC<Props & { expectedOwnerId: string | null }> = ({
+  expectedOwnerId,
   setSelectedQuickPrompt,
   setSelectedSystemPrompt,
   selectedSystemPrompt,
@@ -382,10 +391,7 @@ export const PromptSelect: React.FC<Props> = ({
     isLoading: promptsLoading,
     isError: promptsError,
     refetch: refetchPrompts
-  } = useQuery({
-    queryKey: ["getAllPromptsForSelect"],
-    queryFn: getAllPrompts
-  })
+  } = usePromptInventory("getAllPromptsForSelect")
 
   // The user's server prompt library, listed in full once the picker opens.
   const {
@@ -395,9 +401,9 @@ export const PromptSelect: React.FC<Props> = ({
     error: serverPromptsError,
     refetch: refetchServerPrompts
   } = useQuery({
-    queryKey: ["promptSelectServerLibrary", normalizedPromptAssistBackendKey],
-    queryFn: ({ signal }) => listAllServerPrompts({ signal }),
-    enabled: dropdownOpen,
+    queryKey: ["promptSelectServerLibrary", normalizedPromptAssistBackendKey, expectedOwnerId],
+    queryFn: ({ signal }) => listAllServerPrompts({ signal, expectedOwnerId }),
+    enabled: dropdownOpen && Boolean(expectedOwnerId),
     staleTime: 60_000,
     retry: false
   })
@@ -527,14 +533,15 @@ export const PromptSelect: React.FC<Props> = ({
         editorLookupEpochRef.current === lookupEpoch && serverPromptSelectionRef.current === attempt
       const focusOwner = document.activeElement
       try {
-        const detail = await getServerPromptDetail(serverPrompt.id)
+        const detail = await getServerPromptDetail(serverPrompt.id, expectedOwnerId)
+        await resolvePromptOwnerId(expectedOwnerId)
         const application = resolveServerPromptApplication(detail)
         if (application.kind === "empty") {
           throw new Error("Server prompt has no prompt text")
         }
         if (!isCurrent()) return
         if (application.kind === "system") {
-          const localCopy = await upsertServerLibraryPromptCopy(detail)
+          const localCopy = await upsertServerLibraryPromptCopy(detail, expectedOwnerId)
           await recipeQueryClient.invalidateQueries({
             queryKey: ["getAllPromptsForSelect"]
           })
@@ -574,6 +581,7 @@ export const PromptSelect: React.FC<Props> = ({
       draftRevision,
       quickPromptRevision,
       renderedHistoryFence,
+      expectedOwnerId,
       recipeQueryClient,
       restorePromptSelectFocus,
       setDropdownOpen,

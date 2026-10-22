@@ -25,6 +25,14 @@
 // batch W1 re-runs this bench after fixing the per-token work and records the
 // before/after delta there.
 //
+// 2026-10-16: harness setup adapted to dev's scene-ownership gate introduced
+// in 7b5da56346 (PR #3229, TASK-13549 lineage): every send must now carry an
+// ActorSceneSend captured before dispatch, so the harness stubs
+// captureActorSceneSend with an inert default scene (mirroring dev's own
+// scene tests) whose requestScope matches the service-prompts mock.
+// Measurement unchanged: spies, counters and window boundaries are exactly as
+// they were.
+//
 // Run: cd apps/packages/ui && bun run vitest run src/hooks/__tests__/streaming-render.bench.test.ts
 import { act, renderHook } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"

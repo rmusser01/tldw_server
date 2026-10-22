@@ -98,8 +98,10 @@ def _resolve_variable(
     variables: Mapping[str, Any],
 ) -> Any:
     if variable.name in variables:
-        return variables[variable.name]
-    if variable.default_value is not None:
+        value = variables[variable.name]
+        if not variable.required or (value is not None and (not isinstance(value, str) or value.strip())):
+            return value
+    elif variable.default_value is not None:
         return variable.default_value
     if variable.required:
         raise StructuredPromptAssemblyError(

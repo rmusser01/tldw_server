@@ -5581,6 +5581,44 @@ class CollectionsDatabase:
     ) -> AudioStudioProjectRow:
         return self._get_audio_studio_project(project_row_id=project_row_id, include_archived=include_archived)
 
+    def get_audio_studio_project_snapshot(
+        self, project_row_id: int
+    ) -> tuple[AudioStudioProjectRow, list[AudioStudioSectionRow], list[AudioStudioTrackRow], list[AudioStudioClipRow]]:
+        """Read one owner-bound project and its live resources at the same revision."""
+        with self._operation_backend_pin(), self._read_snapshot() as connection:
+            project = self._get_audio_studio_project(project_row_id=project_row_id, connection=connection)
+            params = (
+                project.id,
+                self._coerce_bool_flag(False, postgres=self.backend.backend_type == BackendType.POSTGRESQL),
+            )
+            sections = self.backend.execute(
+                "SELECT id, project_row_id, section_id, workflow, title, body_text, speaker_id, order_index, settings_json, current_revision_id, archived_at, deleted, deleted_at "
+                "FROM audio_studio_sections WHERE project_row_id = ? AND deleted = ? AND archived_at IS NULL "
+                "ORDER BY order_index, section_id",
+                params,
+                connection=connection,
+            ).rows
+            tracks = self.backend.execute(
+                "SELECT id, project_row_id, track_id, name, kind, order_index, muted, solo, volume, settings_json, current_revision_id, archived_at, deleted, deleted_at "
+                "FROM audio_studio_tracks WHERE project_row_id = ? AND deleted = ? AND archived_at IS NULL "
+                "ORDER BY order_index, track_id",
+                params,
+                connection=connection,
+            ).rows
+            clips = self.backend.execute(
+                "SELECT id, project_row_id, clip_id, section_id, track_id, title, clip_type, start_ms, duration_ms, volume, fade_in_ms, fade_out_ms, muted, artifact_id, settings_json, current_revision_id, archived_at, deleted, deleted_at "
+                "FROM audio_studio_clips WHERE project_row_id = ? AND deleted = ? AND archived_at IS NULL "
+                "ORDER BY start_ms, clip_id",
+                params,
+                connection=connection,
+            ).rows
+            return (
+                project,
+                [AudioStudioSectionRow(**row) for row in sections],
+                [AudioStudioTrackRow(**row) for row in tracks],
+                [AudioStudioClipRow(**row) for row in clips],
+            )
+
     def get_audio_studio_project_by_project_id(
         self,
         project_id: str,

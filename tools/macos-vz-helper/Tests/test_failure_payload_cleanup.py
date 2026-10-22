@@ -8,6 +8,7 @@ import json
 import os
 import signal
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -104,6 +105,57 @@ def test_cleanup_removes_payloads_but_preserves_provenance(
     }
     assert receipt["bundle_cleanup"]["ok"] is True
     assert receipt["errors"] == (["case failed"] if run_failed else [])
+
+
+@pytest.mark.integration
+@pytest.mark.skipif(
+    sys.platform != "darwin" or os.environ.get("TLDW_SANDBOX_VZ_LINUX_NATIVE_CLEANUP") != "1",
+    reason="requires macOS and TLDW_SANDBOX_VZ_LINUX_NATIVE_CLEANUP=1",
+)
+@pytest.mark.parametrize("held_open", [True, False], ids=["open-handle", "closed-handle"])
+def test_native_payload_cleanup_with_real_lsof(drill: ModuleType, packet: tuple, held_open: bool) -> None:
+    """Use native lsof/deletion with tiny files and synthetic source/teardown proofs."""
+    source, evidence, receipt, allocations = packet
+    bundle = next(iter(allocations))
+    names = allocations[bundle].names
+    rootfs = bundle / "rootfs.img"
+    with rootfs.open("rb") if held_open else nullcontext():
+        drill.cleanup_payloads(source, evidence, receipt, allocations)
+
+    cleanup = receipt["bundle_cleanup"]
+    entry = cleanup["bundles"][0]
+    assert "disk_handles" in entry, entry.get("retained_reason")
+    probe = entry["disk_handles"]
+    expected_hashes = {name: hashlib.sha256(name.encode()).hexdigest() for name in names}
+    assert entry["payload_sha256"] == expected_hashes
+    persisted = json.loads((evidence / "receipt.json").read_text())
+    assert persisted["bundle_cleanup"]["bundles"][0]["payload_sha256"] == expected_hashes
+    assert probe["ok"] is (not held_open)
+    # Other named payloads have no handles, so lsof exits 1 even when rootfs is open.
+    assert probe["exit_code"] == 1
+    assert probe["stderr"] == ""
+    assert cleanup["ok"] is (not held_open)
+    if held_open:
+        assert f"p{os.getpid()}" in probe["stdout"].splitlines()
+        assert f"n{rootfs}" in probe["stdout"].splitlines()
+        assert entry["removed"] == []
+        assert "closed payload handles not confirmed" in entry["retained_reason"]
+        assert receipt["errors"]
+        assert all((bundle / name).read_bytes() == name.encode() for name in names)
+    else:
+        assert probe["stdout"] == ""
+        assert entry["removed"] == names
+        assert receipt["errors"] == []
+        assert all(not (bundle / name).exists() for name in names)
+    assert {path.name for path in bundle.iterdir()} == {"manifest.json", "fault-agent", *(names if held_open else [])}
+    assert (source / "rootfs.img").read_bytes() == b"canonical"
+    for path in (
+        bundle / "manifest.json",
+        bundle / "fault-agent",
+        bundle.parent / "manifest.json",
+        evidence / "run.log",
+    ):
+        assert path.read_bytes() == b"evidence"
 
 
 @pytest.mark.unit

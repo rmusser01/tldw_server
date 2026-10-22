@@ -43,6 +43,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
     custom_openai_provider_name,
     custom_openai_provider_number,
 )
+from tldw_Server_API.app.core.exceptions import EgressPolicyError, NetworkError
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import get_registry
 from tldw_Server_API.app.core.LLM_Calls.adapter_utils import (
     bind_provider_call_credentials,
@@ -107,7 +108,13 @@ _SUMMARIZATION_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = (
     ValueError,
     json.JSONDecodeError,
 )
-_SUMMARY_ADAPTER_EXCEPTIONS = (ChatAPIError,) + _SUMMARIZATION_NONCRITICAL_EXCEPTIONS
+# Not ChatAPIErrors, and some adapters let them through untouched: an endpoint the egress policy
+# blocks, and a transport failure such as a local server that is down (it falls through to
+# provider_failure). They are caught only to type them for raise_on_error callers; the other
+# callers still get the exception itself.
+_SUMMARY_PASSTHROUGH_EXCEPTIONS = (EgressPolicyError, NetworkError)
+_TRANSIENT_EGRESS_REASONS = frozenset({"dns_unresolved", "dns_changed", "tls_pin_error"})
+_SUMMARY_ADAPTER_EXCEPTIONS = (ChatAPIError, *_SUMMARY_PASSTHROUGH_EXCEPTIONS) + _SUMMARIZATION_NONCRITICAL_EXCEPTIONS
 
 _SUMMARY_ERROR_CODES = frozenset(
     {
@@ -148,6 +155,11 @@ def _native_http_disabled(adapter: Any) -> bool:
 
 def _summary_error_code(exc: BaseException, adapter: Any = None) -> str:
     """Map chat adapter failures to a bounded, detail-free summary taxonomy."""
+    if isinstance(exc, EgressPolicyError):
+        # A host that did not resolve, a resolution that changed mid-request and a connect failure
+        # during TLS-pin verification can pass on a retry, which re-runs the whole policy check. An
+        # endpoint the outbound policy blocks stays blocked until the configuration changes.
+        return "provider_failure" if exc.reason_code in _TRANSIENT_EGRESS_REASONS else "configuration"
     if isinstance(exc, ChatAuthenticationError):
         return "authentication"
     if isinstance(exc, ChatConfigurationError):
@@ -155,8 +167,14 @@ def _summary_error_code(exc: BaseException, adapter: Any = None) -> str:
     if isinstance(exc, ChatRateLimitError):
         return "provider_quota_exhausted" if exc.quota_exhausted is True else "rate_limit"
     if isinstance(exc, ChatBadRequestError):
+        upstream_status = getattr(exc, "upstream_status_code", None)
+        # Local adapters make every 4xx a ChatBadRequestError, so their 401, 403 and 429 land here.
+        if upstream_status in {401, 403}:
+            return "authentication"
+        if upstream_status == 429:
+            return "rate_limit"
         # 408 (OpenRouter timeout) and 498 (Groq flex capacity) are transient 4xx replies.
-        if getattr(exc, "upstream_status_code", None) in {408, 498}:
+        if upstream_status in {408, 498}:
             return "provider_failure"
         # The provider refused this request (an unknown model, a prompt over its context);
         # sending it again gets the same answer.
@@ -356,6 +374,8 @@ def _summarize_via_adapter(
                 if raise_on_error:
                     logging.error(f"Adapter streaming failed for {provider}")
                     raise SummaryProviderError(code=_summary_error_code(exc, adapter), provider=provider) from None
+                if isinstance(exc, _SUMMARY_PASSTHROUGH_EXCEPTIONS):
+                    raise
                 logging.error(f"Adapter streaming failed for {provider}")
                 yield f"Error: Provider streaming failed for '{provider}'."
             finally:
@@ -407,6 +427,8 @@ def _summarize_via_adapter(
         if raise_on_error:
             logging.error(f"Adapter summarization failed for {provider}")
             raise SummaryProviderError(code=_summary_error_code(exc, adapter), provider=provider) from None
+        if isinstance(exc, _SUMMARY_PASSTHROUGH_EXCEPTIONS):
+            raise
         logging.error(f"Adapter summarization failed for {provider}")
         return f"Error: Provider request failed for '{provider}'."
 

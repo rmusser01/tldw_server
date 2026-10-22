@@ -435,6 +435,40 @@ def load_workflow_trigger(filename: str) -> dict:
     return workflow["on"]["pull_request"]
 
 
+@pytest.mark.parametrize("route_source", ["pull_request", "license_admission"])
+@pytest.mark.parametrize(
+    ("filename", "expected"),
+    [
+        ("apps/extension/tests/e2e/notes.spec.ts", "true"),
+        (".github/workflows/frontend-e2e-tiers.yml", "true"),
+        ("apps/extension-docs/notes.md", "false"),
+        (".github/workflows/frontend-e2e-tiers-copy.yml", "false"),
+    ],
+)
+def test_frontend_e2e_trigger_and_admission_route_notes_chat_paths(
+    route_source: str,
+    filename: str,
+    expected: str,
+) -> None:
+    workflow_file = "frontend-e2e-tiers.yml"
+    if route_source == "pull_request":
+        routes = {
+            workflow_file: {
+                "mode": "paths",
+                "patterns": load_workflow_trigger(workflow_file)["paths"],
+            }
+        }
+    else:
+        routes = json.loads(ROUTES_PATH.read_text(encoding="utf-8"))
+    inputs = valid_inputs(
+        workflow_file=workflow_file,
+        routes=routes,
+        file_pages=[[{"filename": filename, "status": "modified"}]],
+    )
+
+    assert admission.admit(**inputs)["should_run"] == expected  # nosec B101 - pytest asserts the literal routing outcome
+
+
 def test_route_manifest_exactly_copies_current_pull_request_filters() -> None:
     routes = json.loads(ROUTES_PATH.read_text(encoding="utf-8"))
     expected = {}

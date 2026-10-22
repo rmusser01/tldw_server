@@ -7,11 +7,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tldw_Server_API.app.api.v1.API_Deps.auth_deps import get_registration_service_dep
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool
 from tldw_Server_API.app.core.Usage import quota_resolver
 from tldw_Server_API.app.main import app
 from tldw_Server_API.tests.UserProfile._storage_quota_helpers import (
     KEY,
+    assert_admin_quota_flags,
+    assert_quota_clear_preserves_version,
     me,
+    new_quota_user,
     org_and_team_with_member,
     patch_quota,
     quota,
@@ -106,3 +110,56 @@ def test_team_storage_value_enforced_and_user_value_wins(auth_headers: dict) -> 
         finally:
             patch_quota(client, auth_headers, user_id, None)
             client.delete(team_url, headers=auth_headers)
+
+
+@pytest.mark.parametrize(
+    "writer",
+    [
+        "/api/v1/storage/admin/quotas/user/{user_id}",
+        "/api/v1/admin/storage-quotas/users/{user_id}",
+        "/api/v1/admin/users/{user_id}",
+    ],
+    ids=["storage-service", "admin-storage-service", "admin-user"],
+)
+@pytest.mark.parametrize("surviving_override", [False, True], ids=["only-override", "latest-override"])
+def test_quota_clear_rejects_old_profile_token_sqlite(
+    auth_headers: dict, writer: str, surviving_override: bool
+) -> None:
+    """Removing the newest quota override cannot restore an older SQLite profile token."""
+    with TestClient(app) as client:
+        me(client, auth_headers)
+
+        async def _seed() -> int:
+            return await new_quota_user(await get_db_pool(), surviving_override=surviving_override)
+
+        user_id = asyncio.run(_seed())
+        assert_quota_clear_preserves_version(
+            client, auth_headers, user_id, writer, surviving_override=surviving_override
+        )
+
+
+@pytest.mark.parametrize(
+    "quota_mb,used_mb,soft,hard",
+    [
+        (100, 79.0, False, False),
+        (100, 80.0, True, False),
+        (100, 100.0, True, True),
+        (100, 120.0, True, True),
+        (0, 0.0, True, True),
+        (0, 1.0, True, True),
+        (None, 120.0, False, False),
+    ],
+    ids=["below-soft", "soft", "full", "exceeded", "zero-empty", "zero-used", "unlimited"],
+)
+def test_admin_quota_get_put_threshold_flags_sqlite(
+    auth_headers: dict, quota_mb: int | None, used_mb: float, soft: bool, hard: bool
+) -> None:
+    """The real admin responses report soft/full/zero limits without mutating GET state."""
+    with TestClient(app) as client:
+        me(client, auth_headers)
+
+        async def _seed() -> int:
+            return await new_quota_user(await get_db_pool(), used_mb=used_mb)
+
+        user_id = asyncio.run(_seed())
+        assert_admin_quota_flags(client, auth_headers, user_id, quota_mb, soft=soft, hard=hard)

@@ -1,5 +1,6 @@
 import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { normalizeSelectedModel } from "@/hooks/chat/useSelectedModel"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import { useMessageOption } from "@/hooks/useMessageOption"
 import { useStoreMessageOption } from "@/store/option"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
@@ -47,7 +48,7 @@ import {
   ActorTab
 } from "./tabs"
 import { LlamaCppAdvancedControls } from "./LlamaCppAdvancedControls"
-import { resolveSelectedSystemPromptContent } from "../system-prompt-utils"
+import { resolveEffectiveSystemPromptState, resolveSelectedSystemPromptContent } from "../system-prompt-utils"
 import type { ConversationDraftStatus } from "./tabs/ConversationTab"
 import { normalizeCurrentChatModelSettingValue } from "./current-chat-model-settings-values"
 
@@ -150,6 +151,21 @@ export const CurrentChatModelSettings = ({
   const { t } = useTranslation("common")
   const [modal, modalContextHolder] = Modal.useModal()
   const [form] = Form.useForm<CurrentChatModelFormValues>()
+  const [activeTab, setActiveTab] = React.useState("model")
+  React.useEffect(() => {
+    if (!open) setActiveTab("model")
+  }, [open])
+  const settingsOwnerCurrent = React.useRef(true)
+  React.useEffect(() => {
+    settingsOwnerCurrent.current = true
+    return () => { settingsOwnerCurrent.current = false }
+  }, [])
+  React.useEffect(() => watchChatAccountChanges(invalidated => {
+    if (!invalidated) return
+    settingsOwnerCurrent.current = false
+    form.setFieldValue("systemPrompt", "")
+    setOpen(false)
+  }), [form, setOpen])
   const {
     apiProvider, ocrLanguage, updateSetting, updateScopedSetting,
     setActiveSettingsScope, setOcrLanguage
@@ -652,7 +668,7 @@ export const CurrentChatModelSettings = ({
       if (values[key] === undefined && key in data)
         Object.assign(values, { [key]: data[key as keyof ModelConfigData] })
     }
-    return { ...values, systemPrompt: effective.systemPrompt ?? promptFallback ?? "" }
+    return { ...values, systemPrompt: promptFallback ?? effective.systemPrompt ?? "" }
   }, [selectedSelection.settingsScope, sceneOnly])
 
   const { isLoading, isFetching, isError } = useQuery({
@@ -700,9 +716,11 @@ export const CurrentChatModelSettings = ({
 
       let tempSystemPrompt = ""
 
-      if (!sceneOnly && selectedSystemPrompt) {
-        tempSystemPrompt =
-          await resolveSelectedSystemPromptContent(selectedSystemPrompt)
+      if (!sceneOnly) {
+        const effective = useStoreChatModelSettings.getState().getEffectiveSettings(selectedSelection.settingsScope)
+        const resolved = await resolveEffectiveSystemPromptState({ selectedSystemPrompt, systemPrompt: effective.systemPrompt })
+        if (!isCurrent()) throw new Error("stale_selection")
+        tempSystemPrompt = resolved.effectiveContent
       }
 
       const baseValues = buildBaseValues(
@@ -1228,7 +1246,8 @@ export const CurrentChatModelSettings = ({
               className="min-w-0 border-0 p-0"
               disabled={saving || conversationPending || !sceneReady}>
               <Tabs
-                defaultActiveKey={sceneOnly ? "actor" : "model"}
+                activeKey={sceneOnly ? "actor" : activeTab}
+                onChange={setActiveTab}
                 destroyOnHidden={false}
                 items={sceneOnly ? tabItems.filter(item => item.key === "actor") : tabItems}
                 className="settings-tabs"

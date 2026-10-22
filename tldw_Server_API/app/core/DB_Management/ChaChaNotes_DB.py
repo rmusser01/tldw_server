@@ -39,6 +39,8 @@ changes in the `sync_log` and in individual records.
 import hashlib  # noqa: E402
 import json  # noqa: E402
 import math  # noqa: E402
+import os  # noqa: E402
+import queue  # noqa: E402
 import re  # noqa: E402
 import sqlite3  # noqa: E402
 import sys  # noqa: E402
@@ -105,9 +107,6 @@ from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import (  #
     build_source_review_rls_sql,
     build_web_clipper_rls_sql,
     build_workspace_source_saved_view_rls_sql,
-)
-from tldw_Server_API.app.core.DB_Management.backends.postgres_sequences import (  # noqa: E402
-    advance_postgres_serial,
 )
 from tldw_Server_API.app.core.DB_Management.backends.query_utils import (  # noqa: E402
     normalise_params,
@@ -465,6 +464,111 @@ _CHACHA_NONCRITICAL_EXCEPTIONS = (
     InputError,
     ConflictError,
 )
+
+_DROPPED_CHECKOUTS: queue.SimpleQueue[tuple[Any, Any, Any, int]] = queue.SimpleQueue()
+
+
+class _LegacyCheckout:
+    """Queue a legacy PostgreSQL checkout for return when its thread-local slot is dropped.
+
+    Outside a ChaCha operation each thread keeps its checkout in the handle's
+    ``threading.local``. psycopg's ``Connection.__del__`` skips pooled connections,
+    so without this guard the checkout and its pool slot are lost with the slot.
+
+    - Dropped on its owning thread (that thread's exit, which CPython finalizes on
+      that thread, or that thread's own collection of the handle), the guard closes
+      the connection, so a session left in a transaction does not keep its locks and
+      snapshot, and queues it so the pool gets its slot back.
+    - Dropped on any other thread (the handle collected elsewhere), it only queues
+      the checkout, with a strong reference to its owner ``Thread``. The owner may
+      be inside libpq on that connection: psycopg's C generators keep the raw
+      ``PGconn*`` across yields and call libpq without the GIL, so closing or
+      returning it from another thread would free it in use.
+      ``_return_dropped_checkouts`` keeps such an entry queued while the owner
+      ``is_alive()``. The reference is strong because a handle is cyclic garbage,
+      and the collector clears weak references inside garbage before any
+      finalizer runs (bpo-38006). So a collected handle used on a long-lived
+      thread (the main thread, an executor thread) holds its pool slot until that
+      thread exits, and a thread never seen to exit (a ``_DummyThread``) holds it
+      for good; dev lost those slots anyway.
+    - ``close_all_connections()`` keeps the ``threading.local`` on PostgreSQL, so it
+      never drops another thread's slot. Another live thread's session then stays
+      open, idle in a transaction if it left one, and keeps serving that thread
+      until the thread closes it or exits; dev ended an idle one. That only
+      happens in tests and shutdown, on a caller's own pool.
+    - Each entry records the pid that queued it. A forked child inherits a copy of
+      the queue, and its drain forgets the parent's entries untouched: they are the
+      parent's sockets.
+    """
+
+    __slots__ = ("backend", "conn", "owner", "pid", "thread_id")
+
+    def __init__(self, conn: Any, backend: Any) -> None:
+        self.conn = conn
+        self.backend = backend
+        self.owner = threading.current_thread()  # strong: see the class docstring
+        self.pid = os.getpid()
+        self.thread_id = threading.get_ident()
+
+    def disarm(self) -> None:
+        """The checkout was returned or closed explicitly."""
+        self.conn = None
+
+    def __del__(self) -> None:
+        # A finalizer must never raise, even at interpreter teardown with module globals gone.
+        try:
+            if self.conn is None or os.getpid() != self.pid:
+                return  # disarmed, or a forked child: the parent still owns this session
+            owner = self.owner
+            if threading.get_ident() == self.thread_id:
+                # The owner's own slot: nothing else is using the connection, so end the
+                # session now (PQfinish). psycopg's close() takes no lock and makes no pool
+                # call, because these pools do not set close_returns.
+                self.conn.close()
+                owner = None  # closed, so the drain may return it at once
+            # Lock-free: a collection can run this on any thread, even one holding the
+            # pool's own lock, so the pool's bookkeeping waits for _return_dropped_checkouts().
+            _DROPPED_CHECKOUTS.put((self.backend, self.conn, owner, self.pid))
+        except Exception:  # noqa: BLE001  # nosec B110
+            pass  # nothing may escape a finalizer
+
+
+def _disarm_legacy_checkout(state: Any) -> None:
+    guard = getattr(state, "checkout_guard", None)
+    if guard is not None:
+        guard.disarm()
+        state.checkout_guard = None
+
+
+def _return_dropped_checkouts() -> None:
+    """Return checkouts queued by _LegacyCheckout, outside any finalizer.
+
+    An entry whose owner thread is still alive goes back on the queue: that thread may
+    be inside libpq on the connection (see ``_LegacyCheckout``). An entry queued by
+    another process (inherited across fork) is dropped untouched.
+    """
+    still_owned = []
+    while True:
+        try:
+            entry = _DROPPED_CHECKOUTS.get_nowait()
+        except queue.Empty:
+            break
+        backend, conn, owner, pid = entry
+        if pid != os.getpid():
+            continue  # the parent's socket: neither return nor close it here
+        try:
+            owner_alive = owner is not None and owner.is_alive()
+        except AssertionError:  # a stopped _DummyThread asserts instead of answering
+            owner_alive = False
+        if owner_alive:
+            still_owned.append(entry)
+            continue
+        try:
+            backend.get_pool().return_connection(conn)
+        except Exception as exc:  # noqa: BLE001 - keep draining; one bad return must not strand the rest
+            logger.warning("Returning a dropped legacy checkout failed ({})", type(exc).__name__)
+    for entry in still_owned:
+        _DROPPED_CHECKOUTS.put(entry)
 
 
 class BackendCursorAdapter:
@@ -993,6 +1097,7 @@ class CharactersRAGDB:
             conversation_id: str | None = None,
             message_id: str | None = None,
             conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+            semantic_dataset_id: str | None = None,
         ) -> str | None: ...
 
         def get_note_by_id(
@@ -1008,6 +1113,7 @@ class CharactersRAGDB:
             update_data: dict[str, Any],
             expected_version: int,
             conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+            semantic_dataset_id: str | None = None,
         ) -> bool | None: ...
 
         def _ensure_conversation_settings_table(self, *, connection: Any | None = None) -> None: ...
@@ -1129,7 +1235,9 @@ class CharactersRAGDB:
             self, *, owner_user_id: str, conn: sqlite3.Connection | BackendConnectionWrapper | None = None
         ) -> str: ...
 
-        def restore_note(self, note_id: str, expected_version: int) -> bool | None: ...
+        def restore_note(
+            self, note_id: str, expected_version: int, semantic_dataset_id: str | None = None
+        ) -> bool | None: ...
 
         def search_keywords(self, search_term: str, limit: int = 10) -> list[dict[str, Any]]: ...
 
@@ -1163,7 +1271,9 @@ class CharactersRAGDB:
             conn: Any | None = None,
         ) -> bool | None: ...
 
-        def soft_delete_note(self, note_id: str, expected_version: int) -> bool | None: ...
+        def soft_delete_note(
+            self, note_id: str, expected_version: int, semantic_dataset_id: str | None = None
+        ) -> bool | None: ...
 
         def tombstone_note_from_sync(
             self,
@@ -1173,6 +1283,7 @@ class CharactersRAGDB:
             object_revision: int,
             object_hash: str,
             conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+            semantic_dataset_id: str | None = None,
         ) -> bool: ...
 
         def tombstone_unsynced_note_from_sync(
@@ -1213,10 +1324,11 @@ class CharactersRAGDB:
             expected_product_version: int | None = None,
             projection_timestamp: str | None = None,
             conn: sqlite3.Connection | BackendConnectionWrapper | None = None,
+            semantic_dataset_id: str | None = None,
         ) -> bool: ...
 
-    _CURRENT_SCHEMA_VERSION = 81  # Server-issued conversation source incarnation
-    _POSTGRES_SCHEMA_VERSION = 85
+    _CURRENT_SCHEMA_VERSION = 84  # Notes semantic index lifecycle
+    _POSTGRES_SCHEMA_VERSION = 89
     _POSTGRES_SCHEMA_BOOTSTRAP_LOCK_TIMEOUT = "30s"
     _SCHEMA_NAME = "rag_char_chat_schema"  # Used for the db_schema_version table
     _LOCAL_UNBOUND_TASK_DATASET_ID = "local-unbound"
@@ -7618,6 +7730,439 @@ DROP POLICY IF EXISTS note_graph_suggestion_evidence_tenant_isolation ON note_gr
 CREATE POLICY note_graph_suggestion_evidence_tenant_isolation ON note_graph_suggestion_evidence USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
 """
 
+    _MIGRATION_SQL_V81_TO_V82 = """
+CREATE TABLE note_semantic_index_configs(
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  desired_state TEXT NOT NULL CHECK(desired_state IN ('enabled', 'disabled')),
+  active_generation_id TEXT,
+  configuration_revision INTEGER NOT NULL DEFAULT 1 CHECK(configuration_revision >= 1),
+  semantic_index_revision INTEGER NOT NULL DEFAULT 0 CHECK(semantic_index_revision >= 0),
+  capability_revision TEXT,
+  disclosure_hash TEXT,
+  compatibility_hash TEXT,
+  provider TEXT,
+  model TEXT,
+  endpoint_origin_revision TEXT,
+  endpoint_origin_display TEXT,
+  data_boundary TEXT,
+  vector_backend TEXT,
+  storage_boundary TEXT,
+  storage_label TEXT,
+  metric TEXT NOT NULL DEFAULT 'cosine' CHECK(metric = 'cosine'),
+  dimension_state TEXT NOT NULL CHECK(dimension_state IN ('pending', 'resolved')),
+  dimensions INTEGER CHECK(dimensions IS NULL OR dimensions >= 1),
+  normalization_version TEXT NOT NULL CHECK(length(trim(normalization_version)) > 0),
+  chunker_version TEXT NOT NULL CHECK(length(trim(chunker_version)) > 0),
+  enabled_at DATETIME,
+  disabled_at DATETIME,
+  consented_at DATETIME,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id, dataset_id),
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND length(compatibility_hash) BETWEEN 1 AND 128
+      AND substr(compatibility_hash, 1, 1) GLOB '[A-Za-z0-9]'
+      AND compatibility_hash NOT GLOB '*[^A-Za-z0-9._:-]*')
+  )
+);
+
+CREATE TABLE note_semantic_generations(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  configuration_revision INTEGER NOT NULL CHECK(configuration_revision >= 1),
+  state TEXT NOT NULL CHECK(state IN ('staging', 'active', 'retired', 'failed', 'deleting')),
+  compatibility_hash TEXT,
+  dimension_state TEXT NOT NULL CHECK(dimension_state IN ('pending', 'resolved')),
+  dimensions INTEGER CHECK(dimensions IS NULL OR dimensions >= 1),
+  root_job_id TEXT,
+  expected_note_count INTEGER NOT NULL DEFAULT 0 CHECK(expected_note_count >= 0),
+  expected_chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(expected_chunk_count >= 0),
+  published_note_count INTEGER NOT NULL DEFAULT 0 CHECK(published_note_count >= 0),
+  published_chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(published_chunk_count >= 0),
+  manifest_hash TEXT,
+  publication_receipt TEXT,
+  terminal_error_code TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  published_at DATETIME,
+  retired_at DATETIME,
+  deleted_at DATETIME,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id) REFERENCES note_semantic_index_configs(owner_user_id, dataset_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND length(compatibility_hash) BETWEEN 1 AND 128
+      AND substr(compatibility_hash, 1, 1) GLOB '[A-Za-z0-9]'
+      AND compatibility_hash NOT GLOB '*[^A-Za-z0-9._:-]*')
+  )
+);
+
+CREATE TABLE note_semantic_note_state(
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  content_version INTEGER NOT NULL CHECK(content_version >= 1),
+  content_fingerprint TEXT NOT NULL CHECK(
+    length(content_fingerprint) = 71
+    AND substr(content_fingerprint, 1, 7) = 'sha256:'
+    AND substr(content_fingerprint, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  dirty_generation INTEGER NOT NULL CHECK(dirty_generation >= 1),
+  state TEXT NOT NULL CHECK(state IN ('pending', 'indexed', 'excluded', 'failed', 'tombstoned')),
+  chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(chunk_count >= 0),
+  manifest_hash TEXT,
+  error_code TEXT,
+  published_at DATETIME,
+  PRIMARY KEY(owner_user_id, dataset_id, generation_id, note_id),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, note_id) REFERENCES notes(client_id, id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE note_semantic_chunks(
+  chunk_id TEXT PRIMARY KEY CHECK(length(trim(chunk_id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL,
+  note_id TEXT NOT NULL,
+  content_version INTEGER NOT NULL CHECK(content_version >= 1),
+  ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  field TEXT NOT NULL CHECK(field IN ('title', 'content')),
+  start_offset INTEGER NOT NULL CHECK(start_offset >= 0),
+  end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
+  chunk_fingerprint TEXT NOT NULL CHECK(
+    length(chunk_fingerprint) = 71
+    AND substr(chunk_fingerprint, 1, 7) = 'sha256:'
+    AND substr(chunk_fingerprint, 8) NOT GLOB '*[^0-9a-f]*'
+  ),
+  normalization_version TEXT NOT NULL CHECK(length(trim(normalization_version)) > 0),
+  chunker_version TEXT NOT NULL CHECK(length(trim(chunker_version)) > 0),
+  UNIQUE(owner_user_id, dataset_id, chunk_id),
+  UNIQUE(owner_user_id, dataset_id, generation_id, note_id, ordinal),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id, note_id) REFERENCES note_semantic_note_state(owner_user_id, dataset_id, generation_id, note_id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+CREATE TABLE note_semantic_work(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  kind TEXT NOT NULL CHECK(kind IN ('index_note', 'delete_note_vectors', 'delete_generation')),
+  note_id TEXT,
+  generation_id TEXT,
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1),
+  fencing_token TEXT NOT NULL CHECK(length(trim(fencing_token)) > 0),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending', 'claimed', 'completed', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5),
+  next_eligible_at DATETIME NOT NULL,
+  claim_token TEXT,
+  claimed_at DATETIME,
+  error_code TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CHECK(generation_id IS NOT NULL AND (
+    (kind = 'delete_generation' AND note_id IS NULL AND dirty_generation IS NULL)
+    OR
+    (kind IN ('index_note', 'delete_note_vectors') AND note_id IS NOT NULL AND dirty_generation IS NOT NULL)
+  )),
+  CHECK((claim_state = 'claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL) OR (claim_state != 'claimed'))
+);
+
+CREATE UNIQUE INDEX idx_note_semantic_generations_one_active ON note_semantic_generations(owner_user_id, dataset_id) WHERE state = 'active';
+CREATE UNIQUE INDEX idx_note_semantic_generations_one_staging ON note_semantic_generations(owner_user_id, dataset_id) WHERE state = 'staging';
+CREATE INDEX idx_note_semantic_note_state_pending ON note_semantic_note_state(owner_user_id, dataset_id, generation_id, state, dirty_generation);
+CREATE INDEX idx_note_semantic_chunks_note ON note_semantic_chunks(owner_user_id, dataset_id, generation_id, note_id, ordinal);
+CREATE INDEX idx_note_semantic_work_claimable ON note_semantic_work(owner_user_id, dataset_id, claim_state, next_eligible_at, id);
+CREATE UNIQUE INDEX idx_note_semantic_work_note_coalesce ON note_semantic_work(owner_user_id, dataset_id, kind, note_id) WHERE note_id IS NOT NULL;
+CREATE UNIQUE INDEX idx_note_semantic_work_generation_coalesce ON note_semantic_work(owner_user_id, dataset_id, kind, generation_id) WHERE generation_id IS NOT NULL AND kind = 'delete_generation';
+"""
+
+    _MIGRATION_SQL_V85_TO_V86_POSTGRES = """
+CREATE TABLE IF NOT EXISTS note_semantic_index_configs(
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  desired_state TEXT NOT NULL CHECK(desired_state IN ('enabled', 'disabled')),
+  active_generation_id TEXT,
+  configuration_revision INTEGER NOT NULL DEFAULT 1 CHECK(configuration_revision >= 1),
+  semantic_index_revision INTEGER NOT NULL DEFAULT 0 CHECK(semantic_index_revision >= 0),
+  capability_revision TEXT, disclosure_hash TEXT, compatibility_hash TEXT, provider TEXT, model TEXT,
+  endpoint_origin_revision TEXT, endpoint_origin_display TEXT, data_boundary TEXT, vector_backend TEXT,
+  storage_boundary TEXT, storage_label TEXT,
+  metric TEXT NOT NULL DEFAULT 'cosine' CHECK(metric = 'cosine'),
+  dimension_state TEXT NOT NULL CHECK(dimension_state IN ('pending', 'resolved')),
+  dimensions INTEGER CHECK(dimensions IS NULL OR dimensions >= 1),
+  normalization_version TEXT NOT NULL CHECK(char_length(btrim(normalization_version)) > 0),
+  chunker_version TEXT NOT NULL CHECK(char_length(btrim(chunker_version)) > 0),
+  enabled_at TIMESTAMPTZ, disabled_at TIMESTAMPTZ, consented_at TIMESTAMPTZ,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id, dataset_id),
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND compatibility_hash ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
+  )
+);
+CREATE TABLE IF NOT EXISTS note_semantic_generations(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  configuration_revision INTEGER NOT NULL CHECK(configuration_revision >= 1),
+  state TEXT NOT NULL CHECK(state IN ('staging', 'active', 'retired', 'failed', 'deleting')),
+  compatibility_hash TEXT,
+  dimension_state TEXT NOT NULL CHECK(dimension_state IN ('pending', 'resolved')),
+  dimensions INTEGER CHECK(dimensions IS NULL OR dimensions >= 1), root_job_id TEXT,
+  expected_note_count INTEGER NOT NULL DEFAULT 0 CHECK(expected_note_count >= 0),
+  expected_chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(expected_chunk_count >= 0),
+  published_note_count INTEGER NOT NULL DEFAULT 0 CHECK(published_note_count >= 0),
+  published_chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(published_chunk_count >= 0),
+  manifest_hash TEXT, publication_receipt TEXT, terminal_error_code TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, published_at TIMESTAMPTZ,
+  retired_at TIMESTAMPTZ, deleted_at TIMESTAMPTZ,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id) REFERENCES note_semantic_index_configs(owner_user_id, dataset_id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CHECK(
+    (dimension_state = 'pending' AND dimensions IS NULL AND compatibility_hash IS NULL)
+    OR
+    (dimension_state = 'resolved' AND dimensions IS NOT NULL AND compatibility_hash IS NOT NULL
+      AND compatibility_hash ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
+  )
+);
+CREATE TABLE IF NOT EXISTS note_semantic_note_state(
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0), generation_id TEXT NOT NULL, note_id TEXT NOT NULL,
+  content_version INTEGER NOT NULL CHECK(content_version >= 1), content_fingerprint TEXT NOT NULL CHECK(content_fingerprint ~ '^sha256:[0-9a-f]{64}$'),
+  dirty_generation INTEGER NOT NULL CHECK(dirty_generation >= 1),
+  state TEXT NOT NULL CHECK(state IN ('pending', 'indexed', 'excluded', 'failed', 'tombstoned')),
+  chunk_count INTEGER NOT NULL DEFAULT 0 CHECK(chunk_count >= 0), manifest_hash TEXT, error_code TEXT, published_at TIMESTAMPTZ,
+  PRIMARY KEY(owner_user_id, dataset_id, generation_id, note_id),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
+  FOREIGN KEY(owner_user_id, note_id) REFERENCES notes(client_id, id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE TABLE IF NOT EXISTS note_semantic_chunks(
+  chunk_id TEXT PRIMARY KEY CHECK(char_length(btrim(chunk_id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0), dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL, note_id TEXT NOT NULL, content_version INTEGER NOT NULL CHECK(content_version >= 1), ordinal INTEGER NOT NULL CHECK(ordinal >= 0),
+  field TEXT NOT NULL CHECK(field IN ('title', 'content')), start_offset INTEGER NOT NULL CHECK(start_offset >= 0), end_offset INTEGER NOT NULL CHECK(end_offset > start_offset),
+  chunk_fingerprint TEXT NOT NULL CHECK(chunk_fingerprint ~ '^sha256:[0-9a-f]{64}$'), normalization_version TEXT NOT NULL CHECK(char_length(btrim(normalization_version)) > 0),
+  chunker_version TEXT NOT NULL CHECK(char_length(btrim(chunker_version)) > 0),
+  UNIQUE(owner_user_id, dataset_id, chunk_id), UNIQUE(owner_user_id, dataset_id, generation_id, note_id, ordinal),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id, note_id) REFERENCES note_semantic_note_state(owner_user_id, dataset_id, generation_id, note_id) ON DELETE CASCADE ON UPDATE CASCADE
+);
+CREATE TABLE IF NOT EXISTS note_semantic_work(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0), dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  kind TEXT NOT NULL CHECK(kind IN ('index_note', 'delete_note_vectors', 'delete_generation')), note_id TEXT, generation_id TEXT,
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1), fencing_token TEXT NOT NULL CHECK(char_length(btrim(fencing_token)) > 0),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending', 'claimed', 'completed', 'failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5), next_eligible_at TIMESTAMPTZ NOT NULL,
+  claim_token TEXT, claimed_at TIMESTAMPTZ, error_code TEXT, created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id, dataset_id, id),
+  FOREIGN KEY(owner_user_id, dataset_id, generation_id) REFERENCES note_semantic_generations(owner_user_id, dataset_id, id) ON DELETE CASCADE ON UPDATE CASCADE,
+  CHECK(generation_id IS NOT NULL AND (
+    (kind = 'delete_generation' AND note_id IS NULL AND dirty_generation IS NULL)
+    OR
+    (kind IN ('index_note', 'delete_note_vectors') AND note_id IS NOT NULL AND dirty_generation IS NOT NULL)
+  )),
+  CHECK((claim_state = 'claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL) OR (claim_state != 'claimed'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_generations_one_active ON note_semantic_generations(owner_user_id, dataset_id) WHERE state = 'active';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_generations_one_staging ON note_semantic_generations(owner_user_id, dataset_id) WHERE state = 'staging';
+CREATE INDEX IF NOT EXISTS idx_note_semantic_note_state_pending ON note_semantic_note_state(owner_user_id, dataset_id, generation_id, state, dirty_generation);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_chunks_note ON note_semantic_chunks(owner_user_id, dataset_id, generation_id, note_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_work_claimable ON note_semantic_work(owner_user_id, dataset_id, claim_state, next_eligible_at, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_work_note_coalesce ON note_semantic_work(owner_user_id, dataset_id, kind, note_id) WHERE note_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_work_generation_coalesce ON note_semantic_work(owner_user_id, dataset_id, kind, generation_id) WHERE generation_id IS NOT NULL AND kind = 'delete_generation';
+ALTER TABLE note_semantic_index_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_index_configs FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_index_configs_tenant_isolation ON note_semantic_index_configs;
+CREATE POLICY note_semantic_index_configs_tenant_isolation ON note_semantic_index_configs USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_semantic_generations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_generations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_generations_tenant_isolation ON note_semantic_generations;
+CREATE POLICY note_semantic_generations_tenant_isolation ON note_semantic_generations USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_semantic_note_state ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_note_state FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_note_state_tenant_isolation ON note_semantic_note_state;
+CREATE POLICY note_semantic_note_state_tenant_isolation ON note_semantic_note_state USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_semantic_chunks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_chunks FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_chunks_tenant_isolation ON note_semantic_chunks;
+CREATE POLICY note_semantic_chunks_tenant_isolation ON note_semantic_chunks USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+ALTER TABLE note_semantic_work ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_work FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_work_tenant_isolation ON note_semantic_work;
+CREATE POLICY note_semantic_work_tenant_isolation ON note_semantic_work USING (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true)) WITH CHECK (owner_user_id = current_setting('app.current_user_id', true) AND dataset_id = current_setting('app.current_dataset_id', true));
+"""
+
+    _MIGRATION_SQL_V82_TO_V83 = """
+CREATE TABLE note_semantic_obsolete_vectors(
+  id TEXT PRIMARY KEY CHECK(length(trim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL CHECK(length(trim(generation_id)) > 0),
+  vector_id TEXT NOT NULL CHECK(length(trim(vector_id)) > 0),
+  note_id TEXT,
+  source_kind TEXT NOT NULL CHECK(source_kind IN (
+    'unpublished','manifest_replace','tombstone','hard_delete','note_failure'
+  )),
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending','claimed','failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5),
+  next_eligible_at DATETIME NOT NULL,
+  claim_token TEXT,
+  claimed_at DATETIME,
+  error_code TEXT,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id,dataset_id,generation_id,vector_id),
+  CHECK(
+    (claim_state='claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL)
+    OR
+    (claim_state<>'claimed' AND claim_token IS NULL AND claimed_at IS NULL)
+  )
+);
+CREATE INDEX idx_note_semantic_obsolete_vectors_claimable
+  ON note_semantic_obsolete_vectors(
+    owner_user_id,dataset_id,claim_state,next_eligible_at,generation_id,id
+  );
+CREATE INDEX idx_note_semantic_obsolete_vectors_generation
+  ON note_semantic_obsolete_vectors(owner_user_id,dataset_id,generation_id,vector_id);
+"""
+
+    _MIGRATION_SQL_V86_TO_V87_POSTGRES = """
+CREATE TABLE IF NOT EXISTS note_semantic_obsolete_vectors(
+  id TEXT PRIMARY KEY CHECK(char_length(btrim(id)) > 0),
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  generation_id TEXT NOT NULL CHECK(char_length(btrim(generation_id)) > 0),
+  vector_id TEXT NOT NULL CHECK(char_length(btrim(vector_id)) > 0),
+  note_id TEXT,
+  source_kind TEXT NOT NULL CHECK(source_kind IN (
+    'unpublished','manifest_replace','tombstone','hard_delete','note_failure'
+  )),
+  dirty_generation INTEGER CHECK(dirty_generation IS NULL OR dirty_generation >= 1),
+  claim_state TEXT NOT NULL CHECK(claim_state IN ('pending','claimed','failed')),
+  attempt_count INTEGER NOT NULL DEFAULT 0 CHECK(attempt_count >= 0 AND attempt_count <= 5),
+  next_eligible_at TIMESTAMPTZ NOT NULL,
+  claim_token TEXT,
+  claimed_at TIMESTAMPTZ,
+  error_code TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(owner_user_id,dataset_id,generation_id,vector_id),
+  CHECK(
+    (claim_state='claimed' AND claim_token IS NOT NULL AND claimed_at IS NOT NULL)
+    OR
+    (claim_state<>'claimed' AND claim_token IS NULL AND claimed_at IS NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_obsolete_vectors_claimable
+  ON note_semantic_obsolete_vectors(
+    owner_user_id,dataset_id,claim_state,next_eligible_at,generation_id,id
+  );
+CREATE INDEX IF NOT EXISTS idx_note_semantic_obsolete_vectors_generation
+  ON note_semantic_obsolete_vectors(owner_user_id,dataset_id,generation_id,vector_id);
+ALTER TABLE note_semantic_obsolete_vectors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_obsolete_vectors FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_obsolete_vectors_tenant_isolation
+  ON note_semantic_obsolete_vectors;
+CREATE POLICY note_semantic_obsolete_vectors_tenant_isolation
+  ON note_semantic_obsolete_vectors
+  USING (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  )
+  WITH CHECK (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  );
+"""
+
+    _MIGRATION_SQL_V83_TO_V84 = """
+ALTER TABLE note_semantic_index_configs ADD COLUMN model_revision TEXT;
+ALTER TABLE note_semantic_generations ADD COLUMN model_revision TEXT;
+CREATE UNIQUE INDEX idx_note_semantic_generations_root_job
+  ON note_semantic_generations(owner_user_id,dataset_id,root_job_id)
+  WHERE root_job_id IS NOT NULL;
+CREATE TABLE note_semantic_operation_receipts(
+  owner_user_id TEXT NOT NULL CHECK(length(trim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(length(trim(dataset_id)) > 0),
+  key_digest TEXT NOT NULL CHECK(length(key_digest) = 64),
+  action TEXT NOT NULL CHECK(action IN ('enable','cancel')),
+  request_fingerprint TEXT NOT NULL CHECK(length(request_fingerprint) = 64),
+  run_id TEXT,
+  expected_revision INTEGER NOT NULL CHECK(expected_revision >= 0),
+  state TEXT NOT NULL CHECK(state IN ('pending','completed')),
+  response_json TEXT CHECK(response_json IS NULL OR length(response_json) <= 8192),
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id,key_digest)
+);
+CREATE INDEX idx_note_semantic_operation_receipts_scope
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,action,state,updated_at,key_digest
+  );
+CREATE INDEX idx_note_semantic_operation_receipts_expiry
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,expires_at,key_digest
+  );
+"""
+
+    _MIGRATION_SQL_V87_TO_V88_POSTGRES = """
+ALTER TABLE note_semantic_index_configs
+  ADD COLUMN IF NOT EXISTS model_revision TEXT;
+ALTER TABLE note_semantic_generations
+  ADD COLUMN IF NOT EXISTS model_revision TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_note_semantic_generations_root_job
+  ON note_semantic_generations(owner_user_id,dataset_id,root_job_id)
+  WHERE root_job_id IS NOT NULL;
+CREATE TABLE IF NOT EXISTS note_semantic_operation_receipts(
+  owner_user_id TEXT NOT NULL CHECK(char_length(btrim(owner_user_id)) > 0),
+  dataset_id TEXT NOT NULL CHECK(char_length(btrim(dataset_id)) > 0),
+  key_digest TEXT NOT NULL CHECK(char_length(key_digest) = 64),
+  action TEXT NOT NULL CHECK(action IN ('enable','cancel')),
+  request_fingerprint TEXT NOT NULL CHECK(char_length(request_fingerprint) = 64),
+  run_id TEXT,
+  expected_revision INTEGER NOT NULL CHECK(expected_revision >= 0),
+  state TEXT NOT NULL CHECK(state IN ('pending','completed')),
+  response_json TEXT CHECK(response_json IS NULL OR octet_length(response_json) <= 8192),
+  expires_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id,key_digest)
+);
+CREATE INDEX IF NOT EXISTS idx_note_semantic_operation_receipts_scope
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,action,state,updated_at,key_digest
+  );
+CREATE INDEX IF NOT EXISTS idx_note_semantic_operation_receipts_expiry
+  ON note_semantic_operation_receipts(
+    owner_user_id,dataset_id,expires_at,key_digest
+  );
+ALTER TABLE note_semantic_operation_receipts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE note_semantic_operation_receipts FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS note_semantic_operation_receipts_tenant_isolation
+  ON note_semantic_operation_receipts;
+CREATE POLICY note_semantic_operation_receipts_tenant_isolation
+  ON note_semantic_operation_receipts
+  USING (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  )
+  WITH CHECK (
+    owner_user_id=current_setting('app.current_user_id', true)
+    AND dataset_id=current_setting('app.current_dataset_id', true)
+  );
+"""
+
     _NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_SQLITE_TRIGGER_SQL = """
 CREATE TRIGGER note_graph_suggestion_operation_receipts_clear_references
 BEFORE DELETE ON note_graph_suggestion_operation_receipts
@@ -8142,6 +8687,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         backend: DatabaseBackend | None = None,
         config: ConfigParser | None = None,
         owner_user_id: str | None = None,
+        require_existing_sqlite: bool = False,
     ) -> None:
         """
         Initializes the CharactersRAGDB instance.
@@ -8157,6 +8703,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             owner_user_id: Canonical owner supplied by trusted dependency construction,
                            never request metadata. Defaults to the initial client_id
                            for standalone callers that already use it as their owner.
+            require_existing_sqlite: Open file-backed SQLite with ``mode=rw`` so
+                                     construction cannot create a missing database.
 
         Raises:
             ValueError: If `client_id` is empty or None.
@@ -8173,8 +8721,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
 
         if not client_id:
             raise ValueError("Client ID cannot be empty or None.")  # noqa: TRY003
+        if not isinstance(require_existing_sqlite, bool):
+            raise ValueError("require_existing_sqlite must be a boolean.")  # noqa: TRY003
         self.client_id = client_id
         self._owner_user_id = str(client_id if owner_user_id is None else owner_user_id)
+        self._require_existing_sqlite = require_existing_sqlite
         self._local = threading.local()
         self._schema_lock = threading.RLock()
         self._bootstrapped_backend_targets: set[str] = set()
@@ -8220,6 +8771,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         from tldw_Server_API.app.core.DB_Management.chacha.note_link_store import NotesLinkStore
         from tldw_Server_API.app.core.DB_Management.chacha.note_provenance_store import NoteProvenanceStore
+        from tldw_Server_API.app.core.DB_Management.chacha.note_semantic_store import NoteSemanticStore
         from tldw_Server_API.app.core.DB_Management.chacha.note_store import NoteStore
         from tldw_Server_API.app.core.DB_Management.chacha.persona_state_store import (
             PersonaStateStore,
@@ -8245,6 +8797,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self.notes_link_store = NotesLinkStore(self)
         self.note_graph_projection_store = NoteGraphProjectionStore(self)
         self.note_graph_suggestion_store = NoteGraphSuggestionStore(self)
+        self.note_semantic_store = NoteSemanticStore(self)
         self.task_store = TaskStore(self)
         self.keyword_store = KeywordStore(self)
         self.persona_state_store = PersonaStateStore(self)
@@ -8254,6 +8807,10 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self.is_memory_db = False
 
         if self.backend_type == BackendType.SQLITE and not self.is_memory_db:
+            if self._require_existing_sqlite and not self.db_path.is_file():
+                raise CharactersRAGDBError(  # noqa: TRY003
+                    "Existing SQLite database is required."
+                )
             db_parent = self.db_path.parent.resolve(strict=False)
             allowed_roots = self._sqlite_allowed_roots()
             if not any(self._path_is_within(db_parent, root) for root in allowed_roots):
@@ -8318,9 +8875,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._owner_managed_backend = False
                 return candidate, True
 
+        sqlite_path = self.db_path_str
+        if self._require_existing_sqlite and not self.is_memory_db:
+            sqlite_path = f"{self.db_path.as_uri()}?mode=rw"
         fallback_config = DatabaseConfig(
             backend_type=BackendType.SQLITE,
-            sqlite_path=self.db_path_str,
+            sqlite_path=sqlite_path,
         )
         if not self.is_memory_db:
             # Contract: default file-backed SQLite for CharactersRAGDB is intentionally
@@ -8472,6 +9032,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         return transform_sqlite_query_for_postgres(query)
 
     def _open_new_connection(self, backend: DatabaseBackend | None = None) -> RawBackendConnection:
+        _return_dropped_checkouts()
         active_backend = backend or self.backend
         try:
             pool = active_backend.get_pool()
@@ -8658,6 +9219,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             if getattr(state, "borrowed", False):
                 raise CharactersRAGDBError("The borrowed database connection is closed")
             self._release_connection(conn, backend=backend)
+            _disarm_legacy_checkout(state)
             conn = None
             state.conn = None
             state.backend_ref = None
@@ -8667,6 +9229,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             conn = self._open_new_connection(backend)
             state.conn = conn
             state.backend_ref = backend
+            if state is self._local:
+                state.checkout_guard = _LegacyCheckout(conn, backend)
             logger.debug(
                 'Acquired backend connection ({}) for thread {}',
                 backend.backend_type.value,
@@ -8693,6 +9257,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         If a transaction is active and uncommitted on this connection, it attempts a rollback.
         Clears the connection reference from `threading.local` for the current thread.
         """
+        _return_dropped_checkouts()
         state = self._connection_state()
         if state is not self._local:
             state.release()
@@ -8740,6 +9305,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self.db_path_str,
                 )
             else:
+                _disarm_legacy_checkout(self._local)
                 backend.get_pool().return_connection(conn)
                 logger.debug(
                     'Returned backend connection ({}) for thread {}.',
@@ -8766,13 +9332,37 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 except _CHACHA_NONCRITICAL_EXCEPTIONS:
                     pass
 
+    def _discard_legacy_checkout(self) -> None:
+        """Close this thread's legacy PostgreSQL checkout instead of queuing its return."""
+        conn = getattr(self._local, "conn", None) if self._connection_state() is self._local else None
+        if conn is None:
+            self.close_connection()
+            return
+        backend = self._get_pinned_backend() or self._backend
+        self._local.conn = None
+        self._local.backend_ref = None
+        _disarm_legacy_checkout(self._local)
+        backend.get_pool().discard_connection(conn)
+
     def close_all_connections(self) -> None:
         """
         Force-close all backend connections managed by this instance.
 
         Primarily used in tests/shutdown to ensure no background SQLite threads remain.
+        On PostgreSQL the shared content pool is never closed here: every user's
+        handle draws from it, and content-backend shutdown owns it. Other threads'
+        checkouts are left to those threads, which close them on their own exit.
         """
-        self.close_connection()
+        if self.backend_type == BackendType.POSTGRESQL:
+            if self._uses_shared_content_backend:
+                self.close_connection()
+                return
+            # The caller's pool is closed below. putconn hands a checkout to a pool
+            # worker for its reset, and a pool closed first discards that work, leaving
+            # the connection open and unreset, so close this thread's checkout now.
+            self._discard_legacy_checkout()
+        else:
+            self.close_connection()
 
         if (
             self.backend_type == BackendType.SQLITE
@@ -8804,9 +9394,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
                 logger.warning("Error closing all backend connections for {}: {}", self.db_path_str, exc)
 
-        # Reset thread-local reference regardless of backend
-        with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
-            self._local = threading.local()
+        # Reset the thread-local reference, except on PostgreSQL: replacing it would drop every
+        # other thread's slot here, while those threads may be inside libpq on their checkouts.
+        # Each guard stays in its own slot and is finalized on its own thread instead.
+        if self.backend_type != BackendType.POSTGRESQL:
+            with contextlib.suppress(*_CHACHA_NONCRITICAL_EXCEPTIONS):
+                self._local = threading.local()
 
     def backup_database(self, backup_file_path: str) -> bool:
         """
@@ -9249,6 +9842,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             (78, "_migrate_from_v78_to_v79"),
             (79, "_migrate_from_v79_to_v80"),
             (80, "_migrate_from_v80_to_v81"),
+            (81, "_migrate_from_v81_to_v82_sqlite"),
+            (82, "_migrate_from_v82_to_v83_sqlite"),
+            (83, "_migrate_from_v83_to_v84_sqlite"),
         ):
             method = getattr(self, method_name, None)
             if method is not None:
@@ -14908,6 +15504,105 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise
             raise SchemaError(f"Notes graph suggestion v64 SQLite migration failed: {exc}") from exc
 
+    def _migrate_from_v81_to_v82_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add the durable owner/dataset Notes semantic-index authority ledger."""
+        if self._get_db_version(conn) != 81:
+            raise SchemaError("Notes semantic v82 migration requires schema version 81.")  # noqa: TRY003
+        savepoint = "note_semantic_v82_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V81_TO_V82):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version = ? WHERE schema_name = ? AND version = ?",
+                (82, self._SCHEMA_NAME, 81),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 82:
+                raise SchemaError("Notes semantic v82 SQLite version transition failed.")  # noqa: TRY003
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(
+                        "Notes semantic v82 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Notes semantic v82 SQLite migration failed: {exc}") from exc
+
+    def _migrate_from_v82_to_v83_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add crash-durable semantic obsolete-vector cleanup authority."""
+        if self._get_db_version(conn) != 82:
+            raise SchemaError("Notes semantic v83 migration requires schema version 82.")  # noqa: TRY003
+        savepoint = "note_semantic_v83_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V82_TO_V83):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version=? WHERE schema_name=? AND version=?",
+                (83, self._SCHEMA_NAME, 82),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 83:
+                raise SchemaError("Notes semantic v83 SQLite version transition failed.")  # noqa: TRY003
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608 - fixed internal identifier.
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(
+                        "Notes semantic v83 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Notes semantic v83 SQLite migration failed: {exc}") from exc
+
+    def _migrate_from_v83_to_v84_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Add durable semantic operation and resolved-model authority."""
+        if self._get_db_version(conn) != 83:
+            raise SchemaError("Notes semantic v84 migration requires schema version 83.")
+        savepoint = "note_semantic_v84_migration"
+        savepoint_active = False
+        try:
+            conn.execute(f"SAVEPOINT {savepoint}")  # nosec B608
+            savepoint_active = True
+            for statement in split_sql_statements(self._MIGRATION_SQL_V83_TO_V84):
+                conn.execute(statement)
+            cursor = conn.execute(
+                "UPDATE db_schema_version SET version=? WHERE schema_name=? AND version=?",
+                (84, self._SCHEMA_NAME, 83),
+            )
+            if cursor.rowcount != 1 or self._get_db_version(conn) != 84:
+                raise SchemaError("Notes semantic v84 SQLite version transition failed.")
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+            savepoint_active = False
+        except (SchemaError, sqlite3.Error) as exc:
+            if savepoint_active:
+                try:
+                    conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")  # nosec B608
+                    conn.execute(f"RELEASE SAVEPOINT {savepoint}")  # nosec B608
+                except sqlite3.Error as rollback_exc:
+                    raise SchemaError(
+                        "Notes semantic v84 SQLite migration rollback failed: "
+                        f"{rollback_exc}"
+                    ) from exc
+            if isinstance(exc, SchemaError):
+                raise
+            raise SchemaError(f"Notes semantic v84 SQLite migration failed: {exc}") from exc
+
     @staticmethod
     def _notes_moodboard_studio_v61_postgres_checkpoint(_stage: str) -> None:
         """Fault-injection seam after durable PostgreSQL v61 phase commits."""
@@ -18140,6 +18835,42 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if self._get_schema_version_postgres(conn) != 64:
             raise SchemaError("Notes graph suggestion v64 PostgreSQL version verification failed.")  # noqa: TRY003
 
+    def _migrate_from_v85_to_v86_postgres(self, conn: Any) -> None:
+        """Add durable, forced-RLS Notes semantic-index persistence."""
+        if self._get_schema_version_postgres(conn) != 85:
+            raise SchemaError("Notes semantic v86 PostgreSQL migration requires schema version 85.")  # noqa: TRY003
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V85_TO_V86_POSTGRES,
+            conn,
+            expected_version=86,
+        )
+        if self._get_schema_version_postgres(conn) != 86:
+            raise SchemaError("Notes semantic v86 PostgreSQL version verification failed.")  # noqa: TRY003
+
+    def _migrate_from_v86_to_v87_postgres(self, conn: Any) -> None:
+        """Add forced-RLS crash-durable semantic cleanup authority."""
+        if self._get_schema_version_postgres(conn) != 86:
+            raise SchemaError("Notes semantic v87 PostgreSQL migration requires schema version 86.")  # noqa: TRY003
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V86_TO_V87_POSTGRES,
+            conn,
+            expected_version=87,
+        )
+        if self._get_schema_version_postgres(conn) != 87:
+            raise SchemaError("Notes semantic v87 PostgreSQL version verification failed.")  # noqa: TRY003
+
+    def _migrate_from_v87_to_v88_postgres(self, conn: Any) -> None:
+        """Add forced-RLS operation receipts and resolved-model authority."""
+        if self._get_schema_version_postgres(conn) != 87:
+            raise SchemaError("Notes semantic v88 PostgreSQL migration requires schema version 87.")
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V87_TO_V88_POSTGRES,
+            conn,
+            expected_version=88,
+        )
+        if self._get_schema_version_postgres(conn) != 88:
+            raise SchemaError("Notes semantic v88 PostgreSQL version verification failed.")
+
     def _configure_note_graph_suggestion_receipt_delete_trigger_postgres(self, conn: Any) -> None:
         """Clear only receipt IDs before PostgreSQL deletes an expiring receipt."""
         for statement in self._NOTE_GRAPH_SUGGESTION_RECEIPT_DELETE_POSTGRES_TRIGGER_STATEMENTS:
@@ -18547,6 +19278,49 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
         if self._get_db_version(conn) != 78:
             raise SchemaError("Knowledge provenance receipt SQLite migration failed version verification.")
+
+    def _verify_dictionary_schema_postgres(self, conn: Any) -> None:
+        """Validate registered shared catalog ownership without request DDL."""
+        from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import verify_postgres_dictionary_schema
+
+        verify_postgres_dictionary_schema(
+            self.backend, getattr(conn, "_connection", conn),
+            self._normalize_postgres_catalog_expression,
+        )
+
+    def _bridge_legacy_dictionary_v86_postgres(self, conn: Any) -> None:
+        """Complete semantic86 for the verified PR-only dictionary86 layout."""
+        semantic_tables = (
+            "note_semantic_index_configs", "note_semantic_generations", "note_semantic_note_state",
+            "note_semantic_chunks", "note_semantic_work", "note_semantic_obsolete_vectors",
+            "note_semantic_operation_receipts",
+        )
+        if any(self.backend.table_exists(table, connection=conn) for table in semantic_tables):
+            self._ensure_note_semantic_schema_postgres(conn)
+            return
+        self._verify_dictionary_schema_postgres(conn)
+        self._apply_postgres_migration_script(
+            self._MIGRATION_SQL_V85_TO_V86_POSTGRES, conn, expected_version=86,
+        )
+
+    def _migrate_from_v88_to_v89_postgres(self, conn: Any) -> None:
+        """Quarantine unowned legacy dictionaries before publishing forced RLS."""
+        if self._get_schema_version_postgres(conn) != 88:
+            raise SchemaError("Dictionary PostgreSQL owner migration requires schema version 88.")
+        from tldw_Server_API.app.core.DB_Management.backends.pg_rls_policies import build_dictionary_rls_sql
+        from tldw_Server_API.app.core.DB_Management.chacha.dictionary_schema import (
+            postgres_dictionary_schema_statements,
+        )
+
+        for statement in (*postgres_dictionary_schema_statements(), *build_dictionary_rls_sql()):
+            self.backend.execute(statement, connection=conn)
+        self._verify_dictionary_schema_postgres(conn)
+        self.backend.execute(
+            "UPDATE db_schema_version SET version = %s WHERE schema_name = %s AND version = 88",
+            (89, self._SCHEMA_NAME), connection=conn,
+        )
+        if self._get_schema_version_postgres(conn) != 89:
+            raise SchemaError("Dictionary PostgreSQL owner migration failed version verification.")
 
     def _migrate_from_v81_to_v82_postgres(self, conn: Any) -> None:
         """Install permanent local receipts with forced owner RLS before the version bump."""
@@ -19626,6 +20400,25 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if missing:
             raise SchemaError(f"Notes graph suggestion v64 SQLite schema is incomplete: {sorted(missing)}")
 
+    def _ensure_note_semantic_schema_sqlite(self, conn: sqlite3.Connection) -> None:
+        """Verify the schema-version-owned Notes semantic-index relations."""
+        if self._get_db_version(conn) < 82:
+            return
+        required_tables = {
+            "note_semantic_index_configs",
+            "note_semantic_generations",
+            "note_semantic_note_state",
+            "note_semantic_chunks",
+            "note_semantic_work",
+        }
+        if self._get_db_version(conn) >= 83:
+            required_tables.add("note_semantic_obsolete_vectors")
+        if self._get_db_version(conn) >= 84:
+            required_tables.add("note_semantic_operation_receipts")
+        missing = required_tables - self._sqlite_table_names(conn)
+        if missing:
+            raise SchemaError(f"Notes semantic v82 SQLite schema is incomplete: {sorted(missing)}")
+
     def _ensure_note_studio_schema_postgres(self, conn: Any) -> None:
         """Create the legacy sidecar before v63 or verify schema-owned v63 state."""
         if self._get_schema_version_postgres(conn) >= 63:
@@ -19670,6 +20463,27 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         ]
         if missing:
             raise SchemaError(f"Notes graph suggestion v64 PostgreSQL schema is incomplete: {missing}")
+
+    def _ensure_note_semantic_schema_postgres(self, conn: Any) -> None:
+        """Verify the forced-RLS Notes semantic-index relations."""
+        if self._get_schema_version_postgres(conn) < 86:
+            return
+        required_tables = (
+            "note_semantic_index_configs",
+            "note_semantic_generations",
+            "note_semantic_note_state",
+            "note_semantic_chunks",
+            "note_semantic_work",
+        )
+        if self._get_schema_version_postgres(conn) >= 87:
+            required_tables += ("note_semantic_obsolete_vectors",)
+        if self._get_schema_version_postgres(conn) >= 88:
+            required_tables += ("note_semantic_operation_receipts",)
+        missing = [
+            table for table in required_tables if not self.backend.table_exists(table, connection=conn)
+        ]
+        if missing:
+            raise SchemaError(f"Notes semantic v86 PostgreSQL schema is incomplete: {missing}")
 
     def _supports_notes_moodboard_studio_v61(self) -> bool:
         """Return whether this database instance has the v61 product catalog revision."""
@@ -22398,12 +23212,19 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 81 and current_db_version == 80:
                     self._migrate_from_v80_to_v81(conn)
                     current_db_version = self._get_db_version(conn)
+                if target_version >= 66 and current_db_version == 65:
+                    self._migrate_from_v65_to_v66_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
+                if target_version >= 67 and current_db_version == 66:
+                    self._migrate_from_v66_to_v67_sqlite(conn)
+                    current_db_version = self._get_db_version(conn)
 
                 self._ensure_recent_persona_schema_sqlite(conn)
                 self._ensure_recent_voice_command_schema_sqlite(conn)
                 self._ensure_note_folder_schema_sqlite(conn)
                 self._ensure_note_studio_schema_sqlite(conn)
                 self._ensure_note_graph_suggestion_schema_sqlite(conn)
+                self._ensure_note_semantic_schema_sqlite(conn)
                 self._ensure_web_clipper_schema_sqlite(conn)
                 self._ensure_prompt_presets_schema_sqlite(conn)
                 self._ensure_workspace_assistant_defaults_schema_sqlite(conn)
@@ -22423,6 +23244,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._ensure_note_graph_suggestion_schema_sqlite(conn)
                 elif final_version_check >= 60:
                     self._verify_note_task_schema_sqlite(conn)
+                if final_version_check >= 65:
+                    self._ensure_note_semantic_schema_sqlite(conn)
                 # Verify core FTS tables after migrations complete
                 self._verify_required_fts_tables_sqlite(conn)
                 self._ensure_workspace_subresource_schema_sqlite(conn)
@@ -26213,6 +27036,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._verify_note_attachment_schema_postgres(conn, runtime=True)
         self._verify_note_task_schema_postgres(conn, runtime=True)
         self._verify_notes_moodboard_studio_schema_postgres(conn)
+        self._ensure_note_semantic_schema_postgres(conn)
+        if current_version >= 89:
+            self._verify_dictionary_schema_postgres(conn)
         for fts_table, source_table, _ in self._FTS_CONFIG:
             # Required PostgreSQL capability stays lazy and bound before mapping each source.
             register_fts_table: Callable[[str, str], None] = getattr(self.backend, "register_fts_table")  # noqa: B009
@@ -26250,6 +27076,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 raise SchemaError(  # noqa: TRY003
                     f"Database schema version ({current_version}) is newer than supported by code ({target_version})."
                 )
+            if current_version == 86 and target_version >= 89:
+                self._bridge_legacy_dictionary_v86_postgres(conn)
+
             # H1 previously published v68 for history projections, while dev
             # published v68 for owner-scoped character names. Inspect the actual
             # catalog under the migration lock before replaying the missing step.
@@ -26285,7 +27114,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._set_schema_version_postgres(conn, 72)
                 current_version = 72
 
-            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84) and target_version >= 72:
+            if current_version in (71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88) and target_version >= 72:
                 # Completed dev schemas need only the new migrations, avoiding
                 # replay of the earlier schema reconciliation and its DDL.
                 if current_version == 71:
@@ -26331,6 +27160,18 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 if target_version >= 85 and current_version < 85:
                     self._migrate_from_v84_to_v85_postgres(conn)
                     current_version = 85
+                if target_version >= 86 and current_version < 86:
+                    self._migrate_from_v85_to_v86_postgres(conn)
+                    current_version = 86
+                if target_version >= 87 and current_version < 87:
+                    self._migrate_from_v86_to_v87_postgres(conn)
+                    current_version = 87
+                if target_version >= 88 and current_version < 88:
+                    self._migrate_from_v87_to_v88_postgres(conn)
+                    current_version = 88
+                if target_version >= 89 and current_version < 89:
+                    self._migrate_from_v88_to_v89_postgres(conn)
+                    current_version = 89
                 if target_version >= 74:
                     self._repair_conversation_assistant_identity(BackendConnectionWrapper(self, conn, backend, operation_owned=False))
                 self._postgres_schema_is_current(conn)
@@ -26345,6 +27186,8 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                     self._verify_notes_moodboard_studio_schema_postgres(conn)
                 if current_version >= 64:
                     self._ensure_note_graph_suggestion_schema_postgres(conn)
+                if current_version >= 65:
+                    self._ensure_note_semantic_schema_postgres(conn)
 
             if current_version < 36:
                 self._ensure_postgres_workspaces_table_base(conn)
@@ -26603,6 +27446,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             self._ensure_note_folder_schema_postgres(conn)
             self._ensure_note_studio_schema_postgres(conn)
             self._ensure_note_graph_suggestion_schema_postgres(conn)
+            self._ensure_note_semantic_schema_postgres(conn)
             self._ensure_web_clipper_schema_postgres(conn)
             self._ensure_prompt_presets_schema_postgres(conn)
             self._ensure_workspace_subresource_schema_postgres(conn)
@@ -26808,6 +27652,24 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 self._migrate_from_v84_to_v85_postgres(conn)
                 self._runtime_schema_version = 85
                 current_version = 85
+            if target_version >= 86 and current_version < 86:
+                self._migrate_from_v85_to_v86_postgres(conn)
+                self._runtime_schema_version = 86
+                current_version = 86
+            if target_version >= 87 and current_version < 87:
+                self._migrate_from_v86_to_v87_postgres(conn)
+                self._runtime_schema_version = 87
+                current_version = 87
+            if target_version >= 88 and current_version < 88:
+                self._migrate_from_v87_to_v88_postgres(conn)
+                self._runtime_schema_version = 88
+                current_version = 88
+            if target_version >= 89 and current_version < 89:
+                self._migrate_from_v88_to_v89_postgres(conn)
+                self._runtime_schema_version = 89
+                current_version = 89
+
+            self._ensure_note_semantic_schema_postgres(conn)
 
             if current_version < target_version:
                 logger.warning(
@@ -27343,43 +28205,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         )
 
     def _sync_postgres_sequences(self, conn) -> None:
-        """Advance managed PostgreSQL serials without reusing allocated IDs."""
+        """Advance ChaCha-owned serials without reusing tenant-hidden allocations."""
+        from tldw_Server_API.app.core.DB_Management.backends.postgres_sequence_maintenance import (
+            sync_owned_postgres_sequences,
+        )
 
-        backend = self.backend
-
-        for table_name, column_name in self._POSTGRES_SEQUENCE_TABLES:
-            try:
-                # Skip tables that may not exist yet at this schema version
-                try:
-                    if not backend.table_exists(table_name, connection=conn):
-                        continue
-                except _CHACHA_NONCRITICAL_EXCEPTIONS:
-                    continue
-                sequence_rows = backend.execute(
-                    "SELECT ns.nspname AS sequence_schema, seq.relname AS sequence_name "
-                    "FROM pg_class seq JOIN pg_namespace ns ON ns.oid = seq.relnamespace "
-                    "WHERE seq.oid = pg_get_serial_sequence(%s, %s)::regclass",
-                    (table_name, column_name),
-                    connection=conn,
-                ).rows
-                if not sequence_rows:
-                    continue
-                sequence = sequence_rows[0]
-                advance_postgres_serial(
-                    backend,
-                    conn,
-                    table_name=table_name,
-                    column_name=column_name,
-                    sequence_schema=sequence["sequence_schema"],
-                    sequence_name=sequence["sequence_name"],
-                )
-            except BackendDatabaseError as exc:  # noqa: BLE001
-                logger.warning(
-                    "Failed to synchronize PostgreSQL sequence for {}.{}: {}",
-                    table_name,
-                    column_name,
-                    exc,
-                )
+        sync_owned_postgres_sequences(self, conn, self._POSTGRES_SEQUENCE_TABLES)
 
     # --- Internal Helpers ---
     def _get_current_utc_timestamp_iso(self) -> str:
@@ -29055,7 +29886,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         """Read a visible Workspace, optionally locking it in an existing transaction."""
         if for_update and (
             conn is None or not getattr(conn, "in_transaction", False)
-            or (self.backend_type == BackendType.POSTGRESQL and not getattr(self._local, "tx_depth", 0))
+            or (self.backend_type == BackendType.POSTGRESQL and not getattr(self._connection_state(), "tx_depth", 0))
         ):
             raise InputError("Workspace locking reads require a transaction connection.")
         query = "SELECT * FROM workspaces WHERE id = ? AND system_operation_state IS NULL"
@@ -46679,7 +47510,9 @@ for _message_store_method in (
     "append_selected_history_input",
     "append_selected_history_inputs",
     "reuse_selected_history_admission",
+    "validate_history_admission",
     "settle_history_admission",
+    "settle_selected_existing_input",
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "tombstone_unsynced_message_from_sync",
@@ -46999,13 +47832,13 @@ class TransactionContextManager:
         if self.is_outermost_transaction:
             if exc_type:
                 logger.error(
-                    "Transaction (outermost) failed, rolling back on thread {}: {} - {}",
-                    threading.get_ident(), exc_type.__name__, exc_val, exc_info=False) # exc_info=exc_tb if full traceback wanted here
+                    "Transaction (outermost) failed, rolling back on thread {}: {}",
+                    threading.get_ident(), exc_type.__name__)
                 try:
                     self.conn.rollback()
                     logger.debug(f"Rollback successful on thread {threading.get_ident()}.")
                 except sqlite3.Error as rb_err:
-                    logger.critical("Rollback FAILED on thread {}: {}", threading.get_ident(), rb_err, exc_info=True)
+                    logger.critical("Rollback FAILED on thread {}: {}", threading.get_ident(), type(rb_err).__name__)
             else:
                 try:
                     self.conn.commit()
@@ -47013,14 +47846,14 @@ class TransactionContextManager:
                         f"Transaction (outermost) committed successfully on thread {threading.get_ident()}.")
                 except sqlite3.Error as commit_err:
                     logger.error("Commit FAILED on thread {}, attempting rollback: {}",
-                                 threading.get_ident(), commit_err, exc_info=True)
+                                 threading.get_ident(), type(commit_err).__name__)
                     try:
                         self.conn.rollback()
                         logger.debug(f"Rollback after failed commit successful on thread {threading.get_ident()}.")
                     except sqlite3.Error as rb_err_after_commit_fail:
                         logger.critical(
                             "Rollback after failed commit also FAILED on thread {}: {}",
-                            threading.get_ident(), rb_err_after_commit_fail, exc_info=True)
+                            threading.get_ident(), type(rb_err_after_commit_fail).__name__)
                     # Re-raise the commit error so the caller knows the transaction failed.
                     # Encapsulate it if it's not already a DB-specific error from our library.
                     if not isinstance(commit_err, CharactersRAGDBError):

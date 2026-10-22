@@ -4,7 +4,7 @@ import { Upload, Button, message, Card, Alert, Descriptions } from "antd"
 import type { UploadProps } from "antd"
 import { Upload as UploadIcon, FileJson, CheckCircle } from "lucide-react"
 
-import { importBoard } from "@/services/kanban"
+import { useKanbanScope } from "./KanbanScope"
 import type { BoardImportResponse } from "@/types/kanban"
 
 interface ImportPanelProps {
@@ -22,6 +22,8 @@ interface TrelloPreview {
 }
 
 export const ImportPanel = ({ onImported }: ImportPanelProps) => {
+  const { api, isActive } = useKanbanScope()
+  const { importBoard } = api
   const [fileData, setFileData] = useState<Record<string, any> | null>(null)
   const [preview, setPreview] = useState<TrelloPreview | null>(null)
   const [importResult, setImportResult] = useState<BoardImportResponse | null>(null)
@@ -30,11 +32,13 @@ export const ImportPanel = ({ onImported }: ImportPanelProps) => {
   const importMutation = useMutation({
     mutationFn: (data: Record<string, any>) => importBoard(data),
     onSuccess: (result) => {
+      if (!isActive()) return
       message.success("Board imported successfully!")
       setImportResult(result)
       onImported(result.board.id)
     },
     onError: () => {
+      if (!isActive()) return
       message.error("Failed to import board. Please try again.")
     }
   })
@@ -98,8 +102,10 @@ export const ImportPanel = ({ onImported }: ImportPanelProps) => {
 
   const handleFileRead = useCallback(
     (file: File) => {
+      if (!isActive()) return false
       const reader = new FileReader()
       reader.onerror = () => {
+        if (!isActive()) return
         const errorMessage = reader.error?.message
         message.error(
           errorMessage ? `Failed to read file: ${errorMessage}` : "Failed to read file"
@@ -108,6 +114,7 @@ export const ImportPanel = ({ onImported }: ImportPanelProps) => {
         setPreview(null)
       }
       reader.onload = (e) => {
+        if (!isActive()) return
         const content = e.target?.result as string
         try {
           const data = JSON.parse(content)
@@ -129,7 +136,7 @@ export const ImportPanel = ({ onImported }: ImportPanelProps) => {
       reader.readAsText(file)
       return false // Prevent upload
     },
-    [parseFile]
+    [isActive, parseFile]
   )
 
   const uploadProps: UploadProps = {

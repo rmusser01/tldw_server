@@ -374,12 +374,10 @@ describe("manual single-user credential policy", () => {
   })
 
   it("surfaces a persistent sanitize failure after clearing session storage", async () => {
-    const persistent: CredentialStorage = {
-      get: async () => deviceConfig,
-      set: async () => {
-        throw new Error("persistent sanitize unavailable")
-      },
-      remove: async () => undefined
+    const persistent = new MemoryStorage()
+    await persistent.set("tldwConfig", deviceConfig)
+    persistent.set = async () => {
+      throw new Error("persistent sanitize unavailable")
     }
     const session = new MemoryStorage()
     await session.set(MANUAL_SESSION_KEY, { apiKey: "session-secret" })
@@ -393,12 +391,10 @@ describe("manual single-user credential policy", () => {
   it("surfaces session removal failure after sanitizing persistent storage", async () => {
     const persistent = new MemoryStorage()
     await persistent.set("tldwConfig", deviceConfig)
-    const session: CredentialStorage = {
-      get: async () => ({ apiKey: "session-secret" }),
-      set: async () => undefined,
-      remove: async () => {
-        throw new Error("session remove unavailable")
-      }
+    const session = new MemoryStorage()
+    await session.set(MANUAL_SESSION_KEY, { apiKey: "session-secret" })
+    session.remove = async () => {
+      throw new Error("session remove unavailable")
     }
 
     await expect(clearManualCredentials(persistent, session)).rejects.toThrow(

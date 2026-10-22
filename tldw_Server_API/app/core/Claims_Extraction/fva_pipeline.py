@@ -326,6 +326,8 @@ class FVAPipeline:
                         # Keep original verification on timeout
                         final_verification = original_verification
 
+                    except LLMQuotaExceededError:
+                        raise  # the user's limit fails the claim; it does not keep the unchallenged verdict
                     except Exception as e:
                         logger.error(f"Falsification error for claim {claim.id}: {e}")
                         # Keep original verification on error

@@ -913,6 +913,9 @@ type WizardModalContentProps = {
   showSession: () => void
   replaceWithNewDraft: () => QuickIngestSessionRecord
   shouldAttemptPersistedReattach: boolean
+  reviewWasOpened: () => boolean
+  markReviewOpened: () => void
+  releaseReviewOpened: () => void
 }
 
 const WizardModalContent: React.FC<WizardModalContentProps> = ({
@@ -925,6 +928,9 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
   showSession,
   replaceWithNewDraft,
   shouldAttemptPersistedReattach,
+  reviewWasOpened,
+  markReviewOpened,
+  releaseReviewOpened,
 }) => {
   const [operation] = useState(() => quickIngestAuthority.capture())
   const { t } = useTranslation(["option"])
@@ -1805,7 +1811,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     navigationMountedRef.current = true
     return () => { navigationMountedRef.current = false }
   }, [])
-  const navigate = useCallback((route: string) => {
+  const navigate = useCallback((route: string, onFailure?: () => void) => {
     if (!operation.isCurrent()) return
     if (window.location.pathname.endsWith("/sidepanel.html")) {
       setNavigationError(null)
@@ -1818,6 +1824,7 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
           // check also fences a replaced host with the same stored session.
           if (navigationMountedRef.current && operation.isCurrent()) onClose()
         } catch {
+          onFailure?.()
           if (navigationMountedRef.current && operation.isCurrent()) {
             setNavigationError(qi("workspaceOpenFailed", "Could not open the full-page workspace. Try the action again."))
           }
@@ -1825,14 +1832,19 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
       })()
       return
     }
-    navigateInPlace(route)
-    onClose()
+    try {
+      navigateInPlace(route)
+      onClose()
+    } catch (error) {
+      onFailure?.()
+      throw error
+    }
   }, [navigateInPlace, onClose, operation, qi])
   const [reviewError, setReviewError] = useState<string | null>(null)
   const [reviewRetry, setReviewRetry] = useState(0)
   const reviewCreationRef = useRef<ReturnType<typeof createReviewDraftsFromResults> | null>(null)
   useEffect(() => {
-    if (!open || currentStep !== 5 || !presetConfig.reviewBeforeStorage || !results.some(item => item.status === "ok")) return
+    if (!open || currentStep !== 5 || !presetConfig.reviewBeforeStorage || reviewWasOpened() || !results.some(item => item.status === "ok")) return
     if (!reviewCreationRef.current) {
       setReviewError(null)
       const files = new Map<string, File>()
@@ -1852,13 +1864,14 @@ const WizardModalContent: React.FC<WizardModalContentProps> = ({
     // currently open wizard may publish its completion to the UI.
     let cancelled = false
     void reviewCreationRef.current.then(batch => {
-      if (cancelled || !operation.isCurrent() || !batch) return
-      navigate("/content-review?batch=" + encodeURIComponent(batch.batchId))
+      if (cancelled || !operation.isCurrent() || !batch || reviewWasOpened()) return
+      markReviewOpened()
+      navigate("/content-review?batch=" + encodeURIComponent(batch.batchId), releaseReviewOpened)
     }).catch(error => {
       if (!cancelled && operation.isCurrent()) setReviewError(error instanceof Error ? error.message : "Failed to save review drafts.")
     })
     return () => { cancelled = true }
-  }, [currentStep, navigate, onClose, open, operation, presetConfig, queueItems, results, reviewRetry, session.id])
+  }, [currentStep, navigate, onClose, open, operation, presetConfig, queueItems, results, reviewRetry, session.id, reviewWasOpened, markReviewOpened, releaseReviewOpened])
 
   const handleSearchKnowledge = useCallback(
     (mediaIds: number[]) => {
@@ -2063,6 +2076,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
   const authorityKey = useQuickIngestAuthority()
   const {
     session,
+    generation,
     upsertSession,
     markProcessingTracking,
     markInterrupted,
@@ -2073,6 +2087,7 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
     useQuickIngestSessionStore(
       useShallow((store) => ({
         session: store.session,
+        generation: store.generation,
         upsertSession: store.upsertSession,
         markProcessingTracking: store.markProcessingTracking,
         markInterrupted: store.markInterrupted,
@@ -2117,6 +2132,19 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
     }
   }, [authorityKey, session])
   const boundSessionId = session?.id
+  const reviewHandoffKey = JSON.stringify([authorityKey, boundSessionId, generation])
+  // Keep the receipt outside the provider's openRevision remount.
+  const publishedReviewRef = useRef<string | null>(null)
+  const reviewWasOpened = useCallback(
+    () => publishedReviewRef.current === reviewHandoffKey,
+    [reviewHandoffKey]
+  )
+  const markReviewOpened = useCallback(() => {
+    publishedReviewRef.current = reviewHandoffKey
+  }, [reviewHandoffKey])
+  const releaseReviewOpened = useCallback(() => {
+    if (publishedReviewRef.current === reviewHandoffKey) publishedReviewRef.current = null
+  }, [reviewHandoffKey])
   const sessionRef = useRef(session)
   const lastPersistedSignatureRef = useRef<{
     sessionId: string
@@ -2188,6 +2216,9 @@ export const QuickIngestWizardModal: React.FC<QuickIngestWizardModalProps> = ({
         markInterrupted={markInterrupted}
         showSession={showSession}
         replaceWithNewDraft={createNewDraft ?? replaceWithNewDraft}
+        reviewWasOpened={reviewWasOpened}
+        markReviewOpened={markReviewOpened}
+        releaseReviewOpened={releaseReviewOpened}
         shouldAttemptPersistedReattach={
           session.lifecycle === "processing" &&
           session.tracking?.mode === "webui-direct" &&

@@ -486,6 +486,7 @@ async def test_acp_stage_adapter_registers_created_session_and_records_prompt(mo
             "content": "Workflow reply",
             "usage": {"prompt_tokens": 2, "completion_tokens": 4, "total_tokens": 6},
         },
+        assistant_text=None,
     )
 
 
@@ -1637,7 +1638,7 @@ async def test_character_chat_adapter_message_uses_current_core_writer(monkeypat
     offloaded: list[Any] = []
 
     async def fake_to_thread(func: Any, /, *args: Any, **kwargs: Any) -> Any:
-        offloaded.append(func)
+        offloaded.append(getattr(func, "__wrapped__", func))  # each call runs in its own ChaCha operation
         return func(*args, **kwargs)
 
     monkeypatch.setattr(
