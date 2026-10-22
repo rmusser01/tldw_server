@@ -17,7 +17,8 @@ const {
   notificationErrorMock,
   notificationSuccessMock,
   notificationInfoMock,
-  toBase64Mock
+  toBase64Mock,
+  runtime
 } = vi.hoisted(() => ({
   useChatSettingsMock: vi.fn(),
   useStorageMock: vi.fn(),
@@ -30,7 +31,8 @@ const {
   notificationErrorMock: vi.fn(),
   notificationSuccessMock: vi.fn(),
   notificationInfoMock: vi.fn(),
-  toBase64Mock: vi.fn()
+  toBase64Mock: vi.fn(),
+  runtime: { extension: false }
 }))
 
 vi.mock("react-i18next", () => ({
@@ -72,6 +74,11 @@ vi.mock("@/hooks/useAntdNotification", () => ({
 
 vi.mock("@/libs/to-base64", () => ({
   toBase64: toBase64Mock
+}))
+
+vi.mock("@/utils/browser-runtime", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/utils/browser-runtime")>()),
+  isExtensionRuntime: () => runtime.extension
 }))
 
 vi.mock("../DiscoSkillsSettings", () => ({
@@ -419,6 +426,7 @@ describe("ChatSettings side panel pinned composer (XS-09)", () => {
   let sidepanelSticky: boolean | undefined
 
   beforeEach(() => {
+    runtime.extension = true
     sidepanelSticky = undefined
     setSidepanelSticky.mockReset()
     useChatSettingsMock.mockReturnValue(buildChatSettingsState())
@@ -443,6 +451,17 @@ describe("ChatSettings side panel pinned composer (XS-09)", () => {
         name: "generalSettings.settings.stickyChatInput.label"
       })
     ).not.toBeChecked()
+  })
+
+  it("leaves the side panel switch out of the web app, which has no side panel", () => {
+    runtime.extension = false
+    render(<ChatSettings />)
+    expect(screen.queryByRole("switch", { name: SIDEPANEL_LABEL })).toBeNull()
+    expect(
+      screen.getByRole("switch", {
+        name: "generalSettings.settings.stickyChatInput.label"
+      })
+    ).toBeInTheDocument()
   })
 
   it("turns side panel pinning off with one click", () => {

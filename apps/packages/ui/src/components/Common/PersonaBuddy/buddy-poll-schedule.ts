@@ -4,7 +4,8 @@
  * The host is mounted on every page, so a fixed 5 s poll kept two requests
  * going forever, even in background tabs. Instead:
  *  - a hidden page is not polled, and re-reads as soon as it is shown again;
- *  - each read that finds nothing new doubles the wait, up to once a minute;
+ *  - each read that finds nothing new, or fails the same way again, doubles
+ *    the wait, up to once a minute;
  *  - any change, or the page being shown again, returns to the 5 s cadence.
  *
  * Waits are counted in ticks of a fixed interval so the schedule is simple to
@@ -27,8 +28,9 @@ const isPageVisible = (): boolean =>
 
 export type BuddyPoll = {
   /**
-   * Report what a successful read saw. A read that matches the previous one
-   * slows the poll down; a different one speeds it back up.
+   * Report what a read saw: a successful read's `buddyReadSignature`, or a
+   * failed read's `buddyFailureSignature`. A read that matches the previous
+   * one slows the poll down; a different one speeds it back up.
    */
   settle: (signature: string) => void
   stop: () => void
@@ -36,7 +38,7 @@ export type BuddyPoll = {
 
 /**
  * Calls `read` now (when the page is visible) and then on the schedule above.
- * The caller reports each successful read through `settle`.
+ * The caller reports each read, successful or failed, through `settle`.
  */
 export const startBuddyPoll = (read: () => void): BuddyPoll => {
   let unchangedReads = 0
@@ -108,3 +110,7 @@ export const buddyReadSignature = (read: {
     ]),
     read.conversations
   ])
+
+/** The fingerprint of a failed read, so the same failure backs off too. */
+export const buddyFailureSignature = (message: string): string =>
+  `error:${message}`
