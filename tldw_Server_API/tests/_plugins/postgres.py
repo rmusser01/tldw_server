@@ -419,8 +419,46 @@ def pg_restricted_backend(pg_database_config):
         admin.get_pool().close_all()
         admin = DatabaseBackendFactory.create_backend(pg_database_config)
         try:
-            with admin.transaction() as conn:
-                conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
-                conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+            _drop_restricted_role(admin, role)
         finally:
             admin.get_pool().close_all()
+
+
+_RESTRICTED_ROLE_LOCK_TIMEOUT = "10s"
+
+
+def _drop_restricted_role(admin, role: str) -> None:
+    """Drop the role, failing fast and naming its sessions when one still holds a lock.
+
+    A session the test leaked in a transaction keeps its locks, and ``DROP OWNED BY``
+    would wait for them until pytest-timeout ends the whole run.
+    """
+    from psycopg import errors, sql
+
+    drop = (
+        sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)),
+        sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)),
+    )
+    try:
+        with admin.transaction() as conn:
+            conn.execute(sql.SQL("SET LOCAL lock_timeout = {}").format(sql.Literal(_RESTRICTED_ROLE_LOCK_TIMEOUT)))
+            for statement in drop:
+                conn.execute(statement)
+        return
+    except errors.LockNotAvailable:
+        pass
+    with admin.transaction() as conn:
+        sessions = conn.execute(
+            "SELECT pid, state, left(query, 120) AS query FROM pg_stat_activity WHERE usename = %s",
+            (role,),
+        ).fetchall()
+        conn.execute(
+            "SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity WHERE usename = %s",
+            (role,),
+        )
+    with admin.transaction() as conn:
+        for statement in drop:
+            conn.execute(statement)
+    raise AssertionError(
+        f"The test left {len(sessions)} session(s) of {role} holding locks (a leaked checkout?): {sessions}"
+    )
