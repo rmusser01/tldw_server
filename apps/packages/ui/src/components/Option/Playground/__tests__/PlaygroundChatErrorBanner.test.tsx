@@ -440,4 +440,51 @@ describe("PlaygroundChatErrorBanner", () => {
 
     expect(result.current.visibleError?.summary).toBe("Provider failed")
   })
+  it("CC-N2: hides the composer banner while the error reply is on screen, and shows it once it scrolls away", async () => {
+    const observers: Array<{ callback: IntersectionObserverCallback; element?: Element }> = []
+    class FakeIntersectionObserver {
+      constructor(readonly callback: IntersectionObserverCallback) {
+        observers.push(this as unknown as { callback: IntersectionObserverCallback })
+      }
+      observe(element: Element) {
+        ;(this as unknown as { element: Element }).element = element
+      }
+      disconnect() {}
+      unobserve() {}
+      takeRecords() {
+        return []
+      }
+    }
+    vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver)
+    const bubble = document.createElement("div")
+    bubble.setAttribute("data-chat-error-bubble", "")
+    document.body.append(bubble)
+    try {
+      const { result } = renderHook(() =>
+        usePlaygroundChatErrorBanner([
+          { id: "assistant-error", isBot: true, message: encodeError("Couldn't reach Ollama (gemma3:1b)") }
+        ])
+      )
+      const observer = observers.at(-1)!
+      expect(observer.element).toBe(bubble)
+      act(() => observer.callback([{ isIntersecting: true } as IntersectionObserverEntry], observer as never))
+      expect(result.current.latestError?.summary).toBe("Couldn't reach Ollama (gemma3:1b)")
+      expect(result.current.visibleError).toBeNull()
+
+      act(() => observer.callback([{ isIntersecting: false } as IntersectionObserverEntry], observer as never))
+      expect(result.current.visibleError?.summary).toBe("Couldn't reach Ollama (gemma3:1b)")
+    } finally {
+      bubble.remove()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it("CC-N2: shows the composer banner when no error reply is rendered", () => {
+    const { result } = renderHook(() =>
+      usePlaygroundChatErrorBanner([
+        { id: "assistant-error", isBot: true, message: encodeError("Generation failed") }
+      ])
+    )
+    expect(result.current.visibleError?.summary).toBe("Generation failed")
+  })
 })

@@ -265,14 +265,17 @@ describe("Playground conversation reset (#3106)", { timeout: 60_000 }, () => {
       await waitFor(() => expect(sendButton()).toBeDisabled(), HARNESS_WAIT)
       await view.user.click(view.composer)
       await view.user.type(view.composer, "Abandoned restore question")
+      // With text typed, the loading history (not an empty draft) holds Send back.
+      expect(sendButton()).toBeDisabled()
       await view.user.keyboard("{Enter}")
       expect(view.composer).toHaveValue("Abandoned restore question")
 
       await clickHeaderNewChat(view)
-      await waitFor(() => expect(sendButton()).toBeEnabled(), HARNESS_WAIT)
       // New chat addresses its own empty draft, independently of the pending restore.
       await waitFor(() => expect(view.composer).toHaveValue(""), HARNESS_WAIT)
       await view.user.type(view.composer, "Unrelated question")
+      // Send is disabled only while there is nothing to send (CC-02).
+      await waitFor(() => expect(sendButton()).toBeEnabled(), HARNESS_WAIT)
     } finally {
       capture.resolve()
     }

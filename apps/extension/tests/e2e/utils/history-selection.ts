@@ -216,9 +216,9 @@ export async function readStore(page: Page, store: string) {
 export const historyUrl = (base: string, id = 'h1-source') => `${base}?historySelection=${encodeURIComponent(JSON.stringify({ profile_id: 'h1-profile', client_session_id: 'fixture-origin', owner_key: 'local-history-v1:h1-profile', conversation_id: id, owner_kind: 'local' }))}`
 
 export async function review(page: Page) {
-  await expect(page.getByRole('button', { name: 'Review conversation history', exact: true })).toBeVisible({ timeout: 20000 })
-  await page.getByRole('button', { name: 'Review conversation history', exact: true }).click()
-  await expect(page.getByRole('list', { name: 'Complete source messages' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Choose what the AI remembers', exact: true })).toBeVisible({ timeout: 20000 })
+  await page.getByRole('button', { name: 'Choose what the AI remembers', exact: true }).click()
+  await expect(page.getByRole('list', { name: 'Messages in this chat' })).toBeVisible()
   await page.screenshot({ path: test.info().outputPath('selected-history-review.png') })
 }
 
@@ -291,10 +291,13 @@ export async function legacyBoundaries(page: Page) {
   await page.reload()
   expect((await readStore(page, 'historySelections')).some(row => row.client_session_id !== 'fixture-origin' && row.view.cursor.kind === 'before_message' && row.view.cursor.message_id === 'h1-user')).toBe(true)
   await expect(page.getByText('H1 original question', { exact: true })).toHaveCount(0)
-  await page.getByRole('button', { name: 'Use no prior messages', exact: true }).click()
+  // Starting fresh lives inside the review (CC-04); the earlier messages stay readable.
+  await review(page)
+  await page.getByRole('button', { name: 'Start fresh: the AI sees no earlier messages', exact: true }).click()
   await expect.poll(async () => (await readStore(page, 'historySelections')).some(row => row.client_session_id !== 'fixture-origin' && row.view.cursor.kind === 'empty')).toBe(true)
   await page.reload()
-  await expect(page.getByRole('button', { name: 'Use no prior messages', exact: true })).toBeVisible()
+  await expect(page.getByRole('status', { name: /^AI sees 0 of \d+ messages$/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Restore all', exact: true })).toBeVisible()
   expect((await readStore(page, 'historySelections')).some(row => row.client_session_id !== 'fixture-origin' && row.view.cursor.kind === 'empty')).toBe(true)
   expect((await readStore(page, 'messages')).length).toBe(3)
 }
@@ -349,7 +352,7 @@ export async function abortLocalFork(page: Page) {
 export async function largeLegacyReview(page: Page, fullTip = false, bubble = false) {
   await review(page)
   await expect(page.getByText('Complete source / included path: 20001 / 20001', { exact: true })).toBeVisible()
-  const list = page.getByRole('list', { name: 'Complete source messages' })
+  const list = page.getByRole('list', { name: 'Messages in this chat' })
   expect(await list.getByRole('listitem').count()).toBeLessThan(30)
   await list.evaluate(element => { element.scrollTop = element.scrollHeight })
   await expect(page.locator('[data-history-message-id="legacy-20000"]')).toBeVisible()

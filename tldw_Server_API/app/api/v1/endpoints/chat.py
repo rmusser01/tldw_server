@@ -1032,6 +1032,29 @@ def _provider_credential_http_exception(exc: BaseException) -> HTTPException:
     return _provider_credential_http_exception_for_code(code)
 
 
+def _with_history_admission(
+    error: HTTPException, admission: dict[str, Any] | None
+) -> HTTPException:
+    """Name the question a server-settled turn saved before it failed (CC-02).
+
+    A native completion admits (saves) the user's question before the provider
+    is called. When the request then fails, the error carries the same
+    ``tldw_history_admission_v1`` the stream's first frame would, so the client
+    can keep the saved question in view and retry it without saving it again.
+    Errors raised before admission are returned unchanged.
+    """
+    if admission is None:
+        return error
+    detail = error.detail
+    body: dict[str, Any] = (
+        dict(detail)
+        if isinstance(detail, dict)
+        else {"message": detail if isinstance(detail, str) else "Request failed."}
+    )
+    body["tldw_history_admission_v1"] = admission
+    return HTTPException(status_code=error.status_code, detail=body, headers=error.headers)
+
+
 def _provider_credential_http_exception_for_code(code: str) -> HTTPException:
     """Build a bounded downstream-provider response for an allow-listed code."""
     if code not in _PROVIDER_CREDENTIAL_MESSAGES:
@@ -4492,6 +4515,8 @@ async def create_chat_completion(
             persona_budget_tokens_used = int(_PERSONA_EXEMPLAR_DEFAULT_BUDGET)
             persona_budget_auto_adjusted = False
             persona_budget_adjustment_reason: str | None = None
+            # Set once a server-settled turn has saved its question (CC-02).
+            history_admission: dict[str, Any] | None = None
 
             try:
                 # In TEST_MODE or when explicitly enabled via config/env, allow
@@ -5969,15 +5994,20 @@ async def create_chat_completion(
             # Important: preserve HTTPException status codes raised from deeper layers
             # before a broad Exception handler can catch and normalize them.
             except ProviderCredentialTerminalError as credential_error:
-                raise_detached_error(
-                    _provider_credential_http_exception_for_code(credential_error.code)
-                )
+                raise_detached_error(_with_history_admission(
+                    _provider_credential_http_exception_for_code(credential_error.code),
+                    history_admission,
+                ))
 
             except ByokResolutionError as credential_error:
-                raise_detached_error(_provider_credential_http_exception(credential_error))
+                raise_detached_error(_with_history_admission(
+                    _provider_credential_http_exception(credential_error), history_admission
+                ))
 
             except (ChatAuthenticationError, ChatConfigurationError) as provider_error:
-                raise_detached_error(_provider_credential_http_exception(provider_error))
+                raise_detached_error(_with_history_admission(
+                    _provider_credential_http_exception(provider_error), history_admission
+                ))
 
             except HTTPException as e_http:
                 # Log with request context
@@ -6011,6 +6041,8 @@ async def create_chat_completion(
                 }
                 if e_http.status_code in allowed_statuses:
                     # Re-raise expected/intentional HTTP errors
+                    if history_admission is not None:
+                        raise _with_history_admission(e_http, history_admission) from e_http
                     raise
                 # For unexpected HTTP statuses (e.g., from mocked upstream), coerce to 500
                 raise HTTPException(
@@ -6073,9 +6105,10 @@ async def create_chat_completion(
                         "ChatModuleException missing user_message: {}",
                         repr(e_chat),
                     )
-                raise_detached_error(
-                    HTTPException(status_code=http_status, detail=safe_detail)
-                )
+                raise_detached_error(_with_history_admission(
+                    HTTPException(status_code=http_status, detail=safe_detail),
+                    history_admission,
+                ))
 
             except MandatoryAuditWriteError:
                 raise_detached_error(
@@ -6232,9 +6265,10 @@ async def create_chat_completion(
                         client_detail = "An unexpected internal server error occurred."
                     else:
                         client_detail = "An internal server error occurred."
-                raise_detached_error(
-                    HTTPException(status_code=err_status, detail=client_detail)
-                )
+                raise_detached_error(_with_history_admission(
+                    HTTPException(status_code=err_status, detail=client_detail),
+                    history_admission,
+                ))
 
         finally:
             try:

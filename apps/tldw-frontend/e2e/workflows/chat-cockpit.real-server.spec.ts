@@ -3379,7 +3379,7 @@ test.describe('/chat cockpit real-server parity', () => {
         .filter(row => row.conversation_id === originalChatId).flatMap(row => Object.values(row.pending_turns ?? {}));
       const stoppedInput = originalRecoveries.find(turn => turn.input_text === prompt);
       expect(stoppedInput).toBeDefined();
-      await expect(page.getByText('The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.', { exact: true })).toBeVisible();
+      await expect(page.getByText('The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Choose what the AI remembers. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.', { exact: true })).toBeVisible();
       const automaticTurnAttempts: string[] = [];
       const observeAutomaticTurn = (hit: Request) => {
         if (hit.method() !== 'POST') return;
@@ -3395,8 +3395,8 @@ test.describe('/chat cockpit real-server parity', () => {
           .filter(row => row.conversation_id === originalChatId).flatMap(row => Object.values(row.pending_turns ?? {}))
           .find(turn => turn.operation_id === stoppedInput!.operation_id);
         expect(coldRecovery).toEqual(stoppedInput);
-        await page.getByRole('button', { name: 'Review conversation history', exact: true }).click();
-        const savedSource = page.getByRole('list', { name: 'Complete source messages', exact: true });
+        await page.getByRole('button', { name: 'Choose what the AI remembers', exact: true }).click();
+        const savedSource = page.getByRole('list', { name: 'Messages in this chat', exact: true });
         await expect(savedSource).toBeVisible();
         const continueAfterSaved = savedSource.locator('[data-history-message-id]').last()
           .getByRole('button', { name: 'Continue after this message', exact: true });
@@ -3455,7 +3455,7 @@ test('refreshes a real empty native source after late settlement without replay 
   const refresh = page.getByRole('button', { name: 'Refresh history', exact: true });
   await expect(refresh).toBeVisible();
   await expect(page.getByText("Save status unconfirmed", { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Review conversation history', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Choose what the AI remembers', exact: true })).toHaveCount(0);
   const attempts: string[] = [];
   const observe = (hit: Request) => { const path = new URL(hit.url()).pathname; if (hit.method() === 'POST' && (path.endsWith('/messages') || path.endsWith('/completions') || path.endsWith('/complete-v2'))) attempts.push(path); };
   page.on('request', observe);
@@ -3470,10 +3470,10 @@ test('refreshes a real empty native source after late settlement without replay 
     const current = await (await refreshed).json();
     expect(current.snapshot.nodes).toHaveLength(2);
     expect(current.view.cursor).toEqual({ kind: 'empty' });
-    await expect(page.getByRole("button", { name: "Review conversation history", exact: true })).toBeFocused();
+    await expect(page.getByRole("button", { name: "Choose what the AI remembers", exact: true })).toBeFocused();
     await expect(page.getByText("Save status unconfirmed", { exact: true }).first()).toBeVisible();
-    await page.getByRole('button', { name: 'Review conversation history', exact: true }).click();
-    await expect(page.getByRole('list', { name: 'Complete source messages', exact: true }).locator('[data-history-message-id]')).toHaveCount(2);
+    await page.getByRole('button', { name: 'Choose what the AI remembers', exact: true }).click();
+    await expect(page.getByRole('list', { name: 'Messages in this chat', exact: true }).locator('[data-history-message-id]')).toHaveCount(2);
     const records = ((await readStore(page, 'historySelections')) as HistoryBookmark[]).filter(row => row.conversation_id === id);
     expect(records.flatMap(row => Object.values(row.pending_turns ?? {})).find(turn => turn.operation_id === recovery.operation_id)).toEqual(recovery);
     expect(attempts).toEqual([]);

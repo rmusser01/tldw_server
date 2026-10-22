@@ -19,18 +19,18 @@ vi.mock("react-i18next", () => ({
 const t = (_key: string, fallback: string) => fallback
 
 describe("side panel primary action while a reply is pending (XS-10)", () => {
-  it("keeps the Send label and offers Stop before the first token arrives", () => {
+  it("says Send next and offers Stop before the first token arrives", () => {
     const action = resolveSidepanelPrimaryAction({
       isSending: true,
       isConnectionReady: true,
       sendTitle: "Send",
       t
     })
-    expect(action.label).toBe("Send")
+    expect(action.label).toBe("Send next")
     expect(action.showStop).toBe(true)
     expect(action.queuesAfterReply).toBe(true)
-    expect(action.ariaLabel).toBe("Send after this reply")
-    expect(action.title).toBe("Sends your message after the current reply finishes.")
+    expect(action.ariaLabel).toBe("Send next, after the current reply")
+    expect(action.title).toBe("Send this message after the current reply finishes.")
   })
 
   it("sends normally and hides Stop when nothing is pending", () => {

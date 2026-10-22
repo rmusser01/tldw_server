@@ -164,6 +164,7 @@ const ErrorBubble: React.FC<{
     <div
       role="alert"
       aria-live="assertive"
+      data-chat-error-bubble=""
       className="rounded-md border border-danger/30 bg-danger/10 p-3 text-sm text-danger">
       <p className="font-semibold">{payload.summary}</p>
       {payload.hint && (
@@ -2470,6 +2471,8 @@ const PlaygroundMessageImpl = (props: Props) => {
               isSearchingInternet={props.isSearchingInternet}
               isEmbedding={props.isEmbedding}
               actionInfo={props.actionInfo}
+              modelName={resolvedModelName}
+              waitingForReply={!props.message?.replace(/▋/g, "").trim()}
             />
           )}
           {showUsageMetadata && (
@@ -3046,10 +3049,15 @@ const PlaygroundMessageImpl = (props: Props) => {
                     : t("playground:errorRecovery.interruptedLabel", "Interrupted")}
                 </span>
                 {stoppedGeneration
-                  ? t(
-                      "playground:errorRecovery.stoppedSummary",
-                      "You stopped this reply. What it wrote so far is kept."
-                    )
+                  ? hasVisibleAssistantResponseContent
+                    ? t(
+                        "playground:errorRecovery.stoppedSummary",
+                        "You stopped this reply. What it wrote so far is kept."
+                      )
+                    : t(
+                        "playground:errorRecovery.stoppedBeforeReplySummary",
+                        "You stopped this reply before it started."
+                      )
                   : t(
                       "playground:errorRecovery.interruptedSummary",
                       "Generation was interrupted. Any text received is kept."

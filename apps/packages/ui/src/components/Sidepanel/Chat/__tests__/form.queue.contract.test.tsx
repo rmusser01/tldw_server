@@ -68,9 +68,10 @@ describe("sidepanel queued request contract", () => {
     )
   })
 
-  it("keeps Send labelled Send and offers Stop for the whole pending request (XS-10)", () => {
-    // The primary action comes from the shared resolver, which never relabels
-    // Send as "Queue" and shows Stop from the moment a request is pending.
+  it("labels the busy Send 'Send next', never 'Queue', and offers Stop for the whole pending request (XS-10, CM-02)", () => {
+    // The primary action comes from the shared resolver, which says "Send
+    // next" as the full page does and shows Stop from the moment a request is
+    // pending.
     expect(sidepanelFormSource).toContain("resolveSidepanelPrimaryAction({")
     expect(sidepanelFormSource).not.toContain('t("common:queue", "Queue")')
     expect(sidepanelFormSource).not.toContain(

@@ -7,6 +7,7 @@ import type {
   HistorySelectionV1
 } from "@/types/history-selection"
 import type {
+  HistoryTurnFailure,
   HistoryTurnOutcome,
   Message as StoredMessage
 } from "@/db/dexie/types"
@@ -72,6 +73,16 @@ export interface HistorySendTurn {
       createdAt: number
       outcome?: HistoryTurnOutcome
       interruptionReason?: string
+      /** The server answered with an error before any reply arrived (CC-02). */
+      failure?: HistoryTurnFailure
+      /** Why a turn left for review got no reply, when known (CM-06). */
+      cause?: HistoryTurnFailure
+      /**
+       * The user stopped the turn before its owner confirmed the question
+       * (CM-02): there is nothing to recover, and the text goes back to the
+       * composer.
+       */
+      cancelled?: boolean
     },
     error: unknown
   ) => Promise<void>

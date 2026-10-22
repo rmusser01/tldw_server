@@ -5,8 +5,9 @@ import { useTranslation } from "react-i18next"
  * Side panel composer state while a reply is pending or streaming (XS-10).
  *
  * Stop is offered for the whole request, including the wait before the first
- * token, and the primary button keeps its "Send" label. While a reply is in
- * progress, pressing Send queues the message to go out after that reply.
+ * token. While a reply is in progress the primary button reads "Send next"
+ * and queues the message to go out after that reply, in the same words as the
+ * full-page composer (CM-02).
  */
 
 type Translate = (key: string, fallback: string, options?: Record<string, unknown>) => string
@@ -49,16 +50,18 @@ export const resolveSidepanelPrimaryAction = ({
         )
       : queuesAfterReply
         ? t(
-            "sidepanel:composer.sendAfterReplyTitle",
-            "Sends your message after the current reply finishes."
+            "playground:composer.queue.sendNextTitle",
+            "Send this message after the current reply finishes."
           )
         : sendTitle)
   return {
     showStop: isSending,
     queuesAfterReply,
-    label: t("common:send", "Send"),
+    label: queuesAfterReply
+      ? t("playground:composer.queue.sendNext", "Send next")
+      : t("common:send", "Send"),
     ariaLabel: queuesAfterReply
-      ? t("sidepanel:composer.sendAfterReplyAria", "Send after this reply")
+      ? t("playground:composer.queue.sendNextAria", "Send next, after the current reply")
       : t("playground:composer.submitAria", "Send message"),
     title
   }

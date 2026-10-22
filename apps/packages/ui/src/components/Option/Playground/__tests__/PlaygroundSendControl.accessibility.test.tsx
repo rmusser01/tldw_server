@@ -60,6 +60,36 @@ describe("unavailable delivery", () => {
   it("shows a disabled Send instead of offering an offline queue", () => {
     render(<PlaygroundSendControl {...baseProps} isConnectionReady={false} />)
     expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled()
-    expect(screen.queryByRole("button", { name: "Queue request" })).not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: /send next/i })).not.toBeInTheDocument()
+  })
+})
+
+describe("while a reply is being written (CM-02)", () => {
+  it("labels Stop in words and offers to send the next message after the reply", () => {
+    const onStopStreaming = vi.fn()
+    render(<PlaygroundSendControl {...baseProps} isSending onStopStreaming={onStopStreaming} />)
+
+    // The real locale names it "Stop Streaming"; this test's t() echoes the key.
+    const stop = screen.getByRole("button", { name: /stop/i })
+    expect(stop).toHaveTextContent(/^Stop$/)
+    stop.click()
+    expect(onStopStreaming).toHaveBeenCalledTimes(1)
+
+    const next = screen.getByRole("button", { name: "Send next, after the current reply" })
+    expect(next).toHaveTextContent("Send next")
+    expect(next).toHaveAttribute("title", "Send this message after the current reply finishes.")
+    expect(screen.queryByText(/^queue$/i)).not.toBeInTheDocument()
+  })
+})
+
+describe("an empty composer (CC-02)", () => {
+  it("disables Send and says why until there is something to send", () => {
+    const { rerender } = render(<PlaygroundSendControl {...baseProps} hasDraftContent={false} />)
+    const send = screen.getByRole("button", { name: "Send message" })
+    expect(send).toBeDisabled()
+    expect(send).toHaveAttribute("title", "Type a message to send.")
+
+    rerender(<PlaygroundSendControl {...baseProps} hasDraftContent />)
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled()
   })
 })

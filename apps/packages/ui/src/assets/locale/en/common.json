@@ -419,7 +419,13 @@
     "imageBackendUnavailableHint": "Enable an image backend (e.g., Flux-Klein or ZTurbo) in your tldw server config, then try again.",
     "showDetails": "Show technical details",
     "hideDetails": "Hide technical details",
-    "createFolder": "Failed to create folder"
+    "createFolder": "Failed to create folder",
+    "providerUnavailableSummary": "Couldn't reach {{provider}} ({{model}})",
+    "providerUnavailableModelSummary": "Couldn't reach the provider for {{model}}",
+    "providerUnavailableGenericSummary": "Couldn't reach the model's provider",
+    "providerUnavailableHint": "The tldw server is fine, but this model's provider didn't respond. Start the provider or switch models.",
+    "switchModel": "Switch model",
+    "chatStartupTimeoutModelSummary": "No response from {{model}} after {{wait}}."
   },
   "folders": "Folders",
   "folderView": "Folder view",
@@ -900,5 +906,18 @@
     "scope": "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat.",
     "unsupported": "This reply can't be continued here. Your original exchange and draft are kept. To keep going, use New Branch on this reply or send a follow-up message.",
     "failed": "We could not confirm the continued reply. Your original exchange and draft are kept. Reload this chat and check for the saved reply before trying again."
+  },
+  "actionInfo": {
+    "webSearch": "Searching the web...",
+    "ragSearch": "Searching knowledge base...",
+    "embedding": "Processing context...",
+    "generating": "Generating response...",
+    "processing": "Processing...",
+    "thinking": "Thinking...",
+    "started": "{{label}} started",
+    "complete": "Response complete",
+    "waitingFor": "Waiting for {{model}}...",
+    "stillWaitingFor": "Still waiting for {{model}} ({{seconds}} seconds).",
+    "stillGenerating": "Still writing the reply ({{seconds}} seconds)."
   }
 }

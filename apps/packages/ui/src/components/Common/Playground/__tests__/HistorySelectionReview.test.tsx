@@ -45,10 +45,13 @@ vi.mock("react-i18next", async () => {
         const translated = key
           .split(".")
           .reduce((node: any, part) => node?.[part], locale)
-        return (
+        const template =
           translated ??
           (typeof value === "string" ? value : value?.defaultValue || key)
-        )
+        return typeof value === "object" && value
+          ? String(template).replace(/\{\{\s*(\w+)\s*\}\}/g, (_match: string, token: string) =>
+              String(value[token] ?? ""))
+          : template
       }
     })
   }
@@ -86,13 +89,13 @@ describe("history review", () => {
     const selection = controller()
     render(<HistorySelectionReview selection={selection} />)
     fireEvent.click(
-      screen.getByRole("button", { name: "Review conversation history" })
+      screen.getByRole("button", { name: "Choose what the AI remembers" })
     )
     const checkbox = screen.getByRole("checkbox", {
       name: /Include.*Message 0/
     })
     fireEvent.click(checkbox)
-    expect(screen.getByText("Omitted alternative")).toBeTruthy()
+    expect(screen.getByText("Hidden from the AI")).toBeTruthy()
     fireEvent.click(
       screen.getByRole("button", { name: "Before first included message" })
     )
@@ -112,7 +115,7 @@ describe("history review", () => {
       <HistorySelectionReview selection={selection} />
     )
     const trigger = screen.getByRole("button", {
-      name: "Review conversation history"
+      name: "Choose what the AI remembers"
     })
     fireEvent.click(trigger)
     fireEvent.click(
@@ -155,14 +158,14 @@ describe("history review", () => {
     } as unknown as HistorySelectionController
     const { rerender } = render(<HistorySelectionReview selection={first} />)
     fireEvent.click(
-      screen.getByRole("button", { name: "Review conversation history" })
+      screen.getByRole("button", { name: "Choose what the AI remembers" })
     )
     rerender(<HistorySelectionReview selection={second} />)
     expect(
       screen.queryByRole("button", { name: "Confirm selected history" })
     ).toBeNull()
     fireEvent.click(
-      screen.getByRole("button", { name: "Review conversation history" })
+      screen.getByRole("button", { name: "Choose what the AI remembers" })
     )
     fireEvent.click(
       screen.getByRole("button", { name: "Confirm selected history" })
@@ -178,7 +181,7 @@ it("reorders included history by keyboard without changing virtual row identity"
   const selection = controller()
   render(<HistorySelectionReview selection={selection} />)
   fireEvent.click(
-    screen.getByRole("button", { name: "Review conversation history" })
+    screen.getByRole("button", { name: "Choose what the AI remembers" })
   )
   const first = screen.getAllByRole("listitem")[0]
   expect(first).toHaveAttribute("data-history-message-id", "m0")
@@ -267,6 +270,91 @@ it("shows confirmed native refusal with exact input, Copy and Dismiss without un
   expect(
     screen.queryByRole("button", { name: /resend|retry|settle/i })
   ).toBeNull()
+})
+
+it("CC-02 / CM-06: names why a send got no reply and offers Switch model and Edit and send again", async () => {
+  const events: Array<{ type: string; detail: unknown }> = []
+  const record = (event: Event) =>
+    events.push({ type: event.type, detail: (event as CustomEvent).detail })
+  window.addEventListener("tldw:open-model-settings", record)
+  window.addEventListener("tldw:set-composer-message", record)
+  try {
+    const selection = {
+      ...controller(),
+      status: "ready",
+      recoveries: [
+        {
+          scope: { profile_id: "p", client_session_id: "old" },
+          turn: {
+            operation_id: "timed-out",
+            persistence: "server",
+            state: "unknown",
+            input_text: "slow question",
+            result_text: "",
+            failure: { model: "gemma3:1b", timeout_ms: 120_000 }
+          }
+        }
+      ],
+      dismissRecovery: vi.fn(async () => true)
+    } as unknown as HistorySelectionController
+    render(<HistorySelectionReview selection={selection} />)
+    fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+    const card = screen.getByText("No response from gemma3:1b after 2:00.").closest("[role='alert']") as HTMLElement
+    expect(card).toBeTruthy()
+    expect(within(card).getByText(/Your message may have reached the server/)).toBeVisible()
+    expect(within(card).queryByText("Turn needs review")).toBeNull()
+
+    fireEvent.click(within(card).getByRole("button", { name: "Switch model" }))
+    expect(events.map((event) => event.type)).toEqual(["tldw:open-model-settings"])
+
+    await act(async () => {
+      fireEvent.click(within(card).getByRole("button", { name: "Edit and send again" }))
+    })
+    expect(selection.dismissRecovery).toHaveBeenCalledWith(selection.recoveries[0], expect.any(Function))
+    await waitFor(() =>
+      expect(events.at(-1)).toEqual({
+        type: "tldw:set-composer-message",
+        detail: { message: "slow question" }
+      })
+    )
+  } finally {
+    window.removeEventListener("tldw:open-model-settings", record)
+    window.removeEventListener("tldw:set-composer-message", record)
+  }
+})
+
+it("CC-02: a kept failure whose question is saved names the cause without offering to send the question again", () => {
+  const selection = {
+    ...controller(),
+    status: "ready",
+    recoveries: [
+      {
+        scope: { profile_id: "p", client_session_id: "old" },
+        turn: {
+          operation_id: "kept-failure",
+          state: "accepted_unsent",
+          outcome: "interrupted",
+          input_text: "saved question",
+          result_text: "",
+          failure: {
+            status: 502,
+            code: "provider_unavailable",
+            message: "The chat service provider is currently unavailable.",
+            provider: "ollama",
+            model: "gemma3:1b"
+          }
+        }
+      }
+    ],
+    dismissRecovery: vi.fn(async () => true)
+  } as unknown as HistorySelectionController
+  render(<HistorySelectionReview selection={selection} />)
+  fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
+  const card = screen.getByText("Couldn't reach Ollama (gemma3:1b)").closest("[role='alert']") as HTMLElement
+  expect(within(card).getByText("Your question is saved, but no reply was.")).toBeVisible()
+  expect(within(card).queryByText(/part of the reply that arrived/)).toBeNull()
+  expect(within(card).getByRole("button", { name: "Switch model" })).toBeTruthy()
+  expect(within(card).queryByRole("button", { name: "Edit and send again" })).toBeNull()
 })
 
 const recoveryController = (
@@ -423,24 +511,94 @@ describe("available history-path actions (TASK-13550)", () => {
       screen.queryByRole("button", { name: "Use no prior messages" })
     ).toBeNull()
     expect(
-      screen.queryByRole("button", { name: "Review conversation history" })
+      screen.queryByRole("button", { name: "Choose what the AI remembers" })
     ).toBeNull()
   })
 
-  it("retains the empty-path action for a ready nonempty source", () => {
+  it("CC-04: offers no one-click empty path and keeps a single turn free of history controls", () => {
+    const question = { ...nodes[0], id: "q1", parent_id: null }
+    const answer = { ...nodes[1], id: "a1", parent_id: "q1" }
     const selection = {
       ...controller(),
       status: "ready",
-      capture: { snapshot: { nodes: [nodes[0]], source_digest: "one" } }
+      capture: { snapshot: { nodes: [question, answer], source_digest: "one" } }
     } as unknown as HistorySelectionController
     render(<HistorySelectionReview selection={selection} />)
     expect(
-      screen.getByRole("button", { name: "Review conversation history" })
-    ).toBeInTheDocument()
-    fireEvent.click(
-      screen.getByRole("button", { name: "Use no prior messages" })
-    )
+      screen.queryByRole("button", { name: "Choose what the AI remembers" })
+    ).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Use no prior messages" })
+    ).toBeNull()
+  })
+
+  const readyLinear = (cursor: { kind: "empty" } | { kind: "after_message"; message_id: string }) => {
+    const turns = [
+      { id: "a1", revision: "1", role: "assistant", parent_id: "u1", settled: true, preview: "First answer" },
+      { id: "u1", revision: "1", role: "user", parent_id: null, settled: true, preview: "First **bold** question" },
+      { id: "u2", revision: "1", role: "user", parent_id: "a1", settled: true, preview: "Second question" },
+      { id: "a2", revision: "1", role: "assistant", parent_id: "u2", settled: true, preview: "Second answer" }
+    ]
+    const view = {
+      view_session_id: "view", owner_key: "owner", conversation_id: "chat",
+      interpretation: { kind: "parent_graph_v1" }, cursor, selection_revision: 1
+    }
+    const order = ["u1", "a1", "u2", "a2"]
+    const rows = cursor.kind === "empty"
+      ? []
+      : order.slice(0, order.indexOf(cursor.message_id) + 1).map((id) => turns.find((row) => row.id === id))
+    return {
+      ...controller(),
+      status: "ready",
+      view,
+      choose: vi.fn(async () => true),
+      capture: {
+        status: "captured", view, rows, purpose: "send", storage_context_digest: "storage", selected_content: [],
+        snapshot: {
+          version: 1, owner_key: "owner", conversation_id: "chat", nodes: turns, source_digest: "linear",
+          fences: { conversation: "1", history: "1", settings: "1" }, storage_context_digest: "storage",
+          interpretation_status: { kind: "parent_graph_v1" }
+        }
+      }
+    } as unknown as HistorySelectionController
+  }
+
+  it("CC-04: lists two turns in conversation order as plain text and starts fresh only from the review", () => {
+    const selection = readyLinear({ kind: "after_message", message_id: "a2" })
+    render(<HistorySelectionReview selection={selection} />)
+    expect(screen.queryByRole("button", { name: "Use no prior messages" })).toBeNull()
+    expect(screen.queryByRole("status", { name: /AI sees/ })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Choose what the AI remembers" }))
+    const rows = screen.getAllByRole("listitem").map((row) => row.textContent ?? "")
+    expect(rows[0]).toContain("You · First bold question")
+    expect(rows[1]).toContain("Assistant · First answer")
+    expect(rows[0]).toContain("AI sees this as message 1")
+    expect(screen.getByText("4 of 4 messages included")).toBeInTheDocument()
+    expect(screen.queryByText(/Path position|saved interpretation|Complete source/)).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "Start fresh: the AI sees no earlier messages" }))
     expect(selection.choose).toHaveBeenCalledWith({ kind: "empty" })
+  })
+
+  it("CC-04: keeps earlier messages readable after starting fresh and restores them in one step", () => {
+    const selection = readyLinear({ kind: "empty" })
+    render(<HistorySelectionReview selection={selection} />)
+    const earlier = screen.getByRole("list", { name: "Earlier messages, hidden from the AI" })
+    expect(within(earlier).getAllByRole("listitem").map((row) => row.textContent)).toEqual([
+      "You · First bold question",
+      "Assistant · First answer",
+      "You · Second question",
+      "Assistant · Second answer"
+    ])
+    const coverage = screen.getByRole("status", { name: "AI sees 0 of 4 messages" })
+    fireEvent.click(within(coverage).getByRole("button", { name: "Restore all" }))
+    expect(selection.choose).toHaveBeenCalledWith({ kind: "after_message", message_id: "a2" })
+  })
+
+  it("CC-04: says how much the AI sees for a partial choice without listing later messages", () => {
+    const selection = readyLinear({ kind: "after_message", message_id: "a1" })
+    render(<HistorySelectionReview selection={selection} />)
+    expect(screen.getByRole("status", { name: "AI sees 2 of 4 messages" })).toBeInTheDocument()
+    expect(screen.queryByRole("list", { name: "Earlier messages, hidden from the AI" })).toBeNull()
   })
 
   it("retains expansion and recovery when there is no history to omit", () => {
@@ -1780,8 +1938,8 @@ it("explains explicit saved-history review before continuing an uncertain native
   const originalView = selection.view
   render(<HistorySelectionReview selection={selection} />)
   fireEvent.click(screen.getByText(/Retained outcomes \(1\)/))
-  expect(screen.getByText("The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Review conversation history. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.")).toBeVisible()
-  expect(screen.getByRole("button", { name: "Review conversation history", exact: true })).toBeVisible()
+  expect(screen.getByText("The server may have saved a reply. Text that arrived is retained here. Reload this chat and open Choose what the AI remembers. Choose a saved message to continue after before trying again. Recovered requests are never sent automatically.")).toBeVisible()
+  expect(screen.getByRole("button", { name: "Choose what the AI remembers", exact: true })).toBeVisible()
   expect(selection.view).toBe(originalView)
   expect(selection.choose).not.toHaveBeenCalled()
 })

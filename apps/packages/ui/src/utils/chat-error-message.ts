@@ -3,6 +3,13 @@ import { formatErrorMessage } from "@/utils/format-error-message"
 import { parseBillingLimitError } from "@/utils/billing-error"
 import { sanitizeServerErrorMessage } from "@/utils/server-error-message"
 import { ChatStreamTimeoutError } from "@/services/tldw/chat-timeouts"
+import type { HistoryTurnFailure } from "@/db/dexie/types"
+import {
+  findHttpFailure,
+  isProviderUnavailableFailure,
+  providerDisplayLabel,
+  sendFailureError
+} from "@/utils/chat-send-failure"
 
 export const TLDW_ERROR_BUBBLE_PREFIX = "__tldw_error__:"
 
@@ -88,20 +95,57 @@ const findModelUnavailableError = (error: unknown): unknown => {
   return undefined
 }
 
-export const buildFriendlyErrorMessage = (rawError: unknown): string => {
+/** The provider and model a failed send went to, for its message. */
+export type ChatErrorTarget = Pick<HistoryTurnFailure, "provider" | "model">
+
+const interpolateErrorText = (
+  key: string,
+  fallback: string,
+  values: Record<string, string | number>
+): string => {
+  const translated = i18n.t(key, { defaultValue: fallback, ...values })
+  const template =
+    typeof translated === "string" && translated.trim().length > 0 && translated !== key
+      ? translated
+      : fallback
+  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, token: string) =>
+    token in values ? String(values[token]) : match
+  )
+}
+
+const timeoutWaitText = (timeoutMs: number) => {
+  const seconds = Math.max(1, Math.round(timeoutMs / 1_000))
+  return seconds < 60
+    ? `${seconds}s`
+    : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+}
+
+export const buildFriendlyErrorMessage = (
+  rawError: unknown,
+  target: ChatErrorTarget = {}
+): string => {
   let detail = formatErrorMessage(rawError, "Request failed")
   const lower = detail.toLowerCase()
   // Ordinary chat wraps the direct transport error in Error.cause. Preserve
   // its model-selection guidance without changing unrelated error handling.
   const modelUnavailable = findModelUnavailableError(rawError)
+  const http = findHttpFailure(rawError)
+  const providerLabel = providerDisplayLabel(target.provider)
+  const model = target.model?.trim()
 
   if (rawError instanceof ChatStreamTimeoutError) {
     const startup = rawError.phase === "startup"
     return encodeChatErrorPayload({
-      summary: translateErrorText(
-        startup ? "common:error.chatStartupTimeoutSummary" : "common:error.chatIdleTimeoutSummary",
-        startup ? "The model did not start responding in time." : "The response stopped progressing."
-      ),
+      summary: startup && model
+        ? interpolateErrorText(
+            "common:error.chatStartupTimeoutModelSummary",
+            "No response from {{model}} after {{wait}}.",
+            { model, wait: timeoutWaitText(rawError.timeoutMs) }
+          )
+        : translateErrorText(
+            startup ? "common:error.chatStartupTimeoutSummary" : "common:error.chatIdleTimeoutSummary",
+            startup ? "The model did not start responding in time." : "The response stopped progressing."
+          ),
       hint: translateErrorText(
         startup ? "common:error.chatStartupTimeoutHint" : "common:error.chatIdleTimeoutHint",
         startup
@@ -307,12 +351,43 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
       upgradeUrl: billingInfo?.upgradeUrl || "/billing/plans",
       category: billingInfo?.category,
     })
+  } else if (isProviderUnavailableFailure({ ...http, message: http.message ?? detail })) {
+    // CC-N2: the tldw server answered; the model's provider did not.
+    summary =
+      providerLabel && model
+        ? interpolateErrorText(
+            "common:error.providerUnavailableSummary",
+            "Couldn't reach {{provider}} ({{model}})",
+            { provider: providerLabel, model }
+          )
+        : model
+          ? interpolateErrorText(
+              "common:error.providerUnavailableModelSummary",
+              "Couldn't reach the provider for {{model}}",
+              { model }
+            )
+          : translateErrorText(
+              "common:error.providerUnavailableGenericSummary",
+              "Couldn't reach the model's provider"
+            )
+    hint = translateErrorText(
+      "common:error.providerUnavailableHint",
+      "The tldw server is fine, but this model's provider didn't respond. Start the provider or switch models."
+    )
+    detail = [
+      http.message ?? detail,
+      [http.status ? `HTTP ${http.status}` : null, http.code].filter(Boolean).join(", ")
+    ]
+      .filter(Boolean)
+      .join(" · ")
+    recoveryAction = "open-model-selector"
+    recoveryLabel = translateErrorText("common:error.switchModel", "Switch model")
   } else {
-    summary = i18n.t(
+    summary = translateErrorText(
       "common:error.friendlyGenericSummary",
       "Something went wrong while talking to your tldw server."
     )
-    hint = i18n.t(
+    hint = translateErrorText(
       "common:error.friendlyGenericHint",
       "Try again in a moment, or open Health & diagnostics to inspect server health."
     )
@@ -329,10 +404,18 @@ export const buildFriendlyErrorMessage = (rawError: unknown): string => {
 
 export const buildAssistantErrorContent = (
   botMessage: string | undefined,
-  rawError: unknown
+  rawError: unknown,
+  target?: ChatErrorTarget
 ): string => {
   if (botMessage && String(botMessage).trim().length > 0) {
     return String(botMessage)
   }
-  return buildFriendlyErrorMessage(rawError)
+  return buildFriendlyErrorMessage(rawError, target)
 }
+
+/** The error message for a send failure kept with a retained turn (CC-02). */
+export const buildSendFailureContent = (failure: HistoryTurnFailure): string =>
+  buildFriendlyErrorMessage(sendFailureError(failure), {
+    provider: failure.provider,
+    model: failure.model
+  })

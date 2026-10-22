@@ -12,6 +12,10 @@
  *   reply stays in the retained record on this device and only the question
  *   is followed. Saving partial replies on the server belongs to the
  *   resumable-generation design (D7).
+ * - a reply that never started because the user stopped it, or because the
+ *   server answered with an error (CM-02, CC-02, #3107), is kept the same way:
+ *   the question is followed and the record is shown after it as a stopped
+ *   reply or an error reply with Retry, instead of waiting in review.
  *
  * It only uses the controller's public API and the owner write that a normal
  * turn uses, so ownership and lease checks stay where they are.
@@ -31,6 +35,7 @@ import type {
 } from "@/db/dexie/types"
 import type { Message } from "@/store/option"
 import { settleAcceptedAssistant } from "@/services/chat-history-selection"
+import { buildSendFailureContent } from "@/utils/chat-error-message"
 import { beginServerChatWrite } from "@/store/server-chat-save-status"
 import type { HistoryViewSelectionV1 } from "@/types/history-selection"
 
@@ -112,14 +117,21 @@ export const interruptionGenerationInfo = (
   }
 }
 
-/** A client-only reply bubble for a partial server reply kept on this device. */
+/**
+ * A client-only reply bubble for a reply kept on this device: a partial
+ * server reply, a reply stopped before it started, or the error the server
+ * answered with (shown as an error reply with Retry and Switch model).
+ */
 export const retainedReplyMessage = (turn: HistoryTurnRecovery): Message => ({
   isBot: true,
   role: "assistant",
   id: turn.assistant_id,
   name: turn.model_name || "Assistant",
   modelName: turn.model_name,
-  message: turn.result_text,
+  message:
+    turn.result_text.trim() || !turn.failure
+      ? turn.result_text
+      : buildSendFailureContent(turn.failure),
   sources: [],
   createdAt: turn.created_at,
   parentMessageId: turn.admission?.input_message_id ?? turn.input_id ?? null,
@@ -129,17 +141,32 @@ export const retainedReplyMessage = (turn: HistoryTurnRecovery): Message => ({
   )
 })
 
-/** Kept outcomes that remain as a retained record after keeping. */
+/**
+ * Kept outcomes that remain as a retained record after keeping, shown as a
+ * client-only reply after their question:
+ * - a partial reply of a server chat, which the server does not hold;
+ * - a reply the user stopped before it started, or one the server refused
+ *   with an error (CM-02, CC-02). A server-settled turn qualifies once the
+ *   server confirmed its question.
+ */
 export const isRetainedPartialReply = (
   turn: HistoryTurnRecovery,
   ownerKind: "local" | "native" | undefined
-) =>
-  ownerKind === 'native' &&
-  turn.persistence !== 'server' &&
-  Boolean(turn.outcome) &&
-  turn.outcome !== "complete" &&
-  !turn.settled_message_id &&
-  turn.result_text.trim().length > 0
+) => {
+  if (
+    !ownerKind ||
+    !turn.outcome ||
+    turn.outcome === "complete" ||
+    turn.settled_message_id
+  )
+    return false
+  const partial = turn.result_text.trim().length > 0
+  const settled = turn.outcome === "stopped" || Boolean(turn.failure)
+  if (turn.persistence === "server")
+    return ownerKind === "native" && Boolean(turn.admission) && settled
+  // A local chat stores a partial reply with its marker instead.
+  return ownerKind === "native" ? partial || settled : !partial && settled
+}
 
 const sameBoundary = (
   current: HistoryViewSelectionV1 | null,
@@ -203,13 +230,13 @@ const keep = async (
   if (!fresh?.turn.outcome || !fresh.turn.admission) return skipped('gone');
   if (fresh.turn.action !== undefined) return skipped('explicit_action_requires_review');
   const turn = fresh.turn;
-  if (turn.persistence === 'server' && !turn.settled_message_id)
+  const retained = isRetainedPartialReply(turn, owner.kind);
+  if (turn.persistence === 'server' && !turn.settled_message_id && !retained)
     return skipped('server_outcome_unknown');
   const admission = turn.admission!;
   const native = owner.kind === 'native';
   const content = turn.result_text;
   let resultId = admission.input_message_id;
-  const retained = isRetainedPartialReply(turn, owner.kind);
   if (turn.settled_message_id) {
     resultId = turn.settled_message_id
   } else if (content.trim() && !retained) {
@@ -239,9 +266,11 @@ const keep = async (
     resultId = turn.assistant_id
   }
   if (retained) {
-    // The server holds the question but not this reply (CS-04): the chat is
-    // not fully saved there, whatever the last acknowledged write was.
-    beginServerChatWrite(owner.conversation_id)('failed');
+    // The server holds the question but not this partial reply (CS-04): the
+    // chat is not fully saved there, whatever the last acknowledged write
+    // was. A reply that never started leaves nothing unsaved.
+    if (native && turn.persistence !== 'server' && content.trim())
+      beginServerChatWrite(owner.conversation_id)('failed');
   } else if (turn.persistence !== 'server') {
     await dismissHistoryTurnRecovery(
       fresh.scope,
@@ -261,7 +290,7 @@ const keep = async (
     })
   }
 
-  if (turn.persistence === 'server') {
+  if (turn.persistence === 'server' && !retained) {
     if (!followed) return skipped('saved_reply_requires_open');
     await dismissHistoryTurnRecovery(fresh.scope, view, turn.operation_id, 'completed');
   }

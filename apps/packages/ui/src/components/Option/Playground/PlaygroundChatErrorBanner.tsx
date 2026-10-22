@@ -106,6 +106,58 @@ export const getLatestChatErrorBannerEntry = (
   return null
 }
 
+/** The error reply rendered in the transcript (Message ErrorBubble). */
+export const CHAT_ERROR_BUBBLE_SELECTOR = "[data-chat-error-bubble]"
+
+/**
+ * Whether the transcript's latest error reply is on screen (CC-N2). Its own
+ * Retry and Switch model actions are then right there, so the composer banner
+ * would only repeat the same error; the banner returns once it scrolls away.
+ * Without IntersectionObserver, a rendered error reply counts as visible.
+ */
+export const useChatErrorBubbleInView = (errorKey: string | null) => {
+  const [inView, setInView] = React.useState(false)
+  React.useEffect(() => {
+    if (!errorKey || typeof document === "undefined") {
+      setInView(false)
+      return
+    }
+    let observed: Element | null = null
+    let observer: IntersectionObserver | null = null
+    const attach = () => {
+      const bubbles = document.querySelectorAll(CHAT_ERROR_BUBBLE_SELECTOR)
+      const bubble = bubbles[bubbles.length - 1] ?? null
+      if (bubble === observed) return
+      observer?.disconnect()
+      observer = null
+      observed = bubble
+      if (!bubble) {
+        setInView(false)
+        return
+      }
+      if (typeof IntersectionObserver === "undefined") {
+        setInView(true)
+        return
+      }
+      observer = new IntersectionObserver((entries) => {
+        const entry = entries[entries.length - 1]
+        if (entry) setInView(entry.isIntersecting)
+      })
+      observer.observe(bubble)
+    }
+    attach()
+    // The reply may render after the banner, or be replaced (virtualized lists).
+    const mutations =
+      typeof MutationObserver === "undefined" ? null : new MutationObserver(attach)
+    mutations?.observe(document.body, { childList: true, subtree: true })
+    return () => {
+      mutations?.disconnect()
+      observer?.disconnect()
+    }
+  }, [errorKey])
+  return inView
+}
+
 export const usePlaygroundChatErrorBanner = (
   messages: readonly ChatErrorMessageCandidate[]
 ) => {
@@ -114,6 +166,7 @@ export const usePlaygroundChatErrorBanner = (
     () => (scanSignature ? getLatestChatErrorBannerEntry(messages) : null),
     [messages, scanSignature]
   )
+  const bubbleInView = useChatErrorBubbleInView(latestError?.key ?? null)
   const latestErrorRef = React.useRef<PlaygroundChatErrorBannerEntry | null>(
     latestError
   )
@@ -152,7 +205,9 @@ export const usePlaygroundChatErrorBanner = (
   return {
     latestError,
     visibleError:
-      latestError && latestError.key !== dismissedErrorKey ? latestError : null,
+      latestError && latestError.key !== dismissedErrorKey && !bubbleInView
+        ? latestError
+        : null,
     dismissError,
     dismissAfterSuccessfulSubmit
   }

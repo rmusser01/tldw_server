@@ -4,7 +4,20 @@ import { Globe, Cpu, Database, Sparkles, Loader2 } from "lucide-react"
 
 type Props = {
   action: string
+  /** Shown instead of the action label while the reply has not started. */
+  waitingFor?: string | null
+  /** Time since the response started, shown after the label. */
+  elapsedMs?: number
 }
+
+/** Elapsed wait as m:ss, e.g. 0:12 or 2:05 (CM-06). */
+export const formatElapsedWait = (elapsedMs: number) => {
+  const seconds = Math.max(0, Math.floor(elapsedMs / 1_000))
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
+}
+
+/** When a long wait is announced to screen readers (CM-06). */
+export const WAIT_ANNOUNCEMENT_MS = [10_000, 30_000] as const
 
 // Screen reader only announcement component
 const SrAnnouncement: React.FC<{ message: string }> = ({ message }) => (
@@ -28,25 +41,37 @@ const actionConfig: Record<string, { icon: React.ElementType; labelKey: string; 
   thinking: { icon: Sparkles, labelKey: "actionInfo.thinking", defaultLabel: "Thinking..." },
 }
 
-export const ActionInfo = ({ action }: Props) => {
+export const ActionInfo = ({ action, waitingFor, elapsedMs }: Props) => {
   const { t } = useTranslation("common")
 
   const config = actionConfig[action]
   const IconComponent = config?.icon || Loader2
-  const label = config
-    ? t(config.labelKey, config.defaultLabel)
-    : t(`actionInfo.${action}`, action)
+  const label = waitingFor
+    ? t("actionInfo.waitingFor", "Waiting for {{model}}...", { model: waitingFor })
+    : config
+      ? t(config.labelKey, config.defaultLabel)
+      : t(`actionInfo.${action}`, action)
 
+  // Screen readers hear the start and long waits from LoadingStatus; this
+  // pill is not a live region, so its ticking timer is never read out.
   return (
     <div
       className="inline-flex items-center gap-2 px-3 py-2 rounded-full bg-primary/10 border border-primary/30"
-      role="status"
-      aria-live="polite"
+      data-testid="chat-loading-status"
     >
       <IconComponent className="size-4 text-primary animate-pulse" />
       <span className="text-sm font-medium text-primary shimmer-text">
         {label}
       </span>
+      {elapsedMs !== undefined && elapsedMs >= 1_000 && (
+        <span
+          aria-hidden="true"
+          data-testid="chat-loading-elapsed"
+          className="text-xs font-medium tabular-nums text-primary/80"
+        >
+          {formatElapsedWait(elapsedMs)}
+        </span>
+      )}
     </div>
   )
 }
@@ -58,6 +83,10 @@ type LoadingStatusProps = {
   isSearchingInternet?: boolean
   isEmbedding?: boolean
   actionInfo?: string | null
+  /** The model (or character) the reply comes from. */
+  modelName?: string | null
+  /** No part of the reply has arrived yet. */
+  waitingForReply?: boolean
 }
 
 export const LoadingStatus = ({
@@ -65,14 +94,16 @@ export const LoadingStatus = ({
   isStreaming,
   isSearchingInternet,
   isEmbedding,
-  actionInfo
+  actionInfo,
+  modelName,
+  waitingForReply
 }: LoadingStatusProps) => {
   const { t } = useTranslation("common")
   const [completionAnnouncement, setCompletionAnnouncement] = React.useState<string | null>(null)
   const [liveAnnouncement, setLiveAnnouncement] = React.useState<string | null>(null)
+  const [elapsedMs, setElapsedMs] = React.useState(0)
   const wasActiveRef = React.useRef(false)
   const previousActionRef = React.useRef<string | null>(null)
-  const progressCheckpointRef = React.useRef(0)
 
   // Determine the current action based on state
   let currentAction: string | null = null
@@ -94,7 +125,6 @@ export const LoadingStatus = ({
   React.useEffect(() => {
     if (!currentAction) {
       setLiveAnnouncement(null)
-      progressCheckpointRef.current = 0
       previousActionRef.current = null
       return
     }
@@ -111,29 +141,44 @@ export const LoadingStatus = ({
     setLiveAnnouncement(startedLabel)
   }, [currentAction, t])
 
+  // A visible elapsed time, and plain-language announcements at about 10 s
+  // and 30 s instead of a numbered checkpoint every 5 s (CM-06).
+  const waitingForRef = React.useRef<string | null>(null)
+  const model = modelName?.trim() || null
+  waitingForRef.current = waitingForReply ? model : null
+  const translateRef = React.useRef(t)
+  translateRef.current = t
   React.useEffect(() => {
-    if (!isStreaming || !isActive) {
-      progressCheckpointRef.current = 0
-      return
-    }
-
+    setElapsedMs(0)
+    if (!isStreaming || !isActive) return
+    const startedAt = Date.now()
+    let announced = 0
     const timer = window.setInterval(() => {
-      progressCheckpointRef.current += 1
+      const elapsed = Date.now() - startedAt
+      setElapsedMs(elapsed)
+      if (announced >= WAIT_ANNOUNCEMENT_MS.length || elapsed < WAIT_ANNOUNCEMENT_MS[announced])
+        return
+      while (announced < WAIT_ANNOUNCEMENT_MS.length && elapsed >= WAIT_ANNOUNCEMENT_MS[announced])
+        announced += 1
+      const waitingFor = waitingForRef.current
+      const seconds = Math.round(WAIT_ANNOUNCEMENT_MS[announced - 1] / 1_000)
+      const t = translateRef.current
       setLiveAnnouncement(
-        t(
-          "actionInfo.progressCheckpoint",
-          "Still generating response (checkpoint {{count}}).",
-          {
-            count: progressCheckpointRef.current
-          }
-        )
+        waitingFor
+          ? t("actionInfo.stillWaitingFor", "Still waiting for {{model}} ({{seconds}} seconds).", {
+              model: waitingFor,
+              seconds
+            })
+          : t("actionInfo.stillGenerating", "Still writing the reply ({{seconds}} seconds).", {
+              seconds
+            })
       )
-    }, 5000)
+    }, 1_000)
 
     return () => {
       window.clearInterval(timer)
     }
-  }, [isActive, isStreaming, t])
+  }, [isActive, isStreaming])
 
   // Announce completion when transitioning from active to inactive
   React.useEffect(() => {
@@ -158,7 +203,13 @@ export const LoadingStatus = ({
         <SrAnnouncement message={completionAnnouncement} />
       )}
       {/* Visual status indicator */}
-      {currentAction && <ActionInfo action={currentAction} />}
+      {currentAction && (
+        <ActionInfo
+          action={currentAction}
+          waitingFor={currentAction === "generating" && waitingForReply ? model : null}
+          elapsedMs={isStreaming ? elapsedMs : undefined}
+        />
+      )}
     </>
   )
 }

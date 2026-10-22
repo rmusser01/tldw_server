@@ -8,6 +8,7 @@ import type {
   Message,
   HistoryBookmark,
   HistoryTurnRecovery,
+  HistoryTurnFailure,
   HistoryBookmarkScope,
   UploadedFile
 } from "./types"
@@ -1073,6 +1074,36 @@ export const settleLocalAcceptedAssistant = (
 
 const HISTORY_TURN_OUTCOMES = new Set<string>(["complete", "interrupted", "stopped"])
 
+/** Only short, plain fields of a send failure are kept with its recovery. */
+const projectHistoryTurnFailure = (
+  value: unknown
+): HistoryTurnFailure | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const raw = value as Record<string, unknown>
+  const text = (field: string, limit: number) =>
+    typeof raw[field] === "string" && (raw[field] as string).trim()
+      ? (raw[field] as string).trim().slice(0, limit)
+      : undefined
+  const count = (field: string, max: number) =>
+    typeof raw[field] === "number" &&
+    Number.isInteger(raw[field]) &&
+    (raw[field] as number) > 0 &&
+    (raw[field] as number) <= max
+      ? (raw[field] as number)
+      : undefined
+  const failure: HistoryTurnFailure = {
+    ...(text("code", 64) ? { code: text("code", 64) } : {}),
+    ...(count("status", 599) ? { status: count("status", 599) } : {}),
+    ...(text("message", 500) ? { message: text("message", 500) } : {}),
+    ...(text("provider", 128) ? { provider: text("provider", 128) } : {}),
+    ...(text("model", 256) ? { model: text("model", 256) } : {}),
+    ...(count("timeout_ms", 24 * 60 * 60 * 1000)
+      ? { timeout_ms: count("timeout_ms", 24 * 60 * 60 * 1000) }
+      : {})
+  }
+  return Object.keys(failure).length ? failure : undefined
+}
+
 const projectHistoryTurnRecovery = async (
   turn: HistoryTurnRecovery
 ): Promise<HistoryTurnRecovery> => {
@@ -1111,6 +1142,9 @@ const projectHistoryTurnRecovery = async (
       : {}),
     ...(turn.interruption_reason
       ? { interruption_reason: turn.interruption_reason }
+      : {}),
+    ...(projectHistoryTurnFailure(turn.failure)
+      ? { failure: projectHistoryTurnFailure(turn.failure) }
       : {}),
     ...(turn.settled_message_id
       ? { settled_message_id: turn.settled_message_id }

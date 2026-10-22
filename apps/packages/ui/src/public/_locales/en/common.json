@@ -2140,5 +2140,56 @@
   },
   "continueMessage_failed": {
     "message": "We could not confirm the continued reply. Your original exchange and draft are kept. Reload this chat and check for the saved reply before trying again."
+  },
+  "error_providerUnavailableSummary": {
+    "message": "Couldn't reach {{provider}} ({{model}})"
+  },
+  "error_providerUnavailableModelSummary": {
+    "message": "Couldn't reach the provider for {{model}}"
+  },
+  "error_providerUnavailableGenericSummary": {
+    "message": "Couldn't reach the model's provider"
+  },
+  "error_providerUnavailableHint": {
+    "message": "The tldw server is fine, but this model's provider didn't respond. Start the provider or switch models."
+  },
+  "error_switchModel": {
+    "message": "Switch model"
+  },
+  "error_chatStartupTimeoutModelSummary": {
+    "message": "No response from {{model}} after {{wait}}."
+  },
+  "actionInfo_webSearch": {
+    "message": "Searching the web..."
+  },
+  "actionInfo_ragSearch": {
+    "message": "Searching knowledge base..."
+  },
+  "actionInfo_embedding": {
+    "message": "Processing context..."
+  },
+  "actionInfo_generating": {
+    "message": "Generating response..."
+  },
+  "actionInfo_processing": {
+    "message": "Processing..."
+  },
+  "actionInfo_thinking": {
+    "message": "Thinking..."
+  },
+  "actionInfo_started": {
+    "message": "{{label}} started"
+  },
+  "actionInfo_complete": {
+    "message": "Response complete"
+  },
+  "actionInfo_waitingFor": {
+    "message": "Waiting for {{model}}..."
+  },
+  "actionInfo_stillWaitingFor": {
+    "message": "Still waiting for {{model}} ({{seconds}} seconds)."
+  },
+  "actionInfo_stillGenerating": {
+    "message": "Still writing the reply ({{seconds}} seconds)."
   }
 }

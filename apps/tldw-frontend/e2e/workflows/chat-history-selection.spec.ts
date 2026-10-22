@@ -124,7 +124,7 @@ test('populated IndexedDB v15 upgrades to v16 preserving projection, bookmarks a
     })
     expect(saved.version).toBe(150)
     await page.goto('/chat')
-    await expect(page.getByRole('button', { name: 'Review conversation history', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Choose what the AI remembers', exact: true })).toBeVisible()
     expect(await page.evaluate(async () => (await indexedDB.databases()).find(db => db.name === 'PageAssistDatabase')?.version)).toBe(160)
     expect(await readStore(page, 'historyProjections')).toEqual(saved.data.historyProjections)
     const original = (await readStore(page, 'historySelections')).find(row => row.client_session_id === 'fixture-origin')

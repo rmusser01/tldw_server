@@ -272,6 +272,20 @@ export type Prompt = {
 
 export type HistoryBookmarkScope = { profile_id: string; client_session_id: string };
 export type HistoryTurnOutcome = "complete" | "interrupted" | "stopped";
+/**
+ * Why a send got no reply, as far as the client knows (CC-02, CM-06): the
+ * server's error code, HTTP status and message, the provider and model it was
+ * sent to, or how long it waited before giving up.
+ */
+export type HistoryTurnFailure = {
+  code?: string;
+  status?: number;
+  message?: string;
+  provider?: string;
+  model?: string;
+  /** No reply started within this many milliseconds. */
+  timeout_ms?: number;
+};
 /** Recovery text is never a message, selected history, or persisted write capability. */
 export type HistoryTurnRecovery = {
   /** Explicit alternatives remain in review until the user opens their result. */
@@ -305,6 +319,8 @@ export type HistoryTurnRecovery = {
    */
   outcome?: HistoryTurnOutcome;
   interruption_reason?: string;
+  /** Why the send got no reply, when known (CC-02). */
+  failure?: HistoryTurnFailure;
   /** The reply was already written to the owner; only the view must follow it. */
   settled_message_id?: string;
   /** Display identity of the model that wrote the reply. */

@@ -13,6 +13,7 @@ import {
   resetPlaygroundHarness,
   screen,
   waitFor,
+  within,
   type PlaygroundView
 } from "./harness/playground-harness"
 import { fireEvent } from "@testing-library/react"
@@ -83,5 +84,26 @@ describe("Playground first-token wait (#3107)", { timeout: 60_000 }, () => {
     await waitFor(() => expect(screen.getByText("Slow model reply")).toBeInTheDocument(), {
       timeout: 5_000
     })
+  })
+
+  // CM-06 #3107 — a reply that never starts used to end in a generic "Turn needs
+  // review" panel with no reason. The question stays, and the reply says which
+  // model did not answer and for how long, with Retry and Switch model.
+  it("CM-06 (#3107): a reply that never starts names the model and the wait, with Retry and Switch model", async () => {
+    const server = createFakeTldwServer()
+    server.planCompletion({ reply: "Too late", firstTokenDelayMs: 600_000 })
+    const view = await renderPlayground({ server })
+
+    await sendAndWaitOnFakeClock(view, "Hung question", 121_000)
+
+    await waitFor(
+      () => expect(screen.getByText("No response from local-uat-chat after 2:00.")).toBeInTheDocument(),
+      { timeout: 10_000 }
+    )
+    const reply = screen.getByText("No response from local-uat-chat after 2:00.").closest("[role='alert']") as HTMLElement
+    expect(within(reply).getByRole("button", { name: "Retry same model" })).toBeInTheDocument()
+    expect(within(reply).getByRole("button", { name: "Switch model" })).toBeInTheDocument()
+    expect(transcript()[0]).toBe("user: Hung question")
+    expect(screen.queryByText("Turn needs review")).not.toBeInTheDocument()
   })
 })

@@ -30,7 +30,7 @@ describe("PlaygroundSendControl character chat gating", () => {
     const user = userEvent.setup()
     render(<PlaygroundSendControl {...baseProps} isSending={isSending} onSubmitForm={submit}
       submitDisabledReason="Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat." />)
-    const button = screen.getByRole("button", { name: isSending ? /queue/i : /send/i })
+    const button = screen.getByRole("button", { name: isSending ? /send next/i : /send message/i })
     expect(button).toBeDisabled()
     expect(button).toHaveAttribute("title", expect.stringContaining("Tracked persona chat is unavailable"))
     await user.click(button)

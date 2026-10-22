@@ -26,7 +26,13 @@ import type {
   SaveMessageData,
   SaveMessageErrorData
 } from "@/types/chat-modes"
-import { buildAssistantErrorContent } from "@/utils/chat-error-message"
+import { buildAssistantErrorContent, buildSendFailureContent } from "@/utils/chat-error-message"
+import { sendFailureTarget } from "@/utils/chat-send-failure"
+import {
+  adoptFailureAdmission,
+  definitiveHistoryTurnFailure,
+  historyTurnFailureCause
+} from "@/hooks/chat-modes/history-turn-failure"
 import { applyMcpModuleDisclosureFromToolCalls } from "@/utils/mcp-disclosure"
 import {
   buildMessageVariant,
@@ -1285,23 +1291,50 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       return chatSubmitSkipped("Conversation changed")
     }
     if (historyTurn) {
+      // The user stopped this turn (CM-02): a stop is never reported as a failure.
+      const stoppedByUser = signal.aborted && params.wasStoppedByUser?.() === true
       if (historyTurn.dispatched || e instanceof NativeHistoryBranchChoice) {
         // The question is already saved with its owner. A reply that ended
         // early, or finished after its view went away, stays in the
-        // transcript (CS-04, #3104). Failures with nothing to show, and turns
+        // transcript (CS-04, #3104), and so do a stopped reply and a failure
+        // the server reported (CM-02, CC-02). Unknown outcomes, and turns
         // whose account or server changed, stay in review.
         const scopeInvalidated = Boolean(
           params.servicePromptSnapshot?.scopeInvalidatedSignal?.aborted
         )
+        // A server-settled request that failed before its first frame names
+        // the question the server saved in its error (CC-02).
+        const savedQuestion = scopeInvalidated
+          ? undefined
+          : adoptFailureAdmission(historyTurn, e)
+        if (savedQuestion) {
+          historyTurn.admission = savedQuestion
+          if (modelClient) modelClient.userServerMessageId = savedQuestion.input_message_id
+          await historyTurn.afterAdmission?.().catch(() => {
+            console.warn("Could not checkpoint the original accepted server input.")
+          })
+        }
+        // The server answered with an error before any reply arrived (CC-02):
+        // the turn is settled, so it is shown as an error reply with Retry and
+        // Switch model, never parked for review.
+        const failure = definitiveHistoryTurnFailure({
+          error: e,
+          historyTurn,
+          aborted: signal.aborted || isAbortLikeError(e),
+          scopeInvalidated,
+          replyCompleted,
+          fullText,
+          selectedModel: rawSelectedModel
+        })
         const outcome: HistoryTurnOutcome | undefined =
           historyTurn.persistence === "server" && historyTurn.resultId ? historyTurn.outcome ?? "interrupted" :
           !historyTurn.admission || scopeInvalidated
             ? undefined
             : replyCompleted
               ? historyTurn.resultId ? "complete" : undefined
-              : signal.aborted && params.wasStoppedByUser?.() === true
+              : stoppedByUser
                 ? "stopped"
-                : signal.aborted || fullText.trim().length > 0
+                : signal.aborted || fullText.trim().length > 0 || failure
                   ? "interrupted"
                   : undefined
         const keptReason =
@@ -1310,10 +1343,18 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
             : outcome === "interrupted"
               ? signal.aborted
                 ? DEFAULT_INTERRUPTION_REASON
-                : e instanceof Error && e.message.trim()
-                  ? e.message.trim()
-                  : DEFAULT_INTERRUPTION_REASON
+                : failure?.message ||
+                  (e instanceof Error && e.message.trim()
+                    ? e.message.trim()
+                    : DEFAULT_INTERRUPTION_REASON)
               : undefined
+        // Stopped before the owner confirmed the question: nothing to keep.
+        const cancelled = stoppedByUser && !historyTurn.admission && !scopeInvalidated
+        // Why a turn left for review got no reply, when known (CM-06).
+        const cause =
+          failure || outcome || cancelled || scopeInvalidated
+            ? undefined
+            : historyTurnFailureCause(e, rawSelectedModel)
         historyTurn.outcome = outcome
         try {
           await historyTurn.recover(
@@ -1322,7 +1363,10 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
               assistantId: resolvedAssistantMessageId,
               createdAt,
               outcome,
-              interruptionReason: keptReason
+              interruptionReason: keptReason,
+              ...(failure ? { failure } : {}),
+              ...(cause ? { cause } : {}),
+              ...(cancelled ? { cancelled } : {})
             },
             e
           )
@@ -1339,18 +1383,52 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
           return chatSubmitFailed(refusal.message)
         }
 
-        if (historyTurn.persistence === "server" && !historyTurn.resultId) {
+        // The error reply shown for a definitive failure (CC-02).
+        const failedReply = failure ? buildSendFailureContent(failure) : undefined
+        if (cancelled) {
+          // The typed message goes back to the composer, without an error.
+          setMessagesWithTransition((prev) =>
+            prev.filter(
+              (row) =>
+                row.id !== resolvedAssistantMessageId &&
+                row.id !== resolvedUserMessageId
+            )
+          )
+          return chatSubmitSkipped("Request cancelled")
+        }
+        if (
+          historyTurn.persistence === "server" &&
+          !historyTurn.resultId &&
+          !(historyTurn.admission && (outcome === "stopped" || failure))
+        ) {
+          if (failedReply && !historyTurn.admission) {
+            // The server refused the request before saving the question:
+            // show why under it, for this session, with Retry.
+            const marker = interruptionGenerationInfo("interrupted", failure?.message)
+            setMessagesWithTransition((prev) =>
+              prev.map((row) =>
+                row.id === resolvedAssistantMessageId
+                  ? updateActiveVariant(row, {
+                      message: failedReply,
+                      generationInfo: { ...(row.generationInfo || {}), ...marker }
+                    })
+                  : row
+              )
+            )
+            return chatSubmitFailed(failure?.message || (e instanceof Error ? e.message : "Send failed"))
+          }
           setMessagesWithTransition(prev => prev.filter(row => row.id !== resolvedAssistantMessageId && row.id !== resolvedUserMessageId))
           return chatSubmitFailed(e instanceof Error ? e.message : "Server response outcome unknown")
         }
         if (outcome) {
           const marker = interruptionGenerationInfo(outcome, keptReason)
+          const keptText = fullText.trim() ? fullText : failedReply
           setMessagesWithTransition((prev) =>
-            fullText.trim()
+            keptText
               ? prev.map((row) =>
                   row.id === resolvedAssistantMessageId
                     ? updateActiveVariant(row, {
-                        message: fullText,
+                        message: keptText,
                         ...(marker
                           ? {
                               generationInfo: {
@@ -1381,6 +1459,9 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
       } else {
         await historyTurn.cancelPreparation?.()
         setMessagesWithTransition(messages)
+        // Stopped before the request was sent (CM-02): the message goes back
+        // to the composer, without an error.
+        if (stoppedByUser) return chatSubmitSkipped("Request cancelled")
       }
       return chatSubmitFailed(
         e instanceof Error ? e.message : "History send failed"
@@ -1416,7 +1497,7 @@ export const runChatPipeline = async <TParams extends ChatModeParamsBase>(
     }
     const assistantContent = isAbort
       ? fullText
-      : buildAssistantErrorContent(fullText, e)
+      : buildAssistantErrorContent(fullText, e, sendFailureTarget(rawSelectedModel))
     const assistantErrorDynamicUIEnvelope =
       params.dynamicUIRequest?.renderer === "openui"
         ? buildDynamicUIEnvelope("openui", assistantContent)

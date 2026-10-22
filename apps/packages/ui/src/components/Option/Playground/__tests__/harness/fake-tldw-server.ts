@@ -98,6 +98,11 @@ export type CompletionPlan = {
   end?: "finish" | "drop" | "eof"
   /** The final chunk's `finish_reason` (default "stop"); "length" models a cut-off reply. */
   finishReason?: string
+  /**
+   * Server-settled turns only: answer `status` before the question is saved,
+   * as the real endpoint does for a request it refuses outright.
+   */
+  rejectBeforeAdmission?: boolean
 }
 
 type Deferred = { promise: Promise<void>; resolve: () => void }
@@ -206,17 +211,22 @@ const OPENAPI_SPEC = {
   }
 }
 
-export const createFakeTldwServer = ({
-  catalog = DEFAULT_CATALOG,
-  nativeCompletion = false
-}: {
+export type FakeTldwServerOptions = {
   catalog?: FakeCatalog
   /**
    * Advertise `native_completion_v1` on send captures, like the real server
-   * without Sync v2, so a saved chat's turns are settled by the server (D7).
+   * without Sync v2, so a saved chat's turns are settled by the server (D7):
+   * the question is admitted before the provider is called (and stays saved
+   * if the provider then fails), the reply is saved when it finishes, and a
+   * reply cut off after it started is saved as an interrupted partial.
    */
   nativeCompletion?: boolean
-} = {}) => {
+}
+
+export const createFakeTldwServer = ({
+  catalog = DEFAULT_CATALOG,
+  nativeCompletion = false
+}: FakeTldwServerOptions = {}) => {
   const requests: RecordedRequest[] = []
   const unhandled: RecordedRequest[] = []
   const chats = new Map<string, FakeChat>()
@@ -463,7 +473,124 @@ export const createFakeTldwServer = ({
     }
   }
 
+  /**
+   * A server-settled turn (native_completion_v1): like the real endpoint, the
+   * question is admitted before the provider runs and stays saved whatever
+   * happens next; the reply is settled when it finishes, and a reply cut off
+   * after it started is kept as an interrupted partial.
+   */
+  const nativeCompletionResponse = async (body: JsonBody, signal?: AbortSignal | null) => {
+    const chat = chats.get(String(body.conversation_id))
+    if (!chat) return json({ detail: "Chat not found" }, 404)
+    const selection = body.tldw_history_selection_v1
+    const plan = completionPlans.shift() ?? {}
+    // Refused before the question is saved (validation, rate limit): no admission.
+    if (plan.rejectBeforeAdmission && plan.status && plan.status >= 400)
+      return json(plan.errorBody ?? { detail: "Request failed." }, plan.status)
+    const lastUser = [...(body.messages ?? [])].reverse().find((m: JsonBody) => m?.role === "user")
+    const user = appendMessage(chat, {
+      role: "user",
+      content: typeof lastUser?.content === "string" ? lastUser.content : JSON.stringify(lastUser?.content ?? ""),
+      parent_message_id: selection.messages.at(-1)?.id ?? null
+    })
+    const admission: HistoryAdmissionV1 = {
+      version: 1, owner_key: selection.owner_key, conversation_id: chat.id, input_message_id: user.id,
+      input_message_revision: String(user.version), selection_digest: selection.selection_digest,
+      messages: structuredClone(selection.messages), originating_selection_revision: selection.selection_revision
+    }
+    inputAdmissions.set(user.id, admission)
+    if (plan.gate) await waitUnlessAborted(plan.gate, signal)
+    if (plan.status && plan.status >= 400) {
+      // Like the real endpoint, a failure after the question was saved names it.
+      const errorBody = (plan.errorBody ?? { detail: "Provider failed" }) as JsonBody
+      const detail = errorBody.detail
+      return json({
+        ...errorBody,
+        detail: {
+          ...(detail && typeof detail === "object" ? detail : { message: String(detail ?? "Request failed.") }),
+          tldw_history_admission_v1: admission
+        }
+      }, plan.status)
+    }
+    const reply = plan.chunks ? plan.chunks.join("") : (plan.reply ?? defaultReply)
+    const model = body.model ?? FAKE_MODEL
+    const receipt = { tldw_conversation_id: chat.id, tldw_user_message_id: user.id }
+    if (!body.stream) {
+      const assistant = appendMessage(chat, { role: "assistant", content: reply, parent_message_id: user.id })
+      return json({
+        ...receipt, tldw_message_id: assistant.id, tldw_history_admission_v1: admission,
+        id: "chatcmpl-harness", object: "chat.completion", model,
+        choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: reply } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+      })
+    }
+    const encoder = new TextEncoder()
+    const chunk = (payload: unknown) => encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)
+    let sent = ""
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        try {
+          if (plan.firstTokenDelayMs) await sleep(plan.firstTokenDelayMs, signal)
+          const deltas = plan.chunks ?? [reply]
+          const pause = async () => {
+            await waitUnlessAborted(plan.resume ?? new Promise<void>(() => {}), signal)
+            if (plan.end === "drop") throw new TypeError("network error")
+          }
+          for (const [index, content] of deltas.entries()) {
+            if (index === plan.pauseAfterChunks) await pause()
+            // The real endpoint sends the admission with the provider's first
+            // output, so a stop before then never learns the saved question.
+            if (index === 0) controller.enqueue(chunk({ tldw_history_admission_v1: admission }))
+            sent += content
+            controller.enqueue(chunk({
+              ...receipt, id: "chatcmpl-harness", object: "chat.completion.chunk", model,
+              choices: [{ index: 0, delta: index === 0 ? { role: "assistant", content } : { content }, finish_reason: null }]
+            }))
+          }
+          if (plan.pauseAfterChunks === deltas.length) await pause()
+          if (plan.end === "eof") {
+            // The connection ended mid-reply (CM-03): the server keeps the partial.
+            appendMessage(chat, {
+              role: "assistant", content: sent, parent_message_id: user.id,
+              metadata_extra: { generation_status: "interrupted" }
+            })
+            controller.close()
+            return
+          }
+          // Like the server, a reply cut off at the output limit is saved with that status.
+          const assistant = appendMessage(chat, {
+            role: "assistant", content: reply, parent_message_id: user.id,
+            ...(plan.finishReason === "length"
+              ? { metadata_extra: { generation_status: "length", finish_reason: "length" } }
+              : {})
+          })
+          controller.enqueue(chunk({
+            ...receipt, tldw_message_id: assistant.id, id: "chatcmpl-harness", object: "chat.completion.chunk", model,
+            choices: [{ index: 0, delta: {}, finish_reason: plan.finishReason ?? "stop" }]
+          }))
+          controller.enqueue(encoder.encode("data: [DONE]\n\n"))
+          controller.close()
+        } catch (error) {
+          // The real server keeps what streamed before a stop or disconnect.
+          if (sent.trim())
+            appendMessage(chat, {
+              role: "assistant", content: sent, parent_message_id: user.id,
+              metadata_extra: { generation_status: "interrupted" }
+            })
+          controller.error(error)
+        }
+      }
+    })
+    return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } })
+  }
+
   const completionResponse = async (body: JsonBody | undefined, signal?: AbortSignal | null) => {
+    // Edits, Regenerate and Continue reuse a saved admission, so they keep the
+    // client-settled path below.
+    if (nativeCompletion && body?.save_to_db === true && body.tldw_history_selection_v1 &&
+        body.tldw_history_edit_v1 == null && body.metadata?.tldw_regenerate_from_message_id === undefined &&
+        body.metadata?.tldw_continue_from_message_id === undefined)
+      return nativeCompletionResponse(body, signal)
     const originalEditChat = body?.tldw_history_edit_v1 == null ? undefined : chats.get(String(body.conversation_id))
     const canonical = await import("@/db/dexie/history-selection")
     let edited: ReturnType<typeof admitEditedCompletion>
