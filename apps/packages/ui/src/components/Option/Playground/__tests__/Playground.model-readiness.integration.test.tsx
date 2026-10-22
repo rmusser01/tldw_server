@@ -70,8 +70,14 @@ describe("Playground model readiness chip (CC-01, #3111)", { timeout: 90_000 }, 
     })
     await renderPlayground({ server, persistedModel: `ollama:${OLLAMA_MODEL}` })
 
-    await waitFor(() => expect(modelStatus()).toHaveTextContent("Not checked"), HARNESS_WAIT)
-    expect(modelStatus()).not.toHaveTextContent("Healthy")
+    // Without evidence the chip names only the server connection (the
+    // harness reports no knowledge service, so that reads "Degraded").
+    await waitFor(
+      () => expect(modelStatus()).toHaveTextContent(/Server connected|Degraded/),
+      HARNESS_WAIT
+    )
+    expect(modelStatus()).not.toHaveTextContent(/Healthy|Working/)
+    expect(modelStatus()).not.toHaveAttribute("data-model-readiness")
   })
 
   it("CC-01: marks the model Unreachable after a provider failure and switches to the server default in one click", async () => {

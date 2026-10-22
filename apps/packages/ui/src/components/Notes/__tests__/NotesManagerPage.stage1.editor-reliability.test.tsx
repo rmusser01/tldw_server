@@ -513,8 +513,12 @@ describe("NotesManagerPage stage 1 editor reliability", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "New note" }))
 
+    // Starting a draft settles asynchronously (the mutation fence), then the
+    // title is writable.
     const titleInput = screen.getByRole("textbox", { name: "Note title" })
-    expect(titleInput).toBeEnabled()
+    await waitFor(() => {
+      expect(titleInput).toBeEnabled()
+    })
     expect(screen.getByTestId("notes-save-button")).toBeDisabled()
 
     await waitFor(() => {

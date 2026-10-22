@@ -97,15 +97,17 @@ export const ChatModelSelectorDropdown = React.memo(
     const providerSelectionNeeded = !noModelSelected && modelSelectorWarning && !modelUsabilityWarning && !connectionStatusWarning
     // The model's own readiness applies only when nothing more specific
     // (offline server, missing provider, unusable model) is being shown.
+    // Without evidence about the model (no reply yet, no provider report),
+    // the chip names only the server connection.
     const readinessShown = Boolean(
       modelReadiness &&
+        modelReadiness.state !== "not_checked" &&
         !connectionStatusWarning &&
         !providerSelectionNeeded &&
         !modelUsabilityLabel &&
         !noModelSelected
     )
     const readinessWarning = readinessShown && modelReadiness?.state === "unreachable"
-    const readinessNeutral = readinessShown && modelReadiness?.state === "not_checked"
     const statusLabel = connectionStatusWarning ? connectionStatusLabel :
       (providerSelectionNeeded
         ? t("playground:composer.chooseProvider", "Choose provider")
@@ -322,9 +324,7 @@ export const ChatModelSelectorDropdown = React.memo(
               className={`min-w-0 truncate rounded-full px-1.5 py-0.5 text-[11px] ${
                 statusWarning
                   ? "bg-warn/10 text-text"
-                  : readinessNeutral
-                    ? "bg-surface2 text-text-muted"
-                    : "bg-success/10 text-text"
+                  : "bg-success/10 text-text"
               }`}
               title={
                 (readinessShown
@@ -348,8 +348,8 @@ export const ChatModelSelectorDropdown = React.memo(
         </button>
       ) : null}
       <span
-        role="status"
         aria-live="polite"
+        aria-atomic="true"
         data-testid="model-readiness-announcement"
         className="sr-only"
       >

@@ -176,6 +176,7 @@ describe("Playground user message turn styling", () => {
 
     expect(bubble().className).not.toContain("max-w-[75%]")
   })
+})
 
 it("retains the question and names an unavailable attachment after image failure", () => {
   renderUserMessage({ images: ["http://chat.test/missing.png"], messageId: "missing-attachment" })

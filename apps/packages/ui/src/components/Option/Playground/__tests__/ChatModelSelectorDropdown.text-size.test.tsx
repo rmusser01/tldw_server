@@ -32,7 +32,7 @@ describe("Chat model selector text size", () => {
     )
 
     const chip = screen.getByTestId("model-selector")
-    const badge = screen.getByTitle("Provider status")
+    const badge = screen.getByTitle("Status")
     for (const element of [chip, badge]) {
       expect(element.className).not.toMatch(/\btext-\[(?:[0-9]|10)px\]/)
       expect(element).toHaveClass("text-[11px]")
