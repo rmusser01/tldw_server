@@ -1703,7 +1703,8 @@
     "lengthLabel": "Output limit reached",
     "lengthSummary": "This reply reached the model's output limit. The saved content is kept.",
     "generationFailedLabel": "Generation failed",
-    "generationFailedSummary": "The saved record reports a generation failure. Any saved content is kept."
+    "generationFailedSummary": "The saved record reports a generation failure. Any saved content is kept.",
+    "lengthLiveSummary": "The model reached its output limit, so this reply may be cut off."
   },
   "sources": {
     "captureTitle": "Extracted title",
@@ -1744,5 +1745,9 @@
     "placeholder": "Search messages in this conversation",
     "matchCount": "{{current}} / {{total}}",
     "noMatches": "No matches"
+  },
+  "savedReplyActions": {
+    "loading": "This saved chat is still loading. Try again in a moment.",
+    "regenerateUnavailable": "This saved reply can't be regenerated here. Use New Branch to try again from this point."
   }
 }

@@ -78,6 +78,8 @@ import { DynamicMessageRenderer } from "@/components/Common/DynamicUI/DynamicMes
 import { DynamicUISourceFallback } from "@/components/Common/DynamicUI/DynamicUISourceFallback"
 import { normalizeDynamicUIEnvelope } from "@/utils/dynamic-ui"
 import { formatCost } from "@/utils/model-pricing"
+import { isOutputLimitedReply } from "@/utils/output-limit-reply"
+import { incompleteReplyRecoveryActions } from "./incomplete-reply-actions"
 import {
   resolveMessageCostUsd,
   resolveMessageUsage,
@@ -129,6 +131,12 @@ const savedPartialStatusCopy = {
     "Output limit reached",
     "lengthSummary",
     "This reply reached the model's output limit. The saved content is kept."
+  ],
+  lengthLive: [
+    "lengthLabel",
+    "Output limit reached",
+    "lengthLiveSummary",
+    "The model reached its output limit, so this reply may be cut off."
   ],
   error: [
     "generationFailedLabel",
@@ -242,6 +250,11 @@ type Props = {
   totalMessages: number
   onRegenerate: () => void
   regenerateDisabledReason?: string | null
+  /**
+   * This reply's Continue and Retry run on the server's saved reply (D7), so its
+   * recorded output-limit or interrupted status may offer them (CM-03).
+   */
+  savedStatusActions?: boolean
   onEditFormSubmit: (
     value: string,
     isSend: boolean,
@@ -576,10 +589,16 @@ const PlaygroundMessageImpl = (props: Props) => {
   const hasSavedGenerationStatus = Boolean(savedGeneration?.status)
   const savedPartialStatus =
     savedGeneration?.status !== "complete" ? savedGeneration?.status : undefined
+  // CM-03: a reply the model cut off at its output limit, before any saved status.
+  const liveOutputLimited =
+    !hasSavedGenerationStatus && props.isBot && props.role !== "system" &&
+    !isImageGenerationMessageType(props.message_type) && isOutputLimitedReply(props.generationInfo)
+  const recordedIncomplete = props.savedStatusActions === true &&
+    (savedPartialStatus === "length" || savedPartialStatus === "interrupted")
   const savedUsage = savedGeneration?.usage
   const savedPartialCopy = savedPartialStatus
     ? savedPartialStatusCopy[savedPartialStatus]
-    : null
+    : liveOutputLimited ? savedPartialStatusCopy.lengthLive : null
   const resolvedResponseModel = React.useMemo(() => {
     if (savedGeneration?.model) return savedGeneration.model
     const info = props.generationInfo as Record<string, unknown> | undefined
@@ -1856,6 +1875,23 @@ const PlaygroundMessageImpl = (props: Props) => {
     t
   ])
 
+  const outputLimitRecoveryActions = React.useMemo(
+    () =>
+      (!liveOutputLimited && !recordedIncomplete) || !isLastMessage || errorPayload || responseRecoveryBusy
+        ? []
+        : incompleteReplyRecoveryActions({
+            t: (key, fallback) => t(key, fallback) as string,
+            disabledReason: props.regenerateDisabledReason,
+            onRetry: () => runResponseRecovery(props.onRegenerate, true),
+            onSwitchModel: () => runResponseRecovery(handleOpenModelSettings),
+            onContinue: props.onContinue && !props.hideContinue
+              ? () => runResponseRecovery(() => props.onContinue?.(), true) : undefined
+          }),
+    [liveOutputLimited, recordedIncomplete, isLastMessage, errorPayload, responseRecoveryBusy, runResponseRecovery,
+      handleOpenModelSettings, props.hideContinue, props.onContinue, props.onRegenerate,
+      props.regenerateDisabledReason, t]
+  )
+
   const emptyResponseRecoveryActions = React.useMemo(
     () => responseRecoveryBusy ? [] : [
       {
@@ -2981,7 +3017,7 @@ const PlaygroundMessageImpl = (props: Props) => {
                   savedPartialCopy[3]
                 ) as string
               }
-              recoveryActions={[]}
+              recoveryActions={outputLimitRecoveryActions}
             />
           )}
           {showPartialSaveMarker && (

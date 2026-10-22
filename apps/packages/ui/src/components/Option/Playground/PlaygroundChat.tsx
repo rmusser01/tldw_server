@@ -59,6 +59,7 @@ import {
   useVisualIdentityResolver
 } from "@/hooks/useVisualIdentityResolver"
 import { VISUAL_IDENTITY_EXPRESSION_OPTIONS } from "@/utils/visual-identity-expressions"
+import { savedReplyActionAvailability, savedReplyRegenerateUnavailableReason, savedReplyStatusOffersActions } from "@/hooks/chat/saved-reply-actions"
 
 type TimelineBlock =
   | { kind: "single"; index: number }
@@ -228,6 +229,9 @@ export const PlaygroundChat = ({
     Boolean(historySelection), effectiveAssistantState?.kind,
     effectiveAssistantState?.mode === "overlay" ? "overlay" : "tracked"
   ) ? t("option:assistant.trackedPersonaUnavailable", "Tracked persona chat is unavailable here. Use a persona prompt overlay in a regular chat, or choose a character for tracked chat.") : null
+  // CM-01: a saved reply the server cannot regenerate or continue says so up front.
+  const savedReplyActions = savedReplyActionAvailability({ historySelection, messages, temporaryChat })
+  const savedStatusActions = savedReplyStatusOffersActions(historySelection, messages)
   const stopStreamingFromUi = useExplicitStopFocus(stopStreamingRequest)
   const confirmSensitiveValues = React.useCallback(async () => {
     if (typeof window === "undefined" || typeof window.confirm !== "function") {
@@ -1402,7 +1406,8 @@ export const PlaygroundChat = ({
                 currentMessageIndex={block.index}
                 totalMessages={messages.length}
                 onRegenerate={regenerateLastMessage}
-                regenerateDisabledReason={regenerateDisabledReason}
+                regenerateDisabledReason={regenerateDisabledReason ?? savedReplyRegenerateUnavailableReason(savedReplyActions.regenerate, t)}
+                savedStatusActions={savedStatusActions}
                 onRegenerateImage={(payload) => {
                   void handleRegenerateGeneratedImage(payload)
                 }}
@@ -1445,7 +1450,7 @@ export const PlaygroundChat = ({
                 createdAt={message?.createdAt}
                 temporaryChat={temporaryChat}
                 onStopStreaming={stopStreamingFromUi}
-                onContinue={runContinue}
+                onContinue={savedReplyActions.continue ? undefined : runContinue}
                 onRunSteeredContinue={runSteeredContinue}
                 documents={message?.documents}
                 actionInfo={actionInfo}

@@ -5,6 +5,7 @@ import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { useChatHistoryFreshness } from "@/hooks/chat/useChatHistoryFreshness";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
+import { savedReplyActionAvailability, savedReplyRegenerateUnavailableReason } from "@/hooks/chat/saved-reply-actions";
 import { resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils";
 import { HistorySelectionProvider, useHistorySelectionContext, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection";
 import { captureChatDraftLoad, captureChatDraftSource } from "@/hooks/chat/chat-draft-transition";
@@ -2733,10 +2734,14 @@ const PlaygroundContent = () => {
     }
     return null;
   }, [messages]);
-  const regenerateSelectionState = historySelection.getCurrent();
-  const selectedHistoryBlocksRegeneration =
-    regenerateSelectionState.status !== "idle" &&
-    !(temporaryChat && !regenerateSelectionState.owner);
+  // CM-01: a saved chat can regenerate its saved reply through the server;
+  // only a reply the server cannot regenerate disables the rail control.
+  const savedReplyRegenerateBlock = savedReplyActionAvailability({
+    historySelection,
+    messages,
+    temporaryChat,
+  }).regenerate;
+  const selectedHistoryBlocksRegeneration = savedReplyRegenerateBlock !== null;
   const canRegenerateLastResponse =
     Boolean(latestAssistantMessage) && !selectedHistoryBlocksRegeneration;
   const emptyAssistantResponse = React.useMemo(() => {
@@ -3625,11 +3630,9 @@ const PlaygroundContent = () => {
       onRegenerate={() => regenerateLastMessage()}
       regenerateUnavailableReason={
         selectedHistoryBlocksRegeneration && latestAssistantMessage
-          ? toText(
-              t(
-                "playground:cockpit.regenerateUnavailableSelectedHistory",
-                "Regeneration is unavailable for selected history.",
-              ),
+          ? savedReplyRegenerateUnavailableReason(
+              savedReplyRegenerateBlock,
+              (key, fallback) => toText(t(key, fallback)),
             )
           : null
       }

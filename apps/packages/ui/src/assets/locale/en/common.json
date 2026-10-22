@@ -892,5 +892,13 @@
     "scope": "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat.",
     "unsupported": "This reply or its active setup does not support regeneration yet. Your original exchange and draft are kept. Review conversation and response settings or start a compatible saved chat.",
     "failed": "We could not confirm the new reply. Your original exchange and draft are kept. Reload this chat and review recovery before regenerating again."
+  },
+  "continueMessage": {
+    "settings": "Conversation settings could not be verified, so the reply was not continued. Reload this saved chat or try again; your original exchange and draft are kept.",
+    "context": "The server could not continue this reply because this saved chat uses unsupported context. Review the saved setup or start a compatible chat; your original exchange and draft are kept.",
+    "changed": "The saved message or conversation changed. Your original exchange and draft are kept. Reload the chat before continuing the reply.",
+    "scope": "The server or signed-in account changed. Your original exchange and draft are kept. Return to the intended server and account and reload this chat.",
+    "unsupported": "This reply can't be continued here. Your original exchange and draft are kept. To keep going, use New Branch on this reply or send a follow-up message.",
+    "failed": "We could not confirm the continued reply. Your original exchange and draft are kept. Reload this chat and check for the saved reply before trying again."
   }
 }

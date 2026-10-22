@@ -4648,5 +4648,14 @@
   },
   "search_noMatches": {
     "message": "No matches"
+  },
+  "errorRecovery_lengthLiveSummary": {
+    "message": "The model reached its output limit, so this reply may be cut off."
+  },
+  "savedReplyActions_loading": {
+    "message": "This saved chat is still loading. Try again in a moment."
+  },
+  "savedReplyActions_regenerateUnavailable": {
+    "message": "This saved reply can't be regenerated here. Use New Branch to try again from this point."
   }
 }

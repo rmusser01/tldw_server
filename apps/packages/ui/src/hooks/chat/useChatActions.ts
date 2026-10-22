@@ -1,6 +1,7 @@
 import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source"
 import type { NativeHistoryEditResend, NativeHistoryRegenerate } from "@/types/chat-modes"
-import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage, nativeRegenerationFeedback } from "./native-character-preflight"
+import { NativeHistoryBranchRefusal, NativeHistoryContextRefusal, NativeHistorySettingsReadError, NativeHistoryRoleplaySendError, nativeCharacterPreflightMessage } from "./native-character-preflight"
+import { createContinueSavedReply, savedReplyActionFeedback } from "./native-history-continue"
 import { captureChatDraftSource } from "./chat-draft-transition"
 import { bindActorSceneAfterLoad, captureActorSceneSend, type ActorSceneSend } from "./actor-scene-source"
 import { chatDraftOwnerKey } from "@/utils/chat-draft-owner"
@@ -3653,6 +3654,11 @@ export const useChatActions = ({
       if (retryResult) return retryResult
       return chatSubmitSkipped("Retry was not submitted")
     }
+    if (isContinue && !historyRegenerate && !messageSteeringOverride && continueOutputTarget === "chat") {
+      // CM-01: a saved server chat continues its reply through the server (D7).
+      const savedContinue = await continueSavedReply({ controller, assertCurrent, actorSceneSend: requestedActorSceneSend })
+      if (savedContinue !== null) return toChatSubmitResult(savedContinue)
+    }
     const hasVisualIdentityTarget = Boolean(
       selectedCharacter?.id != null ||
         selectedAssistant?.kind === "character" ||
@@ -5010,7 +5016,7 @@ export const useChatActions = ({
           : null
         notification.error({
           message: roleplayRecovery?.summary ?? t("error"),
-          description: historyRegenerate ? nativeRegenerationFeedback(e, t) : preflightMessage ?? roleplayRecovery?.message ?? errorMessage
+          description: savedReplyActionFeedback(e, t, historyRegenerate, isContinue) ?? preflightMessage ?? roleplayRecovery?.message ?? errorMessage
         })
       }
       // If this turn still owns the shared controller (e.g. a pre-stream failure
@@ -5545,6 +5551,15 @@ export const useChatActions = ({
         submitExtras: { serverChatIdOverride: branch.chatId, historyIdOverride: branch.historyId }
       }
     }
+  })
+
+  const continueSavedReply = createContinueSavedReply({
+    validateBeforeSubmitFn,
+    historySelection: selectedHistoryForActions,
+    onSubmit,
+    getMessages: () => useStoreMessageOption.getState().messages,
+    captureSourceFence: () => captureChatDraftSource(() => actionsMountedRef.current).isCurrent,
+    captureViewFence: () => captureChatDraftSource(historySelection?.fence()).isCurrent
   })
 
   const renderedRetryFence = selectedHistoryForActions?.fence()

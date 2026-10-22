@@ -17,6 +17,7 @@ import type { ChatScope } from "@/types/chat-scope"
 import { publishChatLoopEvent } from "@/services/chat-loop/bridge"
 import { extractChatLoopEvent } from "@/services/chat-loop/stream"
 import { extractStreamTransportInterruption, extractTokenFromChunk } from "@/utils/extract-token-from-chunk"
+import { readChunkFinishReason } from "@/utils/output-limit-reply"
 import type { ChatRequestDebugMetadata } from "@/services/tldw/chat-request-debug"
 import { prepareChatCompletionRequest } from "@/services/tldw/TldwChat"
 import type { ChatCompletionRequest } from "@/services/tldw/TldwApiClient"
@@ -89,6 +90,8 @@ export class ChatTldw {
   conversationId?: string
   serverMessageId?: string
   userServerMessageId?: string
+  /** The last stream's `finish_reason` ("length" when the output limit cut it off, CM-03). */
+  finishReason?: string
   historyMessageLimit?: number
   historyMessageOrder?: string
   slashCommandInjectionMode?: string
@@ -168,6 +171,7 @@ export class ChatTldw {
     const { signal, callbacks } = options || {}
     this.serverMessageId = undefined
     this.userServerMessageId = undefined
+    this.finishReason = undefined
 
     const tldwMessages = options?.preparedRequest
       ? []
@@ -243,6 +247,9 @@ export class ChatTldw {
       if (extractStreamTransportInterruption(chunk)) {
         interruptionChunk = chunk as Record<string, unknown>
       }
+
+      const finishReason = readChunkFinishReason(chunk)
+      if (finishReason) this.finishReason = finishReason
 
       const deltas =
         chunk?.choices?.[0]?.delta?.tool_calls ??
