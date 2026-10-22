@@ -428,37 +428,36 @@ _RESTRICTED_ROLE_LOCK_TIMEOUT = "10s"
 
 
 def _drop_restricted_role(admin, role: str) -> None:
-    """Drop the role, failing fast and naming its sessions when one still holds a lock.
+    """Drop the role, failing fast and naming the sessions that still hold a lock.
 
     A session the test leaked in a transaction keeps its locks, and ``DROP OWNED BY``
-    would wait for them until pytest-timeout ends the whole run.
+    would wait for them until pytest-timeout ends the whole run. ``admin`` is
+    connected to the test's own database, so every other open transaction on it
+    belongs to the test, whichever role it runs as.
     """
     from psycopg import errors, sql
 
-    drop = (
-        sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)),
-        sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)),
-    )
-    try:
+    def drop() -> None:
         with admin.transaction() as conn:
             conn.execute(sql.SQL("SET LOCAL lock_timeout = {}").format(sql.Literal(_RESTRICTED_ROLE_LOCK_TIMEOUT)))
-            for statement in drop:
-                conn.execute(statement)
+            conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
+            conn.execute(sql.SQL("DROP ROLE IF EXISTS {}").format(sql.Identifier(role)))
+
+    try:
+        drop()
         return
     except errors.LockNotAvailable:
         pass
-    with admin.transaction() as conn:
-        sessions = conn.execute(
-            "SELECT pid, state, left(query, 120) AS query FROM pg_stat_activity WHERE usename = %s",
-            (role,),
-        ).fetchall()
-        conn.execute(
-            "SELECT pg_terminate_backend(pid, 5000) FROM pg_stat_activity WHERE usename = %s",
-            (role,),
-        )
-    with admin.transaction() as conn:
-        for statement in drop:
-            conn.execute(statement)
-    raise AssertionError(
-        f"The test left {len(sessions)} session(s) of {role} holding locks (a leaked checkout?): {sessions}"
+    others = (
+        "FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()"
+        " AND backend_type = 'client backend' AND state <> 'idle'"
     )
+    with admin.transaction() as conn:
+        sessions = conn.execute(f"SELECT pid, usename, state, left(query, 120) AS query {others}").fetchall()
+        conn.execute(f"SELECT pg_terminate_backend(pid, 5000) {others}")
+    report = f"The test left {len(sessions)} session(s) of {role} or its database holding locks (a leaked checkout?): {sessions}"
+    try:
+        drop()
+    except errors.LockNotAvailable as exc:
+        raise AssertionError(f"{report}; still blocked after terminating them") from exc
+    raise AssertionError(report)

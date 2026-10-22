@@ -25,6 +25,7 @@ Found by TASK-13861 (measured on origin/dev 2b925562e5 and with TASK-13861's cha
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Correction (PR #3300 review, M3): the description names the wrong test. test_permission_first_auth_stream_without_preseeded_scope[sqlite-Rowan-True] is the sqlite param, whose fixture runs no DROP, and it is not the 19th test: that count took only the <Function> lines of --collect-only and skipped two <Coroutine> items. Re-run with pytest -v on 2026-10-22 (PR D's branch, -o timeout=150): the 19th test executed, test_permission_first_auth_trash_restore_without_preseeded_scope[postgresql-X-API-KEY], is the one that FAILED, and its own restricted_media_store teardown (postgresql param) is the DROP OWNED BY that then waits on its rag_retrieval_* role's Media DB session, idle in transaction on SELECT * FROM MediaFiles WHERE media_id = $1 AND file_type = $2 .... The review's guess, [postgresql-Rowan-True] (21st by the <Function> count), is not it either; nothing after the 19th test ran. Start from [postgresql-X-API-KEY].
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

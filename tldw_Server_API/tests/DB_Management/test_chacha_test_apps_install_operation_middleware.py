@@ -3,29 +3,33 @@
 Without ChaChaOperationMiddleware every request falls back to a thread-local
 PostgreSQL checkout; TASK-13841's 5-connection pool ran out that way.
 
-It recognises the literal ``app = FastAPI()`` in files that mention postgres and
-CharactersRAGDB or get_chacha_db_for_user, which is how every such test app is built
-today. An app built another way is not checked.
+It checks files that mention postgres (any case), pg_restricted_backend or
+pg_database_config, and CharactersRAGDB or get_chacha_db_for_user. In each, every
+``<name> = FastAPI(...)`` needs a matching ``<name>.add_middleware(ChaChaOperationMiddleware)``.
+An app built another way (a helper, a factory fixture) is not checked.
 """
 
 import re
+from collections import Counter
 from pathlib import Path
 
 _TESTS = Path(__file__).resolve().parents[1]
-_BUILDER = re.compile(r"^[ \t]*app = FastAPI\(\)[ \t]*$", re.MULTILINE)
-_INSTALLED = re.compile(r"^[ \t]*app\.add_middleware\(ChaChaOperationMiddleware\)[ \t]*$", re.MULTILINE)
+_POSTGRES = re.compile(r"postgres|pg_restricted_backend|pg_database_config", re.IGNORECASE)
+_BUILDER = re.compile(r"^[ \t]*(\w+) = FastAPI\(", re.MULTILINE)
+_INSTALLED = re.compile(r"^[ \t]*(\w+)\.add_middleware\(ChaChaOperationMiddleware\)[ \t]*$", re.MULTILINE)
 
 
 def test_every_postgres_chacha_test_app_installs_the_operation_middleware():
     missing = []
     for path in sorted(_TESTS.rglob("*.py")):
         text = path.read_text(encoding="utf-8")
-        builders = len(_BUILDER.findall(text))
-        if not builders or "postgres" not in text:
+        builders = Counter(_BUILDER.findall(text))
+        if not builders or not _POSTGRES.search(text):
             continue
         if not re.search(r"CharactersRAGDB|get_chacha_db_for_user", text):
             continue
-        if len(_INSTALLED.findall(text)) < builders:
+        installed = Counter(_INSTALLED.findall(text))
+        if any(installed[name] < count for name, count in builders.items()):
             missing.append(str(path.relative_to(_TESTS)))
 
-    assert missing == [], f"Add app.add_middleware(ChaChaOperationMiddleware) after app = FastAPI() in: {missing}"
+    assert missing == [], f"Add <app>.add_middleware(ChaChaOperationMiddleware) after <app> = FastAPI() in: {missing}"
