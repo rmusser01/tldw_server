@@ -139,3 +139,5 @@ def test_an_unknown_match_mode_is_rejected(notes_client: TestClient) -> None:
     response = notes_client.get("/api/v1/notes/search/", params={"tokens": ["rag"], "tokens_match": "some"})
 
     assert response.status_code == 422
+    errors = response.json()["detail"]
+    assert any(error["loc"][-1] == "tokens_match" for error in errors)

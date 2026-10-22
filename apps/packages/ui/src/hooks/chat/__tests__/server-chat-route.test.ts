@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest"
 import {
   buildServerChatPath,
+  historyHandoffState,
   isCharacterChatRouteSearch,
   isServerChatNavigationPending,
   planServerChatNavigation,
@@ -8,6 +9,7 @@ import {
   reportMountedChatRoute,
   resetServerChatRouteState,
   settleServerChatNavigation,
+  withoutHistoryHandoff,
   withServerChatRouteId
 } from "../server-chat-route"
 
@@ -57,5 +59,29 @@ describe("chat page addresses (XP-05)", () => {
     expect(isServerChatNavigationPending("chat-a")).toBe(false)
     settleServerChatNavigation("chat-b")
     expect(isServerChatNavigationPending("chat-b")).toBe(false)
+  })
+})
+
+// The Playground consumes a /chat?historySelection=... link with
+// history.replaceState, which the router does not see. The chat address must
+// wait until it is consumed and must never write it back afterwards.
+describe("chat address and the history handoff link", () => {
+  const handoff = "?historySelection=%7B%22conversation_id%22%3A%22c1%22%7D"
+
+  it("reports no handoff when the router query has none", () => {
+    expect(historyHandoffState("?chat=c1", "http://app.test/chat?chat=c1")).toBe("none")
+  })
+
+  it("waits while the browser address still carries the handoff", () => {
+    expect(historyHandoffState(handoff, `http://app.test/chat${handoff}`)).toBe("pending")
+    expect(historyHandoffState(handoff, `chrome-extension://x/options.html#/chat${handoff}`)).toBe("pending")
+  })
+
+  it("treats a handoff only the router still sees as consumed", () => {
+    expect(historyHandoffState(handoff, "http://app.test/chat")).toBe("consumed")
+  })
+
+  it("drops a consumed handoff from the query it writes", () => {
+    expect(withServerChatRouteId(withoutHistoryHandoff(`${handoff}&tab=x`), "c1")).toBe("?tab=x&chat=c1")
   })
 })

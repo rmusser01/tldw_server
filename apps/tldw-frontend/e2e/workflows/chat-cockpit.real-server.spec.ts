@@ -498,6 +498,11 @@ const buildConfiguredChatModelSelection = (payload: any, metadata: unknown): Rea
   };
 };
 
+// The composition preview names the model as "model (Provider)" (CC-06); the
+// raw provider:model route is shown only in the runtime inspector.
+const compositionScopeText = (modelKey: string): string =>
+  `Scope: ${modelKey.slice(modelKey.indexOf(':') + 1)} (`;
+
 const getConfiguredChatModelSelection = async (
   request: APIRequestContext
 ): Promise<RealChatModelSelection> => {
@@ -1905,7 +1910,7 @@ test.describe('/chat cockpit real-server parity', () => {
     const modeSummary = page.getByTestId('playground-cockpit-mode-summary');
     await expect(modeSummary).toHaveText('Context and chat settings visible.');
     await expect(getDesktopCompositionPreview(page)).toContainText(
-      `Scope: ${chatModelSelection.key}`
+      compositionScopeText(chatModelSelection.key)
     );
 
     await page
@@ -2223,7 +2228,7 @@ test.describe('/chat cockpit real-server parity', () => {
       const compositionPreview = getDesktopCompositionPreview(page);
       await expect(compositionPreview).toBeVisible();
       await expect(compositionPreview).toContainText(promptName);
-      await expect(compositionPreview).toContainText(/Scope: [^:]+:.+/);
+      await expect(compositionPreview).toContainText(/Scope: [^()]+ \([^()]+\)/);
       await expect(compositionPreview).toContainText(
         /MCP tools|MCP unavailable|MCP tools managed from composer/
       );
@@ -2882,7 +2887,7 @@ test.describe('/chat cockpit real-server parity', () => {
       const contextRail = getDesktopContextRail(page);
       const compositionPreview = getDesktopCompositionPreview(page);
       await expect(compositionPreview).toContainText(characterName);
-      await expect(compositionPreview).toContainText(/Scope: [^:]+:.+/);
+      await expect(compositionPreview).toContainText(/Scope: [^()]+ \([^()]+\)/);
       const assistantContextSource = contextRail
         .getByRole('list', { name: 'Context sources' })
         .getByRole('listitem')
@@ -3025,7 +3030,7 @@ test.describe('/chat cockpit real-server parity', () => {
       const contextRail = getDesktopContextRail(page);
       const compositionPreview = getDesktopCompositionPreview(page);
       await expect(compositionPreview).toContainText(String(selectedPersona.name));
-      await expect(compositionPreview).toContainText(/Scope: [^:]+:.+/);
+      await expect(compositionPreview).toContainText(/Scope: [^()]+ \([^()]+\)/);
       const personaContextSource = contextRail
         .getByRole('list', { name: 'Context sources' })
         .getByRole('listitem')
@@ -3253,7 +3258,7 @@ test.describe('/chat cockpit real-server parity', () => {
     const runtimeInspector = getDesktopRuntimeInspector(page);
     const compositionPreview = getDesktopCompositionPreview(page);
 
-    await expect(compositionPreview).toContainText(`Scope: ${modelKey}`);
+    await expect(compositionPreview).toContainText(compositionScopeText(modelKey));
     expect(modelKey).toBe(chatModelSelection.key);
     await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
     await expect(runtimeInspector.getByText(modelKey, { exact: true })).toBeVisible();

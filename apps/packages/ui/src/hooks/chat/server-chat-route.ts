@@ -24,6 +24,57 @@ export const readServerChatRouteId = (search: string | null | undefined): string
 export const isCharacterChatRouteSearch = (search: string | null | undefined): boolean =>
   toSearchParams(search).get("mode")?.trim().toLowerCase() === "character"
 
+/** The one-shot history handoff a link may carry; the Playground consumes it. */
+export const HISTORY_SELECTION_HANDOFF_PARAM = "historySelection"
+
+/** The query string of a browser address, from either the URL or a hash route. */
+const browserQueries = (href: string): URLSearchParams[] => {
+  try {
+    const url = new URL(href)
+    const hashQueryStart = url.hash.indexOf("?")
+    return [
+      url.searchParams,
+      new URLSearchParams(hashQueryStart < 0 ? "" : url.hash.slice(hashQueryStart + 1))
+    ]
+  } catch {
+    return []
+  }
+}
+
+/**
+ * Where a router query that carries the history handoff stands against the
+ * real browser address. The Playground removes the handoff with
+ * `history.replaceState`, which the router does not see, so the router's
+ * query can still carry a handoff the page has already consumed.
+ *
+ * - `"none"`: the router query carries no handoff.
+ * - `"pending"`: the browser address still carries it, so the page has not
+ *   consumed it yet and the address must be left alone.
+ * - `"consumed"`: only the router's stale query carries it.
+ */
+export const historyHandoffState = (
+  routerSearch: string | null | undefined,
+  browserHref: string | null | undefined = typeof window === "undefined"
+    ? null
+    : window.location.href
+): "none" | "pending" | "consumed" => {
+  if (!toSearchParams(routerSearch).has(HISTORY_SELECTION_HANDOFF_PARAM)) return "none"
+  if (!browserHref) return "pending"
+  return browserQueries(browserHref).some((params) =>
+    params.has(HISTORY_SELECTION_HANDOFF_PARAM)
+  )
+    ? "pending"
+    : "consumed"
+}
+
+/** `search` without the history handoff parameter. */
+export const withoutHistoryHandoff = (search: string | null | undefined): string => {
+  const params = toSearchParams(search)
+  params.delete(HISTORY_SELECTION_HANDOFF_PARAM)
+  const next = params.toString()
+  return next ? `?${next}` : ""
+}
+
 /** `search` with the chat parameter set to `chatId`, or removed when it is null. */
 export const withServerChatRouteId = (
   search: string | null | undefined,

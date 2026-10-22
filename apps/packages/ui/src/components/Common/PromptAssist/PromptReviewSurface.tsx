@@ -168,7 +168,7 @@ export function PromptReviewSurface({
             {findings.slice(0, 5).map((finding, index) => (
               <li
                 key={`${finding.category}-${index}`}
-                className="rounded-md bg-muted/50 p-3 text-sm">
+                className="rounded-md bg-surface2 p-3 text-sm">
                 <span className="font-medium">{finding.issue}</span>
                 <span className="block text-text-muted">
                   {finding.change}

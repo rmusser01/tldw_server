@@ -4,11 +4,13 @@ import { useSelectServerChat } from "@/hooks/chat/useSelectServerChat"
 import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
 import { useStoreMessageOption } from "@/store/option"
 import {
+  historyHandoffState,
   isCharacterChatRouteSearch,
   isServerChatNavigationPending,
   readServerChatRouteId,
   reportMountedChatRoute,
   settleServerChatNavigation,
+  withoutHistoryHandoff,
   withServerChatRouteId
 } from "@/hooks/chat/server-chat-route"
 
@@ -61,10 +63,16 @@ export const useServerChatRouteSync = () => {
     if (activeChatId === routeChatId) return
     // A navigation that names this chat is on its way; let it land.
     if (isServerChatNavigationPending(activeChatId)) return
+    // A history handoff link is consumed by the Playground first; writing the
+    // address meanwhile would drop it, and writing it afterwards from the
+    // router's stale query would bring it back.
+    const handoff = historyHandoffState(search)
+    if (handoff === "pending") return
+    const baseSearch = handoff === "consumed" ? withoutHistoryHandoff(search) : search
     navigate(
       {
         pathname: location.pathname,
-        search: withServerChatRouteId(search, activeChatId),
+        search: withServerChatRouteId(baseSearch, activeChatId),
         hash: location.hash
       },
       { replace: true }

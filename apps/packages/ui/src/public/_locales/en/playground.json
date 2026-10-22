@@ -4657,5 +4657,68 @@
   },
   "savedReplyActions_regenerateUnavailable": {
     "message": "This saved reply can't be regenerated here. Use New Branch to try again from this point."
+  },
+  "composer_scrollToLatestReplyInProgress": {
+    "message": "Reply in progress, scroll to latest messages"
+  },
+  "composer_scrollToLatestNewMessages": {
+    "message": "New messages below, scroll to latest messages"
+  },
+  "composer_replyInProgress": {
+    "message": "Reply in progress"
+  },
+  "composer_modelCatalogSearchPlaceholder": {
+    "message": "Search all models"
+  },
+  "composer_modelScopeLabel": {
+    "message": "Models to show"
+  },
+  "composer_modelScopeReady": {
+    "message": "Ready to use"
+  },
+  "composer_modelScopeAll": {
+    "message": "All models"
+  },
+  "composer_modelNotSetUp": {
+    "message": "Not set up"
+  },
+  "composer_modelNotSetUpTitle": {
+    "message": "This model's provider is not set up on your server yet."
+  },
+  "composer_modelReadiness_notChecked": {
+    "message": "Not checked"
+  },
+  "composer_modelReadiness_notCheckedTitle": {
+    "message": "This model has not answered yet. Send a message to check it."
+  },
+  "composer_modelReadiness_working": {
+    "message": "Working"
+  },
+  "composer_modelReadiness_workingTitle": {
+    "message": "This model answered recently."
+  },
+  "composer_modelReadiness_unreachable": {
+    "message": "Unreachable"
+  },
+  "composer_modelReadiness_unreachableTitle": {
+    "message": "The last request to this model failed. Its provider may not be running. Choose another model."
+  },
+  "composer_modelReadiness_switchTo": {
+    "message": "Switch to {{model}}"
+  },
+  "composer_modelReadiness_switchedTo": {
+    "message": "Switched to {{model}}"
+  },
+  "composer_modelReadiness_providerWorkingTitle": {
+    "message": "Its provider answered recently."
+  },
+  "composer_modelReadiness_providerUnreachableTitle": {
+    "message": "Its provider has been failing. Choose another model."
+  },
+  "composer_modelReadiness_tooltip": {
+    "message": "Model status"
+  },
+  "cockpit_routeDetails": {
+    "message": "Details"
   }
 }
