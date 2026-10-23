@@ -96,14 +96,14 @@ One PR. The tasks are independent, but both are small and test-only or near test
 
 from __future__ import annotations
 
-import socke
+import socket
 
-import pytes
+import pytest
 
 from tldw_Server_API.tests.helpers.offline_network import block_live_network
 
 
-@pytest.mark.uni
+@pytest.mark.unit
 def test_a_non_loopback_lookup_is_blocked_and_recorded():
     with block_live_network() as attempts:
         with pytest.raises(socket.gaierror):
@@ -113,7 +113,7 @@ def test_a_non_loopback_lookup_is_blocked_and_recorded():
     assert attempts == [("dns", "api.openai.com"), ("dns", "api.openai.com")]
 
 
-@pytest.mark.uni
+@pytest.mark.unit
 def test_a_non_loopback_connect_is_blocked_before_any_packet():
     with block_live_network() as attempts:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -127,14 +127,14 @@ def test_a_non_loopback_connect_is_blocked_before_any_packet():
     assert attempts == [("connect", "93.184.216.34"), ("connect", "93.184.216.34")]
 
 
-@pytest.mark.uni
+@pytest.mark.unit
 def test_loopback_is_allowed_and_not_recorded():
     with block_live_network() as attempts:
         assert socket.getaddrinfo("127.0.0.1", 80)
     assert attempts == []
 
 
-@pytest.mark.uni
+@pytest.mark.unit
 def test_the_real_functions_are_restored():
     before = (socket.getaddrinfo, socket.gethostbyname, socket.socket.connect, socket.socket.connect_ex)
     with block_live_network():
@@ -151,13 +151,13 @@ Expected: collection error `ModuleNotFoundError: No module named 'tldw_Server_AP
 ```python
 """Block every non-loopback DNS lookup and connect, and record each attempt.
 
-A call whose exception a library swallows still shows up in the returned list, so a tes
+A call whose exception a library swallows still shows up in the returned list, so a test
 can assert that no live network was touched.
 """
 
 from __future__ import annotations
 
-import socke
+import socket
 from collections.abc import Iterator
 from contextlib import contextmanager
 from unittest import mock
@@ -176,7 +176,7 @@ def block_live_network() -> Iterator[list[tuple[str, str]]]:
     attempts: list[tuple[str, str]] = []
     real_getaddrinfo = socket.getaddrinfo
     real_gethostbyname = socket.gethostbyname
-    real_connect = socket.socket.connec
+    real_connect = socket.socket.connect
     real_connect_ex = socket.socket.connect_ex
 
     def getaddrinfo(host, *args, **kwargs):
@@ -199,7 +199,7 @@ def block_live_network() -> Iterator[list[tuple[str, str]]]:
                 raise OSError("live connect blocked by the test")
             return real(self, address, *args, **kwargs)
 
-        return connec
+        return connect
 
     with (
         mock.patch.object(socket, "getaddrinfo", getaddrinfo),
@@ -229,7 +229,7 @@ def loopback_custom_openai_endpoints(monkeypatch):
     """Point both configured custom OpenAI slots at a loopback origin.
 
     config.txt defaults both slots to https://api.openai.com/v1, and the adapters read the
-    server-owned endpoint, not the request's base_url. The egress check still runs, agains
+    server-owned endpoint, not the request's base_url. The egress check still runs, against
     127.0.0.1; nothing listens on port 9 and the tests stub the transport.
     """
     for key in ("CUSTOM_OPENAI_API_IP", "CUSTOM_OPENAI2_API_IP"):
@@ -277,7 +277,7 @@ Expected: no failures (baseline on `e06eeec68c` without the changes: the same 6 
 - [ ] **Step 1 (RED): replace `test_local_openai_rejection_keeps_the_upstream_status` including its two decorators (lines 34-51: `@pytest.mark.unit`, the `@pytest.mark.parametrize("status_code", ...)` line, and the function) with:**
 
 ```python
-@pytest.mark.uni
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("status_code", "error_type"),
     [(401, ChatAuthenticationError), (403, ChatAuthenticationError), (429, ChatRateLimitError)],
@@ -301,7 +301,7 @@ def test_local_openai_auth_and_rate_limit_replies_get_the_remote_error_types(sta
     assert exc.value.__cause__ is None
 
 
-@pytest.mark.uni
+@pytest.mark.unit
 def test_local_openai_unpulled_model_stays_a_rejected_request():
     error = _make_httpx_error(404)
 
@@ -334,7 +334,7 @@ the test if a non-loopback DNS lookup or connect is attempted.
 from __future__ import annotations
 
 import httpx
-import pytes
+import pytest
 
 # Ensure chat fixtures (client/auth) are registered as pytest fixtures
 from tldw_Server_API.tests._plugins import chat_fixtures as _chat_pl  # noqa: F401
@@ -405,7 +405,7 @@ def _post(authenticated_client, monkeypatch, status: int, stream: bool):
 def test_local_provider_reply_not_streamed(monkeypatch, authenticated_client, status, expected):
     response = _post(authenticated_client, monkeypatch, status, stream=False)
 
-    assert response.status_code == expected[0], response.tex
+    assert response.status_code == expected[0], response.text
     detail = response.json()["detail"]
     if expected[1] is not None:
         assert detail["error_code"] == expected[1]
@@ -413,7 +413,7 @@ def test_local_provider_reply_not_streamed(monkeypatch, authenticated_client, st
         assert detail == "Rate limit exceeded. Please retry."
     else:
         assert detail == "Invalid request."
-    assert "upstream secret" not in response.tex
+    assert "upstream secret" not in response.text
 
 
 @pytest.mark.integration
@@ -425,9 +425,9 @@ def test_local_provider_reply_not_streamed(monkeypatch, authenticated_client, st
 def test_local_provider_reply_streamed(monkeypatch, authenticated_client, status, expected):
     response = _post(authenticated_client, monkeypatch, status, stream=True)
 
-    assert response.status_code == expected[0], response.tex
+    assert response.status_code == expected[0], response.text
     assert response.json()["detail"]["error_code"] == expected[1]
-    assert "upstream secret" not in response.tex
+    assert "upstream secret" not in response.text
 ```
 
 Run all three RED files before any source edit: the unit file below, the Task 4 stream file, and this one:
@@ -498,7 +498,7 @@ class _RejectingResponse(DummyResponse):
         raise self._error
 
 
-@pytest.mark.uni
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("status_code", "code"),
     [
@@ -629,7 +629,7 @@ Compute the ids at execution under the id lock (AGENTS.md "Task ids collide" com
 3. `TASK-<N>` Tests: make `no_live_network` autouse for `tests/LLM_Adapters/unit` once item 2 is fixed (it fails today on exactly those tests; `LLM_Calls/test_provider_config_resolution.py` also records `slot-2.example`, which fails closed), so the next config-default leak fails at once instead of in a DNS-less environment. Only that directory plus `LLM_Calls` were measured; other directories were not.
 4. Not filed: a Kobold-specific endpoint test (Review Focus). Covered by the shared function; file only if the reviewer asks.
 
-## ADR assessmen
+## ADR assessment
 
 No new ADR. The change maps local failures onto existing public error types and an existing stream error code; it adds no durable architecture rule. Governing: ADR-025 (LLM provider adapter routing and overrides) concerns routing and overrides, not error typing, and is unaffected; ADR-059 governs the backlog edits. The Chat error vocabulary (`ChatAuthenticationError`, `ChatRateLimitError`, `provider_authentication_failed`) already exists and is reused unchanged. Re-run `grep -n -i "error" Docs/ADR/README.md` at execution in case a newer ADR landed.
 
