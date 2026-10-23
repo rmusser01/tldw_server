@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import os
 import re
+import sqlite3
 import threading
 import time
 import uuid
@@ -13,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
 from tldw_Server_API.app.core.DB_Management.DB_Manager import create_workflows_database, get_content_backend_instance
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.exceptions import AdapterError
@@ -34,6 +36,9 @@ _WF_NONCRITICAL_EXCEPTIONS: tuple[type[Exception], ...] = (
     ValueError,
     AdapterError,
 )
+# Reading the cancel flag inside a CancelledError handler: a DB failure there must not replace the
+# CancelledError (SQLite raises sqlite3.Error; the PostgreSQL backend wraps its driver's in DatabaseError).
+_CANCEL_FLAG_READ_ERRORS = (*_WF_NONCRITICAL_EXCEPTIONS, sqlite3.Error, BackendDatabaseError)
 
 # Telemetry/metrics (graceful fallbacks if missing)
 try:
@@ -838,6 +843,15 @@ class WorkflowEngine:
                             error_reason_code = _reason_code_from_error(e)
                             with contextlib.suppress(*_WF_NONCRITICAL_EXCEPTIONS):
                                 record_span_exception(e)
+                        except asyncio.CancelledError:
+                            current = asyncio.current_task()
+                            run_cancelled = True  # if the flag cannot be read, the CancelledError propagates, as on dev
+                            with contextlib.suppress(*_CANCEL_FLAG_READ_ERRORS):
+                                run_cancelled = self.db.is_cancel_requested(run_id)
+                            if (current is not None and current.cancelling()) or run_cancelled:
+                                raise  # the run task, or the run itself, was cancelled: propagate, as before
+                            err = AdapterError("step_raised_cancelled_error")  # the step raised it itself (TASK-13891)
+                            error_reason_code = _reason_code_from_error(err)
 
                         if err is not None:
                             failure = build_failure_envelope(err, step_type=step_type)
@@ -1371,6 +1385,15 @@ class WorkflowEngine:
                 except Exception as e:  # noqa: BLE001 - adapter/provider failures must terminally fail the step
                     err = e
                     error_reason_code = _reason_code_from_error(e)
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    run_cancelled = True  # if the flag cannot be read, the CancelledError propagates, as on dev
+                    with contextlib.suppress(*_CANCEL_FLAG_READ_ERRORS):
+                        run_cancelled = self.db.is_cancel_requested(run_id)
+                    if (current is not None and current.cancelling()) or run_cancelled:
+                        raise  # the run task, or the run itself, was cancelled: propagate, as before
+                    err = AdapterError("step_raised_cancelled_error")  # the step raised it itself (TASK-13891)
+                    error_reason_code = _reason_code_from_error(err)
                 if err is not None:
                     failure = build_failure_envelope(err, step_type=stype)
                     self._complete_step_attempt_record(
