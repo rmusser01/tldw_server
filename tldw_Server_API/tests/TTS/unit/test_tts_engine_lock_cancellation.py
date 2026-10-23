@@ -573,17 +573,15 @@ async def test_kokoro_load_past_init_timeout_keeps_the_lock_until_the_load_retur
 
 
 @pytest.mark.asyncio
-async def test_kokoro_onnx_load_ignores_init_timeout_sec(monkeypatch, tmp_path):
-    """init_timeout_sec is PyTorch-only: an ONNX load that outlasts it still completes for its caller."""
+async def test_kokoro_onnx_load_honours_init_timeout_sec(monkeypatch, tmp_path):
+    """init_timeout_sec bounds an ONNX load's caller as it does a PyTorch one: a hung constructor returns False."""
     gate = _Gate()
     adapter = _kokoro_adapter(monkeypatch, tmp_path, gate, backend="onnx", init_timeout_sec=0.1)
-    load = asyncio.create_task(adapter._ensure_model_loaded())
     try:
-        await asyncio.sleep(0.3)  # three times the bound
-        assert not load.done()
+        assert await asyncio.wait_for(adapter._ensure_model_loaded(), 2) is False
+        assert gate.started == ["load"]
     finally:
         gate.release.set()
-    assert await asyncio.wait_for(load, 5) is True
 
 
 @pytest.mark.asyncio

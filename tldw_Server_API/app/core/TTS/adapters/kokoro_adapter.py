@@ -357,13 +357,13 @@ class KokoroAdapter(TTSAdapter):
 
         The lock (tts_model_load_lock) is shared by every Kokoro adapter loading this model path, and
         hold_tts_engine keeps it with a load thread until it returns, even after its caller left, so no
-        second load starts beside it on this adapter or another. init_timeout_sec (PyTorch only) bounds
-        each caller's wait on the model load, including queueing on that lock; queueing on
-        ensure_initialized's _init_lock is not bounded.
+        second load starts beside it on this adapter or another. init_timeout_sec bounds each caller's
+        wait on the model load, including queueing on that lock; queueing on ensure_initialized's
+        _init_lock is not bounded.
         """
         if self._model_is_loaded():
             return True
-        bound = None if self.use_onnx else (self.init_timeout_sec or None)
+        bound = self.init_timeout_sec or None
         load_lock = tts_model_load_lock(self.provider_key, f"{'onnx' if self.use_onnx else 'torch'}:{self.model_path}")
         try:
             async with asyncio.timeout(bound) as deadline, hold_tts_engine(load_lock) as run:
