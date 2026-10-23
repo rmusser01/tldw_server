@@ -1,9 +1,11 @@
 """The disposable archive probe cleanup must reject unrelated resource names."""
 
 import json
+import os
 import runpy
 from pathlib import Path
 from secrets import token_urlsafe
+from types import SimpleNamespace
 
 import pytest
 
@@ -82,8 +84,14 @@ async def test_setup_and_cleanup_use_matching_configured_port(monkeypatch, tmp_p
     # Fix only the resource suffix, retaining the real random credential path.
     original_token = namespace["token_hex"]
     monkeypatch.setitem(namespace, "token_hex", lambda size: "012345abcd" if size == 5 else original_token(size))
-    await provisioner["setup"]()
     path = tmp_path / "manifest.json"
+    if os.name != "posix":
+        with pytest.raises(ValueError, match="POSIX"):
+            await provisioner["setup"]()
+        assert statements == []
+        assert not path.exists()
+        return
+    await provisioner["setup"]()
     created = json.loads(path.read_text())
     assert created["port"] == 5435
     assert path.stat().st_mode & 0o077 == 0
@@ -94,6 +102,21 @@ async def test_setup_and_cleanup_use_matching_configured_port(monkeypatch, tmp_p
         'DROP DATABASE IF EXISTS "email_content_012345abcd" WITH (FORCE)',
         'DROP ROLE IF EXISTS "email_probe_012345abcd"',
     ]
+
+
+@pytest.mark.asyncio
+async def test_setup_rejects_non_posix_host_before_database_or_manifest_changes(monkeypatch, tmp_path):
+    provisioner = _load_provisioner(monkeypatch, tmp_path, "5435")
+    namespace = provisioner["setup"].__globals__
+    monkeypatch.setitem(namespace, "os", SimpleNamespace(name="nt"))
+
+    async def forbidden_connection():
+        raise AssertionError("unsupported hosts must not provision databases")
+
+    monkeypatch.setitem(namespace, "admin_connection", forbidden_connection)
+    with pytest.raises(ValueError, match="POSIX"):
+        await provisioner["setup"]()
+    assert not (tmp_path / "manifest.json").exists()
 
 
 def test_generated_probe_resources_are_accepted(validate_manifest):

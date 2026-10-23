@@ -91,6 +91,8 @@ def _configured_postgres_port() -> int:
 
 def _validate_postgres_manifest(path: Path) -> dict[str, Any]:
     """Validate the private local generated target before the guard probe imports it."""
+    if os.name != "posix":
+        raise ValueError("PostgreSQL probes require POSIX owner-only file permissions")
     port = _configured_postgres_port()
     if path.is_symlink() or not path.is_file() or stat.S_IMODE(path.stat().st_mode) & 0o077:
         raise ValueError("PostgreSQL probe manifest must be a private regular file")

@@ -240,9 +240,64 @@ waiver of provider smoke/human rationale. The existing watcher is active again.
    Grounding 53 pass; real RAG policy probe preserves repaired content exactly;
    shared-UI admin 23 pass under coverage; TypeScript pass. Bandit is not applicable
    to this TypeScript/test-only scope; no Python application code changed.
-3. **Review and publish (In Progress):** Scoped requesting-code-review, normal
-   hooks, protected push, then fresh exact-head CI. Do not continually rebase for
-   this CI-only watch. Notify only actionable changes or verified all-green.
+3. **Review and publish (Complete):** Independent review has no findings; exact
+   `14895fcd4630ba9278d544e5e9429e6398c10f41` is published with the protected 558
+   old-head lease. Review `5632130399` records independent reversible-label,
+   random-UUID, real RAG-policy and AntD click-state probes. Reviewer closed.
+4. **Hosted CI watch (In Progress):** Fresh CI `39996031207`, backend
+   `39996031401`, frontend `39996031142`, E2E tiers `39996031083` and license
+   `39996076939` are queued, not green. Existing watcher is active with the fresh
+   checkpoint. Do not continually rebase for this CI-only watch. Notify only
+   actionable changes or verified all-green; stop the watcher when green.
+
+#### Matrix Revision Mismatch (2026-10-23 20:33Z)
+
+All seven required contexts on exact `14895fc` are SUCCESS, and critical E2E
+`39996031083` passed. Full CI `39996031207` failed `admin-bundle-ops` before
+collection: pytest exit 4, `test_bundle_restore_backends.py` not found. Job
+`120605922220` checked out candidate `14895fc`, but GitHub evaluated the workflow
+from synthetic merge `205d874` (dev `4d7405b` plus that candidate). The merged
+matrix names 15 test paths absent from the candidate across seven shards; the
+candidate's own 208-shard manifest has no absent test paths. This is workflow/code
+revision drift, not a demonstrated Calendar test failure.
+
+The supported non-required `ci.yml` dispatch on `codex/calendar-dev-pr` created
+replacement run `40020128320`, verified against exact head `14895fc`. Cancellation
+of the original mixed-revision run was requested as superseded, not passed; GitHub
+still reported it in progress at the final check. No required gate was
+dispatched or replaced, no missing paths were ignored, and no source/test/workflow
+files changed. The manual lane also enables OS/Python matrices; inspect applicable
+failures rather than assuming optional admission skips imply success. Full CI is
+pending. Preserve the failed job log/artifact `12530480543`; do not declare green
+until actual replacement success. No rebase, merge or policy waiver.
+
+#### Release-Lane Portability (2026-10-23)
+
+Run `40020128320` exposed two further failures on exact `14895fc`: macOS Python
+3.13 `core-utils-tooling` lacked Docker Compose; Windows Python 3.13 had nine
+email-probe failures because native chmod mode bits do not enforce POSIX privacy.
+
+1. **Reproduce (Complete):** Retained both job logs. Two deterministic non-POSIX
+   regressions reached credential reads/admin connections before rejection.
+   The missing macOS install-step contract also failed before the workflow fix.
+2. **Repair and local verification (Complete):** Reuse the macOS 3.12 Compose CLI
+   recipe in shared release steps, gated to macOS and `core-utils-tooling` so
+   Windows never runs brew. Standalone PostgreSQL probe setup/validation reject
+   non-POSIX hosts before credential or database changes; real POSIX mode checks
+   remain intact. Tests assert native unsupported rejection, not skips or relaxed
+   permissions. The provenance/timing test injects a validated synthetic manifest
+   boundary without changing its remaining security assertions. Probe 90 pass;
+   actual local monitoring/Compose 8 pass; workflow/license contracts 93 pass;
+   Ruff, normal hooks and diff checks pass; scoped source Bandit 0 findings/errors.
+   No ADR is needed: existing POSIX-only privacy policy, no new ACL support.
+3. **Independent review and publish (In Progress):** Requesting-code-review over
+   the complete eight-file source/test/workflow delta found no issues. Reviewer
+   independently passed 159 tests with no skips, verified red/green in memory and
+   source/security checks, then closed. Normal commit/publication is pending.
+   No Calendar runtime changes; shard coverage 5147 files/new_uncovered 0 passes.
+4. **Hosted verification (Not Started):** Requires fresh exact-head PR statuses
+   plus full Python 3.12 and applicable release-lane results. Local Python 3.12 on
+   macOS is not real Windows or hosted Python 3.13 proof. No rebase or merge.
 
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.

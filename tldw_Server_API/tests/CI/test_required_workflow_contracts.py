@@ -2366,3 +2366,27 @@ def test_release_python313_platforms_keep_the_same_complete_suite() -> None:
             assert job[key] == reference[key], key
     assert sorted(platforms) == ["macos-latest", "windows-latest"]
     assert sum(job["strategy"]["max-parallel"] for job in release) == 20
+
+
+def test_release_python313_provisions_compose_only_for_macos_monitoring_shard() -> None:
+    """The shared release steps need Compose before rendering, but never brew on Windows."""
+    jobs = _load(".github/workflows/ci.yml")["jobs"]
+    for job_name in (
+        "full-suite-os-313-release-shards",
+        "full-suite-windows-313-release-shards",
+    ):
+        steps = jobs[job_name]["steps"]
+        install = _get_step(steps, "Install Docker Compose CLI for monitoring render contract")
+        assert install["if"] == "runner.os == 'macOS' && matrix.shard.name == 'core-utils-tooling'"
+        assert install["shell"] == "bash"
+        assert not install.get("continue-on-error", False)
+        script = install["run"]
+        for command in (
+            "brew install docker docker-compose",
+            'mkdir -p "$HOME/.docker/cli-plugins"',
+            'ln -s "$(brew --prefix)/lib/docker/cli-plugins/docker-compose" '
+            '"$HOME/.docker/cli-plugins/docker-compose"',
+            "docker compose version",
+        ):
+            assert command in script
+        assert steps.index(install) < steps.index(_get_step(steps, "Run release OS shard tests"))

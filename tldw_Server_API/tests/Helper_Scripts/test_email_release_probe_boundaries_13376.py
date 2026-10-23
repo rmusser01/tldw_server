@@ -223,6 +223,12 @@ def test_postgres_guard_accepts_private_generated_target_before_application_impo
     }), encoding="utf-8")
     manifest.chmod(0o600)
     observed = guard_preamble("email_archive_throughput_postgres_2026_09_25.py", tmp_path, manifest=manifest)
+    if os.name != "posix":
+        assert observed == {
+            "status": "rejected", "roots_created": 0,
+            "content_mode": "postgresql", "backend": "postgresql", "has_pg_dsn": True,
+        }
+        return
     assert observed == {
         "status": "configured", "roots_created": 1,
         "content_mode": "postgresql", "backend": "postgresql", "has_pg_dsn": True,
@@ -246,6 +252,7 @@ def test_private_manifest_port_matches_configured_loopback_only(monkeypatch, tmp
     }))
     manifest.chmod(0o600)
     observed = guard_preamble("email_archive_throughput_postgres_2026_09_25.py", tmp_path, manifest=manifest)
+    accepted = accepted and os.name == "posix"
     assert observed["status"] == ("configured" if accepted else "rejected")
     assert observed["roots_created"] == (1 if accepted else 0)
 
