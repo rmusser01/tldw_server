@@ -4,12 +4,14 @@
 # Pipeline: STT (transcription) -> Intent Parse -> Action Execute -> TTS (response)
 #
 #######################################################################################################################
+import asyncio
 import time
 from typing import Any, Callable, Optional
 from urllib.parse import urljoin
 
 from loguru import logger
 
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
 from tldw_Server_API.app.core.Persona.connections import (
     PersonaConnectionConfigError,
@@ -89,6 +91,30 @@ async def _close_response(response: Any) -> None:
     close = getattr(response, "close", None)
     if callable(close):
         close()
+
+
+# A command's ChaCha work runs in these groups, each off the event loop in its own
+# operation (or an HTTP request's), so no checkout waits on the loop or spans the action.
+def _load_commands_and_save_new_session(
+    registry: VoiceCommandRegistry,
+    db: Any,
+    user_id: int,
+    persona_id: str | None,
+    new_session: VoiceSessionContext | None,
+) -> list[Any]:
+    commands = registry.load_user_commands(db, user_id, include_disabled=True, persona_id=persona_id)
+    if new_session is not None:
+        from .db_helpers import save_voice_session
+
+        save_voice_session(db, new_session)
+    return commands
+
+
+def _record_command_and_save_session(db: Any, session: VoiceSessionContext, **event: Any) -> None:
+    from .db_helpers import record_voice_command_event, save_voice_session
+
+    record_voice_command_event(db, **event)
+    save_voice_session(db, session)
 
 
 class VoiceCommandRouter:
@@ -189,16 +215,15 @@ class VoiceCommandRouter:
         if db:
             try:
                 self.registry.load_defaults()
-                self.registry.refresh_user_commands(
+                commands = await asyncio.to_thread(
+                    chacha_operation()(_load_commands_and_save_new_session),
+                    self.registry,
                     db,
                     user_id,
-                    include_disabled=True,
-                    persona_id=persona_id,
+                    persona_id,
+                    session.model_copy(deep=True) if created else None,
                 )
-                if created:
-                    from .db_helpers import save_voice_session
-
-                    save_voice_session(db, session)
+                self.registry.apply_user_commands(user_id, commands, persona_id=persona_id)
             except Exception as e:
                 logger.warning(f"Failed to refresh voice commands from DB: {e}")
 
@@ -280,8 +305,6 @@ class VoiceCommandRouter:
             # Persist session + analytics when DB is available
             if db and parsed:
                 try:
-                    from .db_helpers import record_voice_command_event, save_voice_session
-
                     command_name = None
                     if parsed.intent.command_id:
                         cmd = self.registry.get_command(
@@ -293,8 +316,10 @@ class VoiceCommandRouter:
                     if not command_name:
                         command_name = parsed.intent.action_config.get("action") or parsed.intent.action_type.value
 
-                    record_voice_command_event(
+                    await asyncio.to_thread(
+                        chacha_operation()(_record_command_and_save_session),
                         db,
+                        session.model_copy(deep=True),
                         command_id=parsed.intent.command_id,
                         command_name=command_name,
                         user_id=user_id,
@@ -309,7 +334,6 @@ class VoiceCommandRouter:
                             else "planner_fallback"
                         ),
                     )
-                    save_voice_session(db, session)
                 except Exception as e:
                     logger.warning(f"Failed to record voice analytics: {e}")
 
@@ -819,7 +843,8 @@ class VoiceCommandRouter:
                 error_message="Missing persona_id or connection_id for external action.",
             )
 
-        connection = self._load_persona_connection(
+        connection = await asyncio.to_thread(
+            chacha_operation()(self._load_persona_connection),
             db=db,
             user_id=session.user_id,
             persona_id=resolved_persona_id,
