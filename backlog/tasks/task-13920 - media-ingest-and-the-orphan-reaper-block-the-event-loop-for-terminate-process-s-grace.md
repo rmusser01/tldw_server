@@ -24,6 +24,7 @@ terminate_process (Workflows/subprocess_utils.py) sends SIGTERM, then time.sleep
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Also (clean review of #3308, Minor 4; pre-existing, the same call as on dev): if context['is_cancelled']() raises during a media_ingest download (Workflows/adapters/media/ingest.py, the loop-top check in the poll; the engine's callback is lambda: self.db.is_cancel_requested(run_id), so e.g. sqlite3.OperationalError('database is locked')), the exception leaves the poll with yt-dlp still running, and nothing terminates it. The reviewer's suggested fix: wrap the poll in try/except BaseException that runs await asyncio.to_thread(terminate_process, task) and re-raises, which also subsumes today's CancelledError branch and moves that termination off the event loop, as this task asks.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
