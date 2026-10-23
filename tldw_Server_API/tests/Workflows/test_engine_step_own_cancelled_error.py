@@ -226,8 +226,9 @@ async def test_a_cancelled_run_task_reads_no_cancel_flag(tmp_path, entry) -> Non
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
     reads: list[str] = []
 
-    await _cancel_the_run_task(db, entry, lambda run_id: reads.append(run_id) or False)
+    left = await _cancel_the_run_task(db, entry, lambda run_id: reads.append(run_id) or False)
 
+    assert type(left) is asyncio.CancelledError
     assert reads == []
 
 
