@@ -19,6 +19,7 @@ import anyio
 import numpy as np
 import pytest
 
+from tldw_Server_API.app.core.TTS import utils as tts_utils
 from tldw_Server_API.app.core.TTS.adapters import supertonic2_adapter, supertonic_adapter
 from tldw_Server_API.app.core.TTS.adapters.base import AudioFormat, ProviderStatus, TTSRequest
 
@@ -40,13 +41,39 @@ class _Gate:
             raise RuntimeError("the test never released the engine call")
 
 
+async def _until(condition: Callable[[], object], what: str) -> None:
+    """Poll ``condition``; fail after 5 s rather than hang the run."""
+    for _ in range(500):
+        if condition():
+            return
+        await asyncio.sleep(0.01)
+    pytest.fail(f"timed out waiting for {what}")
+
+
+def _queued_on(lock: asyncio.Lock) -> bool:
+    """Whether a caller is queued on ``lock``: asyncio.Lock keeps each queued acquire's future in _waiters."""
+    return any(not waiter.done() for waiter in lock._waiters or ())
+
+
+def _model_load_lock() -> asyncio.Lock:
+    """The one model-load lock (tts_model_load_lock) held on this test's loop."""
+    loop = asyncio.get_running_loop()
+    (lock,) = [lock for (owner, _provider, _model), lock in tts_utils._MODEL_LOAD_LOCKS.items() if owner is loop]
+    return lock
+
+
 async def _assert_cancelled_call_keeps_the_engine(
     call: Callable[[], Awaitable[object]],
     gate: _Gate,
     *,
+    lock: Callable[[], asyncio.Lock],
     via_anyio_scope: bool,
 ) -> None:
-    """Cancel one call mid-engine-call while a second waits; the second must not start until the first returns."""
+    """Cancel one call mid-engine-call while a second waits; the second must not start until the first returns.
+
+    Checked by state, not by elapsed time (TASK-13893): once the cancel has unwound, the second call must
+    end up queued on ``lock`` (the lock the first call holds), not running its own engine call.
+    """
     scopes: list[anyio.CancelScope] = []
 
     async def _first() -> None:
@@ -59,20 +86,20 @@ async def _assert_cancelled_call_keeps_the_engine(
 
     first = asyncio.create_task(_first())
     try:
-        for _ in range(500):
-            if gate.started:
-                break
-            await asyncio.sleep(0.01)
-        assert gate.started, "the first call never reached the engine"
+        await _until(lambda: gate.started, "the first call to reach the engine")
+        held = lock()
+        # Ready callbacks run in FIFO order, so the second call takes its first step before the cancel lands.
         second = asyncio.create_task(call())
-        await asyncio.sleep(0.05)
         if via_anyio_scope:
             scopes[0].cancel()
         else:
             first.cancel()
-        await asyncio.sleep(0.1)
-        # The cancelled request's engine call is still running, so the next one has not started.
+        await asyncio.wait({first}, timeout=5)
+        assert first.done(), "the cancelled call never unwound"
+        await _until(lambda: _queued_on(held) or len(gate.started) > 1, "the second call to queue on the lock")
+        # The cancelled call's engine thread still runs, so the lock is still held and the second call queued on it.
         assert len(gate.started) == 1
+        assert _queued_on(held)
     finally:
         gate.release.set()
     # Bounded waits: a lock-leak regression must fail here, not hang the run until pytest-timeout kills it (Review M1).
@@ -127,7 +154,9 @@ async def test_pocket_tts_generate_keeps_the_engine_until_its_call_returns(via_a
     async def call():
         return await adapter.generate(_pocket_request(stream=False))
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        call, gate, lock=lambda: adapter._engine_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 @pytest.mark.asyncio
@@ -140,7 +169,9 @@ async def test_pocket_tts_stream_keeps_the_engine_until_its_call_returns(via_any
         response = await adapter.generate(_pocket_request(stream=True))
         return [chunk async for chunk in response.audio_stream]
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        call, gate, lock=lambda: adapter._engine_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 def _luxtts_adapter(gate: _Gate):
@@ -173,7 +204,9 @@ async def test_luxtts_keeps_the_engine_until_its_call_returns(via_anyio_scope):
             TTSRequest(text="hello", format=AudioFormat.PCM, voice_reference=_WAV_HEADER, stream=False)
         )
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        call, gate, lock=lambda: adapter._engine_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 def _supertonic_adapter(monkeypatch, tmp_path, gate: _Gate, *, version: int, gate_load: bool = False):
@@ -227,7 +260,9 @@ async def test_supertonic_keeps_the_engine_until_its_call_returns(monkeypatch, t
         # WAV, not PCM: Supertonic accepts only MP3 and WAV, and MP3 needs PyAV.
         return await adapter.generate(TTSRequest(text="hello", voice=voice, format=AudioFormat.WAV, stream=False))
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        call, gate, lock=lambda: adapter._engine_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 def _omnivoice_runtime(monkeypatch, tmp_path, gate: _Gate, *, gate_load: bool):
@@ -261,7 +296,9 @@ async def test_omnivoice_runtime_synthesis_keeps_the_model_until_its_call_return
     async def call():
         return await runtime.synthesize(OmniVoiceSynthesizeRequest(text="hello", mode="auto", language_id="en"))
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        call, gate, lock=lambda: runtime._generate_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 def _vibevoice_adapter(monkeypatch, gate: _Gate):
@@ -310,7 +347,9 @@ async def test_vibevoice_keeps_the_model_until_its_call_returns(monkeypatch, via
         request = TTSRequest(text="Speaker 1: hello", format=AudioFormat.PCM, stream=True)
         return [chunk async for chunk in adapter._stream_audio_vibevoice(request, "speaker_1", 1)]
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        call, gate, lock=lambda: adapter._model_state_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 @pytest.mark.asyncio
@@ -319,7 +358,9 @@ async def test_omnivoice_runtime_load_keeps_the_lock_until_the_load_returns(monk
     gate = _Gate()
     runtime = _omnivoice_runtime(monkeypatch, tmp_path, gate, gate_load=True)
 
-    await _assert_cancelled_call_keeps_the_engine(runtime.load, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        runtime.load, gate, lock=lambda: runtime._load_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 def _echo_adapter(gate: _Gate):
@@ -394,7 +435,7 @@ async def test_qwen3_mlx_model_load_keeps_the_lock_until_the_load_returns(monkey
     async def call():
         return await runtime._get_model("auto")
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(call, gate, lock=_model_load_lock, via_anyio_scope=via_anyio_scope)
 
 
 @pytest.mark.asyncio
@@ -406,7 +447,7 @@ async def test_qwen3_pipeline_load_keeps_the_lock_until_the_load_returns(via_any
     async def call():
         return await adapter._get_pipeline("Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice")
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(call, gate, lock=_model_load_lock, via_anyio_scope=via_anyio_scope)
 
 
 @pytest.mark.asyncio
@@ -415,7 +456,9 @@ async def test_echo_tts_model_load_keeps_the_lock_until_the_load_returns(via_any
     gate = _Gate()
     adapter = _echo_adapter(gate)
 
-    await _assert_cancelled_call_keeps_the_engine(adapter._ensure_models_loaded, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        adapter._ensure_models_loaded, gate, lock=_model_load_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 @pytest.mark.asyncio
@@ -427,7 +470,7 @@ async def test_kitten_tts_runtime_load_keeps_the_lock_until_the_load_returns(mon
     async def call():
         return await adapter._load_runtime_for_model("KittenML/kitten-tts-nano-0.8")
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(call, gate, lock=_model_load_lock, via_anyio_scope=via_anyio_scope)
 
 
 def _kokoro_adapter(monkeypatch, tmp_path, gate: _Gate, *, backend: str, init_timeout_sec: float | None = None):
@@ -502,7 +545,9 @@ async def test_kokoro_model_load_keeps_the_lock_until_the_load_returns(
     gate = _Gate()
     adapter = _kokoro_adapter(monkeypatch, tmp_path, gate, backend=backend, init_timeout_sec=init_timeout_sec)
 
-    await _assert_cancelled_call_keeps_the_engine(getattr(adapter, entry), gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(
+        getattr(adapter, entry), gate, lock=_model_load_lock, via_anyio_scope=via_anyio_scope
+    )
 
 
 @pytest.mark.asyncio
@@ -683,7 +728,7 @@ async def test_a_new_adapter_instance_waits_for_another_instances_load_of_the_sa
     gate = _Gate()
     call = _NEW_INSTANCE_LOADS[case](monkeypatch, tmp_path, gate)
 
-    await _assert_cancelled_call_keeps_the_engine(call, gate, via_anyio_scope=via_anyio_scope)
+    await _assert_cancelled_call_keeps_the_engine(call, gate, lock=_model_load_lock, via_anyio_scope=via_anyio_scope)
 
 
 @pytest.mark.asyncio
