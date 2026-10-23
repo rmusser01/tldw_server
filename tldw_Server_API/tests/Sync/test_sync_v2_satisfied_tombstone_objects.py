@@ -696,13 +696,14 @@ def test_a_tombstone_never_deletes_another_owners_row(
     assert _blocker(sync_service) is None
 
 
-def test_a_row_another_dataset_of_the_owner_holds_is_not_deleted(
-    sync_service: SyncV2Service, chacha_db: CharactersRAGDB, domain: str
+def test_a_row_another_dataset_of_the_owner_holds_is_a_push_conflict_that_blocks_nothing(
+    client: TestClient, sync_service: SyncV2Service, chacha_db: CharactersRAGDB, third_device: str, domain: str
 ) -> None:
     """A row projected from other Sync history is not this tombstone's to delete.
 
     Messages carry that history on the row; chats and notes do not, so the
-    owner's other datasets are asked instead.
+    owner's other datasets are asked instead. The device is told at push time,
+    and nothing else in the dataset waits on it (owner decision, PR #3299).
     """
     sync_service.enroll_dataset(user_id=USER, dataset_id="second-dataset", domains=list(M1_SYNC_DOMAINS))
     other = _push(
@@ -716,12 +717,16 @@ def test_a_row_another_dataset_of_the_owner_holds_is_not_deleted(
     assert pushed.accepted == []
     assert [item.entity_id for item in pushed.conflicts] == ["from-elsewhere"]
     assert not _is_deleted(chacha_db, domain, "from-elsewhere")
-    blocker = _blocker(sync_service)
-    assert (blocker.conflict_type, blocker.metadata["reason"]) == ("whole_object_conflict", "missing_server_object")
     assert _state(sync_service, domain, "from-elsewhere", dataset_id="second-dataset").deleted is False
+    assert _state(sync_service, domain, "from-elsewhere") is None
+    assert _blocker(sync_service) is None
+    assert _pull(sync_service, third_device) == []
+    assert client.post("/api/v1/chats/", json={"title": "Still healthy"}).status_code == 201
 
 
-def test_a_native_chat_sync_cannot_carry_is_not_deleted(sync_service: SyncV2Service, chacha_db: CharactersRAGDB) -> None:
+def test_a_native_chat_sync_cannot_carry_is_a_push_conflict_that_blocks_nothing(
+    client: TestClient, sync_service: SyncV2Service, chacha_db: CharactersRAGDB, third_device: str
+) -> None:
     """A chat whose native bundle Sync cannot represent is the server's own; a device cannot delete it."""
     _copy_outside_sync(chacha_db, "chat.conversation", "native-chat")
     with chacha_db.transaction() as conn:
@@ -732,6 +737,32 @@ def test_a_native_chat_sync_cannot_carry_is_not_deleted(sync_service: SyncV2Serv
     assert pushed.accepted == []
     assert [item.entity_id for item in pushed.conflicts] == ["native-chat"]
     assert not _is_deleted(chacha_db, "chat.conversation", "native-chat")
+    assert _state(sync_service, "chat.conversation", "native-chat") is None
+    assert _blocker(sync_service) is None
+    assert _pull(sync_service, third_device) == []
+    assert client.post("/api/v1/chats/", json={"title": "Still healthy"}).status_code == 201
+
+
+def test_a_workspace_chat_is_a_push_conflict_that_blocks_nothing(
+    client: TestClient, sync_service: SyncV2Service, chacha_db: CharactersRAGDB, third_device: str
+) -> None:
+    """Workspace chats stay out of Sync on the server; a device's tombstone cannot delete one."""
+    _copy_outside_sync(chacha_db, "chat.conversation", "workspace-chat")
+    chacha_db.upsert_workspace("ws-1", "Workspace")
+    with chacha_db.transaction() as conn:
+        conn.execute(
+            "UPDATE conversations SET scope_type = ?, workspace_id = ? WHERE id = ?",
+            ("workspace", "ws-1", "workspace-chat"),
+        )
+
+    pushed = _push_tombstone(sync_service, "chat.conversation", "workspace-chat")
+
+    assert pushed.accepted == []
+    assert [item.entity_id for item in pushed.conflicts] == ["workspace-chat"]
+    assert not _is_deleted(chacha_db, "chat.conversation", "workspace-chat")
+    assert _blocker(sync_service) is None
+    assert _pull(sync_service, third_device) == []
+    assert client.post("/api/v1/chats/", json={"title": "Still healthy"}).status_code == 201
 
 
 # ---------------------------------------------------------------------------

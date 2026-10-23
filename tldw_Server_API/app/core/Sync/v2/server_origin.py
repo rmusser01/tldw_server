@@ -19,7 +19,7 @@ from .adapters import (
     SyncAdapterContext,
 )
 from .errors import SyncMaterializationPredecessorError, SyncStoreError
-from .materializers.satisfied_tombstone import held_by_another_dataset
+from .materializers.satisfied_tombstone import held_by_another_dataset, other_datasets_of_owner
 from .models import (
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_CODE,
     CLIENT_PRIVATE_SERVER_FRONTEND_LIMITATION_MESSAGE,
@@ -559,12 +559,18 @@ def delete_unenrolled_server_origin_objects(
                 # A row another dataset of the owner holds came from that dataset's history
                 # (route 3 in §5.2). A replica holding it there would read a tombstone of it in
                 # this dataset as not its own to apply, and record a conflict, so none is sent.
+                deleted_now = set(unenrolled)
+                others = other_datasets_of_owner(guarded, dataset.dataset_id)
                 to_publish = [
                     item
                     for item in tombstones
-                    if (item.domain, item.object_id) in unenrolled
+                    if (item.domain, item.object_id) in deleted_now
                     and not held_by_another_dataset(
-                        guarded, dataset_id=dataset.dataset_id, domain=item.domain, object_id=item.object_id
+                        guarded,
+                        dataset_id=dataset.dataset_id,
+                        domain=item.domain,
+                        object_id=item.object_id,
+                        others=others,
                     )
                 ]
                 if to_publish and blocker is not None:
@@ -625,8 +631,9 @@ def _require_publishable_tombstones(
 ) -> None:
     """Refuse, before any delete, a tombstone the direct delete could not publish."""
 
+    target_set = set(targets)
     for item in tombstones:
-        if item.operation != "tombstone" or (item.domain, item.object_id) not in targets:
+        if item.operation != "tombstone" or (item.domain, item.object_id) not in target_set:
             raise SyncStoreError("Sync publishes only the id-only tombstone of an object it deletes directly")
         if not service.adapters.has_domain(item.domain) or not service.adapters.supports_version(
             item.domain, _APPLIED_CAPTURE_ADAPTER_VERSION

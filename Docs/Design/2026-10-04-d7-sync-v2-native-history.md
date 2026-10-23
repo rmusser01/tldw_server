@@ -371,7 +371,7 @@ The client-managed turn sends no conversation id to `/chat/completions`, so it n
 | Nothing | Applied as a no-op. |
 | A row with no Sync history (a copy kept outside Sync) in a chat this owner holds | The row is soft-deleted, and the tombstone is applied. |
 | Object state | Unchanged: the base must match, otherwise it is a conflict. |
-| A row that carries Sync history, but no object state in this dataset | Still a conflict (`missing_server_message`). The row was projected from other Sync history and is not this tombstone's to delete. |
+| A row that carries Sync history, but no object state in this dataset | Refused at push as a conflict that blocks nothing (`message_base_conflict`, reason `held_by_other_sync_history`; owner decision of 2026-10-23, PR #3299). The row was projected from other Sync history and is not this tombstone's to delete. Before, it was applied as a projection conflict (`missing_server_message`) that blocked the dataset; the materializer keeps that as a fallback for a row that turns foreign between push and apply. |
 
 - The envelope is accepted with `apply_status = applied`. No conflict is recorded and the dataset is not blocked.
 - Object state records the message as tombstoned: the envelope's revision, hash and cursor, `deleted = true`.
@@ -411,9 +411,11 @@ What changed, together:
    - a note by `tombstone_unsynced_note_from_sync`, with what an ordinary Sync delete does to a note: provenance, clipper sidecars, graph and Studio state.
 
    The lookup is by id and by owner (`client_id`), as for messages. On PostgreSQL that keeps out every other owner's rows, whether or not the role bypasses row-level security; under the forced tenant policy the same calls work and see only the owner's rows. On SQLite, where each owner has a database of their own, a row written under another `client_id` label is not reached either. Messages behave the same.
-4. **What is still a conflict.** `whole_object_conflict` / `missing_server_object`, which blocks the dataset, as a message with other Sync history does:
+4. **What is refused.** A push conflict that blocks nothing (`whole_object_conflict`, reason `held_by_other_sync_history`; owner decision of 2026-10-23, PR #3299). The device is told, the object stays, and later writes are not held up behind it. Messages with other Sync history are refused the same way. This applies to:
    - a row another live dataset of the owner holds a head or object state for. Chats and notes keep no Sync metadata on the row, so the owner's other datasets are asked instead. The server's own tombstone is exempt: it comes from the owner deleting that very row through the API;
    - a chat Sync cannot carry (a native bundle or a pending projection). Sync never deletes one.
+
+   The push checks this read-only (`foreign_device_tombstone` on each materializer, `is_foreign_device_tombstone` in `materializers/satisfied_tombstone.py`). The materializers keep the old projection conflict (`missing_server_object`) only as a fallback for an object that turns foreign between push and apply. A conflict of that kind recorded before this change is still left for review.
 5. **Records that point at a note** were checked against a note known only by such a tombstone, which the server may hold no row for. A `notes.link` to it waits, as it did while the note was unknown (`_never_live_here` in `domain_adapters/notes_link.py`); the server's own tombstone had a row to delete, so a link can still name that note. A task or a task activity is a push conflict (the parent is deleted), a folder or keyword link is rejected (the dependency is deleted), and provenance needs a live parent, as before. Attachments do not read the note's head.
 
 The guarantees are those of messages:
@@ -444,6 +446,14 @@ Still open: a contract violation in one envelope raises out of `push` and fails 
 6. **§5.4, messages.** Decided: a device's tombstone of a message the server does not have is not rejected and must not block. Shipped (§5.4).
 7. **§5.4, conversations and notes.** Decided (2026-10-19): yes, the same rule as for messages. Shipped (§5.4).
 8. **§5.2.** Decided (2026-10-19): yes, the server's direct delete of a row Sync never saw also publishes a tombstone that carries only the id, at one envelope per row. Shipped (§5.2) for messages and chats. A device that never had the row applies it as a no-op. A note is deleted through the log and is covered by Q7.
+9. **§5.4, objects other Sync history holds.** Decided (2026-10-23, code review of PR #3299): a device's tombstone of a chat, note or message that another dataset of the owner holds, of a native chat, or of a workspace chat is refused at push as a conflict that blocks nothing, instead of a projection conflict that blocks the dataset. Shipped (§5.4, item 4).
+
+**Review notes, not changed (2026-10-23).**
+
+- *Row version.* A tombstone of a row kept outside Sync stores the tombstone's revision as the row's `version`. That can lower a local optimistic-lock counter (a note edited to version 5 becomes version 1). Messages (#3198) do the same; a later local edit of a deleted row is refused anyway.
+- *Note route and other datasets.* The note route's delete always captures a server-origin tombstone, which is exempt from the "held by another dataset" check, while §5.2 publishes nothing for a chat or message another dataset holds. A note held only by another dataset is therefore deleted and its tombstone published into the default dataset. Bring the note route under the same rule if that case becomes real.
+- *Two deletes from the same base.* A device that deletes a held object from a base another delete already replaced gets a `stale_base_state` push conflict that blocks nothing but is left unresolved for review. Settling a tombstone whose head is already a tombstone would close it.
+- *Older devices.* No Sync v2 client lives in this repository. Before release, confirm that clients treat a pulled tombstone of an id they never had as a no-op; §5.2 sends one per directly deleted row.
 
 ## 7. Tests
 

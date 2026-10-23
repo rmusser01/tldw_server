@@ -34,6 +34,27 @@ if TYPE_CHECKING:
 _CONVERSATION_SEARCH_FIELDS: tuple[str, ...] = ("title", "content")
 
 
+
+def _sync_cannot_carry_conversation(row: dict[str, Any]) -> bool:
+    """Return whether Sync can never carry this chat row.
+
+    A chat with native history state (a bundle, a pending projection or a
+    native creation) is the server's own, and a workspace chat is kept out of
+    Sync by the chat routes. A device's tombstone deletes neither.
+    """
+
+    if str(row.get("scope_type") or "global").strip().lower() == "workspace":
+        return True
+    return any(
+        row.get(field) is not None
+        for field in (
+            "required_projection_version",
+            "native_bundle_json",
+            "native_creation_operation_kind",
+            "native_creation_operation_id",
+        )
+    )
+
 class _ReceiptAdmissionChanged(ConflictError):
     """A stale preflight may retry only after its independently owned rollback."""
 
@@ -932,22 +953,14 @@ class ConversationStore:
         try:
             with self._db.transaction() as conn:
                 row = conn.execute(
-                    "SELECT deleted, required_projection_version, native_bundle_json, "
+                    "SELECT deleted, scope_type, required_projection_version, native_bundle_json, "
                     "native_creation_operation_kind, native_creation_operation_id "
                     "FROM conversations WHERE id = ? AND client_id = ?" + lock_suffix,  # nosec B608
                     (normalized_id, owner),
                 ).fetchone()
                 if row is None:
                     return "absent"
-                if any(
-                    row[field] is not None
-                    for field in (
-                        "required_projection_version",
-                        "native_bundle_json",
-                        "native_creation_operation_kind",
-                        "native_creation_operation_id",
-                    )
-                ):
+                if _sync_cannot_carry_conversation(dict(row)):
                     return "foreign"
                 if bool(row["deleted"]):
                     return "deleted"
@@ -961,6 +974,36 @@ class ConversationStore:
             raise
         logger.info("Soft-deleted conversation kept outside Sync v2 for ID: {}.", normalized_id)
         return "deleted"
+
+    def unsynced_conversation_is_foreign(self, *, conversation_id: str, sync_client_id: str) -> bool:
+        """Return whether this owner's chat with the id is one Sync cannot carry.
+
+        Read-only twin of the ``"foreign"`` outcome of
+        :meth:`tombstone_unsynced_conversation_from_sync`, so a device's
+        tombstone of a native chat is refused at push time instead of blocking
+        the dataset.
+
+        Args:
+            conversation_id: The chat id the tombstone names.
+            sync_client_id: The owner whose chats are searched.
+
+        Returns:
+            ``True`` when the owner holds a chat with the id that Sync cannot
+            carry (native history state, or a workspace chat); ``False`` when
+            there is no such chat or it is a plain one.
+        """
+
+        normalized_id = str(conversation_id).strip()
+        if not normalized_id:
+            return False
+        row = self._db.execute_query(
+            "SELECT scope_type, required_projection_version, native_bundle_json, "
+            "native_creation_operation_kind, native_creation_operation_id "
+            "FROM conversations WHERE id = ? AND client_id = ?",
+            (normalized_id, str(sync_client_id)),
+            read_only=True,
+        ).fetchone()
+        return row is not None and _sync_cannot_carry_conversation(dict(row))
 
     def _normalize_sync_conversation_state(self, state: str | None) -> str:
         """Map portable Sync v2 chat states into the local conversation state enum."""

@@ -975,6 +975,8 @@ class CharactersRAGDB:
             self, *, conversation_id: str, sync_client_id: str, object_revision: int, object_hash: str
         ) -> str: ...
 
+        def unsynced_conversation_is_foreign(self, *, conversation_id: str, sync_client_id: str) -> bool: ...
+
         def update_conversation(
             self, conversation_id: str, update_data: dict[str, Any], expected_version: int
         ) -> bool | None: ...
@@ -1021,6 +1023,10 @@ class CharactersRAGDB:
             object_revision: int,
             object_hash: str,
         ) -> str: ...
+
+        def unsynced_message_is_foreign(
+            self, *, stable_message_id: str, sync_client_id: str, object_hash: str
+        ) -> bool: ...
 
         def get_message_by_id(
             self, message_id: str, include_deleted: bool = False, *, strict_images: bool = False
@@ -47419,6 +47425,7 @@ for _conversation_store_method in (
     "upsert_conversation_from_sync",
     "tombstone_conversation_from_sync",
     "tombstone_unsynced_conversation_from_sync",
+    "unsynced_conversation_is_foreign",
     "get_conversation_by_id",
     "get_conversation_by_source_ref",
     "conversation_title_exists",
@@ -47516,6 +47523,7 @@ for _message_store_method in (
     "append_message_from_sync",
     "tombstone_message_from_sync",
     "tombstone_unsynced_message_from_sync",
+    "unsynced_message_is_foreign",
     "get_messages_by_sync_stable_id",
     "_insert_message_images",
     "append_message_image",

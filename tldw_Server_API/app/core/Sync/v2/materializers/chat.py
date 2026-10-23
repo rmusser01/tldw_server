@@ -10,11 +10,11 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 
 from ..errors import SyncMaterializationContractError
-from ..models import SyncDomain, SyncEnvelope, SyncObjectState
+from ..models import SyncDomain, SyncEnvelope, SyncEnvelopeCreate, SyncObjectState
 from ..store import SyncV2Store
 from .base import MaterializationResult
 from .guarded_product_mutation import GuardedProductMutation
-from .satisfied_tombstone import satisfied_result, unheld_tombstone_outcome
+from .satisfied_tombstone import is_foreign_device_tombstone, satisfied_result, unheld_tombstone_outcome
 
 # Recorded on a conflict that is closed because its tombstone turned out to be satisfied.
 SATISFIED_TOMBSTONE_NOTE = "tombstone_of_message_the_dataset_never_held"
@@ -26,6 +26,23 @@ class ChatConversationMaterializer:
 
     note_db: CharactersRAGDB
     domain: SyncDomain = "chat.conversation"
+
+    def foreign_device_tombstone(self, store: SyncV2Store, envelope: SyncEnvelopeCreate) -> bool:
+        """Return whether the push must refuse this device tombstone without blocking the dataset.
+
+        True for a chat another dataset of the owner holds, or a native chat
+        Sync cannot carry. Read-only.
+        """
+
+        return is_foreign_device_tombstone(
+            store,
+            envelope,
+            check_other_datasets=True,
+            product_is_foreign=lambda: self.note_db.unsynced_conversation_is_foreign(
+                conversation_id=str(envelope.object_id),
+                sync_client_id=_projection_client_id(self.note_db),
+            ),
+        )
 
     def apply(
         self,
@@ -239,6 +256,24 @@ class ChatMessageMaterializer:
 
     note_db: CharactersRAGDB
     domain: SyncDomain = "chat.message"
+
+    def foreign_device_tombstone(self, store: SyncV2Store, envelope: SyncEnvelopeCreate) -> bool:
+        """Return whether the push must refuse this device tombstone without blocking the dataset.
+
+        True for a message row that carries other Sync history, as the apply
+        rule (#3198) decides from the row's own metadata. Read-only.
+        """
+
+        return is_foreign_device_tombstone(
+            store,
+            envelope,
+            check_other_datasets=False,
+            product_is_foreign=lambda: self.note_db.unsynced_message_is_foreign(
+                stable_message_id=str(envelope.object_id),
+                sync_client_id=_projection_client_id(self.note_db),
+                object_hash=envelope.payload_hash or "",
+            ),
+        )
 
     def apply(
         self,

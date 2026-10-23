@@ -4950,6 +4950,8 @@ class SyncV2Service:
                     )
                 )
                 continue
+            if isinstance(outcome, AdapterAccepted):
+                outcome = self._foreign_device_tombstone_conflict(envelope) or outcome
 
             if isinstance(outcome, AdapterRejected):
                 rejected.append(
@@ -7719,6 +7721,33 @@ class SyncV2Service:
             prior_envelopes=(current,) if current is not None else (),
             get_head=get_head,
             list_heads=list_heads,
+        )
+
+    def _foreign_device_tombstone_conflict(self, envelope: SyncEnvelopeCreate) -> AdapterConflict | None:
+        """Refuse a device's tombstone of an object other Sync history holds, blocking nothing.
+
+        A chat, note or message this dataset has no history for, but that
+        another dataset of the owner (or a native chat, or a message row with
+        its own Sync history) holds, is not this tombstone's to delete. Applying
+        it would record a projection conflict that holds up every later write in
+        the dataset, so the push refuses it instead: the device is told, the
+        object stays, and nothing waits on it (owner decision, PR #3299). The
+        materializers keep their own check for an object that turns foreign
+        between push and apply.
+        """
+
+        if envelope.operation != "tombstone" or not envelope.object_id:
+            return None
+        probe = getattr(self.materializers.get(envelope.domain), "foreign_device_tombstone", None)
+        if probe is None or not probe(self.store, envelope):
+            return None
+        return AdapterConflict(
+            client_envelope_id=envelope.client_envelope_id,
+            domain=envelope.domain,
+            entity_id=envelope.object_id,
+            conflict_type="message_base_conflict" if envelope.domain == "chat.message" else "whole_object_conflict",
+            message=f"{envelope.domain} tombstone names an object that other Sync history holds",
+            metadata={"reason": "held_by_other_sync_history"},
         )
 
     def _evaluate_envelope(

@@ -14,13 +14,14 @@ from ..models import (
     NotesNoteUpsertPayload,
     SyncDomain,
     SyncEnvelope,
+    SyncEnvelopeCreate,
     SyncObjectState,
     validate_notes_note_upsert_payload,
 )
 from ..store import SyncV2Store
 from .base import MaterializationResult
 from .guarded_product_mutation import GuardedProductMutation
-from .satisfied_tombstone import satisfied_result, unheld_tombstone_outcome
+from .satisfied_tombstone import is_foreign_device_tombstone, satisfied_result, unheld_tombstone_outcome
 
 _INGESTION_EXPECTED_VERSION_KEY = "notes_ingestion_expected_product_version"
 _SERVER_ORIGIN_DEVICE_ID = "server-origin"
@@ -59,6 +60,14 @@ class NotesMaterializer:
 
     note_db: CharactersRAGDB
     domain: SyncDomain = "notes.note"
+
+    def foreign_device_tombstone(self, store: SyncV2Store, envelope: SyncEnvelopeCreate) -> bool:
+        """Return whether the push must refuse this device tombstone without blocking the dataset.
+
+        True for a note another dataset of the owner holds. Read-only.
+        """
+
+        return is_foreign_device_tombstone(store, envelope, check_other_datasets=True)
 
     def apply(
         self,
