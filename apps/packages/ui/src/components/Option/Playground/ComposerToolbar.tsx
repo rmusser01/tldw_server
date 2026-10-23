@@ -48,7 +48,10 @@ export type ComposerToolbarProps = {
   openUIRequestMode?: boolean;
   toolChoice?: "auto" | "none" | "required";
   trackedAssistantSelectionLoading?: boolean;
-  onTrackedAssistantSelection?: (selection: AssistantSelection, isCurrent?: () => boolean) => boolean | Promise<boolean>;
+  onTrackedAssistantSelection?: (
+    selection: AssistantSelection,
+    isCurrent?: () => boolean,
+  ) => boolean | Promise<boolean>;
   onToggleOptions: () => void;
   onRolePlayTriggerCapture?: (element: HTMLButtonElement) => void;
   promptAssistAction?: React.ReactNode;
@@ -225,11 +228,18 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     if (open) pendingCustomizationRevealRef.current = true;
   }, []);
   React.useEffect(() => {
-    if (!assistantPickerOpen && !promptPickerOpen) pendingCustomizationRevealRef.current = false;
+    if (!assistantPickerOpen && !promptPickerOpen)
+      pendingCustomizationRevealRef.current = false;
     if (!pendingCustomizationRevealRef.current || optionsLoading) return;
     pendingCustomizationRevealRef.current = false;
     if (!optionsExpanded) onToggleOptions();
-  }, [assistantPickerOpen, promptPickerOpen, optionsLoading, optionsExpanded, onToggleOptions]);
+  }, [
+    assistantPickerOpen,
+    promptPickerOpen,
+    optionsLoading,
+    optionsExpanded,
+    onToggleOptions,
+  ]);
   React.useEffect(() => {
     const revealTools = () => {
       if (optionsLoading) pendingCustomizationRevealRef.current = true;
@@ -251,58 +261,62 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
   React.useLayoutEffect(() => {
     const isVisible = (element: HTMLElement | null) => {
       if (!element?.isConnected || ("disabled" in element && element.disabled))
-        return false
-      let ancestor: HTMLElement | null = element
+        return false;
+      let ancestor: HTMLElement | null = element;
       while (ancestor) {
-        const style = window.getComputedStyle(ancestor)
+        const style = window.getComputedStyle(ancestor);
         if (
           ancestor.hidden ||
           ancestor.getAttribute("aria-hidden") === "true" ||
           style.display === "none" ||
           style.visibility === "hidden" ||
           style.visibility === "collapse" ||
-          (ancestor.tagName === "DETAILS" && !ancestor.hasAttribute("open") &&
+          (ancestor.tagName === "DETAILS" &&
+            !ancestor.hasAttribute("open") &&
             !ancestor.querySelector("summary")?.contains(element))
         )
-          return false
-        ancestor = ancestor.parentElement
+          return false;
+        ancestor = ancestor.parentElement;
       }
-      return true
-    }
+      return true;
+    };
     const repairOwnedFocus = () => {
-      const previous = lastFocusedControlRef.current
-      if (!previous || isVisible(previous)) return
+      const previous = lastFocusedControlRef.current;
+      if (!previous || isVisible(previous)) return;
       if (
         document.activeElement !== document.body &&
         document.activeElement !== previous
       )
-        return
-      const summary = previous.closest("details:not([open])")?.querySelector<HTMLElement>("summary") ?? null
+        return;
+      const summary =
+        previous
+          .closest("details:not([open])")
+          ?.querySelector<HTMLElement>("summary") ?? null;
       if (isVisible(summary)) {
-        summary?.focus()
-        return
+        summary?.focus();
+        return;
       }
       if (!optionsLoading && isVisible(toggleRef.current)) {
-        toggleRef.current?.focus()
-        return
+        toggleRef.current?.focus();
+        return;
       }
       const candidates =
         toolbarRef.current?.querySelectorAll<HTMLButtonElement>(
-          "button:not(:disabled)"
-        )
-      const target = Array.from(candidates ?? []).find(isVisible)
-      if (target) target.focus()
+          "button:not(:disabled)",
+        );
+      const target = Array.from(candidates ?? []).find(isVisible);
+      if (target) target.focus();
       else if (isVisible(props.focusFallbackRef?.current ?? null))
-        props.focusFallbackRef?.current?.focus()
-    }
-    const pickerOpen = assistantPickerOpen || promptPickerOpen
-    const pickerClosing = previousPickerOpenRef.current && !pickerOpen
-    previousPickerOpenRef.current = pickerOpen
+        props.focusFallbackRef?.current?.focus();
+    };
+    const pickerOpen = assistantPickerOpen || promptPickerOpen;
+    const pickerClosing = previousPickerOpenRef.current && !pickerOpen;
+    previousPickerOpenRef.current = pickerOpen;
     // Let an existing picker return to its visible trigger before qualifying it.
-    if (!pickerClosing) repairOwnedFocus()
+    if (!pickerClosing) repairOwnedFocus();
     // Existing picker focus return is scheduled; qualify its eventual target too.
-    const frame = window.requestAnimationFrame(repairOwnedFocus)
-    return () => window.cancelAnimationFrame(frame)
+    const frame = window.requestAnimationFrame(repairOwnedFocus);
+    return () => window.cancelAnimationFrame(frame);
   }, [
     isProMode,
     isMobile,
@@ -313,12 +327,15 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     nestedDisclosureOpen,
     systemPromptsOpen,
     generationStyleOpen,
-    props.focusFallbackRef
-  ])
+    props.focusFallbackRef,
+  ]);
 
   const dictationActive = speechUsesServer ? isServerDictating : isListening;
   const persistenceLabel = getPersistenceModePillLabel(t, temporaryChat);
-  const persistenceControlLabel = getPersistenceModeControlLabel(t, temporaryChat);
+  const persistenceControlLabel = getPersistenceModeControlLabel(
+    t,
+    temporaryChat,
+  );
   const controlClass =
     "inline-flex min-h-11 items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-muted transition-colors hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus";
   const activeContextItems = contextItems.filter(
@@ -381,7 +398,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         onOpenChange={handlePromptPickerOpen}
         onSelectModel={() =>
           openModelSelector({
-            returnFocusSelector: "[data-testid='chat-prompt-select']"
+            returnFocusSelector: "[data-testid='chat-prompt-select']",
           })
         }
         iconClassName="h-4 w-4"
@@ -400,9 +417,9 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
       setSelectedSystemPrompt,
       setSystemPrompt,
       systemPrompt,
-      handlePromptPickerOpen
-    ]
-  )
+      handlePromptPickerOpen,
+    ],
+  );
 
   const characterSelectControl = React.useMemo(
     () => (
@@ -416,22 +433,33 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         className="text-text-muted hover:text-text"
       />
     ),
-    [props.onTrackedAssistantSelection, props.trackedAssistantSelectionLoading, handleAssistantPickerOpen]
-  )
+    [
+      props.onTrackedAssistantSelection,
+      props.trackedAssistantSelectionLoading,
+      handleAssistantPickerOpen,
+    ],
+  );
 
   return (
     <div
       ref={toolbarRef}
       data-testid="composer-toolbar"
-      onFocusCapture={(event) => { lastFocusedControlRef.current = event.target as HTMLElement; }}
+      onFocusCapture={(event) => {
+        lastFocusedControlRef.current = event.target as HTMLElement;
+      }}
       onKeyDown={(event) => {
         if (
           event.key === "Escape" &&
           !event.defaultPrevented &&
           !event.nativeEvent.isComposing &&
-          !nestedDisclosureOpen && !assistantPickerOpen && !promptPickerOpen &&
-          !systemPromptsOpen && !generationStyleOpen &&
-          !(event.target as HTMLElement).closest('[role="dialog"], [role="listbox"], [role="menu"]') &&
+          !nestedDisclosureOpen &&
+          !assistantPickerOpen &&
+          !promptPickerOpen &&
+          !systemPromptsOpen &&
+          !generationStyleOpen &&
+          !(event.target as HTMLElement).closest(
+            '[role="dialog"], [role="listbox"], [role="menu"]',
+          ) &&
           optionsExpanded
         ) {
           event.preventDefault();
@@ -492,7 +520,13 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
               <button
                 key={item.id}
                 type="button"
-                onClick={!isProMode && (item.id === "rolePlayIdentity" || item.id === "character") && rolePlayActions?.onOpenRolePlaySetup ? rolePlayActions.onOpenRolePlaySetup : item.onClick}
+                onClick={
+                  !isProMode &&
+                  (item.id === "rolePlayIdentity" || item.id === "character") &&
+                  rolePlayActions?.onOpenRolePlaySetup
+                    ? rolePlayActions.onOpenRolePlaySetup
+                    : item.onClick
+                }
                 data-testid={testId}
                 title={item.value ? `${item.label}: ${item.value}` : item.label}
                 className={`${className} transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus`}
@@ -539,12 +573,47 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
         </div>
       )}
 
-      {optionsUnavailable && <p role="status" className="px-2 text-xs text-text-muted">{t("playground:composer.toolsPreferenceUnavailable", "Display preference unavailable. Tools still work for this visit.")}</p>}
-      {(toolChoice !== "none" || appendFormattingGuidePrompt || openUIRequestMode) && <div className="flex flex-wrap gap-2 px-2 pb-2 text-xs text-text-muted">
-        {toolChoice !== "none" && <span>{t("playground:composer.mcpSelectedSummary", {defaultValue: "MCP tools selected: {{choice}}", choice: toolChoice === "required" ? t("playground:composer.toolChoiceRequired", "Required") : t("playground:composer.toolChoiceAuto", "Auto")})}</span>}
-        {appendFormattingGuidePrompt && <span>{t("playground:composer.formattingGuideActive", "Formatting guide on")}</span>}
-        {openUIRequestMode && <span>{t("playground:composer.interactiveResponseActive", "Interactive response on")}</span>}
-      </div>}
+      {optionsUnavailable && (
+        <p role="status" className="px-2 text-xs text-text-muted">
+          {t(
+            "playground:composer.toolsPreferenceUnavailable",
+            "Display preference unavailable. Tools still work for this visit.",
+          )}
+        </p>
+      )}
+      {(toolChoice !== "none" ||
+        appendFormattingGuidePrompt ||
+        openUIRequestMode) && (
+        <div className="flex flex-wrap gap-2 px-2 pb-2 text-xs text-text-muted">
+          {toolChoice !== "none" && (
+            <span>
+              {t("playground:composer.mcpSelectedSummary", {
+                defaultValue: "MCP tools selected: {{choice}}",
+                choice:
+                  toolChoice === "required"
+                    ? t("playground:composer.toolChoiceRequired", "Required")
+                    : t("playground:composer.toolChoiceAuto", "Auto"),
+              })}
+            </span>
+          )}
+          {appendFormattingGuidePrompt && (
+            <span>
+              {t(
+                "playground:composer.formattingGuideActive",
+                "Formatting guide on",
+              )}
+            </span>
+          )}
+          {openUIRequestMode && (
+            <span>
+              {t(
+                "playground:composer.interactiveResponseActive",
+                "Interactive response on",
+              )}
+            </span>
+          )}
+        </div>
+      )}
       <section
         id="composer-options-panel"
         data-testid="composer-options-panel"

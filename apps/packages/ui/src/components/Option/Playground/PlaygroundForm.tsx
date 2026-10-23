@@ -539,6 +539,7 @@ export const PlaygroundForm = ({
   onSelectAttachedResearchContextHistory,
   onPrepareResearchFollowUp,
   stickyDockEnabled = false,
+  mobileCockpitModeActive = false,
   forceWideMode = false,
   onComposerLayoutChange,
   onDraftPresenceChange,
@@ -1193,8 +1194,6 @@ export const PlaygroundForm = ({
   // showServerPersistenceHint and serverSaveInFlightRef moved to usePlaygroundPersistence
   const uiMode = useUiModeStore((state) => state.mode);
   const isProMode = uiMode === "pro";
-  const suppressComposerToolbarForMobileCockpit =
-    mobileCockpitModeActive && isMobileViewport && isProMode;
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -6278,7 +6277,7 @@ export const PlaygroundForm = ({
                     }
                   : undefined
               }
-              className={`relative w-full rounded-2xl border border-border bg-surface p-3 text-text transition-colors duration-150 focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/20 motion-reduce:transition-none data-[istemporary-chat='true']:border-dashed sm:p-4 `}
+              className="relative w-full rounded-2xl border border-border bg-surface p-3 text-text transition-colors duration-150 focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/20 motion-reduce:transition-none data-[istemporary-chat='true']:border-dashed sm:p-4"
             >
               {importedSidepanelContext
                 ? wrapComposerProfile(

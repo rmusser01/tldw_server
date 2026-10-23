@@ -157,14 +157,25 @@ const ToolbarHarness = (
 
 describe("calm composer", () => {
   it("forwards settled tracked model discovery to the existing assistant control", () => {
-    const tracked = vi.fn()
-    const props = createProps({ isProMode: true, onTrackedAssistantSelection: tracked, trackedAssistantSelectionLoading: true })
-    const f = render(<ComposerToolbar {...props} />)
-    expect(assistantSelectMock.mock.lastCall?.[0]).toMatchObject({ onTrackedSelection: tracked, trackedSelectionLoading: true })
-    f.rerender(<ComposerToolbar {...props} trackedAssistantSelectionLoading={false} />)
-    expect(assistantSelectMock.mock.lastCall?.[0]).toMatchObject({ onTrackedSelection: tracked, trackedSelectionLoading: false })
-  })
-
+    const tracked = vi.fn();
+    const props = createProps({
+      isProMode: true,
+      onTrackedAssistantSelection: tracked,
+      trackedAssistantSelectionLoading: true,
+    });
+    const f = render(<ComposerToolbar {...props} />);
+    expect(assistantSelectMock.mock.lastCall?.[0]).toMatchObject({
+      onTrackedSelection: tracked,
+      trackedSelectionLoading: true,
+    });
+    f.rerender(
+      <ComposerToolbar {...props} trackedAssistantSelectionLoading={false} />,
+    );
+    expect(assistantSelectMock.mock.lastCall?.[0]).toMatchObject({
+      onTrackedSelection: tracked,
+      trackedSelectionLoading: false,
+    });
+  });
 
   it.each([
     { label: "desktop", isMobile: false, isProMode: false },
@@ -302,7 +313,9 @@ describe("calm composer", () => {
         onToggleTemporaryChat={onToggleTemporaryChat}
       />,
     );
-    const temporary = screen.getByRole("button", { name: "Chat history: Temporary" });
+    const temporary = screen.getByRole("button", {
+      name: "Chat history: Temporary",
+    });
     expect(temporary).toBeVisible();
     expect(temporary).toBeDisabled();
     fireEvent.click(temporary);
@@ -523,31 +536,31 @@ describe("history mode labels", () => {
     [
       { name: "Casual desktop", isMobile: false, isProMode: false },
       { name: "Pro desktop", isMobile: false, isProMode: true },
-      { name: "mobile", isMobile: true, isProMode: false }
+      { name: "mobile", isMobile: true, isProMode: false },
     ].flatMap((layout) =>
-      [false, true].map((temporaryChat) => ({ ...layout, temporaryChat }))
-    )
+      [false, true].map((temporaryChat) => ({ ...layout, temporaryChat })),
+    ),
   )(
     "$name history toggle agrees with Temporary=$temporaryChat and responds to keyboard",
     async (layout) => {
-      const onToggleTemporaryChat = vi.fn()
+      const onToggleTemporaryChat = vi.fn();
       render(
         <ComposerToolbar
           {...createProps({ ...layout, onToggleTemporaryChat })}
-        />
-      )
-      const stateLabel = layout.temporaryChat ? "Temporary" : "History on"
+        />,
+      );
+      const stateLabel = layout.temporaryChat ? "Temporary" : "History on";
       const toggle = screen.getByRole("button", {
-        name: `Chat history: ${stateLabel}`
-      })
-      expect(toggle).toHaveTextContent(stateLabel)
+        name: `Chat history: ${stateLabel}`,
+      });
+      expect(toggle).toHaveTextContent(stateLabel);
       expect(toggle).toHaveAttribute(
         "aria-pressed",
-        String(!layout.temporaryChat)
-      )
-      toggle.focus()
-      await userEvent.setup().keyboard("{Enter}")
-      expect(onToggleTemporaryChat).toHaveBeenCalledWith(!layout.temporaryChat)
-    }
-  )
-})
+        String(!layout.temporaryChat),
+      );
+      toggle.focus();
+      await userEvent.setup().keyboard("{Enter}");
+      expect(onToggleTemporaryChat).toHaveBeenCalledWith(!layout.temporaryChat);
+    },
+  );
+});

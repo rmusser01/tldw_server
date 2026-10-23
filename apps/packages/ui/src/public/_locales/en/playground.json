@@ -4659,7 +4659,7 @@
   "composer_shortcutHint": {
     "message": "/ commands · @ mentions"
   },
-  "composer.toolsPreferenceUnavailable": {
+  "composer_toolsPreferenceUnavailable": {
     "message": "Display preference unavailable. Tools still work for this visit."
   }
 }

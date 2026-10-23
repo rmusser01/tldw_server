@@ -246,7 +246,7 @@ export const ChatModelSelectorDropdown = React.memo(
               }`}
             />
             <span className="min-w-0 max-w-[180px] truncate">{apiModelLabel}</span>
-            <span className="sr-only">{statusLabel}</span>
+            <span className="sr-only" title={t("common:status", "Status") as string}>{statusLabel}</span>
             <ChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
           </button>
         </Tooltip>
