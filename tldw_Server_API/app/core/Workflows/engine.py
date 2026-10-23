@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.backends.base import DatabaseError as BackendDatabaseError
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import outside_chacha_operation
 from tldw_Server_API.app.core.DB_Management.DB_Manager import create_workflows_database, get_content_backend_instance
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.exceptions import AdapterError
@@ -1150,8 +1151,12 @@ class WorkflowEngine:
         next_step_id: str | None = None,
         retry_resume: bool = False,
     ) -> None:
-        """Resume a run, with its owner as the user for LLM usage accounting."""
-        with llm_call_root(self._llm_user_for_run(run_id), operation="workflow"):
+        """Resume a run, with its owner as the user for LLM usage accounting.
+
+        Callers start it as a detached task (a route, a human step's timeout, the orphan
+        reaper), which outlives their ChaCha operation, so the run never joins it (TASK-13897).
+        """
+        with outside_chacha_operation(), llm_call_root(self._llm_user_for_run(run_id), operation="workflow"):
             await self._continue_run_impl(
                 run_id, after_step_id, last_outputs=last_outputs, next_step_id=next_step_id, retry_resume=retry_resume
             )
@@ -1849,7 +1854,8 @@ class WorkflowEngine:
                 return
 
         try:
-            asyncio.create_task(_timeout_task())
+            with outside_chacha_operation():  # the task copies this context, and can outlive its creator by days
+                asyncio.create_task(_timeout_task())
         except _WF_NONCRITICAL_EXCEPTIONS:
             return
 
