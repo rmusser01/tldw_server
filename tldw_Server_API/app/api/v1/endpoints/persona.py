@@ -9244,19 +9244,22 @@ async def persona_stream(
             state["committed_transcript"] = cleaned_transcript
             # Write first, then notify: a client may close on the notice (TASK-13896).
             # One persona-id read serves both writes, so the notice waits on three worker calls, not four.
+            # None (no handle, a failed read, or no persona id) skips both writes, as each helper did on dev,
+            # without retrying the read.
             commit_persona_id = await _resolve_persona_live_event_persona_id(session_id)
-            await _record_persona_live_voice_event_safe(
-                session_id=session_id,
-                event_type="commit",
-                commit_source=commit_source,
-                persona_id=commit_persona_id,
-            )
-            await _upsert_persona_live_session_summary_safe(
-                session_id=session_id,
-                voice_runtime=voice_runtime if isinstance(voice_runtime, dict) else None,
-                commit_source=commit_source,
-                persona_id=commit_persona_id,
-            )
+            if commit_persona_id:
+                await _record_persona_live_voice_event_safe(
+                    session_id=session_id,
+                    event_type="commit",
+                    commit_source=commit_source,
+                    persona_id=commit_persona_id,
+                )
+                await _upsert_persona_live_session_summary_safe(
+                    session_id=session_id,
+                    voice_runtime=voice_runtime if isinstance(voice_runtime, dict) else None,
+                    commit_source=commit_source,
+                    persona_id=commit_persona_id,
+                )
             await _emit_notice(
                 session_id=session_id,
                 level="info",
