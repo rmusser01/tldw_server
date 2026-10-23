@@ -799,6 +799,7 @@ describe("Playground cockpit controls", () => {
       const compositionPreview = within(contextRail).getByRole("region", {
         name: "Next message composition",
       });
+      fireEvent.click(within(compositionPreview).getByRole("button", { name: "Expand Request preview" }));
       expect(within(compositionPreview).getByText("Inline system prompt selected")).toBeInTheDocument();
       expect(within(compositionPreview).getByText("Mira Vale")).toBeInTheDocument();
       expect(
@@ -808,7 +809,6 @@ describe("Playground cockpit controls", () => {
       expect(
         within(compositionPreview).getByText("Scope: openai:gpt-4.1-mini"),
       ).toBeInTheDocument();
-      expect(within(contextRail).getByText("Context selected")).toBeInTheDocument();
       expect(within(contextRail).getByText("1 file")).toBeInTheDocument();
       expect(
         within(contextRail).getByText("1 knowledge item"),
@@ -820,7 +820,7 @@ describe("Playground cockpit controls", () => {
       expect(within(contextRail).getByText("Temporary chat")).toBeInTheDocument();
       expect(within(contextRail).getByText("History linked")).toBeInTheDocument();
       expect(
-        within(contextRail).getByRole("heading", { name: "Prompt" }),
+        within(contextRail).getAllByText("Prompt", { exact: true })[0],
       ).toBeInTheDocument();
       expect(
         within(contextRail).queryByText("Quick prompt"),
@@ -894,11 +894,10 @@ describe("Playground cockpit controls", () => {
       expect(
         within(runtimeInspector).getByText("Route openai:gpt-4.1-mini"),
       ).toBeInTheDocument();
+      fireEvent.click(within(runtimeInspector).getByText("Default settings"));
       expect(within(runtimeInspector).getByText("Temperature")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("0.7")).toBeInTheDocument();
-      expect(
-        within(runtimeInspector).getAllByText("Inherited").length,
-      ).toBeGreaterThan(0);
+      expect(within(runtimeInspector).getByText("Default settings")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("Context")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("8192")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("Override")).toBeInTheDocument();
@@ -921,7 +920,7 @@ describe("Playground cockpit controls", () => {
         ),
       ).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("2 messages")).toBeInTheDocument();
-      expect(within(runtimeInspector).getByText("Mira Vale")).toBeInTheDocument();
+      expect(within(contextRail).getAllByText("Mira Vale")[0]).toBeInTheDocument();
       const mcpCounts = within(runtimeInspector).getByLabelText(
         "MCP tool state counts",
       );
@@ -952,7 +951,7 @@ describe("Playground cockpit controls", () => {
         }),
       );
       fireEvent.click(
-        within(runtimeInspector).getByRole("button", {
+        within(contextRail).getByRole("button", {
           name: /select character or persona/i,
         }),
       );
@@ -1051,7 +1050,7 @@ describe("Playground cockpit controls", () => {
     }
   });
 
-  it("lists prompt and assistant as first-class context sources and removes one knowledge item at a time", async () => {
+  it("keeps prompt and assistant instructions beside sources and removes one knowledge item at a time", async () => {
     messageOptionState.value.streaming = false;
     messageOptionState.value.selectedQuickPrompt = "Draft a concise summary";
     modelSettingsState.value.systemPrompt = "Be curious.";
@@ -1069,18 +1068,14 @@ describe("Playground cockpit controls", () => {
       name: "Context sources",
     });
 
-    const promptSource = within(sourceList).getByText("Custom prompt").closest("li");
-    expect(promptSource).not.toBeNull();
-    expect(within(promptSource as HTMLElement).getByText("Prompt")).toBeInTheDocument();
-    expect(
-      within(promptSource as HTMLElement).getByText("Inline system prompt selected"),
-    ).toBeInTheDocument();
-
-    const assistantSource = within(sourceList).getByText("Mira Vale").closest("li");
-    expect(assistantSource).not.toBeNull();
-    expect(
-      within(assistantSource as HTMLElement).getByText("Character"),
-    ).toBeInTheDocument();
+    const promptSource = within(contextRail).getByRole("region", { name: "Instructions" });
+    expect(within(promptSource).getByText("Quick prompt")).toBeInTheDocument();
+    expect(within(promptSource).getByText("Draft a concise summary")).toBeInTheDocument();
+    const assistantSource = within(promptSource).getByRole("region", { name: "Assistant" });
+    expect(within(assistantSource).getByText("Mira Vale")).toBeInTheDocument();
+    expect(within(assistantSource).getByText("Character")).toBeInTheDocument();
+    expect(within(sourceList).queryByText("Mira Vale")).toBeNull();
+    expect(within(sourceList).queryByText("Quick prompt")).toBeNull();
 
     const protocolSource = within(sourceList).getByText("Protocol notes").closest("li");
     expect(protocolSource).not.toBeNull();
@@ -1095,7 +1090,7 @@ describe("Playground cockpit controls", () => {
 
     fireEvent.click(
       within(promptSource as HTMLElement).getByRole("button", {
-        name: "Clear prompt context",
+        name: "Clear prompt",
       }),
     );
     expect(messageOptionState.value.setSelectedQuickPrompt).toHaveBeenCalledWith(
@@ -1142,7 +1137,7 @@ describe("Playground cockpit controls", () => {
     expect(
       within(contextRail).getByText("Conversation no longer exists"),
     ).toBeInTheDocument();
-    expect(within(contextRail).getByText("No saved history yet")).toBeInTheDocument();
+    expect(within(contextRail).queryByText("No saved history yet")).toBeNull();
   });
 
   it("surfaces unavailable MCP without enabling cockpit-only tool choice", async () => {
@@ -1203,22 +1198,22 @@ describe("Playground cockpit controls", () => {
 
     renderPlayground();
 
-    const runtimeInspector = within(
-      await screen.findByTestId("playground-cockpit-right-rail"),
-    ).getByTestId("playground-runtime-inspector");
+    const assistant = within(
+      await screen.findByTestId("playground-cockpit-left-rail"),
+    ).getByRole("region", { name: "Assistant" });
     expect(
-      within(runtimeInspector).getByText("Research Persona"),
+      within(assistant).getByText("Research Persona"),
     ).toBeInTheDocument();
     expect(
-      within(runtimeInspector).getByText("Persona selected - memory read/write"),
+      within(assistant).getByText("Persona selected - memory read/write"),
     ).toBeInTheDocument();
     expect(
-      within(runtimeInspector).queryByRole("button", {
+      within(assistant).queryByRole("button", {
         name: "Open Scene Director",
       }),
     ).toBeNull();
     expect(
-      within(runtimeInspector).getByText(
+      within(assistant).getByText(
         "Scene Director is available for character-backed chats.",
       ),
     ).toBeInTheDocument();
@@ -1231,12 +1226,12 @@ describe("Playground cockpit controls", () => {
     try {
       renderPlayground();
 
-      const runtimeInspector = within(
-        await screen.findByTestId("playground-cockpit-right-rail"),
-      ).getByTestId("playground-runtime-inspector");
+      const assistant = within(
+        await screen.findByTestId("playground-cockpit-left-rail"),
+      ).getByRole("region", { name: "Assistant" });
 
       fireEvent.click(
-        within(runtimeInspector).getByRole("button", {
+        within(assistant).getByRole("button", {
           name: /select character or persona/i,
         }),
       );
@@ -1275,12 +1270,12 @@ describe("Playground cockpit controls", () => {
     try {
       renderPlayground();
 
-      const runtimeInspector = within(
-        await screen.findByTestId("playground-cockpit-right-rail"),
-      ).getByTestId("playground-runtime-inspector");
+      const assistant = within(
+        await screen.findByTestId("playground-cockpit-left-rail"),
+      ).getByRole("region", { name: "Assistant" });
 
       fireEvent.click(
-        within(runtimeInspector).getByRole("button", {
+        within(assistant).getByRole("button", {
           name: /select character or persona/i,
         }),
       );
@@ -1311,12 +1306,12 @@ describe("Playground cockpit controls", () => {
     try {
       renderPlayground();
 
-      const runtimeInspector = within(
-        await screen.findByTestId("playground-cockpit-right-rail"),
-      ).getByTestId("playground-runtime-inspector");
+      const assistant = within(
+        await screen.findByTestId("playground-cockpit-left-rail"),
+      ).getByRole("region", { name: "Assistant" });
 
       fireEvent.click(
-        within(runtimeInspector).getByRole("button", {
+        within(assistant).getByRole("button", {
           name: /select character or persona/i,
         }),
       );
@@ -1335,7 +1330,7 @@ describe("Playground cockpit controls", () => {
     }
   });
 
-  it("clears canonical assistant state and the legacy character mirror from the runtime rail", async () => {
+  it("clears canonical assistant state and the legacy character mirror from the context rail", async () => {
     messageOptionState.value.streaming = false;
     messageOptionState.value.selectedAssistant = {
       kind: "persona",
@@ -1350,13 +1345,13 @@ describe("Playground cockpit controls", () => {
 
     const { rerender } = renderPlayground();
 
-    const runtimeInspector = within(
-      await screen.findByTestId("playground-cockpit-right-rail"),
-    ).getByTestId("playground-runtime-inspector");
-    expect(within(runtimeInspector).getByText("Research Persona")).toBeInTheDocument();
-    expect(within(runtimeInspector).queryByText("Legacy Character")).toBeNull();
+    const assistant = within(
+      await screen.findByTestId("playground-cockpit-left-rail"),
+    ).getByRole("region", { name: "Assistant" });
+    expect(within(assistant).getByText("Research Persona")).toBeInTheDocument();
+    expect(within(assistant).queryByText("Legacy Character")).toBeNull();
 
-    const clearButton = within(runtimeInspector).getByRole("button", {
+    const clearButton = within(assistant).getByRole("button", {
       name: "Clear assistant",
     });
     clearButton.focus();
@@ -1373,27 +1368,21 @@ describe("Playground cockpit controls", () => {
     messageOptionState.value.selectedAssistant = null;
     messageOptionState.value.selectedCharacter = null;
     rerender(<Playground />);
-    const updatedRuntimeInspector = within(
-      screen.getByTestId("playground-cockpit-right-rail"),
-    ).getByTestId("playground-runtime-inspector");
+    const updatedAssistant = within(
+      screen.getByTestId("playground-cockpit-left-rail"),
+    ).getByRole("region", { name: "Assistant" });
     expect(
-      within(updatedRuntimeInspector).getAllByText("No runtime assistant selected")
+      within(updatedAssistant).getAllByText("No assistant selected")
         .length,
     ).toBeGreaterThan(0);
-    expect(
-      within(updatedRuntimeInspector).queryByText("No assistant selected"),
-    ).toBeNull();
-    expect(within(updatedRuntimeInspector).queryByText("Legacy Character")).toBeNull();
+    expect(within(updatedAssistant).queryByText("Legacy Character")).toBeNull();
     await waitFor(() => {
-      expect(document.activeElement).toBe(
-        within(updatedRuntimeInspector).getByRole("button", {
-          name: /select character or persona/i,
-        }),
-      );
+      expect(document.activeElement).toHaveAttribute("data-cockpit-assistant-select-trigger");
+      expect(document.activeElement?.closest("[hidden]")).toBeNull();
     });
   });
 
-  it("clears tracked server-chat assistant metadata from the runtime rail", async () => {
+  it("clears tracked server-chat assistant metadata from the context rail", async () => {
     messageOptionState.value.streaming = false;
     messageOptionState.value.selectedAssistant = {
       kind: "character",
@@ -1413,11 +1402,11 @@ describe("Playground cockpit controls", () => {
 
     renderPlayground();
 
-    const runtimeInspector = within(
-      await screen.findByTestId("playground-cockpit-right-rail"),
-    ).getByTestId("playground-runtime-inspector");
+    const assistant = within(
+      await screen.findByTestId("playground-cockpit-left-rail"),
+    ).getByRole("region", { name: "Assistant" });
     fireEvent.click(
-      within(runtimeInspector).getByRole("button", {
+      within(assistant).getByRole("button", {
         name: "Clear assistant",
       }),
     );
@@ -1463,11 +1452,11 @@ describe("Playground cockpit controls", () => {
 
     renderPlayground();
 
-    const runtimeInspector = within(
-      await screen.findByTestId("playground-cockpit-right-rail"),
-    ).getByTestId("playground-runtime-inspector");
+    const assistant = within(
+      await screen.findByTestId("playground-cockpit-left-rail"),
+    ).getByRole("region", { name: "Assistant" });
     fireEvent.click(
-      within(runtimeInspector).getByRole("button", {
+      within(assistant).getByRole("button", {
         name: "Clear assistant",
       }),
     );
@@ -1495,7 +1484,7 @@ describe("Playground cockpit controls", () => {
     let finish!: () => void;
     forkSettings.update.mockImplementation(() => new Promise((resolve, reject) => { finish = () => outcome === "failed" ? reject(new Error("lost response")) : resolve({}); }));
     renderPlayground();
-    const inspector = within(await screen.findByTestId("playground-cockpit-right-rail")).getByTestId("playground-runtime-inspector");
+    const inspector = within(await screen.findByTestId("playground-cockpit-left-rail")).getByRole("region", { name: "Assistant" });
     fireEvent.click(within(inspector).getByRole("button", {name: "Clear assistant"}));
     if (outcome !== "pending") {
       await waitFor(() => expect(forkSettings.update).toHaveBeenCalledWith({assistantOverlay: null}));
@@ -1522,7 +1511,7 @@ describe("Playground cockpit controls", () => {
     await act(async () => {await actual.result.current.open({kind: "native", owner_key: "owner", conversation_id: "legacy", validate_lease: () => true} as any)});
     forkSettings.controller = actual.result.current;
     renderPlayground();
-    const inspector = within(await screen.findByTestId("playground-cockpit-right-rail")).getByTestId("playground-runtime-inspector");
+    const inspector = within(await screen.findByTestId("playground-cockpit-left-rail")).getByRole("region", { name: "Assistant" });
     fireEvent.click(within(inspector).getByRole("button", {name: "Clear assistant"}));
     await waitFor(() => expect(messageOptionState.value.setServerChatId).toHaveBeenCalledWith(null));
     expect(chatSettingsState.applyChatSettingsPatch).toHaveBeenCalledWith({historyId: null, serverChatId: "legacy", patch: {assistantOverlay: null}});
@@ -1865,9 +1854,9 @@ describe("Playground cockpit controls", () => {
     const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
     const rails = within(mobileRails);
     const context = rails.getByRole("button", { name: "Context" });
-    const runtime = rails.getByRole("button", { name: "Chat settings" });
+    const runtime = rails.getByRole("button", { name: "Runtime" });
     const draft = screen.getByRole("textbox", { name: "Mobile message" });
-    expect(rails.getAllByRole("button")).toHaveLength(2);
+    expect(rails.getAllByRole("button")).toHaveLength(3);
     expect(context).toHaveAttribute("aria-expanded", "true");
     expect(runtime).toHaveAttribute("aria-expanded", "false");
     for (const button of [context, runtime]) {
@@ -1879,14 +1868,15 @@ describe("Playground cockpit controls", () => {
     }
     expect(rails.getByRole("region", { name: "Context" })).toBeVisible();
 
-    fireEvent.click(context);
+    fireEvent.click(rails.getByRole("button", { name: "Close Context panel" }));
+    expect(context).toHaveFocus();
     expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
     expect(context).toHaveAttribute("aria-expanded", "false");
     expect(runtime).toHaveAttribute("aria-expanded", "false");
     expect(rails.queryAllByRole("region")).toHaveLength(0);
 
     fireEvent.click(runtime);
-    expect(rails.getByRole("region", { name: "Chat settings" })).toBeVisible();
+    expect(rails.getByRole("region", { name: "Runtime" })).toBeVisible();
     expect(runtime).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(runtime);
     expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");

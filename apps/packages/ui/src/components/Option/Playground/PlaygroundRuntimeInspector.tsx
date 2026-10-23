@@ -10,7 +10,6 @@ import {
   Settings2,
   SlidersHorizontal,
   Square,
-  UserRound,
   Wrench,
 } from "lucide-react";
 import type { ChatModelUsabilityStatus } from "@/utils/chat-model-availability";
@@ -46,14 +45,6 @@ export type RuntimeToolSummary = {
 
 export type RuntimeToolChoice = "auto" | "required" | "none";
 
-export type RuntimeAssistantSummary = {
-  mode: "none" | "character" | "persona";
-  name?: string | null;
-  detail?: string | null;
-  compositionTitle?: string | null;
-  compositionDetail?: string | null;
-};
-
 export type PlaygroundRuntimeInspectorProps = {
   streaming: boolean;
   selectedProvider?: string | null | undefined;
@@ -66,14 +57,7 @@ export type PlaygroundRuntimeInspectorProps = {
   runtimeStatusDetail?: string | null;
   messageCount: number;
   threadSearchOpen: boolean;
-  selectedCharacterName?: string | null | undefined;
-  assistantSummary?: RuntimeAssistantSummary;
   onOpenModelSettings: () => void;
-  onOpenCharacterSettings?: () => void;
-  onOpenAssistantSelect?: () => void;
-  onClearAssistant?: () => void;
-  onInspectAssistant?: () => void;
-  onOpenSceneDirector?: () => void;
   toolChoice?: RuntimeToolChoice;
   onToolChoiceChange?: (choice: RuntimeToolChoice) => void;
   onOpenMcpSettings?: () => void;
@@ -107,14 +91,7 @@ export const PlaygroundRuntimeInspector = ({
   runtimeStatusDetail,
   messageCount,
   threadSearchOpen,
-  selectedCharacterName,
-  assistantSummary,
   onOpenModelSettings,
-  onOpenCharacterSettings,
-  onOpenAssistantSelect,
-  onClearAssistant,
-  onInspectAssistant,
-  onOpenSceneDirector,
   toolChoice,
   onToolChoiceChange,
   onOpenMcpSettings,
@@ -159,17 +136,11 @@ export const PlaygroundRuntimeInspector = ({
       ? emptyAssistantResponseRouteLabel.trim() || null
       : null;
   const emptyAssistantResponseSummary = emptyAssistantRouteLabel
-    ? t(
-        "cockpit.emptyAssistantResponseSummaryWithRoute",
-        {
-          defaultValue: "{{route}} returned no response text.",
-          route: emptyAssistantRouteLabel,
-        },
-      )
-    : t(
-        "cockpit.emptyAssistantResponseSummary",
-        "No response text returned.",
-      );
+    ? t("cockpit.emptyAssistantResponseSummaryWithRoute", {
+        defaultValue: "{{route}} returned no response text.",
+        route: emptyAssistantRouteLabel,
+      })
+    : t("cockpit.emptyAssistantResponseSummary", "No response text returned.");
   const emptyAssistantResponseDetail = t(
     "cockpit.emptyAssistantResponseDetail",
     "Regenerate this turn, or choose a different model if this provider keeps returning empty output.",
@@ -177,10 +148,7 @@ export const PlaygroundRuntimeInspector = ({
   const modelUsabilityBlocks =
     Boolean(modelUsabilityStatus) &&
     modelUsabilityStatus !== "ready" &&
-    !(
-      modelUsabilityStatus === "degraded" &&
-      modelUsabilityCanSend !== false
-    );
+    !(modelUsabilityStatus === "degraded" && modelUsabilityCanSend !== false);
   const status =
     runtimeStatus ||
     (streaming
@@ -195,11 +163,11 @@ export const PlaygroundRuntimeInspector = ({
       ? t("cockpit.streaming", "Streaming")
       : status === "loading"
         ? t("cockpit.modelChecking", "Checking model")
-      : status === "degraded"
-        ? t("cockpit.degraded", DEGRADED_STATE_LABEL)
-        : status === "error"
-          ? t("cockpit.error", ERROR_STATE_LABEL)
-          : t("cockpit.ready", READY_STATE_LABEL);
+        : status === "degraded"
+          ? t("cockpit.degraded", DEGRADED_STATE_LABEL)
+          : status === "error"
+            ? t("cockpit.error", ERROR_STATE_LABEL)
+            : t("cockpit.ready", READY_STATE_LABEL);
   const messageLabel = formatCockpitMessageCount(
     t("cockpit.messageCount", {
       count: effectiveMessageCount,
@@ -208,55 +176,6 @@ export const PlaygroundRuntimeInspector = ({
     }),
     effectiveMessageCount,
   );
-  const effectiveAssistantSummary: RuntimeAssistantSummary =
-    assistantSummary ||
-    (selectedCharacterName
-      ? {
-          mode: "character",
-          name: selectedCharacterName,
-          detail: t("cockpit.characterSelected", "Character selected"),
-        }
-      : {
-          mode: "none",
-          name: null,
-          detail: t(
-            "cockpit.noAssistantDetail",
-            "No persona or character will shape replies.",
-          ),
-        });
-  const noAssistantSelectedLabel = t(
-    "cockpit.noAssistantSelected",
-    "No assistant selected",
-  );
-  const assistantLabel =
-    effectiveAssistantSummary.name ||
-    (effectiveAssistantSummary.mode === "none"
-      ? t(
-          "cockpit.noRuntimeAssistantSelected",
-          "No runtime assistant selected",
-        )
-      : noAssistantSelectedLabel);
-  const noAssistantDetail = t(
-    "cockpit.noAssistantDetail",
-    "No persona or character will shape replies.",
-  );
-  const assistantModeLabel =
-    effectiveAssistantSummary.mode === "persona"
-      ? t("cockpit.personaMode", "Persona")
-      : effectiveAssistantSummary.mode === "character"
-        ? t("cockpit.characterMode", "Character")
-        : t("cockpit.noAssistantMode", "None");
-  const assistantDetail =
-    effectiveAssistantSummary.mode === "none" &&
-    (effectiveAssistantSummary.detail === assistantLabel ||
-      effectiveAssistantSummary.detail === noAssistantSelectedLabel)
-      ? noAssistantDetail
-      : effectiveAssistantSummary.detail ||
-        (effectiveAssistantSummary.mode === "none"
-          ? noAssistantDetail
-          : assistantModeLabel);
-  const openAssistant = onOpenAssistantSelect || onOpenCharacterSettings;
-  const openSceneDirector = onOpenSceneDirector || onOpenCharacterSettings;
   const toolChoices: Array<{ value: RuntimeToolChoice; label: string }> = [
     { value: "auto", label: t("cockpit.toolChoiceAuto", "Auto") },
     { value: "required", label: t("cockpit.toolChoiceRequired", "Required") },
@@ -284,13 +203,20 @@ export const PlaygroundRuntimeInspector = ({
         )
       : regenerateUnavailableReason
         ? regenerateUnavailableReason
-      : t(
-          "cockpit.regenerateUnavailableNoAssistant",
-          "Regenerate becomes available after an assistant response.",
-        );
+        : t(
+            "cockpit.regenerateUnavailableNoAssistant",
+            "Regenerate becomes available after an assistant response.",
+          );
   const stopReasonId = `${runControlsId}-stop-disabled-reason`;
   const regenerateReasonId = `${runControlsId}-regenerate-disabled-reason`;
   const recoveryModeKey = setupRecoveryMode ? "setup" : "standard";
+
+  const overrides = settingSummaries.filter(
+    (setting) => setting.source === "override",
+  );
+  const defaults = settingSummaries.filter(
+    (setting) => setting.source !== "override",
+  );
 
   return (
     <div
@@ -299,186 +225,152 @@ export const PlaygroundRuntimeInspector = ({
       className={cockpitRailStyles.stack}
     >
       <PlaygroundRailSection
-        label={t("cockpit.runtimeState", "Runtime state")}
-        title={t("cockpit.runtime", "Chat settings")}
+        label={t("cockpit.runControls", "Run controls")}
+        title={t("cockpit.currentRun", "Current run")}
       >
-        <div className="mt-1 flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className={cockpitRailStyles.value}>{statusLabel}</p>
-            {runtimeStatusDetail ? (
-              <p className={cockpitRailStyles.muted}>{runtimeStatusDetail}</p>
-            ) : null}
-          </div>
-          <span className="shrink-0 rounded-full border border-border bg-surface2 px-2 py-0.5 text-[10px] font-semibold text-text-muted">
-            {streaming
-              ? t("cockpit.turnRunning", "Turn running")
-              : t("cockpit.turnIdle", "Turn idle")}
-          </span>
-        </div>
-        <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 text-xs text-text-muted">
-          <dt>{t("cockpit.provider", "Provider")}</dt>
-          <dd className="truncate text-text">
-            {displayProvider ||
-              t("cockpit.noProviderSelected", "No provider selected")}
-          </dd>
-          <dt>{t("cockpit.model", "Model")}</dt>
-          <dd className="truncate text-text">
-            {displayModel || t("cockpit.noModelSelected", "No model selected")}
-          </dd>
-        </dl>
-        {routeLabel ? (
-          <div className={`mt-2 ${cockpitRailStyles.compactInset}`}>
-            <p className="text-[10px] font-semibold uppercase text-text-muted">
-              {t("cockpit.providerRoute", "Provider route")}
-            </p>
-            <p className="mt-0.5 truncate text-xs font-medium text-text">
-              {routeLabel}
-            </p>
-            <p className="sr-only">
-              {t("cockpit.route", `Route ${routeLabel}`, {
-                route: routeLabel,
-              })}
-            </p>
-            {modelUsabilityDetail ? (
-              <p className={cockpitRailStyles.muted}>{modelUsabilityDetail}</p>
-            ) : null}
+        <p className={cockpitRailStyles.value}>{statusLabel}</p>
+        {runtimeStatusDetail && (
+          <p className={cockpitRailStyles.muted}>{runtimeStatusDetail}</p>
+        )}
+        {emptyAssistantResponse && !streaming ? (
+          <div
+            role="status"
+            aria-live="polite"
+            aria-label={t(
+              "cockpit.emptyAssistantResponse",
+              "Empty assistant response",
+            )}
+            className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-2.5 py-2 text-xs text-text"
+          >
+            <p className="font-medium">{emptyAssistantResponseSummary}</p>
+            <p className="mt-1 opacity-90">{emptyAssistantResponseDetail}</p>
           </div>
         ) : null}
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={!stopControlEnabled}
+            onClick={stopControlEnabled ? onStopStreaming : undefined}
+            className={`${cockpitRailDisabledActionClass} justify-center gap-1.5`}
+            aria-label={t("cockpit.stopGeneration", "Stop generation")}
+            aria-describedby={!stopControlEnabled ? stopReasonId : undefined}
+          >
+            <Square className="h-3.5 w-3.5" aria-hidden="true" />
+            {t("cockpit.stopShort", "Stop")}
+          </button>
+          <button
+            type="button"
+            disabled={!regenerateControlEnabled}
+            onClick={regenerateControlEnabled ? onRegenerate : undefined}
+            className={`${cockpitRailDisabledActionClass} justify-center gap-1.5`}
+            aria-label={t(
+              "cockpit.regenerateLastResponse",
+              "Regenerate last response",
+            )}
+            aria-describedby={
+              !regenerateControlEnabled ? regenerateReasonId : undefined
+            }
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            {t("cockpit.regenerateShort", "Regenerate")}
+          </button>
+        </div>
+        {stopDisabledReason && (
+          <p id={stopReasonId} className={cockpitRailStyles.muted}>
+            {stopDisabledReason}
+          </p>
+        )}
+        {regenerateDisabledReason && (
+          <p id={regenerateReasonId} className={cockpitRailStyles.muted}>
+            {regenerateDisabledReason}
+          </p>
+        )}
+        {(effectiveMessageCount > 0 || threadSearchOpen) && (
+          <p className="mt-3 text-xs text-text-muted">
+            {messageLabel}
+            {threadSearchOpen && (
+              <> · {t("cockpit.searchOpen", "Search open")}</>
+            )}
+          </p>
+        )}
       </PlaygroundRailSection>
 
       <PlaygroundRailSection
         label={t("cockpit.modelRoute", "Model route")}
-        title={t("cockpit.modelRoute", "Model route")}
+        title={t("cockpit.modelAndSettings", "Model & settings")}
       >
-        <div className="mt-2 flex flex-col gap-2">
-          <button
-            type="button"
-            onClick={onOpenModelSettings}
-            data-cockpit-model-settings-trigger
-            className={`${cockpitRailStyles.action} justify-start gap-1.5`}
-            aria-label={t("cockpit.openModelSettings", "Open model settings")}
-          >
-            <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
-            {t("cockpit.modelSettings", "Model settings")}
-          </button>
-        </div>
-        <div className="mt-3">
-          <p className="text-[10px] font-semibold uppercase text-text-muted">
-            {t("cockpit.providerModelSettings", "Provider:model settings")}
+        <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs text-text-muted">
+          <dt>{t("cockpit.provider", "Provider")}</dt>
+          <dd className="break-words text-text">
+            {displayProvider ||
+              t("cockpit.noProviderSelected", "No provider selected")}
+          </dd>
+          <dt>{t("cockpit.model", "Model")}</dt>
+          <dd className="break-words font-medium text-text">
+            {displayModel || t("cockpit.noModelSelected", "No model selected")}
+          </dd>
+        </dl>
+        {routeLabel && (
+          <p className="sr-only">
+            {t("cockpit.route", `Route ${routeLabel}`, { route: routeLabel })}
           </p>
-          {settingSummaries.length > 0 ? (
-            <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1 text-xs">
-              {settingSummaries.map((setting) => (
+        )}
+        {modelUsabilityDetail &&
+          modelUsabilityDetail !== runtimeStatusDetail && (
+            <p className={cockpitRailStyles.muted}>{modelUsabilityDetail}</p>
+          )}
+        <button
+          type="button"
+          onClick={onOpenModelSettings}
+          data-cockpit-model-settings-trigger
+          title={routeLabel || undefined}
+          className={`${cockpitRailStyles.action} mt-2 gap-1.5`}
+          aria-label={t("cockpit.openModelSettings", "Open model settings")}
+        >
+          <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
+          {t("cockpit.modelSettings", "Model settings")}
+        </button>
+        {overrides.length > 0 && (
+          <dl className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-2 text-xs">
+            {overrides.map((setting) => (
+              <React.Fragment key={setting.label}>
+                <dt className="text-text-muted">{setting.label}</dt>
+                <dd className="flex items-center gap-2 font-medium text-text">
+                  <span>{setting.value}</span>
+                  <span className="text-[10px] text-text-muted">
+                    {t("cockpit.settingOverride", "Override")}
+                  </span>
+                </dd>
+              </React.Fragment>
+            ))}
+          </dl>
+        )}
+        {defaults.length > 0 ? (
+          <details className="mt-3 text-xs text-text-muted">
+            <summary className="cursor-pointer rounded py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus">
+              {t("cockpit.defaultSettings", "Default settings")}
+            </summary>
+            <dl className="mt-2 grid grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-2">
+              {defaults.map((setting) => (
                 <React.Fragment key={setting.label}>
-                  <dt className="truncate text-text-muted">{setting.label}</dt>
-                  <dd className="flex items-center justify-end gap-1.5 font-medium text-text">
-                    <span>{setting.value}</span>
-                    {setting.source ? (
-                      <span
-                        className={
-                          setting.source === "override"
-                            ? "rounded border border-focus/40 bg-focus/10 px-1.5 py-0.5 text-[10px] font-semibold text-focus"
-                            : "rounded border border-border bg-surface2 px-1.5 py-0.5 text-[10px] font-medium text-text-muted"
-                        }
-                      >
-                        {setting.source === "override"
-                          ? t("cockpit.settingOverride", "Override")
-                          : t("cockpit.settingInherited", "Inherited")}
-                      </span>
-                    ) : null}
-                  </dd>
+                  <dt>{setting.label}</dt>
+                  <dd className="font-medium text-text">{setting.value}</dd>
                 </React.Fragment>
               ))}
             </dl>
-          ) : (
+          </details>
+        ) : (
+          !overrides.length && (
             <p className={cockpitRailStyles.muted}>
               {t(
                 "cockpit.settingsDefault",
                 "Default settings for this provider:model.",
               )}
             </p>
-          )}
-        </div>
+          )
+        )}
       </PlaygroundRailSection>
-
-      <PlaygroundRailSection
-        key={`assistant-${recoveryModeKey}`}
-        label={t("cockpit.assistant", "Assistant")}
-        title={t("cockpit.assistant", "Assistant")}
-        defaultOpen={!setupRecoveryMode}
-      >
-        <div className="mt-1 flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className={cockpitRailStyles.value}>{assistantLabel}</p>
-            <p className={cockpitRailStyles.muted}>{assistantDetail}</p>
-          </div>
-          <span className="shrink-0 rounded-full border border-border bg-surface2 px-2 py-0.5 text-[10px] font-semibold text-text-muted">
-            {assistantModeLabel}
-          </span>
-        </div>
-        <div className="mt-2 flex flex-col gap-2">
-          {openAssistant ? (
-            <button
-              type="button"
-              onClick={openAssistant}
-              data-cockpit-assistant-select-trigger
-              className={`${cockpitRailStyles.action} justify-start gap-1.5`}
-              aria-label={t(
-                "cockpit.selectCharacterPersona",
-                "Select character or persona",
-              )}
-            >
-              <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
-              {t("cockpit.selectAssistant", "Select assistant")}
-            </button>
-          ) : null}
-          {effectiveAssistantSummary.mode !== "none" && onInspectAssistant ? (
-            <button
-              type="button"
-              onClick={onInspectAssistant}
-              className={`${cockpitRailStyles.action} justify-start gap-1.5`}
-              aria-label={t("cockpit.manageAssistant", "Manage assistant")}
-            >
-              <Settings2 className="h-3.5 w-3.5" aria-hidden="true" />
-              {t("cockpit.manageAssistant", "Manage assistant")}
-            </button>
-          ) : null}
-          {effectiveAssistantSummary.mode !== "none" && onClearAssistant ? (
-            <button
-              type="button"
-              onClick={onClearAssistant}
-              className={`${cockpitRailStyles.action} justify-start gap-1.5`}
-              aria-label={t("cockpit.clearAssistant", "Clear assistant")}
-            >
-              <UserRound className="h-3.5 w-3.5" aria-hidden="true" />
-              {t("cockpit.clearAssistant", "Clear assistant")}
-            </button>
-          ) : null}
-          {effectiveAssistantSummary.mode === "character" && openSceneDirector ? (
-            <button
-              type="button"
-              onClick={openSceneDirector}
-              className={`${cockpitRailStyles.action} justify-start gap-1.5`}
-              aria-label={t(
-                "cockpit.openSceneDirector",
-                "Open Scene Director",
-              )}
-            >
-              <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
-              {t("cockpit.sceneDirector", "Scene Director")}
-            </button>
-          ) : null}
-        </div>
-        {effectiveAssistantSummary.mode === "persona" ? (
-          <p className={cockpitRailStyles.muted}>
-            {t(
-              "cockpit.personaActorUnavailable",
-              "Scene Director is available for character-backed chats.",
-            )}
-          </p>
-        ) : null}
-      </PlaygroundRailSection>
-
       <PlaygroundRailSection
         key={`tools-${recoveryModeKey}`}
         label={mcpToolsLabel}
@@ -486,7 +378,7 @@ export const PlaygroundRuntimeInspector = ({
         defaultOpen={!setupRecoveryMode}
       >
         {toolSummary ? (
-          <div className={`mt-2 ${cockpitRailStyles.inset}`}>
+          <div className="mt-2">
             <div className="flex items-start gap-2">
               <span
                 className={`rounded border p-1 ${toolStateClass(
@@ -496,9 +388,7 @@ export const PlaygroundRuntimeInspector = ({
                 <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
               </span>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-text">
-                  {toolCardLabel}
-                </p>
+                <p className="text-sm font-medium text-text">{toolCardLabel}</p>
                 {toolSummary.detail ? (
                   <p className="mt-0.5 text-xs text-text-muted">
                     {toolSummary.detail}
@@ -561,7 +451,10 @@ export const PlaygroundRuntimeInspector = ({
                 className={`${cockpitRailStyles.action} mt-2 gap-1.5`}
                 onClick={onOpenMcpSettings}
                 data-cockpit-mcp-settings-trigger
-                aria-label={t("cockpit.configureMcpTools", "Configure MCP tools")}
+                aria-label={t(
+                  "cockpit.configureMcpTools",
+                  "Configure MCP tools",
+                )}
               >
                 <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
                 {t("cockpit.configureMcpTools", "Configure MCP tools")}
@@ -576,86 +469,6 @@ export const PlaygroundRuntimeInspector = ({
             )}
           </p>
         )}
-      </PlaygroundRailSection>
-
-      <PlaygroundRailSection
-        key={`run-${recoveryModeKey}`}
-        label={t("cockpit.runControls", "Run controls")}
-        title={t("cockpit.runControls", "Run controls")}
-        defaultOpen={!setupRecoveryMode}
-      >
-        {emptyAssistantResponse && !streaming ? (
-          <div
-            role="status"
-            aria-live="polite"
-            aria-label={t(
-              "cockpit.emptyAssistantResponse",
-              "Empty assistant response",
-            )}
-            className="mt-2 rounded-md border border-warn/30 bg-warn/10 px-2.5 py-2 text-xs text-warn"
-          >
-            <p className="font-medium">
-              {emptyAssistantResponseSummary}
-            </p>
-            <p className="mt-1 opacity-90">
-              {emptyAssistantResponseDetail}
-            </p>
-          </div>
-        ) : null}
-        <div className="mt-2 grid gap-2">
-          <div>
-            <button
-              type="button"
-              disabled={!stopControlEnabled}
-              onClick={stopControlEnabled ? onStopStreaming : undefined}
-              className={`${cockpitRailDisabledActionClass} w-full justify-start gap-1.5`}
-              aria-label={t("cockpit.stopGeneration", "Stop generation")}
-              aria-describedby={!stopControlEnabled ? stopReasonId : undefined}
-            >
-              <Square className="h-3.5 w-3.5" aria-hidden="true" />
-              {t("cockpit.stopGeneration", "Stop generation")}
-            </button>
-            {stopDisabledReason ? (
-              <p id={stopReasonId} className={cockpitRailStyles.muted}>
-                {stopDisabledReason}
-              </p>
-            ) : null}
-          </div>
-          <div>
-            <button
-              type="button"
-              disabled={!regenerateControlEnabled}
-              onClick={regenerateControlEnabled ? onRegenerate : undefined}
-              className={`${cockpitRailDisabledActionClass} w-full justify-start gap-1.5`}
-              aria-label={t(
-                "cockpit.regenerateLastResponse",
-                "Regenerate last response",
-              )}
-              aria-describedby={
-                !regenerateControlEnabled ? regenerateReasonId : undefined
-              }
-            >
-              <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-              {t("cockpit.regenerateLastResponse", "Regenerate last response")}
-            </button>
-            {regenerateDisabledReason ? (
-              <p id={regenerateReasonId} className={cockpitRailStyles.muted}>
-                {regenerateDisabledReason}
-              </p>
-            ) : null}
-          </div>
-        </div>
-        <div className="mt-3 border-t border-border/70 pt-2">
-          <p className="text-[10px] font-semibold uppercase text-text-muted">
-            {t("cockpit.timeline", "Timeline")}
-          </p>
-          <p className={cockpitRailStyles.value}>{messageLabel}</p>
-          <p className={cockpitRailStyles.muted}>
-            {threadSearchOpen
-              ? t("cockpit.searchOpen", "Search open")
-              : t("cockpit.searchClosed", "Search closed")}
-          </p>
-        </div>
       </PlaygroundRailSection>
     </div>
   );

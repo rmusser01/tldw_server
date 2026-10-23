@@ -140,9 +140,7 @@ describe("Playground mature cockpit surfaces", () => {
         runtimeStatusDetail={null}
         messageCount={4}
         threadSearchOpen={false}
-        selectedCharacterName="Mira Vale"
         onOpenModelSettings={openModel}
-        onOpenCharacterSettings={vi.fn()}
         settingSummaries={[
           { label: "Temperature", value: "0.7" },
           { label: "Context", value: "8k" }
@@ -156,10 +154,10 @@ describe("Playground mature cockpit surfaces", () => {
       />
     )
 
-    expect(screen.getByText("Provider route")).toBeInTheDocument()
-    expect(screen.getByText("openai:gpt-4.1-mini")).toBeInTheDocument()
-    expect(screen.getByText("Provider:model settings")).toBeInTheDocument()
+    expect(screen.getByRole("heading", { name: "Model & settings" })).toBeInTheDocument()
+    expect(screen.getByText("Route openai:gpt-4.1-mini")).toBeInTheDocument()
     expect(screen.getByText("Temperature")).toBeInTheDocument()
+    fireEvent.click(screen.getByText("Default settings"))
     expect(screen.getByText("0.7")).toBeInTheDocument()
     expect(screen.getByText("MCP tools")).toBeInTheDocument()
     expect(screen.getByText("Chat tool access")).toBeInTheDocument()
