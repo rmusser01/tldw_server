@@ -301,7 +301,7 @@ async def await_bounded_daemon_with_timeout(
 
     released = released_event or threading.Event()
     try:
-        pool.start(invoke, name=name, released_event=released)
+        pool.start(invoke, name=name, released_event=released, exhaustion_message=f"{name} capacity is exhausted")
     except BaseException:
         released.set()
         raise
