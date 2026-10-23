@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import uuid
 from datetime import date, datetime, timezone
 from sqlite3 import Error as SQLiteError
@@ -23,6 +24,7 @@ from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.Metrics import increment_counter
 
 from .llm_usage_normalizer import normalize_llm_usage
@@ -234,11 +236,17 @@ def _apply_pii_settings_to_meta(
 
 # Anthropic bills these request options above list price, on every token category, and they stack with each other and
 # with the cache rates (platform.claude.com/docs/en/about-claude/pricing: "Fast mode pricing", "Data residency pricing").
-# Both trust the usage block: the page scopes US-only to Claude 4.6 and later and fast mode to three Opus models, and
-# the API only reports the option on a call that used it. What a pre-4.6 model reports under a workspace default
-# inference_geo is undocumented (follow-up), so there is no model gate here.
+# Fast mode trusts the usage block: the API only reports speed "fast" on a call that used it.
 ANTHROPIC_FAST_MODE_MULTIPLIER = 2.0
 ANTHROPIC_US_ONLY_MULTIPLIER = 1.1
+# US-only costs 1.1x on Claude 4.6 and later only. platform.claude.com/docs/en/manage-claude/data-residency: requests
+# with inference_geo "on Claude Opus 4.5, Claude Sonnet 4.5 (deprecated), Claude Haiku 4.5, or earlier models return
+# a 400 error", "Older models: ... Standard pricing applies", and a workspace migrated from the legacy US-only opt-out
+# (default_inference_geo "us") is billed standard on them ("Legacy models are unaffected"). So a usage block that
+# reports "us" for one of these IDs is costed at list price. Any other model, including a new family, pays the 1.1x.
+_ANTHROPIC_STANDARD_PRICED_GEO = re.compile(
+    r"^claude-(?:(?:opus|sonnet|haiku)-4(?:-[0-5])?(?:-\d{8})?$|[0-3](?:[-.]|$)|instant)"
+)
 
 
 def compute_costs(
@@ -261,7 +269,8 @@ def compute_costs(
     ``cache_write_1h_input_tokens`` is the share of the cache writes made with a
     1-hour TTL; it costs the entry's ``cache_write_1h`` rate (falling back to
     ``cache_write``), the rest of the writes the ``cache_write`` rate.
-    ``speed="fast"`` and ``inference_geo="us"`` (Anthropic) multiply every
+    ``speed="fast"`` and ``inference_geo="us"`` (Anthropic; US-only on Claude
+    4.6 and later models only) multiply every
     category by 2 and 1.1.
     """
     catalog = get_pricing_catalog()
@@ -295,7 +304,9 @@ def compute_costs(
     multiplier = 1.0
     if (speed or "").lower() == "fast":
         multiplier *= ANTHROPIC_FAST_MODE_MULTIPLIER
-    if (inference_geo or "").lower() == "us":
+    if (inference_geo or "").lower() == "us" and not _ANTHROPIC_STANDARD_PRICED_GEO.match(
+        canonical_anthropic_model_id((model or "").strip().lower())
+    ):
         multiplier *= ANTHROPIC_US_ONLY_MULTIPLIER
     prompt_cost *= multiplier
     completion_cost = (completion_total / 1000.0) * out_per_1k * multiplier

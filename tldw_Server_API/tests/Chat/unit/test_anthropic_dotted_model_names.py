@@ -164,3 +164,51 @@ def test_a_provider_override_allowlist_is_still_exact_for_other_providers() -> N
     snapshot = ProviderOverrideCallSnapshot("openai", LLMProviderOverride(provider="openai", allowed_models=["claude-sonnet-4.5"]))
 
     assert snapshot.policy_error("claude-sonnet-4-5") is not None
+
+
+def test_a_dotted_override_allowlist_still_lists_the_dashed_anthropic_models() -> None:
+    """An allowlist saved from the old picker must not empty the picker or the auto-router's candidates (review I1)."""
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        LLMProviderOverride,
+        apply_llm_provider_overrides_to_listing,
+    )
+
+    names = ["claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-5"]
+    payload = {"providers": [{"name": "anthropic", "models": list(names), "models_info": [{"name": n} for n in names]}]}
+    overrides = {
+        "anthropic": LLMProviderOverride(provider="anthropic", allowed_models=["claude-sonnet-4.5", "claude-haiku-4.5"])
+    }
+
+    (entry,) = apply_llm_provider_overrides_to_listing(payload, overrides=overrides)["providers"]
+
+    assert entry["models"] == ["claude-sonnet-4-5", "claude-haiku-4-5"]
+    assert [info["name"] for info in entry["models_info"]] == ["claude-sonnet-4-5", "claude-haiku-4-5"]
+
+
+def test_an_override_allowlist_listing_is_still_exact_for_other_providers() -> None:
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import (
+        LLMProviderOverride,
+        apply_llm_provider_overrides_to_listing,
+    )
+
+    payload = {"providers": [{"name": "openai", "models": ["claude-sonnet-4-5", "gpt-4.1"]}]}
+    overrides = {"openai": LLMProviderOverride(provider="openai", allowed_models=["claude-sonnet-4.5", "gpt-4.1"])}
+
+    (entry,) = apply_llm_provider_overrides_to_listing(payload, overrides=overrides)["providers"]
+
+    assert entry["models"] == ["gpt-4.1"]
+
+
+@pytest.mark.parametrize(
+    ("allowed", "model"),
+    [
+        ({"claude-sonnet-4-5": 1}, {"model": "claude-sonnet-4-5"}),
+        ({"claude-sonnet-4-5": 1}, ["claude-sonnet-4-5"]),
+        (5, "claude-sonnet-4-5"),
+    ],
+)
+def test_the_allowlist_check_returns_false_instead_of_raising_on_unhashable_or_odd_shapes(allowed, model) -> None:
+    """A TypeError in the virtual-key middleware skips enforcement, so the check must return False (review M4)."""
+    from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import allowlist_has_model
+
+    assert allowlist_has_model(allowed, model) is False

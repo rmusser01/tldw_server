@@ -38,6 +38,7 @@ Bandit: uvx bandit -ll on the 13 touched source files (pricing_catalog, llm_usag
 ADR assessment: no new ADR (optional catalog keys and two billing multipliers inside the existing pipeline; no global default flips). Governing: ADR-075 (Anthropic prompt_tokens include cache tokens, so the Haiku 5.5 tier uses the whole prompt) and ADR-059 (backlog-py); no ADR addresses where multipliers live.
 Docs updated: Usage_Quotas.md, Model_Pricing_Catalog.md and the model_pricing.json _catalog_note (plan Task 5).
 Follow-ups: TASK-13913 (replace dotted Anthropic names with API IDs at the source, including claude-3-5-sonnet-latest and the config default).
+Review fix round 1 (PR #3306, I1): apply_llm_provider_overrides_to_listing filtered the override allowlist by exact name, so an allowlist saved from the old picker (['claude-sonnet-4.5', 'claude-haiku-4.5']) emptied the Anthropic picker and the auto-router's Anthropic candidates. The models and models_info filters now use the same allowlist_has_model mapping as policy_error (Anthropic only). RED: the listing was []; GREEN: both dashed models listed. allowlist_has_model also returns False instead of raising on shapes it cannot compare (M4).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

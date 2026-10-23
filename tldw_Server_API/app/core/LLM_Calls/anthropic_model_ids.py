@@ -23,11 +23,15 @@ def allowlist_has_model(allowed_models: Collection[Any], model: Any) -> bool:
     """Whether ``model`` is in a model allowlist, a dotted Claude name and its dashed ID counting as one model.
 
     Only strings are mapped; any other value is compared as written, so a malformed entry or request body never
-    raises (the budget middleware skips enforcement on a TypeError) and never widens the list.
+    widens the list. A shape that cannot be compared at all (an unhashable model against a dict, a non-iterable
+    allowlist) is "not allowed" rather than an error: the budget middleware skips enforcement on a TypeError.
     """
-    if model in allowed_models:
-        return True
-    if not isinstance(model, str):
+    try:
+        if model in allowed_models:
+            return True
+        if not isinstance(model, str):
+            return False
+        wanted = canonical_anthropic_model_id(model)
+        return any(isinstance(item, str) and canonical_anthropic_model_id(item) == wanted for item in allowed_models)
+    except TypeError:
         return False
-    wanted = canonical_anthropic_model_id(model)
-    return any(isinstance(item, str) and canonical_anthropic_model_id(item) == wanted for item in allowed_models)

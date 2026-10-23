@@ -72,6 +72,23 @@ def _parse_rates(rates: dict) -> dict:
     return entry
 
 
+def _parse_long_prompt_tier(tier: dict) -> dict | None:
+    """A long-prompt tier, or None when it would misprice.
+
+    Without ``prompt`` or ``completion`` that side would cost $0 above the threshold, and without a positive
+    ``above_tokens`` the tier would apply to every request.
+    """
+    try:
+        above_tokens = int(tier.get("above_tokens", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    has_prompt = _rate_value(tier, "prompt", "in", "input", default=None) is not None
+    has_completion = _rate_value(tier, "completion", "out", "output", default=None) is not None
+    if above_tokens <= 0 or not has_prompt or not has_completion:
+        return None
+    return {"above_tokens": above_tokens, **_parse_rates(tier)}
+
+
 UNKNOWN_BILLABLE_RATE = {"prompt": 0.01, "completion": 0.03}
 
 
@@ -259,7 +276,16 @@ class PricingCatalog:
                 tier = rates.get("long_prompt")
                 if isinstance(tier, dict):
                     # A request whose whole prompt (cache tokens included) is above this many tokens pays the tier's rates.
-                    entry["long_prompt"] = {"above_tokens": int(tier.get("above_tokens", 0) or 0), **_parse_rates(tier)}
+                    parsed_tier = _parse_long_prompt_tier(tier)
+                    if parsed_tier is None:
+                        logger.warning(
+                            "Ignoring the long_prompt tier of pricing entry {}/{}: it needs above_tokens > 0 and both "
+                            "prompt and completion rates; the base rates apply",
+                            provider,
+                            model,
+                        )
+                    else:
+                        entry["long_prompt"] = parsed_tier
                 base[model] = entry
 
     def get_rate_details(

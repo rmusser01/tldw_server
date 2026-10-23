@@ -494,7 +494,7 @@ def test_the_hidden_flag_survives_an_override_that_repeats_it(monkeypatch: pytes
 def test_fast_mode_costs_twice_list_price_on_every_token_category(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
     reset_pricing_catalog()
-    args = dict(cache_read_input_tokens=40_000, cache_write_input_tokens=10_000, billable_input_tokens=50_000)
+    args = {"cache_read_input_tokens": 40_000, "cache_write_input_tokens": 10_000, "billable_input_tokens": 50_000}
 
     list_prompt, list_completion, _t, _e = compute_costs("anthropic", "claude-opus-5", 100_000, 2_000, **args)
     fast_prompt, fast_completion, fast_total, _e2 = compute_costs("anthropic", "claude-opus-5", 100_000, 2_000, speed="fast", **args)
@@ -518,7 +518,12 @@ def test_fast_mode_input_and_output_match_the_published_fast_prices(monkeypatch:
 def test_us_only_inference_costs_one_point_one_times_on_every_category(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
     reset_pricing_catalog()
-    args = dict(cache_read_input_tokens=40_000, cache_write_input_tokens=10_000, cache_write_1h_input_tokens=4_000, billable_input_tokens=50_000)
+    args = {
+        "cache_read_input_tokens": 40_000,
+        "cache_write_input_tokens": 10_000,
+        "cache_write_1h_input_tokens": 4_000,
+        "billable_input_tokens": 50_000,
+    }
 
     list_prompt, list_completion, _t, _e = compute_costs("anthropic", "claude-sonnet-4-6", 100_000, 2_000, **args)
     us_prompt, us_completion, _t2, _e2 = compute_costs("anthropic", "claude-sonnet-4-6", 100_000, 2_000, inference_geo="us", **args)
@@ -543,3 +548,77 @@ def test_fast_mode_and_us_only_inference_stack_with_cache_rates_and_the_haiku_ti
     haiku_us, _c2, _t2, _e2 = compute_costs("anthropic", "claude-haiku-5-5", 100_001, 0, billable_input_tokens=100_001, inference_geo="us")
     # Haiku 5.5 high tier $0.0005 per 1K, x1.1 (the page: the multiplier applies to the higher prices too).
     assert haiku_us == pytest.approx(100_001 * 0.0005 * 1.1 / 1000)
+
+
+@pytest.mark.parametrize(
+    "tier",
+    [
+        {"above_tokens": 200_000, "completion": 0.01},
+        {"above_tokens": 200_000, "prompt": 0.01},
+        {"prompt": 0.02, "completion": 0.06},
+        {"above_tokens": 0, "prompt": 0.02, "completion": 0.06},
+    ],
+    ids=["no-prompt", "no-completion", "no-above-tokens", "zero-above-tokens"],
+)
+def test_an_incomplete_long_prompt_tier_is_ignored_with_a_warning(tier: dict, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tier without a prompt or completion rate would bill that side at $0; one without a threshold would apply
+    to every request. Such a tier is dropped and the base rates stay (review M2)."""
+    from loguru import logger
+
+    overrides = {"openai": {"tiered-test": {"prompt": 0.01, "completion": 0.03, "long_prompt": tier}}}
+    monkeypatch.setenv("PRICING_OVERRIDES", json.dumps(overrides))
+    warnings: list[str] = []
+    sink = logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        cat = PricingCatalog()
+    finally:
+        logger.remove(sink)
+
+    for prompt_tokens in (1, 300_000):
+        got, _estimated = cat.get_rate_details("openai", "tiered-test", prompt_tokens=prompt_tokens)
+        assert got == pytest.approx({"prompt": 0.01, "completion": 0.03}), prompt_tokens
+    assert any("long_prompt" in line and "tiered-test" in line for line in warnings), warnings
+
+
+# platform.claude.com/docs/en/manage-claude/data-residency, fetched 2026-10-23: "The `inference_geo` parameter is
+# supported on Claude 4.6 and later models. Requests with `inference_geo` on Claude Opus 4.5, Claude Sonnet 4.5
+# (deprecated), Claude Haiku 4.5, or earlier models return a 400 error." Pricing: "Older models: ... Standard
+# pricing applies." "Legacy models are unaffected by this migration."
+@pytest.mark.parametrize(
+    "model",
+    [
+        "claude-opus-4-5-20251101",
+        "claude-opus-4-5",
+        "claude-sonnet-4-5-20250929",
+        "claude-sonnet-4.5",
+        "claude-haiku-4-5-20251001",
+        "claude-opus-4-1-20250805",
+        "claude-opus-4-20250514",
+        "claude-sonnet-4-20250514",
+        "claude-3-7-sonnet-20250219",
+        "claude-3-5-haiku-20241022",
+    ],
+)
+def test_us_only_inference_is_not_charged_on_models_before_claude_4_6(model: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    reset_pricing_catalog()
+
+    standard = compute_costs("anthropic", model, 10_000, 1_000, billable_input_tokens=10_000)
+    reported_us = compute_costs("anthropic", model, 10_000, 1_000, billable_input_tokens=10_000, inference_geo="us")
+
+    assert reported_us[:3] == pytest.approx(standard[:3])
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["claude-opus-4-6", "claude-sonnet-4-6", "claude-opus-4-8", "claude-opus-5", "claude-haiku-5-5", "claude-mythos-5-1", "claude-fable-5"],
+)
+def test_us_only_inference_is_charged_on_claude_4_6_and_later(model: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    reset_pricing_catalog()
+
+    standard = compute_costs("anthropic", model, 10_000, 1_000, billable_input_tokens=10_000)
+    reported_us = compute_costs("anthropic", model, 10_000, 1_000, billable_input_tokens=10_000, inference_geo="us")
+
+    assert reported_us[0] == pytest.approx(1.1 * standard[0])
+    assert reported_us[1] == pytest.approx(1.1 * standard[1])

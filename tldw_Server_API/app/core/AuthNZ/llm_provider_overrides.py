@@ -81,6 +81,13 @@ def _copy_override_map(
     return copy.deepcopy(dict(overrides))
 
 
+def _override_allows_model(provider: str, allowed_models: Any, model: Any) -> bool:
+    """Whether an override allowlist has ``model``; Anthropic dotted and dashed spellings of one ID count as equal."""
+    if provider == "anthropic":
+        return allowlist_has_model(allowed_models, model)
+    return model in allowed_models
+
+
 @dataclass(frozen=True, repr=False)
 class ProviderOverrideCallSnapshot:
     """One redacted provider override snapshot used for policy and fallback."""
@@ -95,12 +102,6 @@ class ProviderOverrideCallSnapshot:
             ")"
         )
 
-    def _model_allowed(self, model: str, allowed_models: list[str]) -> bool:
-        """Whether ``model`` is in the allowlist; Anthropic dotted and dashed spellings of one ID count as equal."""
-        if self.provider == "anthropic":
-            return allowlist_has_model(allowed_models, model)
-        return model in allowed_models
-
     def policy_error(self, model: str | None) -> dict[str, str] | None:
         """Return the bounded policy decision from this captured snapshot."""
         override = self._override
@@ -111,7 +112,8 @@ class ProviderOverrideCallSnapshot:
                 "error_code": "provider_disabled",
                 "message": f"Provider '{self.provider}' is disabled by admin override.",
             }
-        if override.allowed_models and model and not self._model_allowed(model, override.allowed_models):
+        allowed_models = override.allowed_models
+        if allowed_models and model and not _override_allows_model(self.provider, allowed_models, model):
             return {
                 "error_code": "model_not_allowed",
                 "message": f"Model '{model}' is not allowed for provider '{self.provider}'.",
@@ -827,7 +829,11 @@ def apply_llm_provider_overrides_to_listing(
         if isinstance(config_models, list):
             models = [str(v).strip() for v in config_models if str(v).strip()]
         if override.allowed_models:
-            models = [m for m in models if m in override.allowed_models] if models else list(override.allowed_models)
+            models = (
+                [m for m in models if _override_allows_model(provider_name, override.allowed_models, m)]
+                if models
+                else list(override.allowed_models)
+            )
 
         preferred_order = _get_model_priority_from_override(override, "highest_quality")
         if preferred_order:
@@ -844,7 +850,7 @@ def apply_llm_provider_overrides_to_listing(
             for mi in models_info:
                 if not isinstance(mi, dict):
                     continue
-                if mi.get("name") in models:
+                if _override_allows_model(provider_name, models, mi.get("name")):
                     filtered_info.append(mi)
             merged["models_info"] = filtered_info
         if isinstance(merged.get("models_info"), list) and preferred_order:

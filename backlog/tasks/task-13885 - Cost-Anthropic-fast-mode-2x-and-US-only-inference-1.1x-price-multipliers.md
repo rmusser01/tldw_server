@@ -31,6 +31,7 @@ Bandit: uvx bandit -ll on the 13 touched source files (pricing_catalog, llm_usag
 ADR assessment: no new ADR (optional catalog keys and two billing multipliers inside the existing pipeline; no global default flips). Governing: ADR-075 (Anthropic prompt_tokens include cache tokens, so the Haiku 5.5 tier uses the whole prompt) and ADR-059 (backlog-py); no ADR addresses where multipliers live.
 Docs updated: Usage_Quotas.md, Model_Pricing_Catalog.md and the model_pricing.json _catalog_note (plan Task 5).
 Follow-ups: TASK-13917 (what usage.inference_geo reports for a pre-4.6 model under a workspace default); TASK-13916 (the streamed adapter path misses fast mode and US-only).
+Review fix round 1 (PR #3306, M3): the US-only 1.1x is now gated to Claude 4.6 and later, per the data-residency page (quoted in TASK-13917, closed). Fast mode still trusts the usage block.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

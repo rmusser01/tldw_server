@@ -22,6 +22,7 @@ Filed from the TASK-13878/13879/13880/13885 PR (plan Docs/superpowers/plans/2026
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+From the PR #3306 clean review (M1): a dotted [API] anthropic_model in config.txt (and the config.py:3861 fallback default claude-sonnet-4.5) now gives two picker entries for one model, claude-sonnet-4.5 from config and claude-sonnet-4-5 from the catalog, because llm_providers.py:2010-2012 dedupes config models against catalog models by exact string. Before #3306 the catalog key was dotted too, so they merged. The shipped config.txt uses a dashed ID, so only custom or older configs see it. Fix here: dedupe Anthropic names by canonical_anthropic_model_id, or replace the dotted defaults at the source.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
