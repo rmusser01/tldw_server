@@ -827,11 +827,18 @@ class BackendManagedTransaction:
         self._wrapper: BackendConnectionWrapper | None = None
         self._managed = False
         self._depth = 0
+        self._claimed = False
 
     def __enter__(self):
         self._state = self._db._connection_state()
         self._use = self._state.use() if isinstance(self._state, ConnectionState) else contextlib.nullcontext()
         self._use.__enter__()
+        try:
+            # An operation's threads share this state: one transaction at a time (TASK-13899).
+            self._claimed = isinstance(self._state, ConnectionState) and self._state.enter_transaction()
+        except BaseException:
+            self._use.__exit__(*sys.exc_info())
+            raise
         self._depth = getattr(self._state, "tx_depth", 0)
         try:
             self._raw_conn = self._db._get_thread_connection()
@@ -849,6 +856,8 @@ class BackendManagedTransaction:
             return self._wrapper
         except BaseException:
             self._state.tx_depth = self._depth
+            if self._claimed:
+                self._state.leave_transaction()
             self._use.__exit__(*sys.exc_info())
             raise
 
@@ -887,6 +896,8 @@ class BackendManagedTransaction:
                         )
         finally:
             self._state.tx_depth = self._depth
+            if self._claimed:
+                self._state.leave_transaction()
             self._wrapper = None
             self._raw_conn = None
             cleanup_error = sys.exc_info()
