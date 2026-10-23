@@ -1,6 +1,7 @@
 {
   "header": {
-    "newTemporaryChat": "Temporary chat (on this device)"
+    "newTemporaryChat": "Temporary chat (on this device)",
+    "shareShort": "Share"
   },
   "mediaHandoff": {
     "conflictLabel": "Media handoff conflict",
@@ -1698,5 +1699,10 @@
   },
   "shortcuts": {
     "openKeyboardHelp": "Open keyboard shortcuts (?)"
+  },
+  "regions": {
+    "viewToolbar": "Conversation view",
+    "noArtifactsYet": "No artifacts yet",
+    "artifactsShort": "Artifacts"
   }
 }

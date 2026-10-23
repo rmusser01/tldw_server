@@ -4592,7 +4592,16 @@
   "characterRail_pageLabel": {
     "message": "Page"
   },
-  "composer_advancedPreferenceUnavailable": {
-    "message": "Display preference unavailable. Advanced controls still work for this visit."
+  "header_shareShort": {
+    "message": "Share"
+  },
+  "regions_viewToolbar": {
+    "message": "Conversation view"
+  },
+  "regions_noArtifactsYet": {
+    "message": "No artifacts yet"
+  },
+  "regions_artifactsShort": {
+    "message": "Artifacts"
   }
 }
