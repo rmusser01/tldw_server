@@ -378,6 +378,9 @@ class AnthropicAdapter(ChatProvider):
                 for key in ("cache_creation_input_tokens", "cache_read_input_tokens")
                 if isinstance(usage.get(key), int)
             }
+            # Billing facts the cost uses: the 5-minute / 1-hour split of the writes (TASK-13878), fast mode and
+            # US-only inference (TASK-13885). Not token counts, so not part of prompt_tokens.
+            breakdown = {key: usage[key] for key in ("cache_creation", "speed", "inference_geo") if usage.get(key)}
             prompt_tokens = usage.get("input_tokens")
             if cache:
                 prompt_tokens = (prompt_tokens or 0) + sum(cache.values())
@@ -386,6 +389,7 @@ class AnthropicAdapter(ChatProvider):
                 "completion_tokens": usage.get("output_tokens"),
                 "total_tokens": (prompt_tokens or 0) + (usage.get("output_tokens") or 0),
                 **cache,
+                **breakdown,
             }
         shaped["provider_response"] = data
         return shaped

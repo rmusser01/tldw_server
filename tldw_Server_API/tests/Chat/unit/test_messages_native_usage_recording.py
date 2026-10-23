@@ -300,3 +300,38 @@ async def test_with_no_user_a_native_reply_records_nothing(rows, monkeypatch) ->
     assert response.status_code == 200
     await llm_accounting.drain_accounting()
     assert rows == []
+
+
+async def test_a_one_hour_cache_write_is_costed_at_twice_the_input_price(costed_rows, monkeypatch) -> None:
+    """Native reply: the 1-hour share of cache writes costs 2x input, the rest 1.25x (TASK-13878)."""
+    usage = {
+        "input_tokens": 3,
+        "cache_creation_input_tokens": 3000,
+        "cache_creation": {"ephemeral_5m_input_tokens": 1000, "ephemeral_1h_input_tokens": 2000},
+        "output_tokens": 100,
+    }
+    monkeypatch.setattr(messages_endpoint, "_native_post_json", _native_reply(usage))
+    with scoped_context(user_id=5):
+        response = await _call("anthropic/claude-sonnet-4-6", stream=False)
+    assert response.status_code == 200
+    await llm_accounting.drain_accounting()
+    (row,) = costed_rows
+    # Sonnet 4.6 per 1K: input $0.003, 5-minute write $0.00375, 1-hour write $0.006.
+    assert row["prompt_cost_usd"] == pytest.approx((3 * 0.003 + 1000 * 0.00375 + 2000 * 0.006) / 1000)
+
+
+async def test_a_streamed_one_hour_cache_write_is_costed_at_twice_the_input_price(costed_rows, monkeypatch) -> None:
+    """message_start carries the split; message_delta carries only output tokens, and the merge keeps the split."""
+    start = {
+        "input_tokens": 3,
+        "cache_creation_input_tokens": 3000,
+        "cache_creation": {"ephemeral_5m_input_tokens": 1000, "ephemeral_1h_input_tokens": 2000},
+        "output_tokens": 1,
+    }
+    monkeypatch.setattr(messages_endpoint, "_prepare_native_stream_iterator", _native_stream(_frames(start, {"output_tokens": 100})))
+    with scoped_context(user_id=5):
+        response = await _call("anthropic/claude-sonnet-4-6", stream=True)
+        [item async for item in response.body_iterator]
+    await llm_accounting.drain_accounting()
+    (row,) = costed_rows
+    assert row["prompt_cost_usd"] == pytest.approx((3 * 0.003 + 1000 * 0.00375 + 2000 * 0.006) / 1000)

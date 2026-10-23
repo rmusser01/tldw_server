@@ -244,10 +244,19 @@ class PricingCatalog:
                     "cache_write_input_tokens",
                     default=None,
                 )
+                cache_write_1h = _rate_value(
+                    rates,
+                    "cache_write_1h",
+                    "cache-write-1h",
+                    "cache_write_1h_input_tokens",
+                    default=None,
+                )
                 if cache_read is not None:
                     entry["cache_read"] = cache_read
                 if cache_write is not None:
                     entry["cache_write"] = cache_write
+                if cache_write_1h is not None:
+                    entry["cache_write_1h"] = cache_write_1h
                 if "placeholder" in rates:
                     entry["placeholder"] = bool(rates.get("placeholder"))
                 if "estimated" in rates:
@@ -261,8 +270,9 @@ class PricingCatalog:
         Return pricing fields and estimated flag for provider/model.
 
         The returned mapping always contains ``prompt`` and ``completion``.
-        Optional ``cache_read`` and ``cache_write`` rates are present only when
-        supplied by defaults or overrides.
+        Optional ``cache_read``, ``cache_write`` and ``cache_write_1h`` (the
+        1-hour cache-write rate) are present only when supplied by defaults or
+        overrides.
         """
         prov = canonical_provider_name(provider or "")
         mdl = (model or "").lower()
@@ -300,6 +310,8 @@ class PricingCatalog:
             details["cache_read"] = float(rates.get("cache_read", 0.0) or 0.0)
         if "cache_write" in rates:
             details["cache_write"] = float(rates.get("cache_write", 0.0) or 0.0)
+        if "cache_write_1h" in rates:
+            details["cache_write_1h"] = float(rates.get("cache_write_1h", 0.0) or 0.0)
         return details, bool(rates.get("estimated", estimated))
 
     def get_rates(self, provider: str, model: str) -> tuple[float, float, bool]:

@@ -241,10 +241,15 @@ def compute_costs(
     cache_read_input_tokens: int = 0,
     cache_write_input_tokens: int = 0,
     billable_input_tokens: int | None = None,
+    cache_write_1h_input_tokens: int = 0,
 ) -> tuple[float, float, float, bool]:
     """
     Compute (prompt_cost, completion_cost, total_cost, estimated)
     given provider, model and token counts.
+
+    ``cache_write_1h_input_tokens`` is the share of the cache writes made with a
+    1-hour TTL; it costs the entry's ``cache_write_1h`` rate (falling back to
+    ``cache_write``), the rest of the writes the ``cache_write`` rate.
     """
     catalog = get_pricing_catalog()
     rates, est = catalog.get_rate_details(provider, model)
@@ -254,6 +259,7 @@ def compute_costs(
     completion_total = max(0, int(completion_tokens or 0))
     cache_read = min(max(0, int(cache_read_input_tokens or 0)), prompt_total)
     cache_write = min(max(0, int(cache_write_input_tokens or 0)), max(0, prompt_total - cache_read))
+    cache_write_1h = min(max(0, int(cache_write_1h_input_tokens or 0)), cache_write)
 
     if "cache_read" not in rates and "cache_write" not in rates:
         prompt_cost = (prompt_total / 1000.0) * in_per_1k
@@ -265,10 +271,12 @@ def compute_costs(
             normal_input = min(max(0, int(billable_input_tokens or 0)), max_normal_input)
         cache_read_rate = rates.get("cache_read", in_per_1k)
         cache_write_rate = rates.get("cache_write", in_per_1k)
+        cache_write_1h_rate = rates.get("cache_write_1h", cache_write_rate)
         prompt_cost = (
             (normal_input / 1000.0) * in_per_1k
             + (cache_read / 1000.0) * cache_read_rate
-            + (cache_write / 1000.0) * cache_write_rate
+            + ((cache_write - cache_write_1h) / 1000.0) * cache_write_rate
+            + (cache_write_1h / 1000.0) * cache_write_1h_rate
         )
     completion_cost = (completion_total / 1000.0) * out_per_1k
     total_cost = prompt_cost + completion_cost
@@ -346,6 +354,7 @@ async def log_llm_usage(
             cache_read_input_tokens=normalized_usage.cache_read_input_tokens,
             cache_write_input_tokens=normalized_usage.cache_write_input_tokens,
             billable_input_tokens=normalized_usage.billable_input_tokens,
+            cache_write_1h_input_tokens=normalized_usage.cache_write_1h_input_tokens,
         )
         if estimated is None:
             estimated = est_flag or normalized_usage.estimate_source != "provider_usage"

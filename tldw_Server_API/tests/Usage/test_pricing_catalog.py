@@ -124,17 +124,18 @@ def test_compute_costs_clamps_billable_input_tokens_to_uncached_remainder(
     assert estimated is False
 
 
-# Anthropic list prices per 1K tokens: prompt, completion, cache hit, 5-minute cache write.
-# Source: platform.claude.com/docs/en/about-claude/pricing, fetched 2026-10-20 (TASK-13858).
-_FABLE_5_1 = {"prompt": 0.01, "completion": 0.05, "cache_read": 0.00025, "cache_write": 0.0125}
-_FABLE_5 = {"prompt": 0.01, "completion": 0.05, "cache_read": 0.001, "cache_write": 0.0125}
-_OPUS_5_5 = {"prompt": 0.004, "completion": 0.02, "cache_read": 0.0002, "cache_write": 0.005}
-_OPUS_5 = {"prompt": 0.005, "completion": 0.025, "cache_read": 0.0005, "cache_write": 0.00625}
-_OPUS_4_1 = {"prompt": 0.015, "completion": 0.075, "cache_read": 0.0015, "cache_write": 0.01875}
-_SONNET_5_5 = {"prompt": 0.002, "completion": 0.01, "cache_read": 0.0001, "cache_write": 0.0025}
-_SONNET_5 = {"prompt": 0.002, "completion": 0.01, "cache_read": 0.0002, "cache_write": 0.0025}
-_SONNET_4 = {"prompt": 0.003, "completion": 0.015, "cache_read": 0.0003, "cache_write": 0.00375}
-_HAIKU_4_5 = {"prompt": 0.001, "completion": 0.005, "cache_read": 0.0001, "cache_write": 0.00125}
+# Anthropic list prices per 1K tokens: prompt, completion, cache hit, 5-minute cache write, 1-hour cache write.
+# Source: platform.claude.com/docs/en/about-claude/pricing, fetched 2026-10-20 (TASK-13858); 1-hour writes
+# fetched 2026-10-22 (TASK-13878).
+_FABLE_5_1 = {"prompt": 0.01, "completion": 0.05, "cache_read": 0.00025, "cache_write": 0.0125, "cache_write_1h": 0.02}
+_FABLE_5 = {"prompt": 0.01, "completion": 0.05, "cache_read": 0.001, "cache_write": 0.0125, "cache_write_1h": 0.02}
+_OPUS_5_5 = {"prompt": 0.004, "completion": 0.02, "cache_read": 0.0002, "cache_write": 0.005, "cache_write_1h": 0.008}
+_OPUS_5 = {"prompt": 0.005, "completion": 0.025, "cache_read": 0.0005, "cache_write": 0.00625, "cache_write_1h": 0.01}
+_OPUS_4_1 = {"prompt": 0.015, "completion": 0.075, "cache_read": 0.0015, "cache_write": 0.01875, "cache_write_1h": 0.03}
+_SONNET_5_5 = {"prompt": 0.002, "completion": 0.01, "cache_read": 0.0001, "cache_write": 0.0025, "cache_write_1h": 0.004}
+_SONNET_5 = {"prompt": 0.002, "completion": 0.01, "cache_read": 0.0002, "cache_write": 0.0025, "cache_write_1h": 0.004}
+_SONNET_4 = {"prompt": 0.003, "completion": 0.015, "cache_read": 0.0003, "cache_write": 0.00375, "cache_write_1h": 0.006}
+_HAIKU_4_5 = {"prompt": 0.001, "completion": 0.005, "cache_read": 0.0001, "cache_write": 0.00125, "cache_write_1h": 0.002}
 
 
 @pytest.mark.parametrize(
@@ -260,3 +261,50 @@ def test_o3_pro_is_priced_at_its_own_published_rate(monkeypatch: pytest.MonkeyPa
 
     # developers.openai.com/api/docs/pricing: o3-pro input $20, output $80 per MTok, no cached input.
     assert got == pytest.approx({"prompt": 0.02, "completion": 0.08})
+
+
+def test_compute_costs_prices_one_hour_cache_writes_at_the_one_hour_rate(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    reset_pricing_catalog()
+
+    prompt_cost, _completion, _total, _est = compute_costs(
+        "anthropic",
+        "claude-opus-5",
+        3000,
+        0,
+        cache_write_input_tokens=3000,
+        cache_write_1h_input_tokens=2000,
+        billable_input_tokens=0,
+    )
+
+    # Opus 5 per 1K: 5-minute write $0.00625 (1.25x), 1-hour write $0.010 (2x).
+    assert prompt_cost == pytest.approx((1000 * 0.00625 + 2000 * 0.010) / 1000)
+
+
+def test_one_hour_writes_fall_back_to_the_five_minute_rate_when_the_catalog_has_no_one_hour_rate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    overrides = {"anthropic": {"claude-test": {"prompt": 0.010, "completion": 0.030, "cache_write": 0.0125}}}
+    monkeypatch.setenv("PRICING_OVERRIDES", json.dumps(overrides))
+    reset_pricing_catalog()
+
+    prompt_cost, _c, _t, _e = compute_costs(
+        "anthropic", "claude-test", 100, 0, cache_write_input_tokens=100, cache_write_1h_input_tokens=100, billable_input_tokens=0
+    )
+
+    assert prompt_cost == pytest.approx(100 * 0.0125 / 1000)
+
+
+def test_every_anthropic_cache_write_rate_has_a_one_hour_rate_at_twice_the_input_price(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    # list_provider_models reads the global catalog; an earlier test's override must not leak into it (review M9).
+    reset_pricing_catalog()
+    cat = PricingCatalog()
+
+    for model in list_provider_models("anthropic"):
+        rates, _estimated = cat.get_rate_details("anthropic", model)
+        if "cache_write" in rates:
+            # platform.claude.com/docs/en/about-claude/pricing: every 1h write is 2x the row's input price.
+            assert rates["cache_write_1h"] == pytest.approx(2 * rates["prompt"]), model
