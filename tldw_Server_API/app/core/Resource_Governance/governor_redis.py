@@ -1701,6 +1701,8 @@ class RedisResourceGovernor(ResourceGovernor):
         fallback_to_memory = False
         denial_retry_after = 0
         used_lua = False
+        # The script's members, kept to populate added_members on success and to remove on failure
+        tmp_members: list[tuple[str, str, str, str, list[str]]] = []  # (category, sc, ev, key, members)
 
         # Attempt real-Redis multi-key Lua script when available (disabled when forcing stub rate)
         try:
@@ -1710,8 +1712,6 @@ class RedisResourceGovernor(ResourceGovernor):
                 argv: list[Any] = []
                 # ARGV[1]=now, ARGV[2]=kcount; rest per-key quads
                 now_f = float(now)
-                # We'll build a temporary structure to also populate added_members on success
-                tmp_members: list[tuple[str, str, str, str, list[str]]] = []  # (category, sc, ev, key, members)
                 for category, cfg in req.categories.items():
                     units = int(cfg.get("units") or 0)
                     if units <= 0:
@@ -1753,6 +1753,11 @@ class RedisResourceGovernor(ResourceGovernor):
             used_lua = False
             self._last_used_multi_lua = False
             self._multi_lua_sha = None
+            # A script that ran but lost its reply charged these members: take them out, or the
+            # Python path below counts them and charges the request again (TASK-13892).
+            for _category, _sc, _ev, win_key, members in tmp_members:
+                with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):
+                    await client.zrem(win_key, *members)
         if not used_lua:
             if await self._is_stub_client():
                 # Pre-check across all scopes/categories
@@ -2006,6 +2011,11 @@ class RedisResourceGovernor(ResourceGovernor):
                         # Redis answered the probe but not the script (NOSCRIPT after a restart, OOM,
                         # READONLY): load it again next time, and count leases in the Python path below.
                         self._concurrency_lua_sha = None
+                        # A script that ran but lost its reply left this reserve's leases in Redis:
+                        # take them out, or the count below includes them (TASK-13892).
+                        for (sc, ev), members in planned.items():
+                            with contextlib.suppress(_RG_NONCRITICAL_EXCEPTIONS):
+                                await client.zrem(self._keys.lease(policy_id, category, sc, ev), *members)
 
                 if not used_concurrency_lua:
                     active_by_scope: dict[tuple[str, str], int] = {}
