@@ -248,3 +248,23 @@ def test_a_non_anthropic_provider_has_no_one_hour_share() -> None:
     )
 
     assert normalized.cache_write_1h_input_tokens == 0
+
+
+def test_normalize_anthropic_usage_reads_speed_and_inference_geo() -> None:
+    normalized = normalize_llm_usage(
+        provider="anthropic",
+        usage={"input_tokens": 5, "output_tokens": 10, "speed": "fast", "inference_geo": "US"},
+    )
+    standard = normalize_llm_usage(
+        provider="anthropic",
+        usage={"input_tokens": 5, "output_tokens": 10, "speed": "standard", "inference_geo": "global"},
+    )
+
+    assert (normalized.speed, normalized.inference_geo) == ("fast", "us")
+    assert (standard.speed, standard.inference_geo) == ("standard", "global")
+
+
+def test_a_non_anthropic_provider_has_no_speed_or_inference_geo() -> None:
+    normalized = normalize_llm_usage(provider="openai", usage={"prompt_tokens": 5, "speed": "fast", "inference_geo": "us"})
+
+    assert (normalized.speed, normalized.inference_geo) == ("", "")

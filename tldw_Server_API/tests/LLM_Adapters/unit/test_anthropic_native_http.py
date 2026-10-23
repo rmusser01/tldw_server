@@ -143,3 +143,24 @@ def test_anthropic_adapter_keeps_the_cache_creation_breakdown(monkeypatch):
 
     assert r["usage"]["cache_creation"] == split
     assert normalize_llm_usage(provider="anthropic", usage=r["usage"]).cache_write_1h_input_tokens == 1500
+
+
+def test_anthropic_adapter_keeps_speed_and_inference_geo(monkeypatch):
+    """Fast mode and US-only inference stay in the usage block, so the chat path costs them too (TASK-13885)."""
+    import tldw_Server_API.app.core.LLM_Calls.providers.anthropic_adapter as anth_mod
+    from tldw_Server_API.app.core.LLM_Calls.providers.anthropic_adapter import AnthropicAdapter
+
+    message = {
+        "type": "message", "id": "msg-fast", "model": "claude-opus-5", "content": [{"type": "text", "text": "ok"}],
+        "stop_reason": "end_turn",
+        "usage": {"input_tokens": 3, "output_tokens": 10, "speed": "fast", "inference_geo": "us"},
+    }
+
+    class _Client(_FakeClient):
+        def post(self, url: str, json: dict[str, Any], headers: dict[str, str]):
+            return _FakeResponse(200, message)
+
+    monkeypatch.setattr(anth_mod, "http_client_factory", lambda *a, **k: _Client())
+    r = AnthropicAdapter().chat({"messages": [{"role": "user", "content": "hi"}], "model": "claude-opus-5", "api_key": "k", "max_tokens": 32})
+
+    assert (r["usage"]["speed"], r["usage"]["inference_geo"]) == ("fast", "us")

@@ -335,3 +335,21 @@ async def test_a_streamed_one_hour_cache_write_is_costed_at_twice_the_input_pric
     await llm_accounting.drain_accounting()
     (row,) = costed_rows
     assert row["prompt_cost_usd"] == pytest.approx((3 * 0.003 + 1000 * 0.00375 + 2000 * 0.006) / 1000)
+
+
+@pytest.mark.parametrize(
+    ("extra", "factor"),
+    [({"speed": "fast"}, 2.0), ({"inference_geo": "us"}, 1.1), ({"speed": "fast", "inference_geo": "us"}, 2.2), ({"speed": "standard", "inference_geo": "global"}, 1.0)],
+)
+async def test_a_native_reply_is_costed_with_its_fast_mode_and_us_only_multipliers(costed_rows, monkeypatch, extra, factor) -> None:
+    """The usage block reports speed and inference_geo; the row is costed with them (TASK-13885)."""
+    usage = {**CACHED_USAGE, "output_tokens": 100, **extra}
+    monkeypatch.setattr(messages_endpoint, "_native_post_json", _native_reply(usage))
+    with scoped_context(user_id=5):
+        response = await _call("anthropic/claude-opus-5", stream=False)
+    assert response.status_code == 200
+    await llm_accounting.drain_accounting()
+    (row,) = costed_rows
+    # Opus 5 per 1K: input $0.005, cache read $0.0005, 5-minute write $0.00625, output $0.025.
+    assert row["prompt_cost_usd"] == pytest.approx((3 * 0.005 + 60000 * 0.0005 + 2000 * 0.00625) / 1000 * factor)
+    assert row["completion_cost_usd"] == pytest.approx(100 * 0.025 / 1000 * factor)

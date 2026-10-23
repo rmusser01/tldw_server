@@ -489,3 +489,57 @@ def test_the_hidden_flag_survives_an_override_that_repeats_it(monkeypatch: pytes
     assert "claude-test-hidden" not in list_provider_models("anthropic")
     monkeypatch.delenv("PRICING_OVERRIDES")
     reset_pricing_catalog()
+
+
+def test_fast_mode_costs_twice_list_price_on_every_token_category(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    reset_pricing_catalog()
+    args = dict(cache_read_input_tokens=40_000, cache_write_input_tokens=10_000, billable_input_tokens=50_000)
+
+    list_prompt, list_completion, _t, _e = compute_costs("anthropic", "claude-opus-5", 100_000, 2_000, **args)
+    fast_prompt, fast_completion, fast_total, _e2 = compute_costs("anthropic", "claude-opus-5", 100_000, 2_000, speed="fast", **args)
+
+    assert fast_prompt == pytest.approx(2 * list_prompt)
+    assert fast_completion == pytest.approx(2 * list_completion)
+    assert fast_total == pytest.approx(fast_prompt + fast_completion)
+
+
+def test_fast_mode_input_and_output_match_the_published_fast_prices(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    reset_pricing_catalog()
+
+    # platform.claude.com/docs/en/about-claude/pricing, "Fast mode pricing": Opus 5.5 $8/$40, Opus 5 and 4.8 $10/$50 per MTok.
+    for model, in_per_mtok, out_per_mtok in [("claude-opus-5-5", 8, 40), ("claude-opus-5", 10, 50), ("claude-opus-4-8", 10, 50)]:
+        prompt_cost, completion_cost, _t, _e = compute_costs("anthropic", model, 1_000_000, 1_000_000, speed="fast", billable_input_tokens=1_000_000)
+        assert prompt_cost == pytest.approx(in_per_mtok), model
+        assert completion_cost == pytest.approx(out_per_mtok), model
+
+
+def test_us_only_inference_costs_one_point_one_times_on_every_category(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    reset_pricing_catalog()
+    args = dict(cache_read_input_tokens=40_000, cache_write_input_tokens=10_000, cache_write_1h_input_tokens=4_000, billable_input_tokens=50_000)
+
+    list_prompt, list_completion, _t, _e = compute_costs("anthropic", "claude-sonnet-4-6", 100_000, 2_000, **args)
+    us_prompt, us_completion, _t2, _e2 = compute_costs("anthropic", "claude-sonnet-4-6", 100_000, 2_000, inference_geo="us", **args)
+    global_prompt, global_completion, _t3, _e3 = compute_costs("anthropic", "claude-sonnet-4-6", 100_000, 2_000, inference_geo="global", **args)
+
+    assert us_prompt == pytest.approx(1.1 * list_prompt)
+    assert us_completion == pytest.approx(1.1 * list_completion)
+    assert (global_prompt, global_completion) == (list_prompt, list_completion)
+
+
+def test_fast_mode_and_us_only_inference_stack_with_cache_rates_and_the_haiku_tier(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    reset_pricing_catalog()
+
+    fast_us, _c, _t, _e = compute_costs(
+        "anthropic", "claude-opus-5", 10_000, 0,
+        cache_write_input_tokens=10_000, cache_write_1h_input_tokens=10_000, billable_input_tokens=0, speed="fast", inference_geo="us",
+    )
+    # Opus 5 1-hour write $0.010 per 1K, x2 fast, x1.1 US-only.
+    assert fast_us == pytest.approx(10_000 * 0.010 * 2 * 1.1 / 1000)
+
+    haiku_us, _c2, _t2, _e2 = compute_costs("anthropic", "claude-haiku-5-5", 100_001, 0, billable_input_tokens=100_001, inference_geo="us")
+    # Haiku 5.5 high tier $0.0005 per 1K, x1.1 (the page: the multiplier applies to the higher prices too).
+    assert haiku_us == pytest.approx(100_001 * 0.0005 * 1.1 / 1000)

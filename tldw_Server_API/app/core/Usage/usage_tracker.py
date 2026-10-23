@@ -232,6 +232,15 @@ def _apply_pii_settings_to_meta(
     return ip_out, ""
 
 
+# Anthropic bills these request options above list price, on every token category, and they stack with each other and
+# with the cache rates (platform.claude.com/docs/en/about-claude/pricing: "Fast mode pricing", "Data residency pricing").
+# Both trust the usage block: the page scopes US-only to Claude 4.6 and later and fast mode to three Opus models, and
+# the API only reports the option on a call that used it. What a pre-4.6 model reports under a workspace default
+# inference_geo is undocumented (follow-up), so there is no model gate here.
+ANTHROPIC_FAST_MODE_MULTIPLIER = 2.0
+ANTHROPIC_US_ONLY_MULTIPLIER = 1.1
+
+
 def compute_costs(
     provider: str,
     model: str,
@@ -242,6 +251,8 @@ def compute_costs(
     cache_write_input_tokens: int = 0,
     billable_input_tokens: int | None = None,
     cache_write_1h_input_tokens: int = 0,
+    speed: str | None = None,
+    inference_geo: str | None = None,
 ) -> tuple[float, float, float, bool]:
     """
     Compute (prompt_cost, completion_cost, total_cost, estimated)
@@ -250,6 +261,8 @@ def compute_costs(
     ``cache_write_1h_input_tokens`` is the share of the cache writes made with a
     1-hour TTL; it costs the entry's ``cache_write_1h`` rate (falling back to
     ``cache_write``), the rest of the writes the ``cache_write`` rate.
+    ``speed="fast"`` and ``inference_geo="us"`` (Anthropic) multiply every
+    category by 2 and 1.1.
     """
     catalog = get_pricing_catalog()
     prompt_total = max(0, int(prompt_tokens or 0))
@@ -279,7 +292,13 @@ def compute_costs(
             + ((cache_write - cache_write_1h) / 1000.0) * cache_write_rate
             + (cache_write_1h / 1000.0) * cache_write_1h_rate
         )
-    completion_cost = (completion_total / 1000.0) * out_per_1k
+    multiplier = 1.0
+    if (speed or "").lower() == "fast":
+        multiplier *= ANTHROPIC_FAST_MODE_MULTIPLIER
+    if (inference_geo or "").lower() == "us":
+        multiplier *= ANTHROPIC_US_ONLY_MULTIPLIER
+    prompt_cost *= multiplier
+    completion_cost = (completion_total / 1000.0) * out_per_1k * multiplier
     total_cost = prompt_cost + completion_cost
     return prompt_cost, completion_cost, total_cost, est
 
@@ -356,6 +375,8 @@ async def log_llm_usage(
             cache_write_input_tokens=normalized_usage.cache_write_input_tokens,
             billable_input_tokens=normalized_usage.billable_input_tokens,
             cache_write_1h_input_tokens=normalized_usage.cache_write_1h_input_tokens,
+            speed=normalized_usage.speed,
+            inference_geo=normalized_usage.inference_geo,
         )
         if estimated is None:
             estimated = est_flag or normalized_usage.estimate_source != "provider_usage"
