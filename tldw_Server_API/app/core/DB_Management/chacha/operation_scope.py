@@ -65,7 +65,9 @@ class ConnectionState:
                 return True
             if self.tx_owner == key:
                 return False
-        logger.error("A ChaCha transaction overlapped another thread's or task's in one operation")
+        # depth=2 reports the caller's `with db.transaction()` line, past BackendManagedTransaction.__enter__,
+        # so a refusal a caller swallows as RuntimeError can still be traced to the overlapping code.
+        logger.opt(depth=2).error("A ChaCha transaction overlapped another thread's or task's in one operation")
         raise ConcurrentChaChaTransactionError(
             "Another thread or task holds this ChaCha operation's transaction; "
             "give concurrent work its own chacha_operation(independent=True)"

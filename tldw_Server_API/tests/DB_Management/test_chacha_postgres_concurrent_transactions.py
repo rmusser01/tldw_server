@@ -111,3 +111,94 @@ def test_an_overlapping_transaction_raises_and_no_write_is_lost(tx_db, overlap):
             conn.execute(_INSERT, ("r3",))
 
     assert (outcome, committed()) == (["ConcurrentChaChaTransactionError"], ["r1", "r3"])
+
+
+def _on_a_thread(fn):
+    """Run fn on a new thread in this context (so in the current operation); return its error's name."""
+    errors = []
+
+    def run():
+        try:
+            fn()
+        except Exception as exc:  # noqa: BLE001 - reported by name
+            errors.append(type(exc).__name__)
+
+    thread = threading.Thread(target=copy_context().run, args=(run,))
+    thread.start()
+    thread.join(10)
+    return errors
+
+
+def _insert_in_a_transaction(db, name):
+    def insert():
+        with db.transaction() as conn:
+            conn.execute(_INSERT, (name,))
+
+    return insert
+
+
+def test_a_transaction_that_cannot_get_its_connection_releases_its_claim(tx_db, monkeypatch):
+    """Left claimed, every later transaction of another thread in the operation would be refused."""
+    from psycopg_pool import PoolTimeout
+
+    db, committed = tx_db
+    real_get, calls = db._get_thread_connection, []
+
+    def get_connection_failing_once():
+        if not calls:
+            calls.append(1)
+            raise PoolTimeout("the pool is full")
+        return real_get()
+
+    monkeypatch.setattr(db, "_get_thread_connection", get_connection_failing_once)
+    with chacha_operation(independent=True):
+        with pytest.raises(PoolTimeout), db.transaction():
+            pass
+        errors = _on_a_thread(_insert_in_a_transaction(db, "after"))
+
+    assert (errors, committed()) == ([], ["after"])
+
+
+def test_a_transaction_exited_on_another_thread_releases_its_claim(tx_db):
+    """FastAPI's sync yield-dependencies enter and exit on different threads."""
+    db, committed = tx_db
+    entered, finished = threading.Event(), threading.Event()
+    with chacha_operation(independent=True):
+        tx = db.transaction()
+
+        def enter_and_stay_alive():  # alive, so no later thread reuses its ident and joins its claim
+            tx.__enter__().execute(_INSERT, ("a",))
+            entered.set()
+            finished.wait(10)
+
+        first = threading.Thread(target=copy_context().run, args=(enter_and_stay_alive,))
+        first.start()
+        try:
+            assert entered.wait(10)
+            exit_errors = _on_a_thread(lambda: tx.__exit__(None, None, None))
+            third_errors = _on_a_thread(_insert_in_a_transaction(db, "c"))
+        finally:
+            finished.set()
+            first.join(10)
+
+    assert (exit_errors, third_errors, committed()) == ([], [], ["a", "c"])
+
+
+def test_a_refused_transaction_is_logged_at_its_caller(tx_db):
+    """Callers often catch RuntimeError broadly; the ERROR line must name the overlapping caller."""
+    from loguru import logger
+
+    db, _committed = tx_db
+    records = []
+    sink = logger.add(lambda message: records.append(message.record), level="ERROR",
+                      filter=lambda record: "overlapped" in record["message"])
+    try:
+        with chacha_operation(independent=True):
+            outcome = _overlap_on_two_threads(db)
+    finally:
+        logger.remove(sink)
+
+    assert (outcome, [(r["function"], r["file"].name) for r in records]) == (
+        ["ConcurrentChaChaTransactionError"],
+        [("second", "test_chacha_postgres_concurrent_transactions.py")],
+    )
