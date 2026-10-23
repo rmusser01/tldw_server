@@ -82,6 +82,8 @@ type CapabilityMode = "supported" | "false" | "404" | "offline"
 
 type PromptMockOptions = {
   failFirstImprovement?: boolean
+  /** Serve an empty model catalog. The side panel picks a model whenever one exists (XS-02). */
+  noModels?: boolean
 }
 
 type RecordedRequest = {
@@ -119,6 +121,13 @@ const parseBody = (body: string): Record<string, unknown> | null => {
     return null
   }
 }
+
+// The compact Improve-prompt trigger is a 44px touch target on narrow screens
+// and a 32px toolbar icon from Tailwind's `sm` breakpoint up (CC-07).
+const expectedCompactTriggerSize = async (trigger: Locator): Promise<number> =>
+  (await trigger.page().evaluate(() => window.matchMedia("(min-width: 640px)").matches))
+    ? 32
+    : 44
 
 const startPromptMockServer = async (
   capabilityMode: CapabilityMode = "supported",
@@ -162,6 +171,7 @@ const startPromptMockServer = async (
       return sendJson(200, { status: "ok" })
     }
     if (url.startsWith("/api/v1/llm/models/metadata") && method === "GET") {
+      if (options.noModels) return sendJson(200, [])
       return sendJson(200, [
         {
           id: MODEL_ID,
@@ -173,7 +183,7 @@ const startPromptMockServer = async (
       ])
     }
     if (url === "/api/v1/llm/models" && method === "GET") {
-      return sendJson(200, [MODEL_ID])
+      return sendJson(200, options.noModels ? [] : [MODEL_ID])
     }
     if (url.startsWith("/api/v1/users/me/profile") && method === "GET") {
       return sendJson(200, { preferences: {} })
@@ -455,6 +465,21 @@ type SurfaceLaunch = {
   extensionId: string
 }
 
+// The side panel pins its composer by default (XS-09). Plasmo storage keeps
+// JSON-encoded values in both areas, as setSelectedModel writes them.
+const setSidepanelStickyComposer = async (page: Page, sticky: boolean) => {
+  await page.evaluate(async (value) => {
+    const storage = (window as any).chrome?.storage
+    const serialized = JSON.stringify(value)
+    for (const area of [storage?.sync, storage?.local]) {
+      if (!area?.set) continue
+      await new Promise<void>((resolve) =>
+        area.set({ sidepanelStickyChatInput: serialized }, () => resolve())
+      )
+    }
+  }, sticky)
+}
+
 const launchChatSurface = async (
   mock: PromptMockServer,
   surface: "sidepanel" | "options",
@@ -466,6 +491,8 @@ const launchChatSurface = async (
     viewport?: { width: number; height: number }
     seedTemplate?: boolean
     temporaryChat?: boolean
+    /** False unpins the side-panel composer so it scrolls with the transcript. */
+    stickyComposer?: boolean
   } = {}
 ): Promise<SurfaceLaunch> => {
   const {
@@ -475,7 +502,8 @@ const launchChatSurface = async (
     variant = "v1",
     viewport,
     seedTemplate = false,
-    temporaryChat = false
+    temporaryChat = false,
+    stickyComposer = true
   } = options
   const launched = await launchWithExtension(EXT_PATH, {
     seedConfig: buildSeedConfig(mock.baseUrl),
@@ -498,6 +526,7 @@ const launchChatSurface = async (
     ).toBe(true)
     if (seedTemplate) await seedPromptTemplate(page)
     if (withModel) await setSelectedModel(page, MODEL_KEY)
+    if (!stickyComposer) await setSidepanelStickyComposer(page, false)
 
     const chatPage =
       surface === "sidepanel" ? await openSidepanel("/chat") : page
@@ -1088,8 +1117,9 @@ test.describe("Packaged extension prompt improvement parity", () => {
       await expect(compactTrigger).toBeVisible()
       await expect(send).toBeVisible()
       const compactBox = await compactTrigger.boundingBox()
-      expect(compactBox?.width).toBe(44)
-      expect(compactBox?.height).toBe(44)
+      const compactSize = await expectedCompactTriggerSize(compactTrigger)
+      expect(compactBox?.width).toBe(compactSize)
+      expect(compactBox?.height).toBe(compactSize)
       expect(
         await sendCluster.evaluate((cluster) => {
           const improve = cluster.querySelector('[aria-label="Improve prompt"]')
@@ -1377,7 +1407,7 @@ test.describe("Packaged extension prompt improvement parity", () => {
 
   test("missing model offers recovery without sending an improvement request", async () => {
     test.setTimeout(120_000)
-    const mock = await startPromptMockServer()
+    const mock = await startPromptMockServer("supported", { noModels: true })
     let context: BrowserContext | null = null
     try {
       const launched = await launchChatSurface(mock, "sidepanel", {
@@ -1566,8 +1596,9 @@ test.describe("Packaged extension prompt improvement parity", () => {
           })
         ).toBe(true)
         const actionBox = await actions.boundingBox()
-        expect(actionBox?.width).toBe(44)
-        expect(actionBox?.height).toBe(44)
+        const actionSize = await expectedCompactTriggerSize(actions)
+        expect(actionBox?.width).toBe(actionSize)
+        expect(actionBox?.height).toBe(actionSize)
         await actions.click()
         const menu = page.getByRole("group", {
           name: "Prompt improvement actions"
@@ -1941,11 +1972,14 @@ test.describe("Packaged extension prompt improvement parity", () => {
     const mock = await startPromptMockServer()
     let context: BrowserContext | null = null
     try {
+      // This scenario scrolls the composer with the transcript, so it runs
+      // with the side-panel composer unpinned (XS-09 pins it by default).
       const launched = await launchChatSurface(mock, "sidepanel", {
         mode: "pro",
         nextgen: true,
         variant: "v3",
-        viewport: { width: 390, height: 844 }
+        viewport: { width: 390, height: 844 },
+        stickyComposer: false
       })
       context = launched.context
       const page = launched.chatPage
@@ -2020,11 +2054,14 @@ test.describe("Packaged extension prompt improvement parity", () => {
     const mock = await startPromptMockServer()
     let context: BrowserContext | null = null
     try {
+      // This scenario scrolls the composer with the transcript, so it runs
+      // with the side-panel composer unpinned (XS-09 pins it by default).
       const launched = await launchChatSurface(mock, "sidepanel", {
         mode: "pro",
         nextgen: true,
         variant: "v3",
-        viewport: { width: 390, height: 844 }
+        viewport: { width: 390, height: 844 },
+        stickyComposer: false
       })
       context = launched.context
       const page = launched.chatPage
@@ -2065,7 +2102,9 @@ test.describe("Packaged extension prompt improvement parity", () => {
         await clickThroughPaintedCenter(page, applyRecipe)
         const feedback = getPromptAssistFeedback(page, "Recipe applied.")
         await waitForDrawersClosed(page, feedback)
-        await page.setViewportSize({ width: 360, height: 240 })
+        // 248px keeps the prompt picker in view below AX-16's enlarged
+        // (22px) Chat history switch; 240px fit only the old 16px switch.
+        await page.setViewportSize({ width: 360, height: 248 })
         await scrollDraftNearViewportTop(input)
         const initialCluster = {
           width: initialClusterBox!.width,
@@ -2109,11 +2148,14 @@ test.describe("Packaged extension prompt improvement parity", () => {
     const mock = await startPromptMockServer()
     let context: BrowserContext | null = null
     try {
+      // The draft scrolls with the transcript here, so the side-panel
+      // composer is unpinned (XS-09 pins it by default).
       const launched = await launchChatSurface(mock, "sidepanel", {
         mode: "pro",
         nextgen: true,
         variant: "v3",
-        viewport: { width: 390, height: 844 }
+        viewport: { width: 390, height: 844 },
+        stickyComposer: false
       })
       context = launched.context
       const page = launched.chatPage
@@ -2163,7 +2205,9 @@ test.describe("Packaged extension prompt improvement parity", () => {
             : "Recipe applied."
         )
         await waitForDrawersClosed(page, feedback)
-        await page.setViewportSize({ width: 360, height: 240 })
+        // 248px keeps the prompt picker in view below AX-16's enlarged
+        // (22px) Chat history switch; 240px fit only the old 16px switch.
+        await page.setViewportSize({ width: 360, height: 248 })
         await scrollDraftNearViewportTop(input)
         await expectVisibleComposerControlsRemainUsable(page, feedback)
         await expectLayoutNeutralFeedback(
