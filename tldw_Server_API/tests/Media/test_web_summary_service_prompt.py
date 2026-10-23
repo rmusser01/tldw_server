@@ -110,9 +110,12 @@ def context(
     monkeypatch.setattr(service, "get_web_scraping_service", lambda: state.service)
     monkeypatch.setattr(legacy, "scrape_article", page)
     monkeypatch.setattr(service, "scrape_article", page)
-    monkeypatch.setattr(
-        service, "scrape_from_sitemap", lambda *args, **kwargs: [article(), article("https://example.com/b")]
-    )
+    def sitemap(url: str, **kwargs: Any) -> list[dict[str, Any]]:
+        """Replace the legacy sitemap fetch; it runs in a worker thread."""
+        state.fetches.append(url)
+        return [article(), article("https://example.com/b")]
+
+    monkeypatch.setattr(service, "scrape_from_sitemap", sitemap)
     monkeypatch.setattr(summary, "loaded_config_data", {"openai_api": {"model": "test-model"}})
     monkeypatch.setattr(
         prompt_loader, "_prompts_dir", lambda: str(Path(__file__).resolve().parents[2] / "Config_Files" / "Prompts")
@@ -547,6 +550,19 @@ WEB_SUMMARY_REQUESTS = [
         {"urls": ["https://example.com/a"], "scrape_method": "recursive_scraping", "perform_chunking": False},
         "perform_analysis",
         id="ingest-web-content-recursive-default-provider",
+    ),
+    # No provider named: LLM extraction can still run, and its refusal would discard the scraped pages (TASK-13889).
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "individual", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content-individual-no-provider",
+    ),
+    pytest.param(
+        "/api/v1/media/ingest-web-content",
+        {"urls": ["https://example.com/a"], "scrape_method": "sitemap", "perform_chunking": False},
+        "perform_analysis",
+        id="ingest-web-content-sitemap-no-provider",
     ),
     pytest.param(
         "/api/v1/media/process-web-scraping",

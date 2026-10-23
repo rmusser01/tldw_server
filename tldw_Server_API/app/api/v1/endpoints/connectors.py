@@ -997,17 +997,21 @@ async def trigger_source_sync(
     )
 
 
-@router.api_route(
-    "/providers/{provider}/webhook",
-    methods=["GET", "POST"],
-    response_model=ConnectorWebhookCallbackResponse,
-    responses={
+_WEBHOOK_ROUTE = {
+    "path": "/providers/{provider}/webhook",
+    "response_model": ConnectorWebhookCallbackResponse,
+    "responses": {
         200: {
             "description": "Connector webhook callback result or plaintext validation challenge.",
             "content": {"text/plain": {}},
         },
     },
-)
+}
+
+
+# One route per method: a two-method api_route gives both the same operationId (TASK-13890).
+@router.get(**_WEBHOOK_ROUTE)
+@router.post(**_WEBHOOK_ROUTE)
 async def provider_webhook_callback(
     provider: str,
     request: Request,
