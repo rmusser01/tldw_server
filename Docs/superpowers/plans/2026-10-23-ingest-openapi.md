@@ -40,7 +40,7 @@
 - **operationId change reaches clients.** Only the default schema is generated into `apps/packages/api-types`, and the connectors router is non-stable, so the committed fingerprint and `paths.d.ts` should not move. Task 3 proves it by running the drift check rather than assuming. If a deployment enables non-stable routes and generates a client, the GET id changes from the shared id to `..._get`; no repo frontend code uses either (Task 3 step 1).
 - **Decorator stacking order.** `@router.get` over `@router.post` registers POST first, then GET. Route matching is by method, so order is not observable; the test asserts both methods exist and the handler still serves both (the existing `test_connectors_webhooks.py` tests cover the validation challenge on GET).
 
-## PR spli
+## PR split
 
 One PR, branch `fix/web-ingest-quota-boundary-and-webhook-opid`, base `dev`. The two changes are small, touch disjoint files, and neither blocks the other, but each is under 20 lines of code; two PRs would cost two serial merge-queue passes for no gain. Two commits, one per task.
 
@@ -150,7 +150,7 @@ Expected (measured): `106 passed` (82 + 24).
 
 ### Docs (AC 2)
 
-- [ ] **Step 7: edit `Docs/Operations/Usage_Quotas.md` line 93.** Replace the fragmen
+- [ ] **Step 7: edit `Docs/Operations/Usage_Quotas.md` line 93.** Replace the fragment
 
 ```
 `/media/ingest-web-content` when analysis is on and a provider is named, and its `url_level` and `recursive_scraping` methods whenever analysis is on (they summarize with a default provider when none is named);
@@ -178,7 +178,7 @@ with
 - [ ] **Step 1: add the test** to `test_connectors_webhooks.py` (uses a bare app so it does not depend on what other tests mounted into the shared `app`):
 
 ```python
-@pytest.mark.uni
+@pytest.mark.unit
 def test_webhook_get_and_post_have_distinct_operation_ids() -> None:
     """A two-method route puts one operationId on both methods, which breaks client generation (TASK-13890)."""
     from fastapi import FastAPI
@@ -255,7 +255,7 @@ Expected: `OpenAPI fingerprint matches the checked-in snapshot.` and `committed 
 - [ ] **Step 3: regenerate and diff.** Run the exporter's regenerate mode (`<python> Helper_Scripts/export_openapi_schema.py --help` for the exact flags that write `openapi.fingerprint.json` and `paths.d.ts`; the `apps/packages/api-types` package may also have an npm script that wraps it) and `git diff --stat apps/packages/api-types`. Expected: empty diff, because the default schema excludes connectors. If a diff appears, commit it in this PR and say why in the task notes (it would mean the router is in the default schema, contrary to the task text). Re-run Step 2.
 - [ ] **Step 4:** `<python> -m pytest -p no:cacheprovider -q tldw_Server_API/tests/Services/test_openapi_contracts.py` alone (measured on the 13864 PR: 74 passed; re-measure at execution and record the count).
 
-## Backlog close-ou
+## Backlog close-out
 
 For each task, with backlog-py (explicit ids, `--append-notes`, never `--notes`; stage `git add -A backlog/tasks`):
 
@@ -270,7 +270,7 @@ For each task, with backlog-py (explicit ids, `--append-notes`, never `--notes`;
   - Status Done.
 - Add a PR link to both notes after opening.
 
-## ADR assessmen
+## ADR assessment
 
 Not required. No durable architecture rule changes: 13889 widens an existing quota check to the condition the quota design already states (spec §4a: refuse before LLM work); 13890 is a registration detail. Governing decisions: the LLM usage accounting design (`Docs/Design/2026-10-09-llm-usage-accounting-design.md` or its current path; link it in the notes) and ADR-059 for the backlog tooling. Re-check `Docs/ADR/README.md` for a quota ADR at execution.
 
