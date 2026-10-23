@@ -1,3 +1,4 @@
+import type { ChatMessageView } from "@/services/settings/ui-settings"
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { EMPTY_CHAT_MODELS, useChatModelCatalog } from "@/hooks/useChatModelCatalog"
 import { resolveCharacterMessageType } from "@/utils/character-greetings"
@@ -93,6 +94,7 @@ const LazyResearchRunStatusStack = React.lazy(() =>
 
 
 type PlaygroundChatProps = {
+  messageView?: ChatMessageView
   scrollParentRef?: React.RefObject<HTMLDivElement>
   navigationRef?: React.MutableRefObject<ChatTimelineNavigation | null>
   showStarterDeck?: boolean
@@ -151,6 +153,7 @@ const buildBlocks = (messages: TimelineMessageShape[]): TimelineBlock[] => {
 const EMPTY_IMAGES: string[] = []
 
 export const PlaygroundChat = ({
+  messageView,
   scrollParentRef,
   navigationRef,
   showStarterDeck = true,
@@ -1392,6 +1395,7 @@ export const PlaygroundChat = ({
               resolvedMessageType === IMAGE_GENERATION_ASSISTANT_MESSAGE_TYPE
             return (
               <PlaygroundMessage
+                messageView={messageView}
                 isBot={message.isBot}
                 message={message.message}
                 name={message.name}
@@ -1508,6 +1512,7 @@ export const PlaygroundChat = ({
                 </div>
               }>
               <LazyPlaygroundCompareCluster
+                messageView={messageView}
                 block={block}
                 blockIndex={blockIndex}
                 messages={messages}

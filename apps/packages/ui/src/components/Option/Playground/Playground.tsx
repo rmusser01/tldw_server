@@ -14,6 +14,7 @@ import { loadServicePromptSnapshot } from "@/services/service-prompts";
 import React from "react";
 import { PlaygroundForm, type ApplyCharacterRoute } from "./PlaygroundForm";
 import { PlaygroundChat } from "./PlaygroundChat";
+import { MessageViewSelect } from "@/components/Common/Playground/MessageViewSelect";
 import type { ChatTimelineNavigation } from "./VirtualChatTimeline";
 import {
   PlaygroundCockpitShell,
@@ -96,6 +97,7 @@ import {
   CHAT_BACKGROUND_IMAGE_SETTING,
   CHAT_CHARACTER_IMAGE_OPACITY_SETTING,
   CHAT_MESSAGE_OPACITY_SETTING,
+  CHAT_MESSAGE_VIEW_SETTING,
   CHAT_WINDOW_OPACITY_SETTING,
   resolveOpacityAlpha,
 } from "@/services/settings/ui-settings";
@@ -435,6 +437,7 @@ const PlaygroundContent = () => {
   const [composerKeyboardInsetPx, setComposerKeyboardInsetPx] =
     React.useState(0)
 
+  const [messageView, setMessageView] = useSetting(CHAT_MESSAGE_VIEW_SETTING);
   const [composerHasDraft, setComposerHasDraft] = React.useState(false);
   const { t } = useTranslation(["playground", "common"]);
   const { mode: themeMode, toggleDarkMode } = useDarkMode();
@@ -3782,10 +3785,11 @@ const PlaygroundContent = () => {
               <div
                 className={`mx-auto flex w-full ${chatContentWidthClassName} items-center justify-between gap-2 text-[10px] text-text-muted sm:text-[11px]`}
               >
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <MessageViewSelect value={messageView} onChange={setMessageView} />
                   <span
                     data-testid="playground-active-chat-mode"
-                    className={`inline-flex max-w-full items-center rounded-full border px-2 py-0.5 font-medium ${
+                    className={`hidden max-w-full items-center rounded-full border px-2 py-0.5 font-medium md:inline-flex ${
                       characterWorkflowActive
                         ? "border-primary/40 bg-primary/10 text-primaryStrong"
                         : "border-border bg-surface2 text-text-muted"
@@ -4059,6 +4063,7 @@ const PlaygroundContent = () => {
                 <ChatErrorBoundary>
                   <HistorySelectionReview selection={historySelection} hideRecovery={hideKeptHistoryTurn} getRetryContext={getRecoveryRetryContext} onRetryRecovery={retryRecoveredHistoryTurn} getSavedQuestionReview={!compareActive && serverChatCharacterId ? getSavedQuestionReview : undefined} onRetrySavedQuestion={!compareActive && serverChatCharacterId ? retrySavedQuestion : undefined} onBind={() => void historySelection.bindUnavailableConversation()} />
                   <PlaygroundChat
+                    messageView={messageView}
                     scrollParentRef={containerRef}
                     navigationRef={chatTimelineRef}
                     showStarterDeck={showStarterDeck}

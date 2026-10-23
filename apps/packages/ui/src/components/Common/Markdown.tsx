@@ -552,7 +552,7 @@ export function Markdown({
             return <img src={resolvedSrc} alt={alt || ""} loading="lazy" referrerPolicy="no-referrer" className="my-2 max-w-full rounded-md border border-border" />
           },
           table({ children }) {
-            return <TableBlock>{children}</TableBlock>
+            return <TableBlock><table>{children}</table></TableBlock>
           },
           p({ children, className, ...props }) {
             const content = renderHighlightedChildren(children)

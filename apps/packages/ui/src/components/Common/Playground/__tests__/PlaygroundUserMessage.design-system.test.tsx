@@ -15,7 +15,8 @@ vi.mock("@plasmohq/storage/hook", () => ({
   useStorage: (_key: string, defaultValue: unknown) => [defaultValue, vi.fn()]
 }))
 
-vi.mock("antd", () => ({
+vi.mock("antd", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("antd")>()),
   Image: ({ src, alt, onError }: { src?: string; alt?: string; onError?: () => void }) => (
     // eslint-disable-next-line @next/next/no-img-element -- Native img delivers the browser error event instead of a non-image placeholder.
     <img alt={alt ?? ""} src={src ?? ""} onError={onError} />
@@ -150,4 +151,20 @@ it("retains the question and names an unavailable attachment after image failure
   fireEvent.error(screen.getByRole("img", { name: "Uploaded Image" }))
   expect(screen.getByRole("status")).toHaveTextContent("Image unavailable. Attach this image again before continuing.")
   expect(screen.getByText("Review this research plan.")).toBeVisible()
+})
+
+it("keeps an active user edit mounted when the message view changes", async () => {
+  const props = {
+    message: "Review this research plan.", isBot: false, name: "You",
+    currentMessageIndex: 0, totalMessages: 1, onRegenerate: vi.fn(),
+    onEditFormSubmit: vi.fn(), isProcessing: false, messageId: "retained-edit"
+  }
+  const { rerender } = render(<PlaygroundUserMessageBubble {...props} messageView="transcript" />)
+  fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+  fireEvent.click(await screen.findByRole("button", { name: "edit" }))
+  const form = screen.getByTestId("edit-message-form")
+  rerender(<PlaygroundUserMessageBubble {...props} messageView="conversation" />)
+  expect(screen.getByTestId("edit-message-form")).toBe(form)
+  rerender(<PlaygroundUserMessageBubble {...props} messageView="research" />)
+  expect(screen.getByTestId("edit-message-form")).toBe(form)
 })

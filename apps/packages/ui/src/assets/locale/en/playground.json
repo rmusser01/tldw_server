@@ -1698,5 +1698,18 @@
   },
   "shortcuts": {
     "openKeyboardHelp": "Open keyboard shortcuts (?)"
+  },
+  "messageViews": {
+    "label": "Message view",
+    "transcript": "Transcript",
+    "transcriptHelp": "For reading and everyday chat",
+    "conversation": "Conversation",
+    "conversationHelp": "For roleplay and character chat",
+    "research": "Research",
+    "researchHelp": "For sources and detailed review",
+    "preferenceHelp": "Choose a reading layout for this device.",
+    "sourcesCount": "{{count}} sources",
+    "sourcesCount_one": "{{count}} source",
+    "sourcesCount_other": "{{count}} sources"
   }
 }

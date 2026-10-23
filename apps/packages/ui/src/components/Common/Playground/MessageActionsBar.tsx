@@ -1,3 +1,4 @@
+import type { ChatMessageView } from "@/services/settings/ui-settings"
 import React from "react"
 import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return"
 import type { TFunction } from "i18next"
@@ -76,6 +77,7 @@ const OverflowMenuItem: React.FC<{
 )
 
 type MessageActionsBarProps = {
+  messageView?: ChatMessageView
   t: TFunction
   isProMode: boolean
   isBot: boolean
@@ -141,6 +143,7 @@ type MessageActionsBarProps = {
 }
 
 export function MessageActionsBar({
+  messageView,
   t,
   isProMode,
   isBot,
@@ -202,7 +205,7 @@ export function MessageActionsBar({
   onTogglePinned,
   onQuickMessageAction
 }: MessageActionsBarProps) {
-  const actionButtonClass = `${ACTION_BUTTON_CLASS} ${
+  const actionButtonClass = `${messageView ? "inline-flex min-h-11 min-w-11 items-center justify-center rounded-md text-text-muted hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus transition-colors duration-200" : ACTION_BUTTON_CLASS} ${
     isProMode ? "h-11 px-3" : "h-11 w-11"
   }`
 
@@ -469,8 +472,8 @@ export function MessageActionsBar({
 
   return (
     <div
-      className={`flex w-full flex-wrap items-start gap-2 ${
-        showLeftFeedback ? "justify-between" : "justify-end"
+      className={`${messageView ? "order-20" : ""} flex w-full flex-wrap items-start gap-2 ${
+        showLeftFeedback ? "justify-between" : messageView ? "justify-start" : "justify-end"
       }`}>
       {showLeftFeedback && (
         <FeedbackButtons
@@ -487,7 +490,7 @@ export function MessageActionsBar({
         />
       )}
 
-      <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1">
+      <div className={`flex min-w-0 flex-wrap items-center gap-1 ${messageView && !showLeftFeedback ? "justify-start" : "ml-auto justify-end"}`}>
         {/* Variant pager */}
         {showVariantPager && (
           <div className="inline-flex items-center gap-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-xs text-text-muted">
