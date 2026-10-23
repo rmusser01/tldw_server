@@ -53,6 +53,17 @@ type PendingChatRequestDebugSnapshot = {
 
 let pendingSnapshot: PendingChatRequestDebugSnapshot | null = null
 
+// WP-22: the debug pipeline is opt-in. The only production consumer is the
+// Playground raw-request preview; everything else is tests. While disabled,
+// capture is a no-op — chat requests pay nothing (not even the pending
+// snapshot allocation or its reference retention of the conversation payload).
+let chatRequestDebugEnabled = false
+
+export const setChatRequestDebugEnabled = (enabled: boolean): void => {
+  chatRequestDebugEnabled = enabled
+  if (!enabled) pendingSnapshot = null
+}
+
 const clonePayload = (body: unknown): unknown => {
   try {
     return JSON.parse(JSON.stringify(body))
@@ -88,6 +99,7 @@ export const captureChatRequestDebugSnapshot = ({
   body,
   metadata
 }: CaptureChatRequestDebugSnapshotInput) => {
+  if (!chatRequestDebugEnabled) return
   pendingSnapshot = {
     endpoint,
     method,

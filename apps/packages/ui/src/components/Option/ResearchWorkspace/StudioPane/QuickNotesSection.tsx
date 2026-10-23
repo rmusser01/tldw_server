@@ -40,6 +40,7 @@ import {
   Download
 } from "lucide-react"
 import {
+  flushWorkspacePersistence,
   hasResearchWorkspaceMigrationTombstone,
   useWorkspaceStore,
 } from "@/store/workspace";
@@ -1625,6 +1626,12 @@ export const QuickNotesSection: React.FC<QuickNotesSectionProps> = ({ onCollapse
         )
       ) {
         const persistence = useWorkspaceStore.persist.getOptions();
+        // The accepted-identity write above was only BUFFERED by the coalescing
+        // persist writer; this verification must observe it (read-your-writes),
+        // so drain before reading. This gate still fails when the write cannot
+        // land (quota) — the drain swallows quota errors, leaving storage
+        // without the binding this check requires.
+        await flushWorkspacePersistence();
         const persistedWorkspace = await persistence.storage?.getItem(
           persistence.name,
         );

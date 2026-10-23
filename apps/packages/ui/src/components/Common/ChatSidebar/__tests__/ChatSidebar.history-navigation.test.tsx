@@ -17,7 +17,7 @@ import common from "@/assets/locale/en/common.json";
 import { ChatSidebar } from "../../ChatSidebar";
 import { useChatSurfaceCoordinatorStore } from "@/store/chat-surface-coordinator";
 import * as settings from "@/services/settings/ui-settings";
-import { getSetting } from "@/services/settings/registry";
+import { getSetting, __clearSettingCachesForTests } from "@/services/settings/registry";
 
 type Change = { newValue: unknown; oldValue: unknown };
 const io = vi.hoisted(() => ({
@@ -180,6 +180,10 @@ const preferenceWrites = () =>
 
 describe("history-first sidebar navigation", () => {
   beforeEach(() => {
+    // This suite seeds the in-memory storage mock directly (no setSetting, and
+    // jsdom has no storage.onChanged), so the registry's module-level value
+    // cache must be dropped or reads serve the previous test's settings.
+    __clearSettingCachesForTests();
     io.values.clear();
     io.reads.clear();
     io.writes.mockClear();

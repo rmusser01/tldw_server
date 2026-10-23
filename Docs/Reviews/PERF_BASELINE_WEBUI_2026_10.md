@@ -456,3 +456,157 @@ shells) in `ChatPane.virtualization.test.tsx` and
 - tsc: `apps/tldw-frontend` `tsc --noEmit` → 0 errors; `apps/packages/ui`
   scoped `tsc --noEmit` (8 GB heap) → 400 errors, the identical pre-existing
   set carried since Stage 1, with 0 errors in W1-touched files.
+
+## Batch W2 (TASK-13522) — 2026-10-16
+
+Persistence write-path batch: request-history sidecar (WP-15), workspace
+persist chain (WP-16), ModelDb storage hygiene (WP-17/WP-61), legacy
+`chrome.storage` blob-DB quarantine (WP-18), background session-state +
+settings registry (WP-19/WP-20/WP-22), deep-clone cleanup (WP-21). Branch
+`codex/webui-perf-w2-persistence`, range `3b68f2dbc2..aaf09f42ef`
+(14 commits). All numbers below are from actual re-runs of the frozen
+Family C benches at HEAD `aaf09f42ef` on 2026-10-14 (same machine and
+environment as the frozen tables; the frozen tables above are untouched).
+Note: W1's appended section is not present in this branch's copy of the
+file — the branch base (`3b68f2dbc2`) predates it and W1 owns its own
+append; nothing of W1's was modified here.
+Coverage note (final-review round 1, 2026-10-16): the branch tip is now
+`3c699d4814` — 16 commits. The 14-commit range above already includes the
+Stage 2 backlog-note commits `fa77a7f56b` and `d1b91870b7`;
+`55845325a3` (this delta append) and `3c699d4814` (import-suite test fix,
+review round 2) extend it — all four are docs/test/backlog-only and change
+no measured surface, so the attribution tables and HEAD-`aaf09f42ef` bench
+numbers above remain the record for the perf range.
+
+### Family C2 — request history (WP-15, commit `3958f1e8d3`)
+
+**Like-for-like metrics (the binding framing for this family):**
+
+| Metric | Baseline (frozen) | W2 @ HEAD |
+|---|---|---|
+| setItem calls attempted per run | 50 | **1** |
+| setItem calls landed | 48 | 1 |
+| setItem quota errors | 2 | **0** |
+| Amplification vs final history | 26.54× | **1.0×** |
+| final history entries | 48 | 50 |
+| durationMs (informational) | ~97–174 | 2.79–4.84 |
+
+**Byte totals (quoted alongside, with the conflation caveat):**
+
+| Metric | Baseline (frozen) | W2 @ HEAD |
+|---|---|---|
+| setItem bytes attempted | 130,757,040 B ≈ 130.8 MB | 115,651 B |
+| setItem bytes landed | 120,698,808 B ≈ 120.7 MB | 115,651 B |
+| final history bytes | 4,926,481 B ≈ 4.93 MB | 115,651 B |
+| bytes/request (attempted) | 2,615,141 B | 2,313 B |
+
+The 130.8 MB → 115.7 KB byte delta is **not** like-for-like: it conflates
+(a) batching — one debounced flush per run instead of 50 whole-history
+rewrites, (b) 2 KB `responseBody` truncation per entry, and (c) the bench's
+`requestBody` → `responseBody` payload retarget forced in Task 1: the plan
+truncates only `responseBody` while the W0 bench carried its 100 KiB blob
+in `requestBody`, and the untouched bench's quota math (untruncated 100 KB
+bodies × whole-history rewrites against jsdom's 5,000,000-code-unit quota)
+made it unpassable for any correct fix. The retarget and the strengthened
+assertions were reviewed and approved (Task 1 review: 0 Critical/Important).
+Ratified ruling: "2 KB" = **2048 UTF-16 code units**, as implemented for a
+JS debug sidecar.
+
+### Family C1 — workspace persist (WP-16)
+
+| Metric | Baseline (frozen) | W2 @ HEAD |
+|---|---|---|
+| JSON.stringify calls | 31 | **22** |
+| JSON.stringify bytes | 2,451,167 B (~2.45 MB) | **1,915,228 B (~1.92 MB)** |
+| localStorage.setItem calls | 2 | 2 |
+| localStorage.setItem bytes | 121,470 B | 121,600 B (+130 B) |
+| durationMs (informational) | 10.01–12.15 | 12.99–21.46 |
+
+The frozen table's dev-only diagnostics caveat still applies: ~19 of the
+stringify calls per run are `NODE_ENV=test` diagnostics that do not execute
+in production builds, so the absolute serialize figures overstate
+production cost; the before/after delta remains valid because the offset
+is constant across runs of the same harness.
+
+Attribution: sub-steps 1–2 (coalescing `3751c03c22`, per-workspace revision
+diff `df3db85514`) delivered the measurable drop (31→22 stringifies,
+2.45 MB → 1.92 MB). Sub-step 3 (artifact offload dedup, `55b070bb90`) is
+unobservable in this bench — jsdom has no IndexedDB
+(`indexedDbOffloadAvailable: false`), so artifacts stay inline — and is
+pinned by unit tests instead. The +130 B setItem delta is the per-workspace
+revision/etag metadata riding the same two written keys (active snapshot +
+split index; key set unchanged from baseline).
+
+### Per-stage attribution (this branch vs pre-landed TASK-13511 work)
+
+| Stage (WP) | Commits (this branch) | This branch delivered | Pre-landed overlap |
+|---|---|---|---|
+| Task 1 — request-history sidecar (WP-15) | `3958f1e8d3` | Whole sidecar: in-memory buffer, redact + truncate exactly once at insert, 500 ms trailing debounce + idle + lifecycle flushes, `flushRequestHistory()`, bench retarget + strengthened assertions | none |
+| Stage 2 — workspace persist chain (WP-16) | `3751c03c22`, `df3db85514`, `55b070bb90`; fix round `426fc547af` (+ `d1b91870b7` backlog note) | Serialized coalescing writer (per-key pending map, literal 300 ms trailing flush, durability-mode lifecycle flush), per-workspace revision diff, artifact offload dedup with invalidation/failure handling | none |
+| Stage 3 — ModelDb hygiene (WP-17 + WP-61 alarm) | `5b63d01050` | Ledger, verbatim: "~80% pre-landed by interim `ff8803237e` (namespacing, migration, batched createMany, warm Set, 6h alarm); this stage's delta = bulkAddModelsFB replaceAll (2 sets+1 remove → 1+1) + the pinning suite" | `ff8803237e` (~80% of the stage) |
+| Stage 4 — legacy blob-DB quarantine (WP-18) | `d6421555d2`; fix round `3626e61179` | Batched legacy `deleteHistoriesByDateRange` (one `remove([...])` + one index rewrite), titles-only legacy `searchChatHistories`, module-header deprecation + complete fallback map (incl. the migration importer), quarantine/characterization/source-guard suites | The repoint was pre-landed: `messageHandlers` and both delete callers were already on Dexie at the branch base |
+| Stage 5 — session state + settings registry (WP-19/20/22) | `174b7e7bfe`, `01edfa3178`; fix round `623f8b2896` | Serialize-on-drain sharded session writer (`tldw:ingest:*` + index, migration-on-read from the monolithic key), `result.data` strip at persist, registry value cache + write-only-on-change mirror + `onChanged` invalidation, default-off chat-request-debug gate | WP-22's clone removal was pre-landed (TASK-13511's lazy clone-on-read retained; W2 added the enabled gate) |
+| Stage 6 — deep-clone cleanup (WP-21) | `aaf09f42ef` | `structuredClone` replaces JSON round-trips in store mutation paths | none |
+
+Fix-round record: Stages 2, 4 and 5 each required one review round
+(5 / 1 / 3 findings addressed respectively; 0 open after each). Task 1,
+Stage 3 and Stage 6 were approved with 0 Critical/Important findings.
+At HEAD there are zero unresolved Critical/Important review findings.
+
+### Documented gaps / follow-ups
+
+- **Import-suite residual — RESOLVED (round 2 of the batch-final task):
+  branch-caused by Stage 2's debounce (test read persisted state
+  synchronously); fixed test-side via reader-scoped flush; suite 68/68.**
+  The Stage-2 fix-round report had recorded the residual failure in
+  `apps/packages/ui/src/utils/__tests__/research-workspace-import.test.tsx`
+  ("retains two note chunks, retries only unfinished snapshots, and reopens
+  source provenance") as pre-existing; batch-final verification disproved
+  that — the suite is 68/68 green at the dev merge-base `3b68f2dbc2` vs
+  67/68 at HEAD in the same environment (merge-base run in a temporary
+  worktree sharing this branch's `node_modules`; manifests unchanged).
+  Mechanism, pinned empirically: the test snapshotted `localStorage`
+  synchronously after its final mutation (`loadNote`) while the debounced
+  write was still buffered (microtask/idle/300 ms trailing delivery), so
+  the re-seeded rehydrate restored the pre-`loadNote` envelope. Fix:
+  `await flushWorkspacePersistence()` immediately before the snapshot —
+  the same reader-scoped flush pattern `use-research-workspace-prefill.ts`
+  uses (Stage 2's Finding-4 resolution). Suite re-run 68/68 green at HEAD;
+  the only other storage reads in the suite are out-of-band `setItem`
+  seeding plus one rehydrate-after-awaits (microtask delivery lands writes;
+  green), so no other site needed the flush.
+- **Pre-existing split-storage test failure:** `workspace.split-storage.test.ts`
+  (1/8) fails at the dev base as well — jsdom instance-level storage-spy
+  pattern (the W0 ledger's jsdom note); documented since Stage 2, unchanged.
+- **replaceAll crash-orphan reclamation:** a crash between ModelDb
+  `replaceAll`'s set and remove leaves orphaned namespaced keys (storage
+  bloat only, invisible to reads) — future cleanup-pass location noted in
+  the Stage 3 review.
+- **defineSetting options-drop trap:** `defineSetting` silently drops
+  unknown options (Stage 5 review minor) — follow-up to validate or warn.
+- **Multi-tab clobber:** the in-memory history buffer clobbers concurrent
+  tab writes by design (Task 1 review minor); inherent to the sidecar
+  design as approved.
+- **In-flight-IDB-await pagehide gap (narrowed, not closed):** lifecycle
+  flushes gate all IndexedDB awaits, but a pagehide arriving while an IDB
+  await is already in flight on the flush-initiated path can still preempt;
+  out-of-scope deferral from the Stage 2 review.
+- **Registry absent-value / web-context `onChanged` limits:** the settings
+  registry's cache invalidation has reduced fidelity for absent values and
+  no `chrome.storage.onChanged` signal in web context — Stage 5 deferred
+  minors.
+
+### Verification runs (2026-10-14, HEAD `aaf09f42ef`)
+
+- Family C2: `cd apps/tldw-frontend && bun run vitest run
+  lib/__tests__/history.bench.test.ts` — passed as-is (the bench was
+  legitimately modified in Task 1 per the reviewed ruling); numbers quoted
+  above, 3 runs bit-identical on count/byte metrics.
+- Family C1: `cd apps/packages/ui && bun run vitest run
+  src/store/__tests__/workspace-persist.bench.test.ts` — passed untouched;
+  numbers quoted above, 3 runs bit-identical on count/byte metrics.
+- Scoped tsc baselines unchanged: `apps/packages/ui` `tsc --noEmit` → 400
+  pre-existing errors (0 in touched files); `apps/tldw-frontend`
+  `tsc --noEmit` → 0 errors.
+- The W0 streaming benches (Families A/B) belong to W1's remediation scope
+  and are skipped here per the batch brief.

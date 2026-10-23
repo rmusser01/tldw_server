@@ -5030,6 +5030,7 @@ export const PlaygroundForm = ({
   const {
     rawRequestModalOpen,
     setRawRequestModalOpen,
+    closeRawRequestModal,
     rawRequestSnapshot,
     rawRequestJson,
     refreshRawRequestSnapshot,
@@ -7813,7 +7814,7 @@ export const PlaygroundForm = ({
           <React.Suspense fallback={null}>
             <LazyPlaygroundRawRequestModal
               open={rawRequestModalOpen}
-              onClose={() => setRawRequestModalOpen(false)}
+              onClose={closeRawRequestModal}
               snapshot={rawRequestSnapshot}
               json={rawRequestJson}
               onRefresh={refreshRawRequestSnapshot}

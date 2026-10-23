@@ -172,6 +172,7 @@ import { useMcpToolsStore } from "@/store/mcp-tools"
 import { tldwClient, type TldwConfig } from "@/services/tldw/TldwApiClient"
 import { tldwModels } from "@/services/tldw"
 import { setTitleGenEnabled } from "@/services/title"
+import { __clearSettingCachesForTests } from "@/services/settings/registry"
 import { deriveSingleUserApiKeyCredentialScope } from "@/services/chat-surface-scope"
 import { resolveServicePromptScope } from "@/services/service-prompts"
 import {
@@ -225,6 +226,10 @@ let initialCore: ReturnType<typeof useStoreMessageOption.getState>
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  // The physical areas below are cleared out-of-band (no storage events), so
+  // registry-cached settings (imageBackendConfigs) would survive from the
+  // previous test and skip the physical reads these cases gate on.
+  __clearSettingCachesForTests()
   physical.control.beforeRead = undefined
   physical.control.beforeFetch = undefined
   physical.areas.clear()
