@@ -1,0 +1,166 @@
+"""Dotted Anthropic names (claude-sonnet-4.5) stay usable as aliases of the dashed API IDs (TASK-13880)."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from tldw_Server_API.app.core.Chat import chat_service
+from tldw_Server_API.app.core.Usage.pricing_catalog import reset_pricing_catalog
+
+pytestmark = pytest.mark.unit
+
+_DOTTED = ["claude-sonnet-4.5", "claude-haiku-4.5", "claude-opus-4.1", "claude-opus-4.5", "Claude-Sonnet-4.5"]
+
+
+@pytest.fixture(autouse=True)
+def _fresh_catalogs(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    reset_pricing_catalog()
+    chat_service.invalidate_model_alias_caches()
+    yield
+    chat_service.invalidate_model_alias_caches()
+
+
+@pytest.mark.parametrize("name", _DOTTED)
+def test_a_saved_dotted_name_stays_known_for_anthropic(name: str) -> None:
+    assert chat_service.is_model_known_for_provider("anthropic", name) is True
+
+
+def test_an_unknown_dotted_name_is_still_unknown() -> None:
+    assert chat_service.is_model_known_for_provider("anthropic", "claude-nonesuch-9.9") is False
+
+
+@pytest.mark.parametrize("name", _DOTTED)
+def test_a_dotted_name_with_no_provider_still_routes_to_anthropic(name: str) -> None:
+    provider, _debug = chat_service.infer_provider_from_model_catalog(provider="openai", model=name, provider_explicit=False)
+
+    assert provider == "anthropic"
+
+
+def test_strict_model_selection_does_not_reject_a_dotted_anthropic_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.api.v1.endpoints import chat as chat_endpoint
+
+    monkeypatch.setenv("CHAT_ENFORCE_STRICT_MODEL_SELECTION", "1")
+
+    assert chat_endpoint._should_enforce_strict_model_selection() is True
+    assert chat_endpoint._validate_explicit_model_availability("anthropic", "claude-sonnet-4.5") is None
+    # The gate still rejects a name that is neither an ID nor a dotted alias of one.
+    rejected = chat_endpoint._validate_explicit_model_availability("anthropic", "claude-nonesuch-9.9")
+    assert rejected is not None and rejected["error_code"] == "model_not_available"
+
+
+def test_canonical_anthropic_model_id_dashes_only_dotted_claude_versions() -> None:
+    from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id as canon
+
+    assert canon("claude-sonnet-4.5") == "claude-sonnet-4-5"
+    assert canon("Claude-Opus-4.1") == "Claude-Opus-4-1"
+    assert canon("claude-haiku-4.5") == "claude-haiku-4-5"
+    for unchanged in ("claude-sonnet-4-5-20250929", "claude-opus-5", "claude-2.1", "gpt-4.1", "", "claude-3-5-haiku-20241022"):
+        assert canon(unchanged) == unchanged
+
+
+def test_the_adapter_sends_the_dashed_api_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.LLM_Calls.providers import anthropic_adapter as anth_mod
+
+    monkeypatch.setenv("LLM_ADAPTERS_NATIVE_HTTP_ANTHROPIC", "1")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1")
+    sent: list[dict[str, Any]] = []
+
+    class _Response:
+        status_code = 200
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, Any]:
+            return {
+                "type": "message", "id": "m", "model": "claude-sonnet-4-5",
+                "content": [{"type": "text", "text": "ok"}], "stop_reason": "end_turn",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            }
+
+    class _Client:
+        def __enter__(self) -> _Client:
+            return self
+
+        def __exit__(self, *_a: Any) -> None:
+            return None
+
+        def post(self, url: str, json: dict[str, Any], headers: dict[str, str]) -> _Response:
+            sent.append(json)
+            return _Response()
+
+    monkeypatch.setattr(anth_mod, "http_client_factory", lambda *a, **k: _Client())
+    anth_mod.AnthropicAdapter().chat(
+        {"messages": [{"role": "user", "content": "hi"}], "model": "claude-sonnet-4.5", "api_key": "k", "max_tokens": 32}
+    )
+
+    assert [payload["model"] for payload in sent] == ["claude-sonnet-4-5"]
+
+
+def test_the_messages_native_payload_sends_the_dashed_api_id_to_anthropic_only() -> None:
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.api.v1.endpoints import messages as messages_endpoint
+
+    request = SimpleNamespace(model_dump=lambda exclude_none=True: {"model": "x", "messages": []})
+
+    assert messages_endpoint._prepare_native_payload(request, model="claude-sonnet-4.5", provider="anthropic")["model"] == "claude-sonnet-4-5"
+    assert messages_endpoint._prepare_native_payload(request, model="claude-sonnet-4.5", provider="llama.cpp")["model"] == "claude-sonnet-4.5"
+
+
+@pytest.mark.parametrize(
+    ("listed", "saved", "quality_rank"),
+    [
+        ("claude-sonnet-4-5", "claude-sonnet-4.5", 20),
+        ("claude-haiku-4-5", "claude-haiku-4.5", 55),
+        ("claude-opus-4-1", "claude-opus-4.1", 10),
+    ],
+)
+def test_the_listed_dashed_names_keep_their_capability_metadata_and_router_rank(listed, saved, quality_rank) -> None:
+    """Renaming the picker entries to API IDs must not drop tool and vision support or the router rank (review I-A)."""
+    from tldw_Server_API.app.api.v1.endpoints.llm_providers import get_model_metadata
+
+    shown = get_model_metadata("anthropic", listed)
+    stored = get_model_metadata("anthropic", saved)
+
+    assert shown["tool_support"] is True
+    assert shown["vision_support"] is True
+    assert shown["quality_rank"] == quality_rank
+    for key in ("tool_support", "vision_support", "quality_rank", "latency_rank", "cost_rank", "context_window"):
+        assert stored[key] == shown[key], key
+
+
+@pytest.mark.parametrize(
+    ("allowed", "requested", "ok"),
+    [
+        (["claude-sonnet-4.5"], "claude-sonnet-4-5", True),
+        (["claude-sonnet-4-5"], "claude-sonnet-4.5", True),
+        (["claude-sonnet-4-5"], "claude-opus-4-1", False),
+    ],
+)
+def test_a_provider_override_allowlist_treats_dotted_and_dashed_anthropic_names_alike(allowed, requested, ok) -> None:
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import LLMProviderOverride, ProviderOverrideCallSnapshot
+
+    snapshot = ProviderOverrideCallSnapshot("anthropic", LLMProviderOverride(provider="anthropic", allowed_models=allowed))
+
+    assert (snapshot.policy_error(requested) is None) is ok
+
+
+def test_the_allowlist_check_never_raises_or_widens_on_non_string_values() -> None:
+    """The virtual-key middleware skips enforcement on a TypeError, so a malformed body or entry must not raise."""
+    from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import allowlist_has_model
+
+    assert allowlist_has_model(["claude-sonnet-4.5"], "claude-sonnet-4-5") is True
+    assert allowlist_has_model(["claude-sonnet-4-5", 7], 123) is False
+    assert allowlist_has_model([7, "gpt-4o"], {"model": "claude-sonnet-4-5"}) is False
+
+
+def test_a_provider_override_allowlist_is_still_exact_for_other_providers() -> None:
+    from tldw_Server_API.app.core.AuthNZ.llm_provider_overrides import LLMProviderOverride, ProviderOverrideCallSnapshot
+
+    snapshot = ProviderOverrideCallSnapshot("openai", LLMProviderOverride(provider="openai", allowed_models=["claude-sonnet-4.5"]))
+
+    assert snapshot.policy_error("claude-sonnet-4-5") is not None

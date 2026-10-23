@@ -252,10 +252,11 @@ def compute_costs(
     ``cache_write``), the rest of the writes the ``cache_write`` rate.
     """
     catalog = get_pricing_catalog()
-    rates, est = catalog.get_rate_details(provider, model)
+    prompt_total = max(0, int(prompt_tokens or 0))
+    # The whole prompt, cache tokens included (ADR-075), picks a long-prompt price tier.
+    rates, est = catalog.get_rate_details(provider, model, prompt_tokens=prompt_total)
     in_per_1k = rates["prompt"]
     out_per_1k = rates["completion"]
-    prompt_total = max(0, int(prompt_tokens or 0))
     completion_total = max(0, int(completion_tokens or 0))
     cache_read = min(max(0, int(cache_read_input_tokens or 0)), prompt_total)
     cache_write = min(max(0, int(cache_write_input_tokens or 0)), max(0, prompt_total - cache_read))

@@ -6,6 +6,7 @@ import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
     apply_billing_prompt_cache_intent,
     attach_cache_intent_metadata,
@@ -255,7 +256,8 @@ class AnthropicAdapter(ChatProvider):
                 messages.append({"role": role, "content": parts})
 
         payload = {
-            "model": request.get("model"),
+            # Anthropic accepts only its documented IDs; a saved dotted name (claude-sonnet-4.5) is sent dashed.
+            "model": canonical_anthropic_model_id(request.get("model")) if request.get("model") else request.get("model"),
             "messages": messages,
             "max_tokens": request.get("max_tokens") or 1024,
         }

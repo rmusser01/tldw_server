@@ -31,6 +31,7 @@ from tldw_Server_API.app.core.AuthNZ.user_provider_secrets import (
 from tldw_Server_API.app.core.LLM_Calls.adapter_registry import (
     canonical_builtin_llm_provider_name,
 )
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import allowlist_has_model
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 from tldw_Server_API.app.core.testing import is_truthy
 
@@ -94,6 +95,12 @@ class ProviderOverrideCallSnapshot:
             ")"
         )
 
+    def _model_allowed(self, model: str, allowed_models: list[str]) -> bool:
+        """Whether ``model`` is in the allowlist; Anthropic dotted and dashed spellings of one ID count as equal."""
+        if self.provider == "anthropic":
+            return allowlist_has_model(allowed_models, model)
+        return model in allowed_models
+
     def policy_error(self, model: str | None) -> dict[str, str] | None:
         """Return the bounded policy decision from this captured snapshot."""
         override = self._override
@@ -104,7 +111,7 @@ class ProviderOverrideCallSnapshot:
                 "error_code": "provider_disabled",
                 "message": f"Provider '{self.provider}' is disabled by admin override.",
             }
-        if override.allowed_models and model and model not in override.allowed_models:
+        if override.allowed_models and model and not self._model_allowed(model, override.allowed_models):
             return {
                 "error_code": "model_not_allowed",
                 "message": f"Model '{model}' is not allowed for provider '{self.provider}'.",

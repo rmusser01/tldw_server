@@ -150,10 +150,13 @@ _HAIKU_4_5 = {"prompt": 0.001, "completion": 0.005, "cache_read": 0.0001, "cache
         ("claude-opus-4-5", _OPUS_5),
         ("claude-opus-4-5-20251101", _OPUS_5),
         ("claude-opus-4-1-20250805", _OPUS_4_1),
+        ("claude-opus-4-20250514", _OPUS_4_1),
+        ("claude-opus-4-6", _OPUS_5),
         ("claude-sonnet-5-5", _SONNET_5_5),
         ("claude-sonnet-5", _SONNET_5),
         ("claude-sonnet-4-6", _SONNET_4),
         ("claude-sonnet-4-5-20250929", _SONNET_4),
+        ("claude-sonnet-4-20250514", _SONNET_4),
         ("claude-haiku-4-5-20251001", _HAIKU_4_5),
     ],
 )
@@ -308,3 +311,181 @@ def test_every_anthropic_cache_write_rate_has_a_one_hour_rate_at_twice_the_input
         if "cache_write" in rates:
             # platform.claude.com/docs/en/about-claude/pricing: every 1h write is 2x the row's input price.
             assert rates["cache_write_1h"] == pytest.approx(2 * rates["prompt"]), model
+
+
+# Haiku 5.5 per 1K tokens by prompt length. Source: platform.claude.com/docs/en/about-claude/pricing, fetched 2026-10-22.
+_HAIKU_5_5_LOW = {"prompt": 0.0001, "completion": 0.0005, "cache_read": 0.00001, "cache_write": 0.000125, "cache_write_1h": 0.0002}
+_HAIKU_5_5_HIGH = {"prompt": 0.0005, "completion": 0.0025, "cache_read": 0.00005, "cache_write": 0.000625, "cache_write_1h": 0.001}
+
+
+@pytest.mark.parametrize(
+    ("prompt_tokens", "rates"),
+    [(0, _HAIKU_5_5_LOW), (1_000, _HAIKU_5_5_LOW), (100_000, _HAIKU_5_5_LOW), (100_001, _HAIKU_5_5_HIGH), (900_000, _HAIKU_5_5_HIGH)],
+)
+def test_haiku_5_5_is_priced_by_prompt_length(prompt_tokens: int, rates: dict[str, float], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+
+    got, estimated = PricingCatalog().get_rate_details("anthropic", "claude-haiku-5-5", prompt_tokens=prompt_tokens)
+
+    assert got == pytest.approx(rates)
+    assert estimated is False
+
+
+def test_compute_costs_picks_the_haiku_5_5_tier_from_the_whole_prompt_including_cache_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    reset_pricing_catalog()
+
+    # 40,000 uncached + 50,000 cache read + 10,001 cache write = 100,001 prompt tokens: the high tier.
+    prompt_cost, completion_cost, _t, _e = compute_costs(
+        "anthropic", "claude-haiku-5-5", 100_001, 1000,
+        cache_read_input_tokens=50_000, cache_write_input_tokens=10_001, billable_input_tokens=40_000,
+    )
+    low_prompt_cost, _lc, _lt, _le = compute_costs(
+        "anthropic", "claude-haiku-5-5", 100_000, 0,
+        cache_read_input_tokens=50_000, cache_write_input_tokens=10_000, billable_input_tokens=40_000,
+    )
+
+    assert prompt_cost == pytest.approx((40_000 * 0.0005 + 50_000 * 0.00005 + 10_001 * 0.000625) / 1000)
+    assert completion_cost == pytest.approx(1000 * 0.0025 / 1000)
+    assert low_prompt_cost == pytest.approx((40_000 * 0.0001 + 50_000 * 0.00001 + 10_000 * 0.000125) / 1000)
+
+
+@pytest.mark.parametrize(
+    ("model", "rates"),
+    [
+        ("claude-mythos-5-1", _FABLE_5_1),
+        ("claude-mythos-5", _FABLE_5),
+        ("claude-3-5-haiku-20241022", {"prompt": 0.0008, "completion": 0.004, "cache_read": 0.00008, "cache_write": 0.001, "cache_write_1h": 0.0016}),
+        ("claude-opus-4-1-20250805", _OPUS_4_1),
+        ("claude-opus-4-20250514", _OPUS_4_1),
+        ("claude-sonnet-4-5-20250929", _SONNET_4),
+        ("claude-sonnet-4-20250514", _SONNET_4),
+        ("claude-opus-4-7", _OPUS_5),
+        ("claude-sonnet-4-6", _SONNET_4),
+    ],
+)
+def test_remaining_anthropic_api_ids_get_their_list_prices(model: str, rates: dict[str, float], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+
+    got, _estimated = PricingCatalog().get_rate_details("anthropic", model)
+
+    assert got == pytest.approx(rates)
+
+
+def test_listed_anthropic_models_have_no_dotted_names_and_no_invalid_dated_suffixes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Checks the shape of the picker's Anthropic list, not that every key is an API ID.
+
+    claude-opus-4 and claude-sonnet-4 stay as substring price keys (the task's own note allows it) and
+    claude-3-5-sonnet-latest stays until follow-up 1; neither is a documented ID, and neither has a dot or a date.
+    """
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    reset_pricing_catalog()
+    # Dated IDs the API accepts (platform.claude.com/docs/en/about-claude/model-deprecations).
+    dated_ids = {
+        "claude-haiku-4-5-20251001",
+        "claude-3-5-haiku-20241022",
+        "claude-3-7-sonnet-20250219",
+        "claude-3-opus-20240229",
+        "claude-3-sonnet-20240229",
+        "claude-3-haiku-20240307",
+    }
+
+    for model in list_provider_models("anthropic"):
+        assert "." not in model, f"{model} is dotted; no current Anthropic API ID has a dot"
+        if re.search(r"-\d{8}$", model):
+            assert model in dated_ids, f"{model} is not an API ID"
+        # The 4.6 generation and later have dateless IDs only.
+        assert not re.search(r"claude-(opus|sonnet|haiku|fable|mythos)-(4-[6-9]|5(-\d)?)-\d{8}$", model), model
+
+
+@pytest.mark.parametrize(
+    ("dotted", "ids_rates"),
+    [
+        ("claude-haiku-4.5", _HAIKU_4_5),
+        ("claude-sonnet-4.5", _SONNET_4),
+        ("claude-opus-4.1", _OPUS_4_1),
+        ("claude-opus-4.5", _OPUS_5),
+    ],
+)
+def test_a_dotted_anthropic_model_name_is_still_priced_as_its_api_id(dotted: str, ids_rates: dict[str, float], monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dotted names stay in config defaults and the model router; they must not fall to the unknown-model rate."""
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+
+    got, _estimated = PricingCatalog().get_rate_details("anthropic", dotted)
+
+    assert got == pytest.approx(ids_rates)
+
+
+# OpenAI long-context prices per 1K tokens: prompts over 272,000 tokens.
+# Source: developers.openai.com/api/docs/pricing, "Long context" columns, fetched 2026-10-22 (TASK-13879).
+_OPENAI_LONG = {
+    "gpt-5.5": {"prompt": 0.01, "completion": 0.045, "cache_read": 0.001},
+    "gpt-5.5-2026-04-23": {"prompt": 0.01, "completion": 0.045, "cache_read": 0.001},
+    "gpt-5.4": {"prompt": 0.005, "completion": 0.0225, "cache_read": 0.0005},
+    "gpt-5.4-2026-03-05": {"prompt": 0.005, "completion": 0.0225, "cache_read": 0.0005},
+    "gpt-5.5-pro": {"prompt": 0.06, "completion": 0.27},
+    "gpt-5.5-pro-2026-04-23": {"prompt": 0.06, "completion": 0.27},
+    "gpt-5.4-pro": {"prompt": 0.06, "completion": 0.27},
+    "gpt-5.4-pro-2026-03-05": {"prompt": 0.06, "completion": 0.27},
+}
+_OPENAI_SHORT = {
+    "gpt-5.5": {"prompt": 0.005, "completion": 0.03, "cache_read": 0.0005},
+    "gpt-5.5-2026-04-23": {"prompt": 0.005, "completion": 0.03, "cache_read": 0.0005},
+    "gpt-5.4": {"prompt": 0.0025, "completion": 0.015, "cache_read": 0.00025},
+    "gpt-5.4-2026-03-05": {"prompt": 0.0025, "completion": 0.015, "cache_read": 0.00025},
+    "gpt-5.5-pro": {"prompt": 0.03, "completion": 0.18},
+    "gpt-5.5-pro-2026-04-23": {"prompt": 0.03, "completion": 0.18},
+    "gpt-5.4-pro": {"prompt": 0.03, "completion": 0.18},
+    "gpt-5.4-pro-2026-03-05": {"prompt": 0.03, "completion": 0.18},
+}
+
+
+@pytest.mark.parametrize("model", sorted(_OPENAI_LONG))
+def test_openai_long_context_prompts_pay_the_long_context_rates(model: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    cat = PricingCatalog()
+
+    at_limit, _e1 = cat.get_rate_details("openai", model, prompt_tokens=272_000)
+    over_limit, _e2 = cat.get_rate_details("openai", model, prompt_tokens=272_001)
+
+    assert at_limit == pytest.approx(_OPENAI_SHORT[model])
+    assert over_limit == pytest.approx(_OPENAI_LONG[model])
+
+
+def test_compute_costs_bills_a_long_openai_prompt_whole_at_the_long_rates(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    reset_pricing_catalog()
+
+    # 300,000 prompt tokens, 100,000 of them cached: the whole request pays gpt-5.5's long-context prices.
+    prompt_cost, completion_cost, _t, _e = compute_costs(
+        "openai", "gpt-5.5", 300_000, 1_000, cache_read_input_tokens=100_000, billable_input_tokens=200_000
+    )
+
+    assert prompt_cost == pytest.approx((200_000 * 0.01 + 100_000 * 0.001) / 1000)
+    assert completion_cost == pytest.approx(1_000 * 0.045 / 1000)
+
+
+@pytest.mark.parametrize("model", ["claude-mythos-5-1", "claude-mythos-5"])
+def test_hidden_models_are_priced_but_not_listed(model: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("PRICING_OVERRIDES", raising=False)
+    reset_pricing_catalog()
+
+    got, estimated = PricingCatalog().get_rate_details("anthropic", model)
+
+    assert got["prompt"] == pytest.approx(0.01)
+    assert got["completion"] == pytest.approx(0.05)
+    assert estimated is False
+    assert model not in list_provider_models("anthropic")
+
+
+def test_the_hidden_flag_survives_an_override_that_repeats_it(monkeypatch: pytest.MonkeyPatch) -> None:
+    overrides = {"anthropic": {"claude-test-hidden": {"prompt": 0.01, "completion": 0.02, "hidden": True}}}
+    monkeypatch.setenv("PRICING_OVERRIDES", json.dumps(overrides))
+    reset_pricing_catalog()
+
+    got, _estimated = PricingCatalog().get_rate_details("anthropic", "claude-test-hidden")
+
+    assert got["prompt"] == pytest.approx(0.01)
+    assert "claude-test-hidden" not in list_provider_models("anthropic")
+    monkeypatch.delenv("PRICING_OVERRIDES")
+    reset_pricing_catalog()

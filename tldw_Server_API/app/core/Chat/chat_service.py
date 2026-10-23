@@ -174,6 +174,7 @@ from tldw_Server_API.app.core.custom_openai_providers import (
 )
 from tldw_Server_API.app.core.exceptions import EgressPolicyError, LLMQuotaExceededError, raise_detached_error
 from tldw_Server_API.app.core.LLM_Calls import adapter_registry as _adapter_registry
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.capability_registry import ProviderCallPolicy
 from tldw_Server_API.app.core.LLM_Calls.error_utils import (
     privacy_safe_chat_error,
@@ -1019,7 +1020,8 @@ def is_model_known_for_provider(provider: str, model: str) -> bool | None:
     # so treat namespaced and non-namespaced forms as equivalent.
     if provider_key not in {"openrouter", "huggingface", "novita", "poe", "together"}:
         known_lower = {str(item).strip().lower() for item in known_models}
-        return model_key in known_lower
+        # A saved dotted Anthropic name (claude-sonnet-4.5) is known when its dashed API ID is.
+        return model_key in known_lower or canonical_anthropic_model_id(model_key).lower() in known_lower
 
     def _aliases(raw_model: str) -> set[str]:
         normalized = (raw_model or "").strip().lower()
@@ -1620,13 +1622,20 @@ def infer_provider_from_model_catalog(
         return current_provider, debug
 
     debug["attempted"] = True
-    has_current_match = _provider_has_model_cached(current_provider, model_value)
+    # A saved dotted name (claude-sonnet-4.5) finds the catalog entry of its dashed API ID; the name as written
+    # is tried first, so a provider that lists the dotted name itself keeps it.
+    lookup_model = canonical_anthropic_model_id(model_value)
+    has_current_match = _provider_has_model_cached(current_provider, model_value) or _provider_has_model_cached(
+        current_provider, lookup_model
+    )
     debug["current_provider_has_model"] = has_current_match
     if has_current_match:
         debug["reason"] = "current_provider_match"
         return current_provider, debug
 
-    candidates = list(_find_catalog_providers_for_model_cached(model_value))
+    candidates = list(
+        _find_catalog_providers_for_model_cached(model_value) or _find_catalog_providers_for_model_cached(lookup_model)
+    )
     debug["candidates"] = candidates
     if not candidates:
         debug["reason"] = "no_catalog_match"
