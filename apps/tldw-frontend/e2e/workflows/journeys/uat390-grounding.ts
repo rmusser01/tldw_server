@@ -18,6 +18,10 @@ export const ROWAN_QUESTION = 'Who directs Rowan Observatory, where is it, and w
 export const PRICE_QUESTION =
   'What is the ticket price at Rowan Observatory? Use only the source; state when it does not provide the answer.';
 
+// Keep unique fixture labels from looking like phone/card data to the real PII filter.
+export const createUat390RunId = (uuid: string): string =>
+  `uat390-${uuid.replace(/\d/g, (digit) => 'ghijklmnop'.charAt(Number(digit)))}`;
+
 export type EvidenceSource = { source_id: string; excerpt: string; chunk_id?: string };
 export type SavedMessage = { id: string; role: string; content: string };
 

@@ -207,9 +207,42 @@ these runs do not establish hosted success or source approval.
    boundary contracts 80 pass; OpenAPI, Ruff, normal hooks and whitespace pass.
    Bandit on three changed sources: zero findings/errors. Unchanged frontend
    retains independent evidence.
-4. **Exact-head closure (In Progress):** Commit, request focused independent
-   closure against the already-reviewed full range, then publish one new CI
-   candidate. All external merge gates remain unwaived.
+4. **Source closure and publication (Complete):** Published and remote-verified
+   `5587463288310b9aff99d8e639280e0dde98988a` on current dev `721bb583`.
+   The full 87-file review at 59ee plus exact-delta/caller closure reports no
+   actionable findings. Independent 22 focused tests and unmodified periodic-runner
+   real-quota probes pass, including huge legacy intervals. Reviewer closed;
+   public technical review `5594091981`, all 76 review threads resolved.
+
+Overall Stage 4 remains **In Progress**. Fresh exact-head full CI `39531103973`,
+backend-required `39531103960` and trusted license `39531212018` are queued, not
+passing. PR is open/current/MERGEABLE but BLOCKED; no merge attempted. All seven
+hosted contexts, current-dev recheck, live CalDAV smoke or allowed explicit waiver,
+and human-authored what-and-why summary remain required. Heartbeat stays paused.
+These publication notes stay local to avoid invalidating the reviewed CI candidate
+with a tracking-only push; preserve them on the next authorized continuation.
+
+### CI Watch Follow-Up (2026-10-23)
+
+The human authorized watching CI, fixing failures and notification when green.
+On exact `5587463`, all seven required contexts and the full Python 3.12 aggregate
+passed. Two auxiliary jobs failed: critical E2E `39531103803` and shared-UI
+coverage shard 3 in `39531103910`. This is a CI-only follow-up, not a merge or
+waiver of provider smoke/human rationale. The existing watcher is active again.
+
+1. **Reproduce (Complete):** Retained trace proves PII filtering changed numeric
+   UUID groups in the fixture's title/body, breaking literal citation membership.
+   Two deterministic fixture-label regressions failed; 51 positive/existing tests
+   passed. The admin retry test clicked while AntD still held its loading state.
+2. **Repair and local verification (Complete):** Map UUID digits injectively to
+   alphabetic characters; retain all source/citation assertions and security
+   filters. Wait for a usable refresh button before the admin test's retry.
+   Grounding 53 pass; real RAG policy probe preserves repaired content exactly;
+   shared-UI admin 23 pass under coverage; TypeScript pass. Bandit is not applicable
+   to this TypeScript/test-only scope; no Python application code changed.
+3. **Review and publish (In Progress):** Scoped requesting-code-review, normal
+   hooks, protected push, then fresh exact-head CI. Do not continually rebase for
+   this CI-only watch. Notify only actionable changes or verified all-green.
 
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.
