@@ -65,7 +65,7 @@ for (const viewport of [
       for (const control of [
         page.getByTestId('model-selector'),
         page.getByTestId('attachment-button'),
-        page.getByRole('button', { name: 'Queue request', exact: true }),
+        page.getByRole('button', { name: 'Send message', exact: true }),
       ]) {
         await expect(control).toBeVisible();
         const box = await control.boundingBox();
@@ -79,7 +79,7 @@ for (const viewport of [
       await expect(hints).toBeVisible();
       await expect(saved).toBeVisible();
       const model = page.getByTestId('model-selector');
-      const delivery = page.getByRole('button', { name: 'Queue request', exact: true });
+      const delivery = page.getByRole('button', { name: 'Send message', exact: true });
       const rows = viewport.name === 'mobile'
         ? [[tools, hints], [saved, model, delivery]]
         : [[tools, hints, saved, model, delivery]];
@@ -158,7 +158,7 @@ for (const variant of ['v1', 'v3', 'v5']) {
     await page.goto('/chat?nextgenComposer=1', { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('nextgen-composer-wrapper')).toBeVisible();
     await expect(page.getByTestId('chat-input')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Queue request', exact: true })).toHaveCount(1);
+    await expect(page.getByRole('button', { name: 'Send message', exact: true })).toHaveCount(1);
     await expect(page.getByTestId('model-selector')).toBeVisible();
   });
 }
