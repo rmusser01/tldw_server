@@ -4661,5 +4661,44 @@
   },
   "composer_toolsPreferenceUnavailable": {
     "message": "Display preference unavailable. Tools still work for this visit."
+  },
+  "cockpit_instructions": {
+    "message": "Instructions"
+  },
+  "cockpit_sources": {
+    "message": "Sources"
+  },
+  "cockpit_noSourcesAttached": {
+    "message": "No sources attached."
+  },
+  "cockpit_addSources": {
+    "message": "Add sources"
+  },
+  "cockpit_conversation": {
+    "message": "Conversation"
+  },
+  "cockpit_requestPreview": {
+    "message": "Request preview"
+  },
+  "cockpit_currentRun": {
+    "message": "Current run"
+  },
+  "cockpit_modelAndSettings": {
+    "message": "Model & settings"
+  },
+  "cockpit_defaultSettings": {
+    "message": "Default settings"
+  },
+  "cockpit_stopShort": {
+    "message": "Stop"
+  },
+  "cockpit_regenerateShort": {
+    "message": "Regenerate"
+  },
+  "cockpit_closeContextPanel": {
+    "message": "Close Context panel"
+  },
+  "cockpit_closeRuntimePanel": {
+    "message": "Close Runtime panel"
   }
 }

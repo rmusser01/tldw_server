@@ -1320,7 +1320,20 @@
     "runtimeRailTab": "Chat settings",
     "contextRailHiddenSummary": "Context hidden. Chat settings visible.",
     "runtimeRailHiddenSummary": "Chat settings hidden. Context visible.",
-    "cockpitRailsVisibleSummary": "Context and chat settings visible."
+    "cockpitRailsVisibleSummary": "Context and chat settings visible.",
+    "instructions": "Instructions",
+    "sources": "Sources",
+    "noSourcesAttached": "No sources attached.",
+    "addSources": "Add sources",
+    "conversation": "Conversation",
+    "requestPreview": "Request preview",
+    "currentRun": "Current run",
+    "modelAndSettings": "Model & settings",
+    "defaultSettings": "Default settings",
+    "stopShort": "Stop",
+    "regenerateShort": "Regenerate",
+    "closeContextPanel": "Close Context panel",
+    "closeRuntimePanel": "Close Runtime panel"
   },
   "historySelection": {
     "retainedOutcomes": "Retained outcomes",
