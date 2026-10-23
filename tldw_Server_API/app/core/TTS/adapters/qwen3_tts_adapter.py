@@ -32,7 +32,7 @@ from ..tts_exceptions import (
     TTSStreamingError,
     TTSValidationError,
 )
-from ..utils import hold_tts_engine, parse_bool, resolve_qwen3_runtime_name
+from ..utils import hold_tts_engine, parse_bool, resolve_qwen3_runtime_name, tts_model_load_lock
 from .base import (
     AudioFormat,
     TTSAdapter,
@@ -175,7 +175,6 @@ class Qwen3TTSAdapter(TTSAdapter):
         self._runtime_impl: Qwen3Runtime | None = None
         self._pipeline_builders: list[tuple[str, Callable[[str], Any]]] = []
         self._pipelines: dict[str, Any] = {}
-        self._pipeline_lock = asyncio.Lock()
         self._audio_normalizer = AudioNormalizer()
         self._model_aliases = {
             self.MODEL_CUSTOMVOICE_17B.lower(): self.MODEL_CUSTOMVOICE_17B,
@@ -635,7 +634,7 @@ class Qwen3TTSAdapter(TTSAdapter):
         load_id = self.model_path or model_id
         if load_id in self._pipelines:
             return self._pipelines[load_id]
-        async with hold_tts_engine(self._pipeline_lock) as run:
+        async with hold_tts_engine(tts_model_load_lock(self.provider_key, str(load_id))) as run:
             if load_id in self._pipelines:
                 return self._pipelines[load_id]
             pipeline = await run(self._build_pipeline, load_id)

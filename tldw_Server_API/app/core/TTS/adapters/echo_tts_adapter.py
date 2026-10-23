@@ -31,7 +31,7 @@ from ..tts_exceptions import (
 )
 from ..tts_resource_manager import get_resource_manager
 from ..tts_validation import TTSInputValidator, validate_tts_request
-from ..utils import hold_tts_engine, parse_bool
+from ..utils import hold_tts_engine, parse_bool, tts_model_load_lock
 
 #
 # Local Imports
@@ -147,7 +147,6 @@ class EchoTTSAdapter(TTSAdapter):
         self._fish_ae = None
         self._pca_state = None
         self._echo_modules_loaded = False
-        self._model_lock = asyncio.Lock()
         self._cache_lock = asyncio.Lock()
         self._speaker_cache: OrderedDict[str, tuple[float, Any, Any]] = OrderedDict()
 
@@ -476,7 +475,7 @@ class EchoTTSAdapter(TTSAdapter):
     async def _ensure_models_loaded(self) -> None:
         if self._model is not None and self._fish_ae is not None and self._pca_state is not None:
             return
-        async with hold_tts_engine(self._model_lock) as run:
+        async with hold_tts_engine(tts_model_load_lock(self.provider_key, str(self.model_repo))) as run:
             if self._model is not None and self._fish_ae is not None and self._pca_state is not None:
                 return
 

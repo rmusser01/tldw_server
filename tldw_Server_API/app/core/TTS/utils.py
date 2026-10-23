@@ -19,6 +19,7 @@ import os
 import platform
 import re
 import unicodedata
+import weakref
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from typing import Any
 
@@ -153,6 +154,26 @@ async def hold_tts_engine(lock: asyncio.Lock) -> AsyncIterator[Callable[..., Awa
             # ponytail: a cancelled model load's result is discarded, so the next holder loads again
             # (after it, not alongside it); store the model from the thread if that cost matters.
             last_call.add_done_callback(functools.partial(_release_engine_lock, lock))
+
+
+_MODEL_LOAD_LOCKS: weakref.WeakValueDictionary[tuple[asyncio.AbstractEventLoop, str, str], asyncio.Lock] = (
+    weakref.WeakValueDictionary()
+)
+
+
+def tts_model_load_lock(provider: str, model_key: str) -> asyncio.Lock:
+    """The lock every adapter instance takes, through hold_tts_engine, to load ``model_key`` for ``provider``.
+
+    Shared across instances, so a load on a new adapter (a request-owned override adapter, a
+    re-registration, a registry retry) waits for another instance's load thread, even one whose caller
+    was cancelled. Keyed by event loop too, as an asyncio.Lock serves one loop. An entry lives only
+    while a holder or waiter keeps its lock.
+    """
+    key = (asyncio.get_running_loop(), provider, model_key)
+    lock = _MODEL_LOAD_LOCKS.get(key)
+    if lock is None:
+        lock = _MODEL_LOAD_LOCKS[key] = asyncio.Lock()
+    return lock
 
 
 def _release_engine_lock(lock: asyncio.Lock, call: asyncio.Future) -> None:
