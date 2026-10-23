@@ -1,5 +1,10 @@
 import React from "react"
 import { useTranslation } from "react-i18next"
+import {
+  resolveModelSelectorSelection,
+  type ModelSelectorDescriptor
+} from "@/hooks/playground/modelSelectorUtils"
+import { formatChatModelLabel } from "@/utils/chat-model-label"
 
 /**
  * Side panel composer state while a reply is pending or streaming (XS-10).
@@ -66,7 +71,7 @@ export const resolveSidepanelPrimaryAction = ({
 
 type StatusMessage = { isBot?: boolean; message?: string | null }
 
-type StatusModel = { model?: string; name?: string; nickname?: string }
+type StatusModel = ModelSelectorDescriptor & { nickname?: string }
 
 const STREAMING_CURSOR = /▋/g
 
@@ -81,17 +86,27 @@ export const isAwaitingFirstToken = (
   return String(last.message ?? "").replace(STREAMING_CURSOR, "").trim().length === 0
 }
 
-/** The selected model's display name, falling back to its id. */
+/**
+ * The selected model's display name. The picker stores a provider-qualified
+ * key (`provider:id`) while catalog rows carry `tldw:id`, so the row is found
+ * the way the picker finds it; without a catalog name the label is the
+ * "model (Provider)" form (CC-06).
+ */
 export const resolveResponseModelLabel = (
   selectedModel: string | null | undefined,
   models: readonly StatusModel[] | null | undefined
 ): string | null => {
   const selected = String(selectedModel ?? "").trim()
   if (!selected) return null
-  const match = (models ?? []).find(
-    (model) => model.model === selected || model.name === selected
-  )
-  return match?.nickname || match?.model || match?.name || selected
+  const catalog = [...(models ?? [])]
+  const match = (resolveModelSelectorSelection(catalog, selected).model ??
+    catalog.find((model) => model.model === selected || model.name === selected)) as
+    | StatusModel
+    | null
+    | undefined
+  const nickname = typeof match?.nickname === "string" ? match.nickname.trim() : ""
+  if (nickname) return nickname
+  return formatChatModelLabel(match ? { model: match } : { modelId: selected }) || selected
 }
 
 type SidepanelResponseStatusProps = {

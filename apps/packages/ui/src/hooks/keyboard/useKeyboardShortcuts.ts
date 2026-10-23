@@ -60,11 +60,25 @@ const DIGIT_KEY = /^[0-9]$/
 const LETTER_KEY = /^[a-z]$/
 
 /**
- * Alt/Option or Meta with a digit never types wanted text into a field, so
- * those chords (the area shortcuts) keep working while the composer has focus.
+ * Alt or Meta with a digit (the area shortcuts) may fire while the composer
+ * has focus, as long as the chord types no text there (see `typesText`).
  */
 const firesInsideEditable = (shortcut: KeyboardShortcut) =>
   Boolean(shortcut.altKey || shortcut.metaKey) && DIGIT_KEY.test(shortcut.key)
+
+/**
+ * True when an Alt/Option chord produced a character other than its own key.
+ * macOS layouts type with Option: US Option+5 is "∞", German and Swiss
+ * Option+5 is "[", Spanish Option+2 is "@", and Option+W is "∑". In a text
+ * field that is typing, so no shortcut may take it; the physical-key fallback
+ * in `matchesShortcutKey` applies only outside text fields.
+ */
+const typesText = (event: KeyboardEvent, key: string) => {
+  if (!event.altKey || event.ctrlKey || event.metaKey) return false
+  const typed = typeof event.key === "string" ? event.key : ""
+  if (typed === "Dead") return true
+  return [...typed].length === 1 && typed.toLowerCase() !== key.toLowerCase()
+}
 
 /**
  * Match on the typed key first. macOS Option (and AltGr layouts) change
@@ -89,17 +103,15 @@ export const executeKeyboardShortcuts = (
   event: KeyboardEvent,
   shortcuts: KeyboardShortcutConfig[]
 ) => {
+  const activeElement =
+    typeof document === "undefined" ? null : document.activeElement
+  const editable =
+    isEditableTarget(event.target) || isEditableTarget(activeElement)
   shortcuts.forEach(({ shortcut, action, enabled = true, ignoreIfEditable = false }) => {
     if (!enabled) return
-    if (ignoreIfEditable && !firesInsideEditable(shortcut)) {
-      const activeElement =
-        typeof document === "undefined" ? null : document.activeElement
-      if (
-        isEditableTarget(event.target) ||
-        isEditableTarget(activeElement)
-      ) {
-        return
-      }
+    if (editable) {
+      if (ignoreIfEditable && !firesInsideEditable(shortcut)) return
+      if (typesText(event, shortcut.key)) return
     }
 
     const {

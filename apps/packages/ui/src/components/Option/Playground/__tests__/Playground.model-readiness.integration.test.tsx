@@ -150,8 +150,10 @@ describe("Playground model readiness chip (CC-01, #3111)", { timeout: 90_000 }, 
       HARNESS_WAIT
     )
     expect(document.activeElement).toBe(screen.getByTestId("model-selector"))
-    expect(screen.getByTestId("model-readiness-announcement")).toHaveTextContent(
-      `Switched to ${FAKE_MODEL} (Custom OpenAI API)`
+    await waitFor(() =>
+      expect(screen.getByTestId("model-readiness-announcement")).toHaveTextContent(
+        `Switched to ${FAKE_MODEL} (Custom OpenAI API)`
+      )
     )
   })
 })

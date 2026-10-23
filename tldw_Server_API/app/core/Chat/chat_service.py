@@ -4203,7 +4203,8 @@ async def build_context_and_messages(
     regenerate_reply_id = request_metadata.get("tldw_regenerate_from_message_id") if isinstance(request_metadata, dict) else None
     if regenerate_reply_id is not None:
         if not isinstance(regenerate_reply_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", regenerate_reply_id):
-            raise HTTPException(status_code=422, detail="A valid saved reply ID is required for regeneration.")
+            # 400: the chat endpoint turns statuses outside its allow-list (422) into 500.
+            raise HTTPException(status_code=400, detail="A valid saved reply ID is required for regeneration.")
         if (not final_conversation_id or explicit_failed_retry
                 or getattr(request_data, "tldw_continuation", None) is not None):
             raise HTTPException(status_code=409, detail="Regeneration requires an existing saved answered turn.")

@@ -1715,7 +1715,14 @@
     "tagMatchLabel": "Show notes with",
     "tagMatchAll": "All these tags",
     "tagMatchAny": "Any of these tags",
-    "resultsRegionLabel": "Notes list"
+    "resultsRegionLabel": "Notes results",
+    "shortcutGroupList": "Notes list",
+    "shortcutListMoveDescription": "Move between notes in the list.",
+    "shortcutListOpenDescription": "Open the focused note.",
+    "shortcutListSelectDescription": "Select or clear the focused note.",
+    "shortcutListPinDescription": "Pin or unpin the focused note.",
+    "shortcutListAdjacentDescription": "Open the previous or next note.",
+    "shortcutListReturnDescription": "Return to the notes list."
   },
   "tts": {
     "playground": "TTS Playground"

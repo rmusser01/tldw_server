@@ -840,6 +840,7 @@ const expectVisibleComposerControlsRemainUsable = async (
           .elementsFromPoint(center.x, center.y)
           .find((element) => !feedbackElement.contains(element))
         return {
+          inSendCluster: sendCluster.contains(control),
           name:
             control.getAttribute("aria-label") ||
             control.getAttribute("title") ||
@@ -877,9 +878,12 @@ const expectVisibleComposerControlsRemainUsable = async (
   await expect(feedback).toBeAttached()
   // Which toolbar controls fit in a short panel depends on the composer's
   // rows (the model chip, XS-02) and target sizes (AX-16); require at least
-  // one besides the draft so the occlusion check below covers the toolbar.
+  // one outside the draft and the send cluster (which expectLayoutNeutralFeedback
+  // checks) so the occlusion check below covers the toolbar itself.
   expect(
-    result.controls.filter((control) => control.name !== "Message input"),
+    result.controls.filter(
+      (control) => control.name !== "Message input" && !control.inSendCluster
+    ),
     JSON.stringify(result.controls.map((control) => control.name))
   ).not.toEqual([])
   expect(
@@ -2139,6 +2143,60 @@ test.describe("Packaged extension prompt improvement parity", () => {
         await expect(input).toHaveValue(originalDraft)
         await page.setViewportSize({ width: 390, height: 844 })
       }
+    } finally {
+      await context?.close()
+      await stopPromptMockServer(mock)
+    }
+  })
+
+  // The side panel pins its composer by default (XS-09); a short panel must
+  // keep the pinned toolbar usable around feedback without any scrolling.
+  test("V3 pinned composer in a short panel keeps its visible controls usable around improvement feedback", async () => {
+    test.setTimeout(180_000)
+    const mock = await startPromptMockServer()
+    let context: BrowserContext | null = null
+    try {
+      const launched = await launchChatSurface(mock, "sidepanel", {
+        mode: "pro",
+        nextgen: true,
+        variant: "v3",
+        viewport: { width: 390, height: 844 }
+      })
+      context = launched.context
+      const page = launched.chatPage
+      const input = await ensureChatInput(page)
+      await seedExcludedContext(page)
+      const originalDraft = "Pinned {{topic}} draft."
+      await input.fill(originalDraft)
+      const sendCluster = page.getByTestId("sidepanel-send-action-cluster")
+      const initialCluster = await sendCluster.boundingBox()
+      expect(initialCluster).not.toBeNull()
+      const menu = await openPromptActions(page)
+      await clickThroughPaintedCenter(
+        page,
+        menu.actions.getByRole("button", { name: /Improve now/ })
+      )
+      const feedback = getPromptAssistFeedback(page, "Improvement applied.")
+      await waitForDrawersClosed(page, feedback)
+      await page.setViewportSize({ width: 360, height: 240 })
+      // The pinned dock takes at most 60% of the panel and scrolls on its own;
+      // bring its toolbar into view the way a user would.
+      await sendCluster.evaluate((cluster) => cluster.scrollIntoView({ block: "end" }))
+      await expectVisibleComposerControlsRemainUsable(page, feedback)
+      await expectLayoutNeutralFeedback(
+        page,
+        feedback,
+        input,
+        sendCluster,
+        initialCluster!,
+        true
+      )
+      await page.setViewportSize({ width: 390, height: 844 })
+      await clickThroughPaintedCenter(
+        page,
+        feedback.getByRole("button", { name: "Undo improvement" })
+      )
+      await expect(input).toHaveValue(originalDraft)
     } finally {
       await context?.close()
       await stopPromptMockServer(mock)

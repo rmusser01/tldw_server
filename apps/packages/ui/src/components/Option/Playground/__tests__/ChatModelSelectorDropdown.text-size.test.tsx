@@ -38,4 +38,32 @@ describe("Chat model selector text size", () => {
       expect(element).toHaveClass("text-[11px]")
     }
   })
+
+  it("renders the one-click model switch at 11px with a visible focus ring", () => {
+    render(
+      <ConfigProvider theme={{ token: { motion: false } }}>
+        <ChatModelSelectorDropdown
+          apiModelLabel="gpt-4o (OpenAI)"
+          connectionStatusLabel="Server connected"
+          modelDropdownOpen={false}
+          modelDropdownMenuItems={[]}
+          modelReadiness={{
+            state: "unreachable",
+            label: "Unreachable",
+            title: "OpenAI did not answer",
+            switchTarget: { key: "anthropic:claude", modelLabel: "claude (Anthropic)", label: "Switch to claude (Anthropic)" },
+            switchToTarget: () => undefined
+          }}
+          resolvedProviderKey="openai"
+          selectedModel="openai:gpt-4o"
+          setModelDropdownOpen={() => undefined}
+          setModelSearchQuery={() => undefined}
+        />
+      </ConfigProvider>
+    )
+
+    const switchButton = screen.getByTestId("model-readiness-switch")
+    expect(switchButton.className).not.toMatch(/\btext-\[(?:[0-9]|10)px\]/)
+    expect(switchButton).toHaveClass("text-[11px]", "focus-visible:ring-2", "focus-visible:ring-focus")
+  })
 })

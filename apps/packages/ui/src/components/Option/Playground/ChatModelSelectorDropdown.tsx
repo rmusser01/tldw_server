@@ -19,7 +19,15 @@ type ChatModelSelectorDropdownProps = {
    */
   modelLabelParts?: { modelName: string; providerName: string } | null
   connectionStatusLabel: string
+  /** The server cannot take a send (offline, unconfigured); always a warning. */
   connectionStatusWarning?: boolean
+  /** The first connection check is still running; named, but not a warning (CC-03). */
+  connectionStatusPending?: boolean
+  /**
+   * The server answers but is degraded. A warning unless the model's own
+   * readiness is shown, which is the more specific signal (CC-01).
+   */
+  connectionDegraded?: boolean
   catalogControls?: React.ReactNode
   modelUsabilityLabel?: string
   modelUsabilityTitle?: string
@@ -50,6 +58,8 @@ export const ChatModelSelectorDropdown = React.memo(
     catalogControls,
     connectionStatusLabel,
     connectionStatusWarning = false,
+    connectionStatusPending = false,
+    connectionDegraded = false,
     modelUsabilityLabel,
     modelUsabilityTitle,
     modelUsabilityWarning = false,
@@ -94,7 +104,9 @@ export const ChatModelSelectorDropdown = React.memo(
     // but showing that green badge next to "Select a model" is contradictory —
     // you cannot chat yet. Surface a truthful "No model selected" state instead.
     const noModelSelected = !selectedModel?.trim()
-    const providerSelectionNeeded = !noModelSelected && modelSelectorWarning && !modelUsabilityWarning && !connectionStatusWarning
+    // Offline or still connecting: the server connection is the only status.
+    const connectionBlocked = connectionStatusWarning || connectionStatusPending
+    const providerSelectionNeeded = !noModelSelected && modelSelectorWarning && !modelUsabilityWarning && !connectionBlocked
     // The model's own readiness applies only when nothing more specific
     // (offline server, missing provider, unusable model) is being shown.
     // Without evidence about the model (no reply yet, no provider report),
@@ -102,13 +114,15 @@ export const ChatModelSelectorDropdown = React.memo(
     const readinessShown = Boolean(
       modelReadiness &&
         modelReadiness.state !== "not_checked" &&
-        !connectionStatusWarning &&
+        !connectionBlocked &&
         !providerSelectionNeeded &&
         !modelUsabilityLabel &&
         !noModelSelected
     )
     const readinessWarning = readinessShown && modelReadiness?.state === "unreachable"
-    const statusLabel = connectionStatusWarning ? connectionStatusLabel :
+    const degradedShown = connectionDegraded && !connectionBlocked && !readinessShown
+    const connectionShown = connectionBlocked || degradedShown
+    const statusLabel = connectionShown ? connectionStatusLabel :
       (providerSelectionNeeded
         ? t("playground:composer.chooseProvider", "Choose provider")
         : modelUsabilityLabel) ??
@@ -117,12 +131,13 @@ export const ChatModelSelectorDropdown = React.memo(
         : readinessShown && modelReadiness
           ? modelReadiness.label
           : connectionStatusLabel)
-    const statusTitle = connectionStatusWarning ? connectionStatusLabel : providerSelectionNeeded ? apiModelLabel :
+    const statusTitle = connectionShown ? connectionStatusLabel : providerSelectionNeeded ? apiModelLabel :
       modelUsabilityTitle ?? (readinessShown && modelReadiness ? modelReadiness.title : apiModelLabel)
     const statusWarning =
       noModelSelected ||
       modelUsabilityWarning ||
       connectionStatusWarning ||
+      degradedShown ||
       modelSelectorWarning ||
       readinessWarning
     const switchTarget = readinessShown ? modelReadiness?.switchTarget ?? null : null
@@ -132,14 +147,16 @@ export const ChatModelSelectorDropdown = React.memo(
     const handleSwitchToTarget = React.useCallback(() => {
       if (!switchTarget || !modelReadiness) return
       modelReadiness.switchToTarget()
-      setSwitchAnnouncement(
+      // Clear first so a repeat switch to the same model is announced again.
+      setSwitchAnnouncement("")
+      window.setTimeout(() => setSwitchAnnouncement(
         String(
           t("playground:composer.modelReadiness.switchedTo", {
             defaultValue: "Switched to {{model}}",
             model: switchTarget.modelLabel
           } as never)
         )
-      )
+      ), 0)
       selectorRef.current?.focus()
     }, [modelReadiness, switchTarget, t])
 
@@ -342,7 +359,7 @@ export const ChatModelSelectorDropdown = React.memo(
           type="button"
           data-testid="model-readiness-switch"
           onClick={handleSwitchToTarget}
-          className="inline-flex min-h-[44px] min-w-0 max-w-full items-center rounded-full border border-border bg-surface px-2 text-[10px] text-text hover:bg-surface-hover"
+          className="inline-flex min-h-[44px] min-w-0 max-w-full items-center rounded-full border border-border bg-surface px-2 text-[11px] text-text hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           <span className="truncate">{switchTarget.label}</span>
         </button>

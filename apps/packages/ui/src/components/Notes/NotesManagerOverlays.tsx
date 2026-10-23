@@ -636,6 +636,19 @@ const NotesManagerOverlays: React.FC<NotesManagerOverlaysProps> = ({
           </div>
           <div>
             <div className="text-[11px] uppercase tracking-[0.08em] text-text-muted mb-1">
+              {t("option:notesSearch.shortcutGroupList", { defaultValue: "Notes list" })}
+            </div>
+            <div className="space-y-1">
+              <div><strong>↑ / ↓</strong>: {t("option:notesSearch.shortcutListMoveDescription", { defaultValue: "Move between notes in the list." })}</div>
+              <div><strong>Enter</strong>: {t("option:notesSearch.shortcutListOpenDescription", { defaultValue: "Open the focused note." })}</div>
+              <div><strong>X or Space</strong>: {t("option:notesSearch.shortcutListSelectDescription", { defaultValue: "Select or clear the focused note." })}</div>
+              <div><strong>P</strong>: {t("option:notesSearch.shortcutListPinDescription", { defaultValue: "Pin or unpin the focused note." })}</div>
+              <div><strong>Alt + ↑ / ↓</strong>: {t("option:notesSearch.shortcutListAdjacentDescription", { defaultValue: "Open the previous or next note." })}</div>
+              <div><strong>Esc (in the editor)</strong>: {t("option:notesSearch.shortcutListReturnDescription", { defaultValue: "Return to the notes list." })}</div>
+            </div>
+          </div>
+          <div>
+            <div className="text-[11px] uppercase tracking-[0.08em] text-text-muted mb-1">
               {t("option:notesSearch.shortcutGroupEditing", { defaultValue: "Editing" })}
             </div>
             <div className="space-y-1">

@@ -99,6 +99,29 @@ describe("saved reply action availability (CM-01)", () => {
     expect(savedReplyActionAvailability({ historySelection, messages: visible }).regenerate).toBe("unsupported")
   })
 
+  // The local regenerate handler resends one question with at most one image.
+  it("does not offer Regenerate for a local question with more than one image", () => {
+    const capture = captured()
+    const historySelection = controller({
+      status: "ready",
+      owner: { kind: "local" },
+      view,
+      capture: {
+        ...capture,
+        selected_content: [
+          { ...capture.selected_content[0], images: ["data:image/png;base64,a", "data:image/png;base64,b"] },
+          capture.selected_content[1]
+        ]
+      }
+    })
+    expect(savedReplyActionAvailability({ historySelection, messages: visible }).regenerate).toBe("unsupported")
+  })
+
+  it("does not offer Regenerate for a local history without a view", () => {
+    const historySelection = controller({ status: "ready", owner: { kind: "local" }, view: null, capture: captured() })
+    expect(savedReplyActionAvailability({ historySelection, messages: visible }).regenerate).toBe("unsupported")
+  })
+
   it.each([
     ["a legacy linear history", ready({ interpretation: { kind: "legacy_linear_v1", projection_id: "p" } })],
     ["a history that needs review", controller({ status: "legacy_review_required", owner: { kind: "native" } })],

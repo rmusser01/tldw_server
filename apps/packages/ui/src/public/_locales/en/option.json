@@ -7005,6 +7005,27 @@
     "message": "Any of these tags"
   },
   "notesSearch_resultsRegionLabel": {
+    "message": "Notes results"
+  },
+  "notesSearch_shortcutGroupList": {
     "message": "Notes list"
+  },
+  "notesSearch_shortcutListMoveDescription": {
+    "message": "Move between notes in the list."
+  },
+  "notesSearch_shortcutListOpenDescription": {
+    "message": "Open the focused note."
+  },
+  "notesSearch_shortcutListSelectDescription": {
+    "message": "Select or clear the focused note."
+  },
+  "notesSearch_shortcutListPinDescription": {
+    "message": "Pin or unpin the focused note."
+  },
+  "notesSearch_shortcutListAdjacentDescription": {
+    "message": "Open the previous or next note."
+  },
+  "notesSearch_shortcutListReturnDescription": {
+    "message": "Return to the notes list."
   }
 }

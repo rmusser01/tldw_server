@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
   buildServerChatPath,
   historyHandoffState,
+  isAddressableServerChatId,
   isCharacterChatRouteSearch,
   isServerChatNavigationPending,
   planServerChatNavigation,
@@ -9,7 +10,7 @@ import {
   reportMountedChatRoute,
   resetServerChatRouteState,
   settleServerChatNavigation,
-  withoutHistoryHandoff,
+  withoutConsumedParams,
   withServerChatRouteId
 } from "../server-chat-route"
 
@@ -82,6 +83,44 @@ describe("chat address and the history handoff link", () => {
   })
 
   it("drops a consumed handoff from the query it writes", () => {
-    expect(withServerChatRouteId(withoutHistoryHandoff(`${handoff}&tab=x`), "c1")).toBe("?tab=x&chat=c1")
+    expect(
+      withServerChatRouteId(withoutConsumedParams(`${handoff}&tab=x`, "http://app.test/chat?tab=x"), "c1")
+    ).toBe("?tab=x&chat=c1")
+  })
+})
+
+// Returning from Settings or a research run also arrives as one-shot
+// parameters that the Playground removes with history.replaceState.
+describe("chat address and one-shot return parameters", () => {
+  const returned = "?settingsServerChatId=c1&settingsHistoryId=h1&researchReturnRunId=r1&tab=x"
+
+  it("drops return parameters the browser address no longer carries", () => {
+    expect(withoutConsumedParams(returned, "http://app.test/chat?tab=x")).toBe("?tab=x")
+  })
+
+  it("drops them from a hash-routed address too", () => {
+    expect(withoutConsumedParams(returned, "chrome-extension://x/options.html#/chat?tab=x")).toBe("?tab=x")
+  })
+
+  it("keeps return parameters the browser address still carries", () => {
+    expect(withoutConsumedParams(returned, `http://app.test/chat${returned}`)).toBe(returned)
+  })
+
+  it("never drops other parameters, even when only the router knows them", () => {
+    expect(withoutConsumedParams("?tab=x&mode=pro", "http://localhost/")).toBe("?tab=x&mode=pro")
+  })
+})
+
+// The address can name only ids the route pattern reads back; writing any
+// other id would be read as "no chat" and rewritten forever.
+describe("addressable chat ids", () => {
+  it("accepts server chat ids", () => {
+    expect(isAddressableServerChatId("3f2b8c1e-9d4a-4e6b-8f1a-2c3d4e5f6a7b")).toBe(true)
+  })
+
+  it("rejects ids the address cannot carry", () => {
+    expect(isAddressableServerChatId("has spaces")).toBe(false)
+    expect(isAddressableServerChatId("-leading-dash")).toBe(false)
+    expect(isAddressableServerChatId("x".repeat(200))).toBe(false)
   })
 })

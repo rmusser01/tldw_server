@@ -3478,9 +3478,9 @@ export const PlaygroundForm = ({
       modelLabelParts={modelLabelParts}
       catalogControls={modelCatalogControls}
       connectionStatusLabel={connectionStatusLabel}
-      connectionStatusWarning={
-        !isConnectionReady || (!composerModelReadiness && connectionUxState === "connected_degraded")
-      }
+      connectionStatusWarning={!isConnectionReady && !connectionPending}
+      connectionStatusPending={connectionPending}
+      connectionDegraded={connectionUxState === "connected_degraded"}
       modelUsabilityLabel={characterChatModelUsabilityLabel ?? undefined}
       modelUsabilityTitle={characterChatModelUsabilityTitle ?? undefined}
       modelUsabilityWarning={Boolean(

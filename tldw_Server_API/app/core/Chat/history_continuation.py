@@ -40,7 +40,8 @@ def parse_continue_reply_id(
 
     Continue is only defined for a saved, owner-selected reply, so it requires an
     existing conversation and a versioned history selection, and it cannot be
-    combined with Regenerate, failed-turn Retry or legacy continuation controls.
+    combined with Regenerate, failed-turn Retry, legacy continuation controls or
+    tool definitions.
     """
     metadata = getattr(request_data, "metadata", None)
     reply_id = metadata.get(CONTINUE_METADATA_KEY) if isinstance(metadata, dict) else None
@@ -56,6 +57,10 @@ def parse_continue_reply_id(
     ):
         raise HTTPException(status_code=409, detail="Continue requires an existing saved reply and no other reply action.")
     if getattr(request_data, "tldw_history_selection_v1", None) is None:
+        raise _unsupported()
+    # A continuation extends saved text. Tool calls would be saved behind the
+    # old reply text, and continued_reply_prefix already refuses tool replies.
+    if getattr(request_data, "tools", None) or getattr(request_data, "tool_choice", None) not in (None, "none"):
         raise _unsupported()
     return reply_id
 

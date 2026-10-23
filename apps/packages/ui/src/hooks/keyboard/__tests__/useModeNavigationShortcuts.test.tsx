@@ -51,7 +51,7 @@ describe("useModeNavigationShortcuts", () => {
     expect(useRouteTransitionStore.getState().pendingPath).toBeNull()
   })
 
-  it("still navigates while an editable element is focused, since Alt+digit types no text (XP-10)", () => {
+  it("still navigates from an editable element when Alt+digit types no text, as on Windows and Linux (XP-10)", () => {
     const navigate = vi.fn()
     const input = document.createElement("input")
     document.body.appendChild(input)

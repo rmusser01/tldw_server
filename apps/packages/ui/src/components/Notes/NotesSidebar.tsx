@@ -1031,11 +1031,15 @@ const NotesSidebar: React.FC<NotesSidebarProps> = ({
                 data-testid="notes-sidebar-controls-more"
               >
                 <div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-t from-surface via-surface/90 to-transparent pb-1 pt-6">
+                  {/* A pointer affordance: keyboard focus already scrolls the
+                      controls, and this cue unmounts once they are shown. */}
                   <Button
                     size="small"
                     type="link"
                     className="pointer-events-auto text-xs"
                     onClick={showMoreControls}
+                    tabIndex={-1}
+                    aria-hidden="true"
                   >
                     {t('option:notesSearch.controlsMoreBelow', {
                       defaultValue: 'More filters below'

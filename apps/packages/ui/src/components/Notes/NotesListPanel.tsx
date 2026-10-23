@@ -501,7 +501,7 @@ const NotesListPanel: React.FC<NotesListPanelProps> = ({
           : {
               tabIndex: 0,
               role: 'region',
-              'aria-label': t('option:notesSearch.resultsRegionLabel', { defaultValue: 'Notes list' })
+              'aria-label': t('option:notesSearch.resultsRegionLabel', { defaultValue: 'Notes results' })
             })}
       >
       {isRefreshingRows && (

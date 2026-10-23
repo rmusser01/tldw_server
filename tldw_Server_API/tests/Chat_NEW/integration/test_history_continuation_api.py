@@ -175,5 +175,22 @@ def test_continue_requires_a_valid_reply_id(history_api):
     answered(client, cid, headers)
     before = db.get_messages_for_conversation(cid)
     response = continue_reply(client, cid, headers, select(client, cid, headers, after="a1"), target="not a valid id!")
+    # The same status Regenerate uses for an invalid reply id.
     assert response.status_code == 400, response.text
+    assert db.get_messages_for_conversation(cid) == before
+
+
+def test_continue_refuses_tool_definitions(history_api):
+    # A continuation extends saved text; it must not end in tool calls that
+    # would be saved behind the old reply text.
+    client, db, cid, headers = history_api
+    answered(client, cid, headers)
+    before = db.get_messages_for_conversation(cid)
+    tools = [{"type": "function", "function": {"name": "lookup", "parameters": {"type": "object", "properties": {}}}}]
+    response = continue_reply(client, cid, headers, select(client, cid, headers, after="a1"), tools=tools)
+    assert response.status_code == 409, response.text
+    assert response.json()["detail"] == {
+        "status": "unsupported_history_capability",
+        "code": "unsupported_history_continuation",
+    }
     assert db.get_messages_for_conversation(cid) == before

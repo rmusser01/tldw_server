@@ -201,15 +201,21 @@ const AVAILABLE: SavedReplyActionAvailability = Object.freeze({
  * history ends with an answer to the question before it (any order for a
  * legacy linear history). Native histories need a saved-reply target instead.
  */
+// Mirrors the local regenerate path in handlers/messageHandlers.ts, which
+// resends the question before the answer with at most one image.
 const localHistoryRegenerateReady = (state: SelectionState): boolean => {
-  if (state?.status !== "ready" || state.owner?.kind !== "local" || state.capture?.status !== "captured")
+  if (state?.status !== "ready" || state.owner?.kind !== "local" || !state.view ||
+      state.capture?.status !== "captured")
     return false
   const answer = state.capture.rows.at(-1)
   const question = state.capture.rows.at(-2)
+  const content = state.capture.selected_content.at(-2)
   return (
     answer?.role === "assistant" &&
     question?.role === "user" &&
-    (state.view?.interpretation.kind === "legacy_linear_v1" || answer.parent_id === question.id)
+    (state.view.interpretation.kind === "legacy_linear_v1" || answer.parent_id === question.id) &&
+    Boolean(content) &&
+    content!.images.length <= 1
   )
 }
 

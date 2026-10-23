@@ -57,7 +57,11 @@ describe('NotesSidebar viewport frame (NO-01)', () => {
     act(() => {
       fireEvent.scroll(controls)
     })
-    const more = screen.getByRole('button', { name: 'More filters below' })
+    // A pointer-only cue: keyboard focus already scrolls the controls, and a
+    // focused cue would drop focus when it unmounts.
+    const more = screen.getByText('More filters below').closest('button')!
+    expect(more).toHaveAttribute('tabindex', '-1')
+    expect(more).toHaveAttribute('aria-hidden', 'true')
     expect(screen.getByTestId('notes-sidebar-controls-more')).toBeInTheDocument()
 
     fireEvent.click(more)

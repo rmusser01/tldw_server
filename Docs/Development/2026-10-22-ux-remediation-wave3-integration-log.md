@@ -246,3 +246,111 @@ cover. Each fix follows the merged behaviour, not the older one.
     24 s locally, where it passes). The branch does not touch Admin.
   - The extension E2E job once timed out installing Playwright (apt mirror)
     before any test ran.
+
+## 7. Code review (2026-10-23)
+
+Seven reviewers (`superpowers:code-reviewer`), one per area plus a
+test-integrity audit, reviewed `d47c9ccf58..dcc320d332`. Every finding was
+checked against the code. Each fix below has a test that failed first.
+
+### Fixed
+
+- **Critical: Option/Alt chords swallowed typing (XP-10).** On macOS, Option
+  types characters: German/Swiss Option+5 is "[", Spanish Option+2 is "@",
+  US Option+5 is "∞" and Option+W is "∑". In a text field these
+  chords now count as typing, so no shortcut takes them: area switching
+  (Option+digit) and the side panel's Option+W web search.
+  - Outside text fields, the physical-key fallback still works.
+  - Windows/Linux Alt+5 (key "5") still switches area from the composer.
+- **Model chip hid a degraded server.** With a model selected but no evidence
+  yet, "Degraded" showed in the healthy style, and the accessible name dropped
+  it.
+  - The chip now gets `connectionDegraded` and treats it as a warning unless the
+    model's own readiness is shown.
+  - "Connecting…" is neutral (CC-03).
+  - The one-click switch is 11px with a focus ring, and its announcement
+    repeats.
+- **Side panel "Waiting for <model>…" named the raw key.** The picker stores
+  `provider:id` while catalog rows carry `tldw:id`. The status now finds the
+  row the way the picker does, and falls back to "model (Provider)".
+- **The chat address brought back consumed one-shot parameters.**
+  - The Settings and research return parameters (`settingsHistoryId`,
+    `settingsServerChatId`, `researchReturnRunId`) and the history handoff are
+    removed by the Playground with `history.replaceState`.
+  - The address sync now drops any of them that the real browser address no
+    longer carries.
+  - A chat id that the address cannot represent gets no address, instead of
+    an endless rewrite.
+- **Notes list keys were undiscoverable (AX-03).** The shortcuts dialog has a
+  "Notes list" group (arrows, Enter, X/Space, P, Alt+arrows, Esc).
+- **Prompt picker tooltip covered its own menu.** The "Select a Prompt" hover
+  help sat over the upward menu's last item, "Edit system prompt", and caught
+  the pointer. It now hides while the menu is open, as the model chip's help
+  does.
+- **Smaller fixes:**
+  - Local Regenerate is no longer offered when the handler would refuse it
+    (no view, or a question with several images).
+  - The empty-results region is "Notes results", so landmarks are unique.
+  - The delete toast uses the shared key helper.
+  - The "More filters below" cue is pointer-only, so it can't drop focus.
+  - Thread search scrolling honours reduced motion.
+  - The duplicate `focusComposer` is gone.
+- **Backend:**
+  - Continue refuses `tools`/`tool_choice` (409
+    `unsupported_history_continuation`). Tool calls would otherwise be saved
+    behind the old reply text.
+  - An invalid reply id is now 400 for both Continue and Regenerate. The chat
+    endpoint turns statuses outside its allow-list, such as Regenerate's old
+    422, into 500.
+- **Extension E2E:**
+  - The short-panel guard needs a visible control outside the draft and the
+    send cluster.
+  - A new test covers the default pinned composer in a 240px panel.
+  - Note: the extension harness never removes its per-run browser profiles
+    (`apps/extension/tmp-playwright-profile`, about 1.3 GB per full run).
+
+### Follow-ups (not fixed here)
+
+- **Chat:**
+  - Role-play steering ("Continue as user", "Force narrate") is offered in saved
+    character chats, where `sendSavedRoleplay` refuses it (CM-01/CM-09; older
+    than this branch).
+  - A refused Continue does not withdraw Regenerate.
+  - Continue errors still reuse Regenerate wording and codes.
+  - Continue's saved-reply prefix should drop trailing whitespace before it is
+    sent to providers that reject it.
+  - "Copied" may not be announced, because the live region sits inside the
+    button. Clipboard failures are silent.
+  - The trash Undo toast is hard to reach by keyboard.
+  - Readiness evidence counts any 5xx and is not cleared on account change.
+  - The "All models" catalog fails silently.
+- **Side panel:**
+  - Pro + v5 composer has no model picker on a blocked send.
+  - Stop replaces attach and dictation for the whole pending request.
+  - The scroll-to-latest pill floats when the composer is unpinned.
+  - The `sidepanelStickyChatInput` default change has no migration (deliberate,
+    XS-09).
+- **Notes:**
+  - Connections neighbour requests are not cancelled, and a 403 repeats on
+    each switch.
+  - "Loading…" shows on every refetch of an empty list.
+  - The tag-match toggle counts Inbox's hidden token.
+  - `tokens_match` and `legacy_aliases` are ignored by an older server.
+- **Navigation:**
+  - Title-restoring cleanups (`AdminRouteShell`, voice chat) undo XP-19's title
+    reset.
+  - New chat replaces the previous chat's history entry.
+  - A stale pending-navigation marker.
+  - A failed history handoff stops address writes.
+  - A visible tutorial prompt still closes on a same-page address change.
+- **Accessibility:**
+  - Status text on its own `/10` tint is still 4.1–4.4:1.
+  - `text-subtle` and `text-muted` now nearly match.
+  - The a11y ratchet scans only the dark theme.
+- **Backend:**
+  - On SQLite, non-ASCII capitalised tags never match (`LOWER` is ASCII-only;
+    older than this branch).
+  - The `list_notes` docstring is outdated.
+  - Build NS-04 previews.
+- **Review document:** XP-10's recommendation ("Alt+digit never types text") is
+  wrong for macOS and should be corrected.

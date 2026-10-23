@@ -228,6 +228,28 @@ describe("NotesManagerPage stage 20 accessibility shortcut discovery", () => {
     )
   })
 
+  // AX-03 took the row checkbox and pin out of the Tab order; their keys must
+  // be discoverable without a screen reader.
+  it("documents the notes list keys for selecting, pinning and moving between notes (AX-03)", async () => {
+    renderPage()
+
+    fireEvent.click(screen.getByTestId("notes-shortcuts-help-button"))
+    const sheet = await screen.findByTestId("notes-shortcuts-modal")
+    const rowFor = (keys: string) =>
+      Array.from(sheet.querySelectorAll("div")).find(
+        (row) =>
+          row.childElementCount === 1 &&
+          row.querySelector("strong")?.textContent === keys
+      )
+
+    expect(rowFor("↑ / ↓")).toHaveTextContent("Move between notes in the list.")
+    expect(rowFor("Enter")).toHaveTextContent("Open the focused note.")
+    expect(rowFor("X or Space")).toHaveTextContent("Select or clear the focused note.")
+    expect(rowFor("P")).toHaveTextContent("Pin or unpin the focused note.")
+    expect(rowFor("Alt + ↑ / ↓")).toHaveTextContent("Open the previous or next note.")
+    expect(rowFor("Esc (in the editor)")).toHaveTextContent("Return to the notes list.")
+  })
+
   it("documents the search key that works on Notes, not the command palette's Ctrl/Cmd+K (XP-07)", async () => {
     renderPage()
 

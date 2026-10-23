@@ -6,7 +6,8 @@ import {
   executeKeyboardShortcuts,
   useChatModeShortcuts,
   useModeNavigationShortcuts,
-  useSidebarShortcuts
+  useSidebarShortcuts,
+  useWebSearchShortcuts
 } from "../useKeyboardShortcuts"
 
 const typeInto = () => {
@@ -79,15 +80,55 @@ describe("shortcuts pressed while typing", () => {
     expect(navigate).toHaveBeenCalledWith("/notes")
   })
 
-  it("switches area with Option+5 on macOS, where the key reports '∞' (XP-10)", () => {
+  it("switches area with Option+5 on macOS outside a text field, where the key reports '∞' (XP-10)", () => {
+    const navigate = vi.fn()
+    renderHook(() => useModeNavigationShortcuts(navigate))
+
+    const event = pressFrom(document.body, { key: "∞", code: "Digit5", altKey: true })
+
+    expect(navigate).toHaveBeenCalledWith("/notes")
+    expect(event.defaultPrevented).toBe(true)
+  })
+
+  // macOS layouts type characters with Option+digit: US "∞", German/Swiss
+  // "[" (Option+5), Spanish "@" (Option+2). In a text field that is typing.
+  it.each([
+    ["∞", "Digit5"],
+    ["[", "Digit5"],
+    ["]", "Digit6"],
+    ["{", "Digit8"],
+    ["@", "Digit2"],
+    ["#", "Digit3"]
+  ])("leaves Option+digit that types %j to the text field", (key, code) => {
     const navigate = vi.fn()
     renderHook(() => useModeNavigationShortcuts(navigate))
     const textarea = typeInto()
 
-    const event = pressFrom(textarea, { key: "∞", code: "Digit5", altKey: true })
+    const event = pressFrom(textarea, { key, code, altKey: true })
 
-    expect(navigate).toHaveBeenCalledWith("/notes")
-    expect(event.defaultPrevented).toBe(true)
+    expect(navigate).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it("leaves Option+W that types '∑' to the side panel composer instead of toggling web search", () => {
+    const toggleWebSearch = vi.fn()
+    renderHook(() => useWebSearchShortcuts(toggleWebSearch))
+    const textarea = typeInto()
+
+    const event = pressFrom(textarea, { key: "∑", code: "KeyW", altKey: true })
+
+    expect(toggleWebSearch).not.toHaveBeenCalled()
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it("still toggles web search with Alt+W from the composer where the chord types no text", () => {
+    const toggleWebSearch = vi.fn()
+    renderHook(() => useWebSearchShortcuts(toggleWebSearch))
+    const textarea = typeInto()
+
+    pressFrom(textarea, { key: "w", code: "KeyW", altKey: true })
+
+    expect(toggleWebSearch).toHaveBeenCalledTimes(1)
   })
 
   it("does not treat Alt with a number-pad digit as an area shortcut (XP-10)", () => {

@@ -91,6 +91,32 @@ describe("side panel waiting status (XS-10)", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Waiting for Mock GPT-4o…")
   })
 
+  it("names a model chosen in the picker, which stores a provider-qualified key", () => {
+    // Catalog rows as mapTldwModelToUi builds them; selections use getCanonicalModelKey.
+    render(
+      <SidepanelResponseStatus
+        isSending
+        messages={pending}
+        selectedModel="custom-openai-api:mock-gpt-4o"
+        models={[
+          {
+            id: "mock-gpt-4o",
+            name: "tldw:mock-gpt-4o",
+            model: "tldw:mock-gpt-4o",
+            provider: "custom-openai-api",
+            nickname: "Mock GPT-4o"
+          }
+        ]}
+      />
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("Waiting for Mock GPT-4o…")
+  })
+
+  it("names an uncatalogued provider-qualified model as 'model (Provider)' (CC-06)", () => {
+    render(<SidepanelResponseStatus isSending messages={pending} selectedModel="openai:gpt-4o" />)
+    expect(screen.getByRole("status")).toHaveTextContent("Waiting for gpt-4o (OpenAI)…")
+  })
+
   it("falls back to the model id when the catalog has no name for it", () => {
     render(<SidepanelResponseStatus isSending messages={pending} selectedModel="llama3:8b" />)
     expect(screen.getByRole("status")).toHaveTextContent("Waiting for llama3:8b…")

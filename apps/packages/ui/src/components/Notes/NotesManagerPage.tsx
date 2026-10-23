@@ -126,7 +126,7 @@ import { revealNotesListAndFocusSearch } from "@/components/Notes/hooks/useNotes
 import { focusActiveNotesListRow } from "@/components/Notes/notes-list-keyboard"
 import { buildNotesTimelineSections } from "@/components/Notes/notes-timeline"
 import { isNotesServerUnavailableError } from "@/components/Notes/notes-list-error"
-import { buildMoveToTrashConfirm, dismissNoteDeletedToast, findNoteTitleForConfirm } from "@/components/Notes/notes-trash"
+import { buildMoveToTrashConfirm, dismissNoteDeletedToast, findNoteTitleForConfirm, notesDeleteToastKey } from "@/components/Notes/notes-trash"
 import NotesTrashGuidance from "@/components/Notes/NotesTrashGuidance"
 import { useLatchedFlag } from "./hooks/useLatchedFlag"
 
@@ -1379,7 +1379,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
 
   const showDeleteUndoToast = React.useCallback(
     (noteId: string, original: MutationOwner) => {
-      const toastKey = `notes-delete-${noteId}`
+      const toastKey = notesDeleteToastKey(noteId)
       const handleUndo = async () => {
         if (!original.isOwnerCurrent()) return
         const operation = beginNoteMutation(original)

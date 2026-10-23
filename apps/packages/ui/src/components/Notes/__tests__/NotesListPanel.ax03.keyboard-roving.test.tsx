@@ -173,7 +173,8 @@ describe("NotesListPanel results scroller", () => {
 
     const scroller = screen.getByTestId("notes-results-scroll")
     expect(scroller).toHaveAttribute("tabindex", "0")
-    expect(scroller).toHaveAccessibleName("Notes list")
+    // Distinct from the sidebar's "Notes list" region (axe landmark-unique).
+    expect(scroller).toHaveAccessibleName("Notes results")
   })
 
   it("adds no Tab stop when the rows are focusable", () => {

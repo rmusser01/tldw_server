@@ -5,12 +5,13 @@ import type { ServerChatSummary } from "@/services/tldw/TldwApiClient"
 import { useStoreMessageOption } from "@/store/option"
 import {
   historyHandoffState,
+  isAddressableServerChatId,
   isCharacterChatRouteSearch,
   isServerChatNavigationPending,
   readServerChatRouteId,
   reportMountedChatRoute,
   settleServerChatNavigation,
-  withoutHistoryHandoff,
+  withoutConsumedParams,
   withServerChatRouteId
 } from "@/hooks/chat/server-chat-route"
 
@@ -59,16 +60,18 @@ export const useServerChatRouteSync = () => {
     }
     const current = useStoreMessageOption.getState()
     // No saved chat open (null or not yet set) means the address names none.
-    const activeChatId = current.temporaryChat ? null : current.serverChatId ?? null
+    const openChatId = current.temporaryChat ? null : current.serverChatId ?? null
+    const activeChatId =
+      openChatId && isAddressableServerChatId(openChatId) ? openChatId : null
     if (activeChatId === routeChatId) return
     // A navigation that names this chat is on its way; let it land.
     if (isServerChatNavigationPending(activeChatId)) return
     // A history handoff link is consumed by the Playground first; writing the
-    // address meanwhile would drop it, and writing it afterwards from the
-    // router's stale query would bring it back.
-    const handoff = historyHandoffState(search)
-    if (handoff === "pending") return
-    const baseSearch = handoff === "consumed" ? withoutHistoryHandoff(search) : search
+    // address meanwhile would drop it. Once it and any Settings or research
+    // return parameters are consumed, writing from the router's stale query
+    // must not bring them back.
+    if (historyHandoffState(search) === "pending") return
+    const baseSearch = withoutConsumedParams(search)
     navigate(
       {
         pathname: location.pathname,

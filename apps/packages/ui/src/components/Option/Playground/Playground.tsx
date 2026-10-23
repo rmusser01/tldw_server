@@ -713,9 +713,6 @@ const PlaygroundContent = () => {
     "idle" | "dragging" | "error"
   >("idle");
   const [threadSearchOpen, setThreadSearchOpen] = React.useState(false);
-  const focusComposer = React.useCallback(() => {
-    window.dispatchEvent(new CustomEvent("tldw:focus-composer"));
-  }, []);
   const {
     rememberFocus: rememberThreadSearchOpener,
     restoreFocus: restoreThreadSearchOpener,
@@ -2510,7 +2507,7 @@ const PlaygroundContent = () => {
       revealThreadSearchMark(
         containerRef.current,
         messageIndex,
-        messages.length > 100 ? "auto" : "smooth",
+        messages.length > 100 ? "auto" : smoothScrollBehavior(),
       );
     },
     [containerRef, messages.length, scrollToMessageIndex],

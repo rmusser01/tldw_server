@@ -10,6 +10,11 @@
  * current entry instead.
  */
 import { normalizeCharacterChatSessionId } from "@/utils/character-chat-mode-intent"
+import {
+  RESEARCH_RETURN_RUN_ID_PARAM,
+  SETTINGS_HISTORY_ID_PARAM,
+  SETTINGS_SERVER_CHAT_ID_PARAM
+} from "@/utils/settings-return-params"
 
 export const SERVER_CHAT_ROUTE_PARAM = "chat"
 
@@ -67,13 +72,49 @@ export const historyHandoffState = (
     : "consumed"
 }
 
-/** `search` without the history handoff parameter. */
-export const withoutHistoryHandoff = (search: string | null | undefined): string => {
+/**
+ * One-shot parameters the Playground reads on arrival and then removes with
+ * `history.replaceState`: the history handoff and the Settings or research
+ * return targets. The router does not see that removal.
+ */
+const CONSUMED_ON_ARRIVAL_PARAMS = [
+  HISTORY_SELECTION_HANDOFF_PARAM,
+  SETTINGS_HISTORY_ID_PARAM,
+  SETTINGS_SERVER_CHAT_ID_PARAM,
+  RESEARCH_RETURN_RUN_ID_PARAM
+]
+
+/**
+ * `search` without the one-shot parameters the real browser address no
+ * longer carries, so writing the chat address from the router's stale query
+ * never brings a consumed one back. Other parameters are always kept.
+ */
+export const withoutConsumedParams = (
+  search: string | null | undefined,
+  browserHref: string | null | undefined = typeof window === "undefined"
+    ? null
+    : window.location.href
+): string => {
   const params = toSearchParams(search)
-  params.delete(HISTORY_SELECTION_HANDOFF_PARAM)
+  if (browserHref) {
+    const queries = browserQueries(browserHref)
+    for (const name of CONSUMED_ON_ARRIVAL_PARAMS) {
+      if (params.has(name) && !queries.some((query) => query.has(name))) {
+        params.delete(name)
+      }
+    }
+  }
   const next = params.toString()
   return next ? `?${next}` : ""
 }
+
+/**
+ * True when the address can name this chat: the id survives a write and a
+ * read of the chat parameter. Other ids get no address, rather than an
+ * endless rewrite of one that reads back as "no chat".
+ */
+export const isAddressableServerChatId = (chatId: string): boolean =>
+  readServerChatRouteId(withServerChatRouteId("", chatId)) === chatId
 
 /** `search` with the chat parameter set to `chatId`, or removed when it is null. */
 export const withServerChatRouteId = (
