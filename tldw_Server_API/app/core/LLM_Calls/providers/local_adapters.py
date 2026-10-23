@@ -9,9 +9,11 @@ from tldw_Server_API.app.core.AuthNZ.provider_credential_runtime import (
     PROVIDER_CALL_CREDENTIALS_CONTEXT_KEY,
 )
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAuthenticationError,
     ChatBadRequestError,
     ChatConfigurationError,
     ChatProviderError,
+    ChatRateLimitError,
 )
 from tldw_Server_API.app.core.Chat.chat_helpers import extract_response_content
 from tldw_Server_API.app.core.config import load_settings
@@ -104,6 +106,7 @@ _LOCAL_ADAPTERS_NONCRITICAL_EXCEPTIONS = (
 _LOCAL_PROVIDER_UNAVAILABLE_MESSAGE = (
     "The local model provider is currently unavailable."
 )
+_LOCAL_PROVIDER_AUTH_MESSAGE = "The local model provider rejected the credentials."
 
 
 def _bounded_local_provider_name(value: Any) -> str:
@@ -153,15 +156,22 @@ def _close_local_provider_resource(
         _log_local_provider_failure(provider_name, exc, phase=phase)
 
 
-def _local_provider_stream_error_frame(provider_name: Any) -> str:
-    """Build the canonical bounded SSE error for local-provider failures."""
+def _local_provider_stream_error_frame(provider_name: Any, status: int | None = None) -> str:
+    """Build the canonical bounded SSE error for local-provider failures.
+
+    A 401 or 403 reply gets the code a remote provider's stream gets for one; every other
+    failure, a 429 included, is ``provider_unavailable``, as it is for a remote provider.
+    """
 
     provider = _bounded_local_provider_name(provider_name)
+    auth_failed = status in (401, 403)
     return sse_data(
         {
             "error": {
-                "code": "provider_unavailable",
-                "message": _LOCAL_PROVIDER_UNAVAILABLE_MESSAGE,
+                "code": "provider_authentication_failed" if auth_failed else "provider_unavailable",
+                "message": (
+                    _LOCAL_PROVIDER_AUTH_MESSAGE if auth_failed else _LOCAL_PROVIDER_UNAVAILABLE_MESSAGE
+                ),
                 "type": f"{provider}_stream_error",
             }
         }
@@ -211,13 +221,18 @@ def _raise_sanitized_local_provider_error(
     if isinstance(exc, ChatBadRequestError) or (
         isinstance(status, int) and 400 <= status < 500
     ):
-        error = ChatBadRequestError(
-            provider=provider,
-            message="The local model provider rejected the request.",
-        )
+        # The types a remote provider's 401, 403 and 429 get, so chat answers them alike.
+        if status in (401, 403):
+            error = ChatAuthenticationError(provider=provider, status_code=status)
+        elif status == 429:
+            error = ChatRateLimitError(provider=provider)
+        else:
+            error = ChatBadRequestError(
+                provider=provider,
+                message="The local model provider rejected the request.",
+            )
         if status is not None:
-            # As ChatProvider._raise_sanitized_provider_failure: a summary reads it to tell a
-            # local 401, 403 or 429 from a rejected request. Chat responses do not use it.
+            # As ChatProvider._raise_sanitized_provider_failure.
             error.upstream_status_code = status
         raise_detached_error(error)
     public_status = 504 if is_network_error(exc) else 502
@@ -455,6 +470,7 @@ def _chat_with_openai_compatible_local_server(
         def stream_generator():
             upstream_done = False
             error_pending = False
+            error_status = None
             response_obj = None
             session = None
             try:
@@ -504,9 +520,10 @@ def _chat_with_openai_compatible_local_server(
                             phase="stream_request",
                         )
                         error_pending = True
+                        error_status = get_http_status_from_exception(exc)
 
                 if error_pending:
-                    yield _local_provider_stream_error_frame(safe_provider_name)
+                    yield _local_provider_stream_error_frame(safe_provider_name, error_status)
                 # Defer the terminal marker until the response context exits. This
                 # prevents cleanup failures from producing DONE -> error -> DONE.
                 yield from finalize_stream(response_obj, done_already=False)
