@@ -2,7 +2,12 @@
 import httpx
 import pytest
 
-from tldw_Server_API.app.core.Chat.Chat_Deps import ChatBadRequestError, ChatProviderError
+from tldw_Server_API.app.core.Chat.Chat_Deps import (
+    ChatAuthenticationError,
+    ChatBadRequestError,
+    ChatProviderError,
+    ChatRateLimitError,
+)
 from tldw_Server_API.app.core.LLM_Calls.providers.local_adapters import (
     _chat_with_openai_compatible_local_server,
 )
@@ -32,9 +37,32 @@ def test_local_openai_raises_bad_request_on_4xx():
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("status_code", [401, 403, 404, 429])
-def test_local_openai_rejection_keeps_the_upstream_status(status_code):
+@pytest.mark.parametrize(
+    ("status_code", "error_type"),
+    [(401, ChatAuthenticationError), (403, ChatAuthenticationError), (429, ChatRateLimitError)],
+)
+def test_local_openai_auth_and_rate_limit_replies_get_the_remote_error_types(status_code, error_type):
     error = _make_httpx_error(status_code)
+
+    def _fetch(**_kwargs):
+        raise error
+
+    with pytest.raises(error_type) as exc:
+        _chat_with_openai_compatible_local_server(
+            api_base_url="http://localhost:8000",
+            model_name="local-model",
+            input_data=[{"role": "user", "content": "ping"}],
+            http_fetcher=_fetch,
+        )
+    assert exc.value.status_code == status_code
+    assert exc.value.upstream_status_code == status_code
+    assert "failure" not in exc.value.message
+    assert exc.value.__cause__ is None
+
+
+@pytest.mark.unit
+def test_local_openai_unpulled_model_stays_a_rejected_request():
+    error = _make_httpx_error(404)
 
     def _fetch(**_kwargs):
         raise error
@@ -48,7 +76,7 @@ def test_local_openai_rejection_keeps_the_upstream_status(status_code):
         )
     assert exc.value.status_code == 400
     assert exc.value.message == "The local model provider rejected the request."
-    assert exc.value.upstream_status_code == status_code
+    assert exc.value.upstream_status_code == 404
 
 
 @pytest.mark.unit
