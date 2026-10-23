@@ -13,6 +13,7 @@ from loguru import logger
 
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.http_client import RetryPolicy, afetch
+from tldw_Server_API.app.core.Notes_Graph.semantic_publication import run_quiescent_operation
 from tldw_Server_API.app.core.Persona.connections import (
     PersonaConnectionConfigError,
     PersonaConnectionSecretError,
@@ -316,7 +317,8 @@ class VoiceCommandRouter:
                     if not command_name:
                         command_name = parsed.intent.action_config.get("action") or parsed.intent.action_type.value
 
-                    await asyncio.to_thread(
+                    # Shielded once queued: a cancel lets the write finish, then propagates.
+                    await run_quiescent_operation(asyncio.to_thread(
                         chacha_operation()(_record_command_and_save_session),
                         db,
                         session.model_copy(deep=True),
@@ -333,7 +335,7 @@ class VoiceCommandRouter:
                             if parsed.intent.command_id
                             else "planner_fallback"
                         ),
-                    )
+                    ))
                 except Exception as e:
                     logger.warning(f"Failed to record voice analytics: {e}")
 

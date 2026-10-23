@@ -164,6 +164,48 @@ async def test_a_command_takes_no_checkout_on_the_event_loop_and_holds_none_whil
     assert (held_while_acting, loop_takes, outstanding, events) == ([[]], 0, [], 1)
 
 
+async def test_a_command_s_analytics_row_survives_a_cancel_while_its_write_is_queued(pg_voice_db, monkeypatch):
+    """The command's analytics-and-session save must finish once queued, even if the command's task is cancelled.
+
+    The default executor gets one worker, which the action takes, so the save's job is queued when the
+    task is cancelled, as when a WebSocket handler is cancelled while the executor is saturated.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
+    sessions = VoiceSessionManager()
+    router = VoiceCommandRouter(
+        registry=VoiceCommandRegistry(), parser=_StubParser(), session_manager=sessions, workflow_handler=object()
+    )
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=1))
+    release, acted, busy = threading.Event(), asyncio.Event(), []
+
+    async def act(intent, session, *, db=None, persona_id=None):  # noqa: ARG001
+        busy.append(loop.run_in_executor(None, release.wait, 5))  # the only worker is taken
+        acted.set()
+        return ActionResult(success=True, action_type=ActionType.LLM_CHAT, response_text="done")
+
+    monkeypatch.setattr(router, "_execute_intent", act)
+    task = asyncio.create_task(router.process_command(text="hello there", user_id=1, db=pg_voice_db.db))
+    try:
+        await asyncio.wait_for(acted.wait(), timeout=10)
+        await asyncio.sleep(0.1)  # the save's job is queued behind the busy worker
+        task.cancel()
+        await asyncio.sleep(0)  # the cancel reaches the queued job before the worker frees up
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await busy[0]
+        await asyncio.to_thread(time.sleep, 0)  # anything still queued has run
+    finally:
+        release.set()
+        await sessions.stop()
+
+    with chacha_operation(independent=True):
+        events = pg_voice_db.db.execute_query("SELECT count(*) AS n FROM voice_command_events").fetchone()["n"]
+    assert events == 1
+
+
 async def test_an_external_action_reads_its_connection_off_the_event_loop(pg_voice_db):
     router = VoiceCommandRouter(
         registry=VoiceCommandRegistry(), parser=_StubParser(), session_manager=VoiceSessionManager(), workflow_handler=object()
