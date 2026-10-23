@@ -25,6 +25,7 @@ Found by TASK-13900. On PostgreSQL, MediaDatabase.get_connection() checks a conn
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Correction (PR #3305 clean review, M2): the description overstates the coverage. test_lookup_leaves_no_postgres_session_in_a_transaction exercises only MediaFilesRepository.get_for_media. list_for_media has read through execute_query since TASK-13233, but no test pins it against leaving a PostgreSQL session idle in a transaction; add one here alongside the listed calls.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

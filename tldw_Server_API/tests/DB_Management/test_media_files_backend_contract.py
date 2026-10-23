@@ -25,7 +25,9 @@ def media_db(request):
     backend = None
     if request.param == "postgresql":
         backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
-    db = MediaDatabase(":memory:", client_id="1", backend=backend)
+    # A file DB gives each connection its own view; :memory: shares one connection.
+    db_path = str(request.getfixturevalue("tmp_path") / "media.db") if request.param == "sqlite-file" else ":memory:"
+    db = MediaDatabase(db_path, client_id="1", backend=backend)
     try:
         yield db
     finally:
@@ -153,6 +155,7 @@ def test_lookup_leaves_no_postgres_session_in_a_transaction(pg_database_config):
         backend.get_pool().close_all()
 
 
+@pytest.mark.parametrize("media_db", ["sqlite", "sqlite-file", "postgresql"], indirect=True)
 def test_lookup_inside_a_transaction_reads_its_uncommitted_row(media_db):
     media_id = add_media(media_db)
     repo = MediaFilesRepository(media_db)
