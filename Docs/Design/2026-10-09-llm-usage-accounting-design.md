@@ -219,7 +219,8 @@ An endpoint asks before it starts LLM work, and answers 402 before it does anyth
 | `/evaluations/batch` | When the evaluation type is `geval`, `rag` or `response_quality`. |
 | Evaluation runs (`POST /evaluations/{eval_id}/runs`) | Always. The run is a task the request starts, so it is admitted with the request; checked at the call, a refused sample would be scored 0.0 and the run would complete. |
 | Benchmark runs (`/evaluations/benchmarks/{name}/run`, `/benchmarks/{name}/run`) | Always. Checked only at the call, every item would be refused and counted as failed, and the run would still complete. |
-| `/media/ingest-web-content`, `/media/process-web-scraping` and `POST /watchlists/outputs` | When the request asks for summaries: analysis with a provider named (for the `url_level` and `recursive_scraping` crawls, analysis alone, since they summarize with a default provider), `summarize_checkbox`, or `summarize`. Checked only at the call, a refusal discarded the pages or items the request had already fetched. |
+| `/media/ingest-web-content` | When `perform_analysis` is on, for every scrape method, with or without a provider. Without one it makes no summary call, but it may extract with an LLM, and checked only at the call a refusal discarded the pages already fetched. |
+| `/media/process-web-scraping` and `POST /watchlists/outputs` | When the request asks for summaries: `summarize_checkbox`, or `summarize`. Checked only at the call, a refusal discarded the pages or items the request had already fetched. |
 | The six `/media/process-*` endpoints and `/media/add` | When `perform_analysis` is set and an `api_name` is given. |
 
 Simple search (`/rag/simple`) no longer generates an answer it then discarded, so it makes no LLM call and needs no check.
