@@ -599,6 +599,57 @@ async def test_kokoro_load_timeout_error_is_not_reported_as_the_bound(monkeypatc
 
 
 @pytest.mark.asyncio
+async def test_kokoro_failed_pytorch_load_is_not_retried_on_the_event_loop(monkeypatch, tmp_path):
+    """A KModel load that fails on its worker thread is not run again on the event loop."""
+    loop_thread = threading.get_ident()
+    attempts = []
+
+    class _FailingKModel:
+        def __init__(self, **_kwargs):
+            attempts.append(threading.get_ident())
+            raise RuntimeError("corrupt checkpoint")
+
+    adapter = _kokoro_adapter(monkeypatch, tmp_path, _Gate(), backend="pytorch")
+    monkeypatch.setattr(sys.modules["kokoro.model"], "KModel", _FailingKModel)
+    with pytest.raises(RuntimeError, match="corrupt checkpoint"):
+        await asyncio.wait_for(adapter._ensure_model_loaded(), 5)
+    assert len(attempts) == 1
+    assert loop_thread not in attempts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kokoro_package", [True, False], ids=["kmodel", "generic-torch"])
+async def test_kokoro_pytorch_load_runs_off_the_event_loop(monkeypatch, tmp_path, kokoro_package):
+    """The whole PyTorch load runs on the worker thread: KModel with its device move, or the generic torch.jit.load."""
+    from tldw_Server_API.app.core.TTS.adapters import kokoro_adapter as kokoro_mod
+
+    loop_thread = threading.get_ident()
+    threads = []
+
+    class _Model:
+        def __init__(self, **_kwargs):
+            threads.append(threading.get_ident())
+
+        def eval(self):
+            threads.append(threading.get_ident())
+            return self
+
+        def cpu(self):
+            threads.append(threading.get_ident())
+            return self
+
+    adapter = _kokoro_adapter(monkeypatch, tmp_path, _Gate(), backend="pytorch")
+    if kokoro_package:
+        monkeypatch.setattr(sys.modules["kokoro.model"], "KModel", _Model)
+    else:
+        monkeypatch.setitem(sys.modules, "kokoro.model", None)  # `from kokoro.model import KModel` raises ImportError
+        jit = types.SimpleNamespace(load=lambda *_args, **_kwargs: _Model())
+        monkeypatch.setattr(kokoro_mod, "safe_import_torch", lambda: types.SimpleNamespace(jit=jit))
+    assert await asyncio.wait_for(adapter._ensure_model_loaded(), 5) is True
+    assert threads and loop_thread not in threads
+
+
+@pytest.mark.asyncio
 async def test_kokoro_close_releases_the_pytorch_model(monkeypatch, tmp_path):
     """close() drops the PyTorch model and pipelines, so the next ensure_initialized() loads the model again."""
     gate = _Gate()

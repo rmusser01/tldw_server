@@ -658,28 +658,24 @@ class KokoroAdapter(TTSAdapter):
             repo_id = self.config.get("kokoro_repo_id") or os.getenv("KOKORO_REPO_ID") or "hexgrad/Kokoro-82M"
             logger.info(f"{self.provider_name}: Loading Kokoro PyTorch model (repo_id={repo_id})")
             start = time.time()
-            def _load_model():
-                return KModel(repo_id=repo_id, config=config_path, model=self.model_path).eval()
-            try:
-                with _capture_kokoro_repo_warning():
-                    self.kokoro_pt_model = await run(_load_model)
-            except _KOKORO_NONCRITICAL_EXCEPTIONS:
-                # Fallback to sync load if threading fails in constrained envs
-                with _capture_kokoro_repo_warning():
-                    self.kokoro_pt_model = _load_model()
-            # Move to device
             dev = str(self.device).lower()
-            if dev.startswith("cuda"):
-                with suppress(_KOKORO_NONCRITICAL_EXCEPTIONS):
-                    self.kokoro_pt_model = self.kokoro_pt_model.cuda()
-            elif dev == "mps":
-                try:
-                    self.kokoro_pt_model = self.kokoro_pt_model.to(torch.device("mps"))
-                except _KOKORO_NONCRITICAL_EXCEPTIONS:
-                    logger.warning("MPS device not available; using CPU for Kokoro")
-                    self.kokoro_pt_model = self.kokoro_pt_model.cpu()
-            else:
-                self.kokoro_pt_model = self.kokoro_pt_model.cpu()
+
+            def _load_model():
+                """Load the KModel and move it to its device, on the worker thread."""
+                model = KModel(repo_id=repo_id, config=config_path, model=self.model_path).eval()
+                if dev.startswith("cuda"):
+                    with suppress(_KOKORO_NONCRITICAL_EXCEPTIONS):
+                        model = model.cuda()
+                    return model
+                if dev == "mps":
+                    try:
+                        return model.to(torch.device("mps"))
+                    except _KOKORO_NONCRITICAL_EXCEPTIONS:
+                        logger.warning("MPS device not available; using CPU for Kokoro")
+                return model.cpu()
+
+            with _capture_kokoro_repo_warning():
+                self.kokoro_pt_model = await run(_load_model)
             logger.info(f"{self.provider_name}: Kokoro PyTorch model loaded on {dev} (t={time.time() - start:.2f}s)")
             # Register model with resource manager (best-effort)
             try:
@@ -698,13 +694,18 @@ class KokoroAdapter(TTSAdapter):
             return True
         except ImportError:
             # Fallback: generic torch.load
-            try:
+            def _load_generic_model():
+                """Load a TorchScript (or else pickled) model, on the worker thread."""
                 try:
-                    self.model_pt = torch.jit.load(self.model_path, map_location=self.device)
+                    model = torch.jit.load(self.model_path, map_location=self.device)
                 except _KOKORO_NONCRITICAL_EXCEPTIONS:
-                    self.model_pt = torch.load(self.model_path, map_location=self.device)
+                    model = torch.load(self.model_path, map_location=self.device)
                 with suppress(_KOKORO_NONCRITICAL_EXCEPTIONS):
-                    self.model_pt.eval()
+                    model.eval()
+                return model
+
+            try:
+                self.model_pt = await run(_load_generic_model)
                 logger.info(f"{self.provider_name}: Loaded generic PyTorch model on {self.device}")
                 # Register model with resource manager (best-effort)
                 try:
