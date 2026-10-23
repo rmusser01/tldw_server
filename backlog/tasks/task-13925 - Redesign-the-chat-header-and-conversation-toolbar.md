@@ -1,7 +1,7 @@
 ---
 id: TASK-13925
 title: Redesign the chat header and conversation toolbar
-status: In Progress
+status: Done
 labels:
 - chat
 - webui
@@ -44,12 +44,13 @@ PR reconciliation: existing composer PR #3309 and rails PR #3310 were found and 
 Fresh dev reconciliation verification: 101 tests across eight focused suites, one view-controls contract, and 39 palette-host/focus-ownership tests pass (141 total). Installed TypeScript 5.9.3 noEmit exits 0 with the project 8 GB heap; a missing local workspace dependency symlink and bun's unrelated downloaded compiler were environment issues, with no dependency/config changes shipped. Seven-file ESLint comparison has no new findings; final test edits were checked separately. Fresh code review: ship, no remaining reconciliation findings. Bandit applicability remains no Python files/findings in touched UI directories.
 
 Browser scope: unchanged dev header also fails to open the command palette in the same offline fixture; this is reproduced independently, not attributed to the redesign. The new offline browser contract verifies the existing Search open event, while palette ownership is covered by 39 passing component tests. Full palette opening with a valid account/history scope remains outside this offline check. Preview caches shared UI and requires a full restart after the baseline comparison. Final browser matrix and PR publication are pending. ADR required: no; existing ADR-049 ownership and action policy are unchanged.
+Published header-only draft PR against dev: https://github.com/rmusser01/tldw_server/pull/3311. Final fresh dev browser coverage passes all five cases: four cases passed in the matrix and desktop-dark passed on the isolated retry after cold /chat compilation interrupted navigation. Header height/overflow, scoped axe, More/Escape, launcher and unified shortcuts focus return, theme, Focus mode, draft preservation, temporary sharing restrictions, and real artifact counters are covered. Search checks the existing open event under the reproduced dev offline-scope limitation, not real palette opening. Installed project TypeScript final run exits 0; final test lint checks add no findings. The exact Next config is restored and the temporary UI dependency link removed. No preview workaround is shipped. PR remains draft pending the human requester's Change summary under repository policy.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Redesigned both chat header rows as a compact conversation bar and quiet view toolbar. Preserved title, sharing, notification, navigation and artifact behavior; resolved focus and accessibility review findings. Verified 95 focused tests, five desktop/mobile light/dark browser cases, TypeScript and no new lint findings. Design and scope: Docs/Design/chat-header-calm.md.
+Redesigned both chat header rows and published header-only draft PR #3311 directly against dev. Preserved current dev history/privacy, shared shortcuts, title, notification, sharing and artifact behavior. Verified 141 focused tests, five fresh browser cases (with one cold-start retry), TypeScript, no new lint findings, and Bandit applicability. Real command-palette opening is limited by the reproduced dev offline fixture; its existing open request and component ownership contracts are checked.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
