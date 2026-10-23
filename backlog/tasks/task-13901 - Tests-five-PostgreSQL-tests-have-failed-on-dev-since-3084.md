@@ -1,7 +1,7 @@
 ---
 id: TASK-13901
 title: 'Tests: five PostgreSQL tests have failed on dev since #3084'
-status: To Do
+status: In Progress
 labels:
 - chat
 - postgres

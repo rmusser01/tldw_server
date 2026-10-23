@@ -2,7 +2,7 @@
 id: TASK-13900
 title: RAG restricted Media DB test leaves a session idle in transaction and hangs
   its own teardown
-status: To Do
+status: In Progress
 labels:
 - rag
 - postgres
