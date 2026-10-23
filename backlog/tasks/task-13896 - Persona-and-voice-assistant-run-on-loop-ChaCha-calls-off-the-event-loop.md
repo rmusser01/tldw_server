@@ -1,7 +1,7 @@
 ---
 id: TASK-13896
 title: 'Persona and voice assistant: run on-loop ChaCha calls off the event loop'
-status: To Do
+status: Done
 labels:
 - persona
 - postgres
@@ -20,28 +20,38 @@ Voice assistant (found by PR B's clean review, #3295). PR B runs the voice-assis
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The 10 calls in persona_stream's async handlers run through asyncio.to_thread with their own chacha_operation(independent=True), and the persona AST guard requires that form for them
-- [ ] #2 A PostgreSQL test with the pool held by other work shows a persona call waiting for a connection without stalling the event loop
-- [ ] #3 The skill tool call's SkillsService setup and lookup make no ChaCha checkout on the event-loop thread
-- [ ] #4 The voice-assistant WebSocket's session start and command handling make no ChaCha checkout on the event-loop thread, and a command holds no checkout through its LLM call, MCP action or SYNC workflow
+- [x] #1 The 10 calls in persona_stream's async handlers run through asyncio.to_thread with their own chacha_operation(independent=True), and the persona AST guard requires that form for them
+- [x] #2 A PostgreSQL test with the pool held by other work shows a persona call waiting for a connection without stalling the event loop
+- [x] #3 The skill tool call's SkillsService setup and lookup make no ChaCha checkout on the event-loop thread
+- [x] #4 The voice-assistant WebSocket's session start and the voice router's ChaCha call groups (command load, session save, analytics, external-connection lookup) make no ChaCha checkout on the event-loop thread, and a command holds no checkout through its LLM call, MCP action or SYNC workflow
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-10-22-chacha-off-loop-and-transaction-guard.md. PR: the PR from branch fix/chacha-off-loop-and-transaction-guard (its URL is appended in a later note). Branch fix/chacha-off-loop-and-transaction-guard.
+Persona (AC1, AC2): all 13 on-loop calls on persona_scope_db (the 10 in async handlers and the 3 in the analytics helpers) run as await asyncio.to_thread(chacha_operation(independent=True)(fn), ...); the three helpers are async so their bookkeeping (persona_live_summary_sessions_seen) stays on the loop; their 9 call sites are awaited. The AST guards require that form everywhere in persona.py (off-loop count 8 -> 21) and an await on every helper call (mutation: a dropped await is reported as persona.py:10655). RED on origin/dev e06eeec68c: 4 failed, 3 passing pins: 'assert 8 == 21'; the 13 sites listed, first persona.py:9420; the shield guard ([], 0) == ([], 4); the PostgreSQL test (2-connection pool held 1.5 s, real persona_stream, voice_config) gave checkouts [(True, 1.5), (True, 0.0) x4] on the loop with a 1.53 s server-loop gap. GREEN: 7 passed; the same test gave [(False, 1.5), (False, 0.0) x4] and gaps of 0.021-0.030 s (3 runs).
+Persona writes (review B2): moving the writes to awaited threads let a cancel skip them. test_persona_ws.py::test_persona_audio_chunk_records_live_voice_commit_telemetry failed 3 of 3 on the first version (the client closes on VOICE_TURN_COMMITTED, which was emitted before the commit's analytics writes). Now the commit's and the manual-mode notice's writes run before their notice (6 of 6 passed); the 4 writes (summary upsert, event record, both preference saves) run under run_quiescent_operation(asyncio.to_thread(...)) (Notes_Graph/semantic_publication.py), so a queued or running write finishes before the cancel propagates; and the session finalizes its summaries after its turn tasks are drained. A new shield guard names any unshielded write (RED on the first version: 4 sites); a PostgreSQL pin cancels a queued preferences write on a one-worker executor (shielded: saved; plain to_thread: lost). Reads lost to a cancel are harmless. Loop sweep (32 files) under load up to 11: 328 + 317 passed.
+Skill (AC3): handle_skill_tool_call builds SkillsService through asyncio.to_thread inside the lookup's independent operation. RED: (True, True, 4) == (True, True, 0), the 4 table statements of _ensure_skill_registry_table on the loop. GREEN: 0; with test_skill_mcp_integration.py 15 passed. The per-construction DDL itself is TASK-13928.
+Voice (AC4): session start saves and loads in one independent operation on a worker thread, applies the registry cache on the loop, and degrades the session on any failure (except Exception, same sanitized warning). _process_text_command no longer wraps the command in an operation; the router runs its three ChaCha call groups (command load + new-session save; analytics + session save; external-connection lookup) through asyncio.to_thread(chacha_operation()(fn), ...), so it joins an HTTP request's operation (/voice/command) and owns each group in the WebSocket. VoiceCommandRegistry.refresh_user_commands is split into load_user_commands (database) and apply_user_commands (cache, on the loop); its HTTP callers are unchanged. Sessions handed to workers are model_copy(deep=True) snapshots. RED on e06eeec68c: 4 failed: session start 1 checkout on the loop; full pool ('PoolTimeout', [], 1.017 s loop gap: the socket died); command ([['MainThread']], 2, [], 0): checkout held through the action, 2 on the loop, analytics row lost; external lookup 1 on the loop. GREEN: 17 passed with test_ws_integration.py. PR B's test_a_text_command_returns_its_checkout was replaced: its stand-in router used the handle directly on the loop, the shape this task removes.
+AC4 reworded (premise narrower than its words): 'command handling' read literally includes the action's own module. A SYNC workflow's notes step runs NotesInteropService on the loop with a per-call handle it closes (TASK-13897's area; its plan keeps the notes adapter on the loop), and MCP modules use per-call handles closed on the same thread. The description's fix shape covers the WebSocket and the router's call groups, which is what the new AC 4 states. The residual, the action modules' own on-loop checkouts, is TASK-13929.
+Found while planning, filed: TASK-13926 (voice commands are unusable on PostgreSQL: INTEGER deleted/enabled against the boolean rewrite; on dev it also killed every PostgreSQL voice session start, which this task's degrade now catches), TASK-13927 (a failed statement outside a managed transaction poisons the operation's connection; it lost the command's analytics row on dev), TASK-13928 (SkillsService DDL per construction, incl. the /chat/completions path), TASK-13929 (a voice command's action modules check out on the loop), TASK-13930 (seven untracked PostgreSQL test failures on dev).
+Sweep: the 263-file union of PostgreSQL ChaCha tests, persona/voice/skill callers and the semantic projector's tests (RAG/test_restricted_postgres_media_retrieval.py excluded: TASK-13900 hangs it on dev too), 6 shards, RUN_JOBS=1: 7318 passed, 12 failed, 20 skipped, 1 error. The 12 are the known dev failures: TASK-13901's 5 and TASK-13930's 7. The error is the pre-existing Writing/test_writing_owner_postgres.py teardown flake: alternating dev with dev plus this diff in one worktree, each errored in 2 of 10 runs. 244 files ran in 6 shards, then the 19 files with @pytest.mark.timeout(30) markers in one process (timeout_method=signal); a first attempt at load ~48 lost whole shards when two semantic-migration tests ran past their 30 s markers during schema initialization (dev baseline for any failure: TASK-13901's sequence-ownership test re-run on dev 4d7405ba31 fails with the same DatabaseError; the other 11 as the plan's review measured). ruff: no new findings (persona.py I001+SIM114, voice_assistant.py I001, router.py F401+F821x5 as on dev). Bandit: nothing in the product files; tests B101 LOW, voice test B105 LOW x3 ('valid-token'). Triage OK. Docs: ADR-080 Cost bullet and the ChaChaNotes guide; Docs/Published refreshed; tests/Docs 213 passed.
+Executed on origin/dev 617094d014 (2026-10-23, load 20-48; the planned files unchanged since e06eeec68c): every RED and GREEN above matched the plan's Expected lines, including the 32-file loop sweep (328 + 317 passed). One deviation: the queued-write pin's plain-to-thread case raced under load (4 of 6 runs saved the write, because release.set() freed the executor's worker before the loop delivered the cancel to the queued job). It now yields once between task.cancel() and release.set(); 6 of 6 passed after.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Persona, skill and voice-assistant ChaCha calls no longer check out on the event-loop thread, so a full content pool makes them wait on a worker thread instead of stalling the whole server for pool_timeout. Persona: 13 calls through asyncio.to_thread with their own independent operations, pinned by AST guards and a PostgreSQL test (1.53 s loop stall -> 0.03 s); its writes run before the notices a client may close on, and finish once queued even if the session's task is cancelled. Skill tool call: SkillsService built off the loop (4 on-loop checkouts -> 0). Voice: session start off the loop and degrading on a full pool instead of killing the socket; each command's three ChaCha call groups off the loop in their own operations, so no checkout is held through the LLM call, MCP action or workflow, and the analytics row is no longer lost after a failed read. Follow-ups: TASK-13926 … TASK-13930.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->
