@@ -306,15 +306,24 @@ async def test_media_ingest_reports_a_download_that_yt_dlp_failed(tmp_path, monk
     assert [(entry["status"], entry.get("returncode")) for entry in result["metadata"]] == [("download_failed", 1)]
 
 
-async def test_media_ingest_whose_run_was_cancelled_reports_cancelled(tmp_path, monkeypatch) -> None:
-    """engine.cancel() kills the download, so yt-dlp exits -15 before the poll sees the cancel: a cancel, not a failure."""
-    monkeypatch.setenv("WORKFLOWS_TMP", str(tmp_path))
-    checks = iter([False])  # the poll's first is_cancelled() passes; every later one sees the run's cancel
-    context = {"tenant_id": "default", "is_cancelled": lambda: next(checks, True)}
-    killed_by_the_cancel = "import os, signal\nos.kill(os.getpid(), signal.SIGTERM)\n"
+@pytest.mark.parametrize("delay", [0, 0.6], ids=["exits_at_once", "exits_after_two_polls"])
+async def test_media_ingest_whose_run_was_cancelled_reports_cancelled(tmp_path, monkeypatch, delay) -> None:
+    """engine.cancel() kills the download, so yt-dlp exits -15 before the poll sees the cancel: a cancel, not a failure.
 
-    result, download = await _ingest_with_fake_yt_dlp(killed_by_the_cancel, timeout_seconds=30, context=context)
-    _stop(download)
+    The cancel shows only once the poll itself has seen yt-dlp exit (Popen.returncode is set by its poll()), so only
+    the check after the exit can see it, however long the fake takes to start (clean review M2).
+    """
+    monkeypatch.setenv("WORKFLOWS_TMP", str(tmp_path))
+    killed_by_the_cancel = f"import os, signal, time\ntime.sleep({delay})\nos.kill(os.getpid(), signal.SIGTERM)\n"
+
+    with _fake_yt_dlp(killed_by_the_cancel) as started:
+
+        def cancelled_once_the_poll_saw_the_exit() -> bool:
+            return bool(started) and started[0].proc.returncode is not None
+
+        context = {"tenant_id": "default", "is_cancelled": cancelled_once_the_poll_saw_the_exit}
+        result = await ingest.run_media_ingest_adapter({"sources": _SOURCES, "timeout_seconds": 30}, context)
+    _stop(started[0])
 
     assert result == {"__status__": "cancelled"}
 
