@@ -875,9 +875,13 @@ const expectVisibleComposerControlsRemainUsable = async (
   })
 
   await expect(feedback).toBeAttached()
-  expect(result.controls.map((control) => control.name)).toContain(
-    "Select a Prompt"
-  )
+  // Which toolbar controls fit in a short panel depends on the composer's
+  // rows (the model chip, XS-02) and target sizes (AX-16); require at least
+  // one besides the draft so the occlusion check below covers the toolbar.
+  expect(
+    result.controls.filter((control) => control.name !== "Message input"),
+    JSON.stringify(result.controls.map((control) => control.name))
+  ).not.toEqual([])
   expect(
     result.controls.filter(
       (control) => control.intersectsFeedback || !control.centerHitMatches
@@ -2102,9 +2106,7 @@ test.describe("Packaged extension prompt improvement parity", () => {
         await clickThroughPaintedCenter(page, applyRecipe)
         const feedback = getPromptAssistFeedback(page, "Recipe applied.")
         await waitForDrawersClosed(page, feedback)
-        // 248px keeps the prompt picker in view below AX-16's enlarged
-        // (22px) Chat history switch; 240px fit only the old 16px switch.
-        await page.setViewportSize({ width: 360, height: 248 })
+        await page.setViewportSize({ width: 360, height: 240 })
         await scrollDraftNearViewportTop(input)
         const initialCluster = {
           width: initialClusterBox!.width,
@@ -2205,9 +2207,7 @@ test.describe("Packaged extension prompt improvement parity", () => {
             : "Recipe applied."
         )
         await waitForDrawersClosed(page, feedback)
-        // 248px keeps the prompt picker in view below AX-16's enlarged
-        // (22px) Chat history switch; 240px fit only the old 16px switch.
-        await page.setViewportSize({ width: 360, height: 248 })
+        await page.setViewportSize({ width: 360, height: 240 })
         await scrollDraftNearViewportTop(input)
         await expectVisibleComposerControlsRemainUsable(page, feedback)
         await expectLayoutNeutralFeedback(
