@@ -2811,7 +2811,7 @@
     "message": "Context"
   },
   "cockpit_runtime": {
-    "message": "Chat settings"
+    "message": "Runtime"
   },
   "cockpit_focus": {
     "message": "Focus"
@@ -3012,7 +3012,7 @@
     "message": "Chat remains available."
   },
   "cockpit_reviewModelChatSettings": {
-    "message": "Review Model & Chat settings"
+    "message": "Review Model & Runtime"
   },
   "cockpit_reviewSettings": {
     "message": "Review settings"
@@ -4506,28 +4506,28 @@
     "message": "Hide context"
   },
   "cockpit_collapseRuntimeSidechannel": {
-    "message": "Hide chat settings"
+    "message": "Hide runtime"
   },
   "cockpit_restoreContextSidechannel": {
     "message": "Show context"
   },
   "cockpit_restoreRuntimeSidechannel": {
-    "message": "Show chat settings"
+    "message": "Show runtime"
   },
   "cockpit_contextRailTab": {
     "message": "Context"
   },
   "cockpit_runtimeRailTab": {
-    "message": "Chat settings"
+    "message": "Runtime"
   },
   "cockpit_contextRailHiddenSummary": {
-    "message": "Context hidden. Chat settings visible."
+    "message": "Context hidden. Runtime visible."
   },
   "cockpit_runtimeRailHiddenSummary": {
-    "message": "Chat settings hidden. Context visible."
+    "message": "Runtime hidden. Context visible."
   },
   "cockpit_cockpitRailsVisibleSummary": {
-    "message": "Context and chat settings visible."
+    "message": "Context and runtime visible."
   },
   "characterRail_characterSessions": {
     "message": "Character sessions"

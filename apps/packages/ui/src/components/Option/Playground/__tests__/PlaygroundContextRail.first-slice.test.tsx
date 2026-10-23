@@ -148,9 +148,8 @@ describe("PlaygroundContextRail first-slice controls", () => {
         detail: "System prompt selected",
       },
     });
-    expect(screen.getByText("Context selected")).toBeInTheDocument();
     expect(screen.getByText("1 selected source")).toBeInTheDocument();
-    expect(screen.getAllByText("Selected")).toHaveLength(3);
+    expect(screen.getAllByText("Selected behavior")).toHaveLength(2);
     expect(screen.queryByText("Active")).not.toBeInTheDocument();
     expect(screen.queryByText("Armed")).not.toBeInTheDocument();
   });

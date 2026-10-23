@@ -53,11 +53,9 @@ const designSystemStateLabels = {
 
 const stateClass = (state: PlaygroundCompositionPreviewEntryState) => {
   if (state === "active") return "border-border bg-surface2 text-text-muted";
-  if (state === "degraded")
-    return "border-warning/40 bg-warning/10 text-warning";
-  if (state === "unavailable")
-    return "border-danger/40 bg-danger/10 text-danger";
-  if (state === "loading") return "border-info/40 bg-info/10 text-info";
+  if (state === "degraded") return "border-warning/40 bg-warning/10 text-text";
+  if (state === "unavailable") return "border-danger/40 bg-danger/10 text-text";
+  if (state === "loading") return "border-info/40 bg-info/10 text-text";
   return "border-border bg-surface2 text-text-muted";
 };
 

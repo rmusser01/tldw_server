@@ -400,7 +400,7 @@ describe("Playground cockpit accessibility", () => {
     const runtimeToggle = within(
       screen.getByRole("complementary", { name: "Chat cockpit runtime" }),
     ).getByRole("button", {
-      name: "Hide chat settings",
+      name: "Hide runtime",
     });
 
     expect(contextToggle).toHaveAttribute(
@@ -445,7 +445,7 @@ describe("Playground cockpit accessibility", () => {
     expect(onLeftRailVisibleChange).toHaveBeenCalledWith(false);
 
     const runtimeRestore = screen.getByRole("button", {
-      name: "Show chat settings",
+      name: "Show runtime",
     });
     expect(runtimeRestore).toHaveAttribute(
       "aria-controls",
@@ -486,7 +486,7 @@ describe("Playground cockpit accessibility", () => {
 
     const runtimeToggle = within(
       screen.getByRole("complementary", { name: "Chat cockpit runtime" }),
-    ).getByRole("button", { name: "Hide chat settings" });
+    ).getByRole("button", { name: "Hide runtime" });
     runtimeToggle.focus();
     await user.keyboard("{Enter}");
     expect(onRightRailVisibleChange).toHaveBeenCalledWith(false);

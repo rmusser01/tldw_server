@@ -178,7 +178,7 @@ export const PlaygroundCockpitShell = ({
   );
   const collapseRuntimeSidechannelLabel = t(
     "cockpit.collapseRuntimeSidechannel",
-    "Hide chat settings",
+    "Hide runtime",
   );
   const restoreContextSidechannelLabel = t(
     "cockpit.restoreContextSidechannel",
@@ -186,7 +186,7 @@ export const PlaygroundCockpitShell = ({
   );
   const restoreRuntimeSidechannelLabel = t(
     "cockpit.restoreRuntimeSidechannel",
-    "Show chat settings",
+    "Show runtime",
   );
   const contextRailTabLabel = t("cockpit.contextRailTab", "Context rail");
   const runtimeRailTabLabel = t("cockpit.runtimeRailTab", "Runtime rail");
@@ -204,17 +204,17 @@ export const PlaygroundCockpitShell = ({
       : modeSummaryKey === "both-visible"
         ? t(
             "cockpit.cockpitRailsVisibleSummary",
-            "Context and chat settings visible.",
+            "Context and runtime visible.",
           )
         : modeSummaryKey === "context-hidden"
           ? t(
               "cockpit.contextRailHiddenSummary",
-              "Context hidden. Chat settings visible.",
+              "Context hidden. Runtime visible.",
             )
           : modeSummaryKey === "runtime-hidden"
             ? t(
                 "cockpit.runtimeRailHiddenSummary",
-                "Chat settings hidden. Context visible.",
+                "Runtime hidden. Context visible.",
               )
             : t(
                 "cockpit.cockpitRailsHiddenSummary",
@@ -266,61 +266,61 @@ export const PlaygroundCockpitShell = ({
           className="grid shrink-0 grid-cols-1 gap-2 border-b border-border bg-surface2/40 p-2 text-xs lg:hidden"
         >
           <div className="flex items-center gap-1">
-          <div
-            role="group"
-            aria-label={t("cockpit.mobilePanelTabs", "Mobile cockpit panels")}
-            className="grid flex-1 grid-cols-2 gap-1 rounded-md border border-border bg-surface p-1"
-          >
-            <button
-              id={mobileContextButtonId}
-              type="button"
-              aria-controls={mobileContextPanelId}
-              aria-expanded={
-                leftRailVisible && visibleMobilePanel === "context"
-              }
-              onClick={() => {
-                if (visibleMobilePanel === "context") {
-                  setMobilePanel(null);
-                  return;
-                }
-                if (!leftRailVisible) {
-                  onLeftRailVisibleChange?.(true);
-                }
-                setMobilePanel("context");
-              }}
-              className={`min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
-                leftRailVisible && visibleMobilePanel === "context"
-                  ? "bg-bg text-text shadow-sm"
-                  : "text-text-muted hover:bg-bg"
-              }`}
+            <div
+              role="group"
+              aria-label={t("cockpit.mobilePanelTabs", "Mobile cockpit panels")}
+              className="grid flex-1 grid-cols-2 gap-1 rounded-md border border-border bg-surface p-1"
             >
-              {t("cockpit.context", "Context")}
-            </button>
-            <button
-              id={mobileRuntimeButtonId}
-              type="button"
-              aria-controls={mobileRuntimePanelId}
-              aria-expanded={
-                rightRailVisible && visibleMobilePanel === "runtime"
-              }
-              onClick={() => {
-                if (visibleMobilePanel === "runtime") {
-                  setMobilePanel(null);
-                  return;
+              <button
+                id={mobileContextButtonId}
+                type="button"
+                aria-controls={mobileContextPanelId}
+                aria-expanded={
+                  leftRailVisible && visibleMobilePanel === "context"
                 }
-                if (!rightRailVisible) {
-                  onRightRailVisibleChange?.(true);
+                onClick={() => {
+                  if (visibleMobilePanel === "context") {
+                    setMobilePanel(null);
+                    return;
+                  }
+                  if (!leftRailVisible) {
+                    onLeftRailVisibleChange?.(true);
+                  }
+                  setMobilePanel("context");
+                }}
+                className={`min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                  leftRailVisible && visibleMobilePanel === "context"
+                    ? "bg-bg text-text shadow-sm"
+                    : "text-text-muted hover:bg-bg"
+                }`}
+              >
+                {t("cockpit.context", "Context")}
+              </button>
+              <button
+                id={mobileRuntimeButtonId}
+                type="button"
+                aria-controls={mobileRuntimePanelId}
+                aria-expanded={
+                  rightRailVisible && visibleMobilePanel === "runtime"
                 }
-                setMobilePanel("runtime");
-              }}
-              className={`min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
-                rightRailVisible && visibleMobilePanel === "runtime"
-                  ? "bg-bg text-text shadow-sm"
-                  : "text-text-muted hover:bg-bg"
-              }`}
-            >
-              {t("cockpit.runtime", "Chat settings")}
-            </button>
+                onClick={() => {
+                  if (visibleMobilePanel === "runtime") {
+                    setMobilePanel(null);
+                    return;
+                  }
+                  if (!rightRailVisible) {
+                    onRightRailVisibleChange?.(true);
+                  }
+                  setMobilePanel("runtime");
+                }}
+                className={`min-h-[44px] rounded px-3 py-2 text-xs font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
+                  rightRailVisible && visibleMobilePanel === "runtime"
+                    ? "bg-bg text-text shadow-sm"
+                    : "text-text-muted hover:bg-bg"
+                }`}
+              >
+                {t("cockpit.runtime", "Runtime")}
+              </button>
             </div>
             {visibleMobilePanel && (
               <button
@@ -442,7 +442,7 @@ export const PlaygroundCockpitShell = ({
           >
             <div className="sticky top-0 z-10 mb-1 flex min-h-12 items-center justify-between gap-2 border-b border-border bg-surface py-2 text-sm text-text-muted">
               <span className="font-semibold text-text">
-                {t("cockpit.runtime", "Chat settings")}
+                {t("cockpit.runtime", "Runtime")}
               </span>
               <CockpitTooltipButton
                 type="button"
