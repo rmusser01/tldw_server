@@ -33,8 +33,8 @@ from .policy_eval import (
 from .tenant import hash_entity
 
 try:
+    from redis.exceptions import BusyLoadingError, RedisError
     from redis.exceptions import ConnectionError as RedisConnectionError
-    from redis.exceptions import RedisError
     from redis.exceptions import TimeoutError as RedisTimeoutError
 except ImportError:  # pragma: no cover - redis is an optional deployment dependency
     _REDIS_ERRORS: tuple[type[Exception], ...] = ()
@@ -106,7 +106,8 @@ def _stop_calling_redis_while_unreachable(client: Any, cooldown_s: float) -> Any
     stall, does not stop RG. Within the cooldown a command raises redis ConnectionError at once,
     which RG answers by its fail mode as it does a refused connection. After it, one command goes
     to Redis while the rest keep failing fast; any answer from Redis, an error reply included,
-    ends the cooldown.
+    ends the cooldown. That includes LOADING from a restarting Redis, which redis-py raises as
+    BusyLoadingError, a ConnectionError: it never starts the cooldown.
     """
     run = client.execute_command
     blocked_until = 0.0
@@ -114,6 +115,8 @@ def _stop_calling_redis_while_unreachable(client: Any, cooldown_s: float) -> Any
     async def _unreachable() -> bool:
         try:
             await run("PING")
+        except BusyLoadingError:
+            return False  # LOADING: Redis answered
         except (RedisConnectionError, RedisTimeoutError):
             return True
         except RedisError:
@@ -129,6 +132,9 @@ def _stop_calling_redis_while_unreachable(client: Any, cooldown_s: float) -> Any
             blocked_until = now + cooldown_s  # this command probes; the rest fail fast meanwhile
         try:
             result = await run(*args, **options)
+        except BusyLoadingError:
+            blocked_until = 0.0  # LOADING: Redis answered while it loads its data
+            raise
         except (RedisConnectionError, RedisTimeoutError):
             blocked_until = time.monotonic() + cooldown_s if await _unreachable() else 0.0
             raise

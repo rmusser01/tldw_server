@@ -7,8 +7,8 @@ import pytest
 import redis.asyncio as aioredis
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
+from redis.exceptions import BusyLoadingError, NoScriptError
 from redis.exceptions import ConnectionError as RedisConnectionError
-from redis.exceptions import NoScriptError
 
 pytestmark = pytest.mark.rate_limit
 
@@ -325,9 +325,27 @@ async def test_rg_builds_its_redis_client_with_5_s_timeouts(monkeypatch):
     assert (options.get("socket_connect_timeout"), options.get("socket_timeout")) == (5.0, 5.0)
 
 
+class _ScriptedRedis:
+    """A Redis stand-in that records each command in ``sent`` and answers with the next of ``answers`` (raising an exception)."""
+
+    def __init__(self, answers: list, sent: list):
+        self.answers, self.sent = answers, sent
+
+    async def execute_command(self, *args, **_options):
+        self.sent.append(args[0])
+        await asyncio.sleep(0)  # in flight: a concurrent command runs now
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+_LOADING = BusyLoadingError("Redis is loading the dataset in memory")
+
+
 @pytest.mark.asyncio
-# Any answer from Redis shows it is reachable, an error reply too: after a restart the probe is often NOSCRIPT.
-@pytest.mark.parametrize("probe_answer", ["PONG", NoScriptError("No matching script.")], ids=["reply", "error-reply"])
+# Any answer from Redis shows it is reachable, an error reply too: after a restart the probe is often NOSCRIPT, or LOADING.
+@pytest.mark.parametrize("probe_answer", ["PONG", NoScriptError("No matching script."), _LOADING], ids=["reply", "error-reply", "loading"])
 async def test_rg_calls_redis_again_once_it_answers_after_the_cooldown(probe_answer):
     """After the cooldown one command goes to Redis while the others still fail fast; once Redis answers, all go (TASK-13882)."""
     from tldw_Server_API.app.core.Resource_Governance import governor_redis
@@ -336,16 +354,7 @@ async def test_rg_calls_redis_again_once_it_answers_after_the_cooldown(probe_ans
     answers = [RedisConnectionError("Connection refused"), RedisConnectionError("Connection refused"), probe_answer, "after"]
     sent = []
 
-    class _Redis:
-        async def execute_command(self, *args, **_options):
-            sent.append(args[0])
-            await asyncio.sleep(0)  # in flight: a concurrent command runs now
-            answer = answers.pop(0)
-            if isinstance(answer, Exception):
-                raise answer
-            return answer
-
-    client = governor_redis._stop_calling_redis_while_unreachable(_Redis(), cooldown_s=0.5)
+    client = governor_redis._stop_calling_redis_while_unreachable(_ScriptedRedis(answers, sent), cooldown_s=0.5)
     with pytest.raises(RedisConnectionError):
         await client.execute_command("ZCARD")  # Redis is down, and a PING confirms it
     with pytest.raises(RedisConnectionError):
@@ -354,6 +363,25 @@ async def test_rg_calls_redis_again_once_it_answers_after_the_cooldown(probe_ans
     probe, other = await asyncio.gather(client.execute_command("ZCARD"), client.execute_command("ZCARD"), return_exceptions=True)
 
     assert (probe is probe_answer, type(other), await client.execute_command("ZCARD"), sent) == (True, RedisConnectionError, "after", ["ZCARD", "PING", "ZCARD", "ZCARD"])
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "answers, expected_sent",
+    [([_LOADING, "after"], ["ZCARD", "ZCARD"]), ([RedisConnectionError("Connection reset"), _LOADING, "after"], ["ZCARD", "PING", "ZCARD"])],
+    ids=["command-loading", "ping-loading"],
+)
+async def test_a_loading_redis_does_not_start_the_cooldown(answers, expected_sent):
+    """LOADING is redis-py's BusyLoadingError, a ConnectionError, but Redis sent it: a LOADING reply to a command, or to
+    the PING after a failed one, starts no cooldown, so RG calls Redis again the moment it has loaded (TASK-13882)."""
+    from tldw_Server_API.app.core.Resource_Governance import governor_redis
+
+    sent = []
+    client = governor_redis._stop_calling_redis_while_unreachable(_ScriptedRedis(answers, sent), cooldown_s=10)
+    with pytest.raises(RedisConnectionError):
+        await client.execute_command("ZCARD")
+
+    assert (await client.execute_command("ZCARD"), sent) == ("after", expected_sent)
 
 
 @contextlib.asynccontextmanager
@@ -381,8 +409,8 @@ async def _redis_that_closes_its_first_connection():
 
 @pytest.mark.asyncio
 async def test_a_connection_redis_closed_while_idle_does_not_start_the_cooldown():
-    """Redis closed the pooled connection while it sat idle: that command fails, as before, but the PING after it gets an
-    answer, so RG keeps calling Redis. Starting the cooldown here would refuse every user under fail_closed (TASK-13882)."""
+    """Redis closed the pooled connection while it sat idle: that command may fail, as before, but the PING after it gets
+    an answer, so RG keeps calling Redis. Starting the cooldown here would refuse every user under fail_closed (TASK-13882)."""
     from tldw_Server_API.app.core.Resource_Governance import governor_redis
 
     async with _redis_that_closes_its_first_connection() as address:
@@ -390,8 +418,10 @@ async def test_a_connection_redis_closed_while_idle_does_not_start_the_cooldown(
         client = governor_redis._stop_calling_redis_while_unreachable(raw, cooldown_s=10)
         assert await client.ping()  # the connection the stand-in then closes
         await asyncio.sleep(0.05)
-        with pytest.raises(RedisConnectionError):
-            await client.ping()  # that closed connection fails, as it does without the cooldown
+        # redis-py 8.1 sends this on the closed connection, so it fails, as without the cooldown; a redis-py that
+        # notices the close first reconnects instead. Either way the next command must reach Redis.
+        with contextlib.suppress(RedisConnectionError):
+            await client.ping()
         answered = await client.ping()
         await raw.aclose()
 
