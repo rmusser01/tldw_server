@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
+import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -1224,6 +1225,8 @@ vi.mock("../ComposerToolbar", async importOriginal => {
   const actual = await importOriginal<typeof import("../ComposerToolbar")>()
   const StubToolbar = ({
     modelSelectButton,
+    serverChatId,
+    onRolePlayTriggerCapture,
     researchLaunchButton,
     toolsButton,
     sendControl,
@@ -1233,6 +1236,8 @@ vi.mock("../ComposerToolbar", async importOriginal => {
     onOpenModelSettings
   }: {
     onOpenModelSettings?: () => void
+    serverChatId?: string | null
+    onRolePlayTriggerCapture?: (element: HTMLButtonElement) => void
     modelSelectButton?: React.ReactNode
     researchLaunchButton?: React.ReactNode
     toolsButton?: React.ReactNode
@@ -1247,7 +1252,13 @@ vi.mock("../ComposerToolbar", async importOriginal => {
       {modelSelectButton}
       {researchLaunchButton}
       {toolsButton}
-      {sendControl}
+      <div data-testid="composer-inline-send-control">{sendControl}</div>
+      <div onClickCapture={(event) => {
+        const button = event.currentTarget.querySelector("button")
+        if (button) onRolePlayTriggerCapture?.(button)
+      }}>
+        <BuddyManagementButton target={serverChatId ? { scope_type: "conversation", scope_id: serverChatId } : null} onConversationSettings={rolePlayActions?.onOpenRolePlaySetup} />
+      </div>
       <button type="button" onClick={rolePlayActions?.onOpenRolePlaySetup}>Open role-play setup</button>
       <button
         type="button"
@@ -7422,7 +7433,7 @@ describe("PlaygroundForm role-play starter", () => {
     }
 
     expect(() => render(<PlaygroundForm droppedFiles={[]} />)).not.toThrow()
-    expect(document.querySelector("#composer-options-panel")).toBeInTheDocument()
+    expect(screen.getByTestId("composer-toolbar")).toBeInTheDocument()
   })
 
   it("opens character selection from the starter and returns focus after selecting the default assistant", async () => {

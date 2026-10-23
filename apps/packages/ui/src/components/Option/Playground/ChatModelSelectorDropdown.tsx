@@ -1,6 +1,6 @@
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
 import { Dropdown, Input, Select, Tooltip } from "antd"
-import { ArrowRight, HelpCircle } from "lucide-react"
+import { ArrowRight, ChevronDown, HelpCircle } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
@@ -233,34 +233,21 @@ export const ChatModelSelectorDropdown = React.memo(
             aria-haspopup="menu"
             aria-expanded={modelDropdownOpen}
             data-testid="model-selector"
-            className={`inline-flex min-h-[44px] min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-full border px-2 text-[10px] transition-colors ${
+            className={`inline-flex min-h-[44px] min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-lg border border-transparent px-2 text-xs transition-colors ${
               statusWarning
-                ? "border-warn/50 bg-warn/10 text-text hover:bg-warn/20"
-                : "border-border bg-surface hover:bg-surface-hover"
+                ? "bg-warn/10 text-text hover:bg-warn/20"
+                : "bg-transparent text-text hover:bg-surface2"
             }`}
           >
             <ProviderIcons
               provider={resolvedProviderKey}
               className={`h-3 w-3 ${
-                statusWarning ? "text-warn" : "text-text-subtle"
+                statusWarning ? "text-text" : "text-text-subtle"
               }`}
             />
-            <span className="max-w-[120px] truncate">{apiModelLabel}</span>
-            <span
-              className={`min-w-0 truncate rounded-full px-1.5 py-0.5 text-[9px] ${
-                statusWarning
-                  ? "bg-warn/10 text-text"
-                  : "bg-success/10 text-text"
-              }`}
-              title={
-                t(
-                  "playground:composer.statusTooltip",
-                  "Status"
-                ) as string
-              }
-            >
-              {statusLabel}
-            </span>
+            <span className="min-w-0 max-w-[180px] truncate">{apiModelLabel}</span>
+            <span className="sr-only">{statusLabel}</span>
+            <ChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
           </button>
         </Tooltip>
       </Dropdown>

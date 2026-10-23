@@ -1,3 +1,4 @@
+import { useCasualComposerDisclosure } from "./hooks/useCasualComposerDisclosure";
 import { useModelSettingsOverlayState } from "@/hooks/useModelSettingsOverlayState"
 import { shallow } from "zustand/shallow";
 import { SelectedModelSaveFeedback } from "@/components/Common/SelectedModelSaveFeedback";
@@ -21,7 +22,6 @@ import { BetaTag } from "@/components/Common/Beta";
 // getImageBackendConfigs, normalizeImageBackendConfig, resolveImageBackendConfig moved to usePlaygroundImageGen
 import { CharacterSelect } from "@/components/Common/CharacterSelect";
 import { ChatQueuePanel } from "@/components/Common/ChatQueuePanel";
-import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton";
 import { type KnowledgeTab } from "@/components/Knowledge";
 import type { SlashCommandItem } from "@/components/Sidepanel/Chat/SlashCommandMenu";
 import { isFirefoxTarget } from "@/config/platform";
@@ -539,7 +539,6 @@ export const PlaygroundForm = ({
   onSelectAttachedResearchContextHistory,
   onPrepareResearchFollowUp,
   stickyDockEnabled = false,
-  mobileCockpitModeActive = false,
   forceWideMode = false,
   onComposerLayoutChange,
   onDraftPresenceChange,
@@ -5649,14 +5648,9 @@ export const PlaygroundForm = ({
   const {
     actionBarVisible,
     composerTextareaExpanded,
-    actionBarVisibilityClass,
     handlers: actionBarHandlers,
   } = useActionBarVisibility({ externalPinSources });
-  const keepComposerToolbarVisible = !isMobileViewport || !isProMode;
-  const [composerOptionsExpanded, setComposerOptionsExpanded] = useStorage(
-    "playgroundComposerOptionsExpanded",
-    true,
-  );
+  const { open: composerOptionsExpanded, setExplicitOpen: setComposerOptionsExpanded, loading: composerOptionsLoading, unavailable: composerOptionsUnavailable } = useCasualComposerDisclosure("playgroundComposerOptionsExpanded");
   const shouldCompactComposerTextarea =
     !composerTextareaExpanded &&
     !contextToolsOpen &&
@@ -6284,9 +6278,7 @@ export const PlaygroundForm = ({
                     }
                   : undefined
               }
-              className={`relative w-full rounded-xl border border-transparent bg-surface/95 p-2 text-text shadow-sm backdrop-blur-lg transition-all duration-200 data-[istemporary-chat='true']:border-t-4 data-[istemporary-chat='true']:border-t-purple-500 data-[istemporary-chat='true']:border-dashed data-[istemporary-chat='true']:opacity-90 sm:rounded-3xl sm:p-3 sm:shadow-card ${
-                !isConnectionReady ? "opacity-80" : ""
-              }`}
+              className={`relative w-full rounded-2xl border border-border bg-surface p-3 text-text transition-colors duration-150 focus-within:border-focus focus-within:ring-2 focus-within:ring-focus/20 motion-reduce:transition-none data-[istemporary-chat='true']:border-dashed sm:p-4 `}
             >
               {importedSidepanelContext
                 ? wrapComposerProfile(
@@ -6626,11 +6618,7 @@ export const PlaygroundForm = ({
                     />
 
                     <div
-                      className={`w-full flex flex-col px-0 sm:px-2 ${
-                        !isConnectionReady
-                          ? "rounded-md border border-dashed border-border bg-surface2"
-                          : ""
-                      }`}
+                      className="flex w-full min-w-0 flex-col"
                     >
                       <PlaygroundChatErrorBanner
                         error={chatErrorBanner}
@@ -7019,75 +7007,8 @@ export const PlaygroundForm = ({
                           ) : null;
 
                         const composerTextareaNode = (
-                          <div className="relative">
+                          <div className="relative min-w-0">
                             {replyTargetNode}
-                            <div
-                              className={
-                                isMobileViewport
-                                  ? "grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2"
-                                  : "flex items-end gap-2"
-                              }
-                            >
-                              {isProMode && <button
-                                type="button"
-                                data-testid="composer-options-toggle"
-                                aria-controls="composer-options-panel"
-                                aria-expanded={composerOptionsExpanded}
-                                aria-label={
-                                  composerOptionsExpanded
-                                    ? (t(
-                                        "playground:composer.hideOptions",
-                                        "Hide composer options",
-                                      ) as string)
-                                    : (t(
-                                        "playground:composer.showOptions",
-                                        "Show composer options",
-                                      ) as string)
-                                }
-                                title={
-                                  composerOptionsExpanded
-                                    ? (t(
-                                        "playground:composer.hideOptions",
-                                        "Hide composer options",
-                                      ) as string)
-                                    : (t(
-                                        "playground:composer.showOptions",
-                                        "Show composer options",
-                                      ) as string)
-                                }
-                                onClick={() =>
-                                  setComposerOptionsExpanded(
-                                    !composerOptionsExpanded,
-                                  )
-                                }
-                                className={`${
-                                  suppressComposerToolbarForMobileCockpit
-                                    ? "hidden"
-                                    : "inline-flex"
-                                } h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-border/70 bg-surface/80 text-text-muted transition hover:bg-surface2 hover:text-text focus:outline-none focus-visible:ring-2 focus-visible:ring-focus/40 ${
-                                  composerOptionsExpanded
-                                    ? "border-primary/40 text-primaryStrong"
-                                    : ""
-                                }`}
-                              >
-                                <ChevronRight
-                                  className={`h-4 w-4 transition-transform ${
-                                    composerOptionsExpanded ? "rotate-90" : ""
-                                  }`}
-                                  aria-hidden="true"
-                                />
-                              </button>}
-                              <div
-                                className={
-                                  !isProMode
-                                    ? "min-w-0 flex-1 col-span-2"
-                                    : isMobileViewport
-                                    ? suppressComposerToolbarForMobileCockpit
-                                      ? "col-span-2 min-w-0"
-                                      : "min-w-0"
-                                    : "min-w-0 flex-1"
-                                }
-                              >
                                 {wrapComposerProfile(
                                   "composer-textarea",
                                   <ComposerTextarea
@@ -7105,8 +7026,8 @@ export const PlaygroundForm = ({
                                     onMouseDown={handleTextareaMouseDown}
                                     onMouseUp={handleTextareaMouseUp}
                                     placeholder={t(
-                                      "playground:composer.placeholderWithMentions",
-                                      "Type a message... (/ commands, @ mentions)",
+                                      "playground:composer.calmPlaceholder",
+                                      "Write a message…",
                                     )}
                                     isProMode={isProMode}
                                     isMobile={isMobileViewport}
@@ -7139,19 +7060,6 @@ export const PlaygroundForm = ({
                                     draftSaved={draftSaved}
                                   />,
                                 )}
-                              </div>
-                              <div
-                                data-testid="composer-inline-send-control"
-                                className={
-                                  isMobileViewport
-                                    ? "col-span-2 flex shrink-0 items-end justify-end gap-2 self-end"
-                                    : "flex shrink-0 items-end gap-2 self-end"
-                                }
-                              >
-                                {promptAssistAction}
-                                {sendControl}
-                              </div>
-                            </div>
                           </div>
                         );
 
@@ -7362,21 +7270,7 @@ export const PlaygroundForm = ({
                         );
 
                         const composerToolbarNode = (
-                          <div
-                            id="composer-options-panel"
-                            aria-hidden={
-                              keepComposerToolbarVisible
-                                ? false
-                                : !actionBarVisible
-                            }
-                            className={`w-full transition-all duration-200 ${
-                              !isProMode
-                                ? "opacity-100 visible"
-                                : keepComposerToolbarVisible
-                                  ? "max-h-[480px] overflow-hidden opacity-100 visible"
-                                  : `overflow-hidden ${actionBarVisibilityClass}`
-                            }`}
-                          >
+                          <div className="w-full">
                             {wrapComposerProfile(
                               "composer-toolbar",
                               <ComposerToolbar
@@ -7385,6 +7279,11 @@ export const PlaygroundForm = ({
                                 isConnectionReady={isConnectionReady}
                                 isSending={isSending}
                                 optionsExpanded={composerOptionsExpanded}
+                                optionsLoading={composerOptionsLoading}
+                                optionsUnavailable={composerOptionsUnavailable}
+                                onToggleOptions={() => setComposerOptionsExpanded(!composerOptionsExpanded)}
+                                onRolePlayTriggerCapture={(element) => { rolePlaySetupReturnFocusRef.current = element; }}
+                                promptAssistAction={promptAssistAction}
                                 modeLauncherButton={modeLauncherButton}
                                 compareControl={compareControl}
                                 openUIRequestButton={openUIRequestButton}
@@ -7395,7 +7294,7 @@ export const PlaygroundForm = ({
                                 modelSelectButton={modelSelectButton}
                                 mcpControl={mcpControl}
                                 sendControl={sendControl}
-                                sendControlPlacement="external"
+                                sendControlPlacement="toolbar"
                                 attachmentButton={attachmentButton}
                                 toolsButton={toolsButton}
                                 voiceChatButton={voiceChatButton}
@@ -7418,6 +7317,7 @@ export const PlaygroundForm = ({
                                 persistenceTooltip={persistenceTooltip}
                                 contextToolsOpen={contextToolsOpen}
                                 onToggleKnowledgePanel={toggleKnowledgePanel}
+                                onOpenKnowledgePanel={openKnowledgePanel}
                                 webSearch={webSearch}
                                 onToggleWebSearch={handleToggleWebSearch}
                                 hasWebSearch={!!capabilities?.hasWebSearch}
@@ -7477,29 +7377,7 @@ export const PlaygroundForm = ({
                             )}
                           </div>
                         );
-                        const composerToolbarSlot =
-                          suppressComposerToolbarForMobileCockpit
-                            ? (
-                                <>
-                                  <div
-                                    className="flex min-w-0 justify-end"
-                                    onClickCapture={(event) => {
-                                      rolePlaySetupReturnFocusRef.current =
-                                        event.currentTarget.querySelector("button");
-                                    }}
-                                  >
-                                    <BuddyManagementButton
-                                      target={serverChatId ? {
-                                        scope_type: "conversation",
-                                        scope_id: serverChatId,
-                                      } : null}
-                                      onConversationSettings={openRolePlaySetup}
-                                    />
-                                  </div>
-                                  <div className="hidden">{composerToolbarNode}</div>
-                                </>
-                              )
-                            : composerToolbarNode;
+                        const composerToolbarSlot = composerToolbarNode;
 
                         if (nextgenComposerEnabled) {
                           const sharedNoticesSlot = (
@@ -7585,6 +7463,7 @@ export const PlaygroundForm = ({
                             nextgenComposerVariant === "v5" ? (
                               <ChatComposer
                                 variant="v5"
+                                sendSlot={<></>}
                                 message={form.values.message}
                                 onMessageChange={(value) =>
                                   form.setFieldValue("message", value)
