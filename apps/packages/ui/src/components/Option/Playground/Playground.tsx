@@ -88,10 +88,8 @@ import {
   Keyboard,
   Maximize2,
   Minimize2,
-  Moon,
   PanelRightOpen,
   Search,
-  Sun,
   X,
 } from "lucide-react";
 import {
@@ -112,7 +110,6 @@ import { useStorage } from "@plasmohq/storage/hook";
 import { DEFAULT_CHAT_SETTINGS } from "@/types/chat-settings";
 import { useMcpToolsStore } from "@/store/mcp-tools";
 import { useDesktop, useMobile } from "@/hooks/useMediaQuery";
-import { useDarkMode } from "@/hooks/useDarkmode";
 import { useLoadLocalConversation, restoreReadableLocalComparison } from "@/hooks/useLoadLocalConversation";
 import { tldwClient } from "@/services/tldw/TldwApiClient";
 import {
@@ -441,7 +438,6 @@ const PlaygroundContent = () => {
   const [messageView, setMessageView] = useSetting(CHAT_MESSAGE_VIEW_SETTING);
   const [composerHasDraft, setComposerHasDraft] = React.useState(false);
   const { t } = useTranslation(["playground", "common"]);
-  const { mode: themeMode, toggleDarkMode } = useDarkMode();
   const navigate = useNavigate();
   const [chatBackgroundImage] = useSetting(CHAT_BACKGROUND_IMAGE_SETTING);
   const [chatWindowOpacity] = useSetting(CHAT_WINDOW_OPACITY_SETTING);
@@ -898,10 +894,6 @@ const PlaygroundContent = () => {
     focusModeActive
       ? toText(t("playground:cockpit.cockpit", "Cockpit"))
       : toText(t("playground:cockpit.focus", "Focus"));
-  const isDarkTheme = themeMode !== "light";
-  const themeToggleLabel = isDarkTheme
-    ? toText(t("common:theme.switchToLight", "Switch to light theme"))
-    : toText(t("common:theme.switchToDark", "Switch to dark theme"));
   const exitFocusLabel = toText(
     t("playground:cockpit.exitFocus", "Exit focus"),
   );
@@ -3786,9 +3778,11 @@ const PlaygroundContent = () => {
               </div>
             )}
             {!focusModeActive && (
-              <div className="px-2 pt-1 sm:px-4 sm:pt-2">
+              <div className="border-b border-border/60 px-2 py-1 sm:px-4">
               <div
-                className={`mx-auto flex w-full ${chatContentWidthClassName} items-center justify-between gap-2 text-[10px] text-text-muted sm:text-[11px]`}
+                role="group"
+                aria-label={toText(t("playground:regions.viewToolbar", "Conversation view"))}
+                className={`mx-auto flex min-h-11 w-full ${chatContentWidthClassName} items-center justify-between gap-2 text-xs text-text-muted`}
               >
                 <div className="flex min-w-0 items-center gap-1.5">
                   <MessageViewSelect value={messageView} onChange={setMessageView} />
@@ -3797,7 +3791,7 @@ const PlaygroundContent = () => {
                     className={`hidden max-w-full items-center rounded-full border px-2 py-0.5 font-medium md:inline-flex ${
                       characterWorkflowActive
                         ? "border-primary/40 bg-primary/10 text-primaryStrong"
-                        : "border-border bg-surface2 text-text-muted"
+                        : "border-transparent text-text-muted"
                     }`}
                   >
                     {characterWorkflowActive
@@ -3816,25 +3810,8 @@ const PlaygroundContent = () => {
                       </span>
                     ) : null}
                   </span>
-                  <span className="hidden items-center rounded-full border border-border bg-surface2 px-2 py-0.5 sm:inline-flex">
-                    {t("playground:regions.timeline", "Conversation timeline")}
-                  </span>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    data-testid="chat-header-theme-toggle"
-                    aria-label={themeToggleLabel}
-                    onClick={toggleDarkMode}
-                    title={themeToggleLabel}
-                    className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"
-                  >
-                    {isDarkTheme ? (
-                      <Sun className="h-3 w-3" aria-hidden="true" />
-                    ) : (
-                      <Moon className="h-3 w-3" aria-hidden="true" />
-                    )}
-                  </button>
                   <button
                     type="button"
                     data-testid="playground-chat-layout-mode-trigger"
@@ -3842,7 +3819,7 @@ const PlaygroundContent = () => {
                     aria-pressed={focusModeActive}
                     onClick={() => handleChatLayoutModeChange(nextChatLayoutMode)}
                     title={chatLayoutToggleLabel}
-                    className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center gap-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md px-2 text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                   >
                     <Maximize2 className="h-3 w-3" aria-hidden="true" />
                     <span className="hidden sm:inline">
@@ -3860,11 +3837,11 @@ const PlaygroundContent = () => {
                         "Open keyboard shortcuts (?)",
                       ) as string
                     }
-                    className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center gap-1 rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md px-2 text-text-muted hover:bg-surface2 hover:text-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
                   >
                     <Keyboard className="h-3 w-3" aria-hidden="true" />
                     <span className="hidden sm:inline">
-                      {t("playground:shortcuts.title", "Shortcuts")}
+                      {t("common:shortcuts.showKeyboardShortcuts", "Show keyboard shortcuts")}
                     </span>
                   </button>
                   <button
@@ -3883,18 +3860,22 @@ const PlaygroundContent = () => {
                       setArtifactsOpen(true);
                       markArtifactsRead();
                     }}
-                    title={artifactBadgeLabel as string}
+                    aria-pressed={artifactsOpen}
+                    title={!activeArtifact && !artifactsOpen
+                      ? toText(t("playground:regions.noArtifactsYet", "No artifacts yet"))
+                      : artifactBadgeLabel as string}
                     className={`${
                       !activeArtifact && !artifactsOpen
                         ? "hidden sm:inline-flex"
                         : "inline-flex"
-                    } min-h-[26px] items-center gap-1 rounded-full border px-1.5 py-0.5 transition sm:px-2 ${
+                    } min-h-11 items-center gap-1.5 rounded-md px-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus ${
                       !activeArtifact && !artifactsOpen
-                        ? "cursor-not-allowed border-border bg-surface text-text-subtle opacity-70"
-                        : "border-border bg-surface2 text-text hover:bg-surface"
+                        ? "cursor-not-allowed text-text-muted opacity-55"
+                        : "text-text-muted hover:bg-surface2 hover:text-text"
                     }`}
                   >
-                    <span>{artifactBadgeLabel}</span>
+                    <PanelRightOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>{t("playground:regions.artifactsShort", "Artifacts")}</span>
                     {artifactUnreadCount > 0 && (
                       <span
                         data-testid="playground-artifacts-unread"
