@@ -2,7 +2,7 @@
 id: TASK-13888
 title: A full sync adapter pool logs 'Streaming worker capacity is exhausted' for
   non-streaming calls
-status: To Do
+status: In Progress
 labels:
 - backend
 - claims
@@ -23,6 +23,7 @@ await_bounded_daemon_with_timeout (Chat/bounded_daemon.py near line 259) calls p
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-10-22-fva-endpoint-and-capacity-message.md. await_bounded_daemon_with_timeout passes exhaustion_message=f'{name} capacity is exhausted' to pool.start.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

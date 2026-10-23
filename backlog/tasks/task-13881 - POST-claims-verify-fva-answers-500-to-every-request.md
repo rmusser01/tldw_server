@@ -1,7 +1,7 @@
 ---
 id: TASK-13881
 title: POST /claims/verify/fva answers 500 to every request
-status: To Do
+status: In Progress
 labels:
 - claims
 - quotas
@@ -20,6 +20,8 @@ verify_claims_with_fva (Claims_Extraction/claims_service.py) has three construct
 - [ ] #2 A quota refusal at its verify or adjudication call answers 402, with a test
 - [ ] #3 The user_id query parameter counts only for a platform admin, as rebuild_claims does (_legacy_user_has_platform_admin_claims). With an admin's user_id, the media DB, the vector store, the quota decision and the usage rows all belong to that user; otherwise all of them belong to the authenticated user, by id, not username. With a test for each case: a non-admin's user_id is ignored for all four, and an admin's is honoured for all four
 - [ ] #4 Usage_Quotas.md lists POST /claims/verify/fva among the endpoints that answer 402
+- [ ] #5 FVA's anti-context retrieval keeps the counter-evidence hybrid retrieval returns (its min_score trims each query's weakest full-text matches before fusion), so the adjudicator runs, with a test on a real MultiDatabaseRetriever with and without a vector store
+- [ ] #6 Adjudication assesses at most the verifier's 5 base documents on the supporting side, with a test
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -27,6 +29,7 @@ verify_claims_with_fva (Claims_Extraction/claims_service.py) has three construct
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Owner decision, 2026-10-20 (approving the TASK-13862 plan): repair the endpoint in this task, and admin-gate the user_id parameter as the sibling claims endpoints do (rebuild_claims); the two alternatives are not taken. Until this lands, Docs/Operations/Usage_Quotas.md says the endpoint answers 500.
 Review of PR #3287 (I1), 2026-10-20: AC #1 and AC #3 reworded. As first written, AC #3 admin-gated user_id only for the usage row, so a repair could meet every AC and still let a non-admin's ?user_id=2 read user 2's embeddings: the user_id passed to MultiDatabaseRetriever picks the vector store (MediaDBRetriever: create_from_settings_for_user near database_retrievers.py:997, collection user_{id}_media_embeddings near :2203), and the snippets come back as evidence. AC #1's 'the caller's media DB' also contradicted the admin case. AC #3 now gives user_id one meaning for the media DB, vector store, quota decision and usage rows, with a test for the non-admin and the admin case; AC #1 follows it.
+Plan: Docs/superpowers/plans/2026-10-22-fva-endpoint-and-capacity-message.md. AC #5 and AC #6 added (owner Decision 1, A-capped): AntiContextRetriever filtered the fused hybrid list with min_relevance_score 0.3, but an RRF score is at most 1/61, so FVA never found counter-evidence and never adjudicated; the post-fusion filter is deleted (the retriever's min_score already trims each query's weakest full-text matches before fusion; no absolute floor, the adjudicator's stance check decides). Each supporting document costs one stance call per falsified claim, so adjudication assesses the verifier's 5 documents: worst case 1,050 LLM calls per request instead of 50 x (16 + top_k). verify_claims_with_fva resolves the owner first (user_id only for _legacy_user_has_platform_admin_claims, as rebuild_claims), then runs the pipeline for it; an admin naming another user runs inside scoped_context(user_id, is_admin=False) and _claims_user_override_db, so the media visibility filter (SQLite) or RLS (PostgreSQL), the quota decision and the usage rows all read that user. The retriever's user_id picks the vector store; ClaimsJobContext(user_id=owner id) writes the claims_verify rows.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary

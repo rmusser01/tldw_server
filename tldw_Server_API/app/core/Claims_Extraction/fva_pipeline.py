@@ -65,6 +65,11 @@ except ImportError:
         pass
 
 
+# Each supporting document costs one stance call per falsified claim, so adjudication assesses the documents the
+# verifier judged (HybridClaimVerifier.verify's top_k, 5), not every base document the request retrieved.
+_ADJUDICATED_SUPPORTING_DOCS = 5
+
+
 def _load_fva_config_from_settings() -> dict[str, Any]:
     """Load FVA configuration from application settings."""
     try:
@@ -270,7 +275,7 @@ class FVAPipeline:
                         if anti_docs:
                             adjudication = await self.adjudicator.adjudicate(
                                 claim=claim,
-                                supporting_docs=documents,
+                                supporting_docs=documents[:_ADJUDICATED_SUPPORTING_DOCS],
                                 contradicting_docs=anti_docs,
                                 original_verification=original_verification,
                             )
