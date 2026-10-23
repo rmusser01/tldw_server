@@ -33,12 +33,13 @@ RED on origin/dev e06eeec68c: tests/DB_Management/test_chacha_postgres_concurren
 Docs: ADR-080's 'Concurrent transactions' Consequences bullet now states the guard and its cost (Decision unchanged); ChaChaNotes_DB.md names the error; Docs/Published refreshed. Bandit: nothing in operation_scope.py, ChaChaNotes_DB.py or semantic_projector.py; the two tests have B101 LOW x1 each.
 Executed on origin/dev 617094d014 (2026-10-23): the RED ([], ['r1']) x2, GREEN 21 passed, the thread-only-key mutation, the semantic RED 3 of 3 and 38 passed, and the 14-file operation set (163 passed) all matched the plan's Expected lines.
 PR: https://github.com/rmusser01/tldw_server/pull/3312.
+Review fixes on #3312 (2026-10-23): the Final Summary said 'the one current caller'; the audit is name-based within a module and not exhaustive, so it now says 'the one caller found' (review m2; ADR-080's bullet likewise). The guard's ERROR line now reports the caller's line (logger.opt(depth=2); m4), and two PostgreSQL pins cover the claim's release on a failed __enter__ (PoolTimeout) and on a cross-thread exit, each failing on its mutation (m5).
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Inside one chacha_operation, a db.transaction() that enters while another thread's or task's transaction is open on the same ConnectionState now raises ConcurrentChaChaTransactionError instead of joining it; nesting on one thread and task joins as before. Before, the overlap left tx_depth wrong and every later write in the operation was silently rolled back (measured: r2 and r3 lost for both a two-thread and a two-task overlap). Raising rather than serializing avoids deadlocks and event-loop stalls, and covers two tasks on one thread; it also refuses overlaps that happened to work, so the one current caller, semantic conversion's two lookups, now runs them in turn. ADR-080's rule is now enforced.
+Inside one chacha_operation, a db.transaction() that enters while another thread's or task's transaction is open on the same ConnectionState now raises ConcurrentChaChaTransactionError instead of joining it; nesting on one thread and task joins as before. Before, the overlap left tx_depth wrong and every later write in the operation was silently rolled back (measured: r2 and r3 lost for both a two-thread and a two-task overlap). Raising rather than serializing avoids deadlocks and event-loop stalls, and covers two tasks on one thread; it also refuses overlaps that happened to work, so the one caller found, semantic conversion's two lookups, now runs them in turn. ADR-080's rule is now enforced.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
