@@ -38,7 +38,7 @@ from ..tts_exceptions import (
 )
 from ..tts_resource_manager import get_resource_manager as _get_resource_manager
 from ..tts_validation import validate_tts_request
-from ..utils import hold_tts_engine, parse_bool, run_tts_blocking_next
+from ..utils import hold_tts_engine, parse_bool, run_tts_blocking_next, tts_model_load_lock
 
 #
 # Local Imports
@@ -275,7 +275,6 @@ class KokoroAdapter(TTSAdapter):
             if test_mode and not parse_bool(os.getenv("RUN_TTS_LEGACY_INTEGRATION"), default=False) and not explicit_model:
                 self._lazy_init = True
         self._deferred_model_load = self._lazy_init
-        self._model_lock = asyncio.Lock()
 
         # Auto-download toggle (Kokoro does not auto-download; provided for consistency)
         cfg_auto = self.config.get("kokoro_auto_download")
@@ -354,18 +353,20 @@ class KokoroAdapter(TTSAdapter):
         return self.kokoro_pt_model is not None or self.model_pt is not None
 
     async def _ensure_model_loaded(self) -> bool:
-        """Load the model once, keeping _model_lock until the load thread returns.
+        """Load the model once, keeping the model's load lock until the load thread returns.
 
-        init_timeout_sec (PyTorch only) bounds each caller's wait on the model load, including queueing
-        on _model_lock; queueing on ensure_initialized's _init_lock is not bounded. hold_tts_engine keeps
-        _model_lock with a load thread until it returns, even after its caller left, so no second load
-        starts beside it.
+        The lock (tts_model_load_lock) is shared by every Kokoro adapter loading this model path, and
+        hold_tts_engine keeps it with a load thread until it returns, even after its caller left, so no
+        second load starts beside it on this adapter or another. init_timeout_sec (PyTorch only) bounds
+        each caller's wait on the model load, including queueing on that lock; queueing on
+        ensure_initialized's _init_lock is not bounded.
         """
         if self._model_is_loaded():
             return True
         bound = None if self.use_onnx else (self.init_timeout_sec or None)
+        load_lock = tts_model_load_lock(self.provider_key, f"{'onnx' if self.use_onnx else 'torch'}:{self.model_path}")
         try:
-            async with asyncio.timeout(bound) as deadline, hold_tts_engine(self._model_lock) as run:
+            async with asyncio.timeout(bound) as deadline, hold_tts_engine(load_lock) as run:
                 if self._model_is_loaded():
                     return True
                 if self.use_onnx:
