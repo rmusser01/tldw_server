@@ -1815,6 +1815,7 @@ class TestMultiVoiceTTSAdapter:
         monkeypatch,
         tmp_path,
     ):
+        from tldw_Server_API.app.core.Workflows import subprocess_utils
         from tldw_Server_API.app.core.Workflows.adapters.audio import multi_voice_tts
 
         output_path = tmp_path / "section.mp3"
@@ -1843,7 +1844,7 @@ class TestMultiVoiceTTSAdapter:
             lambda name: "/usr/bin/espeak-ng" if name == "espeak-ng" else None,
         )
         monkeypatch.setattr(
-            multi_voice_tts.asyncio,
+            subprocess_utils.asyncio,
             "create_subprocess_exec",
             create_process,
         )
