@@ -82,11 +82,20 @@ def _parse_long_prompt_tier(tier: dict) -> dict | None:
         above_tokens = int(tier.get("above_tokens", 0) or 0)
     except (TypeError, ValueError):
         return None
-    has_prompt = _rate_value(tier, "prompt", "in", "input", default=None) is not None
-    has_completion = _rate_value(tier, "completion", "out", "output", default=None) is not None
-    if above_tokens <= 0 or not has_prompt or not has_completion:
+    if above_tokens <= 0 or not _has_rate(tier, "prompt", "in", "input") or not _has_rate(tier, "completion", "out", "output"):
         return None
     return {"above_tokens": above_tokens, **_parse_rates(tier)}
+
+
+def _has_rate(rates: dict, *keys: str) -> bool:
+    """Whether the first of ``keys`` present holds a number; a null or unparseable rate counts as missing.
+
+    Checks the raw value: ``_rate_value`` turns a null into 0.0, which would price that side at $0.
+    """
+    for key in keys:
+        if key in rates:
+            return rates[key] is not None and _rate_value(rates, key, default=None) is not None
+    return False
 
 
 UNKNOWN_BILLABLE_RATE = {"prompt": 0.01, "completion": 0.03}

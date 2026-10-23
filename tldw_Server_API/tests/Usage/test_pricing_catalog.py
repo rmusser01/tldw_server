@@ -557,8 +557,10 @@ def test_fast_mode_and_us_only_inference_stack_with_cache_rates_and_the_haiku_ti
         {"above_tokens": 200_000, "prompt": 0.01},
         {"prompt": 0.02, "completion": 0.06},
         {"above_tokens": 0, "prompt": 0.02, "completion": 0.06},
+        {"above_tokens": 200_000, "prompt": None, "completion": 0.06},
+        {"above_tokens": 200_000, "prompt": 0.02, "completion": None},
     ],
-    ids=["no-prompt", "no-completion", "no-above-tokens", "zero-above-tokens"],
+    ids=["no-prompt", "no-completion", "no-above-tokens", "zero-above-tokens", "null-prompt", "null-completion"],
 )
 def test_an_incomplete_long_prompt_tier_is_ignored_with_a_warning(tier: dict, monkeypatch: pytest.MonkeyPatch) -> None:
     """A tier without a prompt or completion rate would bill that side at $0; one without a threshold would apply
