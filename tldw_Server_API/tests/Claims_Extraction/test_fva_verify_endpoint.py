@@ -342,3 +342,4 @@ async def test_a_quota_refusal_at_the_verify_or_adjudication_call_answers_402(fv
     assert response.json()["detail"]["error"] == "limit_exceeded"
     assert spies.calls[-1] == (refused, MEMBER)
     assert set(spies.decided_for) == {MEMBER}
+    assert spies.usage_rows == ([("claims_verify", MEMBER)] if admitted else [])  # the paid verify call stays charged

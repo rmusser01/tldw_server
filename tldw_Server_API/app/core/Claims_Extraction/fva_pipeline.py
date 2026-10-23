@@ -66,7 +66,7 @@ except ImportError:
 
 
 # Each supporting document costs one stance call per falsified claim, so adjudication assesses the documents the
-# verifier judged (HybridClaimVerifier.verify's top_k, 5), not every base document the request retrieved.
+# verifier judged, not every base document the request retrieved. process_claim passes it as the verifier's top_k.
 _ADJUDICATED_SUPPORTING_DOCS = 5
 
 
@@ -210,6 +210,7 @@ class FVAPipeline:
             claim=claim,
             query=query,
             base_documents=documents,
+            top_k=_ADJUDICATED_SUPPORTING_DOCS,
             budget=budget,
             job_context=job_context,
         )

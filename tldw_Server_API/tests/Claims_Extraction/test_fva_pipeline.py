@@ -115,6 +115,7 @@ class MockVerifier:
             "claim": claim,
             "query": query,
             "documents": base_documents,
+            "top_k": top_k,
         })
         if self.verification:
             return self.verification
@@ -795,3 +796,21 @@ async def test_adjudication_assesses_only_the_verifiers_top_five_supporting_docu
     assessed = sorted(d.content for d in base_docs + anti_docs if any(f"Evidence: {d.content}\n" in p for p in prompts))
     assert assessed == ["Contradicting evidence"] + [f"Support {i}" for i in range(5)]
     assert {a.document.id for a in result.adjudication.supporting_evidence} == {"0", "1", "2", "3", "4"}
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_the_verifier_judges_the_window_adjudication_assesses(monkeypatch):
+    """The cap is passed to the verifier as its top_k, so the two windows cannot drift apart (TASK-13881)."""
+    from tldw_Server_API.app.core.Claims_Extraction import fva_pipeline
+
+    monkeypatch.setattr(fva_pipeline, "_ADJUDICATED_SUPPORTING_DOCS", 3)
+    low_confidence = MockClaimVerification(claim=MockClaim(id="1", text="Test"), confidence=0.5)
+    claims_engine = MockClaimsEngine(MockVerifier(verification=low_confidence))
+    pipeline = FVAPipeline(claims_engine, MockRetriever(documents=[Document(id="anti_1", content="Against", metadata={}, score=0.7)]))
+    base_docs = [Document(id=str(i), content=f"Support {i}", metadata={}, score=1.0 - i / 10) for i in range(8)]
+
+    result = await pipeline.process_claim(claim=MockClaim(id="1", text="Test claim"), query="test", documents=base_docs)
+
+    assert [call["top_k"] for call in claims_engine.verifier.verify_calls] == [3]
+    assert {a.document.id for a in result.adjudication.supporting_evidence} == {"0", "1", "2"}
