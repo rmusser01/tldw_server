@@ -6,6 +6,7 @@ import runpy
 import socket
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -98,6 +99,10 @@ def test_postgres_manifest_validation_rejects_unrelated_and_public_credentials(r
     }
     manifest.write_text(json.dumps(data), encoding="utf-8")
     manifest.chmod(0o600)
+    if os.name != "posix":
+        with pytest.raises(ValueError, match="POSIX"):
+            runner["_validate_postgres_manifest"](manifest)
+        return
     assert runner["_validate_postgres_manifest"](manifest)["content_db"] == data["content_db"]
     data["host"] = "192.0.2.1"
     manifest.write_text(json.dumps(data), encoding="utf-8")
@@ -108,6 +113,21 @@ def test_postgres_manifest_validation_rejects_unrelated_and_public_credentials(r
     manifest.chmod(0o644)
     with pytest.raises(ValueError, match="private"):
         runner["_validate_postgres_manifest"](manifest)
+
+
+def test_postgres_manifest_rejects_non_posix_host_before_reading_credentials(runner, tmp_path, monkeypatch):
+    manifest = tmp_path / "private.json"
+    manifest.write_text("{}", encoding="utf-8")
+    manifest.chmod(0o600)
+    validate = runner["_validate_postgres_manifest"]
+    monkeypatch.setitem(validate.__globals__, "os", SimpleNamespace(name="nt", environ=os.environ))
+
+    def forbidden_read(*args, **kwargs):
+        raise AssertionError("unsupported hosts must not read credentials")
+
+    monkeypatch.setattr(Path, "read_text", forbidden_read)
+    with pytest.raises(ValueError, match="POSIX"):
+        validate(manifest)
 
 
 def test_persisted_fixture_validation_checks_real_native_identity_and_isolation(runner, tmp_path):

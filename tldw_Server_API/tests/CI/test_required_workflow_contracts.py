@@ -2810,3 +2810,27 @@ def test_notes_persona_linux_partitions_preserve_every_module_once() -> None:
                     owners[path].append(shard["name"])
         assert files and all(len(names) == 1 for names in owners.values()), (job, owners)  # nosec B101 -- No omitted or repeated module.
         assert {names[0] for names in owners.values()} == set(groups)  # nosec B101 -- Four complete independent budgets.
+
+
+def test_release_python313_provisions_compose_only_for_macos_monitoring_shard() -> None:
+    """The shared release steps need Compose before rendering, but never brew on Windows."""
+    jobs = _load(".github/workflows/ci.yml")["jobs"]
+    for job_name in (
+        "full-suite-os-313-release-shards",
+        "full-suite-windows-313-release-shards",
+    ):
+        steps = jobs[job_name]["steps"]
+        install = _get_step(steps, "Install Docker Compose CLI for monitoring render contract")
+        assert install["if"] == "runner.os == 'macOS' && matrix.shard.name == 'core-utils-tooling'"
+        assert install["shell"] == "bash"
+        assert not install.get("continue-on-error", False)
+        script = install["run"]
+        for command in (
+            "brew install docker docker-compose",
+            'mkdir -p "$HOME/.docker/cli-plugins"',
+            'ln -s "$(brew --prefix)/lib/docker/cli-plugins/docker-compose" '
+            '"$HOME/.docker/cli-plugins/docker-compose"',
+            "docker compose version",
+        ):
+            assert command in script
+        assert steps.index(install) < steps.index(_get_step(steps, "Run release OS shard tests"))
