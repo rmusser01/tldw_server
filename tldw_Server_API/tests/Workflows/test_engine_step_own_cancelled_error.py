@@ -7,8 +7,9 @@ loop every detached task (a route, a human step's timeout, the orphan reaper) ru
 import asyncio
 import contextlib
 import sqlite3
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import psycopg
 import pytest
 
 from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
@@ -28,6 +29,16 @@ _PARALLEL_FAIL_FAST = {
     "config": {"fail_fast": True, "steps": [{"type": "summarize", "config": {"n": n}} for n in range(2)]},
 }
 _PLAIN = {"id": "s", "type": "summarize", "config": {"n": 0}}
+
+
+class PoolTimeout(psycopg.OperationalError):
+    """psycopg_pool.PoolTimeout's shape: the PostgreSQL pool raises it unwrapped from getconn() when it is exhausted.
+
+    A stand-in, because psycopg_pool comes only with the db_postgres extra, which the macOS and Windows jobs lack.
+    """
+
+
+_UNREADABLE_FLAG = [sqlite3.OperationalError("database is locked"), PoolTimeout("couldn't get a connection after 30.00 sec")]
 
 
 def _run(db: WorkflowsDatabase, engine: WorkflowEngine, entry: str, step: dict):
@@ -149,7 +160,8 @@ async def test_a_run_cancelled_through_the_api_stays_cancelled_when_its_step_the
 
 
 @pytest.mark.parametrize("entry", _ENTRIES)
-async def test_an_unreadable_cancel_flag_still_propagates_the_cancelled_error(tmp_path, entry) -> None:
+@pytest.mark.parametrize("error", _UNREADABLE_FLAG, ids=["sqlite_locked", "pool_timeout"])
+async def test_an_unreadable_cancel_flag_still_propagates_the_cancelled_error(tmp_path, error, entry) -> None:
     """If the clause cannot read the cancel flag, the step's CancelledError propagates and the run stays 'running', as on dev."""
     db = WorkflowsDatabase(str(tmp_path / "wf.db"))
     run = _run(db, WorkflowEngine(db), entry, {"id": "s", "type": "summarize", "config": {}})
@@ -157,7 +169,7 @@ async def test_an_unreadable_cancel_flag_still_propagates_the_cancelled_error(tm
 
     def locked_once_the_step_runs(run_id):
         if stepped.is_set():
-            raise sqlite3.OperationalError("database is locked")
+            raise error
         return read_flag(run_id)
 
     async def raises_cancelled_error(_config, _context):
@@ -170,3 +182,62 @@ async def test_an_unreadable_cancel_flag_still_propagates_the_cancelled_error(tm
 
     assert db.get_run("run").status == "running"
     assert "run_failed" not in _events(db)
+
+
+async def _cancel_the_run_task(db: WorkflowsDatabase, entry: str, read_once_the_step_runs) -> BaseException | None:
+    """Cancel the run's task mid-step, as shutdown does, and return what left it.
+
+    Once the step runs, the cancel flag is read through ``read_once_the_step_runs``.
+    """
+    run = _run(db, WorkflowEngine(db), entry, {"id": "s", "type": "summarize", "config": {}})
+    read_flag, started = db.is_cancel_requested, asyncio.Event()
+
+    def read(run_id):
+        return read_once_the_step_runs(run_id) if started.is_set() else read_flag(run_id)
+
+    async def runs_until_cancelled(_config, _context):
+        started.set()
+        await asyncio.Event().wait()
+
+    with _summarize_is(runs_until_cancelled), patch.object(db, "is_cancel_requested", side_effect=read):
+        task = asyncio.create_task(run)
+        await asyncio.wait_for(started.wait(), timeout=10)
+        task.cancel()
+        [left] = await asyncio.gather(task, return_exceptions=True)
+    return left
+
+
+@pytest.mark.parametrize("entry", _ENTRIES)
+async def test_a_cancelled_run_task_propagates_when_the_cancel_flag_cannot_be_read(tmp_path, entry) -> None:
+    """A real cancel during a pool outage: before the fix the flag read's PoolTimeout escaped instead (clean review I1)."""
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+
+    def pool_exhausted(_run_id):
+        raise PoolTimeout("couldn't get a connection after 30.00 sec")
+
+    left = await _cancel_the_run_task(db, entry, pool_exhausted)
+
+    assert type(left) is asyncio.CancelledError
+
+
+@pytest.mark.parametrize("entry", _ENTRIES)
+async def test_a_cancelled_run_task_reads_no_cancel_flag(tmp_path, entry) -> None:
+    """The flag only tells a step's own CancelledError from an API cancel; a cancelled task needs no blocking DB read."""
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    reads: list[str] = []
+
+    await _cancel_the_run_task(db, entry, lambda run_id: reads.append(run_id) or False)
+
+    assert reads == []
+
+
+async def test_a_steps_own_cancelled_error_is_recorded_on_its_span(tmp_path) -> None:
+    """start_run records each step failure on its tracing span; the step's own CancelledError too (clean review M3)."""
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    run = _run(db, WorkflowEngine(db), "start_run", _PLAIN)
+    recorded = MagicMock()
+
+    with _summarize_is(_raises_its_own_cancelled_error), patch.object(engine_module, "record_span_exception", recorded):
+        await asyncio.wait_for(run, timeout=10)
+
+    assert [str(call.args[0]) for call in recorded.call_args_list] == ["step_raised_cancelled_error"]
