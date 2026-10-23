@@ -63,16 +63,19 @@ for (const viewport of [
       if (await exitFocus.isVisible()) await exitFocus.click();
       await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /dark/ : /light/);
       await expect(page.getByTestId('model-selector')).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Queue request', exact: true })).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Send message', exact: true })).toBeVisible();
       await page.evaluate(async () => {
         await document.fonts.ready;
         await new Promise(requestAnimationFrame);
         await new Promise(requestAnimationFrame);
       });
       const mobile = viewport.name === 'mobile';
-      if (mobile) await page.getByRole('tab', { name: 'Context', exact: true }).click();
+      if (mobile) {
+        const contextToggle = page.getByRole('button', { name: 'Context', exact: true });
+        if (await contextToggle.getAttribute('aria-expanded') === 'false') await contextToggle.click();
+      }
       const context = mobile
-        ? page.getByRole('tabpanel', { name: 'Context', exact: true })
+        ? page.getByRole('region', { name: 'Context', exact: true })
         : page.getByTestId('playground-cockpit-left-rail');
       await expect(
         context.getByRole('heading', { name: 'Instructions', exact: true })
@@ -86,7 +89,7 @@ for (const viewport of [
       const contextAxe = await new AxeBuilder({ page })
         .include(
           mobile
-            ? '[role="tabpanel"]:not([hidden])'
+            ? '[data-testid="playground-cockpit-mobile-rails"] > section:not([hidden])'
             : '[data-testid="playground-cockpit-left-rail"]'
         )
         .analyze();
@@ -96,9 +99,9 @@ for (const viewport of [
           animations: 'disabled',
           path: testInfo.outputPath(`${viewport.name}-${theme}-context.png`),
         });
-      if (mobile) await page.getByRole('tab', { name: 'Runtime', exact: true }).click();
+      if (mobile) await page.getByRole('button', { name: 'Runtime', exact: true }).click();
       const runtime = mobile
-        ? page.getByRole('tabpanel', { name: 'Runtime', exact: true })
+        ? page.getByRole('region', { name: 'Runtime', exact: true })
         : page.getByTestId('playground-cockpit-right-rail');
       await expect(
         runtime.getByRole('heading', { name: 'Current run', exact: true })
@@ -113,7 +116,7 @@ for (const viewport of [
       const runtimeAxe = await new AxeBuilder({ page })
         .include(
           mobile
-            ? '[role="tabpanel"]:not([hidden])'
+            ? '[data-testid="playground-cockpit-mobile-rails"] > section:not([hidden])'
             : '[data-testid="playground-cockpit-right-rail"]'
         )
         .analyze();
@@ -134,8 +137,8 @@ for (const viewport of [
       if (mobile) {
         await page.getByRole('button', { name: 'Close Runtime panel', exact: true }).click();
         await expect(runtime).toBeHidden();
-        await expect(page.getByRole('tab', { name: 'Runtime', exact: true })).toBeFocused();
-        await page.getByRole('tab', { name: 'Context', exact: true }).click();
+        await expect(page.getByRole('button', { name: 'Runtime', exact: true })).toBeFocused();
+        await page.getByRole('button', { name: 'Context', exact: true }).click();
         await expect(context).toBeVisible();
         await expect(input).toHaveValue('Keep this draft while I inspect the rails.');
       }
@@ -151,7 +154,7 @@ test('keeps independent rail visibility after reload', async ({ page }) => {
   await expect(page.getByTestId('chat-input')).toBeVisible({ timeout: 60_000 });
   await page.getByTestId('playground-cockpit-left-rail-restore').click();
   await page.getByTestId('playground-cockpit-right-rail-restore').click();
-  await page.getByRole('button', { name: 'Collapse context sidechannel', exact: true }).click();
+  await page.getByRole('button', { name: 'Hide context', exact: true }).click();
   await expect(page.getByTestId('playground-cockpit-right-rail')).toBeVisible();
   await page.reload({ waitUntil: 'domcontentloaded' });
   await expect(page.getByTestId('playground-cockpit-left-rail-restore')).toBeVisible();

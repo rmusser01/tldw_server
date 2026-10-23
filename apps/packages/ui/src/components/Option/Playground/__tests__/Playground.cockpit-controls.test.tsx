@@ -1069,8 +1069,8 @@ describe("Playground cockpit controls", () => {
     });
 
     const promptSource = within(contextRail).getByRole("region", { name: "Instructions" });
-    expect(within(promptSource).getByText("Quick prompt")).toBeInTheDocument();
-    expect(within(promptSource).getByText("Draft a concise summary")).toBeInTheDocument();
+    expect(within(promptSource).getByText("Custom prompt")).toBeInTheDocument();
+    expect(within(promptSource).getByText("Inline system prompt selected")).toBeInTheDocument();
     const assistantSource = within(promptSource).getByRole("region", { name: "Assistant" });
     expect(within(assistantSource).getByText("Mira Vale")).toBeInTheDocument();
     expect(within(assistantSource).getByText("Character")).toBeInTheDocument();
@@ -1798,11 +1798,11 @@ describe("Playground cockpit controls", () => {
       requireFresh: true,
     });
     expect(
-      within(leftRail).getByRole("button", { name: "Expand Prompt" }),
+      within(leftRail).getByRole("button", { name: "Expand Instructions" }),
     ).toHaveAttribute("aria-expanded", "false");
     expect(
-      within(rightRail).getByRole("button", { name: "Expand Assistant" }),
-    ).toHaveAttribute("aria-expanded", "false");
+      within(leftRail).getByRole("region", { name: "Assistant", hidden: true }).closest('[aria-hidden="true"]'),
+    ).not.toBeNull();
 
     expect(
       screen.queryByRole("status", { name: "Chat status" }),

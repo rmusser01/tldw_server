@@ -50,24 +50,24 @@ describe("Playground cockpit rail restore tabs", () => {
       onLeftRailVisibleChange,
       onRightRailVisibleChange,
     });
-    const contextTab = screen.getByRole("button", { name: "Context",
+    const contextButton = screen.getByRole("button", { name: "Context",
       exact: true,
     });
-    const runtimeTab = screen.getByRole("button", { name: "Runtime",
+    const runtimeButton = screen.getByRole("button", { name: "Runtime",
       exact: true,
     });
-    fireEvent.click(runtimeTab);
+    fireEvent.click(runtimeButton);
     fireEvent.click(
       screen.getByRole("button", { name: "Close Runtime panel" }),
     );
     expect(
       screen.getByTestId("playground-cockpit-mobile-rails"),
     ).toHaveAttribute("data-mobile-panel", "none");
-    expect(runtimeTab).toHaveFocus();
+    expect(runtimeButton).toHaveFocus();
     expect(onLeftRailVisibleChange).not.toHaveBeenCalled();
     expect(onRightRailVisibleChange).not.toHaveBeenCalled();
-    fireEvent.click(contextTab);
-    expect(screen.getByRole("tabpanel", { name: "Context" })).toBeVisible();
+    fireEvent.click(contextButton);
+    expect(screen.getByRole("region", { name: "Context" })).toBeVisible();
   });
 
   it("keeps restore controls mounted across rail visibility changes", () => {
@@ -239,9 +239,9 @@ describe("Playground cockpit rail restore tabs", () => {
     const mobileRails = screen.getByTestId("playground-cockpit-mobile-rails");
     expect(mobileRails).toHaveAttribute("data-mobile-panel", "none");
 
-    const contextTab = screen.getByRole("button", { name: "Context",
+    const contextButton = screen.getByRole("button", { name: "Context",
     });
-    const runtimeTab = screen.getByRole("button", { name: "Runtime",
+    const runtimeButton = screen.getByRole("button", { name: "Runtime",
     });
     const contextPanel = document.getElementById(
       contextButton.getAttribute("aria-controls") ?? "",

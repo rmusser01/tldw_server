@@ -310,12 +310,12 @@ export const PlaygroundContextRail = ({
           {t("cockpit.prompt", "Prompt")}
         </p>
         <p className={cockpitRailStyles.value}>{promptManagementLabel}</p>
-        {promptActive && promptManagementDetail && (
+        {promptSelected && promptManagementDetail && (
           <p className={cockpitRailStyles.muted}>{promptManagementDetail}</p>
         )}
         <div className="mt-2 flex flex-wrap items-center gap-1">
           {promptSelectControl}
-          {promptActive && onClearPrompt && (
+          {promptSelected && onClearPrompt && (
             <button
               type="button"
               className={railActionClass}
