@@ -2,14 +2,21 @@
 
 import asyncio
 import contextlib
+import functools
+import os
+import signal
+import sys
 from unittest.mock import MagicMock, call, patch
 
 import pytest
 from fastapi import HTTPException
 
+from tldw_Server_API.app.core.DB_Management.Workflows_DB import WorkflowsDatabase
 from tldw_Server_API.app.core.exceptions import AdapterError, LLMQuotaExceededError
+from tldw_Server_API.app.core.Workflows import subprocess_utils
 from tldw_Server_API.app.core.Workflows.adapters.control import flow
 from tldw_Server_API.app.core.Workflows.adapters.media import ingest
+from tldw_Server_API.app.core.Workflows.engine import RunMode, WorkflowEngine
 from tldw_Server_API.app.core.Workflows.subprocess_utils import SubprocessTask
 
 pytestmark = pytest.mark.unit
@@ -233,3 +240,117 @@ async def test_a_map_item_still_runs_once_when_its_tracing_span_fails() -> None:
 
     assert result == {"results": [{"text": "0"}], "count": 1}
     assert calls == [0]
+
+
+_SOURCES = [{"uri": "https://media.example.com/clip"}]  # never fetched: start_process is replaced
+
+
+@contextlib.contextmanager
+def _fake_yt_dlp(script: str):
+    """Run ``script`` (Python, in the step directory) in place of yt-dlp; yield the downloads it started."""
+    started: list[SubprocessTask] = []
+
+    def start(_cmd, workdir, log_dir):
+        started.append(subprocess_utils.start_process([sys.executable, "-c", script], workdir, log_dir))
+        return started[-1]
+
+    with patch.object(ingest, "is_test_mode", return_value=False), patch.object(
+        ingest, "is_url_allowed_for_tenant", return_value=True
+    ), patch.object(ingest, "start_process", side_effect=start):
+        yield started
+
+
+async def _ingest_with_fake_yt_dlp(script: str, timeout_seconds: int, context=None) -> tuple[dict, SubprocessTask]:
+    """Run the media_ingest adapter itself with ``script`` in place of yt-dlp."""
+    config = {"sources": _SOURCES, "timeout_seconds": timeout_seconds}
+    with _fake_yt_dlp(script) as started:
+        result = await ingest.run_media_ingest_adapter(config, context or {"tenant_id": "default"})
+    return result, started[0]
+
+
+def _stop(download: SubprocessTask) -> bool:
+    """Kill the download if it is still running (dev leaves it), and say whether it was there to kill."""
+    try:
+        os.kill(download.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+async def test_media_ingest_returns_only_after_yt_dlp_has_exited(tmp_path, monkeypatch) -> None:
+    """On dev it returned as soon as yt-dlp's .part file appeared, with the download still running (TASK-13887)."""
+    monkeypatch.setenv("WORKFLOWS_TMP", str(tmp_path))
+    script = (
+        "import pathlib, time\n"
+        "pathlib.Path('clip.mp4.part').write_bytes(b'x')\n"
+        "time.sleep(1)\n"
+        "pathlib.Path('clip.mp4.part').rename('clip.mp4')\n"
+    )
+
+    result, download = await _ingest_with_fake_yt_dlp(script, timeout_seconds=30)
+    files = sorted(path.name for path in download.workdir.glob("*.*"))
+    was_running = _stop(download)
+
+    assert [entry["status"] for entry in result["metadata"]] == ["downloaded"]
+    assert files == ["clip.mp4"]
+    assert was_running is False
+
+
+async def test_media_ingest_reports_a_download_that_yt_dlp_failed(tmp_path, monkeypatch) -> None:
+    """yt-dlp exited with an error and wrote nothing; on dev the poll waited out the step's timeout instead."""
+    monkeypatch.setenv("WORKFLOWS_TMP", str(tmp_path))
+
+    result, download = await _ingest_with_fake_yt_dlp("raise SystemExit(1)", timeout_seconds=2)
+    _stop(download)
+
+    assert [(entry["status"], entry.get("returncode")) for entry in result["metadata"]] == [("download_failed", 1)]
+
+
+async def test_media_ingest_whose_run_was_cancelled_reports_cancelled(tmp_path, monkeypatch) -> None:
+    """engine.cancel() kills the download, so yt-dlp exits -15 before the poll sees the cancel: a cancel, not a failure."""
+    monkeypatch.setenv("WORKFLOWS_TMP", str(tmp_path))
+    checks = iter([False])  # the poll's first is_cancelled() passes; every later one sees the run's cancel
+    context = {"tenant_id": "default", "is_cancelled": lambda: next(checks, True)}
+    killed_by_the_cancel = "import os, signal\nos.kill(os.getpid(), signal.SIGTERM)\n"
+
+    result, download = await _ingest_with_fake_yt_dlp(killed_by_the_cancel, timeout_seconds=30, context=context)
+    _stop(download)
+
+    assert result == {"__status__": "cancelled"}
+
+
+async def test_a_download_that_outlasts_the_steps_timeout_fails_the_step(tmp_path, monkeypatch) -> None:
+    """The step's timeout_seconds is the download's budget; on dev the run 'succeeded' at the .part file (TASK-13887)."""
+    monkeypatch.setenv("WORKFLOWS_TMP", str(tmp_path))
+    db = WorkflowsDatabase(str(tmp_path / "wf.db"))
+    step = {
+        "id": "ingest",
+        "type": "media_ingest",
+        # The step's budget, the engine's wait_for. Dev's poll must get to see the .part file within it, so the
+        # adapter registry is loaded before the run (below): its one-off imports took 1.1-5.2 s, by machine load.
+        "timeout_seconds": 3,
+        "config": {"sources": _SOURCES, "timeout_seconds": 60},  # a larger adapter budget cannot extend it
+    }
+    db.create_run(
+        run_id="run",
+        tenant_id="default",
+        user_id="1",
+        inputs={},
+        workflow_id=None,
+        definition_version=1,
+        definition_snapshot={"name": "run", "version": 1, "steps": [step]},
+    )
+    slow_download = "import pathlib, time\npathlib.Path('clip.mp4.part').write_bytes(b'x')\ntime.sleep(30)\n"
+    quick_terminate = functools.partial(subprocess_utils.terminate_process, grace_ms=100)  # the real grace is 5 s
+    assert flow.get_adapter("media_ingest") is ingest.run_media_ingest_adapter  # loads the registry outside the budget
+
+    with _fake_yt_dlp(slow_download) as started, patch.object(ingest, "terminate_process", quick_terminate):
+        await asyncio.wait_for(WorkflowEngine(db).start_run("run", RunMode.SYNC), timeout=30)
+    try:
+        run = db.get_run("run")
+        assert (run.status, run.error) == ("failed", "")
+        assert [event["event_type"] for event in db.get_events("run")][-3:] == ["step_timeout", "step_failed", "run_failed"]
+        assert sorted(path.name for path in started[0].workdir.glob("*.*")) == ["clip.mp4.part"]  # yt-dlp never finished
+        assert started[0].proc.poll() is not None  # the download was stopped, not left running
+    finally:
+        _stop(started[0])
