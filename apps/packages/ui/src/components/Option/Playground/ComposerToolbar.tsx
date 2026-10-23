@@ -342,10 +342,17 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
     (item) =>
       item.id !== "model" &&
       item.id !== "temporary" &&
-      (item.tone === "active" || item.tone === "warning"),
+      (item.tone === "active" ||
+        item.tone === "warning" ||
+        [
+          "character",
+          "rolePlayIdentity",
+          "rolePlayBehavior",
+          "rolePlayScene",
+        ].includes(item.id)),
   );
   const neutralContextItems = contextItems.filter(
-    (item) => item.tone === "neutral",
+    (item) => item.tone === "neutral" && !activeContextItems.includes(item),
   );
   const dictationControl = hasDictation ? (
     <Tooltip title={speechTooltip}>

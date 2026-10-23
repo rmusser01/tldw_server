@@ -650,7 +650,7 @@ describe("Casual task-based customization", () => {
             id: "rolePlayIdentity",
             label: "Character",
             value: "Mira",
-            tone: "active",
+            tone: "neutral",
             onClick: clear
           },
           {

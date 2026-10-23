@@ -429,6 +429,55 @@ describe("composer keyboard disclosure", () => {
 });
 
 describe("composer context review actions", () => {
+  it.each([
+    {
+      id: "rolePlayIdentity",
+      label: "Character",
+      value: "Mira",
+      opensSetup: true,
+    },
+    { id: "character", label: "Character", value: "Mira", opensSetup: true },
+    {
+      id: "rolePlayBehavior",
+      label: "System prompt",
+      value: "Story instructions",
+      opensSetup: false,
+    },
+    {
+      id: "rolePlayScene",
+      label: "Scene draft",
+      value: "A quiet library",
+      opensSetup: false,
+    },
+  ])(
+    "keeps neutral selected $id visible and actionable with Tools closed",
+    (selection) => {
+      const action = vi.fn();
+      const setup = vi.fn();
+      render(
+        <ToolbarHarness
+          rolePlayActions={{ onOpenRolePlaySetup: setup }}
+          contextItems={[
+            {
+              id: selection.id,
+              label: selection.label,
+              value: selection.value,
+              tone: "neutral",
+              onClick: action,
+            },
+          ]}
+        />,
+      );
+      const chip = screen.getByTitle(`${selection.label}: ${selection.value}`);
+      expect(chip).toBeVisible();
+      fireEvent.click(chip);
+      expect(selection.opensSetup ? setup : action).toHaveBeenCalledOnce();
+      fireEvent.click(screen.getByTestId("composer-options-toggle"));
+      expect(screen.getAllByText(selection.value)).toHaveLength(1);
+      if (selection.opensSetup) expect(action).not.toHaveBeenCalled();
+    },
+  );
+
   it("opens attached context instead of closing an already open search panel", () => {
     const onOpenKnowledgePanel = vi.fn();
     const onToggleKnowledgePanel = vi.fn();
