@@ -15,7 +15,7 @@ The FVA pipeline introduces a new verification status:
 | Status | Description |
 |--------|-------------|
 | `VERIFIED` | Claim is supported by evidence with high confidence |
-| `REFUTED` | Claim is contradicted by strong evidence |
+| `REFUTED` | Contradicting evidence dominates. Once the contradict score reaches 0.1, the claim is refuted when it is at least 1.5 × the support score (support's share at most `contested_threshold`), or above 0.7 with support below 0.4. So with no supporting document judged SUPPORTS, one contradicting document at confidence 0.1 or more refutes the claim |
 | `CONTESTED` | **New**: Claim has significant evidence both supporting AND contradicting it |
 | `UNVERIFIED` | Insufficient evidence to determine claim validity |
 
@@ -58,7 +58,7 @@ POST /api/v1/claims/verify/fva
 
 ### Query Parameter
 
-- `user_id` (optional): the user to verify for. It counts only for a platform admin, as for the claims rebuild endpoints. The request then reads that user's media DB and vector store, and its LLM calls are quota-checked and recorded for that user. Anyone else's `user_id` is ignored, and the request runs for the caller.
+- `user_id` (optional): the user to verify for. It counts only for a platform admin, as for the claims rebuild endpoints. The request then reads that user's media DB and vector store (their personal media only; media shared with their teams or orgs is not searched), and its LLM calls are quota-checked and recorded for that user. Anyone else's `user_id` is ignored, and the request runs for the caller.
 
 An LLM call refused by the user's quota answers HTTP 402 with the `limit_exceeded` body (`Docs/Operations/Usage_Quotas.md`).
 
