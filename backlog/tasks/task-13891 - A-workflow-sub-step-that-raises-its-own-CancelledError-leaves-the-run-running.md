@@ -1,7 +1,7 @@
 ---
 id: TASK-13891
 title: A workflow sub-step that raises its own CancelledError leaves the run running
-status: To Do
+status: In Progress
 labels:
 - workflows
 - backend

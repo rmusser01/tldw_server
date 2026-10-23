@@ -1,6 +1,7 @@
 """map and parallel cancel their other sub-steps when one raises, and a cancelled sub-step stops its work (TASK-13863)."""
 
 import asyncio
+import contextlib
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -195,3 +196,40 @@ async def test_a_cancelled_media_ingest_terminates_its_download(tmp_path, monkey
             await step
 
     assert terminate.call_args_list == [call(download)]
+
+
+async def test_a_map_item_that_raises_runs_once_and_fails_the_step() -> None:
+    """On dev the tracing fallback ran the item again before the step failed: calls == [0, 0] (TASK-13886)."""
+    calls: list[int] = []
+    error = RuntimeError("webhook failed")
+
+    async def substep(_config, context):
+        calls.append(context["item"])
+        raise error
+
+    with patch.object(flow, "get_adapter", return_value=substep):
+        with pytest.raises(RuntimeError) as raised:
+            await flow.run_map_adapter({"items": [0], "step": {"type": "summarize", "config": {}}}, {})
+
+    assert raised.value is error
+    assert calls == [0]
+
+
+async def test_a_map_item_still_runs_once_when_its_tracing_span_fails() -> None:
+    """A span that fails to open costs the item its trace, not its run (TASK-13886)."""
+    calls: list[int] = []
+
+    async def substep(_config, context):
+        calls.append(context["item"])
+        return {"text": str(context["item"])}
+
+    @contextlib.asynccontextmanager
+    async def broken_span(*_args, **_kwargs):
+        raise RuntimeError("tracer unavailable")
+        yield  # pragma: no cover - never reached
+
+    with patch.object(flow, "get_adapter", return_value=substep), patch.object(flow, "_start_span", broken_span):
+        result = await flow.run_map_adapter({"items": [0], "step": {"type": "summarize", "config": {}}}, {})
+
+    assert result == {"results": [{"text": "0"}], "count": 1}
+    assert calls == [0]
