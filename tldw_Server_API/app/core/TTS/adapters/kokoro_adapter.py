@@ -425,7 +425,7 @@ class KokoroAdapter(TTSAdapter):
                 )
 
             # Resolve voices bundle path (required by kokoro-onnx)
-            voices_json_arg: Optional[str]
+            voices_json_arg: str
             if self.voices_json_path and os.path.isfile(self.voices_json_path):
                 voices_json_arg = self.voices_json_path
             else:
@@ -505,29 +505,7 @@ class KokoroAdapter(TTSAdapter):
             espeak_lib = _discover_espeak_library()
             espeak_config = EspeakConfig(lib_path=espeak_lib) if espeak_lib else None
 
-            # Initialize Kokoro (support constructors that accept either 1 or 2 positional args)
-            if voices_json_arg:
-                self.kokoro_instance = await run(
-                    Kokoro,
-                    self.model_path,
-                    voices_json_arg,
-                    espeak_config=espeak_config
-                )
-            else:
-                try:
-                    self.kokoro_instance = await run(
-                        Kokoro,
-                        self.model_path,
-                        espeak_config=espeak_config
-                    )
-                except TypeError:
-                    # Fallback: pass empty string for voices path if constructor requires it
-                    self.kokoro_instance = await run(
-                        Kokoro,
-                        self.model_path,
-                        "",
-                        espeak_config=espeak_config
-                    )
+            self.kokoro_instance = await run(Kokoro, self.model_path, voices_json_arg, espeak_config=espeak_config)
 
             # Work around a kokoro-onnx 0.4.x bug where the ONNX graph
             # expects a float `speed` input but the library feeds int32
