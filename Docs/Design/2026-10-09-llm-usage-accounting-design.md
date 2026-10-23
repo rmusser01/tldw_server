@@ -502,3 +502,7 @@ Revision of 2026-10-20, TASK-13864:
 - **A media ingest job that asks for analysis is checked once, when it starts,** and then runs `prechecked`, as an admitted request does; the admission ends with the job. Refused, it stores the item without analysis and records `analysis_error.code = "llm_quota_exceeded"` in its result, instead of failing the item; a reused transcript still records `video_lite.summary_error`. Other jobs are still checked at the call (§4b).
 - **The two web scraping endpoints and `POST /watchlists/outputs` join the §4a table.**
 - **Scraping queue jobs run as the request that submitted them.** The web scraping service starts its queue workers lazily, inside a request, and they ran every later job in that request's context. Each job now runs in a copy of its submitter's context, so its LLM calls are recorded and checked for that user and no request's admission reaches another's jobs (§1).
+
+Revision of 2026-10-23, TASK-13881:
+
+- **`POST /claims/verify/fva` runs,** and a refusal at its verify or adjudication call answers the 402. Its `user_id` query parameter counts only for a platform admin. The request then runs in that user's content scope, so its calls are checked and recorded for that user (§1). Anyone else's `user_id` is ignored.
