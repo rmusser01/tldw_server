@@ -46,7 +46,8 @@ const PAGE_ASSIST_SCHEMA: Record<string, string> = {
   ttsClips: "id, createdAt, historyId, serverChatId, messageId, serverMessageId, provider",
   sttRecordings: "id, createdAt",
   mediaReadAlongAudioCache:
-    "id, createdAt, lastUsedAt, [lastUsedAt+sizeBytes+id], mediaId, mediaKind, segmentId, settingsSignature, textHash"
+    "id, createdAt, lastUsedAt, [lastUsedAt+sizeBytes+id], mediaId, mediaKind, segmentId, settingsSignature, textHash",
+  searchTokens: "&[token+history_id], token"
 }
 
 const clone = <T,>(value: T): T => (value === undefined ? value : structuredClone(value))
@@ -277,6 +278,18 @@ export class MemoryWhereClause {
   equalsIgnoreCase(value: string) {
     return this.collection(
       (candidate) => typeof candidate === "string" && candidate.toLowerCase() === value.toLowerCase()
+    )
+  }
+  startsWithIgnoreCase(prefix: string) {
+    const needle = prefix.toLowerCase()
+    return this.collection(
+      (candidate) => typeof candidate === "string" && candidate.toLowerCase().startsWith(needle)
+    )
+  }
+  anyOfIgnoreCase(values: string[]) {
+    const needles = values.map((value) => value.toLowerCase())
+    return this.collection(
+      (candidate) => typeof candidate === "string" && needles.includes(candidate.toLowerCase())
     )
   }
   anyOf(...values: Array<Key | Key[]>) {

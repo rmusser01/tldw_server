@@ -24,7 +24,8 @@ import {
   AudiobookChapterAsset,
   TtsClip,
   SttRecordingRow,
-  MediaReadAlongAudioCacheEntry
+  MediaReadAlongAudioCacheEntry,
+  SearchTokenRow
 } from "./types"
 
 export class PageAssistDexieDB extends Dexie {
@@ -62,6 +63,9 @@ export class PageAssistDexieDB extends Dexie {
 
   // Media read-along generated audio cache
   mediaReadAlongAudioCache!: Table<MediaReadAlongAudioCacheEntry>
+
+  // Message-content search token side table (WP-23 / TASK-13523)
+  searchTokens!: Table<SearchTokenRow>
 
   constructor() {
     super('PageAssistDatabase');
@@ -404,6 +408,30 @@ export class PageAssistDexieDB extends Dexie {
     });
     this.version(16).stores({
       forkOperations: "[owner_key+operation_id], source_key, candidate_key, &active_intent"
+    });
+
+    // Version 17: message-content search token side table (WP-23 / TASK-13523).
+    // Additive-only: no existing table's spec changes. Fresh installs pick the
+    // declaration up directly; existing databases get a one-time backfill so
+    // content search keeps finding messages written before this version.
+    this.version(17).stores({
+      searchTokens: '&[token+history_id], token'
+    }).upgrade(async tx => {
+      const { buildSearchTokenRows } = await import("./search-tokenizer");
+      const rows: Array<{ token: string; history_id: string }> = [];
+      const pairs = new Set<string>();
+      await tx.table('messages').each(message => {
+        for (const row of buildSearchTokenRows(message.history_id, message.content)) {
+          const pair = `${row.token}|${row.history_id}`;
+          if (pairs.has(pair)) continue;
+          pairs.add(pair);
+          rows.push(row);
+        }
+      });
+      // Chunked writes bound each request batch on very large databases.
+      for (let index = 0; index < rows.length; index += 5000) {
+        await tx.table('searchTokens').bulkPut(rows.slice(index, index + 5000));
+      }
     });
   }
 }

@@ -30,6 +30,7 @@ import {
 import Dexie, { type ObservabilitySet, type UpdateSpec } from "dexie"
 import { db } from './schema';
 import { getAllModelNicknames } from "./nickname";
+import { indexMessageSearchTokens, indexMessagesSearchTokens, searchTokenHistoryIds } from "./search-tokens";
 const PAGE_SIZE = 30;
 
 export { isOnDeviceHistory, isReadableOnDeviceHistory, isOwnedCachedServerHistory, type OnDeviceHistoryScope, type OnDeviceHistoryReadOptions, type VisibleServerChats } from "./history-selection";
@@ -188,21 +189,41 @@ export class PageAssistDatabase {
       .anyOfIgnoreCase(normalizedQuery.split(' '))
       .toArray();
 
-    const messageMatches = await db.messages
-      .filter(message => searchQueryInContent(message.content, normalizedQuery))
-      .toArray();
+    // Content search (WP-23): the searchTokens index narrows to candidate
+    // histories, then only candidate message rows are streamed through the
+    // exact word-boundary check. The messages table is never materialized.
+    const candidateHistoryIds = await searchTokenHistoryIds(normalizedQuery);
+    const contentMatchedIds = new Set<string>();
+    if (candidateHistoryIds === null) {
+      // Punctuation-only query: no word tokens to prefilter with. Keep the
+      // exact semantics via a streaming pass that never materializes the
+      // table (rare path).
+      await db.messages.each(message => {
+        if (searchQueryInContent(message.content, normalizedQuery)) {
+          contentMatchedIds.add(message.history_id);
+        }
+      });
+    } else if (candidateHistoryIds.size > 0) {
+      await db.messages
+        .where('history_id')
+        .anyOf([...candidateHistoryIds])
+        .filter(message => searchQueryInContent(message.content, normalizedQuery))
+        .each(message => contentMatchedIds.add(message.history_id));
+    }
 
-    const historyIdsFromMessages = [...new Set(messageMatches.map(msg => msg.history_id))];
-
-    const historiesFromMessages = await db.chatHistories
+    const historiesFromMessages = contentMatchedIds.size === 0 ? [] : await db.chatHistories
       .where('id')
-      .anyOf(historyIdsFromMessages)
+      .anyOf([...contentMatchedIds])
       .toArray();
 
-    const allMatches = [...titleMatches, ...historiesFromMessages];
-    const uniqueHistories = allMatches.filter((history, index, self) =>
-      index === self.findIndex(h => h.id === history.id)
-    );
+    // Set dedupe: title matches win over content matches for the same id.
+    const seenIds = new Set<string>();
+    const uniqueHistories: ChatHistory = [];
+    for (const history of [...titleMatches, ...historiesFromMessages]) {
+      if (seenIds.has(history.id)) continue;
+      seenIds.add(history.id);
+      uniqueHistories.push(history);
+    }
 
     return uniqueHistories.sort((a, b) => b.createdAt - a.createdAt);
   }
@@ -343,6 +364,14 @@ export class PageAssistDatabase {
 
   async addMessage(message: Message) {
     await db.messages.add(stripHistoryAuthority(message));
+    // Keep the content-search token index fresh. Best-effort: the message is
+    // already committed, so an index failure degrades only that message's
+    // searchability rather than failing the save.
+    try {
+      await indexMessageSearchTokens(message);
+    } catch (error) {
+      console.warn("[search-tokens] failed to index a saved message:", error);
+    }
   }
 
   async updateMessage(
@@ -357,6 +386,10 @@ export class PageAssistDatabase {
       if (row.history_id !== history_id)
         throw new Error("message_owner_mismatch");
       await db.messages.update(message_id, { content });
+      // Re-index in the same transaction: stale tokens from the old content
+      // are harmless (exact verification rejects them), the new content must
+      // be findable.
+      await indexMessageSearchTokens({ history_id, content });
     });
   }
 
@@ -466,7 +499,7 @@ export class PageAssistDatabase {
   }> {
     const offset = (page - 1) * PAGE_SIZE;
     const query = searchQuery?.trim();
-    if (scope) return db.transaction("r", [db.userSettings, db.chatHistories, db.messages], async () => {
+    if (scope) return db.transaction("r", [db.userSettings, db.chatHistories, db.messages, db.searchTokens], async () => {
       await assertOnDeviceReader(scope);
       const candidates = query ? await this.fullTextSearchChatHistories(query) : await this.getChatHistories();
       const eligible = candidates.filter(history => isReadableOnDeviceHistory(history, scope, options, query));
@@ -865,7 +898,7 @@ export class PageAssistDatabase {
     const { replaceExisting = false, mergeData = true } = options;
 
     // Preserve this destination's guard, never imported authority, under the replacement lock.
-    await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates], async () => {
+    await db.transaction('rw', [db.chatHistories, db.messages, db.compareStates, db.searchTokens], async () => {
       const histories = data.filter(item => item.history).map(item => sanitizeImportedHistory(item.history));
       for (const history of histories) {
         const destination = await db.chatHistories.get(history.id);
@@ -898,6 +931,7 @@ export class PageAssistDatabase {
       if (allMessages.length > 0) {
         if (replaceExisting) {
           await db.messages.bulkPut(allMessages);
+          await indexMessagesSearchTokens(allMessages);
         } else {
           // Filter out existing messages
           const existingIds = new Set(
@@ -907,6 +941,7 @@ export class PageAssistDatabase {
           const newMessages = allMessages.filter(m => !existingIds.has(m.id));
           if (newMessages.length > 0) {
             await db.messages.bulkPut(newMessages);
+            await indexMessagesSearchTokens(newMessages);
           }
         }
       }

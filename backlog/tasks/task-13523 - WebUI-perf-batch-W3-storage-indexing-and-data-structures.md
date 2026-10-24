@@ -1,7 +1,7 @@
 ---
 id: TASK-13523
 title: 'WebUI perf batch W3: storage indexing and data structures'
-status: To Do
+status: In Progress
 created_date: 2026-10-07 04:14
 ---
 
@@ -18,7 +18,7 @@ WebUI/extension perf program. Index: Docs/Plans/2026-10-06-webui-perf-remediatio
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
-
+Stage 1 (WP-23, chat search index scan + Set dedupe) implemented on codex/webui-perf-w3-storage-indexing: added searchTokens side table (schema v17, additive, with streaming backfill upgrade), token-prefiltered content search in fullTextSearchChatHistories (no messages-table materialization; candidate-only verify via history_id index; streaming fallback for punctuation-only queries), Set-based dedupe replacing the O(n^2) findIndex merge, and token indexing wired into every message write path (addMessage, updateMessage, importChatHistoryV2, server mirror reconcile, fork commit, history-selection admits) with searchTokens added to the affected Dexie transaction table lists. Verified: 28 db suites (484 tests) + 5 Sidebar/harness suites (100 tests) green; FE typecheck exit 0; no new deps (memory-dexie harness extended with startsWithIgnoreCase/anyOfIgnoreCase). Stages 2-4 remain.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
