@@ -169,6 +169,16 @@ export type CompareParentMeta = {
 };
 export type CompareContinuationMode = "winner" | "compare";
 
+/**
+ * Message-content search side-table row (WP-23 / TASK-13523): one distinct
+ * word of a history's messages. Compound primary key `[token+history_id]`
+ * makes writes idempotent; `token` is indexed for candidate lookups.
+ */
+export type SearchTokenRow = {
+  token: string;
+  history_id: string;
+};
+
 export type CompareState = {
   history_id: string;
   compareMode: boolean;

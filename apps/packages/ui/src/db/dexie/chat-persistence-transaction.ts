@@ -60,7 +60,7 @@ export const runChatPersistenceTransaction = async <T>(
   try {
     const result = await db.transaction(
       "rw",
-      [db.chatHistories, db.messages, db.modelNickname, db.sessionFiles],
+      [db.chatHistories, db.messages, db.modelNickname, db.sessionFiles, db.searchTokens],
       async (transaction) => {
         activeTransaction = transaction
         throwIfAborted(signal, shouldAbortForScopeChange, validateLease)

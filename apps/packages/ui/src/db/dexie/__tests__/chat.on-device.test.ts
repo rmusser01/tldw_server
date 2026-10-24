@@ -40,6 +40,12 @@ function collection<T>(input: () => T[]) {
       state.afterRead?.();
       return result;
     },
+    async each(callback: (row: T) => void) {
+      if (state.fail) throw new Error("storage unavailable");
+      const rows = structuredClone(select());
+      state.afterRead?.();
+      rows.forEach(callback);
+    },
     async count() {
       return select().length;
     },
@@ -78,11 +84,42 @@ function table<T extends { id: string }>(rows: () => T[]) {
     delete: state.writes,
   };
 }
-vi.mock("../schema", () => ({
+// Token side-table for content search (WP-23): candidates are derived from
+// the seeded messages with the production tokenizer, mirroring a database
+// whose write paths (or v17 backfill) kept the index fresh. Declared as a
+// function so the hoisted vi.mock factory can reference it.
+function searchTokensTable(tokenize: (text: string) => string[]) {
+  return {
+    where: (field: string) => ({
+      anyOf: (tokens: string[]) => ({
+        primaryKeys: async () => {
+          if (field !== "token") throw new Error(`searchTokens.where(${field}) unsupported`);
+          const wanted = new Set(tokens);
+          const seen = new Set<string>();
+          const keys: Array<[string, string]> = [];
+          for (const message of state.messages) {
+            for (const token of tokenize(message.content)) {
+              if (!wanted.has(token)) continue;
+              const pair = `${token}|${message.history_id}`;
+              if (seen.has(pair)) continue;
+              seen.add(pair);
+              keys.push([token, message.history_id]);
+            }
+          }
+          return keys;
+        }
+      })
+    })
+  };
+}
+vi.mock("../schema", async () => {
+  const { tokenizeSearchText } = await import("../search-tokenizer");
+  return {
   db: {
     name: "PageAssistDatabase",
     chatHistories: table(() => state.rows),
     messages: table(() => state.messages),
+    searchTokens: searchTokensTable(tokenizeSearchText),
     userSettings: {
       get: async () =>
         state.profile
@@ -97,7 +134,8 @@ vi.mock("../schema", () => ({
       fn: () => Promise<unknown>,
     ) => fn(),
   },
-}));
+  };
+});
 import Dexie from "dexie";
 import { PageAssistDatabase, watchOnDeviceHistoryChanges } from "../chat";
 const database = new PageAssistDatabase();

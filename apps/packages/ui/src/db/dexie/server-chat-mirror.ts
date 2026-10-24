@@ -3,6 +3,7 @@ import type { ServicePromptSnapshot } from "@/services/service-prompts"
 import { createServicePromptScopeChangedError } from "@/services/tldw/service-prompt-scope-error"
 import { db } from "./schema"
 import { generateID } from "./helpers"
+import { indexMessageSearchTokens } from "./search-tokens"
 import { runChatPersistenceTransaction } from "./chat-persistence-transaction"
 import type { Message } from "./types"
 import type { ChatScope } from "@/types/chat-scope"
@@ -295,6 +296,10 @@ export const reconcileServerChatMirror = async ({
     }
     if (existing) await db.messages.put(next)
     else await db.messages.add(next)
+    // Mirror content can change (remote edits); keep the search index fresh.
+    // Stale tokens for previous content are harmless extras that exact
+    // verification rejects.
+    await indexMessageSearchTokens(next)
     localIds.set(serverMessageId, id)
   }
   return { localIds, rows: await db.messages.where("history_id").equals(historyId).toArray() }

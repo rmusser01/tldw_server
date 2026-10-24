@@ -1,6 +1,7 @@
 import { withPlainLocalForkSettings } from "@/services/chat-settings"
 /** Independent local copies. Only this projector writes fork children. */
 import { db } from "./schema"
+import { indexMessagesSearchTokens } from "./search-tokens"
 import type { HistoryInfo, Message, SessionFiles, UploadedFile } from "./types"
 import {
   getLocalHistoryOwner,
@@ -508,6 +509,7 @@ export const commitLocalFork = async (
         validate(source, request)
         await db.chatHistories.add(trusted.history)
         await db.messages.bulkAdd(trusted.messages)
+        await indexMessagesSearchTokens(trusted.messages)
         if (trusted.files) await db.sessionFiles.add(trusted.files)
       },
       opts
