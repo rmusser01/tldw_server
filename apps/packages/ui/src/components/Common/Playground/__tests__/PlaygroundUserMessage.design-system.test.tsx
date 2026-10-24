@@ -168,3 +168,17 @@ it("keeps an active user edit mounted when the message view changes", async () =
   rerender(<PlaygroundUserMessageBubble {...props} messageView="research" />)
   expect(screen.getByTestId("edit-message-form")).toBe(form)
 })
+
+describe.each([
+  { messageView: undefined, width: "max-w-[calc(100%-1.75rem)]", shape: "rounded-3xl" },
+  { messageView: "conversation" as const, width: "max-w-[calc(100%-1.75rem)]", shape: "rounded-3xl" },
+  { messageView: "transcript" as const, width: "w-full", shape: "rounded-xl" },
+  { messageView: "research" as const, width: "w-full", shape: "rounded-xl" }
+])("user message width in $messageView", ({ messageView, width, shape }) => {
+  it.each([false, true])("preserves the content width and wrapping with editMode=%s", (editMode) => {
+    const { container } = renderUserMessage({ messageView, editMode })
+    expect(container.querySelector(".message-bubble")).toHaveClass(
+      "prose", "max-w-none", "dark:prose-invert", "break-words", width, shape
+    )
+  })
+})

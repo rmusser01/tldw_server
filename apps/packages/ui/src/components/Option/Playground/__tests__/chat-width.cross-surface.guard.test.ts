@@ -43,13 +43,11 @@ describe("chat width cross-surface guard", () => {
       "prose max-w-none dark:prose-invert whitespace-pre-line"
     )
     expect(userMessageSource).toContain("max-w-5xl")
+    expect(userMessageSource).toContain("rounded-3xl")
     expect(userMessageSource).toContain(
-      "rounded-3xl prose max-w-none dark:prose-invert break-words"
+      "prose max-w-none dark:prose-invert break-words"
     )
-    const userBubbleInsetMatches = userMessageSource.match(
-      /max-w-\[calc\(100%-1\.75rem\)\]/g
-    )
-    expect(userBubbleInsetMatches?.length ?? 0).toBeGreaterThanOrEqual(2)
+    expect(userMessageSource).toContain("max-w-[calc(100%-1.75rem)]")
     expect(humanMessageSource).toContain("max-w-none")
     expect(sidepanelFormSource).toContain("max-w-[64rem]")
     expect(sidepanelRouteSource).toContain("w-full max-w-5xl")
