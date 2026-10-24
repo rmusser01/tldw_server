@@ -1,6 +1,6 @@
 # X01 — supported upgrade without data loss
 
-Associated task: TASK-13260.278.18.83.45. Current candidate 04f73263923e2f3d371ffbe9d5a97f73a2ab31e0 on verified dev bd9b4e0ac3f65f3b4fcc4796842288e5a451b3a3. The original 523ef323 source/runtime is preserved separately; its earlier results below are historical. C12 closed; selected acceptance remains 33/43, 10 open. X01 is the sole active family; X02 is untouched.
+Associated task: TASK-13260.278.18.83.45. Current candidate b6e13804f25c8ca7bd59c2c3c67d6fb69f39c75e on verified dev 4e7be41029b18881e55aa4260dfcb83baf92c45c, with the incoming test-cleanup correction pending qualification. The original 523ef323 source/runtime is preserved separately; its earlier results below are historical. C12 closed; selected acceptance remains 33/43, 10 open. X01 is the sole active family; X02 is untouched.
 
 ## Scope and controls
 
@@ -1007,3 +1007,7 @@ First no-Send single-user invocation stopped before acquisition because complete
 ## Latest-dev login repair — component checks
 
 Actual browser diagnostic caught ReferenceError:isAbsolute is not defined before login dispatch. The shared request executor contained an obsolete duplicate CSRF block referring to variables now owned by resolveTldwRequestPlan. Existing absolute same-page regression reproduced1failed/12excluded/1.167s. Delete only duplicate14lines; preserve samePageOriginRequest CSRF/auth/origin/recipe protections. Connected6modules86passed in each configured client (12.826s UI/12.380s WebUI). Changed module has0diagnostics under both actual configured TypeScript programs; no fullprojectTS claim. Configured lint0errors/6identical inheritedany warnings/no ignored. TS-only Bandit N/A; functional Python operators0findings0errors. Final review/normalcommit/build/live validation pending. Python installed bytes remain unchanged, so no redundant wheel/install. Separate private frontend shutdown27.786s exceeded15s and remains unqualified. Original session/runtime/source/archive/config preserved.
+
+Exact4e integration complete: normal rebase of both local commits atb6e13804f25c8ca7bd59c2c3c67d6fb69f39c75e, no conflicts; originaltrackedsource/owners preserved. Incoming13path production/tests reviewed; one incoming test constructor-cleanup correction now pending qualification. Old bd9 installedsite/build/results retain exact scope; newPython package and affected checks required. Frontend/login source unchanged by newincoming, so no repeated86case controls. X01 remains active.
+
+Incoming4e qualification completed:35sequence/constructor controls passed47.003s outer;82MediaFiles/restrictedRAG passed322warnings208.32s pytest;18admission/ABA passed6warnings24.43s pytest26.906s outer. All selected cases passed, normal official PostgreSQL isolation required.7Python modules compile; Ruff0baseline/0current; Bandit474identical/0errors/0new. Protected owners unchanged; oldpytest-temp warnings untouched. New test constructor cleanup reviewCLEAR, behavior/assertions unchanged. Source qualification is separate from pending current4e package/frontend build and actual X01 live/lifecycle acceptance.

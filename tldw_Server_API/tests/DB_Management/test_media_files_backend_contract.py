@@ -139,8 +139,9 @@ def test_database_query_failure_is_not_reported_as_missing_file(media_db, monkey
 def test_lookup_leaves_no_postgres_session_in_a_transaction(pg_database_config):
     """A lookup outside a transaction must not pin a connection idle in one (TASK-13900)."""
     backend = DatabaseBackendFactory.create_backend(pg_database_config)
-    db = MediaDatabase(":memory:", client_id="1", backend=backend)
+    db = None
     try:
+        db = MediaDatabase(":memory:", client_id="1", backend=backend)
         media_id = add_media(db)
         repo = MediaFilesRepository(db)
         repo.insert(media_id, "original", "original.txt")
@@ -151,8 +152,11 @@ def test_lookup_leaves_no_postgres_session_in_a_transaction(pg_database_config):
         ).scalar
         assert idle == 0
     finally:
-        db.close_connection()
-        backend.get_pool().close_all()
+        try:
+            if db is not None:
+                db.close_connection()
+        finally:
+            backend.get_pool().close_all()
 
 
 @pytest.mark.parametrize("media_db", ["sqlite", "sqlite-file", "postgresql"], indirect=True)
