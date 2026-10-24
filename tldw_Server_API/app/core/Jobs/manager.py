@@ -2448,9 +2448,11 @@ class JobManager:
         Enter and exit inside the same synchronous/threadpool call. A token
         cannot be reset from a different execution context.
         """
+        domain = domain_allowlist if (domain_allowlist or "").strip() else None
+        owner = owner_user_id if (owner_user_id or "").strip() else None
         admin_token = cls._RLS_IS_ADMIN.set(bool(is_admin))
-        domain_token = cls._RLS_DOMAIN_ALLOWLIST.set(domain_allowlist if (domain_allowlist or "").strip() else None)
-        owner_token = cls._RLS_OWNER_USER_ID.set(owner_user_id if (owner_user_id or "").strip() else None)
+        domain_token = cls._RLS_DOMAIN_ALLOWLIST.set(domain)
+        owner_token = cls._RLS_OWNER_USER_ID.set(owner)
         try:
             yield
         finally:

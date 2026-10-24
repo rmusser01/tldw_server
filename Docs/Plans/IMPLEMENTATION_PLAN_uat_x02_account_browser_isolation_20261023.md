@@ -85,3 +85,63 @@ security, review and refreshed packaging are qualified.
 - Independent actual source, full added tests and affected callers: CLEAR.
 - Pending: final staged review/normal commit and fresh3817-file private packaging
   before the first live fixture. Frontend unchanged; no rebuild is needed.
+
+### SQLite API progress
+
+- Repaired package73a9a80 qualified3817files/337dependency nodes/722edges.
+- Both ordinary users created/read six resource families; ten reciprocal
+  Note/Chat/card/draft/Job denials and two caller-owned numeric Media controls
+  passed. That first run failed only the inherited browser-stream precondition;
+  actual zero-work graceful retirement and three current-session logouts passed.
+- API-only monitor correction retains exact fresh dispatch timestamp/request,
+  response200/final body/return/task/zero work and deadline fences. Nine rejection
+  controls and seven causal final-readiness controls pass; independent review CLEAR.
+- Second extension run failed an unsupported Media-list full-content expectation.
+  Read-only diagnostic proves Alice zero IDs/count and Bob owned ID1/count1, with
+  separate rich-content positives and no foreign canary. Corrected metadata
+  oracle has seven positive/wrong-ID/count/missing/duplicate controls.
+- New scope-only continuation passes real FTS RAG candidates, ordinary/Admin
+  boundaries and organization grant/read/forbidden rename/revoke/immediate
+  same-session denial. Independent preparation review CLEAR; actual API release
+  2.176s, EOF/group gone/lifespan zero, all three sessions closed, cleanup empty.
+- No original runtime cycle or browser/model action. PostgreSQL, UI deep links,
+  same-browser/independent contexts, inflight/old-tab recovery, generated answer,
+  completed background result, full export accounting and human UX remain open.
+
+### PostgreSQL enqueue failure investigation
+
+The first normal official PostgreSQL fixture run failed at ordinary-user Job
+submission (HTTP207), before Bob setup. Actual private API/session cleanup and
+original-owner preservation passed; the failed fixture was retired normally.
+The schema-owning fixture role is NOSUPERUSER/NOBYPASSRLS, not DML-only serving.
+
+Source hypothesis: six ingest Jobs routes acquire a cached manager without
+binding the authenticated principal to its PostgreSQL RLS context. Its default
+owner GUC is empty; FORCE policies deny unscoped writes and reads. Prove this
+with normal real official-PG causal regressions before changing production.
+Assess all six callers; preserve the manager factory/overrides, media_ingest
+domain, claim-based Admin and explicit owner checks, and restore context on
+normal/error/cancellation exit. ADR required:no; ADR003/018 govern unchanged
+Jobs and claim-first request authority. Do not accept207 or relax RLS.
+
+
+### PostgreSQL request-scope causal repair
+
+- Normal official FORCE-policy causal baseline:3failed3passed/4.12s pytest,
+  6.179s outer. Alice/Bob owned reads and claimed Admin returned404; reciprocal
+  and convenience-admin-hint denials passed.
+- All six media-ingest Jobs endpoints now use an async yielding manager dependency
+  that binds the existing claims, media_ingest domain and actor. The cached pure
+  factory/overrides and explicit owner checks remain. A ContextVar token scope
+  restores the exact parent through nesting, concurrency, error and cancellation;
+  streaming producers retain the actor until response completion.
+- Initial nine checks pass. Eight affected modules:45passed287warnings/28.41s
+  pytest33.63s outer, including actual PG producer isolation and the existing
+  submit/list/cancel/event and fail-closed controls. Four sources compile.
+  Production Bandit1identical inherited finding; new tests0/new findings0/errors0.
+- Independent actual-source review CLEAR, including full new tests, six callers
+  and installed FastAPI streaming lifetime. Configured Ruff retains exactly two
+  inherited diagnostics; baseline/current Black flags remain inherited. Final
+  staged review, normal hooks/commit, fresh private packaging and full native
+  PostgreSQL validation remain required. Product unit
+  qualification does not accept X02. Original runtime owners remain unchanged.
