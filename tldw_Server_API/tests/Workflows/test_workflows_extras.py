@@ -610,7 +610,8 @@ async def test_ws_peer_disconnect_finishes_without_asgi_exception(client_with_wf
 
 
 @pytest.mark.asyncio
-async def test_ws_history_burst_allows_other_loop_work(client_with_wf):
+@pytest.mark.parametrize("clock_resolution", [0.0001, 0.015625])
+async def test_ws_history_burst_allows_other_loop_work(client_with_wf, monkeypatch, clock_resolution):
     """A writable transport must not let a whole history page monopolize the loop."""
     db = app.dependency_overrides[wf_mod._get_db]()
     run_id = uuid4().hex
@@ -627,6 +628,18 @@ async def test_ws_history_burst_allows_other_loop_work(client_with_wf):
         db.append_event("default", run_id, "history", {"index": index})
     token = wf_mod.get_jwt_manager().create_access_token(subject="1")
     event_sequences, probe_counts = [], []
+    loop = asyncio.get_running_loop()
+    clock = types.SimpleNamespace(now=0.0)
+    budget = wf_mod._workflow_history_budget()
+    # Control only the work clock; keep real event-loop scheduling and the shared budget.
+    monkeypatch.setattr(
+        budget,
+        "_loop",
+        types.SimpleNamespace(
+            time=lambda: int(clock.now / clock_resolution) * clock_resolution,
+            call_later=loop.call_later,
+        ),
+    )
 
     async def receive():
         return {"type": "websocket.connect"}
@@ -637,6 +650,7 @@ async def test_ws_history_burst_allows_other_loop_work(client_with_wf):
             frame = json.loads(message["text"])
             if "event_seq" in frame:
                 event_sequences.append(frame["event_seq"])
+                clock.now += 0.0004
                 if len(event_sequences) == 1:
                     asyncio.get_running_loop().call_soon(lambda: probe_counts.append(len(event_sequences)))
                 if len(event_sequences) == 500:

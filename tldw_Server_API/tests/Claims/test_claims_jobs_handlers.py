@@ -5,6 +5,7 @@ import threading
 from configparser import ConfigParser
 from contextlib import contextmanager
 from datetime import date
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -889,7 +890,7 @@ async def test_review_metrics_handler_uses_captured_window_and_scoped_thread_ses
     if postgres:
         assert "db_path" not in open_kwargs
     else:
-        assert open_kwargs["db_path"].endswith("/42/Media_DB_v2.db")
+        assert Path(open_kwargs["db_path"]).parts[-2:] == ("42", "Media_DB_v2.db")
     assert events[1][3] == {"db": db, "owner_user_id": "42", "start_date": date(2026, 9, 6), "end_date": date(2026, 9, 7)}
 
 

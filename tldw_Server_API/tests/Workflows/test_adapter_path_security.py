@@ -278,8 +278,10 @@ def test_artifacts_base_dir_accepts_test_mode_y(monkeypatch, tmp_path):
     monkeypatch.setenv("TEST_MODE", "y")
     monkeypatch.setenv("TLDW_TEST_MODE", "0")
 
+    expected_base_dir = tmp_path / "Databases" / "artifacts"
+    expected_base_dir.mkdir(parents=True)
     base_dir = wf_adapters._artifacts_base_dir()
-    assert base_dir == (tmp_path / "Databases" / "artifacts").resolve()
+    assert base_dir.samefile(expected_base_dir)
 
 
 def test_resolve_workflow_file_path_unsafe_denies_without_allowlist(monkeypatch, tmp_path):
