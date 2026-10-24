@@ -1,7 +1,7 @@
 ---
 id: TASK-13924
 title: Redesign chat Context and Runtime rails
-status: Done
+status: In Progress
 labels:
 - chat
 - webui
@@ -42,6 +42,7 @@ Published as draft PR https://github.com/rmusser01/tldw_server/pull/3310 on clea
 2026-10-23 independent rebase verification: based on dev 9acce4297594a56c3a186793859121ca18be0b68; composer ancestry dropped. Kept native disclosure buttons/toggle-close/null panel behavior and ownership-aware current callbacks. Preserved planned/null-footprint composition semantics and selected-context language; prompt/assistant deduplication does not restore uninserted quick prompts. 214 tests in 13 suites passed, frontend TypeScript passed, scoped production ESLint 0 errors/17 existing warnings (same as dev). Five desktop/mobile light/dark browser cases passed, including scoped axe, focus/draft preservation and saved independent visibility. Restored contrast for preview status text. Temporary React test/preview wiring restored before commit; no dependency/config changes shipped. Bandit applicability run cannot parse TypeScript and gives no security clearance. Fresh pinned manual reviewer is next; Qodo has not been requested. ADR required: no; ADR-049 preserved.
 2026-10-23 clean manual review of 848527d00cc4de9b891dd7f88bf7940e5a88983b found no important or critical issues. Reviewer requested one nonblocking cleanup: restore the unrelated composer_advancedPreferenceUnavailable locale entry removed by the old patch. Restored the upstream key and verified locale mirroring. Rebasing onto newer dev 8e8d9f2dcac12ef9743f9bead4a4a16a65ca2353 adds backend-only TTS changes; reviewed UI content is otherwise unchanged. Reviewer will confirm final pinned head.
 Review clarification: composer_advancedPreferenceUnavailable was already present at line 4058 in reviewed head 848527d00cc4de9b891dd7f88bf7940e5a88983b. The apparent deletion was JSON key movement; setdefault made no locale change. Locale mirror verification passed all 3 cases. No important/critical findings remain from the fresh manual review; the final latest-dev head is being checked before force-with-lease publication.
+2026-10-24 serial landing follow-up: the requester authorized updating, fixing CI and merging PRs #3309, #3310 and #3311 in order, and explicitly replied summary waived. Composer #3309 actually merged at 2026-10-24T16:38:06Z with merge commit 17141ff73c3caee7998d93a290598d6c3ab4ec0c, verified identical to dev. Rails #3310 is now next: remote head d2b474ff9954a47fa80ded19b0653a0c28268ac2 was verified OPEN/draft and auto-merge disabled; MERGE_QUEUE is unset. Reuse the isolated chat-ui-merge worktree on local codex/chat-rails-merge-20261024, preserve original worktrees/evidence, reconcile approved rail behavior with current dev/composer/message views, verify affected contracts and browser behavior, obtain a fresh independent manual review, then publish with an exact lease and use protected CI/merge. Sidebar remains paused. Plan: IMPLEMENTATION_PLAN_chat_ui_serial_merge_20261024.md. ADR required: no; approved presentation integration preserves existing ADR-049 ownership and APIs.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
