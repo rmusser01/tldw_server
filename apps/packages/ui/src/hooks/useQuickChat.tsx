@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
+import { watchChatAccountChanges } from "@/services/chat-account-boundary"
 import {
   useQuickChatStore,
   QuickChatMessage,
@@ -47,6 +48,7 @@ export const useQuickChat = () => {
     QUICK_CHAT_WORKFLOW_GUIDES
   )
   const ragControllerRef = useRef<AbortController | null>(null)
+  const generationRef = useRef(0)
   const quickChatWorkflowGuides = useMemo(
     () => resolveQuickChatWorkflowGuides(quickChatWorkflowGuidesRaw),
     [quickChatWorkflowGuidesRaw]
@@ -74,6 +76,9 @@ export const useQuickChat = () => {
         return
       }
 
+      const generation = ++generationRef.current
+      const isCurrent = () => generationRef.current === generation
+
       // Add user message
       addMessage("user", content)
 
@@ -85,6 +90,7 @@ export const useQuickChat = () => {
       try {
         if (mode === "docs_rag") {
           await tldwClient.initialize()
+          if (!isCurrent()) return
           const ragController = new AbortController()
           ragControllerRef.current = ragController
           const docsProfile = buildQuickChatDocsRagProfile({
@@ -102,6 +108,7 @@ export const useQuickChat = () => {
             ...docsProfile.options,
             signal: ragController.signal
           })
+          if (!isCurrent()) return
           const ragReply = buildQuickChatRagReply(ragResponse, {
             query: content,
             currentRoute: sendOptions?.currentRoute ?? null,
@@ -138,10 +145,12 @@ export const useQuickChat = () => {
           chatHistory,
           options
         )) {
+          if (!isCurrent()) return
           chunks.push(chunk)
           updateLastMessage(chunks.join(""))
         }
       } catch (error) {
+        if (!isCurrent()) return
         // Check if it's an abort error
         if (error instanceof Error && error.name === "AbortError") {
           // Stream was cancelled, don't show error
@@ -161,8 +170,10 @@ export const useQuickChat = () => {
           error instanceof Error ? error.message : "An error occurred"
         updateLastMessage(`Error: ${errorMessage}`)
       } finally {
-        ragControllerRef.current = null
-        setIsStreaming(false)
+        if (isCurrent()) {
+          ragControllerRef.current = null
+          setIsStreaming(false)
+        }
       }
     },
     [
@@ -179,6 +190,7 @@ export const useQuickChat = () => {
   )
 
   const cancelStream = useCallback(() => {
+    generationRef.current += 1
     quickChatService.cancelStream()
     if (ragControllerRef.current) {
       ragControllerRef.current.abort()
@@ -186,6 +198,11 @@ export const useQuickChat = () => {
     }
     setIsStreaming(false)
   }, [setIsStreaming])
+
+  useEffect(() => watchChatAccountChanges((invalidated) => {
+    if (!invalidated) return
+    cancelStream()
+  }), [cancelStream])
 
   const openModal = useCallback(() => {
     setIsOpen(true)
@@ -199,6 +216,7 @@ export const useQuickChat = () => {
   // Abort in-flight streams on unmount to prevent state updates on unmounted component
   useEffect(() => {
     return () => {
+      generationRef.current += 1
       quickChatService.cancelStream()
       if (ragControllerRef.current) {
         ragControllerRef.current.abort()
