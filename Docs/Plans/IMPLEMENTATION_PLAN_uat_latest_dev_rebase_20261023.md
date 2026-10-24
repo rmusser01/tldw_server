@@ -4,7 +4,7 @@ Task: TASK-13260.278.18.83.45. Human explicitly authorizes rebase, necessary rep
 
 ## Constraints and rulings
 
-Preserve current runtime/source/profile/data/keys/build/Chrome and complete unpublished fixes. Work in the separately managed uat-latest-dev-20261023 checkout. Original523 plus765tracked/345new source-doc-test files; exclude every .next build, model/data/cache/runtime lock/secret. Latest verified dev bd9b4e0ac3f65f3b4fcc4796842288e5a451b3a3; refresh exact remote before final qualification/publication. PR3084 is merged/immutable. No GitHub queue/push/merge action in this integration unit. Existing startup120s/generation180s/workflow600s/case300s/operation and gracefulcleanup15s remain. No force or weakened acceptance. Heartbeat stays paused.
+Preserve current runtime/source/profile/data/keys/build/Chrome and complete unpublished fixes. Work in the separately managed uat-latest-dev-20261023 checkout. Original523 plus765tracked/345new source-doc-test files; exclude every .next build, model/data/cache/runtime lock/secret. Latest verified dev 4e7be41029b18881e55aa4260dfcb83baf92c45c; refresh exact remote before final qualification/publication. PR3084 is merged/immutable. No GitHub queue/push/merge action in this integration unit. Existing startup120s/generation180s/workflow600s/case300s/operation and gracefulcleanup15s remain. No force or weakened acceptance. Heartbeat stays paused.
 
 ADR required:no for integration; preserve upstream decisions and their actual statuses. Proposed Media identity069 collided with existing upstream069 frontend API contract; it is now Proposed082. Exact duplicate regeneration/recovery records map to upstream077/079; their Proposed statuses remain unchanged.
 
@@ -21,7 +21,7 @@ Ruling: normal Git stash in the new checkout is functional rebase state, not a p
 **Goal**: Preserve upstream behavior and every still-needed UAT repair.
 **Success Criteria**: Keep current NotesSQLite84/PostgreSQL89 migration chain, active-borrower pool ownership, native-chat quota schema102, Notes semantic schema103 and admin indexes101 and strict stored-settings errors; combine X01 authority/progress/read-only admission. Resolve ADR collision. Satisfy exact current dependencies including pytest<9.1; affected causal/connected tests, compile/lint/scoped baseline-current Bandit and independent review pass. Normal hooks, no bypass.
 **Tests**: Genuinely changed and conflict-affected suites in both configured clients, official isolated PostgreSQL/restricted roles and relevant SQLite controls. Canonical API generation only on qualified combined source where affected.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage3: Finish X01 and continue sequential UAT
 **Goal**: Actual installed combined candidate passes X01 modes and recovery before X02.
@@ -64,3 +64,7 @@ Latest live dev advanced during validation to4e7be41029b18881e55aa4260dfcb83baf9
 Exact4e integration complete: normal rebase of both local commits atb6e13804f25c8ca7bd59c2c3c67d6fb69f39c75e, no conflicts; originaltrackedsource/owners preserved. Incoming13path production/tests reviewed; one incoming test constructor-cleanup correction now pending qualification. Old bd9 installedsite/build/results retain exact scope; newPython package and affected checks required. Frontend/login source unchanged by newincoming, so no repeated86case controls. X01 remains active.
 
 Incoming4e qualification completed:35sequence/constructor controls passed47.003s outer;82MediaFiles/restrictedRAG passed322warnings208.32s pytest;18admission/ABA passed6warnings24.43s pytest26.906s outer. All selected cases passed, normal official PostgreSQL isolation required.7Python modules compile; Ruff0baseline/0current; Bandit474identical/0errors/0new. Protected owners unchanged; oldpytest-temp warnings untouched. New test constructor cleanup reviewCLEAR, behavior/assertions unchanged. Source qualification is separate from pending current4e package/frontend build and actual X01 live/lifecycle acceptance.
+
+## Current4e artifacts and live check
+
+Normal local ec3b5ddb8e810f080e224f5bfc6b002ae9700b75 contains the reviewed incoming MediaFiles fixture cleanup after all affected35+82+18checks, static/security and normal hooks passed; exact committed patch SHA256bf94739161ad185befce183da921ad759d8a652c033de22c4b4346dfc65b007a. New private Python3816file package qualified8.210s/3roots/337dependencyNodes722edges/cleanup0. New direct frontend build THttd0p00MlSSxPE1Yyre qualified84.444s on ec3,7731inputs unchanged, exact5APIrewrites18908, token-sync and593.3KB budgetpass. Inherited build TypeScript skip disclosed. Build operator preserves primary failures, revokes late/interrupted publication and explicitly guards the canonical tracked extension assets symlink; focused controls and independent review CLEAR. Initial symlink preflight stopped before compilation and was corrected without weakening other guards. Original3owners unchanged. Saved-only0132 login/Chat/reload/Disconnect/handback check is running; no outcome or X01 closure inferred.
