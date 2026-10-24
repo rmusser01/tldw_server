@@ -290,14 +290,58 @@ email-probe failures because native chmod mode bits do not enforce POSIX privacy
    actual local monitoring/Compose 8 pass; workflow/license contracts 93 pass;
    Ruff, normal hooks and diff checks pass; scoped source Bandit 0 findings/errors.
    No ADR is needed: existing POSIX-only privacy policy, no new ACL support.
-3. **Independent review and publish (In Progress):** Requesting-code-review over
+3. **Independent review and publish (Complete):** Requesting-code-review over
    the complete eight-file source/test/workflow delta found no issues. Reviewer
    independently passed 159 tests with no skips, verified red/green in memory and
-   source/security checks, then closed. Normal commit/publication is pending.
+   source/security checks, then closed. Published exact head
+   `c85925c990960f8f6cce763949a9d8ac529dae6e` using the protected old-148 lease;
+   review `5634915991` records technical clearance, not human approval.
    No Calendar runtime changes; shard coverage 5147 files/new_uncovered 0 passes.
-4. **Hosted verification (Not Started):** Requires fresh exact-head PR statuses
+4. **Hosted verification (In Progress):** Requires fresh exact-head PR statuses
    plus full Python 3.12 and applicable release-lane results. Local Python 3.12 on
-   macOS is not real Windows or hosted Python 3.13 proof. No rebase or merge.
+   macOS is not real Windows or hosted Python 3.13 proof. Fresh PR CI `40030875894`
+   and required workflows are queued, latest trusted license `40030909390` queued.
+   Wait for actual new-head license SUCCESS before one exact-branch full CI
+   dispatch; recheck the PR workflow matrix before replacing any mismatched run.
+   Cancellation of old-head manual `40020128320` was requested, not counted as
+   success. Old-head seven-context success is not proof for this candidate.
+   No rebase or merge; preserve local publication notes without another push.
+
+   22:34Z checkpoint: actual `frontend-license-policy/trusted/dev` is SUCCESS on
+   unchanged `c85925c990`. With no prior matching dispatch, exact-branch full CI
+   `40034567805` was created and its event/head verified directly; initial run-list
+   indexing lag is not a reason to dispatch again. Current PR CI `40030875894`
+   uses merge-ref `77056d9`, whose matrix still names 15 candidate-absent paths
+   across seven shards; head's 208-shard manifest has none. Only that non-required
+   mixed-revision run was requested cancelled as superseded, not passing.
+   Required workflows remain untouched. Old manual `40020128320` is confirmed
+   cancelled. Full `40034567805` and six other protected contexts are pending;
+   inspect applicable release lanes and do not declare green yet.
+
+#### Soak Collector Clock Fixture (2026-10-24)
+
+Full CI `40034567805` failed only the Windows Python 3.12 healthy soak-fixture
+case in `core-utils-tooling` at this checkpoint (2245 passed/19 expected skips).
+The original assertion did not retain the harness failure list, so its precise
+Windows cause remains inferred pending a hosted rerun.
+
+1. **Reproduce and repair (Complete):** A controlled 100ms collector clock
+   reproduced invalid/repeated telemetry and recovery failures. The test collector
+   now adds a bounded per-sample sequence offset, as other tests in the file do.
+   An explicit repeated-timestamp negative control still fails validation. No
+   production harness, threshold, duration, timeout, filter or gate changed.
+2. **Local verification and review (Complete):** All 42 soak tests pass with
+   the real loopback integration server permitted; 40 healthy/coarse repetitions
+   pass. Ruff and normal hooks pass; test-only Bandit excludes expected pytest
+   assert warnings and has no other findings. Independent requesting-code-review
+   found no issues, reproduced baseline failure, passed the full file/40 repetitions
+   and all nine negative scenarios, and confirmed the sequence offset stays below
+   30ms in this fixed profile. Reviewer closed. Earlier sandbox loopback denial is
+   not counted as a code failure.
+3. **Publish and hosted verification (In Progress):** Exact-old-head lease after
+   review clearance, then require fresh actual PR statuses and exact-head full CI.
+   Preserve failed run evidence; do not treat this inferred fixture fix as Windows
+   proof or merge authorization. ADR not needed for a test-only collector change.
 
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.
