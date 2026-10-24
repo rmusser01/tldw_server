@@ -4,6 +4,7 @@ import {
   assertFullSourceHandoff,
   assertPriceAbstention,
   assertSavedTurn,
+  createUat390RunId,
   ROWAN_SOURCE,
   readMediaRecord,
   readSavedMessages,
@@ -20,6 +21,22 @@ const sources = [
 ];
 const check = (text = answer, evidence = sources) =>
   assertCitedRowanAnswer(text, evidence, '812', '913', { title: 'Owned Rowan source', text: ROWAN_SOURCE });
+
+describe('UAT390 redaction-safe fixture identity', () => {
+  it.each([
+    '849bc456-5021-4435-8152-72d3d075a0d3',
+    '01234567-8901-4234-8567-890123456789',
+  ])('avoids phone and card-shaped digit groups in run UUID %s', (uuid) => {
+    expect(createUat390RunId(uuid)).toMatch(/^uat390-[a-p]{8}-[a-p]{4}-[a-p]{4}-[a-p]{4}-[a-p]{12}$/);
+  });
+
+  it('preserves distinct UUID identities rather than dropping their digits', () => {
+    const ids = Array.from({ length: 10 }, (_, digit) =>
+      createUat390RunId(`849bc456-5021-4435-8152-72d3d075a0d${digit}`)
+    );
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+});
 
 describe('UAT390 acceptance discriminates actual source grounding', () => {
   it('accepts supported facts and the canonical source citation', () =>

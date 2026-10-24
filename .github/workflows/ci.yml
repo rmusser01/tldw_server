@@ -532,6 +532,7 @@ jobs:
               tldw_Server_API/tests/Image_Generation
           - name: gap-verified-2
             paths: >-
+              tldw_Server_API/tests/Calendar
               tldw_Server_API/tests/Claims_Extraction
               tldw_Server_API/tests/Discord
               tldw_Server_API/tests/Files
@@ -2223,6 +2224,7 @@ jobs:
               tldw_Server_API/tests/Image_Generation
           - name: gap-verified-2
             paths: >-
+              tldw_Server_API/tests/Calendar
               tldw_Server_API/tests/Claims_Extraction
               tldw_Server_API/tests/Discord
               tldw_Server_API/tests/Files
@@ -7970,6 +7972,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pytest pytest-asyncio
+
+      - name: Install Docker Compose CLI for monitoring render contract
+        if: runner.os == 'macOS' && matrix.shard.name == 'core-utils-tooling'
+        shell: bash
+        run: |
+          brew install docker docker-compose
+          mkdir -p "$HOME/.docker/cli-plugins"
+          ln -s "$(brew --prefix)/lib/docker/cli-plugins/docker-compose" "$HOME/.docker/cli-plugins/docker-compose"
+          docker compose version
 
       - name: Smoke start server (single-user)
         if: matrix.shard.name == 'core-server-smoke'

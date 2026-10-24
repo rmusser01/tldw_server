@@ -19,6 +19,7 @@ import {
   LARCH_SOURCE,
   ROWAN_QUESTION,
   PRICE_QUESTION,
+  createUat390RunId,
   assertCitedRowanAnswer,
   assertFullSourceHandoff,
   assertPriceAbstention,
@@ -49,7 +50,7 @@ test.describe('Ingest -> Search -> Chat journey', () => {
     expect(serverInfo.available, 'Owned backend is required; unavailable is not a pass').toBe(true);
     // Remove the legacy title-settings fixture fulfillment before navigation.
     await page.unrouteAll({ behavior: 'wait' });
-    const runId = `uat390-${randomUUID()}`;
+    const runId = createUat390RunId(randomUUID());
     const evidence: Record<string, unknown> = {
       runId,
       mode,

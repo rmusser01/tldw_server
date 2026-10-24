@@ -318,7 +318,7 @@ def test_org_summary_trends_requested(privilege_test_client: TestClient):
 def test_get_org_detail_pagination(privilege_test_client: TestClient):
     response = privilege_test_client.get(
         "/api/v1/privileges/org",
-        params={"view": "detail", "page": 1, "page_size": 5},
+        params={"view": "detail", "page": 1, "page_size": 5, "resource": "catalog"},
     )
     assert response.status_code == 200
     payload = response.json()

@@ -106,6 +106,8 @@ def test_collect_startup_worker_specs_accepts_real_provider_graph() -> None:
         "audio_studio_jobs_task",
         "authnz_scheduler",
         "automation_definitions_sched_task",
+        "calendar_sync_jobs_task",
+        "calendar_sync_scheduler_task",
         "chatbooks_cleanup",
         "chat_macros_jobs_task",
         "claims_alerts_task",

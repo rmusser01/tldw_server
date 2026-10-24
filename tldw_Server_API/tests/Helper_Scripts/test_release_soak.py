@@ -113,8 +113,10 @@ def test_all_required_metrics_and_categories_must_be_measured():
     "fault,expected",
     [
         (None, True),
+        ("coarse-clock", True),
         ("missing-metric", False),
         ("stale", False),
+        ("repeated", False),
         ("drift", False),
         ("server-error", False),
         ("wrong-terminal-state", False),
@@ -129,6 +131,7 @@ async def test_http_run_measures_workloads_and_rejects_incomplete_evidence(fault
     samples = 0
     active = 0
     workload_count = 0
+    sample_epoch = time.time()
 
     async def application(scope, receive, send):
         nonlocal samples, active, workload_count
@@ -136,10 +139,14 @@ async def test_http_run_measures_workloads_and_rejects_incomplete_evidence(fault
         code = 200
         if scope["path"] == "/observations":
             samples += 1
+            sampled_at = time.time()
+            if fault == "coarse-clock":
+                sampled_at = int(sampled_at * 10) / 10
             body = {
                 "artifact_sha256": "a" * 64,
                 "source_revision": "b" * 40,
-                "sampled_at": time.time(),
+                # Model a progressing collector even when the host wall clock repeats.
+                "sampled_at": sampled_at + samples * 0.001,
                 "queue_depth": 0,
                 "db_pool_in_use": 1,
                 "storage_bytes": 200,
@@ -148,6 +155,8 @@ async def test_http_run_measures_workloads_and_rejects_incomplete_evidence(fault
                 del body["db_pool_in_use"]
             if fault == "stale":
                 body["sampled_at"] = 1
+            if fault == "repeated":
+                body["sampled_at"] = sample_epoch
             if fault == "drift" and samples > 2:
                 body["artifact_sha256"] = "c" * 64
             if fault == "unrecovered":
@@ -175,7 +184,7 @@ async def test_http_run_measures_workloads_and_rejects_incomplete_evidence(fault
         transport=httpx.ASGITransport(app=application), base_url="http://fixture.local"
     ) as client:
         evidence = await runner.run(profile(), dataset(), client)
-    assert evidence["passed"] is expected
+    assert evidence["passed"] is expected, evidence["failures"]
     assert "NEVER_RETAIN_RESPONSE" not in json.dumps(evidence)
     if expected:
         assert all(phase["workloads"]["terminal-workflow"]["successes"] > 0 for phase in evidence["phases"])
