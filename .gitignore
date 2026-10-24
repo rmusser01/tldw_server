@@ -292,7 +292,6 @@ errors.log
 !apps/package.json
 !apps/extension/package.json
 !apps/packages/voice-assistant-sdk/package.json
-!apps/packages/voice-assistant-sdk/tsconfig.json
 !apps/extension/tsconfig.json
 !apps/packages/ui/src/assets/locale/**/*.json
 !apps/packages/ui/src/public/_locales/**/*.json
