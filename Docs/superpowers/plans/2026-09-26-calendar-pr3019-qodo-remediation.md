@@ -389,6 +389,54 @@ limit. This is a shared test launcher defect, not a storage assertion failure.
    review/verification. Fresh required PR statuses and applicable exact-head full
    CI remain mandatory. Preserve failed run evidence; no merge or policy waiver.
 
+   Published `5636c06584780426787ff75a1d8465e340baadc7` with protected old-d8 lease;
+   exact-head technical review `5636965027` is clear. New PR CI `40065435407` and
+   protected workflows are queued; latest license `40065451129` is pending.
+   No new-head full dispatch yet: wait for actual trusted/dev license SUCCESS,
+   check for an existing matching dispatch, then dispatch exact-branch CI once.
+   Independently check PR merge-matrix drift before replacing only non-required
+   CI. Old-d8 full `40048217901` cancellation was requested after publication;
+   its Windows failure evidence remains retained, not counted as a pass. Hosted
+   Windows/PostgreSQL proof remains outstanding; leave publication notes local.
+
+   At 2026-10-24 05:46Z, trusted license `40065451129` passed on unchanged 5636.
+   Full CI `40067635101` was dispatched once after checking for duplicates and
+   directly verified on exact 5636. Current merge `b93f85c` still adds 15 absent
+   paths across seven shards while the candidate manifest has none. After verified
+   replacement, cancellation was requested only for mismatched non-required PR
+   CI `40065435407`; required PR workflows are untouched. Old-d8 full
+   `40048217901` is confirmed cancelled, not passing. Full Ubuntu Python 3.12,
+   applicable OS/Python lanes and six other required contexts remain pending.
+
+#### Logging Fixture Isolation (2026-10-24)
+
+Exact-5636 full CI `40067635101` exposed two Python 3.13 smoke failures: macOS
+`120801012928` did not reject the timeout test's placeholder lock; Windows
+`120801013261` observed one unrelated cleanup log instead of 100 retained entries.
+Each job passed its other 227 tests. The precise Windows interleaving remains
+inferred until hosted verification; the isolated local baseline passed 21 tests.
+
+1. **Regressions and fixture repair (Complete):** Controlled pending-queue reset
+   and initialization-aged-lock cases fail before the changes. Drain the existing
+   writer queue after removing the sink and before resetting shared module state;
+   restore the fake worker copied by the reload test. Reuse the existing fallback
+   fixture's real held lock, matching upstream `9f9ca7c4aa`. Production logging,
+   locking, retention, redaction and all timing/assertion limits are unchanged.
+2. **Validation and review (Complete):** All 23 system-log tests and all 105
+   Logging/Health tests pass. Ruff, syntax, normal hooks and diff pass; test Bandit
+   has only the same three fixture-secret warnings and expected pytest assertions.
+   Independent review is clear: five focused cases, a real persistent-writer and
+   redaction probe, 20 worker-reuse repetitions without thread growth, and negative
+   controls for draining, fake-worker restoration, stale locks and ignored runtime
+   timeout. Reviewer closed. ADR not needed for test-only isolation; no Calendar,
+   credential, tenant or Jobs behavior changed.
+3. **Publication and CI (In Progress):** The complete affected smoke-shard manifest
+   passes all 230 tests locally. Independent clearance, normal hooks, scoped
+   security comparison, syntax, shard coverage and fresh branch/auto-merge checks
+   pass. Use a normal commit and protected exact-old-head lease before push.
+   Fresh required PR contexts and applicable exact-head full CI remain mandatory;
+   keep failed logs and local publication notes. No merge or policy waiver.
+
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.
 **Success Criteria:** Streamed responses stop at a byte limit; XML/ICS are bounded before parsing; synchronous provider calls run off the event loop; API and worker reuse scoped credential resolution; a deleted account or failed scan does not stop later polling; diagnostics contain safe context and stack locations without secrets.
