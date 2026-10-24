@@ -1100,3 +1100,217 @@ async def test_nonowner_startup_refuses_native_quota_drift(migrated_startup, dri
     result = _run_runtime(runtime_dir, env, "USER_ID=None\n" + _NATIVE_QUOTA_STARTUP_SCRIPT)
     assert result == {"complete": False, "error": "SchemaReadinessError"}  # nosec B101 -- absence or weakened quota enforcement cannot be ready.
     assert _startup_snapshot(owner) == before  # nosec B101 -- an ordinary serving principal never repairs the owner schema.
+
+
+_AUDIO_PROFILE_OWNER_SCRIPT = """
+import asyncio
+import json
+import traceback
+from datetime import datetime, timezone
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.Usage import audio_quota
+
+async def main():
+    result = {'complete': False, 'phase': 'owner-pool'}
+    try:
+        pool = await get_db_pool()
+        result['phase'] = 'owner-audio-schema'
+        await audio_quota._ensure_tables(pool)
+        result['phase'] = 'owner-legacy-row'
+        await pool.execute('INSERT INTO audio_usage_daily (user_id, day, minutes_used, jobs_started) VALUES ($1, $2, 2.5, 1)',
+            USER_ID, datetime.now(timezone.utc).date())
+        result['complete'] = True
+    except Exception as error:
+        result['error'] = type(error).__name__
+        result['functions'] = [frame.name for frame in traceback.extract_tb(error.__traceback__)[-5:]]
+    finally:
+        await reset_db_pool()
+    print('RUNTIME_RESULT=' + json.dumps(result))
+
+asyncio.run(main())
+"""
+
+_AUDIO_PROFILE_SCRIPT = """
+import asyncio
+import json
+import traceback
+from httpx import ASGITransport, AsyncClient
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.Usage import audio_quota
+
+async def main():
+    result = {'complete': False, 'phase': 'cold-reporting'}
+    try:
+        assert await audio_quota.get_daily_minutes_used(USER_ID) == EXPECTED
+        assert await audio_quota.get_monthly_minutes_used(USER_ID) == EXPECTED
+        pool = await get_db_pool()
+        count = await pool.fetchval("SELECT COUNT(*) FROM resource_daily_ledger WHERE entity_scope='user' AND entity_value=$1 AND category='minutes'", str(USER_ID))
+        assert count == (1 if EXPECTED else 0)
+        result['phase'] = 'real-login'
+        from tldw_Server_API.app.main import app
+        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://localhost') as client:
+            login = await client.post('/api/v1/auth/login', data={'username':'runtime-user','password':'X!a7-fixture-account'})
+            result['loginStatus'] = login.status_code
+            assert login.status_code == 200, login.status_code
+            headers = {'Authorization':'Bearer '+login.json()['access_token'], 'X-TLDW-Expected-User-ID': str(USER_ID)}
+            before = dict(await pool.fetchone('SELECT id,role,is_active,is_verified,updated_at,profile_version FROM users WHERE id=$1', USER_ID))
+            result['phase'] = 'real-profile'
+            response = await client.get('/api/v1/users/me/profile', headers=headers)
+            result['profileStatus'] = response.status_code
+            assert response.status_code == 200, response.status_code
+            profile = response.json()
+            assert profile['user']['id'] == USER_ID and profile['user']['role'] == 'user'
+            assert profile['quotas']['audio']['daily_minutes_used'] == EXPECTED
+            assert dict(await pool.fetchone('SELECT id,role,is_active,is_verified,updated_at,profile_version FROM users WHERE id=$1', USER_ID)) == before
+        result['complete'] = True
+    except Exception as error:
+        result['error'] = type(error).__name__
+        result['functions'] = [frame.name for frame in traceback.extract_tb(error.__traceback__)[-5:]]
+    finally:
+        from tldw_Server_API.app.api.v1.API_Deps.Audit_DB_Deps import shutdown_all_audit_services
+        await shutdown_all_audit_services()
+        await reset_db_pool()
+    print('RUNTIME_RESULT=' + json.dumps(result))
+
+asyncio.run(main())
+"""
+
+
+@pytest.mark.parametrize("legacy_present", [True, False], ids=["legacy-usage", "no-legacy-table"])
+def test_nonowner_profile_preserves_cold_audio_reporting(migrated_daily_ledger, pg_restricted_backend, legacy_present):
+    """Cold reporting must retain legacy minutes without request-time owner DDL."""
+    owner, runtime_dir, env, ids = migrated_daily_ledger
+    if legacy_present:
+        prepare = runtime_dir.parent / "audio-owner"
+        prepare.mkdir()
+        owner_env = _runtime_env(prepare, _dsn(owner.config), backend="postgres", mode="multi_user")
+        prepared = _run_runtime(prepare, owner_env, f"USER_ID={ids['user']}\n" + _AUDIO_PROFILE_OWNER_SCRIPT)
+        assert prepared["complete"], prepared  # nosec B101 -- real canonical owner schema and legacy row.
+        with owner.transaction() as conn:
+            conn.execute(
+                sql.SQL("GRANT SELECT,INSERT,UPDATE,DELETE ON audio_usage_daily,audio_user_tiers TO {}").format(
+                    sql.Identifier(pg_restricted_backend.config.pg_user)
+                )
+            )
+    before = _snapshot(owner)
+    script = f"USER_ID={ids['user']}\nEXPECTED={2.5 if legacy_present else 0.0}\n" + _AUDIO_PROFILE_SCRIPT
+    result = _run_runtime(runtime_dir, env, script)
+    assert result["complete"], result  # nosec B101 -- actual cold accounting and authenticated profile chain.
+    if legacy_present:
+        again = _run_runtime(runtime_dir, env, script)
+        assert again["complete"], again  # nosec B101 -- real new-process idempotence, no cache reset.
+    after = _snapshot(owner)
+    assert {k: v for k, v in before.items() if k != "users"} == {
+        k: v for k, v in after.items() if k != "users"
+    }  # nosec B101 -- login may change auth timestamps, not schema or grants.
+
+
+_CONNECTOR_POLICY_OWNER_SCRIPT = """
+import asyncio
+import json
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.DB_Management.Connectors_DB import ensure_connectors_tables
+async def main():
+    try:
+        pool = await get_db_pool()
+        await ensure_connectors_tables(pool, is_postgres=True)
+        await pool.execute("INSERT INTO public.org_connector_policy (org_id, enabled_providers, denied_remote_paths, allowed_export_formats, quotas_per_role) VALUES ($1, $2, $3, $4, $5)",
+            41, 'notion', '/private/*', 'md', json.dumps({'user': {'max_jobs_per_day': 3}}))
+        print('RUNTIME_RESULT=' + json.dumps({'complete': True}))
+    finally:
+        await reset_db_pool()
+asyncio.run(main())
+"""
+
+_CONNECTOR_POLICY_RUNTIME_SCRIPT = """
+import asyncio
+import json
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.External_Sources.connectors_service import get_policy
+async def main():
+    result = {'complete': False}
+    try:
+        async with (await get_db_pool()).transaction() as conn:
+            policy = await get_policy(conn, 41)
+            assert not DENIED
+            if PRESENT:
+                assert policy['enabled_providers'] == ['notion'] and policy['denied_remote_paths'] == ['/private/*']
+                assert policy['quotas_per_role'] == {'user': {'max_jobs_per_day':3}}
+                assert await get_policy(conn, 42) == {}
+            else:
+                assert policy == {}
+        result['complete'] = True
+    except Exception as error:
+        result['error'] = type(error).__name__
+        cause = error.__cause__ or error.__context__
+        result['denied'] = type(error).__name__ == 'InsufficientPrivilegeError' or type(cause).__name__ == 'InsufficientPrivilegeError'
+        result['complete'] = bool(DENIED and result['denied'])
+    finally:
+        await reset_db_pool()
+    print('RUNTIME_RESULT=' + json.dumps(result))
+asyncio.run(main())
+"""
+
+
+@pytest.mark.parametrize("policy_state", ["present", "absent", "denied"])
+def test_nonowner_connector_policy_reads_without_schema_provisioning(
+    migrated_runtime, pg_restricted_backend, policy_state
+):
+    """Policy reads preserve configured restrictions and never hide access denials."""
+    owner, runtime_dir, env, _ids = migrated_runtime
+    if policy_state != "absent":
+        prepare = runtime_dir.parent / "connector-policy-owner"
+        prepare.mkdir()
+        owner_env = _runtime_env(prepare, _dsn(owner.config), backend="postgres", mode="multi_user")
+        assert _run_runtime(prepare, owner_env, _CONNECTOR_POLICY_OWNER_SCRIPT)[
+            "complete"
+        ]  # nosec B101 -- canonical owner provisioning.
+        if policy_state == "present":
+            with owner.transaction() as conn:
+                conn.execute(
+                    sql.SQL("GRANT SELECT ON public.org_connector_policy TO {}").format(
+                        sql.Identifier(pg_restricted_backend.config.pg_user)
+                    )
+                )
+    before = _snapshot(owner)
+    result = _run_runtime(
+        runtime_dir,
+        env,
+        f"PRESENT={policy_state != 'absent'}\nDENIED={policy_state == 'denied'}\n" + _CONNECTOR_POLICY_RUNTIME_SCRIPT,
+    )
+    assert result["complete"], result  # nosec B101 -- real configured, absent and denied policy paths.
+    assert _snapshot(owner) == before  # nosec B101 -- no read-time DDL, backfill, user or grant mutation.
+
+
+_CONNECTOR_POLICY_SAVE_SCRIPT = """
+import asyncio
+import json
+from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
+from tldw_Server_API.app.core.External_Sources.connectors_service import upsert_policy
+async def main():
+    result = {'complete': False}
+    try:
+        pool = await get_db_pool()
+        for maximum in (3, 5):
+            policy = await upsert_policy(pool, 41, {'enabled_providers':['notion'], 'quotas_per_role': {'user': {'max_jobs_per_day': maximum}}})
+            assert policy['quotas_per_role'] == {'user': {'max_jobs_per_day': maximum}}
+        result['complete'] = True
+    except Exception as error:
+        result['error'] = type(error).__name__
+        cause = error.__cause__ or error.__context__
+        result['cause'] = type(cause).__name__ if cause else None
+    finally:
+        await reset_db_pool()
+    print('RUNTIME_RESULT=' + json.dumps(result))
+asyncio.run(main())
+"""
+
+
+def test_postgres_policy_save_and_update_preserve_nonempty_quotas(migrated_runtime):
+    """The normal policy save caller round-trips a real nonempty JSON quota map."""
+    owner, runtime_dir, _env, _ids = migrated_runtime
+    prepare = runtime_dir.parent / "connector-policy-save-owner"
+    prepare.mkdir()
+    owner_env = _runtime_env(prepare, _dsn(owner.config), backend="postgres", mode="multi_user")
+    result = _run_runtime(prepare, owner_env, _CONNECTOR_POLICY_SAVE_SCRIPT)
+    assert result["complete"], result  # nosec B101 -- actual PostgreSQL save and update contract.
