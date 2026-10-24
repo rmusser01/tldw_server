@@ -382,7 +382,7 @@ export function ChatHeader({
 
   const notificationControl = onOpenNotifications && notificationCopy && (
     <div className="relative">
-      <Tooltip title={notificationCopy.title}>
+      <Tooltip title={notificationCopy.title} placement="bottomRight">
         <button
           ref={notificationTriggerRef}
           type="button"
