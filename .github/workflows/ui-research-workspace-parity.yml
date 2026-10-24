@@ -219,6 +219,8 @@ jobs:
 
       - name: Build Chrome extension
         working-directory: apps/extension
+        env:
+          NODE_OPTIONS: --max-old-space-size=5120
         run: bun run build:chrome:prod
 
       - name: Install Playwright Chromium
