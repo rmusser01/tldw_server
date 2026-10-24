@@ -29,6 +29,18 @@ def _install_module(
     return module
 
 
+def _owner_pg_pool() -> SimpleNamespace:
+    """Provide a migration-owner transaction for the existing ensure-chain controls."""
+    async def can_migrate(_query: str) -> bool:
+        return True
+
+    @asynccontextmanager
+    async def transaction():
+        yield SimpleNamespace(fetchval=can_migrate)
+
+    return SimpleNamespace(pool=object(), transaction=transaction)
+
+
 def _import_startup_auth() -> ModuleType:
     sys.modules.pop("tldw_Server_API.app.services.startup_auth", None)
     return importlib.import_module("tldw_Server_API.app.services.startup_auth")
@@ -138,7 +150,7 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
     monkeypatch: pytest.MonkeyPatch,
     usage_failure: bool,
 ) -> None:
-    db_pool = SimpleNamespace(pool=object())
+    db_pool = _owner_pg_pool()
     pg_calls: list[str] = []
 
     async def _fake_get_db_pool():
@@ -185,7 +197,11 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
         PGUsageSchemaError=PGUsageSchemaError,
         ensure_user_timestamp_timezones_pg=_make_pg_ensure("user_timestamps"),
         ensure_authnz_core_tables_pg=_make_pg_ensure("authnz_core"),
+        ensure_authnz_lockout_tables_pg=_make_pg_ensure("authnz_lockouts"),
+        ensure_authnz_token_blacklist_pg=_make_pg_ensure("authnz_token_blacklist"),
+        ensure_resource_daily_ledger_pg=_make_pg_ensure("resource_daily_ledger"),
         ensure_org_stt_settings_pg=_make_pg_ensure("org_stt_settings"),
+        ensure_admin_monitoring_tables_pg=_make_pg_ensure("admin_monitoring"),
         ensure_admin_webhook_canonical_tables_pg=_make_pg_ensure(
             "admin_webhook_canonical"
         ),
@@ -206,10 +222,14 @@ async def test_init_auth_services_runs_pg_extras_when_pool_present(
     result = await startup_auth.init_auth_services()
 
     assert result is db_pool
-    assert pg_calls == [
+    assert pg_calls == [  # nosec B101 -- required startup ensure-chain regression.
         "user_timestamps",
         "authnz_core",
+        "authnz_lockouts",
+        "authnz_token_blacklist",
+        "resource_daily_ledger",
         "org_stt_settings",
+        "admin_monitoring",
         "storage_quota_backfill",
         "admin_webhook_canonical",
         "sharing",
@@ -249,6 +269,7 @@ async def test_pg_usage_ddl_failure_classification_survives_canonical_transactio
 ) -> None:
     """Hard DDL failures stop startup; transient failures roll back and continue."""
     from tldw_Server_API.app.core.AuthNZ import pg_migrations_extra
+    from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL
 
     marker = "postgres://admin:private-password@private-host/auth private-row-value"
     failures = {
@@ -306,9 +327,28 @@ async def test_pg_usage_ddl_failure_classification_survives_canonical_transactio
                     raise failure from ValueError(marker)
             staged.append(sql)
 
+    owner_probes: list[str] = []
+
+    class _MigrationOwnerProbe:
+        @asynccontextmanager
+        async def transaction(self):
+            yield self
+
+        async def fetchval(self, query: str) -> bool:
+            assert query == POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL  # nosec B101 -- the independent startup probe must prove migration authority.
+            owner_probes.append(query)
+            return True
+
     class _NativePool:
+        owner_checked = False
+
         @asynccontextmanager
         async def acquire(self):
+            # The first lease proves authority; inject failures only in the later usage-DDL lifecycle.
+            if not self.owner_checked:
+                self.owner_checked = True
+                yield _MigrationOwnerProbe()
+                return
             if failure_phase == "acquire":
                 raise failure
             try:
@@ -333,6 +373,10 @@ async def test_pg_usage_ddl_failure_classification_survives_canonical_transactio
     for name in (
         "ensure_user_timestamp_timezones_pg",
         "ensure_authnz_core_tables_pg",
+        "ensure_authnz_lockout_tables_pg",
+        "ensure_authnz_token_blacklist_pg",
+        "ensure_resource_daily_ledger_pg",
+        "ensure_admin_monitoring_tables_pg",
         "ensure_org_stt_settings_pg",
         "ensure_storage_quota_overrides_backfill_pg",
         "ensure_admin_webhook_canonical_tables_pg",
@@ -387,6 +431,8 @@ async def test_pg_usage_ddl_failure_classification_survives_canonical_transactio
     finally:
         startup_auth.logger.remove(sink)
 
+    assert owner_probes == [POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL]  # nosec B101 -- prove the real startup guard ran before the target lifecycle.
+
     if failure_phase == "acquire":
         assert events == []
     else:
@@ -418,7 +464,11 @@ async def test_pg_ensure_false_emits_high_signal_warning(
     pg_ensures = {
         "ensure_user_timestamp_timezones_pg": _successful_ensure,
         "ensure_authnz_core_tables_pg": _successful_ensure,
+        "ensure_authnz_lockout_tables_pg": _successful_ensure,
+        "ensure_authnz_token_blacklist_pg": _successful_ensure,
+        "ensure_resource_daily_ledger_pg": _successful_ensure,
         "ensure_org_stt_settings_pg": _successful_ensure,
+        "ensure_admin_monitoring_tables_pg": _successful_ensure,
         "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _failed_ensure,
         "ensure_sharing_tables_pg": _successful_ensure,
@@ -441,7 +491,7 @@ async def test_pg_ensure_false_emits_high_signal_warning(
     warnings: list[str] = []
     monkeypatch.setattr(startup_auth.logger, "warning", warnings.append)
 
-    await startup_auth._ensure_pg_extras(SimpleNamespace(pool=object()))
+    await startup_auth._ensure_pg_extras(_owner_pg_pool())
 
     assert warnings == [
         "App Startup: PG notification permissions ensure returned False; "
@@ -462,7 +512,11 @@ async def test_pg_authnz_core_readiness_failure_blocks_startup(
     pg_ensures = {
         "ensure_user_timestamp_timezones_pg": _successful_ensure,
         "ensure_authnz_core_tables_pg": _profile_version_not_ready,
+        "ensure_authnz_lockout_tables_pg": _successful_ensure,
+        "ensure_authnz_token_blacklist_pg": _successful_ensure,
+        "ensure_resource_daily_ledger_pg": _successful_ensure,
         "ensure_org_stt_settings_pg": _successful_ensure,
+        "ensure_admin_monitoring_tables_pg": _successful_ensure,
         "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_sharing_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
@@ -487,7 +541,7 @@ async def test_pg_authnz_core_readiness_failure_blocks_startup(
         startup_auth.AuthStartupError,
         match="AUTHNZ_CORE_SCHEMA_NOT_READY",
     ) as exc_info:
-        await startup_auth._ensure_pg_extras(SimpleNamespace(pool=object()))
+        await startup_auth._ensure_pg_extras(_owner_pg_pool())
 
     assert exc_info.value.__cause__ is None
 
@@ -497,7 +551,11 @@ async def test_pg_authnz_core_readiness_failure_blocks_startup(
     "ensure_name,readiness_error",
     [
         ("ensure_user_timestamp_timezones_pg", "AUTHNZ_USER_TIMESTAMPS_NOT_READY"),
+        ("ensure_authnz_lockout_tables_pg", "AUTHNZ_PG_LOCKOUT_SCHEMA_NOT_READY"),
+        ("ensure_authnz_token_blacklist_pg", "AUTHNZ_PG_TOKEN_BLACKLIST_NOT_READY"),
+        ("ensure_resource_daily_ledger_pg", "AUTHNZ_PG_DAILY_LEDGER_NOT_READY"),
         ("ensure_org_stt_settings_pg", "AUTHNZ_PG_STT_SCHEMA_NOT_READY"),
+        ("ensure_admin_monitoring_tables_pg", "AUTHNZ_PG_MONITORING_SCHEMA_NOT_READY"),
     ],
 )
 @pytest.mark.unit
@@ -518,7 +576,11 @@ async def test_pg_required_schema_readiness_failure_blocks_startup(
     pg_ensures = {
         "ensure_user_timestamp_timezones_pg": _successful_ensure,
         "ensure_authnz_core_tables_pg": _successful_ensure,
+        "ensure_authnz_lockout_tables_pg": _successful_ensure,
+        "ensure_authnz_token_blacklist_pg": _successful_ensure,
+        "ensure_resource_daily_ledger_pg": _successful_ensure,
         "ensure_org_stt_settings_pg": _successful_ensure,
+        "ensure_admin_monitoring_tables_pg": _successful_ensure,
         "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_sharing_tables_pg": _successful_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
@@ -544,7 +606,7 @@ async def test_pg_required_schema_readiness_failure_blocks_startup(
         startup_auth.AuthStartupError,
         match=readiness_error,
     ) as exc_info:
-        await startup_auth._ensure_pg_extras(SimpleNamespace(pool=object()))
+        await startup_auth._ensure_pg_extras(_owner_pg_pool())
 
     assert exc_info.value.__cause__ is None
 
@@ -566,7 +628,11 @@ async def test_pg_sharing_readiness_failure_blocks_startup(
     pg_ensures = {
         "ensure_user_timestamp_timezones_pg": _successful_ensure,
         "ensure_authnz_core_tables_pg": _successful_ensure,
+        "ensure_authnz_lockout_tables_pg": _successful_ensure,
+        "ensure_authnz_token_blacklist_pg": _successful_ensure,
+        "ensure_resource_daily_ledger_pg": _successful_ensure,
         "ensure_org_stt_settings_pg": _successful_ensure,
+        "ensure_admin_monitoring_tables_pg": _successful_ensure,
         "ensure_admin_webhook_canonical_tables_pg": _successful_ensure,
         "ensure_sharing_tables_pg": _failed_sharing_ensure,
         "ensure_notification_permissions_pg": _successful_ensure,
@@ -591,7 +657,7 @@ async def test_pg_sharing_readiness_failure_blocks_startup(
         startup_auth.AuthStartupError,
         match="AUTHNZ_PG_SHARING_SCHEMA_NOT_READY",
     ) as exc_info:
-        await startup_auth._ensure_pg_extras(SimpleNamespace(pool=object()))
+        await startup_auth._ensure_pg_extras(_owner_pg_pool())
 
     assert exc_info.value.__cause__ is None
 

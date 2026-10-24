@@ -44,6 +44,25 @@ legacy wrapper. The runner executes these connection settings outside its
 transaction. Other setting spellings in the body fail instead of being silently
 ignored. These scripts are intended to run through `DatabaseMigrator`.
 
+## SQLite permissions and failed-upgrade recovery
+
+Run upgrade preflight as the account that will perform migrations, after stopping
+all server and worker writers. That account needs write access to each database,
+its containing directory and any existing `-wal`, `-shm` or `-journal` files.
+Readable data can pass an integrity check while these permissions still prevent
+migration. Preflight reports the file or directory that needs attention; it does
+not change permissions. Filesystem access can change after preflight, so a passing
+check is not a guarantee that a later migration will complete.
+
+If a permission failure interrupts startup, keep the original backup untouched.
+With all users of the affected database stopped, correct ownership and access for
+the migration account across the database, directory and existing SQLite sidecars,
+then resume on the disposable upgrade target and compare the saved records.
+Do not delete WAL files to clear the error: they can contain committed data.
+Alternatively, restore the verified backup into a separate empty target, apply
+the upgrade there and compare records before switching deployments. Do not run an
+older binary on the migrated copy or merge a backup over a live data directory.
+
 ## Legacy SQLite Media DB recovery
 
 Automatic upgrades of existing file-backed Media DBs start at schema version

@@ -56,3 +56,15 @@ def test_close_all_connections_closes_its_checkout_before_closing_the_callers_po
     db.close_all_connections()
 
     assert raw.closed, f"the returned checkout was left open ({raw.info.transaction_status.name})"
+
+
+def test_close_all_connections_marks_a_private_pool_closed(pg_database_config, tmp_path):
+    """Closing one caller-owned handle must retire its private pool too."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    pool = backend.get_pool()
+    try:
+        db = CharactersRAGDB(tmp_path / "private.db", client_id="1", backend=backend)
+        db.close_all_connections()
+        assert pool.get_stats()["closed"] is True  # nosec B101 -- no idle connections or pool workers may outlive their owner.
+    finally:
+        pool.close_all()

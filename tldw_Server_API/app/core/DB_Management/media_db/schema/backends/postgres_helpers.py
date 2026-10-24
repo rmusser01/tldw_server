@@ -11,6 +11,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_s
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
     apply_postgres_core_media_schema,
     ensure_postgres_keyword_identity,
+    ensure_postgres_media_owner_identity,
     ensure_postgres_sync_log_contract,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.fts import (
@@ -105,6 +106,7 @@ def ensure_postgres_post_core_structures(
     """Ensure non-core PostgreSQL schema structures after base bootstrap or migration."""
 
     ensure_postgres_sync_log_contract(db, conn)
+    ensure_postgres_media_owner_identity(db, conn)
     db._ensure_postgres_collections_tables(conn)
     db._ensure_postgres_tts_history(conn)
     db._ensure_postgres_audio_presets(conn)
@@ -144,6 +146,21 @@ def bootstrap_postgres_schema(db: SupportsPostgresPostCoreStructures) -> None:
             raise SchemaError(
                 f"Database schema version ({current_version}) is newer than supported by code ({target_version})."
             )
+
+        authority = backend.execute(
+            "SELECT pg_has_role(current_user,c.relowner,'USAGE') AS can_migrate "
+            "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+            "WHERE n.nspname=current_schema() AND c.relname='media' AND c.relkind IN ('r','p')",
+            connection=conn,
+        ).first
+        if authority is not None and not authority["can_migrate"]:
+            if current_version != target_version:
+                raise SchemaError("PostgreSQL content requires schema-owner migration before runtime startup")
+            from tldw_Server_API.app.core.DB_Management.media_db.schema.postgres_runtime_validation import (
+                validate_postgres_runtime_schema,
+            )
+            validate_postgres_runtime_schema(db, conn)
+            return
 
         must_tables = [
             "media",

@@ -9414,6 +9414,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             except _CHACHA_NONCRITICAL_EXCEPTIONS as exc:  # noqa: BLE001
                 logger.warning("Error closing all backend connections for {}: {}", self.db_path_str, exc)
 
+
         # Reset the thread-local reference, except on PostgreSQL: replacing it would drop every
         # other thread's slot here, while those threads may be inside libpq on their checkouts.
         # Each guard stays in its own slot and is finalized on its own thread instead.
@@ -16861,12 +16862,12 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         self._notes_moodboard_studio_v61_postgres_checkpoint("version")
 
     def _verify_notes_moodboard_studio_schema_postgres(
-        self, conn: Any, *, migrating: bool = False
+        self, conn: Any, *, migrating: bool = False, runtime: bool = False
     ) -> None:
         """Reject PostgreSQL v61 catalog, relationship, or forced-RLS drift."""
         progress_state = self.backend.execute(
             """
-            SELECT c.relowner=current_user::regrole AS is_table_owner,
+            SELECT pg_has_role(current_user,c.relowner,'USAGE') AS has_owner_authority,
                    n.nspowner=current_user::regrole AS is_schema_owner,
                    c.relowner=n.nspowner AS owner_matches_schema,
                    has_table_privilege('public',c.oid,'SELECT') AS public_select,
@@ -17549,9 +17550,22 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
         if relationship_failures or studio_failures:
             raise SchemaError("Notes moodboard/Studio v61 PostgreSQL relationship catalog drifted.")  # noqa: TRY003
 
-        progress = self._postgres_v61_progress_row(conn, "migration")
-        if not migrating and progress["status"] != "complete":
-            raise SchemaError("Notes moodboard/Studio v61 PostgreSQL migration progress is incomplete.")  # noqa: TRY003
+        # A database owner may inherit the journal owner's role without sharing its OID.
+        runtime_nonowner = runtime and not bool(progress_state[0]["has_owner_authority"])
+        if runtime_nonowner:
+            # The owner publishes completion and version atomically; runtime cannot forge either.
+            writable_version = self.backend.execute(
+                "SELECT has_table_privilege(current_user, 'db_schema_version', "
+                "'INSERT,UPDATE,DELETE,TRUNCATE') OR "
+                "has_any_column_privilege(current_user, 'db_schema_version', 'INSERT,UPDATE')",
+                connection=conn,
+            ).scalar
+            if writable_version or self._get_schema_version_postgres(conn) != self._POSTGRES_SCHEMA_VERSION:
+                raise SchemaError("Notes PostgreSQL runtime migration-version authority is unsafe.")  # noqa: TRY003
+        else:
+            progress = self._postgres_v61_progress_row(conn, "migration")
+            if not migrating and progress["status"] != "complete":
+                raise SchemaError("Notes moodboard/Studio v61 PostgreSQL migration progress is incomplete.")  # noqa: TRY003
 
     def _create_note_attachment_schema_postgres(self, conn: Any) -> None:
         """Create the PostgreSQL v59 registry with fixed constraint and index SQL."""
@@ -17641,7 +17655,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                    attachment_table.relforcerowsecurity,
                    attachment_table.relowner = current_user::regrole AS is_schema_owner,
                    pg_has_role(current_user, attachment_namespace.nspowner, 'USAGE')
-                     AS is_current_schema_owner
+                     AS is_current_schema_owner,
+                   attachment_table.relowner = (
+                     SELECT relowner FROM pg_class WHERE oid='notes'::regclass
+                   ) AND pg_has_role(attachment_table.relowner, attachment_namespace.nspowner, 'USAGE')
+                     AS runtime_owner_matches
               FROM pg_class AS attachment_table
               JOIN pg_namespace AS attachment_namespace
                 ON attachment_namespace.oid = attachment_table.relnamespace
@@ -17656,8 +17674,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             for flag in (
                 "relrowsecurity",
                 "relforcerowsecurity",
-                "is_schema_owner",
-                "is_current_schema_owner",
+                *(("runtime_owner_matches",) if runtime else ("is_schema_owner", "is_current_schema_owner")),
             )
         ):
             raise SchemaError(  # noqa: TRY003
@@ -18000,7 +18017,11 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                    table_row.relowner = namespace_row.nspowner
                      AS owner_matches_schema,
                    pg_has_role(current_user, namespace_row.nspowner, 'USAGE')
-                     AS is_schema_owner
+                     AS is_schema_owner,
+                   table_row.relowner = (
+                     SELECT relowner FROM pg_class WHERE oid='notes'::regclass
+                   ) AND pg_has_role(table_row.relowner, namespace_row.nspowner, 'USAGE')
+                     AS runtime_owner_matches
               FROM pg_class AS table_row
               JOIN pg_namespace AS namespace_row ON namespace_row.oid=table_row.relnamespace
              WHERE namespace_row.nspname=current_schema()
@@ -18024,9 +18045,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
                 row.get("owner_matches_schema")
                 if v61_authority_owner
                 and row.get("table_name") == "note_task_scope_authority"
-                else row.get("is_table_owner")
+                else row.get("runtime_owner_matches") if runtime else row.get("is_table_owner")
             )
-            or not bool(row.get("is_schema_owner"))
+            or (not runtime and not bool(row.get("is_schema_owner")))
             or not bool(row.get("rls_enabled"))
             or not bool(row.get("rls_forced"))
             for row in table_rows
@@ -27055,7 +27076,7 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             return False
         self._verify_note_attachment_schema_postgres(conn, runtime=True)
         self._verify_note_task_schema_postgres(conn, runtime=True)
-        self._verify_notes_moodboard_studio_schema_postgres(conn)
+        self._verify_notes_moodboard_studio_schema_postgres(conn, runtime=True)
         self._ensure_note_semantic_schema_postgres(conn)
         if current_version >= 89:
             self._verify_dictionary_schema_postgres(conn)

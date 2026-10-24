@@ -29,6 +29,7 @@ from tldw_Server_API.app.core.Claims_Extraction.claims_utils import (
     persist_claims_if_applicable,
 )
 from tldw_Server_API.app.core.config import loaded_config_data, settings
+from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.DB_Manager import mark_media_as_processed
 from tldw_Server_API.app.core.DB_Management.media_db.api import (
     create_media_database,
@@ -36,6 +37,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.api import (
 )
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
+    media_owner_identity,
     normalize_media_dedupe_url,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.errors import (
@@ -4250,26 +4252,38 @@ async def process_batch_media(
                 if source_hash and not is_url:
 
                     def _source_hash_precheck(
-                        db: MediaDatabase, *, source_hash=source_hash, url_clause=url_clause,
-                        url_clause_alias=url_clause_alias, url_params=url_params, url_params_alias=url_params_alias,
+                        db: MediaDatabase,
+                        *,
+                        source_hash=source_hash,
+                        url_clause=url_clause,
+                        url_clause_alias=url_clause_alias,
+                        url_params=url_params,
+                        url_params_alias=url_params_alias,
                     ) -> Any:
                         nonlocal source_hash_column_available
+                        owner_clause = (
+                            "AND COALESCE(CAST(m.owner_user_id AS TEXT),m.client_id) = ? AND m.system_operation_id IS NULL"
+                            if getattr(db, "backend_type", None) == BackendType.POSTGRESQL
+                            else ""
+                        )
+                        owner_params = (media_owner_identity(db.client_id),) if owner_clause else ()
                         if source_hash_column_available is None:
                             source_hash_column_available = _media_has_source_hash_column(db)
                         if source_hash_column_available:
                             pre_check_query_template = """
-                                SELECT id
-                                FROM Media
+                                SELECT m.id
+                                FROM Media m
                                 WHERE {url_clause}
                                   AND source_hash = ?
                                   AND is_trash = 0
                                   AND deleted = 0
+                                {owner_clause}
                                 LIMIT 1
                             """
-                            pre_check_query = pre_check_query_template.format(url_clause=url_clause)  # nosec B608
+                            pre_check_query = pre_check_query_template.format(url_clause=url_clause, owner_clause=owner_clause)  # nosec B608
                             cursor = db.execute_query(
                                 pre_check_query,
-                                (*url_params, source_hash),
+                                (*url_params, source_hash, *owner_params),
                             )
                             existing_record = cursor.fetchone()
                             if not existing_record:
@@ -4282,15 +4296,16 @@ async def process_batch_media(
                                       AND m.deleted = 0
                                       AND dv.deleted = 0
                                       AND dv.safe_metadata LIKE ?
-                                    LIMIT 1
+                                    {owner_clause}
+                                LIMIT 1
                                 """
                                 pre_check_query = pre_check_query_template.format(
-                                    url_clause_alias=url_clause_alias
+                                    url_clause_alias=url_clause_alias, owner_clause=owner_clause
                                 )  # nosec B608
                                 hash_fragment = f'%"source_hash":"{source_hash}"%'
                                 cursor = db.execute_query(
                                     pre_check_query,
-                                    (*url_params_alias, hash_fragment),
+                                    (*url_params_alias, hash_fragment, *owner_params),
                                 )
                                 existing_record = cursor.fetchone()
                         else:
@@ -4303,15 +4318,14 @@ async def process_batch_media(
                                   AND m.deleted = 0
                                   AND dv.deleted = 0
                                   AND dv.safe_metadata LIKE ?
+                                {owner_clause}
                                 LIMIT 1
                             """
-                            pre_check_query = pre_check_query_template.format(
-                                url_clause_alias=url_clause_alias
-                            )  # nosec B608
+                            pre_check_query = pre_check_query_template.format(url_clause_alias=url_clause_alias, owner_clause=owner_clause)  # nosec B608
                             hash_fragment = f'%"source_hash":"{source_hash}"%'
                             cursor = db.execute_query(
                                 pre_check_query,
-                                (*url_params_alias, hash_fragment),
+                                (*url_params_alias, hash_fragment, *owner_params),
                             )
                             existing_record = cursor.fetchone()
                         return existing_record
@@ -4339,18 +4353,25 @@ async def process_batch_media(
                 else:
 
                     def _url_precheck(db: MediaDatabase, *, url_clause=url_clause, url_params=url_params) -> Any:
+                        owner_clause = (
+                            "AND COALESCE(CAST(m.owner_user_id AS TEXT),m.client_id) = ? AND m.system_operation_id IS NULL"
+                            if getattr(db, "backend_type", None) == BackendType.POSTGRESQL
+                            else ""
+                        )
+                        owner_params = (media_owner_identity(db.client_id),) if owner_clause else ()
                         pre_check_query_template = """
-                                          SELECT id
-                                          FROM Media
+                                          SELECT m.id
+                                          FROM Media m
                                           WHERE {url_clause}
                                             AND is_trash = 0
                                             AND deleted = 0
+                                          {owner_clause}
                                           LIMIT 1
                                           """
-                        pre_check_query = pre_check_query_template.format(url_clause=url_clause)  # nosec B608
+                        pre_check_query = pre_check_query_template.format(url_clause=url_clause, owner_clause=owner_clause)  # nosec B608
                         cursor = db.execute_query(
                             pre_check_query,
-                            url_params,
+                            (*url_params, *owner_params),
                         )
                         return cursor.fetchone()
 

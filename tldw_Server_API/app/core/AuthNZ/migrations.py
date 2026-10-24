@@ -6568,7 +6568,26 @@ def get_authnz_migrations() -> list[Migration]:
         Migration(103, "Seed Notes graph semantic management permission", migration_103_seed_notes_graph_semantic_manage_permission),
         Migration(104, "Add llm_usage_log.credential_source", migration_104_add_llm_usage_log_credential_source),
         Migration(105, "Create durable provider usage reservations", migration_105_create_provider_usage_reservations),
+        Migration(
+            106,
+            "Persist external MCP discovery outcomes",
+            migration_106_add_mcp_external_discovery_state,
+        ),
     ]
+
+
+def migration_106_add_mcp_external_discovery_state(conn: sqlite3.Connection) -> None:
+    """Retain discovery outcomes independently of the server configuration revision."""
+    if not _sqlite_table_exists(conn, "mcp_external_servers"):
+        return
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(mcp_external_servers)")}
+    for column, declaration in (
+        ("last_discovery_at", "TIMESTAMP"),
+        ("last_successful_discovery_at", "TIMESTAMP"),
+        ("last_error_category", "TEXT"),
+    ):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE mcp_external_servers ADD COLUMN {column} {declaration}")
 
 
 def migration_097_backfill_user_uuid(conn: sqlite3.Connection) -> None:

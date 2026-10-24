@@ -131,6 +131,24 @@ def check_database_integrity(db_path: str) -> dict[str, Any]:
         }
 
 
+def check_database_write_access(db_path: str) -> dict[str, Any]:
+    """Reject migrations when the current account cannot write the store or sidecars."""
+    path = Path(db_path)
+    required = [(path, os.W_OK), (path.parent, os.W_OK | os.X_OK)]
+    for suffix in ("-wal", "-shm", "-journal"):
+        sidecar = Path(str(path) + suffix)
+        if sidecar.exists():
+            required.append((sidecar, os.W_OK))
+    for candidate, mode in required:
+        if not os.access(candidate, mode):
+            return {
+                "name": "db_write_access",
+                "status": "fail",
+                "message": f"{path.name}: migration requires write access to {candidate.name}",
+            }
+    return {"name": "db_write_access", "status": "ok", "message": f"{path.name}: upgrade write access ok"}
+
+
 def check_disk_space(min_mb: int = 500, path: str | None = None) -> dict[str, Any]:
     """Warn if free disk space at *path* is below *min_mb* megabytes."""
     name = "disk_space"
@@ -157,7 +175,7 @@ def check_disk_space(min_mb: int = 500, path: str | None = None) -> dict[str, An
         }
 
 
-def check_python_version(min_version: tuple[int, int] = (3, 11)) -> dict[str, Any]:
+def check_python_version(min_version: tuple[int, int] = (3, 12)) -> dict[str, Any]:
     """Fail if the running Python version is below *min_version*."""
     name = "python_version"
     current = sys.version_info[:2]
@@ -190,8 +208,8 @@ def run_pre_upgrade_checks(
 
     Checks performed:
     1. Disk space (warning if below *min_disk_mb*)
-    2. Python version (>= 3.11)
-    3. SQLite integrity for every ``.db`` file in *db_dir*
+    2. Python version (>= 3.12)
+    3. Write access and SQLite integrity for ``.db``, ``.sqlite`` and ``.sqlite3`` files throughout *db_dir*
     """
     result = PreUpgradeResult()
 
@@ -204,16 +222,22 @@ def run_pre_upgrade_checks(
     # 3. Database integrity
     db_path = Path(db_dir)
     if db_path.is_dir():
-        db_files = sorted(db_path.glob("*.db"))
+        db_files = sorted(
+            path for path in db_path.rglob("*")
+            if path.is_file() and path.suffix.lower() in {".db", ".sqlite", ".sqlite3"}
+        )
         if not db_files:
             result.checks.append({
                 "name": "db_integrity",
                 "status": "ok",
-                "message": "no .db files found (fresh install)",
+                "message": "no SQLite database files found (fresh install)",
             })
         else:
             for db_file in db_files:
-                result.checks.append(check_database_integrity(str(db_file)))
+                access = check_database_write_access(str(db_file))
+                result.checks.append(access)
+                if access["status"] == "ok":
+                    result.checks.append(check_database_integrity(str(db_file)))
     else:
         result.checks.append({
             "name": "db_integrity",

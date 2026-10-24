@@ -120,11 +120,13 @@ class ProviderOverrideCallSnapshot:
             }
         return None
 
-    def enforce(self, model: str | None) -> None:
-        """Fail closed when this snapshot denies the provider/model pair."""
+    def enforce(self, model: str | None, *, require_model: bool = False) -> None:
+        """Fail closed; final dispatch can require a known model for an allowlist."""
         error = self.policy_error(model)
         if error is not None:
             raise ProviderOverridePolicyError(error["error_code"], self.provider)
+        if require_model and not model and self._override and self._override.allowed_models:
+            raise ProviderOverridePolicyError("model_not_allowed", self.provider)
 
     def ensure_healthy(self) -> None:
         """Reject this captured snapshot if its backing store became unhealthy."""

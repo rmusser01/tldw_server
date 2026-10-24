@@ -312,6 +312,24 @@ def _is_stdio_mcp_server(server: dict[str, Any]) -> bool:
     return bool(server.get("command")) and not _mcp_server_url_fields(server)
 
 
+def prepare_mcp_servers_for_session(servers: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Supply required ACP arrays without mutating saved server configurations."""
+    prepared = []
+    for server in servers or []:
+        value = dict(server)
+        if _is_stdio_mcp_server(value):
+            fields = ("args", "env")
+        elif value.get("type") in {"http", "sse"}:
+            fields = ("headers",)
+        else:
+            fields = ()
+        for field_name in fields:
+            if value.get(field_name) is None:
+                value[field_name] = []
+        prepared.append(value)
+    return prepared
+
+
 def validate_acp_session_launch_inputs(
     *,
     cwd: str,

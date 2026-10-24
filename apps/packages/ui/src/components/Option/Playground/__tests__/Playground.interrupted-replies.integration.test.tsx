@@ -174,6 +174,7 @@ const retryInterruptedReply = async (view: PlaygroundView, server: ReturnType<ty
   await act(async () => { outcome = await retryCompletion.current })
   expect(outcome, JSON.stringify(outcome)).toMatchObject({ status: "submitted" })
   await waitFor(() => expect(server.completionRequests()).toHaveLength(before + 1), HARNESS_WAIT)
+  await act(async () => { await retryCompletion.current })
   await waitForChatIdle()
 }
 

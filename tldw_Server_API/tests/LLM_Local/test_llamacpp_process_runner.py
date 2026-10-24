@@ -130,6 +130,42 @@ def test_runner_reports_defined_before_first_start(tmp_path: Path):
     assert runtime.warnings == []
 
 
+@pytest.mark.parametrize("configured_timeout", [None, 2.0])
+async def test_runner_permits_observed_cold_start_and_retains_explicit_short_timeout(
+    tmp_path, monkeypatch, configured_timeout
+):
+    from tldw_Server_API.app.core.Local_LLM import llamacpp_process_runner as module
+
+    values = make_config(tmp_path).model_dump()
+    values.pop("readiness_timeout")
+    if configured_timeout is not None:
+        values["readiness_timeout"] = configured_timeout
+    config = LlamaCppConfig(**values)
+    runner = LlamaCppProcessRunner(config, "cold-start")
+    child = FakeProcess(77777)
+
+    async def spawn(*args, **kwargs):
+        return child
+
+    async def observed_readiness(*args, timeout_total, **kwargs):
+        # Real C10 model became ready in58.903s; retain at least15s of the120s cap for cleanup.
+        return 58.903 <= timeout_total <= 105
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spawn)
+    monkeypatch.setattr(module, "wait_for_http_ready", observed_readiness)
+    monkeypatch.setattr(runner, "_is_port_free", lambda *args: True)
+    monkeypatch.setattr(runner, "_signal_managed_process_group", lambda *args: child.terminate())
+    try:
+        if configured_timeout is None:
+            runtime = await runner.start(make_model(config), profile("cold-start"))
+            assert runtime.state == LlamaCppRuntimeState.RUNNING  # nosec B101 -- observed cold readiness must fit the default budget.
+        else:
+            with pytest.raises(ServerError, match="failed to start or become ready"):
+                await runner.start(make_model(config), profile("cold-start"))
+    finally:
+        await runner.stop()
+
+
 @requires_posix_snapshots
 def test_full_cache_changes_snapshot_identity_but_false_matches_omitted(tmp_path):
     from tldw_Server_API.app.core.Local_LLM.llamacpp_snapshot_compatibility import (

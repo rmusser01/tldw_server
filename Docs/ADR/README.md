@@ -116,4 +116,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-087](087-mcp-durable-provider-accounting.md) | Proposed | Reserve MCP provider exposure durably before dispatch and serialize conservative admission and settlement on explicit billing scope. |
 | [ADR-088](088-mcp-certified-completion-lifecycle.md) | Proposed | Certify one bounded native-async completion path and retain ownership through cancellation, abandonment, and shutdown. |
 
+| [ADR-082](082-postgresql-media-source-owner-identity.md) | Proposed | Scope shared PostgreSQL Media source identity by owner while preserving reserved clone URL recovery guarantees. |
+
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.

@@ -61,7 +61,40 @@ class ResourceDailyLedger:
         is_pg = await self._using_postgres_backend()
         try:
             async with self.db_pool.transaction() as conn:
+                can_migrate = True
                 if is_pg:
+                    from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
+                        POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
+                    )
+                    from tldw_Server_API.app.core.exceptions import SchemaReadinessError
+
+                    can_migrate = await conn.fetchval(POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL)
+                if not can_migrate:
+                    await conn.fetch(
+                        "SELECT id, day_utc, entity_scope, entity_value, category, units, op_id, occurred_at, created_at "
+                        "FROM public.resource_daily_ledger LIMIT 0"
+                    )
+                    if not await conn.fetchval(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1 FROM pg_index AS indexes
+                            WHERE indexes.indexrelid = to_regclass('public.uq_ledger_op')
+                              AND indexes.indrelid = 'public.resource_daily_ledger'::regclass
+                              AND indexes.indisunique AND indexes.indisvalid AND indexes.indisready
+                              AND indexes.indimmediate
+                              AND indexes.indpred IS NULL AND indexes.indexprs IS NULL
+                              AND ARRAY(
+                                  SELECT attribute.attname::text
+                                  FROM unnest(indexes.indkey) WITH ORDINALITY AS key_part(number, position)
+                                  JOIN pg_attribute AS attribute ON attribute.attrelid = indexes.indrelid
+                                    AND attribute.attnum = key_part.number
+                                  WHERE key_part.position <= indexes.indnkeyatts ORDER BY key_part.position
+                              ) = ARRAY['day_utc', 'entity_scope', 'entity_value', 'category', 'op_id']
+                        )
+                        """
+                    ):
+                        raise SchemaReadinessError("PostgreSQL daily ledger idempotency requires owner migration")
+                elif is_pg:
                     await conn.execute(
                         """
                         CREATE TABLE IF NOT EXISTS resource_daily_ledger (

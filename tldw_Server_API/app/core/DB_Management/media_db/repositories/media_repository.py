@@ -10,6 +10,7 @@ from loguru import logger
 from tldw_Server_API.app.core.DB_Management.backends.base import BackendType
 from tldw_Server_API.app.core.DB_Management.media_db.dedupe_urls import (
     media_dedupe_url_candidates,
+    media_owner_identity,
     normalize_media_dedupe_url,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.email_identity import email_identity_url
@@ -119,7 +120,11 @@ class MediaRepository:
         if source_hash is not None:
             source_hash_str = str(source_hash).strip()
             source_hash_norm = source_hash_str if source_hash_str else None
-        owner_lookup_value = str(owner_user_id).strip() if owner_user_id is not None else None
+        owner_lookup_value = (
+            media_owner_identity(client_id, owner_user_id)
+            if db.backend_type == BackendType.POSTGRESQL
+            else str(owner_user_id).strip() if owner_user_id is not None else None
+        )
         raw_url_input = str(url).strip() if url is not None else ""
         if raw_url_input:
             dedupe_url_candidates = media_dedupe_url_candidates(raw_url_input)
@@ -395,20 +400,32 @@ class MediaRepository:
                                 if old_identity == url:
                                     return candidate
                         return None
+                    owner_clause = (
+                        " AND COALESCE(CAST(owner_user_id AS TEXT),client_id) = ?"
+                        if db.backend_type == BackendType.POSTGRESQL else ""
+                    )
+                    owner_params = (owner_lookup_value,) if owner_clause else ()
                     if len(dedupe_url_candidates) == 1:
                         return _fetchone(
                             f"SELECT {select_columns} "  # nosec B608
                             "FROM Media WHERE url = ? AND deleted = 0 "
-                            "AND system_operation_id IS NULL LIMIT 1",
-                            (dedupe_url_candidates[0],),
+                            "AND system_operation_id IS NULL" + owner_clause + " LIMIT 1",
+                            (dedupe_url_candidates[0], *owner_params),
                         )
                     placeholders = ", ".join(["?"] * len(dedupe_url_candidates))
                     return _fetchone(
                         f"SELECT {select_columns} "  # nosec B608
                         f"FROM Media WHERE url IN ({placeholders}) AND deleted = 0 "
-                        "AND system_operation_id IS NULL "
-                        "ORDER BY last_modified DESC, id DESC LIMIT 1",
-                        tuple(dedupe_url_candidates),
+                        "AND system_operation_id IS NULL " + owner_clause +
+                        " ORDER BY last_modified DESC, id DESC LIMIT 1",
+                        (*dedupe_url_candidates, *owner_params),
+                    )
+
+                if db.backend_type == BackendType.POSTGRESQL and media_type != "email":
+                    # Serialize the absent-row check across handles until the owning transaction commits.
+                    _exec(
+                        "SELECT pg_advisory_xact_lock(hashtext(?),hashtext(?))",
+                        (f"media-owner:{owner_lookup_value}", url),
                     )
 
                 row = _fetch_existing_by_url(

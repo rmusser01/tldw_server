@@ -1373,8 +1373,10 @@ class WorkflowEngine:
                 )
                 await self._wait_if_paused(run_id, step_run_id)
                 try:
+                    step_cfg_eff = _resolve_step_config_templates(stype, dict(scfg), context)
+                    step_cfg_eff.setdefault("timeout_seconds", step_timeout)
                     outputs = await asyncio.wait_for(
-                        self._run_step_adapter(stype, {**scfg, "timeout_seconds": step_timeout}, context, last, run_id, step_run_id=step_run_id),
+                        self._run_step_adapter(stype, step_cfg_eff, context, last, run_id, step_run_id=step_run_id),
                         timeout=step_timeout,
                     )
                     err = None
@@ -1461,6 +1463,7 @@ class WorkflowEngine:
 
             last = outputs or {}
             context.update({"last": last})
+            context[sid] = last
             if last.get("__status__") in {"waiting_human", "waiting_approval"}:
                 wait_status = str(last["__status__"])
                 self._complete_step_attempt_record(
@@ -1594,6 +1597,29 @@ class WorkflowEngine:
         except _WF_NONCRITICAL_EXCEPTIONS:
             WorkflowScheduler._spawn(self.start_run(run_id, mode))
         logger.debug(f"WorkflowEngine: submit run_id={run_id} mode={mode}")
+
+    def retry(self, run_id: str) -> str:
+        """Replay the failed step once, keeping the successful prefix and history."""
+        run = self.db.get_run(run_id)
+        if run is None:
+            return "not_found"
+        if run.status in {"queued", "running"}:
+            return "already_applied"
+        if run.status != "failed" or not run.ended_at:
+            return "invalid_state"
+        failed_step = self.db.get_last_failed_step_id(run_id)
+        if not failed_step:
+            return "invalid_state"
+
+        async def resume_failure() -> None:
+            # Claim after dispatch so task-creation failure cannot strand a claim.
+            if not self.db.claim_failed_run_retry(run_id, run.ended_at):
+                return
+            self._append_event(run_id, "transition_retry_resume", {"from": "failed", "to": "queued"})
+            await self.continue_run(run_id, after_step_id=failed_step, next_step_id=failed_step, retry_resume=True)
+
+        asyncio.create_task(resume_failure())
+        return "applied"
 
     def pause(self, run_id: str) -> str:
         run = self.db.get_run(run_id)
