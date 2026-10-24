@@ -1902,4 +1902,13 @@ describe("Playground cockpit controls", () => {
     expect(screen.getByRole("textbox", { name: "Mobile message" })).toBe(draft);
     expect(draft).toHaveValue("Retained message");
   });
+  it("keeps conversation view actions together while theme belongs to the header menu", async () => {
+    renderPlayground();
+    const view = await screen.findByRole("group", {name: "Conversation view"});
+    expect(within(view).getByRole("button", {name: "Enter focus chat"})).toBeInTheDocument();
+    expect(within(view).getByRole("button", {name: "Show keyboard shortcuts"})).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-header-theme-toggle")).toBeNull();
+  });
+
+
 });
