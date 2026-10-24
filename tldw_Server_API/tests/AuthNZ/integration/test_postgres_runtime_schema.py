@@ -48,6 +48,7 @@ asyncio.run(main())
 _RUNTIME_SCRIPT = """
 import asyncio
 import json
+from contextlib import AsyncExitStack
 import traceback
 from tldw_Server_API.app.core.AuthNZ.database import get_db_pool, reset_db_pool
 from tldw_Server_API.app.core.AuthNZ.repos.users_repo import AuthnzUsersRepo
@@ -65,6 +66,24 @@ async def main():
                 await validate_postgres_profile_candidate_schema(conn)
             finally:
                 await conn.close()
+        elif SURFACE in {'api-keys', 'api-key-write'}:
+            from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
+            manager = APIKeyManager(await get_db_pool())
+            async with AsyncExitStack() as occupied:
+                for _ in range(4):
+                    await occupied.enter_async_context(manager.db_pool.pool.acquire())
+                async with asyncio.timeout(15):
+                    await manager.initialize()
+                    assert await manager.list_user_keys(user_id=ADMIN_ID, include_revoked=False) == []
+                    assert await manager.list_user_keys(user_id=USER_ID, include_revoked=False) == []
+            if SURFACE == 'api-key-write':
+                created = await manager.create_virtual_key(user_id=USER_ID, name='runtime-key',
+                    allowed_endpoints=['chat.completions'], allowed_providers=['openai'], allowed_models=['fixture-model'],
+                    budget_day_usd=1.25, budget_month_usd=2.5)
+                row = await manager.db_pool.fetchone('SELECT llm_allowed_endpoints,llm_allowed_providers,llm_allowed_models,llm_budget_day_usd,llm_budget_month_usd FROM api_keys WHERE id=$1', created['id'])
+                for name, expected in (('llm_allowed_endpoints',['chat.completions']),('llm_allowed_providers',['openai']),('llm_allowed_models',['fixture-model'])):
+                    assert json.loads(row[name]) == expected
+                assert row['llm_budget_day_usd']==1.25 and row['llm_budget_month_usd']==2.5
         elif SURFACE == 'users':
             await get_db_pool()
             repo = await AuthnzUsersRepo.from_pool()
@@ -83,6 +102,8 @@ async def main():
         result['complete'] = True
     except Exception as error:
         result['error'] = type(error).__name__
+        if SURFACE in {'api-keys', 'api-key-write'}:
+            result['initialized'] = manager._initialized
         result['functions'] = [frame.name for frame in traceback.extract_tb(error.__traceback__)[-4:]]
         cause = error.__cause__ or error.__context__
         result['causes'] = []
@@ -187,7 +208,7 @@ def _read_runtime(runtime_dir, env, ids, surface):
     return _run_runtime(runtime_dir, env, script)
 
 
-@pytest.mark.parametrize("surface", ["users", "rbac", "candidate"])
+@pytest.mark.parametrize("surface", ["users", "rbac", "candidate", "api-keys"])
 def test_migrated_authnz_serves_without_owner_authority(migrated_runtime, surface):
     """Pool/user and configured permission reads preserve the owner-migrated store."""
     owner, runtime_dir, env, ids = migrated_runtime
@@ -220,6 +241,19 @@ def test_migrated_authnz_serves_without_owner_authority(migrated_runtime, surfac
             "rbac",
             "DELETE FROM public.role_permissions WHERE role_id = (SELECT id FROM public.roles WHERE name = 'admin') AND permission_id = (SELECT id FROM public.permissions WHERE name = 'media.read')",
         ),
+        ("api-keys", "DROP TABLE public.api_key_audit_log"),
+        ("api-keys", "ALTER TABLE public.api_keys DROP COLUMN key_prefix"),
+        ("api-keys", "ALTER TABLE public.api_keys ALTER COLUMN is_virtual DROP DEFAULT; ALTER TABLE public.api_keys ALTER COLUMN is_virtual TYPE TEXT USING is_virtual::text"),
+        ("api-keys", "ALTER TABLE public.api_key_audit_log DROP CONSTRAINT api_key_audit_log_pkey"),
+        ("api-keys", "ALTER TABLE public.api_keys DROP CONSTRAINT api_keys_key_hash_key"),
+        ("api-keys", "DROP INDEX public.idx_api_keys_key_id; CREATE UNIQUE INDEX idx_api_keys_key_id ON public.api_keys(key_id) WHERE key_id IS NULL"),
+        ("api-keys", "ALTER TABLE public.api_keys DROP CONSTRAINT api_keys_parent_key_id_fkey"),
+        ("api-keys", "ALTER TABLE public.api_key_audit_log DROP CONSTRAINT api_key_audit_log_api_key_id_fkey"),
+        ("api-keys", "DROP INDEX public.idx_api_keys_user_id; CREATE INDEX idx_api_keys_user_id ON public.api_keys(status)"),
+        ("api-keys", "ALTER TABLE public.api_key_audit_log ALTER COLUMN action DROP NOT NULL"),
+        ("api-keys", "ALTER TABLE public.api_keys ALTER COLUMN usage_count DROP DEFAULT"),
+        ("api-keys", "ALTER TABLE public.api_key_audit_log ALTER COLUMN id DROP DEFAULT"),
+        ("api-keys", "ALTER TABLE public.api_keys ALTER COLUMN llm_budget_day_usd TYPE INTEGER USING llm_budget_day_usd::integer"),
     ],
     ids=[
         "profile-default",
@@ -233,6 +267,9 @@ def test_migrated_authnz_serves_without_owner_authority(migrated_runtime, surfac
         "rbac-unique-key",
         "rbac-primary-key",
         "rbac-required-link",
+        "api-keys-table", "api-keys-column", "api-keys-type", "api-keys-primary", "api-keys-hash-unique",
+        "api-keys-partial-id", "api-keys-parent", "api-keys-audit-link", "api-keys-index-columns",
+        "api-keys-nullability", "api-keys-insert-default", "api-keys-generated-id", "api-keys-integer-usd",
     ],
 )
 @pytest.mark.asyncio
@@ -244,7 +281,26 @@ async def test_nonowner_authnz_refuses_schema_drift_without_repair(migrated_runt
     before = _snapshot(owner)
     result = _read_runtime(runtime_dir, env, ids, surface)
     assert not result["complete"], result  # nosec B101 -- malformed-schema refusal.
+    if surface == "api-keys":
+        assert result["initialized"] is False  # nosec B101 -- failed initialization cannot be cached.
+        assert any(cause["type"] == "SchemaReadinessError" for cause in result["causes"])  # nosec B101 -- reject drift before DDL.
     assert _snapshot(owner) == before  # nosec B101 -- failed readiness leaves all state intact.
+
+
+@pytest.mark.asyncio
+async def test_nonowner_api_keys_preserve_supported_jsonb_lists_and_fractional_budgets(migrated_runtime):
+    """A supported JSONB representation retains real virtual-key write behavior."""
+    owner, runtime_dir, env, ids = migrated_runtime
+    async with unmanaged_authnz_pg_connection(owner.config.pg_database) as conn:
+        await conn.execute(
+            "ALTER TABLE public.api_keys ALTER COLUMN llm_allowed_endpoints TYPE JSONB USING llm_allowed_endpoints::jsonb; "
+            "ALTER TABLE public.api_keys ALTER COLUMN llm_allowed_providers TYPE JSONB USING llm_allowed_providers::jsonb; "
+            "ALTER TABLE public.api_keys ALTER COLUMN llm_allowed_models TYPE JSONB USING llm_allowed_models::jsonb"
+        )
+    before = _snapshot(owner)
+    result = _read_runtime(runtime_dir, env, ids, "api-key-write")
+    assert result["complete"], result  # nosec B101 -- real supported representation and fractional write.
+    assert _snapshot(owner) == before  # nosec B101 -- no serving schema or identity mutation.
 
 
 _STARTUP_SCRIPT = """

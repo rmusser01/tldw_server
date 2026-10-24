@@ -71,6 +71,66 @@ _NATIVE_QUOTA_CHECKS = (
     ("team_id IS NULL OR org_id IS NOT NULL",),
     ("(scope_type = 'global' AND workspace_id IS NULL) OR (scope_type = 'workspace' AND workspace_id IS NOT NULL)",),
 )
+_API_KEY_COLUMNS = {
+    "api_keys": {
+        "id",
+        "user_id",
+        "key_hash",
+        "key_id",
+        "key_prefix",
+        "name",
+        "description",
+        "scope",
+        "status",
+        "created_at",
+        "expires_at",
+        "last_used_at",
+        "last_used_ip",
+        "usage_count",
+        "rate_limit",
+        "allowed_ips",
+        "metadata",
+        "rotated_from",
+        "rotated_to",
+        "revoked_at",
+        "revoked_by",
+        "revoke_reason",
+        "is_virtual",
+        "parent_key_id",
+        "org_id",
+        "team_id",
+        "llm_budget_day_tokens",
+        "llm_budget_month_tokens",
+        "llm_budget_day_usd",
+        "llm_budget_month_usd",
+        "llm_allowed_endpoints",
+        "llm_allowed_providers",
+        "llm_allowed_models",
+    },
+    "api_key_audit_log": {"id", "api_key_id", "action", "user_id", "ip_address", "user_agent", "details", "created_at"},
+}
+_API_KEY_INDEXES = {
+    "idx_api_keys_user_id": "api_keys",
+    "idx_api_keys_key_hash": "api_keys",
+    "idx_api_keys_key_id": "api_keys",
+    "idx_api_keys_status": "api_keys",
+    "idx_api_keys_expires_at": "api_keys",
+    "idx_api_keys_virtual": "api_keys",
+    "idx_api_keys_org": "api_keys",
+    "idx_api_keys_team": "api_keys",
+    "idx_api_key_audit_log_api_key_id": "api_key_audit_log",
+    "idx_api_key_audit_log_created_at": "api_key_audit_log",
+}
+_API_KEY_DEFAULTS = {
+    "api_keys": {
+        "status": ("'active'",),
+        "is_virtual": ("FALSE",),
+        "usage_count": ("0",),
+        "created_at": ("CURRENT_TIMESTAMP", "now()"),
+    },
+    "api_key_audit_log": {"created_at": ("CURRENT_TIMESTAMP", "now()")},
+}
+
 _CORE_COLUMNS = {
     "native_chat_quota_reservations": _NATIVE_QUOTA_COLUMNS,
     "users": _USERS_COLUMNS,
@@ -261,7 +321,7 @@ WHERE namespace.nspname = 'public' AND relation.relkind IN ('r', 'p')
 _INDEXES_SQL = """
 SELECT index_relation.relname AS index_name, relation.relname AS table_name,
        indexes.indisvalid AND indexes.indisready AS ready,
-       indexes.indisunique AS is_unique,
+       indexes.indisunique AS is_unique, indexes.indimmediate AS immediate,
        ARRAY(SELECT attribute.attname
              FROM unnest(indexes.indkey) WITH ORDINALITY AS key_part(number, position)
              LEFT JOIN pg_attribute AS attribute
@@ -310,6 +370,7 @@ _PRIMARY_KEYS = {
     "user_permissions": ("user_id", "permission_id"),
 }
 _UNIQUE_KEYS = {
+    "api_keys": {("key_hash",), ("key_id",)},
     "users": {("uuid",), ("username",), ("email",)},
     "org_invites": {("code",)},
     "org_invite_redemptions": {("invite_id", "user_id")},
@@ -319,6 +380,15 @@ _UNIQUE_KEYS = {
     "audio_studio_media_tickets": {("token_hash",)},
 }
 _FOREIGN_KEYS = {
+    "api_keys": {
+        (("user_id",), "users", ("id",), "c"),
+        (("parent_key_id",), "api_keys", ("id",), "a"),
+        (("rotated_from",), "api_keys", ("id",), "a"),
+        (("rotated_to",), "api_keys", ("id",), "a"),
+        (("org_id",), "organizations", ("id",), "n"),
+        (("team_id",), "teams", ("id",), "n"),
+    },
+    "api_key_audit_log": {(("api_key_id",), "api_keys", ("id",), "c"), (("user_id",), "users", ("id",), "n")},
     "sessions": {(("user_id",), "users", ("id",), "c")},
     "audit_logs": {(("user_id",), "users", ("id",), "n")},
     "password_history": {(("user_id",), "users", ("id",), "c")},
@@ -354,6 +424,10 @@ _CHECKS = {
     ),
 }
 _INDEX_COLUMNS = {
+    "idx_api_keys_user_id": ("user_id",), "idx_api_keys_key_hash": ("key_hash",), "idx_api_keys_key_id": ("key_id",),
+    "idx_api_keys_status": ("status",), "idx_api_keys_expires_at": ("expires_at",), "idx_api_keys_virtual": ("is_virtual",),
+    "idx_api_keys_org": ("org_id",), "idx_api_keys_team": ("team_id",),
+    "idx_api_key_audit_log_api_key_id": ("api_key_id",), "idx_api_key_audit_log_created_at": ("created_at",),
     "native_chat_quota_user": ("user_id", "user_uuid", "state"),
     "native_chat_quota_org": ("org_id", "state"),
     "native_chat_quota_team": ("team_id", "state"),
@@ -437,6 +511,7 @@ def _column_type_allowed(column: str, data_type: str) -> bool:
         "is_system",
         "granted",
         "is_revoked",
+        "is_virtual",
         "delete_audio_after_success",
         "redact_pii",
         "allow_unredacted_partials",
@@ -468,8 +543,18 @@ def _column_type_allowed(column: str, data_type: str) -> bool:
         "days",
         "limit_per_min",
         "burst",
+        "api_key_id",
+        "parent_key_id",
+        "rotated_from",
+        "rotated_to",
+        "rate_limit",
+        "usage_count",
+        "llm_budget_day_tokens",
+        "llm_budget_month_tokens",
     }:
         return data_type in {"int2", "int4", "int8"}
+    if column in {"llm_budget_day_usd", "llm_budget_month_usd"}:
+        return data_type in {"float4", "float8", "numeric"}
     if column in {"storage_used_mb", "used_mb", "audio_retention_hours"}:
         return data_type in {"int2", "int4", "int8", "float4", "float8", "numeric"}
     if column in {
@@ -484,6 +569,7 @@ def _column_type_allowed(column: str, data_type: str) -> bool:
         "consumed_at",
         "revoked_at",
         "last_redeemed_at",
+        "last_used_at",
         "used_at",
         "last_activity",
         "refresh_expires_at",
@@ -496,7 +582,7 @@ def _column_type_allowed(column: str, data_type: str) -> bool:
         return data_type == "jsonb"
     if column == "uuid":
         return data_type in {"uuid", "text", "varchar"}
-    if column in {"metadata", "details"}:
+    if column in {"metadata", "details", "llm_allowed_endpoints", "llm_allowed_providers", "llm_allowed_models"}:
         return data_type in {"json", "jsonb", "text", "varchar"}
     return data_type in {"text", "varchar"}
 
@@ -588,6 +674,51 @@ def _validate_metadata(columns: Any, indexes: Any, constraints: Any, *, rbac: bo
         _RBAC_COLUMNS if rbac else _CORE_COLUMNS,
         _SHARED_INDEXES if rbac else _CORE_INDEXES,
     )
+
+
+async def validate_postgres_api_keys_runtime(conn: Any) -> None:
+    """Admit API-key reads/writes only against the complete owner-migrated schema."""
+    from tldw_Server_API.app.core.AuthNZ.profile_candidate_schema import _postgres_generated_id_matches
+
+    columns = await conn.fetch(_COLUMNS_SQL)
+    indexes = await conn.fetch(_INDEXES_SQL)
+    constraints = await conn.fetch(_CONSTRAINTS_SQL)
+    _validate_required_metadata(
+        columns, indexes, [row for row in constraints if not row["deferrable"]], _API_KEY_COLUMNS, _API_KEY_INDEXES
+    )
+    for key in (("key_hash",), ("key_id",)):
+        if not any(
+            row["table_name"] == "api_keys"
+            and row["ready"]
+            and row["is_unique"]
+            and row["immediate"]
+            and row["predicate"] is None
+            and tuple(row["columns"]) == key
+            for row in indexes
+        ):
+            raise SchemaReadinessError("PostgreSQL API key uniqueness requires owner migration")
+    required_not_null = {
+        "api_keys": {"id", "user_id", "key_hash", "key_prefix"},
+        "api_key_audit_log": {"id", "api_key_id", "action"},
+    }
+    for row in columns:
+        table, column = row["table_name"], row["column_name"]
+        if table not in _API_KEY_COLUMNS or column not in _API_KEY_COLUMNS[table]:
+            continue
+        if column in required_not_null[table] and not row["not_null"]:
+            raise SchemaReadinessError("PostgreSQL API key nullability requires owner migration")
+        expected = _API_KEY_DEFAULTS[table].get(column)
+        if expected and not _check_matches(row["default_expression"], expected):
+            raise SchemaReadinessError("PostgreSQL API key defaults require owner migration")
+        if column == "id" and not _postgres_generated_id_matches(
+            table,
+            {
+                "default": row["default_expression"],
+                "is_identity": row["is_identity"],
+                "identity_generation": row["identity_generation"],
+            },
+        ):
+            raise SchemaReadinessError("PostgreSQL API key generated ID requires owner migration")
 
 
 async def validate_postgres_startup_timestamps(conn: Any) -> None:
