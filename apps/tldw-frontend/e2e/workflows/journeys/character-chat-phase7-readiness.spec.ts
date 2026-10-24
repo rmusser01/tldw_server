@@ -667,7 +667,8 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
       expect((await pending())[0]).toMatchObject({ operation_id: original.operation_id, input_id: admission.message_id, roleplay_resume: original.roleplay_resume })
       const recoveryDraft = "Continue this character chat after configuring the provider."
       await input.fill(recoveryDraft)
-      await page.getByRole("button", { name: "Current Chat Model Settings", exact: true }).click()
+      await new ChatPage(page).openConversationControls()
+      await composer.getByRole("button", { name: "Chat Settings", exact: true }).click()
       const settings = page.getByRole("dialog", { name: "Current Chat Model Settings", exact: true })
       await expect(settings).toBeVisible()
       await settings.getByRole("button", { name: "Close", exact: true }).click()

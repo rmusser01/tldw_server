@@ -2337,9 +2337,9 @@ test.describe('/chat cockpit real-server parity', () => {
       const draftBox = await page.getByTestId('chat-input').boundingBox();
       expect(draftBox?.width ?? 0).toBeGreaterThanOrEqual(180);
     };
-    const expectNoMobileBottomControls = async () => {
+    const expectMobileComposerFooter = async () => {
       await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
-      await expect(page.getByTestId('composer-bottom-bar')).toHaveCount(0);
+      await expect(page.getByTestId('composer-bottom-bar')).toBeVisible();
     };
     const panelControlledByButton = async (panel: 'context' | 'runtime') => {
       const config = mobileCockpitPanelConfig[panel];
@@ -2353,7 +2353,7 @@ test.describe('/chat cockpit real-server parity', () => {
     await fillEditableComposer(page, mobileDraft);
     await expectMobileDraftReachable();
     await waitForPlaygroundDraftSaved(page);
-    await expectNoMobileBottomControls();
+    await expectMobileComposerFooter();
 
     await expect(page.getByTestId('playground-cockpit-shell')).toHaveAttribute(
       'data-mode',
@@ -2367,7 +2367,7 @@ test.describe('/chat cockpit real-server parity', () => {
       'Context panel active. Composer draft remains available below.'
     );
     await expectMobileDraftPreserved();
-    await expectNoMobileBottomControls();
+    await expectMobileComposerFooter();
     const contextButton = mobileRails.getByRole('button', { name: 'Context', exact: true });
     const runtimeButton = mobileRails.getByRole('button', { name: 'Chat settings', exact: true });
     await expect(mobileRails.getByRole('group', { name: 'Mobile cockpit panels' })).toBeVisible();
@@ -2542,7 +2542,7 @@ test.describe('/chat cockpit real-server parity', () => {
       path: testInfo.outputPath('chat-cockpit-mobile-focus.png'),
       fullPage: true,
     });
-    await expectNoMobileBottomControls();
+    await expectMobileComposerFooter();
     await switchChatLayoutMode(page, 'cockpit');
     mobileRails = await waitForMobileCockpitPanel(page, 'runtime');
     await expectMobileDraftPreserved();
@@ -2710,7 +2710,7 @@ test.describe('/chat cockpit real-server parity', () => {
     );
     await expect(page.getByTestId('playground-cockpit-mobile-rails')).toHaveCount(0);
     await expect(page.getByTestId('playground-collapsed-composition-summary')).toHaveCount(0);
-    await expect(page.getByTestId('composer-bottom-bar')).toHaveCount(0);
+    await expect(page.getByTestId('composer-bottom-bar')).toBeVisible();
 
     const mobileWebSearchControl = page.getByRole('button', {
       name: 'Web search',
