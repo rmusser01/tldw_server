@@ -1,6 +1,6 @@
-# X01: API key and provider-secret initialization under the serving role
+# X01: Profile initialization and reads under the serving role
 
-Task: TASK-13260.278.18.83.45. Candidate ec3 on dev4e; original session protected.
+Task: TASK-13260.278.18.83.45. Candidate rebased on dev4e; committed API-key/provider-secret repairs and current audio/policy unit; original session protected.
 
 Root: actual profile GET500 invokes lazy APIKeyManager initialization, which executes PostgreSQL DDL under a nonowner. Keep the failure visible and retain all failed results. No new model run merely for diagnosis.
 
@@ -35,3 +35,12 @@ Connected ten modules:88passed3208warnings23.78s pytest/28.139s outer. Constrain
 Installed f4db API-key repair is qualified3816files/7.873s. Actual no-generation Settings check now passes that initialization, then fails at user_provider_secrets request-time owner DDL. Extend the same read-only serving boundary to this repository; existing profile-overrides readiness already read-only. Real causal regression before product edits, finite schema/refusal/write checks and normal owner/SQLite behavior retained. API0.246s/frontend0.006s actual cleanup within15s, original fullcanonical/Chat/draft/owners preserved. Whole live Settings still failed; no X01 closure.
 
 Provider-secret causal/green:1failed then1passed real restricted role, onefree asyncslot and actual synthetic-ciphertext write/isolation/revocation; eleven drift refusals pass. Reviewer found coexisting deferrable conflict arbiter (including reversed key order):2red then2green; minimal explicit refusal added. Connected4modules49passed255warnings32.87s pytest/37.086s outer. Compile/Ruff and scoped baseline/current Bandit clear; source review CLEAR. This qualifies repository persistence, not encryption or liveprofile. All8runtime pins and fresh packager target align;3816inputs admitted. Stage3 remains open until actual package/Settings/release acceptance.
+
+
+## Optional audio and connector profile reads
+
+The installed provider-secret repair advanced actual Settings to a third request-time DDL failure in cold audio backfill. PostgreSQL now checks for the optional legacy audio table and reads it without provisioning; existing canonical ledger DML/idempotence and SQLite remain. Connector policy GET similarly distinguishes actual absence from denial without DDL, decodes the JSONB quota map, and normal Save serializes that map for asyncpg. Existing owner bootstrap, SQLite and authorization semantics remain.
+
+Qualification: full real JWT/profile without legacy store passed; legacy2.5-minute reporting plus full profile and fresh-process idempotence passed1case/5warnings33.13s pytest36.966s outer. Policy present/absent/denied controls passed, nonempty quota read passed after causal red (10.35s/14.799s), and normal owner create/update passed after DataError causal red (9.28s/13.566s). Connected audio23passed1077warnings34.01s/37.834s; SQLite/backend/principal11passed5warnings0.84s/2.087s. Owner-fixture SQL spacing and one nested JSON fixture quotation were operator errors, corrected without weakening guards; no application idempotence failure is inferred from them. Four Python files and14 embedded drivers compile. Ruff retains four inherited diagnostics; Bandit production0, runtime tests0, policy tests182identical,0errors/0new. Actual-source review CLEAR. These results qualify components/real ASGI, not native UI or whole X01. Stage3 remains In Progress.
+
+Fresh profile-reads site is prepared; all8 runtime pins align and3816 source files are admitted. Current frontend build is unchanged THttd0p00MlSSxPE1Yyre; no redundant frontend build. Prior failed native Settings remains failed (API0.233s/frontend0.005s release, original state preserved); package and native checks follow normal final staged review/hooks/commit.
