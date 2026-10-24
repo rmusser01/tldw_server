@@ -62,6 +62,388 @@ const jwtForUser = (userId: string | number): string =>
   `header.${btoa(JSON.stringify({ sub: String(userId) }))}.signature`
 
 describe("background proxy web token refresh", () => {
+  describe("X02 document GET lifetime", () => {
+    let listeners: [string, EventListenerOrEventListenerObject][]
+    let restoreListenerSpy: () => void
+    beforeEach(() => {
+      mocks.store.tldwConfig = { serverUrl: "https://api.example.com", authMode: "multi-user",
+        accessToken: jwtForUser(42), refreshToken: "original-document-refresh" }
+      listeners = []
+      const add = window.addEventListener.bind(window)
+      const spy = vi.spyOn(window, "addEventListener").mockImplementation((type, listener, options) => {
+        if (type === "pagehide" || type === "pageshow") listeners.push([type, listener])
+        add(type, listener, options)
+      })
+      restoreListenerSpy = () => spy.mockRestore()
+    })
+    afterEach(() => {
+      for (const [type, listener] of listeners) window.removeEventListener(type, listener)
+      restoreListenerSpy()
+    })
+    const hide = () => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true }))
+    const show = () => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }))
+
+    it.each([
+      ["fetch", false], ["body", false], ["fetch", true], ["body", true]
+    ] as const)("retires a direct GET during %s (caller signal=%s)", async (phase, callerSignal) => {
+      let release!: () => void
+      const held = new Promise<void>(resolve => { release = resolve })
+      let signal: AbortSignal | null | undefined
+      let entered = false
+      vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        signal = init?.signal
+        const response = Response.json({ private: "retired document" })
+        if (phase === "fetch") {
+          entered = true
+          await held
+        } else {
+          vi.spyOn(response, "json").mockImplementation(async () => {
+            entered = true
+            await held
+            return { private: "retired document" }
+          })
+        }
+        return response
+      }))
+      const caller = new AbortController()
+      const { bgRequest } = await importProxy()
+      const pending = bgRequest({ path: "/api/v1/notes/private-note", method: "GET", preferDirect: true,
+        ...(callerSignal ? { abortSignal: caller.signal } : {}) })
+        .then(value => ({ value }), error => ({ error }))
+      try {
+        await vi.waitFor(() => expect(entered).toBe(true))
+        hide()
+        expect(signal?.aborted).toBe(true)
+        expect(caller.signal.aborted).toBe(false)
+        release()
+        expect(await pending).toMatchObject({ error: { name: "AbortError" } })
+      } finally {
+        caller.abort()
+        release()
+        await pending
+      }
+    })
+
+    it("captures retirement before config preparation and permits only a fresh restored GET", async () => {
+      let release!: () => void
+      const held = new Promise<void>(resolve => { release = resolve })
+      let entered = false
+      mocks.storageGet.mockImplementation(async (key: string) => {
+        const value = mocks.store[key] ?? null
+        if (key === "tldwConfig") { entered = true; await held }
+        return value
+      })
+      const fetchSpy = vi.fn(async () => Response.json({ current: true }))
+      vi.stubGlobal("fetch", fetchSpy)
+      const { bgRequest } = await importProxy()
+      const pending = bgRequest({ path: "/api/v1/notes/private-note", method: "GET", preferDirect: true })
+        .then(value => ({ value }), error => ({ error }))
+      try {
+        await vi.waitFor(() => expect(entered).toBe(true))
+        hide()
+        show()
+        release()
+        expect(await pending).toMatchObject({ error: { name: "AbortError" } })
+        expect(fetchSpy).not.toHaveBeenCalled()
+        await expect(bgRequest({ path: "/api/v1/notes/private-note", method: "GET", preferDirect: true }))
+          .resolves.toEqual({ current: true })
+        expect(fetchSpy).toHaveBeenCalledTimes(1)
+      } finally {
+        release()
+        await pending
+      }
+    })
+
+    it.each(["bgRequest", "apiSend"] as const)("keeps restored %s coalesced GETs separate from retired callers and their cleanup", async transport => {
+      let releaseOld!: () => void
+      let releaseNew!: () => void
+      const oldGate = new Promise<void>(resolve => { releaseOld = resolve })
+      const newGate = new Promise<void>(resolve => { releaseNew = resolve })
+      const signals: (AbortSignal | null | undefined)[] = []
+      vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        signals.push(init?.signal)
+        const old = signals.length === 1
+        await (old ? oldGate : newGate)
+        return Response.json({ current: !old })
+      }))
+      const { bgRequest } = await importProxy()
+      const { apiSend } = await import("@/services/api-send")
+      const request = () => (transport === "bgRequest"
+        ? bgRequest({ path: "/api/v1/notes/private-note", method: "GET", preferDirect: true })
+        : apiSend({ path: "/api/v1/notes/private-note", method: "GET" }).then(response => response.data))
+        .then(value => ({ value }), error => ({ error }))
+      const first = request()
+      const second = request()
+      let fresh: ReturnType<typeof request> | undefined
+      let joined: ReturnType<typeof request> | undefined
+      try {
+        await vi.waitFor(() => expect(signals).toHaveLength(1))
+        hide()
+        expect(signals[0]?.aborted).toBe(true)
+        show()
+        fresh = request()
+        await vi.waitFor(() => expect(signals).toHaveLength(2))
+        expect(signals[1]?.aborted).toBe(false)
+        releaseOld()
+        expect(await first).toMatchObject({ error: { name: "AbortError" } })
+        expect(await second).toMatchObject({ error: { name: "AbortError" } })
+        joined = request()
+        await new Promise(resolve => setTimeout(resolve, 0))
+        expect(signals).toHaveLength(2)
+        releaseNew()
+        expect(await fresh).toEqual({ value: { current: true } })
+        expect(await joined).toEqual({ value: { current: true } })
+      } finally {
+        releaseOld()
+        releaseNew()
+        await Promise.all([first, second, fresh, joined])
+      }
+    })
+
+    it.each(["request", "requestWithCurrentConfig", "fetchWithAuth"] as const)(
+      "captures configured-client %s before its real config await", async method => {
+        let release!: () => void
+        const held = new Promise<void>(resolve => { release = resolve })
+        let entered = false
+        mocks.storageGet.mockImplementation(async (key: string) => {
+          const value = mocks.store[key] ?? null
+          if (key === "tldwConfig") { entered = true; await held }
+          return value
+        })
+        const fetchSpy = vi.fn(async () => Response.json({ private: "retired client" }))
+        vi.stubGlobal("fetch", fetchSpy)
+        const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
+        const client = new TldwApiClient()
+        const pending = (method === "fetchWithAuth"
+          ? client.fetchWithAuth("/api/v1/notes/private-note", { method: "GET" })
+          : client[method]({ path: "/api/v1/notes/private-note", method: "GET", preferDirect: true }))
+          .then(value => ({ value }), error => ({ error }))
+        try {
+          await vi.waitFor(() => expect(entered).toBe(true))
+          hide()
+          show()
+          release()
+          expect(await pending).toMatchObject({ error: { name: "AbortError" } })
+          expect(fetchSpy).not.toHaveBeenCalled()
+        } finally {
+          release()
+          await pending
+        }
+      })
+
+    it.each(["apiSend", "requestWithCurrentConfig"] as const)(
+      "retires the real %s direct response body", async transport => {
+        let release!: () => void
+        const held = new Promise<void>(resolve => { release = resolve })
+        let signal: AbortSignal | null | undefined
+        let entered = false
+        vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+          signal = init?.signal
+          const response = Response.json({ private: "retired direct body" })
+          vi.spyOn(response, "json").mockImplementation(async () => {
+            entered = true
+            await held
+            return { private: "retired direct body" }
+          })
+          return response
+        }))
+        const { apiSend } = await import("@/services/api-send")
+        const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
+        const init = { path: "/api/v1/notes/private-note" as const, method: "GET" as const }
+        const pending = (transport === "apiSend" ? apiSend(init) : new TldwApiClient().requestWithCurrentConfig(init))
+          .then(value => ({ value }), error => ({ error }))
+        try {
+          await vi.waitFor(() => expect(entered).toBe(true))
+          hide()
+          expect(signal?.aborted).toBe(true)
+          release()
+          expect(await pending).toMatchObject({ error: { name: "AbortError" } })
+        } finally {
+          release()
+          await pending
+        }
+      })
+
+    it("keeps an HTTP extension content-script GET outside document retirement", async () => {
+      const { browser } = await import("wxt/browser")
+      const prior = Object.getOwnPropertyDescriptor(browser.runtime, "id")
+      Object.defineProperty(browser.runtime, "id", { value: "x02-real-extension", configurable: true })
+      let release!: () => void
+      const held = new Promise<void>(resolve => { release = resolve })
+      let signal: AbortSignal | null | undefined
+      vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        signal = init?.signal
+        await held
+        return Response.json({ current: true })
+      }))
+      const { TldwApiClient } = await import("@/services/tldw/TldwApiClient")
+      const pending = new TldwApiClient().request({ path: "/api/v1/notes/private-note", method: "GET", preferDirect: true })
+        .then(value => ({ value }), error => ({ error }))
+      try {
+        expect(window.location.protocol).toMatch(/^https?:$/)
+        await vi.waitFor(() => expect(signal).toBeDefined())
+        hide()
+        expect(signal?.aborted).toBe(false)
+        release()
+        expect(await pending).toEqual({ value: { current: true } })
+      } finally {
+        release()
+        await pending
+        if (prior) Object.defineProperty(browser.runtime, "id", prior)
+        else Reflect.deleteProperty(browser.runtime, "id")
+      }
+    })
+
+    it("refuses new GETs while retired before pageshow without dispatch", async () => {
+      const fetchSpy = vi.fn(async () => Response.json({ current: true }))
+      vi.stubGlobal("fetch", fetchSpy)
+      const { bgRequest } = await importProxy()
+      const request = () => bgRequest({ path: "/api/v1/notes/private-note", method: "GET", preferDirect: true })
+      await request()
+      hide()
+      await expect(request()).rejects.toMatchObject({ name: "AbortError" })
+      expect(fetchSpy).toHaveBeenCalledTimes(1)
+      show()
+      await expect(request()).resolves.toEqual({ current: true })
+      expect(fetchSpy).toHaveBeenCalledTimes(2)
+    })
+
+    it.each([429, 500])("does not publish a retired %s failure or cooldown after restore", async status => {
+      let release!: () => void
+      const held = new Promise<void>(resolve => { release = resolve })
+      let entered = false
+      const events: Event[] = []
+      const listener = (event: Event) => { events.push(event) }
+      window.addEventListener("tldw:backend-unreachable", listener)
+      const fetchSpy = vi.fn(async () => {
+        if (!entered) {
+          entered = true
+          await held
+          return Response.json({ detail: "Retired response" }, { status, headers: { "retry-after": "60" } })
+        }
+        return Response.json({ current: true })
+      })
+      vi.stubGlobal("fetch", fetchSpy)
+      const { bgRequest } = await importProxy()
+      const request = () => bgRequest({ path: "/api/v1/notes/private-note", method: "GET", preferDirect: true })
+      const pending = request().then(value => ({ value }), error => ({ error }))
+      try {
+        await vi.waitFor(() => expect(entered).toBe(true))
+        hide()
+        show()
+        release()
+        expect(await pending).toMatchObject({ error: { name: "AbortError" } })
+        expect(events).toEqual([])
+        await expect(request()).resolves.toEqual({ current: true })
+        expect(fetchSpy).toHaveBeenCalledTimes(2)
+      } finally {
+        release()
+        await pending
+        window.removeEventListener("tldw:backend-unreachable", listener)
+      }
+    })
+
+    it.each([false, true])("fences a warm cached429 settlement at pagehide (returnResponse=%s)", async returnResponse => {
+      const fetchSpy = vi.fn(async () => Response.json({ detail: "Rate limited" }, {
+        status: 429, headers: { "retry-after": "60" }
+      }))
+      vi.stubGlobal("fetch", fetchSpy)
+      const { bgRequest } = await importProxy()
+      const request = () => bgRequest({ path: "/api/v1/notes/private-note", method: "GET", preferDirect: true, returnResponse })
+        .then(value => ({ value }), error => ({ error }))
+      const warm = await request()
+      expect(warm).toMatchObject(returnResponse ? { value: { status: 429 } } : { error: { status: 429 } })
+      const now = Date.now()
+      const retirement = new PageTransitionEvent("pagehide", { persisted: true })
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now)
+      try {
+        const cached = await request()
+        const cachedClockReads = clock.mock.calls.length
+        expect(cached).toEqual(warm)
+        expect(cachedClockReads).toBeGreaterThan(0)
+        expect(fetchSpy).toHaveBeenCalledTimes(1)
+        let reads = 0
+        clock.mockImplementation(() => {
+          // Queue retirement at the last clock read of the calibrated warm hit.
+          if (++reads === cachedClockReads) queueMicrotask(() => window.dispatchEvent(retirement))
+          return now
+        })
+        const outcome = await request()
+        const settlementReads = reads
+        expect(outcome).toMatchObject({ error: { name: "AbortError" } })
+        expect(settlementReads).toBe(cachedClockReads)
+        expect(fetchSpy).toHaveBeenCalledTimes(1)
+      } finally {
+        clock.mockRestore()
+        show()
+      }
+    })
+
+    it("preserves a spent refresh rotation while retiring its GET without replay", async () => {
+      const original = structuredClone(mocks.store.tldwConfig) as { accessToken: string; refreshToken: string }
+      let release!: () => void
+      const held = new Promise<void>(resolve => { release = resolve })
+      let refreshSignal: AbortSignal | null | undefined
+      let refreshEntered = false
+      let reads = 0
+      vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        if (String(input).endsWith("/auth/refresh")) {
+          refreshSignal = init?.signal
+          refreshEntered = true
+          await held
+          return Response.json({ access_token: jwtForUser(42) + "-rotated", refresh_token: "document-rotated-refresh" })
+        }
+        reads += 1
+        return new Response("Unauthorized", { status: 401 })
+      }))
+      const { bgRequest } = await importProxy()
+      const pending = bgRequest({ path: "/api/v1/notes/private-note", method: "GET", preferDirect: true })
+        .then(value => ({ value }), error => ({ error }))
+      try {
+        await vi.waitFor(() => expect(refreshEntered).toBe(true))
+        hide()
+        expect(refreshSignal?.aborted).toBe(false)
+        release()
+        expect(await pending).toMatchObject({ error: { name: "AbortError" } })
+        await vi.waitFor(() => expect(mocks.store.tldwRefreshRotation).toMatchObject({
+          sourceAccessToken: original.accessToken, sourceRefreshToken: original.refreshToken,
+          accessToken: jwtForUser(42) + "-rotated", refreshToken: "document-rotated-refresh"
+        }))
+        expect(reads).toBe(1)
+        expect(mocks.store.tldwConfig).toEqual(original)
+      } finally {
+        release()
+        await pending
+        if (refreshEntered) await vi.waitFor(() => expect(mocks.store.tldwRefreshRotation).toBeDefined())
+      }
+    })
+
+    it("does not retire a GET when its tab is merely hidden or receives an initial pageshow", async () => {
+      let release!: () => void
+      const held = new Promise<void>(resolve => { release = resolve })
+      let signal: AbortSignal | null | undefined
+      vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        signal = init?.signal
+        await held
+        return Response.json({ current: true })
+      }))
+      const { bgRequest } = await importProxy()
+      const pending = bgRequest({ path: "/api/v1/notes/private-note", method: "GET", preferDirect: true })
+      const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden")
+      try {
+        await vi.waitFor(() => expect(signal).toBeDefined())
+        document.dispatchEvent(new Event("visibilitychange"))
+        show()
+        expect(signal?.aborted).toBe(false)
+        release()
+        await expect(pending).resolves.toEqual({ current: true })
+      } finally {
+        release()
+        try { await pending } finally { visibility.mockRestore() }
+      }
+    })
+  })
+
   it.each([false, true])("invalidates a revoked rotated session without replaying its stale raw JWT (scoped=%s)", async (scoped) => {
     const config = {
       serverUrl: "https://api.example.com", authMode: "multi-user" as const,
