@@ -119,8 +119,9 @@ def test_media_ingest_stream_keeps_postgres_actor_in_producer(owned_jobs, monkey
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("termination", ["stop", "cancel"])
+@pytest.mark.parametrize("outbox", [False, True], ids=["without-outbox", "with-outbox"])
 async def test_trusted_media_worker_completes_other_owners_and_restores_ambient_scope(
-    owned_jobs, monkeypatch, termination
+    owned_jobs, monkeypatch, termination, outbox
 ):
     """The real SDK must acquire under service authority, then process as each owner."""
     import asyncio
@@ -134,6 +135,9 @@ async def test_trusted_media_worker_completes_other_owners_and_restores_ambient_
         sentinel = manager.create_job(
             domain="other", queue="default", job_type="untouched", owner_user_id="11", payload={}
         )
+    monkeypatch.setenv("JOBS_EVENTS_OUTBOX", "1" if outbox else "0")
+    if outbox:
+        monkeypatch.setenv("JOBS_DB_URL", manager.db_url)
     seen = []
 
     async def work(job, _manager, _progress):
