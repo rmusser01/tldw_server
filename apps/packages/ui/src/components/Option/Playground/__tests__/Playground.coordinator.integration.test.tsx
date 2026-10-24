@@ -1870,7 +1870,12 @@ describe("Playground coordinator integration", () => {
     try {
       await waitFor(() => expect(useStoreMessageOption.getState().serverChatLoadState).toBe("loaded"))
       await waitFor(async () => expect(await getOwnedAssistant()).toMatchObject({ id: "5", name: "Robot" }))
-      fireEvent.click(screen.getByRole("button", { name: action }))
+      if (action === "Temporary chat (on this device)") {
+        fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+        fireEvent.click(await screen.findByRole("menuitem", { name: action }))
+      } else {
+        fireEvent.click(screen.getByRole("button", { name: action }))
+      }
       await act(async () => { await new Promise(resolve => setTimeout(resolve, 180)) })
       expect(window.location.pathname + window.location.search).toBe("/chat")
       expect(useStoreMessageOption.getState().serverChatId).toBeNull()

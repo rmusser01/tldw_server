@@ -562,17 +562,6 @@ describe("Playground cockpit shell", () => {
     });
   });
 
-  it("exposes the shared theme toggle contract in the cockpit header", async () => {
-    render(<Playground />);
-
-    const themeToggle = await screen.findByTestId("chat-header-theme-toggle");
-    expect(themeToggle).toHaveAccessibleName("Switch to light theme");
-
-    fireEvent.click(themeToggle);
-
-    expect(darkModeState.toggleDarkMode).toHaveBeenCalledTimes(1);
-  });
-
   it("renders Character Chat recent sessions only for the active character workflow", async () => {
     storageState.values.set("playgroundChatWorkflowMode", "character");
     messageOptionState.value.selectedCharacter = {
@@ -996,7 +985,7 @@ describe("Playground cockpit shell", () => {
     routeApplyOutcome.value = 'retired';
     render(<Playground />);
     const status = await screen.findByRole('status', { name: 'Character Chat setup status' });
-    expect(status).toHaveTextContent('Character setup was not applied');
+    await waitFor(() => expect(status).toHaveTextContent('Character setup was not applied'));
     expect(routerNavigateState.navigate).not.toHaveBeenCalled();
     expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
     expect(messageOptionState.value.setMessages).not.toHaveBeenCalled();

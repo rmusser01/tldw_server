@@ -1914,6 +1914,13 @@ describe("Playground cockpit controls", () => {
     expect(screen.getByTestId("playground-form")).toBe(form);
     expect(messageOptionState.value.setMessages).toHaveBeenCalledTimes(replaced);
   });
+  it("keeps conversation view actions together while theme belongs to the header menu", async () => {
+    renderPlayground();
+    const view = await screen.findByRole("group", {name: "Conversation view"});
+    expect(within(view).getByRole("button", {name: "Enter focus chat"})).toBeInTheDocument();
+    expect(within(view).getByRole("button", {name: "Show keyboard shortcuts"})).toBeInTheDocument();
+    expect(screen.queryByTestId("chat-header-theme-toggle")).toBeNull();
+  });
 
 
 });

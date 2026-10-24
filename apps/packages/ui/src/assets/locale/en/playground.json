@@ -1,6 +1,7 @@
 {
   "header": {
-    "newTemporaryChat": "Temporary chat (on this device)"
+    "newTemporaryChat": "Temporary chat (on this device)",
+    "shareShort": "Share"
   },
   "mediaHandoff": {
     "conflictLabel": "Media handoff conflict",
@@ -1731,5 +1732,10 @@
     "sourcesCount": "{{count}} sources",
     "sourcesCount_one": "{{count}} source",
     "sourcesCount_other": "{{count}} sources"
+  },
+  "regions": {
+    "viewToolbar": "Conversation view",
+    "noArtifactsYet": "No artifacts yet",
+    "artifactsShort": "Artifacts"
   }
 }

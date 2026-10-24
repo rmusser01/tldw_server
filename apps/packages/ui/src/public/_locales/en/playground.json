@@ -4700,5 +4700,17 @@
   },
   "cockpit_closeRuntimePanel": {
     "message": "Close Runtime panel"
+  },
+  "header_shareShort": {
+    "message": "Share"
+  },
+  "regions_viewToolbar": {
+    "message": "Conversation view"
+  },
+  "regions_noArtifactsYet": {
+    "message": "No artifacts yet"
+  },
+  "regions_artifactsShort": {
+    "message": "Artifacts"
   }
 }
