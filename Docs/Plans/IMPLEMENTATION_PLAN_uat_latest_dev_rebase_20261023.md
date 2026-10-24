@@ -1,6 +1,6 @@
 # UAT fixes on latest dev — 2026-10-23
 
-Task: TASK-13260.278.18.83.45. Human explicitly authorizes rebase, necessary repairs/setup/retries and sequential completion of all43 workflows. X01 and X02 selected acceptances are complete by recorded composition;35accepted,8open. X03 is next, after actual incoming dev review/integration and affected qualification. Prior frozen qualification alone does not qualify this new candidate.
+Task: TASK-13260.278.18.83.45. Human explicitly authorizes rebase, necessary repairs/setup/retries and sequential completion of all43 workflows. X01 and X02 selected acceptances are complete by recorded composition;35accepted,8open. X03 Stage1 is active: devc90 rebase and affected component qualification are complete; the current frontend build and native audit remain pending. Prior frozen qualification alone does not qualify this new candidate.
 
 ## Constraints and rulings
 
@@ -98,3 +98,13 @@ User explicitly identified the complete redesign PRs3309/3310/3311. Fetched dev1
 ## 2026-10-24 X02 closeout and next dev integration
 
 X02 selected functional and human UX acceptance is complete by the [retained master closure](IMPLEMENTATION_PLAN_uat_all_fixes_20261006.md#x02-account-and-browser-isolation-selected-closure):35/43 accepted, eight open. Its own completed plan and released payloads/operators are removed; detailed failed outcomes remain in the official task. The earlier active-plan and pending-X02 notes are historical. X02 qualifies e388823/dev17141/frontend9U by explicit composition. New handoff devc90 contains merged PR3310 head0ae8; open PR3311 advanced to fad63/basec90. Neither is covered by the earlier reference-only c0cd/8d369 reviews or current candidate. Actual source review, preserved-fix rebase and genuinely affected checks precede X03; Stage3 remains In Progress. Original source/runtime/session and all retained limits remain protected.
+
+
+## 2026-10-24 rails integration entry
+
+X02 closeout is committed at6e8f769b673c8f928b3ef292446c24fcbfe740e4. The new [X03 plan](IMPLEMENTATION_PLAN_uat_x03_accessibility_responsive_20261024.md) starts with exact incoming review/rebase/affected qualification. Current devc90 and reference3311fad objects are available; no rebase yet. New rails increment and full current header reference source assessments are clear within their stated scopes. Preserve all21 existing local commits and original runtime; use a separate exact backup plus functional notes stash. No publication or unchanged-suite replay.
+
+
+## 2026-10-24 merged rails qualification
+
+X03 merged-rails integration is locally qualified through component/static scope: conflict-free rebase onto dev c90e57e3824a77102939e5b4017c5c0973a00c64 at HEAD775fe34a59222e25fb69e0a6c8412303544ca10c; all21 range-diff entries identical. Backup codex/uat-before-rails-20261024 retains6e8f769. Exact notes stash244e9f82a99678b3d01cbb081d18deeaf090b58a (10414bytes/SHA256004ffb1b7364885f4d6b78097a434e9d1b62afd273f488eb2d69404cc10814ee) is retained and restored byte-identically; untracked plan preserved. Committed tree delta is exactly27 incoming paths. All3817 installed API/data files at /private/tmp/tldw-x02-outbox-20261024/site match current source; no Python/dependency delta or API rebuild. Nine changed rails modules pass181 tests in UI9.971s and WebUI7.504s. Genuinely affected coordinator ownership/retirement plus locale mirror pass83 in UI29.704s and WebUI32.034s; total264/configuration, no failures or pending. TypeScript syntax22files clear; actual lint22files0errors/90warnings exactly baseline-current/no ignored/new findings. First comparator incorrectly distinguished3 embedded hook line numbers; only location text normalization corrected, with pure guards, no source edit. Inherited Pages-discovery diagnostic remains. Bandit N/A: no Python source change; no TypeScript security/full typecheck claim. Independent source/combined preservation assessments clear. Frontend9U is stale for the new rails; reviewed normal build/qualification and X03 live audit remain. Original owners unchanged. No publication, original service cycle, installs/downloads or models.
