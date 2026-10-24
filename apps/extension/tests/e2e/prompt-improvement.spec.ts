@@ -1080,7 +1080,10 @@ test.describe("Packaged extension prompt improvement parity", () => {
       const input = await ensureChatInput(page)
       await input.fill(originalDraft)
 
-      const sendCluster = page.getByTestId("composer-inline-send-control")
+      const tools = page.getByTestId("composer-options-toggle")
+      await expect(tools).toBeEnabled()
+      if (await tools.getAttribute("aria-expanded") !== "true") await tools.click()
+      const sendCluster = page.getByTestId("composer-toolbar")
       const compactTrigger = sendCluster.getByRole("button", {
         name: "Improve prompt"
       })

@@ -821,20 +821,11 @@ const trackRealApiHits = (page: Page) => {
 };
 
 const ensureComposerOptionsVisible = async (page: Page) => {
-  const mode = page.locator('[data-ui-mode]').first();
-  await expect(mode).toHaveAttribute('data-ui-mode', /casual|pro/);
-  const casual = page.getByTestId('composer-casual-advanced-chip');
-  if ((await mode.getAttribute('data-ui-mode')) === 'casual') {
-    await expect(casual).toBeEnabled();
-    if ((await casual.getAttribute('aria-expanded')) !== 'true') await casual.click();
-    await expect(casual).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.getByTestId('composer-casual-advanced-controls-row')).toBeVisible();
-    return;
-  }
-  const toggle = page.getByTestId('composer-options-toggle');
-  await expect(toggle).toBeVisible();
-  const label = await toggle.getAttribute('aria-label');
-  if (/show composer options/i.test(label || '')) await toggle.click();
+  const tools = page.getByTestId('composer-options-toggle');
+  await expect(tools).toBeVisible();
+  await expect(tools).toBeEnabled();
+  if (await tools.getAttribute('aria-expanded') !== 'true') await tools.click();
+  await expect(page.getByTestId('composer-options-panel')).toBeVisible();
 };
 
 const closeSearchContextIfOpen = async (page: Page) => {
@@ -899,51 +890,22 @@ const assertCoreComposerControls = async (
   page: Page,
   options: { mobile?: boolean; composerOnly?: boolean } = {}
 ) => {
-  const mode = page.locator('[data-ui-mode]').first();
-  await expect(mode).toHaveAttribute('data-ui-mode', /casual|pro/);
-  const casual = page.getByTestId('composer-casual-advanced-chip');
-  const isCasual = (await mode.getAttribute('data-ui-mode')) === 'casual';
-  await expect(isCasual ? casual : page.getByTestId('composer-options-toggle')).toBeVisible();
+  await expect(page.getByTestId('composer-options-toggle')).toBeVisible();
   await expect(page.getByTestId('chat-input')).toBeVisible();
   await expect(page.getByRole('button', { name: /send message/i })).toBeVisible();
   if (options.composerOnly) return;
   await ensureComposerOptionsVisible(page);
   await expect(page.getByTestId('model-selector').first()).toBeVisible();
   await expect(page.getByTestId('attachment-button')).toBeVisible();
-  if (isCasual) {
-    const customize = page.getByTestId('composer-casual-advanced-controls-row');
-    const research = customize.getByRole('group', { name: 'Research & context' });
-    const character = customize.getByRole('group', { name: 'Character & your role' });
-    const response = customize.getByRole('group', { name: 'Response settings' });
-    await expect(research).toBeVisible();
-    await expect(character).toBeVisible();
-    await expect(response).toBeVisible();
-    await expect(character.getByTestId('character-select')).toBeVisible();
-    await expect(response.getByTestId('chat-prompt-select')).toBeVisible();
-    await expect(research.getByTestId('mcp-tools-toggle')).toBeVisible();
-    const advancedSummary = customize.locator('summary').filter({ hasText: 'Advanced customization' });
-    const advancedDetails = advancedSummary.locator('..');
-    if (!(await advancedDetails.evaluate(node => (node as HTMLDetailsElement).open)))
-      await advancedSummary.click();
-    await expect(advancedDetails).toHaveAttribute('open', '');
-    const advanced = customize.getByRole('group', { name: 'Advanced composer controls', exact: true });
-    await expect(advanced.getByTestId('tools-button')).toBeVisible();
-    if (options.mobile)
-      await expect(
-        advanced.getByRole('button', { name: /Health & diagnostics|Server:/i })
-      ).toBeVisible();
-    return;
-  }
-  await expect(page.getByTestId('chat-prompt-select')).toBeVisible();
-  await expect(page.getByTestId('character-select')).toBeVisible();
-  await expect(page.getByTestId('tools-button')).toBeVisible();
-  if (options.mobile) {
-    await expect(page.getByRole('button', { name: /More options/i })).toBeVisible();
-    await expect(page.getByRole('button', { name: /Health & diagnostics|Server:/i })).toBeVisible();
-    return;
-  }
-  await expect(page.getByTestId('mcp-tools-toggle')).toBeVisible();
-  await expect(page.getByRole('button', { name: /Advanced controls/i })).toBeVisible();
+  const tools = page.getByTestId('composer-options-panel');
+  const context = tools.getByRole('region', { name: 'Context setup', exact: true });
+  const prompts = tools.getByRole('region', { name: 'Prompts & people', exact: true });
+  const response = tools.getByRole('region', { name: 'Response & tools', exact: true });
+  for (const group of [context, prompts, response]) await expect(group).toBeVisible();
+  await expect(prompts.getByTestId('character-select')).toBeVisible();
+  await expect(prompts.getByTestId('chat-prompt-select')).toBeVisible();
+  await expect(context.getByTestId('mcp-tools-toggle')).toBeVisible();
+  await expect(response.getByTestId('tools-button')).toBeVisible();
 };
 
 const fillEditableComposer = async (page: Page, value: string) => {
@@ -2000,12 +1962,8 @@ test.describe('/chat cockpit real-server parity', () => {
       await page.keyboard.press('Escape');
     }
 
-    const advanced = page.getByTestId('composer-advanced-toggle');
-    await expect(advanced).toBeEnabled();
-    if (await advanced.getAttribute('aria-expanded') !== 'true') await advanced.click();
-    await expect(page.getByTestId('composer-options-panel')).toBeVisible();
-    await expect(page.getByTestId('composer-advanced-toggle')).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.locator('#composer-pro-advanced-controls-row')).toBeVisible();
+    await ensureComposerOptionsVisible(page);
+    await expect(page.getByRole('region', { name: 'Response & tools', exact: true })).toBeVisible();
 
     const modelSelector = page.getByTestId('model-selector').first();
     await modelSelector.focus();
@@ -3681,7 +3639,7 @@ for (const format of ['v2', 'png'] as const) test('imports a real '+format+' car
     expect(canonical.body.messages[0].content).toBe(imported.firstMessage);
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.getByRole('log', { name: /chat messages/i })).toContainText('Imported card second turn '+format);
-    const customize = page.getByRole('button', { name: 'Customize chat', exact: true });
+    const customize = page.getByTestId('composer-options-toggle');
     if (await customize.isVisible() && await customize.getAttribute('aria-expanded') === 'false') await customize.click();
     await page.getByTestId('composer-role-play-setup').click();
     const scene = page.getByRole('dialog', { name: 'Role-play setup', exact: true });

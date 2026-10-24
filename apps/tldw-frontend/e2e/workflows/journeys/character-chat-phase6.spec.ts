@@ -129,7 +129,7 @@ test.describe("Character Chat Phase 6 signoff", () => {
       await expect(
         page.getByTestId("character-chat-readiness-panel"),
       ).toBeVisible({ timeout: 30_000 })
-      await expect(page.getByPlaceholder(/type a message/i)).toBeVisible({
+      await expect(page.getByTestId("chat-input")).toBeVisible({
         timeout: 30_000,
       })
       await expectNoHorizontalOverflow(page, `${viewport.label} character chat`)

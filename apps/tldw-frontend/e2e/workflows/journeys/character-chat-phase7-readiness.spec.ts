@@ -560,7 +560,7 @@ function roleplayCompletionCallPredicate(url: string, method = "POST"): boolean 
 }
 
 async function clickPrimaryComposerAction(page: Page, name: RegExp): Promise<void> {
-  const input = page.getByPlaceholder(/type a message/i).first()
+  const input = page.getByTestId("chat-input").first()
   const composerForm = page.locator("form").filter({ has: input }).last()
   await composerForm.getByRole("button", { name }).first().click()
 }
@@ -616,7 +616,7 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
     const capture = captureAllApiCalls(page)
     try {
       await openCharacterChatWithCharacter(page, character.name, failureModel)
-      const input = page.getByPlaceholder(/type a message/i).first()
+      const input = page.getByTestId("chat-input").first()
       const composer = page.locator("form").filter({ has: input }).last()
       const question = "Trigger the real provider configuration failure."
       await input.fill(question)
@@ -719,7 +719,7 @@ test.describe("Character Chat Phase 7 real-backend readiness", () => {
       const admitted = page.waitForResponse(response => response.request().method() === "POST" &&
         /\/api\/v1\/chats\/[^/]+\/roleplay\/messages$/.test(new URL(response.url()).pathname))
       const completed = page.waitForResponse(response => roleplayCompletionCallPredicate(response.url(), response.request().method()))
-      await page.getByPlaceholder(/type a message/i).first().fill(question)
+      await page.getByTestId("chat-input").first().fill(question)
       await clickPrimaryComposerAction(page, /send/i)
       const completion = await completed
       expect(completion.status()).toBe(200)
