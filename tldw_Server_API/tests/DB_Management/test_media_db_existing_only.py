@@ -273,28 +273,54 @@ def test_existing_only_malformed_database_fails_eagerly_without_schema_repairs(t
     assert pools[-1].get_stats()["closed"]
 
 
-@pytest.mark.parametrize("filename", ["spaces in name.db", "query?and#fragment.db"])
-def test_existing_only_sqlite_uri_escapes_filename(tmp_path, filename):
+@pytest.mark.parametrize(("filename", "escaped_filename"), [
+    ("spaces in name.db", "spaces%20in%20name.db"),
+    ("query%3Fand#fragment.db", "query%253Fand%23fragment.db"),
+])
+def test_existing_only_sqlite_uri_escapes_filename(
+    tmp_path, monkeypatch, filename, escaped_filename
+):
     path = tmp_path / filename
+    original_touch = Path.touch
+
+    def touch_portable_filename(candidate, *args, **kwargs):
+        if candidate == path and any(char in candidate.name for char in '<>:"/\\|?*'):
+            raise OSError("Windows-invalid filename")
+        return original_touch(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "touch", touch_portable_filename)
     path.touch()
     with managed_media_database("42", db_path=str(path), existing_only=True) as db:
         assert db.execute_query("SELECT 1 AS value").fetchone()["value"] == 1
         assert db.backend.config.sqlite_path == path.as_uri() + "?mode=rw"
+        assert db.backend.config.sqlite_path.endswith("/" + escaped_filename + "?mode=rw")
 
 
 @pytest.mark.parametrize("method", ["execute_query", "execute_many"])
-def test_existing_only_queries_cannot_recreate_a_deleted_database(tmp_path, method):
+def test_existing_only_queries_cannot_recreate_a_deleted_database(tmp_path, monkeypatch, method):
     path = tmp_path / "media.db"
     path.touch()
     with managed_media_database("42", db_path=str(path), existing_only=True) as db:
+        pool = db.backend.get_pool()
+        connection = pool.get_connection()
+        original_unlink = Path.unlink
+
+        def unlink_closed_database(candidate, *args, **kwargs):
+            if candidate == path:
+                with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+                    connection.execute("SELECT 1")
+            return original_unlink(candidate, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", unlink_closed_database)
+        # Windows requires releasing the cached handle before deleting the file.
+        pool.clear_thread_local_connection()
+        assert not pool.get_stats()["closed"]
         path.unlink()
-        try:
+        with pytest.raises((sqlite3.Error, media_db_api.DatabaseError)):
             if method == "execute_query":
                 db.execute_query("SELECT 1")
             else:
                 db.execute_many("CREATE TABLE forbidden (value TEXT)", [()])
-        except (sqlite3.Error, media_db_api.DatabaseError):
-            pass
         assert not path.exists()
 
 
