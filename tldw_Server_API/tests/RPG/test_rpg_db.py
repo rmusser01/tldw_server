@@ -426,3 +426,182 @@ def test_commit_events_rejects_stale_expected_sequence():
 
     with pytest.raises(RPGConflictError, match="stale_event_sequence"):
         repo.commit_events_and_snapshot(42, session.id, 7, 0, payload, {"notes": []}, {}, "stale-key", "hash-a", "fate", "1.0.0", None)
+
+
+def test_list_campaigns_filters_status_and_paginates():
+    repo = _repo()
+    first = _campaign(repo)
+    second = repo.create_campaign(
+        owner_user_id=42, title="Second", description=None,
+        default_adapter_key="fate", default_adapter_version="1.0.0",
+        settings={}, linked_rules_pack_refs=[],
+        idempotency_key="campaign-2", request_payload_hash="hash-2", source_type="user",
+    )
+    listed, total = repo.list_campaigns(owner_user_id=42)
+    assert total == 2  # nosec B101
+    assert [c.id for c in listed] == [second.id, first.id]  # nosec B101  (updated_at DESC, id DESC)
+    empty, empty_total = repo.list_campaigns(owner_user_id=42, status="archived")
+    assert empty == [] and empty_total == 0  # nosec B101
+    page, page_total = repo.list_campaigns(owner_user_id=42, limit=1, offset=1)
+    assert page_total == 2 and [c.id for c in page] == [first.id]  # nosec B101
+    foreign, foreign_total = repo.list_campaigns(owner_user_id=7)
+    assert foreign == [] and foreign_total == 0  # nosec B101
+    with repo.db.transaction() as conn:
+        conn.execute("UPDATE rpg_campaigns SET status = 'archived' WHERE id = ?", (second.id,))
+    archived, archived_total = repo.list_campaigns(owner_user_id=42, status="archived")
+    assert archived_total == 1 and archived[0].id == second.id  # nosec B101
+
+
+def test_list_sessions_filters_and_counts():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    listed, total = repo.list_sessions(owner_user_id=42)
+    assert total == 1 and listed[0].id == session.id  # nosec B101
+    assert repo.list_sessions(owner_user_id=42, campaign_id=campaign.id)[1] == 1  # nosec B101
+    assert repo.list_sessions(owner_user_id=42, campaign_id=999)[1] == 0  # nosec B101
+    assert repo.count_campaign_sessions(owner_user_id=42, campaign_id=campaign.id) == 1  # nosec B101
+    assert repo.count_pending_proposals(owner_user_id=42, session_id=session.id) == 0  # nosec B101
+
+
+def test_list_events_cursors_and_filters():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    for seq, (event_type, source) in enumerate(
+        [("note.added", "user"), ("note.added", "mcp"), ("scene.updated", "user")], start=1
+    ):
+        repo.commit_events_and_snapshot(
+            owner_user_id=42, session_id=session.id,
+            expected_last_event_sequence=seq - 1, base_snapshot_version=seq - 1,
+            events=[{"event_type": event_type, "event_payload": {"note_id": f"n{seq}", "scene_id": f"s{seq}"}, "source_type": source}],
+            snapshot={}, diagnostics={}, idempotency_key=f"evt-{seq}", request_payload_hash=f"h{seq}",
+            adapter_key=session.adapter_key, adapter_version=session.adapter_version, proposal_id=None,
+        )
+    events = repo.list_events(owner_user_id=42, session_id=session.id)
+    assert [e.sequence_number for e in events] == [1, 2, 3]  # nosec B101
+    assert [e.sequence_number for e in repo.list_events(owner_user_id=42, session_id=session.id, after_sequence=1)] == [2, 3]  # nosec B101
+    assert len(repo.list_events(owner_user_id=42, session_id=session.id, source_type="mcp")) == 1  # nosec B101
+    assert len(repo.list_events(owner_user_id=42, session_id=session.id, event_type="scene.updated")) == 1  # nosec B101
+
+
+def test_list_proposals_and_get_snapshot_by_version():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    assert repo.list_proposals(owner_user_id=42, session_id=session.id) == ([], 0)  # nosec B101
+    record = repo.get_snapshot_by_version(owner_user_id=42, session_id=session.id, snapshot_version=0)
+    assert record.snapshot_version == 0  # nosec B101
+    with pytest.raises(RPGNotFoundError):
+        repo.get_snapshot_by_version(owner_user_id=42, session_id=session.id, snapshot_version=99)
+
+
+def test_update_campaign_metadata_with_cas_and_replay():
+    repo = _repo()
+    campaign = _campaign(repo)
+    result = repo.update_campaign(
+        owner_user_id=42, campaign_id=campaign.id,
+        title="Renamed", description="Now with words", status="archived",
+        expected_version=campaign.version, idempotency_key="upd-1", request_payload_hash="h-upd-1",
+        source_type="user",
+    )
+    assert result.replayed is False  # nosec B101
+    assert result.campaign.title == "Renamed" and result.campaign.status == "archived"  # nosec B101
+    assert result.campaign.version == campaign.version + 1  # nosec B101
+    replay = repo.update_campaign(
+        owner_user_id=42, campaign_id=campaign.id,
+        title="Renamed", description="Now with words", status="archived",
+        expected_version=campaign.version, idempotency_key="upd-1", request_payload_hash="h-upd-1",
+        source_type="user",
+    )
+    assert replay.replayed is True and replay.campaign.id == campaign.id  # nosec B101
+    with pytest.raises(RPGConflictError):
+        repo.update_campaign(
+            owner_user_id=42, campaign_id=campaign.id, title="X",
+            expected_version=campaign.version, idempotency_key="upd-2",
+            request_payload_hash="h-upd-2", source_type="user",
+        )
+    with pytest.raises(RPGConflictError):  # same key, different payload
+        repo.update_campaign(
+            owner_user_id=42, campaign_id=campaign.id, title="Y",
+            expected_version=campaign.version, idempotency_key="upd-1",
+            request_payload_hash="h-DIFFERENT", source_type="user",
+        )
+    with pytest.raises(RPGNotFoundError):
+        repo.update_campaign(
+            owner_user_id=7, campaign_id=campaign.id, title="Z",
+            expected_version=1, idempotency_key="upd-3", request_payload_hash="h-3", source_type="user",
+        )
+
+
+def test_update_session_metadata_partial_and_cas():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    result = repo.update_session(
+        owner_user_id=42, session_id=session.id, title="Act II", status="archived",
+        expected_version=session.version, idempotency_key="s-upd-1",
+        request_payload_hash="h-s-1", source_type="user",
+    )
+    assert result.session.title == "Act II" and result.session.status == "archived"  # nosec B101
+    untouched = repo.update_session(
+        owner_user_id=42, session_id=session.id,
+        expected_version=result.session.version, idempotency_key="s-upd-2",
+        request_payload_hash="h-s-2", source_type="user",
+    )
+    assert untouched.session.title == "Act II"  # nosec B101  (COALESCE keeps omitted fields)
+
+
+def test_update_session_authority_settings_cas_and_replay():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    settings = {"import_auto_commit": True, "mcp_auto_commit": False, "model_auto_commit": False, "model_auto_commit_event_types": []}
+    result = repo.update_session_authority_settings(
+        owner_user_id=42, session_id=session.id, authority_settings=settings,
+        expected_version=session.version, idempotency_key="auth-1",
+        request_payload_hash="h-auth-1", source_type="user",
+    )
+    assert result.session.authority_settings["import_auto_commit"] is True  # nosec B101
+    assert result.session.version == session.version + 1  # nosec B101
+    replay = repo.update_session_authority_settings(
+        owner_user_id=42, session_id=session.id, authority_settings=settings,
+        expected_version=session.version, idempotency_key="auth-1",
+        request_payload_hash="h-auth-1", source_type="user",
+    )
+    assert replay.replayed is True  # nosec B101
+    with pytest.raises(RPGConflictError):
+        repo.update_session_authority_settings(
+            owner_user_id=42, session_id=session.id, authority_settings=settings,
+            expected_version=session.version, idempotency_key="auth-2",
+            request_payload_hash="h-auth-2", source_type="user",
+        )
+
+
+def test_rebuild_session_snapshot_replays_full_log():
+    repo = _repo()
+    campaign = _campaign(repo)
+    session = _session(repo, campaign.id)
+    for seq in (1, 2):
+        repo.commit_events_and_snapshot(
+            owner_user_id=42, session_id=session.id,
+            expected_last_event_sequence=seq - 1, base_snapshot_version=seq - 1,
+            events=[{"event_type": "note.added", "event_payload": {"note_id": f"n{seq}"}, "source_type": "user"}],
+            snapshot={}, diagnostics={}, idempotency_key=f"rb-evt-{seq}", request_payload_hash=f"rh{seq}",
+            adapter_key=session.adapter_key, adapter_version=session.adapter_version, proposal_id=None,
+        )
+    result = repo.rebuild_session_snapshot(
+        owner_user_id=42, session_id=session.id,
+        idempotency_key="rebuild-1", request_payload_hash="h-rebuild-1", source_type="user",
+    )
+    assert result.replayed is False and result.event_count == 2  # nosec B101
+    assert result.snapshot.snapshot_version == 3  # nosec B101  (v0 seed + 2 commits -> rebuild writes v3)
+    assert result.snapshot.last_event_sequence == 2  # nosec B101
+    assert result.snapshot.diagnostics_json["rebuilt"] is True  # nosec B101
+    notes = result.snapshot.snapshot_json["notes"]
+    assert len(notes) == 2  # nosec B101  (full-log fold reproduces appended notes)
+    replay = repo.rebuild_session_snapshot(
+        owner_user_id=42, session_id=session.id,
+        idempotency_key="rebuild-1", request_payload_hash="h-rebuild-1", source_type="user",
+    )
+    assert replay.replayed is True and replay.snapshot.snapshot_version == 3  # nosec B101
