@@ -66,6 +66,23 @@ async def main():
                 await validate_postgres_profile_candidate_schema(conn)
             finally:
                 await conn.close()
+        elif SURFACE == 'provider-secrets':
+            from datetime import datetime, timezone
+            from tldw_Server_API.app.core.AuthNZ.repos.user_provider_secrets_repo import AuthnzUserProviderSecretsRepo
+            repo = AuthnzUserProviderSecretsRepo(await get_db_pool())
+            async with AsyncExitStack() as occupied:
+                for _ in range(4):
+                    await occupied.enter_async_context(repo.db_pool.pool.acquire())
+                async with asyncio.timeout(15):
+                    await repo.ensure_tables()
+                    assert await repo.list_secrets_for_user(USER_ID) == []
+            created = await repo.upsert_secret(user_id=USER_ID, provider='openai', encrypted_blob='synthetic-encrypted-fixture',
+                key_hint='fixture', metadata={'scope':'runtime'}, updated_at=datetime.now(timezone.utc), created_by=USER_ID, updated_by=USER_ID)
+            assert created['user_id'] == USER_ID and created['provider'] == 'openai'
+            assert len(await repo.list_secrets_for_user(USER_ID)) == 1
+            assert await repo.list_secrets_for_user(ADMIN_ID) == []
+            assert await repo.delete_secret(USER_ID, 'openai', revoked_by=USER_ID)
+            assert await repo.list_secrets_for_user(USER_ID) == []
         elif SURFACE in {'api-keys', 'api-key-write'}:
             from tldw_Server_API.app.core.AuthNZ.api_key_manager import APIKeyManager
             manager = APIKeyManager(await get_db_pool())
@@ -208,7 +225,7 @@ def _read_runtime(runtime_dir, env, ids, surface):
     return _run_runtime(runtime_dir, env, script)
 
 
-@pytest.mark.parametrize("surface", ["users", "rbac", "candidate", "api-keys"])
+@pytest.mark.parametrize("surface", ["users", "rbac", "candidate", "api-keys", "provider-secrets"])
 def test_migrated_authnz_serves_without_owner_authority(migrated_runtime, surface):
     """Pool/user and configured permission reads preserve the owner-migrated store."""
     owner, runtime_dir, env, ids = migrated_runtime
@@ -254,6 +271,19 @@ def test_migrated_authnz_serves_without_owner_authority(migrated_runtime, surfac
         ("api-keys", "ALTER TABLE public.api_keys ALTER COLUMN usage_count DROP DEFAULT"),
         ("api-keys", "ALTER TABLE public.api_key_audit_log ALTER COLUMN id DROP DEFAULT"),
         ("api-keys", "ALTER TABLE public.api_keys ALTER COLUMN llm_budget_day_usd TYPE INTEGER USING llm_budget_day_usd::integer"),
+        ("provider-secrets", 'DROP TABLE public.user_provider_secrets'),
+        ("provider-secrets", 'ALTER TABLE public.user_provider_secrets DROP COLUMN encrypted_blob'),
+        ("provider-secrets", 'ALTER TABLE public.user_provider_secrets ALTER COLUMN provider TYPE INTEGER USING 0'),
+        ("provider-secrets", 'ALTER TABLE public.user_provider_secrets DROP CONSTRAINT user_provider_secrets_pkey'),
+        ("provider-secrets", 'ALTER TABLE public.user_provider_secrets DROP CONSTRAINT user_provider_secrets_user_id_fkey'),
+        ("provider-secrets", 'ALTER TABLE public.user_provider_secrets DROP CONSTRAINT uq_user_provider_secrets'),
+        ("provider-secrets", 'ALTER TABLE public.user_provider_secrets DROP CONSTRAINT uq_user_provider_secrets; ALTER TABLE public.user_provider_secrets ADD CONSTRAINT uq_user_provider_secrets UNIQUE(user_id, provider) DEFERRABLE INITIALLY DEFERRED'),
+        ("provider-secrets", 'DROP INDEX public.idx_user_provider_secrets_user_id; CREATE INDEX idx_user_provider_secrets_user_id ON public.user_provider_secrets(provider)'),
+        ("provider-secrets", 'ALTER TABLE public.user_provider_secrets ALTER COLUMN encrypted_blob DROP NOT NULL'),
+        ("provider-secrets", 'ALTER TABLE public.user_provider_secrets ALTER COLUMN created_at DROP DEFAULT'),
+        ("provider-secrets", 'ALTER TABLE public.user_provider_secrets ALTER COLUMN id DROP DEFAULT'),
+        ("provider-secrets", "ALTER TABLE public.user_provider_secrets ADD CONSTRAINT x01_deferred_credentials UNIQUE(user_id, provider) DEFERRABLE INITIALLY DEFERRED"),
+        ("provider-secrets", "ALTER TABLE public.user_provider_secrets ADD CONSTRAINT x01_deferred_credentials UNIQUE(provider, user_id) DEFERRABLE INITIALLY DEFERRED"),
     ],
     ids=[
         "profile-default",
@@ -270,6 +300,18 @@ def test_migrated_authnz_serves_without_owner_authority(migrated_runtime, surfac
         "api-keys-table", "api-keys-column", "api-keys-type", "api-keys-primary", "api-keys-hash-unique",
         "api-keys-partial-id", "api-keys-parent", "api-keys-audit-link", "api-keys-index-columns",
         "api-keys-nullability", "api-keys-insert-default", "api-keys-generated-id", "api-keys-integer-usd",
+        "provider-secrets-table",
+        "provider-secrets-column",
+        "provider-secrets-type",
+        "provider-secrets-primary",
+        "provider-secrets-user-link",
+        "provider-secrets-unique",
+        "provider-secrets-deferred-unique",
+        "provider-secrets-index",
+        "provider-secrets-nullability",
+        "provider-secrets-default",
+        "provider-secrets-generated-id",
+        "provider-secrets-coexisting-deferred", "provider-secrets-reversed-deferred",
     ],
 )
 @pytest.mark.asyncio
@@ -284,6 +326,8 @@ async def test_nonowner_authnz_refuses_schema_drift_without_repair(migrated_runt
     if surface == "api-keys":
         assert result["initialized"] is False  # nosec B101 -- failed initialization cannot be cached.
         assert any(cause["type"] == "SchemaReadinessError" for cause in result["causes"])  # nosec B101 -- reject drift before DDL.
+    if surface == "provider-secrets":
+        assert result["error"] == "SchemaReadinessError" or any(cause["type"] == "SchemaReadinessError" for cause in result["causes"]), result  # nosec B101 -- refuse drift before DDL.
     assert _snapshot(owner) == before  # nosec B101 -- failed readiness leaves all state intact.
 
 

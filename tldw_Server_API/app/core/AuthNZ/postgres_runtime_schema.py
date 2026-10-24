@@ -131,6 +131,28 @@ _API_KEY_DEFAULTS = {
     "api_key_audit_log": {"created_at": ("CURRENT_TIMESTAMP", "now()")},
 }
 
+_PROVIDER_SECRET_COLUMNS = {
+    "user_provider_secrets": {
+        "id",
+        "user_id",
+        "provider",
+        "encrypted_blob",
+        "key_hint",
+        "metadata",
+        "created_by",
+        "updated_by",
+        "revoked_by",
+        "revoked_at",
+        "created_at",
+        "updated_at",
+        "last_used_at",
+    }
+}
+_PROVIDER_SECRET_INDEXES = {
+    "idx_user_provider_secrets_user_id": "user_provider_secrets",
+    "idx_user_provider_secrets_provider": "user_provider_secrets",
+}
+
 _CORE_COLUMNS = {
     "native_chat_quota_reservations": _NATIVE_QUOTA_COLUMNS,
     "users": _USERS_COLUMNS,
@@ -370,6 +392,7 @@ _PRIMARY_KEYS = {
     "user_permissions": ("user_id", "permission_id"),
 }
 _UNIQUE_KEYS = {
+    "user_provider_secrets": {("user_id", "provider")},
     "api_keys": {("key_hash",), ("key_id",)},
     "users": {("uuid",), ("username",), ("email",)},
     "org_invites": {("code",)},
@@ -380,6 +403,7 @@ _UNIQUE_KEYS = {
     "audio_studio_media_tickets": {("token_hash",)},
 }
 _FOREIGN_KEYS = {
+    "user_provider_secrets": {(("user_id",), "users", ("id",), "c")},
     "api_keys": {
         (("user_id",), "users", ("id",), "c"),
         (("parent_key_id",), "api_keys", ("id",), "a"),
@@ -424,6 +448,7 @@ _CHECKS = {
     ),
 }
 _INDEX_COLUMNS = {
+    "idx_user_provider_secrets_user_id": ("user_id",), "idx_user_provider_secrets_provider": ("provider",),
     "idx_api_keys_user_id": ("user_id",), "idx_api_keys_key_hash": ("key_hash",), "idx_api_keys_key_id": ("key_id",),
     "idx_api_keys_status": ("status",), "idx_api_keys_expires_at": ("expires_at",), "idx_api_keys_virtual": ("is_virtual",),
     "idx_api_keys_org": ("org_id",), "idx_api_keys_team": ("team_id",),
@@ -719,6 +744,62 @@ async def validate_postgres_api_keys_runtime(conn: Any) -> None:
             },
         ):
             raise SchemaReadinessError("PostgreSQL API key generated ID requires owner migration")
+
+
+async def validate_postgres_user_provider_secrets_runtime(conn: Any) -> None:
+    """Validate BYOK persistence without running owner DDL on a serving request."""
+    from tldw_Server_API.app.core.AuthNZ.profile_candidate_schema import _postgres_generated_id_matches
+
+    columns = await conn.fetch(_COLUMNS_SQL)
+    indexes = await conn.fetch(_INDEXES_SQL)
+    constraints = await conn.fetch(_CONSTRAINTS_SQL)
+    _validate_required_metadata(
+        columns,
+        indexes,
+        [row for row in constraints if not row["deferrable"]],
+        _PROVIDER_SECRET_COLUMNS,
+        _PROVIDER_SECRET_INDEXES,
+    )
+    if not any(
+        row["table_name"] == "user_provider_secrets"
+        and row["ready"]
+        and row["is_unique"]
+        and row["immediate"]
+        and row["predicate"] is None
+        and tuple(row["columns"]) == ("user_id", "provider")
+        for row in indexes
+    ):
+        raise SchemaReadinessError("PostgreSQL provider credential uniqueness requires owner migration")
+    if any(
+        row["table_name"] == "user_provider_secrets"
+        and row["ready"]
+        and row["is_unique"]
+        and not row["immediate"]
+        and row["predicate"] is None
+        and len(row["columns"]) == 2
+        and set(row["columns"]) == {"user_id", "provider"}
+        for row in indexes
+    ):
+        raise SchemaReadinessError("PostgreSQL provider credential conflict arbiter requires owner migration")
+    for row in columns:
+        if row["table_name"] != "user_provider_secrets":
+            continue
+        column = row["column_name"]
+        if column in {"id", "user_id", "provider", "encrypted_blob"} and not row["not_null"]:
+            raise SchemaReadinessError("PostgreSQL provider credential nullability requires owner migration")
+        if column in {"created_at", "updated_at"} and not _check_matches(
+            row["default_expression"], ("CURRENT_TIMESTAMP", "now()")
+        ):
+            raise SchemaReadinessError("PostgreSQL provider credential defaults require owner migration")
+        if column == "id" and not _postgres_generated_id_matches(
+            "user_provider_secrets",
+            {
+                "default": row["default_expression"],
+                "is_identity": row["is_identity"],
+                "identity_generation": row["identity_generation"],
+            },
+        ):
+            raise SchemaReadinessError("PostgreSQL provider credential generated ID requires owner migration")
 
 
 async def validate_postgres_startup_timestamps(conn: Any) -> None:
