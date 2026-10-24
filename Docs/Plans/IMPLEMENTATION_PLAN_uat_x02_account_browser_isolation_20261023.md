@@ -10,9 +10,9 @@
 
 ## Global constraints
 
-- Product source22141c4223 on reviewed dev22c9; current Jobs-scope package3817files, unchanged buildTHttd0p00MlSSxPE1Yyre. Refresh dev before later publication, not after every step.
+- Product source29a1b69eed on reviewed dev22c9; current worker-scope package3817files, unchanged buildTHttd0p00MlSSxPE1Yyre. Refresh dev before later publication, not after every step.
 - Preserve original API50010/49993, frontend50863/50855, Chrome54716/54710, five saved messages, exact draft/URL and full canonical objects. No original runtime cycle.
-- One temporary independent browser context is necessary for isolation; keep the existing context/tab and close only the temporary one after validation. Never treat two shared-storage tabs as independent identities.
+- Keep the original default Chrome context/tab untouched. X02 uses one owned temporary main context; create a second owned context only for the independent concurrent-account check, then close both owned contexts. Two tabs within the main context share storage and are not independent identities. The owned main context also bounds its disposable network pool.
 -600s per workflow/run/build,120s startup/child,180s inference,300s pytest case,15s operation/graceful cleanup; no force or assertion weakening. Reassess after three failures; latest human authorization covers necessary diagnostics/retries without another approval question.
 - No stored secrets in output, model/cache/proof recovery, raw operator SQL or homemade PostgreSQL setup. Actual official managed fixture provisioning only.
 - Keep failed outcomes failed. Dispose completed private payloads/operators promptly, retaining current artifacts and original restoration dependencies. Heartbeat remains paused.
@@ -44,7 +44,7 @@
 **Status:** In Progress
 
 - [ ] Review browser driver and finite authority/write admission before action.
-- [ ] Run sequential SQLite/PostgreSQL browser cells; use one temporary independent context and close it.
+- [ ] Run sequential SQLite/PostgreSQL browser cells in an owned main context; use a separate context for the concurrent-account check and close every owned context.
 - [ ] Capture one settled screenshot; record functional and human UX results separately.
 
 ## Stage4: Review, dispose and close
@@ -377,3 +377,159 @@ findings/errors in both files. Independent actual two-file/caller/full-test revi
 CLEAR; idle cancellation is distinguished from real ingestion content and native
 completed-result acceptance. Stage/normal hooks/commit, fresh installed package and
 actual background completion remain pending.
+
+
+Worker repair local29a1b69eed31619bf2e236b49f9016c0d7de9e22, parent22141;
+reviewed four-path38573-byte patch SHA256
+ae15eb6da2f502c4abdf951ec96b32706fd44b5ea8ad6f99993871d9380d9e51
+committed exactly. Normal hooks1.506s/commit1.134s; unpublished. Final staged
+review CLEAR after narrowing Stage1 to fixture create/read; mutation/completion
+acceptance remains later-stage. Changed function Black0; whole-file flags inherited.
+Fresh worker-scope package3817files/3roots/337dependencyNodes/722edges qualifies
+9.632s cleanupempty, source/environment/originalowners preserved; installed worker
+bytes equal committed source. Host pins new site, unchanged TH frontend.
+No new application runtime/native completed Job acceptance yet.
+
+
+### Native completed-Job preparation
+
+Current3817-file worker package matches committed29a1. The normal separately owned
+media service uses the private profile and public stop_event, never other pollers
+or original-runtime cycles. Two fixed dispatch/service-return receipts are not
+startup readiness. Actual two-owner completed results, content canaries and reciprocal
+Job denials must pass within120s; worker signal/return/exit/EOF uses15s graceful
+cleanup.21 pure operator controls cover schema/results, output failure, identity
+refusal without signals, collector setup and latched interruption. Compile/Ruff/
+Bandit0. Final source review precedes native execution. Official PG entry adds
+only prepare-jobs selection; prior complete API controls are not replayed.
+
+The distinct browser diagnostic changes metadata only: exact history before/target/
+after and fine selection/entry/commit/UI failure steps. The strict history and
+request-drain assertions stay unchanged. Last83.628s run had zero pending requests
+in all three browser ledgers but did not prove its history recovery; do not close
+that gate or infer the frontend cleanup cause from the coarse RuntimeError.
+
+
+### Actual completed-Job tenant acceptance on29a1
+
+Final worker/operator/official-entry source review CLEAR. SQLite real background
+completion passes17.261s outer/worker2.847s, both durable Success results and owned
+content, reciprocal403. Worker returns through public stop_event, exit0/grace0.271s;
+API graceful2.230s/actual lifespan zero, all current sessions closed and original
+owners preserved. Official restricted PostgreSQL1passed6warnings25.67s pytest/
+27.425s outer, worker3.619s, both content positives and reciprocal404, worker returned/
+API released/shutdowncomplete/cleanupempty/currentlogoutsclosed/ownerspreserved.
+No fake in-scope work, application mocks/source patches, model calls, policy changes, builds
+or original runtime cycles. Existing sidecar mode stayed enabled; only media
+sidecar was launched. The completed disposable PG profile was removed using exact
+root/UID/no-link/closed-session/no-open-handle guards after official DB teardown.
+
+One read-only Docker preflight stopped before pytest because existing port15492
+is wildcard-bound, rather than loopback-bound. The corrected admission verifies
+that retained mapping and still connects exclusively through127.0.0.1; no Docker
+configuration or service change. No native failure or extra source qualification.
+
+These checks close the selected completed-Job result component only. Browser strict
+request retirement/history recovery, PostgreSQL browser, retrieval answers, switch
+during fetch/generation, further UI state/export checks and UX remain open.
+
+
+### Exact history passed; request retirement remains open
+
+Metadata diagnostic83.789s passes settled foreign Note denial/current Logout and
+actual known BFCache Settings history entry523 atindex1, Loginvisible/Logoutabsent/
+canary-free. Strict final drain fails one GET auth/me36347.146 without status or
+terminal in all3browser ledgers/cohorts. Notifications2start2done afterNodecleanup.
+Frontend release30.630s errorsnone/exit0/groupEOF fails15s; API2.251s/lifespanallzero,
+all current sessions closed and full original canonical/URL/draft/owners preserved.
+Neither a30s configured timeout nor an application cause is established. Independent
+source review finds shared transport aborts on actual account changes, but not on
+document pagehide; Authme's10s timer may freeze in BFCache. This is a coverage gap,
+not yet attribution of that pending ID. Next diagnostic adds only exact failure-time
+readiness callback timestamps and pending request loader metadata, then retains
+strict failure, cleanup and original handback. No product edits or timeout increase.
+
+
+### Browser passed; own the complete disposable network context
+
+Distinct diagnostic82.472s: all targeted browser checks PASS, including exact history,
+Login/privacy and strict actual3-ledger drain. All owned handles/sessions close and
+original tab unchanged. Failure-time probe is correctly unused on a passing browser.
+Private frontend beforeTERM has1acceptedESTABLISHED/noAPIoutbound pluslistener; its
+release60.120s/exit0/groupEOF exceeds15. API2.165s actualzero/grace/logouts and full
+original canonical/owners pass. No default30s shutdown/proxy rule is inferred.
+
+Normal isolated Node20.19.5 HTTP/TCP control0.104s confirms a no-request preconnect
+can hold server.close, and normal client.end releases it. App attribution remains
+limited: actual browser drain passed, the remaining failure is cleanup. Use the
+existing qualified acquireOwned mechanism for a separately owned MAIN browser
+context rather than borrowing default-context connection pools. Its page/history/
+login/logout and strict request fences are unchanged; normal context.close owns
+the disposable pool. The retained original default context is preserved. Separate
+concurrency context remains genuinely independent. No product, timeout, cache,
+model, build or original-runtime change. Review and actual lifecycle validation
+remain required before claiming this correction.
+
+
+### Owned context retires frontend; fresh Notes tour adaptation
+
+Actual changed-context check65.841s: owned context is separate from original,
+frontend beforeTERM has listeneronly, graceful0.004s/exit0/groupEOF; API2.233s
+actualzero/grace/all core and parent current-session cleanup/full originalcanonical/
+owners pass. This validates the context cleanup correction; no frontend timer or
+product change. Work fails earlier at OpenSettings after foreign Note denial:
+visible unknown dialog,2Auth requests from prior Settings loader plus Notes
+notification. Actual probe200 but its strict pre-cleanup callback correlation is
+inconclusive; do not claim failure-time APIzero. Requests are single starts, not
+duplicated IDs; public initiators are the app bundle.
+
+Current source NotesManagerPage2735-2790 auto-launches notes-basics1000ms after a
+fresh Notes visit unless the user already interacts; TutorialRunner exposes its
+normal Skip tour action. The Notes definition supplies eight fixed public step
+titles. Adapt only a visibly matching Notes tutorial tooltip/title/Skip tour; no
+generic dialog dismissal, storage injection or assertion/timer change. Preserve
+unknown-dialog failure and all strict request/teardown fences. Review before run.
+
+
+### SQLite targeted browser recovery accepted
+
+Actual21.140s completes foreign Note denial, visibly matched normal Notes tour
+Skip, current Logout, exact Settings history558/index1 knownBFCache, Login/privacy
+and strict actual3-ledger drain. All owned contexts/handles and browser/core
+sessions close; original tab/URL/draft/fullcanonical/owners preserved. Frontend
+beforeTERM listeneronly, graceful0.007s/exit0/groupEOF; API2.179s actualzero/lifespan/
+cleanupempty plus fresh final callback pass. No failure probe ran on success.
+The context lifecycle and source-specific first-visit UI handling are qualified
+operator corrections, with no app cancellation/time/cache change or build.
+
+This closes selected SQLite recovery/teardown only. Four Alice exports were
+qualified earlier; Bob tail is still unattempted. Prepare a bounded Bob-only
+continuation that skips Alice and already-qualified scope work. Completed Jobs
+now create additional owned Sources, so the old singletonsearch oracle must not
+be replayed against this changed fixture. PostgreSQL browser, generation/inflight
+isolation, further UI states and human UX remain open.
+
+
+### Correct retained export accounting before finish
+
+Fresh private-control inspection finds both Alice and Bob already have a message
+ID. The previous claim that Bob's entire tail was unattempted was inaccurate; a
+message ID alone does not qualify any export body. The first proposed continuation
+correctly refused its absent-message guard before callback mutation (13.254s outer,
+API graceful2.160s/actualzero/currentlogoutsclosed/originalownerspreserved). No
+export acceptance resulted. Remove the unqualified resume option and preserve the
+original qualified full-run behavior. The replacement finish is strictly GET-only:
+Bob own Note, four owned export bodies, foreign Chat export404 and Alice own Chat
+positive. It refuses PG/missing seed and performs no seed, PUT, search or scope
+replay. Four operator controls pass; Ruff0/Bandit0. Final review and live finish
+remain required. Earlier Alice export evidence retains only its stated scope.
+
+
+### Source durability and synthetic-password failures
+
+X02 new native failures: read-only SQLite export finish14.841s passes Bob Notes/cards/Chat bodies, then original Source download404. API grace2.264s/actualzero/all current sessions closed/originalowners preserved. Normal read-only DB/storage diagnostic confirms both actors retain active Media/file records but neither blob exists under current installed-package storage root; root is outside private profile. Factory default is anchored to replaceable package and ignores USER_DB_BASE_DIR; independent source review confirms durability and profile-isolation defect. Do not recover deleted package/proofs or treat those fixture exports accepted. Add causal real factory tests for configured profile root, reused numeric keys/profile switch, package relocation, explicit path and reset; minimally bind default to existing DatabasePaths profile root and effective-root cache. Preserve explicit override and document ownership-confirmed legacy migration; no automatic ambiguous-root import or deletion-service redirect. ADR assessment: ADR020 governs existing profile paths, no new tenancy/storage authority. Normal config wiring of optional file_storage_path is absent and must be explicitly handled if exposed. Separately, official PG browser preparation22.600s failed Bob account POST400 before browser action; actual password-service validation identifies random synthetic password's forbidden sequential/repeated characters. All sessions closed/API2.281s actualzero/originalpreserved. Reuse normal policy-validated secure generator; do not weaken policy or blindly replay failing credentials. X02 remains open.
+
+
+### Storage repair source verification and password preparation
+
+X02 storage causal baseline4failed1passed/1.01pytest2.779outer. Minimal factory repair uses profile DatabasePaths root/user_files, normalized effective-root cache and explicit FILE_STORAGE_PATH override; existing settings override/reset/relative keys preserved. Normal connected cohort78 assertions pass365warnings23.83pytest28.168outer, but one explicit-setting test's LazySettings teardown fails. Only its proxy ownership corrected; focused finish1passed6warnings0.91pytest2.592outer; no77-control replay. Initial causal test used old default outside tmp; exact synthetic Alice-private blob removed and fixture now fences both old/new package roots inside tmp. No user/runtime files touched. Compile3/Ruff0/Black0; baseline/current productionBandit0/newtests0/operator0/errors0/diffclear. Independent actual review CLEAR after documentation precision and password literal/binding corrections. Operator password preparation reuses normal installed PasswordService with bounded32 interpolation-safe generation, rejects ${ on deserialize, updates exact quoted canonical Admin field/state/env before initializer. Five initial plus4literal/bound/dotenv operator controls pass; temporary trees removed. No live repaired-package acceptance yet. Legacy blobs require ownership-confirmed preservation/migration, no automatic cross-profile fallback or deletion-service redirect; missing bytes cannot be recovered by this path fix. Original runtime unchanged; X02 remains sole active.
