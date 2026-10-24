@@ -115,3 +115,73 @@ def test_media_ingest_stream_keeps_postgres_actor_in_producer(owned_jobs, monkey
         item["job_id"] == rows[actor]["id"] for item in events
     )  # nosec B101 # Producer sees only its actor.
     assert f"private-owner-{33-actor}.txt" not in response.text  # nosec B101 # Foreign metadata never enters SSE.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("termination", ["stop", "cancel"])
+async def test_trusted_media_worker_completes_other_owners_and_restores_ambient_scope(
+    owned_jobs, monkeypatch, termination
+):
+    """The real SDK must acquire under service authority, then process as each owner."""
+    import asyncio
+
+    from tldw_Server_API.app.core.DB_Management.scope_context import get_scope, scoped_context
+    from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerSDK
+    from tldw_Server_API.app.services import media_ingest_jobs_worker as worker
+
+    manager, rows = owned_jobs
+    with JobManager.scoped_rls_context(is_admin=False, domain_allowlist="other", owner_user_id="11"):
+        sentinel = manager.create_job(
+            domain="other", queue="default", job_type="untouched", owner_user_id="11", payload={}
+        )
+    seen = []
+
+    async def work(job, _manager, _progress):
+        scope = get_scope()
+        seen.append((job["owner_user_id"], scope.user_id, scope.is_admin))
+        return {"owner": job["owner_user_id"]}
+
+    async def finish_after_empty_acquire(sdk, _seconds):
+        if termination == "cancel":
+            raise asyncio.CancelledError
+        sdk.stop()
+
+    monkeypatch.setattr(worker, "_jobs_manager", lambda: manager)
+    monkeypatch.setattr(worker, "_handle_job_in_scope", work)
+    monkeypatch.setattr(WorkerSDK, "_sleep_chunked", finish_after_empty_acquire)
+    with (
+        JobManager.scoped_rls_context(is_admin=False, domain_allowlist="ambient", owner_user_id="999"),
+        scoped_context(user_id=999, is_admin=False) as content_scope,
+    ):
+        before = (
+            JobManager._RLS_IS_ADMIN.get(),
+            JobManager._RLS_DOMAIN_ALLOWLIST.get(),
+            JobManager._RLS_OWNER_USER_ID.get(),
+        )
+        if termination == "cancel":
+            with pytest.raises(asyncio.CancelledError):
+                await worker.run_media_ingest_jobs_worker(worker_id="scope-regression")
+        else:
+            await worker.run_media_ingest_jobs_worker(worker_id="scope-regression")
+        after = (
+            JobManager._RLS_IS_ADMIN.get(),
+            JobManager._RLS_DOMAIN_ALLOWLIST.get(),
+            JobManager._RLS_OWNER_USER_ID.get(),
+        )
+        assert (
+            after == before and get_scope() is content_scope
+        )  # nosec B101 # Service authority must not escape its lifetime.
+    assert sorted(seen) == [
+        ("11", 11, False),
+        ("22", 22, False),
+    ]  # nosec B101 # Actual handlers retain queued content ownership.
+    for owner in (11, 22):
+        with JobManager.scoped_rls_context(is_admin=False, domain_allowlist="media_ingest", owner_user_id=str(owner)):
+            completed = manager.get_job(rows[owner]["id"])
+        assert (completed["status"], completed["result"]) == (
+            "completed",
+            {"owner": str(owner)},
+        )  # nosec B101 # Real SDK durable completion.
+    with JobManager.scoped_rls_context(is_admin=False, domain_allowlist="other", owner_user_id="11"):
+        untouched = manager.get_job(sentinel["id"])
+    assert untouched == sentinel  # nosec B101 # Worker capability remains limited to its configured domain.
