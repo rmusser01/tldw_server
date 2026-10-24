@@ -5,7 +5,7 @@
 **Backfilled from:** not backfilled
 **Decision owner:** UAT requester and implementation review; proposal prepared under authorized defect repair
 **Related task:** TASK-13260.278.18.83.45
-**Related spec/plan:** `Docs/Plans/IMPLEMENTATION_PLAN_uat_x01_supported_upgrade_20261021.md`
+**Related spec/plan:** `Docs/Plans/IMPLEMENTATION_PLAN_uat_all_fixes_20261006.md#x01-supported-upgrade-selected-closure`
 
 ## Decision
 

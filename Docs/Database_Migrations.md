@@ -93,3 +93,25 @@ This is a recovery procedure, not a guaranteed lossless automatic conversion.
 If no compatible release can export the required data, preserve the backup and
 seek a schema-specific migration before proceeding. Do not manually increase
 `schema_version` to bypass the check or apply migrations for another database.
+
+## Validated upgrade starting points
+
+The 2026-10-23 X01 validation demonstrated upgrades from the published v0.1.32
+package (Media schema23), and from genuine v0.1.43 and v0.1.46 source
+installations. Each starting point covered SQLite/PostgreSQL content and Jobs
+with single-user and multi-user authentication, old-data inventory, whole
+configured backups, separate restores, owner-run migrations, ordinary runtime
+access, new writes and saved-Chat reload. In v0.1.32 single-user mode, AuthNZ
+remains SQLite even when content and Jobs use PostgreSQL; that is a hybrid
+deployment, not PostgreSQL AuthNZ coverage. Prompts retain their SQLite sidecar.
+
+v0.1.32 is the earliest tested published-package starting point. This does not
+certify every intervening release or establish a lossless path for Media
+schemas1–21. The v0.1.43/v0.1.46 results cover source deployments; their failed
+published-wheel checks are not accepted by those source results.
+Keep the separate backup and compare the complete configured deployment before
+switching. See the [X01 acceptance record](Plans/IMPLEMENTATION_PLAN_uat_all_fixes_20261006.md#x01-supported-upgrade-selected-closure)
+for exact coverage and recovery limits.
+
+ADR assessment: no new support policy or migration architecture is introduced;
+this records executed coverage within the existing migration boundary above.

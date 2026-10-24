@@ -7,9 +7,9 @@ ADR required: no. Restore existing migration and retry contracts; retain ADR-003
 
 ## Current UAT tracking index — 2026-10-23
 
-**X01 remains active; X02 is untouched. 33/43 selected acceptances are historical, 10 families remain open.** The reviewed fixes and demonstrated login repair are rebased locally as `ec3b5ddb8e810f080e224f5bfc6b002ae9700b75` on latest verified dev `4e7be41029b18881e55aa4260dfcb83baf92c45c`, with the incoming test-cleanup correction, affected source checks and isolated package/build qualified; live X01 validation remains in progress in the separate managed `uat-latest-dev-20261023` checkout. Prior frozen-source results do not qualify the combined candidate. The original523 checkout/runtime/session/data/keys remain protected. Current integration/qualification is tracked in [the latest-dev plan](IMPLEMENTATION_PLAN_uat_latest_dev_rebase_20261023.md); heartbeat remains PAUSED. All historical outcomes below retain their stated scope.
+**X01 is selected-functional and human-UX accepted. X02 is next.** The current unpublished candidate is3106420856fa31d5e3694627817ae78b354324f3 on dev22c9eac5cb9eb59cea3b9aea0448ee4da0965ebc, freshly verified unchanged. The six rebased commits retain identical intent; the incoming legacy-model alias regression is repaired. The affected744 tests pass with one inherited TestClient streaming skip, and touched lint/security checks introduce no findings. The current3817-file package is qualified; frontendTH is unchanged. All12 X01 mode cells passed on their recorded4e artifacts; current22c recovery passes by the explicit composition below. Original523 source/runtime/Chat/draft/data/keys remain protected. The selected acceptance count is34/43; nine families remain open. Heartbeat remains paused.
 
-The43 IDs below are existing workflow families in [the release catalog](../../apps/tldw-frontend/scripts/live-tier-uat/release-catalog-data.mjs), with426 planned variants. C01 through C12 selected acceptances are closed;10 families remain open. Selected acceptance does not close broader release gates or convert historical failed runs into passing runs.
+The43 IDs below are existing workflow families in [the release catalog](../../apps/tldw-frontend/scripts/live-tier-uat/release-catalog-data.mjs), with426 planned variants. C01 through C12 and X01 selected acceptances are closed; nine families remain open. Selected acceptance does not close broader release gates or convert historical failed runs into passing runs.
 
 - [TASK-13260](../../backlog/tasks/task-13260%20-%20Run-fresh-single-user-and-multi-user-UAT-across-core-workflow-loops.md): existing overall single-user/multi-user UAT, In Progress.
 - [TASK-13260.281](../../backlog/tasks/task-13260.281%20-%20Correct-root-causes-from-resumed-release-UAT-before-continuing.md): existing resumed-UAT root-cause work, In Progress.
@@ -52,7 +52,7 @@ The43 IDs below are existing workflow families in [the release catalog](../../ap
 | C10 | Model runtime admin and inference | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED: actual SQLiteSingle owned engine/inference/stop/restart/retained-input Retry/saved512/fresh-document persistence, four-mode profile configuration and explicit fault composition; full handback/cleanup independently reviewed. Other native-engine/hardware/release variants remain open. [Closure](#c10-managed-runtime-and-inference-selected-closure). |
 | C11 | MCP discovery and scoped execution | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit native/component/mode composition; controlled transport, scope/recovery, credentials/logs/exports, corrected UI contrast, exact original handback and cleanup independently reviewed. Failed outcomes and mode/cancellation/API-L limits retained. [Closure](#c11-mcp-discovery-and-scoped-execution-selected-closure). |
 | C12 | Workflow scheduled/monitored result | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by reviewed core4/recovery7 and four-mode composition; repaired timezone, Retry/dependency, provider policy and PostgreSQL timestamp contracts. Exact original handback and owned cleanup passed. [Closure](#c12-workflow-scheduled-and-monitored-result-selected-closure). |
-| X01 | Upgrade without data loss | In Progress — v0.1.32 and genuine v0.1.43/v0.1.46 source selected-store backup/restore/migration and live content checks pass; 0132 browser content/reload passed, then Disconnect drain failed; named-assistant display repair component-verified; original restored, remaining stores/modes/final acceptance open |
+| X01 | Upgrade without data loss | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit twelve-mode/current22c composition and recovery; original session preserved and disposable payloads removed. [Closure scope](#x01-supported-upgrade-selected-closure). |
 | X02 | Account/browser isolation | Open |
 | X03 | Usability, accessibility and responsive UI | Open |
 | X04 | Extension capture and sidepanel continuity | Open |
@@ -1546,7 +1546,7 @@ Selected total:33/43 accepted,10open. Latest-dev integration/rebase, complete426
 
 ### X01 entry and preflight repair
 
-X01 is active under [its own staged plan](IMPLEMENTATION_PLAN_uat_x01_supported_upgrade_20261021.md). Exact latest public v0.1.46 tag/commit verified read-only; oldest supported starting release awaits product answer. Two real preflight defects reproduced with4failed4passed, then fixed minimally: Python>=3.12 and recursive nested SQLite-store inspection. Full existing18+new8=26passed30warnings/0.74pytest1.885outer/natural0; scoped compile/security and independent actual source/full test/caller review clear. New tests lint/format clear; production inherited diagnostics unchanged. This is helper qualification only: prior-release installation, complete backup/separate restore, published upgrade, intended PostgreSQL role and recovery cases remain open. Other upgrade.sh source hazards are recorded in the plan; no actual Git/install/download/runtime/browser/publication action occurred. Original runtime/Chat/data/keys preserved; frozen523+WIP/not latestdev and heartbeat paused remain. Selected total33/43 accepted,10open.
+At this historical checkpoint X01 was active; its completed plan has been removed. See the [retained closure](#x01-supported-upgrade-selected-closure). Exact latest public v0.1.46 tag/commit verified read-only; oldest supported starting release awaits product answer. Two real preflight defects reproduced with4failed4passed, then fixed minimally: Python>=3.12 and recursive nested SQLite-store inspection. Full existing18+new8=26passed30warnings/0.74pytest1.885outer/natural0; scoped compile/security and independent actual source/full test/caller review clear. New tests lint/format clear; production inherited diagnostics unchanged. This is helper qualification only: prior-release installation, complete backup/separate restore, published upgrade, intended PostgreSQL role and recovery cases remain open. Other upgrade.sh source hazards are recorded in the plan; no actual Git/install/download/runtime/browser/publication action occurred. Original runtime/Chat/data/keys preserved; frozen523+WIP/not latestdev and heartbeat paused remain. Selected total33/43 accepted,10open.
 
 X01 script component follow-up: causal3failed2passed then corrected5passed; terminal postcheck failures, explicit offline acknowledgement, unique temporary output and truthful startup/recovery guidance independently reviewed CLEAR. These separate helper26/script5 runs do not accept native backup/restore/upgrade. Requester selected oldestv0.1.3; no exact public artifact found, source clarification pending. Verified latestpublicv0.1.46 wheel setup is being prepared. Selected33/43 accepted,10open; X01soleactive. Originalruntime/Chat/data and all remaining boundaries preserved.
 
@@ -1687,3 +1687,51 @@ X01 2026-10-23 continuation: ordinary PostgreSQL startup/STT permission repairs 
 ## Latest-dev integration — 2026-10-23
 
 The committed-history rebase is complete; all34old commits are equivalent/superseded upstream. The unpublished source was preserved through an exact finite copy and retained Git stash, then resolved against newer contracts. X01 stays open until actual installed combined-source mode/recovery qualification and final review; no acceptance is transferred from old artifacts. In the qualified separate Python3.12.13/pytest9.0.3 environment, the integration migration collision reproduced3failures and is repaired by numbering only the MCP addition104, preserving101–103; all3regressions pass. The legacy Character display defect reproduced8failures/10passes; the minimal display-only projection now passes the complete28-casefile in both UI/WebUI, preserving canonical provider history/native metadata isolation. No new live/runtime/latest-dev-completion claim. Remaining combined scope and new native-quota readiness/private-pool cleanup review findings are open.
+
+
+## X01 supported-upgrade selected closure
+
+Selected functional and human UX acceptance is complete by the scoped composition
+below. Prior failed runs remain failed; wider release gates remain open.
+
+The twelve cells are v0.1.32 published package, v0.1.43 source and v0.1.46 source
+across SQLite/PostgreSQL and single-/multi-user modes. They passed on their
+recorded4e-based installed artifacts, including the later profile-read fixes.
+The current310642 candidate rebases those fixes onto dev22c9;744 affected checks
+(one inherited streaming skip), a fresh3817-file package, unchanged TH frontend
+and the current live recovery pass complete the explicit composition. This is
+not a fresh repetition of all twelve cells on22c9.
+
+| Required variant | Selected outcome |
+|---|---|
+| Prior-data inventory | Genuine old writers created fourteen content families plus real accounts, credentials, roles and queued Jobs; IDs/content/counts/settings compared. |
+| Pre-upgrade restore | Whole configured backups restored into separate targets before migration; source/archive/sidecars preserved. |
+| Published migration | Actual candidate migrations and store outcomes verified under owner provisioning followed by restricted runtime, without role elevation. |
+| Post-upgrade operations | Old data/account scope, new Chat/source/Note/card writes, real saved provider reply, login/reload and lifecycle passed in the twelve declared cells. |
+| Interrupted upgrade | Actual disposable SQLite permission failure, correction/resume and separate-backup restoration passed. No PostgreSQL crash or old-binary rollback claim. |
+| Old browser assets/storage | Current persisted stale URL was observed before reload, canonical recovery afterward with authority unchanged, followed by authenticated retained Chat access. Obsolete JavaScript and older serialized storage formats remain untested. |
+| Changed routes | Legacy /chat/settings reached /settings/chat with its real heading; returning to and reloading the old Chat retained IDs/content. |
+| Malformed legacy records | Genuine v0.1.32 non-object settings survived backup/two separate restores/migration; explicit database correction preserved saved work. No malformed-specific native Resume claim. |
+| Settings migration | Documented settings/scope and post-UI historical values preserved. The human-accepted original PRE-payload comparison gap remains a specific limitation. |
+
+The final live recovery passed1case/1warning43.43s pytest44.222s outer.
+API/frontend release0.174/0.006s, actual lifespan completion/EOF/process-group
+release and zero pending work passed. Full original canonical objects, five
+message IDs/content, draft, URL, owners, configuration, source and archives were
+preserved; cleanup errors were empty. No model request or original runtime
+cycle occurred. The prior three recovery runs remain failed; no auth-expiry
+guidance result or exact bootstrap-branch attribution is claimed.
+
+The earliest tested published path is v0.1.32/Media23. Existing automatic Media22+
+support is unchanged; no all-intermediate-release or lossless pre22 guarantee
+follows. v0.1.32 PostgreSQL single-user is hybrid AuthSQLite/content+JobsPG;
+v0.1.43/v0.1.46 source qualification does not accept their failed published wheels.
+Fresh-install, release-wide/native/installer/publication gates remain separate.
+
+Completed disposable cleanup removed five historical/superseded roots and28
+retired operator/check files:181,807entries/5,387,693,120bytes. Exact process,
+environment, open-handle, UID/inode and no-follow boundaries passed; private
+venv dependency assets were admitted only through their installed RECORD
+metadata. Shared BASE/.venv, current22c package/build/environment, user models,
+original data/runtime/session and restoration dependency closure were preserved.
+Both completed owned X01 plans were removed; their task history remains.
