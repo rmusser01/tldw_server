@@ -1011,7 +1011,7 @@ def test_native_admission_capture_proves_unchanged_input_without_equating_revisi
 @pytest.mark.parametrize("drift", ["edit", "delete", "metadata", "asset", "receipt", "owner", "scope", "snapshot"])
 def test_native_admission_capture_refuses_changed_input_or_capture(admission_capture_db, drift):
     db, cid = admission_capture_db
-    reference = admission_reference(admit(db, cid, selected(db, cid), extra_metadata={"original": True}))
+    reference = admission_reference(admit(db, cid, selected(db, cid)))
     captured = snapshot(db, cid)
     if drift == "edit":
         db.update_message(reference["input_message_id"], {"content": "edited input"}, expected_version=1)
@@ -1037,7 +1037,7 @@ def test_native_admission_capture_refuses_changed_input_or_capture(admission_cap
         )
     else:
         add(db, cid, "later unrelated input")
-    with pytest.raises(HistorySelectionError):
+    with pytest.raises(HistorySelectionError, match="stale_parent" if drift == "metadata" else None):
         db.validate_history_admission(cid, reference, snapshot=captured, owner_client_id="alice", owner_key=OWNER_KEY)
 
 
@@ -1047,7 +1047,7 @@ def test_native_admission_capture_refuses_metadata_change_and_restore(admission_
     captured = snapshot(db, cid)
     db.add_message_metadata(reference["input_message_id"], extra={"changed": True})
     db.add_message_metadata(reference["input_message_id"], extra={"original": True})
-    assert db.get_message_by_id(reference["input_message_id"])["version"] == 1  # nosec B101: Metadata ABA leaves the physical version unchanged.
+    assert db.get_message_by_id(reference["input_message_id"])["version"] == 3  # nosec B101: Each rewrite of the ABA bumps the physical version (TASK-13569).
     with pytest.raises(HistorySelectionError):
         db.validate_history_admission(cid, reference, snapshot=captured, owner_client_id="alice", owner_key=OWNER_KEY)
 

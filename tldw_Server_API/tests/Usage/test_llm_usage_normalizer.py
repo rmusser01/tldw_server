@@ -205,3 +205,66 @@ def test_normalize_missing_and_stream_estimated_usage_sources() -> None:
     assert missing_usage.output_tokens == 0
     assert missing_usage.total_tokens == 0
     assert missing_usage.estimate_source == "missing_usage"
+
+
+def test_normalize_anthropic_usage_reads_the_one_hour_share_of_cache_writes() -> None:
+    normalized = normalize_llm_usage(
+        provider="anthropic",
+        usage={
+            "input_tokens": 5,
+            "output_tokens": 10,
+            "cache_creation_input_tokens": 3000,
+            "cache_creation": {"ephemeral_5m_input_tokens": 1000, "ephemeral_1h_input_tokens": 2000},
+            "cache_read_input_tokens": 70,
+        },
+    )
+
+    assert normalized.cache_write_input_tokens == 3000
+    assert normalized.cache_write_1h_input_tokens == 2000
+
+
+def test_the_one_hour_share_never_exceeds_the_cache_writes() -> None:
+    over = normalize_llm_usage(
+        provider="anthropic",
+        usage={
+            "input_tokens": 5,
+            "cache_creation_input_tokens": 100,
+            "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 900},
+        },
+    )
+    no_total = normalize_llm_usage(
+        provider="anthropic",
+        usage={"input_tokens": 5, "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 900}},
+    )
+
+    assert over.cache_write_1h_input_tokens == 100
+    assert no_total.cache_write_1h_input_tokens == 0
+
+
+def test_a_non_anthropic_provider_has_no_one_hour_share() -> None:
+    normalized = normalize_llm_usage(
+        provider="openai",
+        usage={"prompt_tokens": 10, "cache_creation": {"ephemeral_1h_input_tokens": 9}},
+    )
+
+    assert normalized.cache_write_1h_input_tokens == 0
+
+
+def test_normalize_anthropic_usage_reads_speed_and_inference_geo() -> None:
+    normalized = normalize_llm_usage(
+        provider="anthropic",
+        usage={"input_tokens": 5, "output_tokens": 10, "speed": "fast", "inference_geo": "US"},
+    )
+    standard = normalize_llm_usage(
+        provider="anthropic",
+        usage={"input_tokens": 5, "output_tokens": 10, "speed": "standard", "inference_geo": "global"},
+    )
+
+    assert (normalized.speed, normalized.inference_geo) == ("fast", "us")
+    assert (standard.speed, standard.inference_geo) == ("standard", "global")
+
+
+def test_a_non_anthropic_provider_has_no_speed_or_inference_geo() -> None:
+    normalized = normalize_llm_usage(provider="openai", usage={"prompt_tokens": 5, "speed": "fast", "inference_geo": "us"})
+
+    assert (normalized.speed, normalized.inference_geo) == ("", "")

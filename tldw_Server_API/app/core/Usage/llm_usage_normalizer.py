@@ -67,6 +67,11 @@ class NormalizedLLMUsage:
     choice_count: int = 0
     estimate_source: str = "missing_usage"
     raw_usage_metadata: Mapping[str, Any] = field(default_factory=dict)
+    # The 1-hour share of cache_write_input_tokens (Anthropic). Not in to_dict(); compute_costs reads it.
+    cache_write_1h_input_tokens: int = 0
+    # Anthropic request options billed above list price (lowercased; empty when not reported).
+    speed: str = ""
+    inference_geo: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -132,11 +137,20 @@ def normalize_llm_usage(
     cache_read_input_tokens = 0
     cache_write_input_tokens = 0
     cached_input_tokens = 0
+    cache_write_1h_input_tokens = 0
+    speed = ""
+    inference_geo = ""
 
     if "anthropic" in provider_key:
+        speed = _usage_str(usage_mapping, "speed")
+        inference_geo = _usage_str(usage_mapping, "inference_geo")
         cache_write_input_tokens = _usage_int(usage_mapping, "cache_creation_input_tokens")
         cache_read_input_tokens = _usage_int(usage_mapping, "cache_read_input_tokens")
         cached_input_tokens = cache_read_input_tokens
+        # The 1-hour share of the writes (billed at 2x input, the rest at 1.25x); never more than the writes.
+        cache_write_1h_input_tokens = min(
+            _usage_int(usage_mapping, "cache_creation.ephemeral_1h_input_tokens"), cache_write_input_tokens
+        )
     elif "google" in provider_key or "gemini" in provider_key:
         cache_read_input_tokens = _usage_int(usage_mapping, "cachedContentTokenCount", "cached_content_token_count")
         cached_input_tokens = cache_read_input_tokens
@@ -191,6 +205,9 @@ def normalize_llm_usage(
         choice_count=resolved_choice_count,
         estimate_source=resolved_source,
         raw_usage_metadata=raw_usage_metadata,
+        cache_write_1h_input_tokens=cache_write_1h_input_tokens,
+        speed=speed,
+        inference_geo=inference_geo,
     )
 
 
@@ -216,6 +233,12 @@ def _usage_int(usage: Mapping[str, Any] | None, *paths: str) -> int:
         if parsed > 0:
             return parsed
     return 0
+
+
+def _usage_str(usage: Mapping[str, Any] | None, key: str) -> str:
+    """A lowercased string usage field, or empty."""
+    value = usage.get(key) if usage else None
+    return value.strip().lower() if isinstance(value, str) else ""
 
 
 def _coerce_nonnegative_int(value: Any) -> int:

@@ -1462,6 +1462,7 @@ jobs:
           - name: llm-adapters-chat-errors-extra
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_google_mistral.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_local_provider_status.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_midstream_error_all.py
           - name: llm-adapters-orchestrator-core
             paths: >-
@@ -3154,6 +3155,7 @@ jobs:
           - name: llm-adapters-chat-errors-extra
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_google_mistral.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_local_provider_status.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_midstream_error_all.py
           - name: llm-adapters-orchestrator-core
             paths: >-
@@ -4682,6 +4684,7 @@ jobs:
           - name: llm-adapters-chat-errors-extra
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_google_mistral.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_local_provider_status.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_midstream_error_all.py
           - name: llm-adapters-orchestrator-core
             paths: >-
@@ -6120,6 +6123,7 @@ jobs:
           - name: llm-adapters-chat-errors-extra
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_google_mistral.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_local_provider_status.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_midstream_error_all.py
           - name: llm-adapters-orchestrator-core
             paths: >-
@@ -7549,6 +7553,7 @@ jobs:
           - name: llm-adapters-chat-errors-extra
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_google_mistral.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_local_provider_status.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_midstream_error_all.py
           - name: llm-adapters-orchestrator-core
             paths: >-

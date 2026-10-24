@@ -20,6 +20,7 @@ from pathlib import Path
 
 from loguru import logger
 
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.provider_identity import canonical_provider_name
 
 
@@ -41,6 +42,60 @@ def _rate_value(rates: dict, *keys: str, default: float | None = None) -> float 
             except (TypeError, ValueError):
                 return default
     return default
+
+
+# Accepted spellings of the optional cache rates in an entry or a price tier.
+_CACHE_RATE_ALIASES = {
+    "cache_read": ("cache_read", "cache-read", "cached", "cached_input", "cache_read_input", "cached_input_tokens"),
+    "cache_write": (
+        "cache_write",
+        "cache-write",
+        "cache_creation",
+        "cache_creation_input",
+        "cache_write_input",
+        "cache_write_input_tokens",
+    ),
+    "cache_write_1h": ("cache_write_1h", "cache-write-1h", "cache_write_1h_input_tokens"),
+}
+
+
+def _parse_rates(rates: dict) -> dict:
+    """The prompt, completion and cache rates of one catalog entry or price tier."""
+    entry = {
+        "prompt": _rate_value(rates, "prompt", "in", "input", default=0.0) or 0.0,
+        "completion": _rate_value(rates, "completion", "out", "output", default=0.0) or 0.0,
+    }
+    for name, aliases in _CACHE_RATE_ALIASES.items():
+        value = _rate_value(rates, *aliases, default=None)
+        if value is not None:
+            entry[name] = value
+    return entry
+
+
+def _parse_long_prompt_tier(tier: dict) -> dict | None:
+    """A long-prompt tier, or None when it would misprice.
+
+    Without ``prompt`` or ``completion`` that side would cost $0 above the threshold, and without a positive
+    ``above_tokens`` the tier would apply to every request.
+    """
+    try:
+        above_tokens = int(tier.get("above_tokens", 0) or 0)
+    except (TypeError, ValueError):
+        return None
+    if above_tokens <= 0 or not _has_rate(tier, "prompt", "in", "input") or not _has_rate(tier, "completion", "out", "output"):
+        return None
+    return {"above_tokens": above_tokens, **_parse_rates(tier)}
+
+
+def _has_rate(rates: dict, *keys: str) -> bool:
+    """Whether the first of ``keys`` present holds a number; a null or unparseable rate counts as missing.
+
+    Checks the raw value: ``_rate_value`` turns a null into 0.0, which would price that side at $0.
+    """
+    for key in keys:
+        if key in rates:
+            return rates[key] is not None and _rate_value(rates, key, default=None) is not None
+    return False
 
 
 UNKNOWN_BILLABLE_RATE = {"prompt": 0.01, "completion": 0.03}
@@ -70,10 +125,6 @@ DEFAULT_PRICING: dict[str, dict[str, dict[str, float]]] = {
         "text-embedding-ada-002": {"prompt": 0.1e-3, "completion": 0.1e-3},
     },
     "anthropic": {
-        # Claude 4.5 / 4.1 families
-        "claude-sonnet-4.5": {"prompt": 3e-3, "completion": 15e-3},
-        "claude-haiku-4.5": {"prompt": 1e-3, "completion": 5e-3},
-        "claude-opus-4.1": {"prompt": 15e-3, "completion": 75e-3},
         # Back-compat Claude 3 family
         "claude-3-opus": {"prompt": 15e-3, "completion": 75e-3},
         "claude-3-sonnet": {"prompt": 3e-3, "completion": 15e-3},
@@ -221,55 +272,53 @@ class PricingCatalog:
                         entry["note"] = str(note)
                     base[model] = entry
                     continue
-                pr = _rate_value(rates, "prompt", "in", "input", default=0.0) or 0.0
-                cr = _rate_value(rates, "completion", "out", "output", default=0.0) or 0.0
-                entry = {"prompt": pr, "completion": cr}
-                cache_read = _rate_value(
-                    rates,
-                    "cache_read",
-                    "cache-read",
-                    "cached",
-                    "cached_input",
-                    "cache_read_input",
-                    "cached_input_tokens",
-                    default=None,
-                )
-                cache_write = _rate_value(
-                    rates,
-                    "cache_write",
-                    "cache-write",
-                    "cache_creation",
-                    "cache_creation_input",
-                    "cache_write_input",
-                    "cache_write_input_tokens",
-                    default=None,
-                )
-                if cache_read is not None:
-                    entry["cache_read"] = cache_read
-                if cache_write is not None:
-                    entry["cache_write"] = cache_write
+                entry = _parse_rates(rates)
                 if "placeholder" in rates:
                     entry["placeholder"] = bool(rates.get("placeholder"))
                 if "estimated" in rates:
                     entry["estimated"] = estimated
                 if note is not None:
                     entry["note"] = str(note)
+                if rates.get("hidden"):
+                    # Priced, but kept out of the model picker (limited-availability models).
+                    entry["hidden"] = True
+                tier = rates.get("long_prompt")
+                if isinstance(tier, dict):
+                    # A request whose whole prompt (cache tokens included) is above this many tokens pays the tier's rates.
+                    parsed_tier = _parse_long_prompt_tier(tier)
+                    if parsed_tier is None:
+                        logger.warning(
+                            "Ignoring the long_prompt tier of pricing entry {}/{}: it needs above_tokens > 0 and both "
+                            "prompt and completion rates; the base rates apply",
+                            provider,
+                            model,
+                        )
+                    else:
+                        entry["long_prompt"] = parsed_tier
                 base[model] = entry
 
-    def get_rate_details(self, provider: str, model: str) -> tuple[dict[str, float], bool]:
+    def get_rate_details(
+        self, provider: str, model: str, *, prompt_tokens: int = 0
+    ) -> tuple[dict[str, float], bool]:
         """
         Return pricing fields and estimated flag for provider/model.
 
         The returned mapping always contains ``prompt`` and ``completion``.
-        Optional ``cache_read`` and ``cache_write`` rates are present only when
-        supplied by defaults or overrides.
+        Optional ``cache_read``, ``cache_write`` and ``cache_write_1h`` (the
+        1-hour cache-write rate) are present only when supplied by defaults or
+        overrides. ``prompt_tokens`` is the request's whole prompt (cache
+        tokens included); above an entry's ``long_prompt.above_tokens`` the
+        tier's rates apply.
         """
         prov = canonical_provider_name(provider or "")
         mdl = (model or "").lower()
         prov_map = self._catalog.get(prov, {})
+        if prov == "anthropic" and mdl not in prov_map:
+            # No current Anthropic API ID has a dot; the router and config defaults still say claude-sonnet-4.5.
+            mdl = canonical_anthropic_model_id(mdl)
 
         if mdl in prov_map:
-            return self._entry_rate_details(prov_map[mdl], estimated=False)
+            return self._entry_rate_details(prov_map[mdl], estimated=False, prompt_tokens=prompt_tokens)
 
         best_match: tuple[str, dict] | None = None
         for mk, rates in prov_map.items():
@@ -279,19 +328,24 @@ class PricingCatalog:
                 if best_match is None or len(mk) > len(best_match[0]):
                     best_match = (mk, rates)
         if best_match is not None:
-            return self._entry_rate_details(best_match[1], estimated=True)
+            return self._entry_rate_details(best_match[1], estimated=True, prompt_tokens=prompt_tokens)
 
         if "default" in prov_map:
             # A provider-wide price (LLM usage accounting spec §6): local providers ship one at zero.
-            return self._entry_rate_details(prov_map["default"], estimated=True)
+            return self._entry_rate_details(prov_map["default"], estimated=True, prompt_tokens=prompt_tokens)
         return _unknown_billable_rate(), True
 
     @staticmethod
-    def _entry_rate_details(rates: dict, *, estimated: bool) -> tuple[dict[str, float], bool]:
+    def _entry_rate_details(
+        rates: dict, *, estimated: bool, prompt_tokens: int = 0
+    ) -> tuple[dict[str, float], bool]:
         if isinstance(rates, dict) and rates.get("placeholder"):
             return _unknown_billable_rate(), True
         if not isinstance(rates, dict):
             return {"prompt": 0.0, "completion": 0.0}, True
+        tier = rates.get("long_prompt")
+        if isinstance(tier, dict) and prompt_tokens > int(tier.get("above_tokens", 0) or 0):
+            rates = {**rates, **{k: v for k, v in tier.items() if k != "above_tokens"}}
         details = {
             "prompt": float(rates.get("prompt", 0.0) or 0.0),
             "completion": float(rates.get("completion", 0.0) or 0.0),
@@ -300,13 +354,16 @@ class PricingCatalog:
             details["cache_read"] = float(rates.get("cache_read", 0.0) or 0.0)
         if "cache_write" in rates:
             details["cache_write"] = float(rates.get("cache_write", 0.0) or 0.0)
+        if "cache_write_1h" in rates:
+            details["cache_write_1h"] = float(rates.get("cache_write_1h", 0.0) or 0.0)
         return details, bool(rates.get("estimated", estimated))
 
     def get_rates(self, provider: str, model: str) -> tuple[float, float, bool]:
         """
         Return (prompt_per_1k, completion_per_1k, estimated) for provider/model.
         If exact model not found, try partial matches; otherwise fall back to a
-        small sentinel rate (estimated=True).
+        small sentinel rate (estimated=True). Takes no prompt length, so it
+        prices a tiered model at its base tier.
         """
         rates, estimated = self.get_rate_details(provider, model)
         return rates["prompt"], rates["completion"], estimated
@@ -359,7 +416,7 @@ def compute_token_cost(
 
 def _lookup_model_across_providers(catalog: PricingCatalog, model: str) -> tuple[float, float, bool]:
     """Search all providers for a model, preferring exact matches."""
-    mdl = model.lower()
+    mdl = canonical_anthropic_model_id(model).lower()
 
     # First pass: exact match across all providers
     for prov_name, prov_map in catalog._catalog.items():
@@ -411,7 +468,9 @@ def list_provider_models(provider: str) -> list[str]:
                 name
                 for name, meta in models_map.items()
                 # "default" is a provider-wide price, not a model (LLM usage accounting spec §6).
-                if name != "default" and not (isinstance(meta, dict) and meta.get("placeholder"))
+                # A hidden model is priced but not offered (its entry says "hidden": true).
+                if name != "default"
+                and not (isinstance(meta, dict) and (meta.get("placeholder") or meta.get("hidden")))
             ]
         )
     except Exception:

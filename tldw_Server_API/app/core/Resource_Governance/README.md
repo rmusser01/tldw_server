@@ -26,6 +26,7 @@ Centralized rate limiting and concurrency control with policy-based configuratio
 ## Backend Selection (env)
 - `RG_BACKEND`: `memory` (default) or `redis`
 - `RG_REDIS_FAIL_MODE`: `fallback_memory` (default) | `fail_closed` | `fail_open`
+  - Once a Redis command and a PING right after it both fail (refused, reset or timed out), the governor stops calling Redis for `RG_REDIS_UNREACHABLE_COOLDOWN_SEC` seconds (default 10; `0` turns it off) and answers by this fail mode, then probes Redis with one command at a time. The fail mode then lasts up to about 15 s after Redis returns. RG's client waits at most 5 s to connect and for each reply, unless `REDIS_URL` sets `socket_timeout` or `socket_connect_timeout` (ADR-081, TASK-13882).
 - `REDIS_URL`: Redis connection URL (used when backend=redis). If unset, defaults to `redis://127.0.0.1:6379`.
 - Determinism (tests/dev): `RG_TEST_FORCE_STUB_RATE=1` prefers in‑process rails for requests/tokens when running Redis backend, stabilizing burst vs steady retry‑after behavior in CI.
 

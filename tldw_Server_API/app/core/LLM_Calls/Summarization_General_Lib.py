@@ -168,11 +168,6 @@ def _summary_error_code(exc: BaseException, adapter: Any = None) -> str:
         return "provider_quota_exhausted" if exc.quota_exhausted is True else "rate_limit"
     if isinstance(exc, ChatBadRequestError):
         upstream_status = getattr(exc, "upstream_status_code", None)
-        # Local adapters make every 4xx a ChatBadRequestError, so their 401, 403 and 429 land here.
-        if upstream_status in {401, 403}:
-            return "authentication"
-        if upstream_status == 429:
-            return "rate_limit"
         # 408 (OpenRouter timeout) and 498 (Groq flex capacity) are transient 4xx replies.
         if upstream_status in {408, 498}:
             return "provider_failure"

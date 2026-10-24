@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import uuid
 from datetime import date, datetime, timezone
 from sqlite3 import Error as SQLiteError
@@ -23,6 +24,7 @@ from tldw_Server_API.app.core.AuthNZ.database import DatabasePool, get_db_pool
 from tldw_Server_API.app.core.AuthNZ.ip_allowlist import resolve_client_ip
 from tldw_Server_API.app.core.AuthNZ.repos.usage_repo import AuthnzUsageRepo
 from tldw_Server_API.app.core.AuthNZ.settings import get_settings
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.Metrics import increment_counter
 
 from .llm_usage_normalizer import normalize_llm_usage
@@ -232,6 +234,21 @@ def _apply_pii_settings_to_meta(
     return ip_out, ""
 
 
+# Anthropic bills these request options above list price, on every token category, and they stack with each other and
+# with the cache rates (platform.claude.com/docs/en/about-claude/pricing: "Fast mode pricing", "Data residency pricing").
+# Fast mode trusts the usage block: the API only reports speed "fast" on a call that used it.
+ANTHROPIC_FAST_MODE_MULTIPLIER = 2.0
+ANTHROPIC_US_ONLY_MULTIPLIER = 1.1
+# US-only costs 1.1x on Claude 4.6 and later only. platform.claude.com/docs/en/manage-claude/data-residency: requests
+# with inference_geo "on Claude Opus 4.5, Claude Sonnet 4.5 (deprecated), Claude Haiku 4.5, or earlier models return
+# a 400 error", "Older models: ... Standard pricing applies", and a workspace migrated from the legacy US-only opt-out
+# (default_inference_geo "us") is billed standard on them ("Legacy models are unaffected"). So a usage block that
+# reports "us" for one of these IDs is costed at list price. Any other model, including a new family, pays the 1.1x.
+_ANTHROPIC_STANDARD_PRICED_GEO = re.compile(
+    r"^claude-(?:(?:opus|sonnet|haiku)-4(?:-[0-5])?(?:-\d{8})?$|[0-3](?:[-.]|$)|instant)"
+)
+
+
 def compute_costs(
     provider: str,
     model: str,
@@ -241,19 +258,31 @@ def compute_costs(
     cache_read_input_tokens: int = 0,
     cache_write_input_tokens: int = 0,
     billable_input_tokens: int | None = None,
+    cache_write_1h_input_tokens: int = 0,
+    speed: str | None = None,
+    inference_geo: str | None = None,
 ) -> tuple[float, float, float, bool]:
     """
     Compute (prompt_cost, completion_cost, total_cost, estimated)
     given provider, model and token counts.
+
+    ``cache_write_1h_input_tokens`` is the share of the cache writes made with a
+    1-hour TTL; it costs the entry's ``cache_write_1h`` rate (falling back to
+    ``cache_write``), the rest of the writes the ``cache_write`` rate.
+    ``speed="fast"`` and ``inference_geo="us"`` (Anthropic; US-only on Claude
+    4.6 and later models only) multiply every
+    category by 2 and 1.1.
     """
     catalog = get_pricing_catalog()
-    rates, est = catalog.get_rate_details(provider, model)
+    prompt_total = max(0, int(prompt_tokens or 0))
+    # The whole prompt, cache tokens included (ADR-075), picks a long-prompt price tier.
+    rates, est = catalog.get_rate_details(provider, model, prompt_tokens=prompt_total)
     in_per_1k = rates["prompt"]
     out_per_1k = rates["completion"]
-    prompt_total = max(0, int(prompt_tokens or 0))
     completion_total = max(0, int(completion_tokens or 0))
     cache_read = min(max(0, int(cache_read_input_tokens or 0)), prompt_total)
     cache_write = min(max(0, int(cache_write_input_tokens or 0)), max(0, prompt_total - cache_read))
+    cache_write_1h = min(max(0, int(cache_write_1h_input_tokens or 0)), cache_write)
 
     if "cache_read" not in rates and "cache_write" not in rates:
         prompt_cost = (prompt_total / 1000.0) * in_per_1k
@@ -265,12 +294,22 @@ def compute_costs(
             normal_input = min(max(0, int(billable_input_tokens or 0)), max_normal_input)
         cache_read_rate = rates.get("cache_read", in_per_1k)
         cache_write_rate = rates.get("cache_write", in_per_1k)
+        cache_write_1h_rate = rates.get("cache_write_1h", cache_write_rate)
         prompt_cost = (
             (normal_input / 1000.0) * in_per_1k
             + (cache_read / 1000.0) * cache_read_rate
-            + (cache_write / 1000.0) * cache_write_rate
+            + ((cache_write - cache_write_1h) / 1000.0) * cache_write_rate
+            + (cache_write_1h / 1000.0) * cache_write_1h_rate
         )
-    completion_cost = (completion_total / 1000.0) * out_per_1k
+    multiplier = 1.0
+    if (speed or "").lower() == "fast":
+        multiplier *= ANTHROPIC_FAST_MODE_MULTIPLIER
+    if (inference_geo or "").lower() == "us" and not _ANTHROPIC_STANDARD_PRICED_GEO.match(
+        canonical_anthropic_model_id((model or "").strip().lower())
+    ):
+        multiplier *= ANTHROPIC_US_ONLY_MULTIPLIER
+    prompt_cost *= multiplier
+    completion_cost = (completion_total / 1000.0) * out_per_1k * multiplier
     total_cost = prompt_cost + completion_cost
     return prompt_cost, completion_cost, total_cost, est
 
@@ -346,6 +385,9 @@ async def log_llm_usage(
             cache_read_input_tokens=normalized_usage.cache_read_input_tokens,
             cache_write_input_tokens=normalized_usage.cache_write_input_tokens,
             billable_input_tokens=normalized_usage.billable_input_tokens,
+            cache_write_1h_input_tokens=normalized_usage.cache_write_1h_input_tokens,
+            speed=normalized_usage.speed,
+            inference_geo=normalized_usage.inference_geo,
         )
         if estimated is None:
             estimated = est_flag or normalized_usage.estimate_source != "provider_usage"
