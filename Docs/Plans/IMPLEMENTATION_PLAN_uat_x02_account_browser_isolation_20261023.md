@@ -3,14 +3,14 @@
 > Execute inline using the executing-plans workflow; reuse the authorized read-only reviewer.
 
 **Goal:** Finish selected X02 before X03, proving reciprocal ownership and browser-state isolation with working owner controls.
-**Architecture:** Use the qualified current3817-file installed API and unchanged TH frontend on private18908/18989, alongside the protected original runtime. Reuse official PostgreSQL isolation and existing lifecycle/receipt/session restoration helpers. Use supported real API/UI paths; mocks do not qualify live isolation.
+**Architecture:** Use the qualified current3817-file installed API and a reviewed private frontend on18908/18989, alongside the protected original runtime. The GET repair requires its own build before native qualification. Reuse official PostgreSQL isolation and existing lifecycle/receipt/session restoration helpers. Use supported real API/UI paths; mocks do not qualify live isolation.
 **Spec:** Docs/Development/RELEASE_UAT_PLAYBOOK.md X-02 and apps/tldw-frontend/scripts/live-tier-uat/release-catalog-data.mjs X-02.
 **Task:** TASK-13260.278.18.83.45.
 **ADR assessment:** No new architecture rule for validation; existing AuthNZ/tenant ownership, PostgreSQL RLS and documented revocation contracts govern. Any demonstrated repair gets its own assessment and causal red/green before product edits.
 
 ## Global constraints
 
-- Product source29a1b69eed on reviewed dev22c9; current worker-scope package3817files, unchanged buildTHttd0p00MlSSxPE1Yyre. Refresh dev before later publication, not after every step.
+- API package source6abd503df1 on reviewed dev22c9/current storage-root package3817files. GET frontend repair is qualified locally and awaits reviewed commit/build/native checks; last native buildTHttd0p00MlSSxPE1Yyre. Refresh dev before later publication, not after every step.
 - Preserve original API50010/49993, frontend50863/50855, Chrome54716/54710, five saved messages, exact draft/URL and full canonical objects. No original runtime cycle.
 - Keep the original default Chrome context/tab untouched. X02 uses one owned temporary main context; create a second owned context only for the independent concurrent-account check, then close both owned contexts. Two tabs within the main context share storage and are not independent identities. The owned main context also bounds its disposable network pool.
 -600s per workflow/run/build,120s startup/child,180s inference,300s pytest case,15s operation/graceful cleanup; no force or assertion weakening. Reassess after three failures; latest human authorization covers necessary diagnostics/retries without another approval question.
@@ -533,3 +533,94 @@ X02 new native failures: read-only SQLite export finish14.841s passes Bob Notes/
 ### Storage repair source verification and password preparation
 
 X02 storage causal baseline4failed1passed/1.01pytest2.779outer. Minimal factory repair uses profile DatabasePaths root/user_files, normalized effective-root cache and explicit FILE_STORAGE_PATH override; existing settings override/reset/relative keys preserved. Normal connected cohort78 assertions pass365warnings23.83pytest28.168outer, but one explicit-setting test's LazySettings teardown fails. Only its proxy ownership corrected; focused finish1passed6warnings0.91pytest2.592outer; no77-control replay. Initial causal test used old default outside tmp; exact synthetic Alice-private blob removed and fixture now fences both old/new package roots inside tmp. No user/runtime files touched. Compile3/Ruff0/Black0; baseline/current productionBandit0/newtests0/operator0/errors0/diffclear. Independent actual review CLEAR after documentation precision and password literal/binding corrections. Operator password preparation reuses normal installed PasswordService with bounded32 interpolation-safe generation, rejects ${ on deserialize, updates exact quoted canonical Admin field/state/env before initializer. Five initial plus4literal/bound/dotenv operator controls pass; temporary trees removed. No live repaired-package acceptance yet. Legacy blobs require ownership-confirmed preservation/migration, no automatic cross-profile fallback or deletion-service redirect; missing bytes cannot be recovered by this path fix. Original runtime unchanged; X02 remains sole active.
+
+
+### Reviewed storage package ready for live checks
+
+X02 storage repair local commit6abd503df1e1665f4643562cf48138f96c6d0b5d, parent29a1,6files293insertions33deletions. Final staged review CLEAR; normal scoped hooks/commit2.575s, exact reviewed patch37331bytes SHA256fc3e2ca64c77a3c9945407deb5805fc5442cd5898124d6ffcf7d9cf98a03b16f. No publication. New private storage-root package PASS7.810s/3817files/3roots/337nodes722edges/cleanupempty; normal wheel/install, every child capped120s and original owners/package/env/source preserved. BASE host pins new site, unchanged TH frontend. Retired failed PGprofile removed39entries1160900bytes after closed sessions/no open handles/official DB teardown. Password preparation/controls/review qualified; fresh PGbrowser validation next. Existing SQLite missing original blobs remain failed until legitimate normal reupload/download recovery, not silently reconstructed or accepted. No original runtime cycle or frontend build.
+
+
+### Browser budget admission and explicit new asset recovery
+
+X02 corrected-password PG preparation25.996s reaches browser callback after both accounts/resources created. Browser refuses before CDP at unchanged90s admission: nested250-35-75-45 allocation leaves nominal95s before preparation. No browser checks ran; cleanup wrongly attempted an attachment never started. Privatefrontend0.005/API2.322actualzero/all current logoutsclosed/full originalpreserved. Reviewed operator correction allocates280s only to browser cohort within unchanged300s pytest cap; othercases250, all local cleanup/supervisor reserves/90s admission unchanged. if(acquisition) retains every started/rejected/late CDP promise but skips never-started cleanup. Three real operator controls pass without attachment/application requests. New SQLite-only original-reupload/read phases reviewed CLEAR: one supported upload per actor with pending-intent/acknowledged IDs, exact-owned bytes; later fresh API GET-only persistence required. Five asset controls/compile/Ruff/Black/Bandit0; no live asset acceptance yet. Missing old blobs remain historical failures; new upload is not automatic restoration. Original runtime remains unchanged.
+
+
+### Live storage reupload and fresh-process persistence accepted
+
+X02 repaired storage native recovery PASS27.210s outer: one legitimate normal original-file upload per actor retains existing MediaID1, then exact owned-byte downloads; independent fresh API process GET-only downloads both pass. API graceful2.220/2.263s, actual lifespan allzero/cleanupempty/all current sessionsclosed/full originalowners preserved. This recreates known fixture bytes via supported reupload; old deleted package blobs are not recovered. Reupload callback initially returned final-read helper readOnly:true despite its earlier uploads; summary flag corrected to false, GET-only phase remains true, no behavioral change or application replay. Product source6abd/private3817package/THfrontend unchanged. Corrected PGbrowser allocation/review ready; no original runtime cycles.
+
+
+### PostgreSQL visible ownership passes; old-document drain fails
+
+X02 PG full browser71.046s: all14visible ownership/switch/oldtab/reloadBack/unsentdraft/independent-context controls pass. Strict finaldrain FAIL: anonymous main Settings26pending/independentSettings4pending/oldLogin0; all3requestledgerscohortmatch. Old-loader Auth/sessions/NotesTasks/buddies/profile/modelmetadata lack terminals; several notification streams200/no terminal. Failureprobe200 but failure-time callback correlation inconclusive;15notificationtasks complete only afterNodecleanup. No browser-cell acceptance. Front graceful0.006/API2.370actualzero/all sessionsclosed/fulloriginalcanonical/ownerspreserved. Trace shared transport/pagehide and BFCache lifecycle causally; do not weaken drain, close contexts before it or replay14passing functional controls. Existing Splash catalog read-only preflight200/exact requested model present; no inference/model changes. Generation-isolation preparation continues independently within X02. Failed official PGprofile is retired after database teardown and eligible guarded disposal.
+
+
+### Direct web GET document-lifetime causal repair scope
+
+All14 PostgreSQL visible isolation controls passed, but final old-document drain
+remains failed. Source confirms direct GETs watch account changes without a
+pagehide/BFCache lifetime. Exact native pending-ID attribution is still unproved.
+First repair scope: direct HTTP(S) GET fetch/body/config preparation, coalesced
+callers, result/rate-limit publication and restored-page fresh requests. Capture
+the document signal before the first await, abort on pagehide and renew only on
+pageshow; retain original coalescing eligibility and promise-identity cleanup.
+No fake account transition or cancellation merely because a tab is hidden.
+POST/refresh rotation, extension messaging, streams, uploads and raw bootstrap
+remain unchanged and separately open. ADR assessment:no new durable rule; retain
+existing request/account ownership. Causal real-request-core tests precede source
+edits; preserve the spent-refresh control, check both configured clients and
+affected transport consumers, then scoped security/review and private build plus
+targeted native lifecycle checks. Do not replay14 passing browser controls or
+claim broader lifecycle acceptance. Original runtime/session stays unchanged.
+
+
+### GET proxy evidence and connected-entry causal preparation
+
+bgRequest-direct GET lifetime causal failures confirmed for fetch/body/config,
+coalescing, calls while retired, late429/500 and spent-refresh/no-replay. Fixed11
+focused cases pass. Reviewer-found warm cached429 settlement fails causally in
+both return modes; await/finally fence added. UI20affected modules623pass before
+warm extension, currentUI237proxy controls+2warm finishes pass; WebUI19other
+modules526pass plus current2proxy modules239pass. New fixture owns/restores its
+listener/visibility spies explicitly; warm clock calibration excludes Event's
+own timestamp. Syntax0; lint baseline/current exact15production+5test inherited
+warnings/0errors/noignored; BanditN/A(TypeScript only). No native acceptance yet.
+Review limits this to bgRequest-direct GETs: actual TldwApiClient config await and
+direct requestWithCurrentConfig, plus apiSend, have other entry points. Before a
+build, add real-client held-config/body and apiSend body/coalescing causal cases;
+only confirmed gaps justify extending the same document-lifetime signal. No new
+architecture rule or authority. POST/refresh rotation, streams/uploads/bootstrap
+remain excluded, and original runtime/session remains unchanged.
+
+
+### Connected GET repair verified; targeted native preparation
+
+Six additional actual-client/apiSend causal failures1.488s confirm held-config,
+direct-body and coalescing gaps. One HTTP(S) document-get-scope helper now binds
+only GET at bgRequest/apiSend and base-client request/requestWithCurrentConfig/
+fetchWithAuth. POST/refresh/stream/upload/bootstrap logic remains unchanged; the
+spent rotation still completes for its original account while its retired GET
+is not replayed. All19focused cases pass2.240s; final32connected modules962pass
+in each client(UI31.238outer/WebUI31.348outer), no skips reported. FiveTS parse0;
+exact baseline/current inherited lint15+4+517production/5test, helper0, all0errors
+and noignored. BanditN/A TypeScript-only product changes. Final review/staged
+review/hooks/commit remain required, then one private frontend build. APIpackage
+remains6abd/3817. Prepare explicit prepare-denial-browser phase plus officialPG
+case within unchanged280/300 budgets. Target denied-Note, normal Logout, exact
+Settings BFCache/history and strict3-ledger drain/fresh server callback/normal
+shutdown; do not replay14passing whole-browser controls. Original runtime/session
+unchanged; X02 remains open and exact native pending-ID attribution is unproved.
+
+
+### Final GET exclusion and disposable-package cleanup
+
+HTTP(S)+real extension runtime.id negative control fails1.342s before helper
+exclusion. Corrected shared guard preserves that extension behavior; complete
+106-case lifetime/refresh module passesUI15.889outer/WebUI16.196outer. Prior
+32modules962each passed before this narrow guard; no unchanged broad replay.
+Final helper syntax/lint0; existing diagnostics unchanged. Operator compile/
+Ruff/Bandit0errors0 and three pure phase/budget controls pass; no app/DB/browser
+action during those controls. Actual+staged review, normal commit, private build
+and native targeted checks remain. Retired unselected worker package removed
+4190entries/78,001,469bytes after no handles/references, UID and symlink guards;
+protected original owners unchanged. No native acceptance or X02 closure.
