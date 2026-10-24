@@ -126,6 +126,8 @@ async def run_rag_search_adapter(config: dict[str, Any], context: dict[str, Any]
     }
     kwargs: dict[str, Any] = {k: v for k, v in (config or {}).items() if k in passthrough_keys}
 
+    # Media DB only: with no notes, character or ChaCha handle passed, the pipeline opens no
+    # ChaCha retriever, so this step needs no ChaCha operation. Passing one needs one (ADR-080, TASK-13897).
     result = await unified_rag_pipeline(
         query=rendered_query,
         sources=sources,

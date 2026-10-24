@@ -1692,6 +1692,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_egress_policy.py
               tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
               tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_notes_step_continued_after_its_creator_postgres.py
               tldw_Server_API/tests/Workflows/test_workflows_db*.py
               tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
               tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py
@@ -3382,6 +3383,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_egress_policy.py
               tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
               tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_notes_step_continued_after_its_creator_postgres.py
               tldw_Server_API/tests/Workflows/test_workflows_db*.py
               tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
               tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py
@@ -4910,6 +4912,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_egress_policy.py
               tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
               tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_notes_step_continued_after_its_creator_postgres.py
               tldw_Server_API/tests/Workflows/test_workflows_db*.py
               tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
               tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py
@@ -6348,6 +6351,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_egress_policy.py
               tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
               tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_notes_step_continued_after_its_creator_postgres.py
               tldw_Server_API/tests/Workflows/test_workflows_db*.py
               tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
               tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py
@@ -7777,6 +7781,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_egress_policy.py
               tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
               tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_notes_step_continued_after_its_creator_postgres.py
               tldw_Server_API/tests/Workflows/test_workflows_db*.py
               tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
               tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py

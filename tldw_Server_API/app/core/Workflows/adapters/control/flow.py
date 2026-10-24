@@ -358,22 +358,23 @@ async def run_map_adapter(config: dict[str, Any], context: dict[str, Any]) -> di
                     preview = preview[:77] + "…"
             except _FLOW_NONCRITICAL_EXCEPTIONS:
                 preview = ""
+            adapter = get_adapter(sub_type)
+            if adapter is None:
+                return {"error": f"unsupported_substep:{sub_type}"}
+            started = False
             try:
                 async with _start_span("workflows.map.item", attributes={
                     "index": int(idx),
                     "sub_type": sub_type,
                     "item_preview": preview,
                 }):
-                    adapter = get_adapter(sub_type)
-                    if adapter is not None:
-                        return await adapter(sub_cfg, sub_ctx)
-                    return {"error": f"unsupported_substep:{sub_type}"}
-            except _FLOW_NONCRITICAL_EXCEPTIONS:
-                # If tracing fails, still attempt the sub-step
-                adapter = get_adapter(sub_type)
-                if adapter is not None:
+                    started = True
                     return await adapter(sub_cfg, sub_ctx)
-                return {"error": f"unsupported_substep:{sub_type}"}
+            except _FLOW_NONCRITICAL_EXCEPTIONS:
+                if started:
+                    raise  # the sub-step's own error: running it again would repeat its side effects (TASK-13886)
+            # The span failed to open: still run the sub-step, untraced
+            return await adapter(sub_cfg, sub_ctx)
 
     results = await _run_cancelling_siblings([_run_one(i, it) for i, it in enumerate(items)])
     return {"results": results, "count": len(results)}

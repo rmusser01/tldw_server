@@ -215,6 +215,21 @@ def chacha_operation(
             _current_operation.reset(token)
 
 
+@contextmanager
+def outside_chacha_operation() -> Iterator[None]:
+    """Run without the caller's operation, for work that may outlive it, such as a detached task.
+
+    ChaCha calls inside take the thread-local fallback or open their own operations. Never
+    wrap such work in one operation of its own instead: concurrent branches would share
+    one connection and lose writes (ADR-080).
+    """
+    token = _current_operation.set(None)
+    try:
+        yield
+    finally:
+        _current_operation.reset(token)
+
+
 _F = TypeVar("_F", bound=Callable[..., Any])
 
 
