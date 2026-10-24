@@ -183,6 +183,9 @@ class TestFileSystemStoragePathSecurity:
             storage_backend._validate_path(outside_path)
 
         assert "escapes base directory" in str(exc_info.value)
+        assert isinstance(exc_info.value.__cause__, ValueError)
+        assert repr(str(outside_path.resolve())) in str(exc_info.value.__cause__)
+        assert repr(str(storage_backend.base_path)) in str(exc_info.value.__cause__)
 
     @pytest.mark.unit
     @pytest.mark.parametrize(

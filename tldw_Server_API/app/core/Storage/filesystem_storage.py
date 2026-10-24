@@ -105,11 +105,11 @@ class FileSystemStorage(StorageBackend):
             resolved = _ordinary_windows_path(path.resolve())
             try:
                 resolved.relative_to(_ordinary_windows_path(self.base_path))
-            except ValueError:
+            except ValueError as exc:
                 raise StorageError(
                     f"Path escapes base directory: {path}",
                     path=str(path),
-                ) from None
+                ) from exc
             return resolved
         except Exception as e:
             if isinstance(e, StorageError):
