@@ -2,6 +2,11 @@ import { useCallback, useEffect, useMemo, useRef } from "react"
 import { useStorage } from "@plasmohq/storage/hook"
 import { useSelectedModel } from "@/hooks/chat/useSelectedModel"
 import { watchChatAccountChanges } from "@/services/chat-account-boundary"
+import { normalizeChatModelId } from "@/utils/chat-model-availability"
+import {
+  parseProviderQualifiedModelSelection,
+  resolveApiProviderForModel
+} from "@/utils/resolve-api-provider"
 import {
   useQuickChatStore,
   QuickChatMessage,
@@ -133,8 +138,12 @@ export const useQuickChat = () => {
           return
         }
 
+        const apiProvider = await resolveApiProviderForModel({ modelId: resolvedModel })
+        if (!isCurrent()) return
+        const selection = parseProviderQualifiedModelSelection(resolvedModel)
         const options: TldwChatOptions = {
-          model: resolvedModel,
+          model: normalizeChatModelId(selection.modelId),
+          apiProvider,
           stream: true
         }
 
