@@ -437,6 +437,85 @@ inferred until hosted verification; the isolated local baseline passed 21 tests.
    Fresh required PR contexts and applicable exact-head full CI remain mandatory;
    keep failed logs and local publication notes. No merge or policy waiver.
 
+   Published `a7e49c86db217c4bd87855fcae33e1c7f2467f33` with protected old-5636 lease;
+   exact-head technical review `5637248537` is clear. Latest license `40072247193`
+   is queued; other PR workflows were not yet indexed at the first read. Resolve
+   them freshly. No same-head full dispatch yet: wait for actual trusted/dev
+   license SUCCESS, check for an existing matching dispatch, then create one
+   exact-branch CI run and verify its head. Recheck PR matrix drift before replacing
+   only non-required CI. Old-5636 full `40067635101` cancellation was requested
+   after publication, not counted as pass. Hosted Python 3.13 remains mandatory.
+
+   Post-publication blocker: GitHub reports the candidate conflicting with dev;
+   only pull_request_target license audits exist, with no normal PR workflows.
+   Live dev `879d375635a71e8b6cdf1ab73b9e80f9a8ecfc00` has one content conflict
+   with this candidate, in `tests/Logging/test_system_log_buffer.py`: upstream's
+   held-lock test overlaps the candidate's initialization-aged-lock regression.
+   `git merge-tree` confirmed this without changing branch, index or worktree.
+   No dev integration was performed under this CI-only watch. Request one explicit
+   integration decision to restore PR CI; do not repeat the question unchanged.
+   Obsolete 5636 full `40067635101` is now confirmed completed/cancelled, not passing.
+
+   2026-10-24T07:22Z: Actual `frontend-license-policy/trusted/dev` SUCCESS from
+   `40072247193` verified on unchanged a7. After checking no matching dispatch,
+   created full exact-branch CI `40073930678` once and directly verified its
+   workflow_dispatch event, branch and exact a7 head; queued. Do not dispatch
+   again. Required PR contexts remain absent because of the unresolved conflict;
+   manual full CI is not a substitute. Integration approval remains unanswered;
+   do not repeat the question. No source edit, rebase, push, merge or waiver.
+
+#### BYOK Worker-Entry Investigation (2026-10-24)
+
+1. **Evidence and reproduction (In Progress):** Exact-a7 full `40073930678`
+   failed Windows Python 3.12 auth-unit-a-l job `120822833087`: one timeout at
+   the lifecycle test's 1s adapter-entry wait, before its timeout/capacity
+   assertions; 759 passed and one expected skip. Preserve
+   `/private/tmp/calendar-pr3019-auth-unit-windows312-120822833087.log`.
+   The local timeout/cancellation cases both pass. Full local shard baseline
+   finished with 759 passes, one skip and a different sandbox IPC socket failure;
+   the IPC case separately passed when permitted. Preserve both local logs; this
+   is not an all-green full baseline. The test matches upstream. Hosted cause is
+   not established; do not widen the watchdog or change runtime admission based
+   only on an inference about scheduling.
+2. **Hosted diagnosis (Pending):** A single debug-enabled failed-job rerun was
+   requested after fresh exact-head verification but rejected as not rerunnable;
+   full workflow remains active and run_attempt is still 1. Retry one diagnostic
+   job rerun only after completion; do not duplicate the full dispatch or cancel
+   valid lanes. Inspect the original first-task outcome if more evidence appears.
+3. **Remediation and verification (Pending):** Only after a root cause is
+   established, add a failing regression and minimal repair, scoped security
+   validation, normal hooks and independent requesting-code-review. No source
+   edit, runtime change, rebase, push, merge or waiver at this checkpoint.
+
+#### Existing-Only DB Fixture Portability (2026-10-24)
+
+1. **Regression evidence (Complete):** Exact-a7 full `40073930678` Windows
+   Python 3.12 db-management-m job `120822834087` failed three setup operations,
+   with 998 passes and 139 expected skips. A URI test creates a Windows-invalid
+   question-mark filename; deletion tests unlink while SQLite still holds a
+   handle. Preserve `/private/tmp/calendar-pr3019-db-management-windows312-120822834087.log`.
+   Deterministic strict filename and real closed-handle guards reproduced all
+   three defects before repair (three failures, one pass).
+2. **Minimal fixture repair (Complete):** Use a portable URI-sensitive filename
+   and release the existing cached connection before unlink, without closing the
+   pool. Require query failure and no recreated file. Keep actual SQLite, all
+   negative assertions, `mode=rw` and production code unchanged. Run focused/full
+   boundary tests, Ruff, test Bandit comparison, shard guard and normal hooks.
+   All 37 existing-only tests pass; Ruff, syntax, normal hooks and diff pass,
+   Bandit has zero nonassert findings/errors on old/current test scope, and shard
+   guard has zero newly uncovered files. Full affected shard passes all 1,140
+   tests locally with no skips; local Python 3.12 is not native Windows proof.
+3. **Review and publication (In Progress):** Independent requesting-code-review
+   `01a16d6b-30b5-7410-932b-f5ab11072c90` is clear/closed: four focused cases,
+   two real reconnect probes and 11 negative controls pass. Both query methods
+   attempt a fresh native connection and receive `SQLITE_CANTOPEN`, not a closed
+   pool error. Escaping remains meaningful on both path flavors. Technical
+   publication clearance only; actual Windows confirmation remains mandatory.
+   Proceed with
+   then fresh writer/auto-merge/head checks, normal commit and exact-old-head
+   lease. ADR not required for test-only fixture validity. No rebase or merge;
+   existing dev conflict and separate BYOK uncertainty remain unresolved.
+
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.
 **Success Criteria:** Streamed responses stop at a byte limit; XML/ICS are bounded before parsing; synchronous provider calls run off the event loop; API and worker reuse scoped credential resolution; a deleted account or failed scan does not stop later polling; diagnostics contain safe context and stack locations without secrets.
