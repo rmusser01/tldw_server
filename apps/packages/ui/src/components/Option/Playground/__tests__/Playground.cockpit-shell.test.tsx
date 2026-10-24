@@ -985,7 +985,7 @@ describe("Playground cockpit shell", () => {
     routeApplyOutcome.value = 'retired';
     render(<Playground />);
     const status = await screen.findByRole('status', { name: 'Character Chat setup status' });
-    expect(status).toHaveTextContent('Character setup was not applied');
+    await waitFor(() => expect(status).toHaveTextContent('Character setup was not applied'));
     expect(routerNavigateState.navigate).not.toHaveBeenCalled();
     expect(messageOptionState.value.setSelectedCharacter).not.toHaveBeenCalled();
     expect(messageOptionState.value.setMessages).not.toHaveBeenCalled();

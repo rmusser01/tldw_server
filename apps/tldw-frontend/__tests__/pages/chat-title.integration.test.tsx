@@ -123,7 +123,8 @@ vi.mock('@/hooks/useDarkmode', () => ({
 vi.mock('@/hooks/useSelectedCharacter', () => ({ useSelectedCharacter: () => [null, vi.fn()] }));
 vi.mock('@/components/Sidepanel/Chat/TtsClipsDrawer', () => ({ TtsClipsDrawer: () => null }));
 vi.mock('@/components/Layouts/HeaderShortcuts', () => ({ HeaderShortcuts: () => null }));
-vi.mock('antd', () => ({
+vi.mock('antd', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('antd')>()),
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   Modal: () => null,
   Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (

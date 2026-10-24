@@ -135,6 +135,11 @@ describe("ChatHeader shortcut toggle", () => {
     expect(props.onOpenCompanionHome).toHaveBeenCalledTimes(1)
   })
 
+  it("keeps the conversation title below the route heading", () => {
+    render(<ChatHeader {...createProps()} />)
+    expect(screen.getByRole("heading", { name: "Chat title", level: 2 })).toBeVisible()
+  })
+
   it("keeps visible focus rings on primary conversation controls", () => {
     render(<ChatHeader {...createProps()} />)
     for (const name of [

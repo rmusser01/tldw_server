@@ -158,7 +158,7 @@ for (const viewport of [
         })
         .click();
       await expect(page.locator('html')).toHaveClass(theme === 'dark' ? /light/ : /dark/);
-      // The offline history scope can reject the palette on dev; verify the header request here.
+      // Wait for the requested palette before sending Escape to its keyboard handler.
       await page.evaluate(() => {
         window.addEventListener('tldw:open-command-palette', () => {
           document.documentElement.dataset.headerPaletteRequested = 'true';
@@ -168,7 +168,10 @@ for (const viewport of [
         .getByRole('button', { name: 'Search commands - Open command palette', exact: true })
         .click();
       await expect(page.locator('html')).toHaveAttribute('data-header-palette-requested', 'true');
+      const palette = page.getByRole('dialog', { name: 'Search commands', exact: true });
+      await expect(palette).toBeVisible();
       await page.keyboard.press('Escape');
+      await expect(palette).toBeHidden();
       await expect(input).toHaveValue('Keep this draft while I use the header.');
       await view.getByRole('button', { name: 'Show keyboard shortcuts', exact: true }).click();
       const viewHelp = page.getByRole('dialog').last();

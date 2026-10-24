@@ -604,7 +604,7 @@ export function ChatHeader({
           </button>
         )}
         <div className="min-w-0 flex-1">
-          <h1 className="truncate text-sm font-semibold leading-5 text-text">
+          <h2 className="truncate text-sm font-semibold leading-5 text-text">
             {canEditTitle ? (
               isEditingTitle ? (
                 <Input
@@ -641,7 +641,7 @@ export function ChatHeader({
             ) : (
               chatTitle || t("option:newChat", "New Chat")
             )}
-          </h1>
+          </h2>
           {sessionBadges}
         </div>
         <div className="flex shrink-0 items-center gap-0.5 sm:gap-1">
