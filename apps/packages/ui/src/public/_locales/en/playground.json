@@ -4640,5 +4640,26 @@
   },
   "messageViews_sourcesCount_other": {
     "message": "{{count}} sources"
+  },
+  "composer_calmPlaceholder": {
+    "message": "Write a message…"
+  },
+  "composer_instructionsAndPeople": {
+    "message": "Prompts & people"
+  },
+  "composer_responseAndTools": {
+    "message": "Response & tools"
+  },
+  "composer_toolsPanel": {
+    "message": "Composer tools"
+  },
+  "composer_toolsLabel": {
+    "message": "Tools"
+  },
+  "composer_shortcutHint": {
+    "message": "/ commands · @ mentions"
+  },
+  "composer_toolsPreferenceUnavailable": {
+    "message": "Display preference unavailable. Tools still work for this visit."
   }
 }

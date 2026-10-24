@@ -50,7 +50,7 @@ const playgroundBasics: TutorialDefinition = {
     },
     {
       target:
-        '[data-testid="composer-casual-advanced-chip"], [data-testid="chat-input"]',
+        '[data-testid="composer-options-toggle"], [data-testid="chat-input"]',
       titleKey: "tutorials:playground.basics.customizeTitle",
       titleFallback: "Customize Responses",
       contentKey: "tutorials:playground.basics.customizeContent",

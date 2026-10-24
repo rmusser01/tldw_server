@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React from "react"
+import { BuddyManagementButton } from "@/components/Common/PersonaBuddy/BuddyManagementButton"
 import { resolveEffectiveAssistantState } from "@/hooks/chat/effective-assistant-state"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
@@ -1224,6 +1225,8 @@ vi.mock("../ComposerToolbar", async importOriginal => {
   const actual = await importOriginal<typeof import("../ComposerToolbar")>()
   const StubToolbar = ({
     modelSelectButton,
+    serverChatId,
+    onRolePlayTriggerCapture,
     researchLaunchButton,
     toolsButton,
     sendControl,
@@ -1233,6 +1236,8 @@ vi.mock("../ComposerToolbar", async importOriginal => {
     onOpenModelSettings
   }: {
     onOpenModelSettings?: () => void
+    serverChatId?: string | null
+    onRolePlayTriggerCapture?: (element: HTMLButtonElement) => void
     modelSelectButton?: React.ReactNode
     researchLaunchButton?: React.ReactNode
     toolsButton?: React.ReactNode
@@ -1247,7 +1252,13 @@ vi.mock("../ComposerToolbar", async importOriginal => {
       {modelSelectButton}
       {researchLaunchButton}
       {toolsButton}
-      {sendControl}
+      <div data-testid="composer-inline-send-control">{sendControl}</div>
+      <div onClickCapture={(event) => {
+        const button = event.currentTarget.querySelector("button")
+        if (button) onRolePlayTriggerCapture?.(button)
+      }}>
+        <BuddyManagementButton target={serverChatId ? { scope_type: "conversation", scope_id: serverChatId } : null} onConversationSettings={rolePlayActions?.onOpenRolePlaySetup} />
+      </div>
       <button type="button" onClick={rolePlayActions?.onOpenRolePlaySetup}>Open role-play setup</button>
       <button
         type="button"
@@ -5375,18 +5386,17 @@ describe("PlaygroundForm role-play starter", () => {
     const user = userEvent.setup()
     render(<PlaygroundForm droppedFiles={[]} mobileCockpitModeActive />)
     expect(screen.queryByRole("button", { name: /(?:Hide|Show) composer options/ })).not.toBeInTheDocument()
-    const trigger = screen.getByRole("button", { name: "Customize chat" })
+    const trigger = screen.getByTestId("composer-options-toggle")
+    await waitFor(() => expect(trigger).toBeEnabled())
     expect(trigger).toBeVisible()
     expect(screen.getByRole("button", { name: /Select model|deepseek-chat/i })).toBeVisible()
     expect(screen.getByTestId("composer-inline-send-control")).toBeVisible()
     await user.click(trigger)
-    const customization = screen.getByRole("region", { name: "Customize chat" })
+    const customization = screen.getByRole("region", { name: "Composer tools" })
     expect(customization).toBeVisible()
     const buddy = within(customization).getByRole("button", { name: "Buddy & Persona", hidden: true })
-    expect(buddy).not.toBeVisible()
-    expect(within(screen.getByRole("group", { name: "Character & your role" })).getByRole("button", { name: "Role-play setup" })).toBeVisible()
-    await user.click(within(customization).getByText("Advanced customization", { selector: "summary" }))
     expect(buddy).toBeVisible()
+    expect(within(screen.getByRole("region", { name: "Prompts & people" })).getByRole("button", { name: "Role-play setup" })).toBeVisible()
   })
 
   it("allows Customize Escape while the real embedded Search & Context section remains open", async () => {
@@ -5394,7 +5404,8 @@ describe("PlaygroundForm role-play starter", () => {
     viewportState.realToolbar = true
     const user = userEvent.setup()
     render(<PlaygroundForm droppedFiles={[]} />)
-    const trigger = screen.getByRole("button", { name: "Customize chat" })
+    const trigger = screen.getByTestId("composer-options-toggle")
+    await waitFor(() => expect(trigger).toBeEnabled())
     await user.click(trigger)
     await user.click(screen.getByRole("button", { name: "Search & Context" }))
     const search = screen.getByRole("button", { name: "Close Search & Context" })
@@ -5410,7 +5421,8 @@ describe("PlaygroundForm role-play starter", () => {
     viewportState.realToolbar = true
     const user = userEvent.setup()
     render(<PlaygroundForm droppedFiles={[]} />)
-    const trigger = screen.getByRole("button", { name: "Customize chat" })
+    const trigger = screen.getByTestId("composer-options-toggle")
+    await waitFor(() => expect(trigger).toBeEnabled())
     expect(trigger).toHaveAttribute("aria-expanded", "false")
     act(() => window.dispatchEvent(new CustomEvent("tldw:open-assistant-select", { detail: { tab: "character" } })))
     const tab = await screen.findByRole("tab", { name: "Characters" })
@@ -7422,7 +7434,7 @@ describe("PlaygroundForm role-play starter", () => {
     }
 
     expect(() => render(<PlaygroundForm droppedFiles={[]} />)).not.toThrow()
-    expect(document.querySelector("#composer-options-panel")).toBeInTheDocument()
+    expect(screen.getByTestId("composer-toolbar")).toBeInTheDocument()
   })
 
   it("opens character selection from the starter and returns focus after selecting the default assistant", async () => {
