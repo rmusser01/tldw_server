@@ -10,7 +10,7 @@
 
 ## Global constraints
 
-- API package source6abd503df1 on reviewed dev22c9/current storage-root package3817files. GET frontend repair is qualified locally and awaits reviewed commit/build/native checks; last native buildTHttd0p00MlSSxPE1Yyre. Refresh dev before later publication, not after every step.
+- Current GET frontend sourcef286a3b3cb on reviewed dev22c9/buildfGDxU2Zf7SJMROKg0qgUg; targeted history boundaries passed. API package source6abd503df1/storage-root3817files is the last native-tested Python; the locally qualified canonical-preset repair awaits private package refresh and cache/generation/isolation validation. Refresh dev before later publication, not after every step.
 - Preserve original API50010/49993, frontend50863/50855, Chrome54716/54710, five saved messages, exact draft/URL and full canonical objects. No original runtime cycle.
 - Keep the original default Chrome context/tab untouched. X02 uses one owned temporary main context; create a second owned context only for the independent concurrent-account check, then close both owned contexts. Two tabs within the main context share storage and are not independent identities. The owned main context also bounds its disposable network pool.
 -600s per workflow/run/build,120s startup/child,180s inference,300s pytest case,15s operation/graceful cleanup; no force or assertion weakening. Reassess after three failures; latest human authorization covers necessary diagnostics/retries without another approval question.
@@ -624,3 +624,126 @@ action during those controls. Actual+staged review, normal commit, private build
 and native targeted checks remain. Retired unselected worker package removed
 4190entries/78,001,469bytes after no handles/references, UID and symlink guards;
 protected original owners unchanged. No native acceptance or X02 closure.
+
+
+### Reviewed GET repair committed and built privately
+
+Independent actual+staged review CLEAR; normal scoped hooks/local commitf286a3b3cb
+pass2.819s. Committed7path patch exactly reviewed61131bytes SHA256
+2e05b1db1f532ca905b55b6123ca1ae5a481edd760742f30261d22c8687e7b0c; unpublished.
+Private normal buildPASS75.245s/fGDxU2Zf7SJMROKg0qgUg/7732inputs/5rewrites18908,
+token-sync/bundle593.7KBunder600KB, no source/owner restoration errors. Existing
+configured typecheck skip disclosed; no fullTS qualification. APIpackage6abd
+unchanged3817files. Functional build pin verified; targeted officialPG native
+denied-Note/logout/exactSettingshistory/strictdrain check now running. No native
+acceptance yet; originalsession/runtime preserved, X02open/X03untouched.
+
+
+### Repaired-build PostgreSQL target still has one pending session read
+
+Actual62.758outer/61.06pytest6warnings FAIL at finalstrictdrain. Foreign Note
+denial, visible known Notes tour Skip, normal navigation/logout and exactSettings
+history625/index1 pass; one GET/auth/sessions request92860.152 lacks status/terminal
+in all3matching ledgers. No native/browser acceptance. Notification2starts/2done
+are post-Node-cleanup only; readiness failure-time correlation inconclusive.
+Browser final originalTab assertion was not reached after drain; parent full
+originalcanonical/owners pass. Frontgrace0.006exit0/API2.310graceful-15, actual
+lifespan zero/shutdowncomplete/cleanupempty/all current sessionsclosed. Need exact
+current-build loader/initiator attribution; do not infer another source cause.
+Existing outer formatter omitted that navigation detail from RAM; no old log or
+proof recovery. First changed-build SQLite target will retain bounded public
+loader/initiator/lifecycle fields, same driver/guards/budgets, no14control replay.
+Failed officialPG profile is disposable after teardown/nohandles/ownershipguard.
+
+
+### SQLite identifies restored loader; prepare a transport-only failure probe
+
+Changed-build SQLite targetFAIL52.953s after same4visible passes. OneGET/auth/me
+94151.148 status/terminalnull in matching3ledgers; untruncated journal records
+starts1/no previousTerminal and originalSettings loader2FDA6561C133E3C93E12F65D7743E018
+restored via actualBackForwardCacheRestore. Public current _app16:12586 maps to
+request-core fetch. Start relative restore remains unknown; no exact sourcecause.
+Parentcanonical/owners preserved; browser finalTab assertion after drain notrun.
+Front0.006/API2.234graceful-15/actualzero/lifespancomplete/cleanupempty/all sessions
+closed. Failuretime server correlation still inconclusive. Shared pre-entry
+Auth/current-user and connection-check awaits are hypotheses, not attribution.
+Next distinct diagnostic: passive request start timestamps; at actual failure
+only, bounded anonymous GET of observed auth/me or auth/sessions via both private
+API and frontend, within existing14s probe cap. Fixed whitelisted paths only,
+status/elapsed/byte counts in RAM, no queries/headers/bodies in output. No app
+change, writes, models, build or originalcycle; strictdrain remains required.
+Pure whitelist/pairing/timestamp controls and review precede one SQLite run.
+
+
+### Read-only failure diagnostic reviewed
+
+Source reviewCLEAR; whitelist11 +exact anonymous pairing/clock1 +actualNode
+journal receipt/CDPclock/reused-ID/listenercleanup1 controls pass. Compile/Ruff/
+currentBandit0findings0errors. Node receipt time is eventReceivedAt, not network
+start; retain finite CDP networkTimestamp/networkWallTime separately and make no
+BFCache start-order claim from receipt time alone. One distinct SQLite diagnostic
+uses existing fGD build, same strictdrain/14s probe/2s HTTP/native caps and original
+preservation. No app source/build/model/credential change or acceptance waiver.
+
+
+### Three native failures reassessed; isolated history calibration
+
+X02 latest repaired-build SQLite diagnostic: FAIL51.195outer after four visible controls passed. One GET/auth/me97147.148 has no status/terminal in all three browser ledgers; actual CDP wall start1792842337.138369 precedes Notes commit1792842337162, and originalSettings loaderE9D22B7D502B81D635385BFF1BB8AC34 is restored by BFCache. Current public request-core fetch initiator16:12586. Failure-time fresh anonymous auth/me returns expected401/66bytes: directAPI4.716ms,frontend7.057ms. Exact fresh readiness callback task_done has pending_tasks/server_tasks/queued all0 while browser remains open; frontend has LISTEN only. This does not establish phantom-browser attribution or native acceptance. Notification2starts/2done remain post-Node-cleanup observations. Front0.004/API2.212 graceful, actual lifespan zero/complete/cleanupempty/current sessionsclosed; parent original canonical objects and owners preserved. Browser final original-tab assertion after strict drain was not reached.
+Three post-build native failures are reassessed rather than replayed. Product document-GET lifetime tests/build are qualified, but pre-entry await and Chrome BFCache ledger hypotheses remain unproved. Next distinct calibration uses one temporary owned context/tab in existing Chrome and an isolated ephemeral loopback HTTP fixture, two synthetic pages and one held GET. Require native fetch AbortError, pagehide/pageshow persisted, actual server response-close before finish, actual history restore and all three event-ledger snapshots before context close. First prove fixture cancellation with a real local HTTP client. Strict application acceptance/drain remains unchanged. Total60s with15s reserved cleanup/15s operations; no original API/frontend/Chrome restart, app navigation, credentials, models, installs/builds, proof artifacts or Git mutation. Later source changes require causal evidence. ADR not required: diagnostic only, existing lifecycle architecture unchanged. Existing read-only reviewer checks operator before native execution. Latest human necessary-diagnostic/retry approval applies.
+
+
+### Isolated calibration guards and review
+
+X02 isolated history-calibration preparation: normal real loopback client cancellation PASS0.228s, response-close before response finish and listener release; exact-origin/terminal/listener ledger control passes, Node syntax passes. Initial sandbox listenerEPERM was permission-only before app/browser action, corrected with authorized escalation. Read-only review found raw AssertionError message privacy risk and post-BFCache callback-order seam; metadata-only own-file frames now replace main raw message, and an existing-left bounded wait requires actual persisted pageshow plus AbortError before copying receipts. No app source/build/credentials change. Native calibration has not run; application strict drain/acceptance remains unchanged.
+
+
+### Real cancellation reproduces three stale event ledgers
+
+X02 isolated Chrome/BFCache calibration PASS0.591outer: real fetch AbortError plus pagehide.persistedtrue/pageshow.persistedtrue and actual BackForwardCacheRestore; held server response closed before finish and before browser cleanup. Despite that, page/context/CDP request ledgers each remain1 with null status/terminal after navigation and Back. All owned handles/listener closed, original tab/draft and protected owners unchanged. This causally establishes event-ledger nonterminal is not proof of a live connection; it does not attribute each prior application request or accept X02. Next one synthetic same-tab normal reload will observe whether native terminal events arrive; no ledger mutation or acceptance exception. Same isolated60s/15s reserve/15s ops scope, no app API/frontend/runtime/credentials/models/build action. If events remain absent, correct validation around real owned-context closure and exact server task/stream/zero receipts, retaining unknown event metadata and all privacy/write assertions. Review before invocation.
+
+
+### Correct event-ledger measurement without inventing request completion
+
+X02 synthetic reload also reproduces stale event records: calibration PASS0.547outer, after normal reload page/context/raw remain1 with nullstatus/terminal, while native AbortError and server response-close precede browser cleanup. Owned resources/listener/original tab/draft/owners preserved. Read-only design review: nonempty browser ledgers are not live-connection proof, but native GETs must remain UNKNOWN rather than invented cancelled/completed. Correct only the X02 driver: retain strict empty default; finite <=2 observed anonymous auth/me/auth/sessions GET residuals may defer only with matched three-ledger counts/signatures, no response/write, exact request IDs and actual original-loader navigate-away/BFCacheRestore journal. All functional/privacy assertions and successful complete auth writes remain mandatory before closure; authority/write observers remain through closure. Require exact owned contexts/pages CLOSED; parent independently requires that receipt, unchanged notification/SSE/server lifecycle, fresh zero-task readiness and bounded graceful release plus original preservation. Unknown reads cannot count as own/denial/response evidence. Pure positive/refusal/closure controls and independent source review precede changed-driver native checks. No product edit/build follows this calibration; ADR not needed because validation measurement only.
+
+
+### Sequence and closure fences validated
+
+X02 changed-driver controls now pass: unknown-history1positive33refusals; complete authwrite1positive3refusals; closure request-start1positive3refusals; actual navigationJournal same-millisecond pre-away positive/post-BFCache-restore refusal and listener cleanup. Parent exact context-closure1positive4refusals pass. Review caught timestamp-order ambiguity and passive-detach gap before native: request now captures exact navigation row count and requires later away/restore sequence; all-API request-start map epoch remains fenced through awaited owned context closure, rejecting later starts. Node syntax/Pythoncompile/Ruff pass; current operator Bandit0findings0errors. No application acceptance yet; existing strict API/SSE/zero/graceful/preservation gates unchanged. Completed isolated-calibration operator is removed after both successful native results and listener/context release; concise results remain in task/plan, no proof payload retained.
+
+
+### Both native history boundaries pass; proceed to generated isolation
+
+X02 repaired-driver native history boundary PASSES both backends on fGD/f286 frontend and6abd installed API: SQLite21.269outer; official PostgreSQL1passed6warnings28.41pytest30.081outer. Each run passes foreign-Note denial, known tour Skip, normal navigation/Logout and exact originalSettings history restore. One auth/me event record per run remains explicitly UNKNOWN/completionEvidencefalse; it is not endpoint completion evidence. All owned contexts/pages closed, no new API requests after final closure fence, all current sessionsclosed, both notification tasks2/2 complete before browser return; fresh strict API/server/SSE checkpoint passes. Frontend onlyLISTEN before graceful release0.005s; API graceful2.245SQLite/2.334PG, actual lifespan active/pending/server/connections0, no app/cleanup errors. Browser original URL/draft and full canonical objects/owners preserved. PostgreSQL disposable profile removed after official teardown/nohandles/ownership guard:61entries1,709,453bytes. No14control replay, no product/source/build change or X02 closure.
+Next X02 work: actual generated RAG/representative Chat plus cache separation and in-flight switch. Prepare real cached retrieval with Bob positive, identical Alice query without Bob nonce, check candidates/citations/answer, then representative real Alice Chat on existing Splash8010. Reuse provider_config for ONLY disposable private config; bind semantic cache to that private profile through supported RAG_SEMANTIC_CACHE_DIR and leave models/services untouched. Normal authenticated public calls only, no mock generation, downloads, hidden retries or unknown-write replay. New generator requests retain180s and total600/officialcase300, normal current-session cleanup and actual zero/graceful/preservation gates. Pure driver guards, source review and operator security checks precede live use; any demonstrated product failure requires normal causal red/green. X02 remains active; X03 untouched;34/43 accepted.
+
+
+### Generated request returns; cache control needs actual metadata
+
+X02 first SQLite generated-isolation run FAIL16.962outer at require_rag BobGenerated cache-hit control. Warm Bob retrieval passed coldFalse/owned-doc/noAlice controls; Bob generation HTTP200 response returned, then expected cache_hitTrue failed. No Alice RAG/Chat dispatched and no generation/answer acceptance claimed; safe response metadata was not retained. No old-log/proof/body recovery. Actual API graceful2.182/lifespanall0/shutdowncomplete, all current sessionsclosed, protected owners unchanged. Private config only uses reviewed existing8010 external provider; catalog HTTP200/expected model was checked before run. Pure generator guards passed before a temporary-path alias setup error; canonical tempconfig-only follow-up passes; no application change. Current compile/Ruff/Black/Bandit0 and source review clear within stated scope.
+Next distinct diagnostic: at most two ordinary Bob RAG retrieval-only requests with identical cache-enabled payload, no model calls, capturing safe cache_hit/retrieval_cache_hit/generation_executed booleans, document/error counts and fixed whitelisted cache-bypass reason/code only. Retain strict own-positive/noAlice checks, but cache-hit result is observed diagnosis, not passed isolation. Improve the cache-control failure message with that same safe metadata before future generation; no raw bodies, keys, queries, credentials or cache-file contents. Inspect actual current cache identity/write/authorization-scope source before any product change; no bypass of fail-closed caching. Same private API/profile/600host/15request/120startup/15graceful/current-session/zero/preservation scope. Source review precedes execution; latest human diagnostics/retries authority applies. X02 remains open and X03 untouched.
+
+
+### Confirmed Balanced-preset explicit-setting defect
+
+X02 retrieval-only diagnostic completes13.954outer: two identical Bob requests each1owned document/0errors/cacheHitfalse/retrievalCacheHitfalse/generationExecutedfalse; both explicitly report cache_bypassed.reason=secondary_retrieval_mode. No model requests in this explicit ten-feature-disabled diagnostic; actual installed publicschema/default-resolver guard verifies10falsefields against forcedtrue defaults. Earlier primary-cwd import selected primarysource and is UNQUALIFIED; corrected source/private-profile binding only, no application startup or qualification adopted from that control. Actual private config search_default_mode=balanced confirmed by public-key-only read. Current unified_pipeline2705-2770 re-enables expand_query despite explicitFalse when Balancedpreset is selected; canonical schema promises individual explicit overrides. This source behavior explains the observed intentional cache bypass; no auth/cache leak is claimed. API graceful2.238/actualallzero/sessionclosed/ownerspreserved.
+Bounded repair design under existing human all-necessary-fix authorization: preserve current public schema and canonical Pydantic field-set through ResolvedRAGRequest into preset application; explicitFalse and explicitdefault values win, while omittedsettings and legacy direct-call heuristic remain. Search all five production dataclass constructors and affected standard/batch/agentic/RPG consumers. Add normal causal publicschema/resolver/realpipeline cache regression first, plus omitted/default-value controls, then minimal shared fix, affected checks, compile/lint/baseline-current scopedBandit and independent actual/staged review/normalhooks/commit. Refresh private installed package through existing build/install path only after qualification; current frontend unchanged. Revalidate genuinely affected native cache/generation/isolation only; do not change the environment/preset to hide the defect. ADR required:no; restoring existing documented request precedence, no new public authority/schema/storage/fusion rule (ADR053 fusion unaffected). X02 remains active beforeX03;34/43 accepted.
+
+
+### Canonical preset repair and connected qualification
+
+Normal causal regression on unchanged production:4failed3passed. Canonical explicit
+field-set now survives request resolution; presets and compatibility aliases
+cannot override explicit values. All six public preset knobs are covered; HyDE
+is internal-only and its omitted quality preset remains intact, with a separate
+internal canonical-False control. No public schema/API fingerprint change.
+Independent review caught a scalar-plan coherence edge; two new causal failures
+(3,.7) and (10,0) corrected by replacing only plan.top_k, preserving min_score.
+Final eight-module qualification:101passed8warnings/2.78pytest4.825outer/natural0,
+including10 new cases and real isolated scoped cache. Compile3 pass; touched
+baseline/current Bandit0findings0errors; Ruff no new diagnostics; both inherited
+whole-file Black flags retained, new test clean. An initial new-test C408 was
+corrected; an initial test-only nonexistent-public-HyDE assumption was corrected
+without a product/schema change. Actual/staged review and normal hooks/commit
+precede private wheel refresh and affected native cache/generation/isolation.
+No native acceptance or X02 closure yet; protected original session untouched.
