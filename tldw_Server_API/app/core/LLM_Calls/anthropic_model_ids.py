@@ -6,6 +6,11 @@ import re
 from collections.abc import Collection
 from typing import Any
 
+_LEGACY_ALIASES = {
+    "claude-haiku-3.5": "claude-3-5-haiku-20241022",
+    "claude-sonnet-3.7": "claude-3-7-sonnet-20250219",
+}
+
 _DOTTED_VERSION = re.compile(r"^(claude-(?:opus|sonnet|haiku|fable|mythos)-\d+)\.(\d+)", re.IGNORECASE)
 
 
@@ -16,6 +21,8 @@ def canonical_anthropic_model_id(model: str | None) -> str:
     picker, saved conversations and config defaults still hold dotted names. This is the one place that maps them.
     """
     value = model or ""
+    if legacy := _LEGACY_ALIASES.get(value.lower()):
+        return legacy
     return _DOTTED_VERSION.sub(r"\1-\2", value)
 
 
