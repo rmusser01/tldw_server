@@ -152,3 +152,43 @@ def test_concurrent_creates_enforce_owner_quota_without_timing_sleeps(tmp_path) 
     assert unexpected_errors == []
     assert len(created_ids) == 1
     assert len(quota_errors) == 1
+
+
+@pytest.mark.parametrize("operation", ["get", "delete"])
+def test_default_drafts_cannot_cross_configured_profiles(monkeypatch, tmp_path, operation):
+    """Reused numeric actors in different deployments must not share handoffs."""
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import document_upload_drafts as module
+
+    # Contain the old installation-wide fallback while exercising real SQLite.
+    monkeypatch.setattr(module, "get_project_root", lambda: str(tmp_path / "shared-install"), raising=False)
+    if clear := getattr(module.get_document_upload_draft_store, "cache_clear", None):
+        clear()
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "profile-a" / "users"))
+    first = module.get_document_upload_draft_store()
+    created = first.create(owner="2", payload={"text": "CANARY-profile-a-private"})
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "profile-b" / "users"))
+    second = module.get_document_upload_draft_store()
+
+    foreign = getattr(second, operation)(owner="2", draft_id=created.draft_id)
+
+    assert foreign is (None if operation == "get" else False)  # nosec B101 -- pytest verifies denial.
+    assert (  # nosec B101 -- pytest verifies retained owner data.
+        first.get(owner="2", draft_id=created.draft_id).payload == {"text": "CANARY-profile-a-private"}
+    )
+
+
+def test_default_drafts_share_only_within_the_configured_profile(monkeypatch, tmp_path):
+    """Worker-local handles retain the same profile-wide quota and data."""
+    from tldw_Server_API.app.core.Ingestion_Media_Processing import document_upload_drafts as module
+
+    monkeypatch.setattr(module, "get_project_root", lambda: str(tmp_path / "shared-install"), raising=False)
+    monkeypatch.setenv("USER_DB_BASE_DIR", str(tmp_path / "profile" / "users"))
+    first = DocumentUploadDraftStore(max_drafts_per_owner=1)
+    second = DocumentUploadDraftStore(max_drafts_per_owner=1)
+    created = first.create(owner="2", payload={"text": "same-profile"})
+
+    assert (  # nosec B101 -- pytest verifies same-profile worker sharing.
+        second.get(owner="2", draft_id=created.draft_id).payload == {"text": "same-profile"}
+    )
+    with pytest.raises(DocumentUploadDraftQuotaError):
+        second.create(owner="2", payload={"text": "over-quota"})

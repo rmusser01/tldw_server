@@ -115,3 +115,16 @@ for exact coverage and recovery limits.
 
 ADR assessment: no new support policy or migration architecture is introduced;
 this records executed coverage within the existing migration boundary above.
+
+## Temporary document upload handoffs
+
+Short-lived document handoffs use
+`<USER_DB_BASE_DIR>/document_upload_drafts.db`, shared by workers within that
+configured deployment. This remains a SQLite store when content uses PostgreSQL.
+Give separate deployments separate data roots.
+
+After upgrading from the installation-wide draft store, recreate any pending
+upload handoff by selecting its document again. The old
+`Databases/document_upload_drafts.db` is neither read nor migrated automatically:
+its numeric owner IDs cannot be safely attributed to a configured deployment.
+Saved sources and Chats retain their normal migration and backup procedures.
