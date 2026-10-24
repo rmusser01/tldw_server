@@ -745,7 +745,14 @@
     "previewChanges": "Preview changes",
     "previewCurrent": "Current",
     "previewAfterApplying": "After applying",
-    "sceneDetails": "Scene details"
+    "sceneDetails": "Scene details",
+    "shortcutHint": "/ commands · @ mentions",
+    "toolsLabel": "Tools",
+    "instructionsAndPeople": "Prompts & people",
+    "toolsPanel": "Composer tools",
+    "calmPlaceholder": "Write a message…",
+    "responseAndTools": "Response & tools",
+    "toolsPreferenceUnavailable": "Display preference unavailable. Tools still work for this visit."
   },
   "tour": {
     "modelTitle": "Choose a Model",

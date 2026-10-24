@@ -17,7 +17,7 @@ describe("P0/P1 tutorial selector contracts", () => {
     const controls = [
       '[data-testid="model-selector"]',
       '[data-testid="chat-input"]',
-      '[data-testid="composer-casual-advanced-chip"]'
+      '[data-testid="composer-options-toggle"]'
     ]
     const collapsedProControls = ['[data-testid="chat-input"]']
     expect(

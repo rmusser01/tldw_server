@@ -57,8 +57,9 @@ describe("Playground cockpit regression guard", () => {
     expect(source).toContain("mobileCockpitComposerConstrained");
     expect(source).toContain("mobileCockpitModeActive={mobileCockpitComposerConstrained}");
     expect(source).toContain("min-h-0 overflow-y-auto overscroll-contain");
-    expect(formSource).toContain("suppressComposerToolbarForMobileCockpit");
-    expect(formSource).toContain('<div className="hidden">{composerToolbarNode}</div>');
+    const toolbarSource = readFileSync(path.resolve(__dirname, "../ComposerToolbar.tsx"), "utf8");
+    expect(formSource).not.toContain("suppressComposerToolbarForMobileCockpit");
+    expect(toolbarSource).toContain("max-h-[35dvh] overflow-y-auto");
     expect(formSource).toContain("facetsSlot={composerToolbarSlot}");
     expect(formSource).toContain("bottomBarSlot={composerToolbarSlot}");
   });

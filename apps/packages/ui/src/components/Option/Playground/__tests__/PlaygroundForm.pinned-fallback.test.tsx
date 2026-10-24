@@ -892,7 +892,7 @@ describe("PlaygroundForm pinned fallback", () => {
 
     expect(textarea).toHaveAttribute(
       "placeholder",
-      "Type a message... (/ commands, @ mentions)"
+      "Write a message…"
     )
     expect(
       screen.getByTestId("playground-composer-disconnected-notice")

@@ -5,7 +5,7 @@ const casualPreferenceKey = "playgroundComposerCasualAdvancedControlsOpen"
 
 /** Existing presentation preference, with session-only recovery on storage failure. */
 export function useCasualComposerDisclosure(
-  preferenceKey: "playgroundComposerCasualAdvancedControlsOpen" | "playgroundComposerAdvancedControlsOpen" = casualPreferenceKey
+  preferenceKey: "playgroundComposerCasualAdvancedControlsOpen" | "playgroundComposerAdvancedControlsOpen" | "playgroundComposerOptionsExpanded" = casualPreferenceKey
 ) {
   const storage = React.useMemo(() => createSafeStorage(), [])
   const [open, setOpen] = React.useState(false)

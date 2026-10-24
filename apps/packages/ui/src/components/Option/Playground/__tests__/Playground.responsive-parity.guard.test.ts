@@ -48,18 +48,13 @@ describe("Playground responsive parity guard", () => {
     expect(playgroundSource).toContain("px-2 pt-1 sm:px-4 sm:pt-2")
     expect(playgroundSource).toContain("px-2 sm:px-4")
     expect(playgroundSource).toContain('!isMobileViewport && !focusModeActive ? (')
-    expect(formSource).toContain(
-      "grid grid-cols-[auto_minmax(0,1fr)] items-end gap-2"
-    )
-    expect(formSource).toContain(
-      "col-span-2 flex shrink-0 items-end justify-end gap-2 self-end"
-    )
-    expect(formSource).toContain(
-      "px-2 pb-0 sm:px-4 sm:pb-0"
-    )
-    expect(formSource).toContain("rounded-xl")
-    expect(formSource).toContain("p-2 text-text shadow-sm")
-    expect(formSource).toContain("sm:rounded-3xl sm:p-3 sm:shadow-card")
+    const toolbarSource = fs.readFileSync(path.resolve(__dirname, "../ComposerToolbar.tsx"), "utf8")
+    expect(formSource).toContain("flex w-full min-w-0 flex-col")
+    expect(formSource).toContain("rounded-2xl border border-border bg-surface p-3")
+    expect(toolbarSource).toContain('data-testid="composer-bottom-bar"')
+    expect(toolbarSource).toContain("flex flex-wrap items-center justify-between")
+    expect(toolbarSource).toContain('hidden={!optionsExpanded}')
+    expect(toolbarSource).toContain("max-h-[35dvh] overflow-y-auto")
   })
 
   it("keeps cockpit mode controls inside the chat utility row instead of a top rail", () => {
@@ -118,11 +113,11 @@ describe("Playground responsive parity guard", () => {
 
     expect(playgroundSource).toContain("composerMessageCount")
     expect(formSource).toContain("composerMessageCount")
-    expect(formSource).toContain("keepComposerToolbarVisible")
-    expect(formSource).toContain("max-h-[480px] overflow-hidden opacity-100 visible")
+    expect(formSource).toContain("optionsLoading={composerOptionsLoading}")
+    expect(toolbarSource).toContain('data-testid="composer-bottom-bar"')
     expect(contextItemsSource).toContain('id: "messageCount"')
     expect(contextItemsSource).toContain('id: "sessionStatus"')
-    expect(toolbarSource).toContain("composer-message-count-chip")
+    expect(toolbarSource).toContain("neutralContextItems.map")
     expect(toolbarSource).toContain("composer-session-status-chip")
   })
 })

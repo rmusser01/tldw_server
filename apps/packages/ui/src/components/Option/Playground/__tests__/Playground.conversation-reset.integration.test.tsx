@@ -138,7 +138,7 @@ describe("Playground conversation reset (#3106)", { timeout: 60_000 }, () => {
     const view = await renderPlayground({ server })
     await sendFromComposer(view, "Sensitive first question")
 
-    await view.user.click(screen.getByRole("button", { name: "Customize chat" }))
+    await view.user.click(screen.getByTestId("composer-options-toggle"))
     await view.user.click(await screen.findByRole("button", { name: "More tools" }))
     await view.user.click(await screen.findByText("Clear conversation"))
     await view.user.click(await screen.findByRole("button", { name: "Confirm" }))
@@ -210,7 +210,7 @@ describe("Playground conversation reset (#3106)", { timeout: 60_000 }, () => {
     })
     await openSavedServerChat(view, { title: "Saved topic", lastMessage: "Saved answer" })
 
-    await view.user.click(screen.getByRole("button", { name: "Customize chat" }))
+    await view.user.click(screen.getByTestId("composer-options-toggle"))
     await view.user.click(await screen.findByRole("button", { name: "More tools" }))
     await view.user.click(await screen.findByText("Clear conversation"))
     // antd confirm dialogs live outside the React tree, and jsdom never finishes

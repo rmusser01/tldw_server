@@ -279,7 +279,7 @@ export const renderPlayground = async ({
     const state = useConnectionStore.getState().state
     expect(state.isConnected && state.phase === ConnectionPhase.CONNECTED).toBe(true)
   }, HARNESS_WAIT)
-  const composer = await screen.findByPlaceholderText(/Type a message/i, {}, HARNESS_WAIT)
+  const composer = await screen.findByTestId("chat-input", {}, HARNESS_WAIT)
   return Object.assign(page, { user, queryClient, server, composer })
 }
 

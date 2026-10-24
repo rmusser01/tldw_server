@@ -13,7 +13,7 @@ vi.mock("@playwright/test", async () => {
   return {
     expect: (locator: DomLocator) => ({
       toBeVisible: async () => waitFor(() => expect(locator.element).toBeVisible()),
-      toBeEnabled: async () => expect(locator.element).toBeEnabled(),
+      toBeEnabled: async () => waitFor(() => expect(locator.element).toBeEnabled()),
       toHaveAttribute: async (name: string, value: string) => expect(locator.element).toHaveAttribute(name, value)
     })
   }
@@ -32,9 +32,9 @@ class DomLocator {
 }
 
 function setup(mode: "casual" | "pro", expanded = false) {
-  const toggleId = mode === "casual" ? "composer-casual-advanced-chip" : "composer-options-toggle"
+  const toggleId = "composer-options-toggle"
   document.body.innerHTML = `<button data-testid="${toggleId}" aria-expanded="${expanded}">Options</button>
-    <section data-testid="composer-casual-advanced-controls-row" ${expanded ? "" : "hidden"}>Character controls</section>`
+    <section data-testid="composer-options-panel" ${expanded ? "" : "hidden"}>Character controls</section>`
   const button = document.querySelector("button")!
   const click = vi.fn(() => {
     button.setAttribute("aria-expanded", "true")
@@ -67,7 +67,7 @@ it.each(["casual", "pro"] as const)("keeps already open %s controls open", async
   expect(document.querySelector("section")).toBeVisible()
 })
 
-it("waits for delayed Casual disclosure instead of choosing an absent Pro control", async () => {
+it("waits for the shared Tools disclosure before character lookup", async () => {
   const { page, click } = setup("casual")
   const button = document.querySelector("button")!
   button.remove()
@@ -78,4 +78,16 @@ it("waits for delayed Casual disclosure instead of choosing an absent Pro contro
   await opening
   expect(click).toHaveBeenCalledOnce()
   await waitFor(() => expect(document.querySelector("section")).toBeVisible())
+})
+
+it("waits for the saved Tools preference before opening conversation controls", async () => {
+  const { page, click } = setup("casual")
+  const button = document.querySelector<HTMLButtonElement>("button")!
+  button.disabled = true
+  const opening = new ChatPage(page).openConversationControls()
+  await Promise.resolve()
+  expect(click).not.toHaveBeenCalled()
+  button.disabled = false
+  await opening
+  expect(click).toHaveBeenCalledOnce()
 })

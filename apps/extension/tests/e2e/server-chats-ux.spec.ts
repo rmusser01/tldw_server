@@ -141,7 +141,7 @@ test.describe('Server-backed chats UX', () => {
     await page.waitForLoadState('networkidle')
 
     // Ensure we have at least one message so a title can be inferred.
-    const textarea = page.getByPlaceholder(/Type a message/i)
+    const textarea = page.getByTestId("chat-input")
     await textarea.fill('Test server-backed chat')
 
     // Trigger server-backed save; mock server will fail character creation.
