@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import configparser
 import importlib
+import os
 import threading
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager, nullcontext, suppress
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from queue import Queue
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -23,6 +25,11 @@ def _reload_log_buffer() -> ModuleType:
             logger.remove(sink_id)
         with suppress(Exception):
             delattr(logger, sink_attr)
+
+    # Finish writes before reload resets globals shared with the daemon writer.
+    file_queue = getattr(logger, "_tldw_system_log_buffer_file_queue", None)
+    if isinstance(file_queue, Queue):
+        file_queue.join()
 
     import tldw_Server_API.app.core.Logging.system_log_buffer as log_buffer
 
@@ -56,6 +63,46 @@ class _CapturingLogger:
         if args:
             message = message.format(*args)
         self.messages.append(message)
+
+
+@pytest.mark.unit
+def test_reload_drains_file_writes_before_resetting_module(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from loguru import logger
+
+    log_buffer = _reload_log_buffer()
+    pending: Queue[object] = Queue()
+    pending.put(object())
+    release = threading.Event()
+    join = pending.join
+
+    def finish_write() -> None:
+        pending.get()
+        try:
+            release.wait()
+        finally:
+            pending.task_done()
+
+    def drain() -> None:
+        release.set()
+        join()
+
+    def reset_module(module: ModuleType) -> ModuleType:
+        assert pending.unfinished_tasks == 0
+        return module
+
+    worker = threading.Thread(target=finish_write)
+    worker.start()
+    monkeypatch.setattr(logger, log_buffer._LOG_FILE_QUEUE_ATTR, pending)
+    monkeypatch.setattr(pending, "join", drain)
+    monkeypatch.setattr(importlib, "reload", reset_module)
+    try:
+        assert _reload_log_buffer() is log_buffer
+    finally:
+        release.set()
+        worker.join(timeout=2)
+    assert not worker.is_alive()
 
 
 @pytest.mark.unit
@@ -296,6 +343,7 @@ def test_reload_reuses_log_file_queue_and_worker(
             return True
 
     worker = _Worker()
+    monkeypatch.setattr(log_buffer, "_LOG_FILE_WORKER", worker)
     monkeypatch.setattr(logger, log_buffer._LOG_FILE_QUEUE_ATTR, queue, raising=False)
     monkeypatch.setattr(logger, log_buffer._LOG_FILE_WORKER_ATTR, worker, raising=False)
 
@@ -564,28 +612,34 @@ def test_query_system_logs_keeps_entries_with_different_events(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize("age_lock_during_settings_init", [False, True])
 def test_log_file_lock_uses_runtime_timeout_from_env(
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
+    request: pytest.FixtureRequest,
+    age_lock_during_settings_init: bool,
 ) -> None:
-    log_path = tmp_path / "system_logs.jsonl"
-    lock_path = log_path.with_suffix(log_path.suffix + ".lock")
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    lock_path.write_text("locked", encoding="utf-8")
-
-    monkeypatch.setenv("SYSTEM_LOG_FILE_ENABLED", "true")
-    monkeypatch.setenv("SYSTEM_LOG_FILE_PATH", str(log_path))
     monkeypatch.setenv("SYSTEM_LOG_FILE_LOCK_TIMEOUT", "0.2")
+    log_buffer, lock_path = request.getfixturevalue("fallback_log_lock")
+    initialize = log_buffer._init_log_file_settings
+    first_initialization = True
 
-    log_buffer = _reload_log_buffer()
-    monkeypatch.setattr(log_buffer, "_HAS_FCNTL", False)
+    def initialize_settings() -> None:
+        nonlocal first_initialization
+        initialize()
+        if first_initialization and age_lock_during_settings_init and lock_path.exists():
+            aged = time.time() - 2
+            os.utime(lock_path, (aged, aged))
+        first_initialization = False
 
-    started = time.monotonic()
-    with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
-        with log_buffer._log_file_lock():
-            pass
-    elapsed = time.monotonic() - started
-    assert elapsed < 0.5
+    monkeypatch.setattr(log_buffer, "_init_log_file_settings", initialize_settings)
+
+    with log_buffer._log_file_lock():
+        started = time.monotonic()
+        with pytest.raises(RuntimeError, match="Failed to acquire system log lock"):
+            with log_buffer._log_file_lock():
+                pass
+        elapsed = time.monotonic() - started
+        assert elapsed < 0.5
 
 
 @pytest.fixture
