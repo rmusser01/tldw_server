@@ -7905,6 +7905,26 @@ async def character_chat_completion(
             fallback_mood_topic=resolved_mood_topic,
         )
         assistant_text = resolved_emotes.clean_text
+        validated_tool_calls = (
+            _validate_and_truncate_tool_calls(assistant_tool_calls)
+            if assistant_tool_calls
+            else None
+        )
+        has_usable_tool_call = any(
+            isinstance(call, dict)
+            and isinstance(call.get("function"), dict)
+            and isinstance(call["function"].get("name"), str)
+            and call["function"]["name"].strip()
+            for call in validated_tool_calls or []
+        )
+        if not assistant_text.strip() and not has_usable_tool_call:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail={
+                    "error_code": "empty_provider_response",
+                    "message": "The provider returned no usable answer. No new messages were saved; please retry.",
+                },
+            )
         resolved_mood_label = resolved_emotes.mood_label
         resolved_mood_confidence = resolved_emotes.mood_confidence
         resolved_mood_topic = resolved_emotes.mood_topic
@@ -7974,11 +7994,6 @@ async def character_chat_completion(
                 metadata_extra["prompt_guardrails"] = turn_prompt_guardrail_diagnostics
             if visual_identity_metadata:
                 metadata_extra.update(visual_identity_metadata)
-            validated_tool_calls = (
-                _validate_and_truncate_tool_calls(assistant_tool_calls)
-                if assistant_tool_calls
-                else None
-            )
             try:
                 db.add_message_metadata(
                     assistant_msg_id,

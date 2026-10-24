@@ -800,3 +800,44 @@ Same-config Black: schema clean, test inherited whole-file flag unchanged, added
 block formatted without AST changes. Final reviews/hooks/commit/package refresh
 precede native receipt qualification. Existing saved3messages remain retained;
 no blind resend. X02 remains active beforeX03.
+
+
+### Empty saved answer is a failed result; pre-persistence guard needed
+
+Nullable receipt repair6797e03285 committed normalhooks/reviews; private package
+verified3817files7.403s. Finish-only13.324s stopped before Send on unresolved prior
+intent. Distinct read-only diagnostic15.205s reports fixed answer_content reason:
+old assistant placeholder is blank. No model/reasoning root attribution claimed;
+no empty answer acceptance. All sessionsclosed, actualserverzero/graceful cleanup,
+original owners preserved. Current nonstream path saves a space when no answer
+and no toolcalls; establish causal tests and reject this before either row write,
+using existing validated-toolcall path and retaining valid tool-only/stream/Resume
+behavior. No schema change/new option. ADR not required. Prior linked empty pair
+may be reconciled as failed/consumed while all rows remain, never called usable.
+Later one distinct follow-up uses an existing normal output-limit setting within
+180s; no repeated prior Send or SQLite RAG. Retired old packages removed under
+exact ownership/nohandle guards:156003520bytes; current/original packages kept.
+X02 active beforeX03.
+
+
+### Empty-output repair qualified locally
+
+- Causal unchanged endpoint:6failed/1valid-tool positive passed, plus4failed
+  malformed-tool/emote cases. Guard follows emote cleaning and precedes both
+  writes;502/empty_provider_response, no new rows. Valid bounded tool metadata,
+  streaming and protected Resume retained. No schema/options/architecture change.
+- Connected50passed1060warnings/71.39pytest77.038outer. Final wording and exact
+  absent-tool metadata preservation:direct11passed365warnings/30.79pytest35.827outer.
+  Compile2/old16testdefs unchanged/configured Ruff0/same inherited Black flags;
+  production Bandit0/test72identical inherited findings/no new/errors. Canonical
+  fingerprint+paths unchanged15.664s. Initial exporter flag typo failed before
+  import, then corrected documented --check; no application retry. Static baseline
+  path-ignore mismatch corrected with same configured stdin filename.
+- Reviewed operator classifies a fully ID/role/parent-linked blank string as
+  failed_empty, retains all3rows, clears only the consumed intent and never calls
+  it usable. One distinct follow-up uses normal2048 output tokens within180s;
+  this does not prove the earlier provider reason. Wire positive/six malformed
+  refusals and blank-parent/role/nonstring controls pass; compile/Ruff/Bandit0.
+- Final staged review/normal hooks/commit/private package refresh precede native
+  SQLite finish; do not repeat its four passed RAG controls. PostgreSQL generated
+  isolation and remaining browser variants/UX/final closeout remain open.
