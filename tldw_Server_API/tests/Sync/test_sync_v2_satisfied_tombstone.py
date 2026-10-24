@@ -433,12 +433,18 @@ def test_a_tombstone_never_deletes_a_message_in_another_owners_chat(
     assert _blocker(sync_service) is None
 
 
-def test_rows_that_belong_to_other_sync_history_are_not_deleted_by_a_baseless_tombstone(
+def test_rows_that_belong_to_other_sync_history_are_a_push_conflict_that_blocks_nothing(
+    client: TestClient,
     sync_service: SyncV2Service,
     chacha_db: CharactersRAGDB,
     projection_db: CharactersRAGDB,
+    third_device: str,
 ) -> None:
-    """A row another Sync history projected, with no state in this dataset, is not this tombstone's to delete."""
+    """A row another Sync history projected, with no state in this dataset, is not this tombstone's to delete.
+
+    The device is told at push time and nothing else in the dataset waits on
+    it (owner decision, PR #3299).
+    """
     _legacy_chat(chacha_db)
     projection_db.append_message_from_sync(
         stable_message_id="projected-elsewhere",
@@ -456,8 +462,9 @@ def test_rows_that_belong_to_other_sync_history_are_not_deleted_by_a_baseless_to
     assert pushed.accepted == []
     assert [item.entity_id for item in pushed.conflicts] == ["projected-elsewhere"]
     assert not _is_deleted(chacha_db, "projected-elsewhere")
-    blocker = _blocker(sync_service)
-    assert (blocker.conflict_type, blocker.metadata["reason"]) == ("message_base_conflict", "missing_server_message")
+    assert _blocker(sync_service) is None
+    assert _pull(sync_service, third_device) == []
+    assert client.post("/api/v1/chats/", json={"title": "Still healthy"}).status_code == 201
 
 
 # ---------------------------------------------------------------------------

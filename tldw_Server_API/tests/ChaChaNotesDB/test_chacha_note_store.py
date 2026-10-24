@@ -44,6 +44,7 @@ _DELEGATED_NOTE_METHODS = {
     "get_note_counts_for_keywords",
     "upsert_note_from_sync",
     "tombstone_note_from_sync",
+    "tombstone_unsynced_note_from_sync",
 }
 
 
@@ -101,6 +102,55 @@ def test_note_store_owns_delegated_methods_without_monolith_duplicates(db, monke
     assert db.add_note(title="Delegated Note", content="delegated body") == "note-from-store"
     assert captured["args"] == ()
     assert captured["kwargs"] == {"title": "Delegated Note", "content": "delegated body"}
+
+
+def _tombstone_unsynced(db, note_id):
+    return db.tombstone_unsynced_note_from_sync(
+        note_id=note_id,
+        sync_client_id="note-store-user",
+        object_revision=1,
+        object_hash="sha256:tombstone",
+    )
+
+
+def test_unsynced_tombstone_of_a_note_that_does_not_exist_changes_nothing(db):
+    db.add_note(title="Neighbour", content="stays", note_id="neighbour")
+
+    assert _tombstone_unsynced(db, "never-existed") == "absent"
+
+    assert db.get_note_by_id("never-existed", include_deleted=True) is None
+    assert db.get_note_by_id("neighbour") is not None
+
+
+def test_unsynced_tombstone_deletes_a_note_kept_outside_sync_and_replays(db):
+    db.add_note(title="Copy", content="kept outside Sync", note_id="outside-sync")
+    db.add_note(title="Neighbour", content="stays", note_id="neighbour")
+
+    assert _tombstone_unsynced(db, "outside-sync") == "deleted"
+
+    assert db.get_note_by_id("outside-sync") is None
+    row = db.get_note_by_id("outside-sync", include_deleted=True)
+    assert (bool(row["deleted"]), row["version"]) == (True, 1)
+    assert db.get_note_by_id("neighbour") is not None
+    # A replay finds the note already deleted and leaves it as it is.
+    assert _tombstone_unsynced(db, "outside-sync") == "deleted"
+
+
+def test_unsynced_tombstone_only_reaches_notes_the_projection_owner_holds(db):
+    with db.transaction() as conn:
+        conn.execute(
+            "INSERT INTO notes (id, title, content, client_id) VALUES (?, ?, ?, ?)",
+            ("their-note", "Theirs", "not yours", "another-owner"),
+        )
+
+    assert _tombstone_unsynced(db, "their-note") == "absent"
+
+    assert bool(db.get_note_by_id("their-note", include_deleted=True)["deleted"]) is False
+
+
+def test_unsynced_tombstone_requires_a_note_id(db):
+    with pytest.raises(InputError):
+        _tombstone_unsynced(db, "  ")
 
 
 def test_source_note_projection_is_active_bounded_and_explicit(store, db, monkeypatch):

@@ -132,6 +132,12 @@ SYNC_APPLY_STATUSES: set[str] = {
     "superseded",
 }
 _WHOLE_OBJECT_DOMAINS = {"notes.note", "notes.provenance", "chat.conversation"}
+# A tombstone of one of these may come without a base. It names an object the
+# dataset never held: the head check accepts it only when the object has no head,
+# and the materializer applies it as already satisfied (the object is gone). One
+# without a base for an object that has a head is refused by the head check.
+# Provenance is deleted with its note, from the note's own head, and keeps the rule.
+_BASELESS_TOMBSTONE_DOMAINS = {"notes.note", "chat.conversation"}
 _ATTACHMENT_REF_REQUIRED_PAYLOAD_KEYS = {
     "attachment_id",
     "parent_domain",
@@ -3697,6 +3703,7 @@ class SyncDatabase:
                 envelope.operation == "tombstone"
                 and not has_all_base
                 and not has_prebootstrap_product_base
+                and envelope.domain not in _BASELESS_TOMBSTONE_DOMAINS
             ):
                 raise SyncStoreError(
                     f"Sync v2 M1 {envelope.domain} tombstones require base metadata"
@@ -4723,14 +4730,16 @@ class SyncDatabase:
         user_id: str,
         *,
         include_archived: bool = False,
+        connection: Any | None = None,
     ) -> list[SyncDataset]:
-        """List Sync v2 datasets owned by a user."""
+        """List Sync v2 datasets owned by a user, inside ``connection``'s transaction when given."""
 
         archived_predicate = "" if include_archived else " AND archived_at IS NULL"
         result = self.execute(
             "SELECT * FROM sync_datasets WHERE owner_user_id = ?"
             f"{archived_predicate} ORDER BY created_at ASC, dataset_id ASC",  # nosec B608
             (user_id,),
+            connection=connection,
         )
         return [_dataset_from_row(row) for row in result.rows]
 
