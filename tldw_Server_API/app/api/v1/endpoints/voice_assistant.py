@@ -1020,6 +1020,12 @@ async def cancel_workflow(
 
 # WebSocket Endpoint
 
+def _save_session_and_load_commands(db: CharactersRAGDB, session: Any, registry: Any, user_id: int) -> list[Any]:
+    """Session start's ChaCha work; it runs off the event loop, and the loop applies the commands."""
+    save_voice_session(db, session)
+    return registry.load_user_commands(db, user_id, include_disabled=True)
+
+
 @ws_router.websocket("/assistant")
 async def websocket_voice_assistant(
     websocket: WebSocket,
@@ -1100,14 +1106,20 @@ async def websocket_voice_assistant(
 
         # Initialize DB + load user commands for persistence
         try:
-            # A WebSocket runs outside the HTTP operation middleware: own this step's checkouts.
-            with chacha_operation(independent=True):
-                db = await get_chacha_db_for_user_id(user_id, client_id="voice_assistant")
-                save_voice_session(db, session)
-                registry = get_voice_command_registry()
-                registry.load_defaults()
-                registry.refresh_user_commands(db, user_id, include_disabled=True)
-        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
+            db = await get_chacha_db_for_user_id(user_id, client_id="voice_assistant")
+            registry = get_voice_command_registry()
+            registry.load_defaults()
+            # A WebSocket runs outside the HTTP operation middleware: this step owns its
+            # checkout, off the event loop, so a full pool cannot stall the server.
+            commands = await asyncio.to_thread(
+                chacha_operation(independent=True)(_save_session_and_load_commands),
+                db,
+                session.model_copy(deep=True),
+                registry,
+                user_id,
+            )
+            registry.apply_user_commands(user_id, commands)
+        except Exception:  # noqa: BLE001 - a full pool (PoolTimeout) or a DB error degrades the session, not the socket
             logger.warning("Voice assistant DB init failed")
 
         await websocket.send_json(
@@ -1408,14 +1420,14 @@ async def _process_text_command(
     db: Optional[CharactersRAGDB] = None,
 ) -> None:
     """Process text through Intent -> Action -> TTS pipeline."""
-    # A WebSocket runs outside the HTTP operation middleware: this command owns its checkouts.
-    with chacha_operation(independent=True):
-        result, _ = await router_instance.process_command(
-            text=text,
-            user_id=user_id,
-            session_id=session_id,
-            db=db,
-        )
+    # No operation around the command: the router runs each of its ChaCha call groups off
+    # the event loop in its own, so no checkout spans the LLM call, MCP action or workflow.
+    result, _ = await router_instance.process_command(
+        text=text,
+        user_id=user_id,
+        session_id=session_id,
+        db=db,
+    )
 
     # Send intent
     await websocket.send_json(
