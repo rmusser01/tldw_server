@@ -2811,7 +2811,7 @@
     "message": "Context"
   },
   "cockpit_runtime": {
-    "message": "Chat settings"
+    "message": "Runtime"
   },
   "cockpit_focus": {
     "message": "Focus"
@@ -3012,7 +3012,7 @@
     "message": "Chat remains available."
   },
   "cockpit_reviewModelChatSettings": {
-    "message": "Review Model & Chat settings"
+    "message": "Review Model & Runtime"
   },
   "cockpit_reviewSettings": {
     "message": "Review settings"
@@ -4506,28 +4506,28 @@
     "message": "Hide context"
   },
   "cockpit_collapseRuntimeSidechannel": {
-    "message": "Hide chat settings"
+    "message": "Hide runtime"
   },
   "cockpit_restoreContextSidechannel": {
     "message": "Show context"
   },
   "cockpit_restoreRuntimeSidechannel": {
-    "message": "Show chat settings"
+    "message": "Show runtime"
   },
   "cockpit_contextRailTab": {
     "message": "Context"
   },
   "cockpit_runtimeRailTab": {
-    "message": "Chat settings"
+    "message": "Runtime"
   },
   "cockpit_contextRailHiddenSummary": {
-    "message": "Context hidden. Chat settings visible."
+    "message": "Context hidden. Runtime visible."
   },
   "cockpit_runtimeRailHiddenSummary": {
-    "message": "Chat settings hidden. Context visible."
+    "message": "Runtime hidden. Context visible."
   },
   "cockpit_cockpitRailsVisibleSummary": {
-    "message": "Context and chat settings visible."
+    "message": "Context and runtime visible."
   },
   "characterRail_characterSessions": {
     "message": "Character sessions"
@@ -4592,7 +4592,43 @@
   "characterRail_pageLabel": {
     "message": "Page"
   },
-  "composer_advancedPreferenceUnavailable": {
-    "message": "Display preference unavailable. Advanced controls still work for this visit."
+  "cockpit_instructions": {
+    "message": "Instructions"
+  },
+  "cockpit_sources": {
+    "message": "Sources"
+  },
+  "cockpit_noSourcesAttached": {
+    "message": "No sources attached."
+  },
+  "cockpit_addSources": {
+    "message": "Add sources"
+  },
+  "cockpit_conversation": {
+    "message": "Conversation"
+  },
+  "cockpit_requestPreview": {
+    "message": "Request preview"
+  },
+  "cockpit_currentRun": {
+    "message": "Current run"
+  },
+  "cockpit_modelAndSettings": {
+    "message": "Model & settings"
+  },
+  "cockpit_defaultSettings": {
+    "message": "Default settings"
+  },
+  "cockpit_stopShort": {
+    "message": "Stop"
+  },
+  "cockpit_regenerateShort": {
+    "message": "Regenerate"
+  },
+  "cockpit_closeContextPanel": {
+    "message": "Close Context panel"
+  },
+  "cockpit_closeRuntimePanel": {
+    "message": "Close Runtime panel"
   }
 }

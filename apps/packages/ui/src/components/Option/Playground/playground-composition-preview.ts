@@ -1,3 +1,4 @@
+import type { PlaygroundAssistantSummary } from "./PlaygroundAssistantContext";
 import type { ConversationContextComposition } from "@/types/conversation-context";
 import type { ChatModelUsabilityStatus } from "@/utils/chat-model-availability";
 import type {
@@ -5,7 +6,6 @@ import type {
   PlaygroundPromptSummary,
 } from "./PlaygroundContextRail";
 import type {
-  RuntimeAssistantSummary,
   RuntimeSettingSummary,
   RuntimeToolSummary,
 } from "./PlaygroundRuntimeInspector";
@@ -52,7 +52,7 @@ export type PlaygroundCompositionPreviewFootprint = {
 
 export type PlaygroundCompositionPreviewInput = {
   promptSummary: PlaygroundPromptSummary;
-  assistantSummary: RuntimeAssistantSummary;
+  assistantSummary: PlaygroundAssistantSummary;
   providerRoute: {
     selectedProvider: string | null;
     selectedModel: string | null;
