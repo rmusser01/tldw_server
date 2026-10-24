@@ -10,7 +10,7 @@
 
 ## Global constraints
 
-- Current GET frontend sourcef286a3b3cb on reviewed dev22c9/buildfGDxU2Zf7SJMROKg0qgUg; targeted history boundaries passed. API package sourcee830669e8f/preset3817files passed SQLite real RAG/cache isolation; plain Chat saved3messages before a failed receipt. The nullable receipt repair is locally qualified and awaits final review/package refresh/live validation. Refresh dev before later publication, not after every step.
+- Current private API179ab7db8e/3817files and GET frontendf286a3b3cb/buildfGDxU2Zf7SJMROKg0qgUg on reviewed dev22c9. Both backend RAG/cache/usable Chat isolation passed with explicit saved-history limits below. Remaining browser/UX acceptance stays open; refresh dev before later publication, not after every step.
 - Preserve original API50010/49993, frontend50863/50855, Chrome54716/54710, five saved messages, exact draft/URL and full canonical objects. No original runtime cycle.
 - Keep the original default Chrome context/tab untouched. X02 uses one owned temporary main context; create a second owned context only for the independent concurrent-account check, then close both owned contexts. Two tabs within the main context share storage and are not independent identities. The owned main context also bounds its disposable network pool.
 -600s per workflow/run/build,120s startup/child,180s inference,300s pytest case,15s operation/graceful cleanup; no force or assertion weakening. Reassess after three failures; latest human authorization covers necessary diagnostics/retries without another approval question.
@@ -841,3 +841,51 @@ X02 active beforeX03.
 - Final staged review/normal hooks/commit/private package refresh precede native
   SQLite finish; do not repeat its four passed RAG controls. PostgreSQL generated
   isolation and remaining browser variants/UX/final closeout remain open.
+
+
+### Saved answer passed; denial observer finish remains
+
+Repair179ab7db8e committed normalhooks2.864s/commit2.049s; exact reviewed4path
+patch17571bytes SHA256e0975f383c019889920ff8c39751570585016140781f56fbc57f5e1490b0454a,
+unpublished. Private3817file/3root/337node/722edge packagePASS8.566s, cleanupempty.
+Native SQLite32.077s retained the proven failed_empty3rows and saved a distinct
+nonempty follow-up with correct receipt/roles/parent/exact oldrows+2/noBobnonce.
+Foreignmessages GET404/body checks passed; run FAILED only at operator denial
+receipt because its selector covered Chat root, not messages. No further Send.
+All3sessionsclosed/actualzero/grace2.206/originalownerspreserved. Prepare readonly
+known5-ID finish and exact GETmessages observer; positive/five malformed-history
+refusals/five route controls passed. PostgreSQL generation remains unexecuted.
+
+
+### Generated isolation complete in both backend cells
+
+SQLite readonlyfinishPASS19.448s:known5IDs/usablelinkedfollow-up/priorfailed3rows
+retained/noBobnonce/foreignmessages404 actualreceipt, zero Sends. All3sessions
+closed/freshactualzero/grace2.211/originalownerspreserved. Exact GETmessages
+observer, read-only positive/five malformed refusals/five routecontrols reviewed.
+Fresh official restrictedPG generatedisolationPASS1test6warnings38.95pytest/
+41.128outer. Bobcold1doc0errors/cachefalse; Bobrealgeneratedanswer/cachetrue;
+Alicematchingquery1owneddoc0errors/cachefalse/noBobnonce; BobcacheafterAlicetrue;
+realAliceChatSaved/foreigngeneratedChatdenied/privateanswernotsupplied. All3
+sessionsclosed/actualzero/grace2.421/ownerspreserved; officialteardown and exact
+nohandle disposal67entries2717638bytes. Do not replay these passed controls.
+Remaining:deeper UIhandoff/helper/autocomplete/notification state, switchduring
+realgeneration, settledUXscreenshot/humanreview/finalcloseout. Use existingprivate
+maincontext+one temporary samecontextoldtab; preserve originalruntime/session.
+
+
+### Shared helper boundary investigation
+
+QuickChat store/hook/input currently clear on close/unmount but have no explicit
+account-change subscription. Source risk only until causal test/native proof.
+Cover actual shared hook/store/observer and input, late stream/docs replies,
+auth-preserving refresh and modal/popout consumers. Reuse watchChatAccountChanges;
+minimal epoch cancellation/output fence and input reset if causal tests confirm.
+No new auth rule/dependency; ADR not required. Review existing popout transfer
+scope separately without opening a new window. After qualification/review, one
+private frontend build and focused native browser states; no API RAG replay.
+
+
+### Shared helper repair qualification — 2026-10-24
+
+X02 shared helper repair (latest-dev candidate, 2026-10-24): causal hook controls reproduced five privacy failures (retained messages/input and late stream/RAG publication); module-level retirement additionally covers a closed helper's model/mode. Pop-out transfers now carry the existing verified opaque account owner and are consumed once; actual shared/legacy entry-point controls reproduced both StrictMode lost-restore failures and both pending-restore overwrite failures. The shared effect now revalidates its retained in-memory payload on StrictMode replay and refuses publication after unmount, account/key change or intervening helper work. Three mounted-modal controls cover unresolved-owner refusal, admitted current-store snapshot/blocked-window cleanup and boundary-before-click refusal; window.open is mocked, with no native window created. Seven connected modules pass 59 tests in each configured UI/WebUI runner (4.80s/4.52s); all original behavioral assertions retained. Twelve touched TS/config files parse clean and configured ESLint has zero errors/new diagnostics; one inherited QuickChatInput any warning and inherited Next pages-discovery diagnostic remain. Bandit N/A to this TypeScript/prose-only unit; no Python change or repeated Python scans. No new architecture decision: existing account observer, verified prompt-owner scope, store and transport cancellation are reused. Actual-source/staged review and normal hooks are required before local commit/build. These are source/component checks only: X02 live helper/account-switch and human UX acceptance remain open; X03 untouched. Failed operator cwd/static inventory/tracking-import invocations are not qualification; scoped reruns above completed normally. Original runtime/session untouched.
