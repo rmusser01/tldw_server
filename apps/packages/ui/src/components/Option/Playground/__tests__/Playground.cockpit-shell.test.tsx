@@ -549,7 +549,7 @@ describe("Playground cockpit shell", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.getByTestId("playground-cockpit-mode-summary"),
-    ).toHaveTextContent("Context and chat settings visible.");
+    ).toHaveTextContent("Context and runtime visible.");
     expect(screen.getByTestId("playground-chat")).toBeInTheDocument();
     expect(screen.getByTestId("playground-form")).toBeInTheDocument();
     expect(
@@ -2103,7 +2103,7 @@ describe("Playground cockpit shell", () => {
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-right-rail")).getByRole(
         "button",
-        { name: /hide chat settings/i },
+        { name: /hide runtime/i },
       ),
     );
 
@@ -2178,7 +2178,7 @@ describe("Playground cockpit shell", () => {
     });
     expect(
       screen.getByTestId("playground-cockpit-mode-summary"),
-    ).toHaveTextContent("Context hidden. Chat settings visible.");
+    ).toHaveTextContent("Context hidden. Runtime visible.");
     expect(
       screen.getByTestId("playground-cockpit-right-rail"),
     ).toBeInTheDocument();
@@ -2192,7 +2192,7 @@ describe("Playground cockpit shell", () => {
     fireEvent.click(
       within(screen.getByTestId("playground-cockpit-right-rail")).getByRole(
         "button",
-        { name: /hide chat settings/i },
+        { name: /hide runtime/i },
       ),
     );
 
@@ -2212,7 +2212,7 @@ describe("Playground cockpit shell", () => {
       screen.getByRole("button", { name: /show context/i }),
     );
     fireEvent.click(
-      screen.getByRole("button", { name: /show chat settings/i }),
+      screen.getByRole("button", { name: /show runtime/i }),
     );
 
     await waitFor(() => {
@@ -2289,11 +2289,11 @@ describe("Playground cockpit shell", () => {
     const collapseRuntimeButton = within(runtimeRailAfterRestore).getByRole(
       "button",
       {
-        name: /hide chat settings/i,
+        name: /hide runtime/i,
       },
     );
     const collapseRuntimeTooltip = screen.getByRole("tooltip", {
-      name: "Hide chat settings",
+      name: "Hide runtime",
     });
     expect(collapseRuntimeButton).toHaveAttribute(
       "aria-describedby",
@@ -2306,10 +2306,10 @@ describe("Playground cockpit shell", () => {
       expect(screen.queryByTestId("playground-cockpit-right-rail")).toBeNull();
     });
     const restoreRuntimeButton = screen.getByRole("button", {
-      name: /show chat settings/i,
+      name: /show runtime/i,
     });
     const restoreRuntimeTooltip = screen.getByRole("tooltip", {
-      name: "Show chat settings",
+      name: "Show runtime",
     });
     expect(restoreRuntimeButton).toHaveAttribute(
       "aria-describedby",

@@ -20,6 +20,7 @@ import {
   PlaygroundCockpitShell,
   type PlaygroundCockpitMode,
 } from "./PlaygroundCockpitShell";
+import { PlaygroundAssistantContext } from "./PlaygroundAssistantContext";
 import {
   PlaygroundContextRail,
   type PlaygroundContextSource,
@@ -3562,6 +3563,15 @@ const PlaygroundContent = () => {
           {toText(t("playground:cockpit.selectPrompt", "Select prompt"))}
         </button>
       }
+      assistantControl={
+        <PlaygroundAssistantContext
+          assistantSummary={cockpitAssistantSummary}
+          onOpenAssistantSelect={openAssistantSelectorFromCockpit}
+          onClearAssistant={clearAssistantFromCockpit}
+          onInspectAssistant={inspectAssistantFromCockpit}
+          onOpenSceneDirector={openActorSettings}
+        />
+      }
       characterSessionsPanel={characterSessionsPanel}
       onClearPrompt={clearPromptContextFromCockpit}
       onOpenSearchContext={() => openSearchAndContext({ tab: "search" })}
@@ -3602,14 +3612,9 @@ const PlaygroundContent = () => {
             ? activeChatModelUsabilityMessage ?? runtimeStatusDetail
             : characterChatReadinessCopy?.title ?? runtimeStatusDetail
       }
+      onOpenModelSettings={openModelSettingsFromCockpit}
       messageCount={cockpitMessageCount}
       threadSearchOpen={threadSearchOpen}
-      assistantSummary={cockpitAssistantSummary}
-      onOpenModelSettings={openModelSettingsFromCockpit}
-      onOpenAssistantSelect={openAssistantSelectorFromCockpit}
-      onClearAssistant={clearAssistantFromCockpit}
-      onInspectAssistant={inspectAssistantFromCockpit}
-      onOpenSceneDirector={openActorSettings}
       canStopStreaming={streaming}
       onStopStreaming={stopStreamingFromUi}
       canRegenerate={canRegenerateLastResponse}
