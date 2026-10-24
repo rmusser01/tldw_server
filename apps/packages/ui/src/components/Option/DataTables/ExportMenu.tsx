@@ -25,7 +25,7 @@ export const ExportMenu: React.FC<ExportMenuProps> = ({ tableId, tableName }) =>
   const handleExport = async (format: ExportFormat) => {
     setIsExporting(true)
     try {
-      const { blob, filename } = await tldwClient.exportDataTable(tableId, format)
+      const { blob, filename } = await tldwClient.exportDataTable(tableId, format, async (requireAuth: boolean) => { await tldwClient.ensureConfigForRequest(requireAuth) })
       downloadBlob(blob, filename)
       message.success(
         t("dataTables:exportSuccess", "Table exported as {{format}}", {

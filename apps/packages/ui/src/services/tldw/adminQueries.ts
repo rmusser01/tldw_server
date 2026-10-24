@@ -37,7 +37,7 @@ export const adminKeys = {
 export const useSystemStats = (options?: { timeoutMs?: number; configSnapshot?: TldwConfig }) =>
   useQuery({
     queryKey: options?.configSnapshot ? [...adminKeys.systemStats, deriveConnectionAuthorityId(options.configSnapshot)] : adminKeys.systemStats,
-    queryFn: ({ signal }) => tldwClient.getSystemStats({ ...options, abortSignal: signal })
+    queryFn: ({ signal }) => tldwClient.getSystemStats({ timeoutMs: options?.timeoutMs })
   })
 
 export const useUsersPage = (page: number, limit: number, search?: string) =>
