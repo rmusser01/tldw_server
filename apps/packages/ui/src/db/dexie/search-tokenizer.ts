@@ -1,7 +1,10 @@
 /**
  * Pure tokenizer shared by the `searchTokens` side-table write path and the
- * v17 schema backfill (WP-23 / TASK-13523). No imports: schema.ts depends on
- * it inside its upgrade handler, so it must stay dependency-free.
+ * v17 schema backfill (WP-23 / TASK-13523). Its only import is type-only
+ * (erased at runtime): the module must stay free of RUNTIME dependencies so
+ * schema.ts can import it statically inside its upgrade handler — a dynamic
+ * import there would await a non-Dexie promise at the start of the
+ * version-change transaction.
  *
  * Word runs are ASCII `\w+` sequences, matching the `\b`-anchored regex the
  * content search uses for exact verification. Keeping both on the same
