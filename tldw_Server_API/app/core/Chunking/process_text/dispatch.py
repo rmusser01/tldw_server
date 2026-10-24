@@ -10,6 +10,7 @@ from typing import Any
 from tldw_Server_API.app.core.Chunking.base import ChunkMetadata
 from tldw_Server_API.app.core.Chunking.error_policy import CHUNKER_NONCRITICAL_EXCEPTIONS
 from tldw_Server_API.app.core.Chunking.exceptions import ChunkingError
+from tldw_Server_API.app.core.Chunking.hierarchical.spans import compute_paragraph_spans
 from tldw_Server_API.app.core.Chunking.process_text.models import (
     NormalizedChunk,
     ProcessTextContext,
@@ -62,7 +63,7 @@ def _dispatch_multi_level(
     """Dispatch paragraph-level chunking with metadata fallback support."""
     method_options_for_chunk = dict(resolved.method_options_for_chunk)
     norm_chunks: list[NormalizedChunk] = []
-    spans = context._compute_paragraph_spans(processed_text, template=None)
+    spans = compute_paragraph_spans(processed_text, template=None)
     pidx = 0
     for start, end, kind in spans:
         if kind == "blank":
