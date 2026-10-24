@@ -1489,3 +1489,81 @@ def test_complete_v2_plain_chat_acknowledges_optional_character_after_persistenc
         } == {  # nosec B101 - pytest behavior check.
             row["id"] for row in messages
         }
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("save_to_db", [False, True])
+@pytest.mark.parametrize(
+    "message",
+    [
+        {"content": ""},
+        {"content": " \n "},
+        {"content": None, "reasoning_content": "unfinished internal reasoning"},
+        {"content": "", "tool_calls": [{}, None, "x", {"function": {"name": " "}}]},
+        {"content": "Emote: smug"},
+    ],
+    ids=["empty", "whitespace", "reasoning-only", "malformed-tools", "emote-only"],
+)
+def test_complete_v2_refuses_empty_answer_before_any_message_write(
+    monkeypatch, test_client, auth_headers, populated_character_db, save_to_db, message
+):
+    created = test_client.post("/api/v1/chats/", headers=auth_headers, json={"title": "Empty answer refusal"})
+    assert created.status_code == 201  # nosec B101 - pytest behavior check.
+    chat_id = created.json()["id"]
+    monkeypatch.setattr(
+        character_chat_sessions,
+        "perform_chat_api_call",
+        lambda **kwargs: {"choices": [{"message": message, "finish_reason": "length"}]},
+    )
+    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/complete-v2",
+        headers=auth_headers,
+        json={
+            "provider": "llama",
+            "model": "garden-model",
+            "append_user_message": "Keep this question available.",
+            "save_to_db": save_to_db,
+            "stream": False,
+        },
+    )
+    assert response.status_code == 502  # nosec B101 - pytest behavior check.
+    assert response.json()["detail"]["error_code"] == "empty_provider_response"  # nosec B101 - pytest behavior check.
+    saved = test_client.get(f"/api/v1/chats/{chat_id}/messages", headers=auth_headers)
+    assert saved.status_code == 200  # nosec B101 - pytest behavior check.
+    assert saved.json()["messages"] == []  # nosec B101 - pytest behavior check.
+
+
+@pytest.mark.integration
+def test_complete_v2_retains_valid_tool_only_completion(monkeypatch, test_client, auth_headers, populated_character_db):
+    created = test_client.post("/api/v1/chats/", headers=auth_headers, json={"title": "Valid tool turn"})
+    assert created.status_code == 201  # nosec B101 - pytest behavior check.
+    chat_id = created.json()["id"]
+    tool_calls = [{"id": "call-1", "type": "function", "function": {"name": "lookup", "arguments": "{}"}}]
+    monkeypatch.setattr(
+        character_chat_sessions,
+        "perform_chat_api_call",
+        lambda **kwargs: {
+            "choices": [{"message": {"content": None, "tool_calls": tool_calls}, "finish_reason": "tool_calls"}]
+        },
+    )
+    monkeypatch.setattr(character_chat_sessions, "is_model_known_for_provider", lambda *args: None)
+    response = test_client.post(
+        f"/api/v1/chats/{chat_id}/complete-v2",
+        headers=auth_headers,
+        json={
+            "provider": "llama",
+            "model": "garden-model",
+            "append_user_message": "Use the lookup tool.",
+            "save_to_db": True,
+            "stream": False,
+        },
+    )
+    assert response.status_code == 200  # nosec B101 - pytest behavior check.
+    body = response.json()
+    assert body["saved"] is True  # nosec B101 - pytest behavior check.
+    saved = test_client.get(f"/api/v1/chats/{chat_id}/messages?include_tool_calls=true", headers=auth_headers)
+    assert saved.status_code == 200  # nosec B101 - pytest behavior check.
+    rows = {row["id"]: row for row in saved.json()["messages"]}
+    assert rows[body["assistant_message_id"]]["tool_calls"] == tool_calls  # nosec B101 - pytest behavior check.
+    assert len(rows) == 2  # nosec B101 - pytest behavior check.
