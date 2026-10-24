@@ -78,30 +78,102 @@ def restricted_pg_backend(request):
     config = request.getfixturevalue("pg_database_config")
     admin = DatabaseBackendFactory.create_backend(config)
     role, password = "fva_endpoint_" + uuid4().hex, uuid4().hex
-    with admin.transaction() as conn:
-        conn.execute(
-            sql.SQL(
-                "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE"
-            ).format(sql.Identifier(role), sql.Literal(password))
-        )
-        conn.execute(sql.SQL("GRANT USAGE, CREATE ON SCHEMA public TO {}").format(sql.Identifier(role)))
-        conn.execute(
-            sql.SQL("GRANT CREATE ON DATABASE {} TO {}").format(
-                sql.Identifier(config.pg_database), sql.Identifier(role)
-            )
-        )
-    backend = DatabaseBackendFactory.create_backend(
-        replace(config, pg_user=role, pg_password=password, connection_string=None, pool_size=2, max_overflow=4)
-    )
+    backend = None
+    role_created = False
     try:
+        with admin.transaction() as conn:
+            conn.execute(
+                sql.SQL(
+                    "CREATE ROLE {} LOGIN PASSWORD {} NOSUPERUSER NOBYPASSRLS NOINHERIT NOCREATEDB NOCREATEROLE"
+                ).format(sql.Identifier(role), sql.Literal(password))
+            )
+            conn.execute(sql.SQL("GRANT USAGE, CREATE ON SCHEMA public TO {}").format(sql.Identifier(role)))
+            conn.execute(
+                sql.SQL("GRANT CREATE ON DATABASE {} TO {}").format(
+                    sql.Identifier(config.pg_database), sql.Identifier(role)
+                )
+            )
+        role_created = True
+        backend = DatabaseBackendFactory.create_backend(
+            replace(config, pg_user=role, pg_password=password, connection_string=None, pool_size=2, max_overflow=4)
+        )
         yield backend
     finally:
-        backend.get_pool().close_all()
-        with admin.transaction() as conn:
-            conn.execute("SET LOCAL lock_timeout = '10s'")  # fail, not hang, on a leaked session (TASK-13900)
-            conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
-            conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
-        admin.get_pool().close_all()
+        try:
+            if backend is not None:
+                backend.get_pool().close_all()
+        finally:
+            try:
+                if role_created:
+                    with admin.transaction() as conn:
+                        conn.execute(
+                            "SET LOCAL lock_timeout = '10s'"
+                        )  # fail, not hang, on a leaked session (TASK-13900)
+                        conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
+                        conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
+            finally:
+                admin.get_pool().close_all()
+
+
+@pytest.mark.parametrize("failure_stage", ["role", "backend", "body", "backend-close", "role-drop"])
+def test_restricted_fixture_releases_admin_after_failures(monkeypatch, failure_stage):
+    """Every acquisition/teardown error must still close the admin pool and compensate a committed role."""
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.DB_Management.backends.base import BackendType, DatabaseConfig
+
+    closed, statements = [], []
+    failure = RuntimeError("fixture lifecycle failed")
+
+    def execute(statement):
+        text = statement if isinstance(statement, str) else statement.as_string()
+        statements.append(text.split()[0:2])
+        if (failure_stage == "role" and text.startswith("CREATE ROLE")) or (
+            failure_stage == "role-drop" and text.startswith("DROP ROLE")
+        ):
+            raise failure
+
+    @contextmanager
+    def transaction():
+        yield SimpleNamespace(execute=execute)
+
+    def close_backend():
+        closed.append("backend")
+        if failure_stage == "backend-close":
+            raise failure
+
+    admin = SimpleNamespace(
+        transaction=transaction, get_pool=lambda: SimpleNamespace(close_all=lambda: closed.append("admin"))
+    )
+    backend = SimpleNamespace(get_pool=lambda: SimpleNamespace(close_all=close_backend))
+    created = []
+
+    def factory(_config):
+        if not created:
+            created.append("admin")
+            return admin
+        if failure_stage == "backend":
+            raise failure
+        return backend
+
+    monkeypatch.setattr(DatabaseBackendFactory, "create_backend", factory)
+    request = SimpleNamespace(
+        getfixturevalue=lambda _name: DatabaseConfig(BackendType.POSTGRESQL, pg_database="fixture")
+    )
+    fixture = restricted_pg_backend.__wrapped__(request)
+    with pytest.raises(RuntimeError, match="fixture lifecycle failed"):
+        next(fixture)
+        if failure_stage == "body":
+            fixture.throw(failure)
+        else:
+            fixture.close()
+    assert closed == (
+        ["admin"] if failure_stage in {"role", "backend"} else ["backend", "admin"]
+    )  # nosec B101 # Both owned pools must release even after a failure.
+    assert (["DROP", "ROLE"] in statements) is (
+        failure_stage != "role"
+    )  # nosec B101 # Only a committed fixture role needs compensation.
 
 
 @pytest.fixture
