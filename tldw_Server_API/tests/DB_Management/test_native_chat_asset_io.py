@@ -332,17 +332,17 @@ def test_missing_native_storage_capability_refuses_payload_io(
     db = native_fork_db
     generation = _reserve(db)
     io = _io(db, tmp_path, monkeypatch, require_storage=False)
-    if capability in {"directory", "nofollow", "cloexec"}:
-        flag = {"directory": "O_DIRECTORY", "nofollow": "O_NOFOLLOW", "cloexec": "O_CLOEXEC"}[capability]
-        monkeypatch.setattr(os, flag, 0, raising=False)
-    elif capability == "dir_fd":
-        monkeypatch.setattr(os, "supports_dir_fd", set())
-    elif capability == "link":
-        monkeypatch.setattr(
-            os, "supports_dir_fd", {function for function in os.supports_dir_fd if function.__name__ != "link"}
-        )
-    elif capability == "rmtree":
-        monkeypatch.setattr(blob_store.shutil.rmtree, "avoids_symlink_attacks", False, raising=False)
+    missing_capabilities = {
+        "directory": (os, "O_DIRECTORY", 0),
+        "nofollow": (os, "O_NOFOLLOW", 0),
+        "cloexec": (os, "O_CLOEXEC", 0),
+        "dir_fd": (os, "supports_dir_fd", set()),
+        "link": (os, "supports_dir_fd", {function for function in os.supports_dir_fd if function.__name__ != "link"}),
+        "rmtree": (blob_store.shutil.rmtree, "avoids_symlink_attacks", False),
+    }
+    if capability != "native":
+        target, attribute, value = missing_capabilities[capability]
+        monkeypatch.setattr(target, attribute, value, raising=False)
 
     def refuse_filesystem(*args: Any, **kwargs: Any) -> Any:
         pytest.fail("unsupported native storage reached payload filesystem access")

@@ -600,6 +600,29 @@ inferred until hosted verification; the isolated local baseline passed 21 tests.
    diff pass. Use normal hooks and an exact-old-daf lease, then require actual
    current-head hosted CI. No dev integration or merge is authorized.
 
+#### Native Capability Test-Quality Ratchet (2026-10-24)
+
+1. **Regression (Complete):** Exact-e3d Ubuntu Python 3.12 gap-verified-12 job
+   `120919871795`: one failure, 1,144 passes, one skip. The quality ratchet flags
+   one new mock-density offense in the capability rejection test. Local unchanged
+   DB-management triage reproduces it. Preserve the hosted and local RED logs.
+2. **Minimal refinement (Complete):** Replace five mutually exclusive patch
+   call sites with capability target/attribute/value data and one patch call.
+   Keep all cases, real guards, filesystem tripwire, candidate and quota checks.
+   Do not change the baseline, checker, marks, matrix or runtime. No new ADR is
+   needed for test-data arrangement preserving the existing security contract.
+3. **Verification (Complete):** Scoped ratchet RED/GREEN; full affected native I/O
+   file plus unchanged repository-wide quality ratchet: 155 passes, seven expected
+   skips. Ruff, compileall, diff, normal merge-base hooks and shard guard pass;
+   test Bandit excluding expected assertions reports zero findings/errors.
+   Independent review `01a16ed9-1300-7152-90f3-95c243a68dd2` is clear/closed:
+   only setup changed; 28 base/current runtime profiles agree, including missing
+   Windows flags; 12 real guard rejections and 12 bypass controls preserve the
+   filesystem canary. Native Windows execution is still a hosted prerequisite.
+4. **Publication (In Progress):** Use normal commit and protected exact-old-e3d
+   publication after fresh writer/head/no-auto-merge checks. Preserve earlier
+   local publication notes. The separate HTTP timeout is unmodified; no dev
+   integration, merge, baseline change or production timeout change.
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.
 **Success Criteria:** Streamed responses stop at a byte limit; XML/ICS are bounded before parsing; synchronous provider calls run off the event loop; API and worker reuse scoped credential resolution; a deleted account or failed scan does not stop later polling; diagnostics contain safe context and stack locations without secrets.
