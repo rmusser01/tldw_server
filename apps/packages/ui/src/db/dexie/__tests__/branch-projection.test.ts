@@ -1140,6 +1140,13 @@ it("clean deletion and same-owner undo retain the settled local baseline and row
     (await memory.chatHistories.get("source")).local_settings_guard
   ).toEqual(snapshot!.historyInfo.local_settings_guard)
   expect(memory.messages.rows.size).toBe(3)
+  // WP-23: undo is a message write path, so restored rows re-enter the
+  // content-search token index.
+  expect(
+    [...memory.searchTokens.rows.values()].some(
+      (row) => row.history_id === "source"
+    )
+  ).toBe(true)
 })
 it("grouped deletion uses the atomic pending guard before removing any target messages", async () => {
   const { deleteHistoriesByDateRange } = await import("../helpers")

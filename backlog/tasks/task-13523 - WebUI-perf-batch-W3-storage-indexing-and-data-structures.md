@@ -19,6 +19,7 @@ WebUI/extension perf program. Index: Docs/Plans/2026-10-06-webui-perf-remediatio
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Stage 1 (WP-23, chat search index scan + Set dedupe) implemented on codex/webui-perf-w3-storage-indexing: added searchTokens side table (schema v17, additive, with streaming backfill upgrade), token-prefiltered content search in fullTextSearchChatHistories (no messages-table materialization; candidate-only verify via history_id index; streaming fallback for punctuation-only queries), Set-based dedupe replacing the O(n^2) findIndex merge, and token indexing wired into every message write path (addMessage, updateMessage, importChatHistoryV2, server mirror reconcile, fork commit, history-selection admits) with searchTokens added to the affected Dexie transaction table lists. Verified: 28 db suites (484 tests) + 5 Sidebar/harness suites (100 tests) green; FE typecheck exit 0; no new deps (memory-dexie harness extended with startsWithIgnoreCase/anyOfIgnoreCase). Stages 2-4 remain.
+Fix round 1 after review: v17 upgrade handler now imports the tokenizer statically (no non-Dexie promise awaited inside the version-change transaction); helpers.ts restoreChat wired as the seventh token-indexed message write path (searchTokens added to its tx table list, bulk index after the adds) and pinned via the branch-projection undo test. Re-verified: 18/18 Stage 1 tests, full src/db 28 files/484 tests, FE typecheck exit 0, whitespace clean.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
