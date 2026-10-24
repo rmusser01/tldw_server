@@ -31,6 +31,8 @@ function table<T extends { id: string }>(rows: Map<string, T>) {
 vi.mock("../schema", () => ({ db: {
   chatHistories: table(state.histories), messages: table(state.messages),
   modelNickname: {}, sessionFiles: {},
+  // Token side-table for content search (WP-23): mirror writes index words.
+  searchTokens: { bulkPut: async () => undefined, where: () => ({ anyOf: () => ({ primaryKeys: async () => [] }) }) },
   transaction: async (_mode: string, _tables: unknown[], operation: (transaction: { abort: () => void }) => Promise<unknown>) => operation({ abort: vi.fn() })
 } }))
 vi.mock("../chat", () => ({ PageAssistDatabase: class {
