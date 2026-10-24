@@ -516,6 +516,72 @@ inferred until hosted verification; the isolated local baseline passed 21 tests.
    lease. ADR not required for test-only fixture validity. No rebase or merge;
    existing dev conflict and separate BYOK uncertainty remain unresolved.
 
+#### Native Asset Windows Qualification (2026-10-24)
+
+1. **Hosted diagnosis (Complete):** Exact-eb full `40087370412`, Windows Python
+   3.12 db-management-n job `120856685403`, has 189 failures, 370 passes and 554
+   skips. Preserve `/private/tmp/calendar-pr3019-db-management-n-windows312-120856685403.log`.
+   There are 154 direct unsupported-platform storage errors, 30 mismatched-error
+   assertions reporting that same rejection, two JSON fixture decoding errors,
+   two child-process EOFs and one worker-entry assertion. The last three remain
+   unconfirmed individually. Storage explicitly requires anchored no-follow
+   descriptor operations with no pathname fallback; do not bypass that boundary
+   or remove coverage. These source/test files match origin/dev.
+2. **Independent fixture decoding (Complete):** Both PostgreSQL guard-contract
+   cases reproduce the real UTF-8 JSON fixture's failure under a controlled
+   cp1252 default (two failures before, two passes after the explicit UTF-8 read).
+   Full file: 53 passes and 51 PostgreSQL-fixture skips. Ruff, syntax, diff and
+   normal merge-base hooks pass. Bandit has two unchanged synthetic SQL-test
+   findings and no new nonassert findings/errors. Independent review
+   `01a16e0a-f960-7992-96d2-b372b0bd2b3a` is clear/closed: fixture bytes and six
+   canonical digests remain intact; real Unicode/Pydantic loader probes pass.
+   The later human option-1 approval releases the original scope hold. This
+   isolated decoding probe is not native Windows qualification. No ADR is needed
+   for fixture decoding; no storage architecture change is authorized.
+3. **Windows contract decision (Approved):** Human chose option 1 for now:
+   preserve unsupported/fail-closed Windows storage with explicit rejection
+   coverage. Created separate To Do `TASK-13932` for secure native Windows
+   implementation, after duplicate search and fresh dev/open-PR task-ID checks.
+   That future architecture is not authorized in this CI-only patch. No new ADR
+   is required for test applicability preserving the existing runtime contract;
+   the future Windows backend needs an ADR assessment and approved design.
+4. **Local qualification (Complete):** Four fixture regressions failed
+   before the helper/forwarding changes and now pass. Physical test setup declines Windows
+   prerequisites, while the original POSIX bodies and pure database/model,
+   outer-transaction and before-I/O owner checks remain applicable. Expand
+   runnable no-I/O/no-quota-release rejection tests across native Windows and
+   missing directory/no-follow/dir-fd/link/close-on-exec/safe-removal capabilities,
+   for write, publication and reclamation. No production or CI matrix changes.
+   Full supported POSIX n-manifest baseline: 1,142 passes and 13 expected skips,
+   including 548 real PostgreSQL fixture cases. Reconciliation then caught ten
+   previously runnable SQLite negative cases gated too early. Explicit fixture
+   metadata preserves malformed-upload, cancellation, bounded-read, missing-EPUB
+   marker and three symlink negatives without changing their assertions. Final
+   changed-file POSIX verification: 325 passes, seven expected skips. The private
+   unsupported eight-file baseline had 181 passes/396 skips; final delta has
+   24 passes/no skips, restoring all 20 SQLite/PostgreSQL negatives. Set comparison
+   proves the remaining SQLite physical skip set equals the original 187 hosted
+   failures, with no extra original SQLite physical skips. This is compositional
+   baseline-plus-delta evidence, not a final whole-eight-file rerun or real
+   Windows proof. See `/private/tmp/calendar-pr3019-native-platform-reconciliation.json`.
+   Initial and narrow independent review `01a16e47-2cec-7402-97a6-85bfdb507928`
+   are clear/closed; three guard-bypass controls fail at the filesystem tripwire.
+   Ruff, syntax, diff and shard guard pass; Bandit has two unchanged synthetic
+   SQL-test findings and no new nonassert findings/errors. Final normal hooks
+   and protected publication follow only after fresh writer/head checks.
+   Initial local run loaded the async package rather than its plugin entry point;
+   preserved the failed/interrupted evidence and restarted with the correct
+   `pytest_asyncio.plugin`. Do not count that setup failure as a product defect.
+   The unsupported probe initially patched only one pytest import alias; a
+   corrected private facade patches both aliases without global OS-name changes.
+   Existing dev integration approval remains separately unanswered; no merge.
+
+   Partial exact-eb hosted confirmation: Windows Python 3.12 db-management-m
+   `120856685392` and auth-unit-a-l `120856684370` succeeded; the old BYOK timeout
+   cause remains unknown. Windows Python 3.13 core-server-smoke `120856680420`
+   and macOS Python 3.13 core-server-smoke `120856680481` succeeded. The full run
+   still has pending work and the db-management-n failure; this is not all-green.
+
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.
 **Success Criteria:** Streamed responses stop at a byte limit; XML/ICS are bounded before parsing; synchronous provider calls run off the event loop; API and worker reuse scoped credential resolution; a deleted account or failed scan does not stop later polling; diagnostics contain safe context and stack locations without secrets.

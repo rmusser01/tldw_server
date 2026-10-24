@@ -454,7 +454,7 @@ def test_postgres_guard_accepts_current_legacy_and_scoped_caller_transactions(mo
     from tldw_Server_API.app.core.DB_Management.chacha.native_fork_store import NativeForkStore
 
     vector = Path(__file__).parents[1] / "fixtures" / "native_fork_v1.json"
-    request = NativeForkRequestV1.model_validate(json.loads(vector.read_text())["vectors"][0]["request"])
+    request = NativeForkRequestV1.model_validate(json.loads(vector.read_text(encoding="utf-8"))["vectors"][0]["request"])
     raw = object()
     state = SimpleNamespace(conn=raw, tx_depth=1)
     db = SimpleNamespace(backend_type=BackendType.POSTGRESQL, client_id="alice", _connection_state=lambda: state)

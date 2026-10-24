@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -103,13 +104,32 @@ def _reserve(
     return attempt.generation
 
 
-def _io(db: CharactersRAGDB, root: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+def _io(
+    db: CharactersRAGDB, root: Path, monkeypatch: pytest.MonkeyPatch, *, require_storage: bool = True
+) -> Any:
+    if require_storage and os.name == "nt":
+        pytest.skip("Native asset physical I/O is unsupported on Windows; secure support is TASK-13932")
     try:
         module = importlib.import_module("tldw_Server_API.app.core.Chat.native_chat_assets")
     except ModuleNotFoundError:
         pytest.fail("private native candidate writer/reclamation adapter is missing")
     monkeypatch.setattr(DatabasePaths, "resolve_user_base_directory", staticmethod(lambda user_id: root))
     return module.NativeChatAssetIO(db, user_id=1)
+
+
+def test_physical_io_fixture_requires_supported_platform(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(globals(), "os", SimpleNamespace(name="nt"))
+    db = SimpleNamespace(client_id="1", owner_user_id="1")
+    with pytest.raises(pytest.skip.Exception, match="Windows.*TASK-13932"):
+        _io(db, tmp_path, monkeypatch)
+
+
+def test_rejection_fixture_remains_available_without_physical_support(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(globals(), "os", SimpleNamespace(name="nt"))
+    db = SimpleNamespace(client_id="1", owner_user_id="1")
+    assert _io(db, tmp_path, monkeypatch, require_storage=False)._db is db
 
 
 def _chunk(io: Any, generation: int, *, payload: bytes = PAYLOAD, index: int = 0) -> str:
@@ -230,7 +250,7 @@ def test_outer_transaction_refuses_before_filesystem_side_effects(
 ) -> None:
     db = native_fork_db
     generation = _reserve(db)
-    io = _io(db, tmp_path, monkeypatch)
+    io = _io(db, tmp_path, monkeypatch, require_storage=False)
     with db.transaction():
         with pytest.raises(ValueError, match="native_assets_outermost_required"):
             if action == "chunk":
@@ -300,20 +320,49 @@ def test_existing_final_content_is_verified_before_publication(
     assert _candidate(db)["state"] == "reserved"
 
 
-def test_missing_native_link_capability_refuses_payload_io(
-    native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("capability", ["native", "directory", "nofollow", "dir_fd", "link", "cloexec", "rmtree"])
+@pytest.mark.parametrize("action", ["chunk", "publish", "reclaim"])
+def test_missing_native_storage_capability_refuses_payload_io(
+    native_fork_db: CharactersRAGDB, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capability: str, action: str
 ) -> None:
-    from tldw_Server_API.app.core.Sync.v2.blob_store import SyncBlobStoreError
+    from tldw_Server_API.app.core.Sync.v2 import blob_store
 
+    if capability == "native" and os.name != "nt":
+        pytest.skip("requires native Windows unsupported-platform qualification")
     db = native_fork_db
     generation = _reserve(db)
-    io = _io(db, tmp_path, monkeypatch)
-    monkeypatch.setattr(
-        os, "supports_dir_fd", {function for function in os.supports_dir_fd if function.__name__ != "link"}
-    )
-    with pytest.raises(SyncBlobStoreError, match="unavailable|unsupported"):
-        _chunk(io, generation)
+    io = _io(db, tmp_path, monkeypatch, require_storage=False)
+    if capability in {"directory", "nofollow", "cloexec"}:
+        flag = {"directory": "O_DIRECTORY", "nofollow": "O_NOFOLLOW", "cloexec": "O_CLOEXEC"}[capability]
+        monkeypatch.setattr(os, flag, 0, raising=False)
+    elif capability == "dir_fd":
+        monkeypatch.setattr(os, "supports_dir_fd", set())
+    elif capability == "link":
+        monkeypatch.setattr(
+            os, "supports_dir_fd", {function for function in os.supports_dir_fd if function.__name__ != "link"}
+        )
+    elif capability == "rmtree":
+        monkeypatch.setattr(blob_store.shutil.rmtree, "avoids_symlink_attacks", False, raising=False)
+
+    def refuse_filesystem(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("unsupported native storage reached payload filesystem access")
+
+    module = importlib.import_module("tldw_Server_API.app.core.Chat.native_chat_assets")
+    monkeypatch.setattr(module, "_open_directory_chain", refuse_filesystem)
+    if action == "reclaim":
+        _expire(db)
+    with pytest.raises(blob_store.SyncBlobStoreError, match="unavailable|unsupported"):
+        if action == "chunk":
+            _chunk(io, generation)
+        elif action == "publish":
+            _publish(io, generation)
+        else:
+            io.reclaim(owner(), "native_fork_v1", "fork-one", "sha256:one", "candidate-one")
     assert not (tmp_path / "chat_assets").exists()
+    assert _candidate(db)["state"] == ("reclaiming" if action == "reclaim" else "reserved")
+    with db.transaction() as conn:
+        intents = conn.execute("SELECT intent_kind, state FROM native_chat_quota_intents").fetchall()
+    assert [(row["intent_kind"], row["state"]) for row in intents] == [("reserve", "confirmed")]
 
 
 def test_root_change_before_removal_ack_keeps_quota_unreleased(
@@ -531,7 +580,7 @@ def test_symlinked_roots_and_candidate_paths_fail_without_touching_external_file
 
     db = native_fork_db
     generation = _reserve(db)
-    io = _io(db, tmp_path, monkeypatch)
+    io = _io(db, tmp_path, monkeypatch, require_storage=path == "namespace")
     external = tmp_path / "outside"
     external.mkdir()
     (external / "keep").write_bytes(b"external marker")
@@ -919,7 +968,7 @@ def test_native_storage_keeps_captured_owner_after_client_reassignment(
 
     db = native_fork_db
     generation = _reserve(db)
-    io = _io(db, tmp_path, monkeypatch)
+    io = _io(db, tmp_path, monkeypatch, require_storage=stage != "before")
     if stage in {"final", "reclaim"}:
         _chunk(io, generation)
     if stage == "reclaim":
