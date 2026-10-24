@@ -65,6 +65,11 @@ except ImportError:
         pass
 
 
+# Each supporting document costs one stance call per falsified claim, so adjudication assesses the documents the
+# verifier judged, not every base document the request retrieved. process_claim passes it as the verifier's top_k.
+_ADJUDICATED_SUPPORTING_DOCS = 5
+
+
 def _load_fva_config_from_settings() -> dict[str, Any]:
     """Load FVA configuration from application settings."""
     try:
@@ -205,6 +210,7 @@ class FVAPipeline:
             claim=claim,
             query=query,
             base_documents=documents,
+            top_k=_ADJUDICATED_SUPPORTING_DOCS,
             budget=budget,
             job_context=job_context,
         )
@@ -270,7 +276,7 @@ class FVAPipeline:
                         if anti_docs:
                             adjudication = await self.adjudicator.adjudicate(
                                 claim=claim,
-                                supporting_docs=documents,
+                                supporting_docs=documents[:_ADJUDICATED_SUPPORTING_DOCS],
                                 contradicting_docs=anti_docs,
                                 original_verification=original_verification,
                             )

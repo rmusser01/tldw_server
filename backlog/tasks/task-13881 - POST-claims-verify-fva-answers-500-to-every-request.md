@@ -1,7 +1,7 @@
 ---
 id: TASK-13881
 title: POST /claims/verify/fva answers 500 to every request
-status: To Do
+status: Done
 labels:
 - claims
 - quotas
@@ -16,10 +16,12 @@ verify_claims_with_fva (Claims_Extraction/claims_service.py) has three construct
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 POST /claims/verify/fva runs the FVA pipeline on the media DB and vector store of the user that AC #3 resolves, with an endpoint test that checks a result
-- [ ] #2 A quota refusal at its verify or adjudication call answers 402, with a test
-- [ ] #3 The user_id query parameter counts only for a platform admin, as rebuild_claims does (_legacy_user_has_platform_admin_claims). With an admin's user_id, the media DB, the vector store, the quota decision and the usage rows all belong to that user; otherwise all of them belong to the authenticated user, by id, not username. With a test for each case: a non-admin's user_id is ignored for all four, and an admin's is honoured for all four
-- [ ] #4 Usage_Quotas.md lists POST /claims/verify/fva among the endpoints that answer 402
+- [x] #1 POST /claims/verify/fva runs the FVA pipeline on the media DB and vector store of the user that AC #3 resolves, with an endpoint test that checks a result
+- [x] #2 A quota refusal at its verify or adjudication call answers 402, with a test
+- [x] #3 The user_id query parameter counts only for a platform admin, as rebuild_claims does (_legacy_user_has_platform_admin_claims). With an admin's user_id, the media DB, the vector store, the quota decision and the usage rows all belong to that user; otherwise all of them belong to the authenticated user, by id, not username. With a test for each case: a non-admin's user_id is ignored for all four, and an admin's is honoured for all four
+- [x] #4 Usage_Quotas.md lists POST /claims/verify/fva among the endpoints that answer 402
+- [x] #5 FVA's anti-context retrieval keeps the counter-evidence hybrid retrieval returns (its min_score trims each query's weakest full-text matches before fusion), so the adjudicator runs, with a test on a real MultiDatabaseRetriever with and without a vector store
+- [x] #6 Adjudication assesses at most the verifier's 5 base documents on the supporting side, with a test
 <!-- AC:END -->
 
 ## Implementation Notes
@@ -27,19 +29,25 @@ verify_claims_with_fva (Claims_Extraction/claims_service.py) has three construct
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
 Owner decision, 2026-10-20 (approving the TASK-13862 plan): repair the endpoint in this task, and admin-gate the user_id parameter as the sibling claims endpoints do (rebuild_claims); the two alternatives are not taken. Until this lands, Docs/Operations/Usage_Quotas.md says the endpoint answers 500.
 Review of PR #3287 (I1), 2026-10-20: AC #1 and AC #3 reworded. As first written, AC #3 admin-gated user_id only for the usage row, so a repair could meet every AC and still let a non-admin's ?user_id=2 read user 2's embeddings: the user_id passed to MultiDatabaseRetriever picks the vector store (MediaDBRetriever: create_from_settings_for_user near database_retrievers.py:997, collection user_{id}_media_embeddings near :2203), and the snippets come back as evidence. AC #1's 'the caller's media DB' also contradicted the admin case. AC #3 now gives user_id one meaning for the media DB, vector store, quota decision and usage rows, with a test for the non-admin and the admin case; AC #1 follows it.
+Plan: Docs/superpowers/plans/2026-10-22-fva-endpoint-and-capacity-message.md. AC #5 and AC #6 added (owner Decision 1, A-capped): AntiContextRetriever filtered the fused hybrid list with min_relevance_score 0.3, but an RRF score is at most 1/61, so FVA never found counter-evidence and never adjudicated; the post-fusion filter is deleted (the retriever's min_score already trims each query's weakest full-text matches before fusion; no absolute floor, the adjudicator's stance check decides). Each supporting document costs one stance call per falsified claim, so adjudication assesses the verifier's 5 documents: worst case 1,050 LLM calls per request instead of 50 x (16 + top_k). verify_claims_with_fva resolves the owner first (user_id only for _legacy_user_has_platform_admin_claims, as rebuild_claims), then runs the pipeline for it; an admin naming another user runs inside scoped_context(user_id, is_admin=False) and _claims_user_override_db, so the media visibility filter (SQLite) or RLS (PostgreSQL), the quota decision and the usage rows all read that user. The retriever's user_id picks the vector store; ClaimsJobContext(user_id=owner id) writes the claims_verify rows.
+RED on origin/dev 617094d014 (the plan measured e06eeec68c; no commit between them touches these files): Task 1's tests 4 failed, 23 passed (the fused-score floor dropped every document: set() == {'1'} without a vector store, set() == {'1', '2'} with one; all 8 supporting documents adjudicated where the cap allows 5; the NEUTRAL pin passes on dev, as a pin); with Task 1 in, test_fva_verify_endpoint.py 22 failed (20 assert 500 == 200, 2 assert 500 == 402; TypeError: ClaimsJobContext got an unexpected keyword argument 'job_id', or MultiDatabaseRetriever missing db_paths without max_budget_usd). GREEN: 91 passed (anti-context, pipeline and adjudicator files) and 22 passed (the endpoint file: SQLite and PostgreSQL under a role that cannot bypass RLS, with and without a vector store, one real multi-user API-key case per backend and role); no fva_endpoint_% role left in pg_roles. Mutants all killed, with the plan's counts: user_id honoured for anyone (6), ignored for everyone (7), no scope switch (7), a scope switch that keeps is_admin (7), no DB switch (3), another user's vector store (19), usage rows by username (20), the fused-score floor put back (24), no cap (1), NEUTRAL counter-evidence counted (1), no FTS floor (1). tests/Claims + tests/Claims_Extraction: 1307 passed, 1 failed, 1 skipped; the failure is the known Hypothesis too_slow test, which passed alone, so 1308 pass; the skip is spaCy. Lint boundary tests 8 passed. Test-quality triage exit 0; ratchet + tests/Docs 213 passed; ruff: dev's own findings only; bandit -ll clean; OpenAPI drift check OK; shard coverage new_uncovered=0.
+A non-admin that passes another user's user_id gets 200 with its own results; the parameter is ignored for the media DB, vector store, quota decision and usage rows (AC #3, owner decision 2026-10-20). Single-user mode honours user_id: the single user has the admin role, as for rebuild_claims. AC #5 and AC #6 (owner Decision 1, A-capped): the anti-context retriever no longer filters fused scores; no absolute relevance floor applies, and the adjudicator's stance check decides; adjudication assesses the verifier's 5 supporting documents, so a request's worst case is 1,050 LLM calls (50 claims x 21), bounded by the request schema, not the quota (off by default, fail-open when on). Filed: TASK-13918 (the adjudicator never uses NLI). Not changed: on PostgreSQL an admin's own request reads every account's media, as any admin read does; an admin's user_id for an account with no media DB creates an empty one and answers 200, as rebuild_claims_fts does; max_budget_usd gates only the entry to falsification.
+Correction (clean review of PR #3307, M1): the plan's Review Focus 10 and 11 understate when a verdict becomes REFUTED. ClaimAdjudicator._determine_status (unchanged) refutes once the contradict score reaches min_contradict_score 0.1 whenever contradict >= 1.5 x support (support's share <= contested_threshold 0.4), as well as when contradict > 0.7 with support < 0.4. So with support 0, any CONTRADICTS at confidence >= 0.1 gives REFUTED, not only one above 0.7; the review measured support 0.0 with contradict 0.2 -> REFUTED. Under the cap: if a falsified claim's only SUPPORTS document is ranked 6th or lower, support becomes 0, and a contradiction of 0.5 that kept the original status before now gives REFUTED; one unfloored neighbour misjudged CONTRADICTS at >= 0.1, with no SUPPORTS in the top 5, does the same. Docs/RAG/FVA_Pipeline.md's REFUTED row now states the rule. A follow-up requiring, for example, two CONTRADICTS documents or a minimum confidence before unfloored counter-evidence can refute was offered by the review as optional and not filed.
+Review of PR #3307, the other minors: M2, the adjudication-refusal 402 test pins that the verify call's claims_verify row is kept. M3, process_claim passes _ADJUDICATED_SUPPORTING_DOCS to verifier.verify as top_k, so the cap and the verifier's window are one value (RED: assert [5] == [3] with the constant patched to 3; GREEN). M4, one FVA request can hold up to 20 of the 32 default SYNC_ADAPTER_CALL_POOL slots: filed as TASK-13923, because the suggested clamp through suggest_claims_concurrency is a no-op unless CLAIMS_ADAPTIVE_THROTTLE_ENABLED is set (false by default). M5, FVA_Pipeline.md says an admin's named user is read with personal visibility only. After the fixes: the five FVA and capacity test files 131 passed (the endpoint file on SQLite and PostgreSQL); ruff dev's own findings only; triage OK; shard coverage new_uncovered=0.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+POST /claims/verify/fva runs: the three constructor calls that made every request a 500 are fixed, and FVA now finds counter-evidence (the anti-context retriever no longer drops every fused hybrid result), so claims are adjudicated, against the verifier's 5 supporting documents (at most 1,050 LLM calls per request). user_id counts only for a platform admin, as rebuild_claims does; an admin's switches the media DB and the content scope, so the evidence, the vector store, the quota decision and the claims usage rows all belong to the named user, on SQLite and PostgreSQL. Otherwise all four are the authenticated user's, by id. A quota refusal at the verify or adjudication call answers 402. Usage_Quotas.md lists the endpoint. Follow-up: TASK-13918 (the adjudicator never uses NLI).
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

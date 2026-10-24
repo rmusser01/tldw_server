@@ -917,7 +917,8 @@ async def test_daemon_drain_after_timeout_rejects_until_exit_then_raises() -> No
         assert task.done() is False
         assert pool.active_count == 1
 
-        with pytest.raises(DaemonCapacityError):
+        # The rejection names the call, not the pool's streaming default (TASK-13888).
+        with pytest.raises(DaemonCapacityError, match="^capacity-rejected capacity is exhausted$"):
             await bounded_daemon.await_bounded_daemon_with_timeout(
                 blocked_call,
                 pool=pool,
@@ -1039,7 +1040,7 @@ async def test_async_daemon_bridge_consumes_failure_when_cancelled_during_releas
             return super().is_set()
 
     class GatedReleasePool(BoundedDaemonPool):
-        def start(self, target, *, name, released_event=None):
+        def start(self, target, *, name, released_event=None, **kwargs):
             def gated_target() -> None:
                 target()
                 target_finished.set()
@@ -1049,6 +1050,7 @@ async def test_async_daemon_bridge_consumes_failure_when_cancelled_during_releas
                 gated_target,
                 name=name,
                 released_event=released_event,
+                **kwargs,
             )
 
     def fail() -> None:
