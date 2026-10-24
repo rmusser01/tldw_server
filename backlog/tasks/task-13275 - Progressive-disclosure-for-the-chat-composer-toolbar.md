@@ -1,7 +1,7 @@
 ---
 id: TASK-13275
 title: Progressive disclosure for the chat composer toolbar
-status: Done
+status: In Progress
 assignee: []
 created_date: 2026-09-19 14:47
 updated_date: 2026-09-19 14:47
@@ -46,6 +46,7 @@ Published as draft PR https://github.com/rmusser01/tldw_server/pull/3309 from cl
 2026-10-23 clean manual review at 2cb3b4423fdd552e50dba776c5f165ee32be6e10 found one P2: the context hook uses neutral tone for settled role-play identity/behavior/scene selections, which the new persistent strip hid. Fix must retain selected values regardless of tone, avoid duplicate rendering inside Tools, and route Casual identity actions through setup instead of clear. Add a failing regression using the production neutral tones, then request reviewer confirmation.
 2026-10-23 review correction: four regressions reproduced neutral selected identity/character/behavior/scene disappearing, then passed after preserving those selections in the persistent strip and excluding duplicate neutral Tools rows. Casual identity chips use setup and never call the clear callback. Follow-up toolbar/disclosure/real context-hook suites passed 91 tests. Earlier combined regression run passed 341 tests and all eight responsive browser cases passed, including scoped axe and optional shells. Reviewer confirmation is pending. dev advanced with backend-only TTS changes to 8e8d9f2dcac12ef9743f9bead4a4a16a65ca2353; both PRs will use this latest base.
 Fresh manual reviewer confirmed the P2 fix at 327e57c90e42f0c68b21f28097decc2d3a167b1c against latest dev 8e8d9f2dcac12ef9743f9bead4a4a16a65ca2353: no further important findings. Final TypeScript passed; corrected toolbar lint remains 0 errors/1 existing warning; locale mirror passed 3 cases. This final change is tracking only; exact publication hashes will be included in the PR review record. Qodo was not requested.
+2026-10-24 completion follow-up: requester explicitly waived the human-written Change summary for PRs #3309 and #3310 and authorized following both through completion. MERGE_QUEUE is unset: land composer first on current dev, then update/land rails. CI investigation found stale composer-placeholder lookup in the shared integration harness, obsolete Customize/Advanced and prompt-assist placement contracts, stale tutorial target, and matching E2E callers. Keep all behavioral assertions; adapt callers to current stable controls, reproduce/verify failures, obtain fresh review and satisfy required gates without bypassing them. Diagnose any remaining failures separately.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
