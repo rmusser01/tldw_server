@@ -582,6 +582,24 @@ inferred until hosted verification; the isolated local baseline passed 21 tests.
    and macOS Python 3.13 core-server-smoke `120856680481` succeeded. The full run
    still has pending work and the db-management-n failure; this is not all-green.
 
+#### Folder-Cycle Watchdog Portability (2026-10-24)
+
+1. **Diagnosis (Complete):** Old-eb full `40087370412`, Windows Python 3.13
+   chacha-content-persona job `120856686513`, had one failure/126 passes/nine
+   skips followed by pytest-timeout `signal.setitimer` INTERNALERROR. The workflow
+   correctly selected `thread`, but one folder-cycle marker forced `signal`.
+2. **Minimal repair (Complete):** Remove only the test marker's method override;
+   retain two seconds, function-only scope and all cycle/no-mutation assertions.
+   A plugin-private signal-less probe reproduced exit 3 before and passed after.
+   Whole file: 18 passes with thread; POSIX signal target: one pass. A real
+   blocked-body negative control fires the configured two-second thread watchdog.
+   No production timeout or workflow change; no new ADR needed for test metadata.
+3. **Review/publication (In Progress):** Narrow independent review is clear/closed:
+   four backend/global-timeout combinations retain the deadline and scope; a
+   signal-less thread timer starts and cancels. Ruff, syntax, test Bandit and
+   diff pass. Use normal hooks and an exact-old-daf lease, then require actual
+   current-head hosted CI. No dev integration or merge is authorized.
+
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.
 **Success Criteria:** Streamed responses stop at a byte limit; XML/ICS are bounded before parsing; synchronous provider calls run off the event loop; API and worker reuse scoped credential resolution; a deleted account or failed scan does not stop later polling; diagnostics contain safe context and stack locations without secrets.
