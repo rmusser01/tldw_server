@@ -38,7 +38,19 @@ class AuthnzUserProviderSecretsRepo:
                 from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
                     ensure_user_provider_secrets_pg,
                 )
+                from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
+                    POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
+                    validate_postgres_user_provider_secrets_runtime,
+                )
+                from tldw_Server_API.app.core.exceptions import SchemaReadinessError
 
+                async with self.db_pool.transaction() as conn:
+                    authority = await conn.fetchval(POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL)
+                    if authority is False:
+                        await validate_postgres_user_provider_secrets_runtime(conn)
+                        return
+                    if authority is not True:
+                        raise SchemaReadinessError("PostgreSQL AuthNZ migration authority is unavailable")
                 ok = await ensure_user_provider_secrets_pg(self.db_pool)
                 if not ok:
                     raise RuntimeError("PostgreSQL user_provider_secrets schema ensure failed")
