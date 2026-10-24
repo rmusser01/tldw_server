@@ -343,6 +343,52 @@ Windows cause remains inferred pending a hosted rerun.
    Preserve failed run evidence; do not treat this inferred fixture fix as Windows
    proof or merge authorization. ADR not needed for a test-only collector change.
 
+   Published exact `d8f91dd9aff02bd29106a31724b8b1373dd37f4e` with protected old-c859
+   lease; technical review `5635743008` is clear and the reviewer is closed. Fresh
+   PR CI `40043796259` and required workflows are queued; latest trusted license
+   `40043821067` is queued. No same-head full dispatch yet: wait for actual license
+   SUCCESS, check for an existing matching dispatch and create only one. Check the
+   PR merge-matrix revision before replacing only a mismatched non-required run.
+   Cancellation of old-c859 full `40034567805` was requested, not counted as pass.
+   New-head Windows and full-suite proof remain pending; no rebase or merge.
+
+   At 2026-10-24 01:05Z, exact-d8 trusted license `40043821067` passed. With no
+   existing matching dispatch, full CI `40048217901` was created once and directly
+   verified as `workflow_dispatch` on exact d8. Do not dispatch again. Current
+   merge `126e6c5` still adds 15 candidate-absent paths across seven shards versus
+   zero missing paths in the candidate's 208-shard manifest. After replacement
+   verification, only mismatched non-required PR CI `40043796259` was requested
+   cancelled; protected PR workflows are untouched. Old-c859 full `40034567805`
+   is confirmed cancelled, not passing. Remaining protected contexts, full Ubuntu
+   Python 3.12 and applicable OS/Python lanes are pending. No source edit or merge.
+
+#### Windows Runtime Script Transport (2026-10-24)
+
+Exact-d8 full CI `40048217901` failed Windows Python 3.12
+`auth-integration-b-z` job `120750258667`: 34 VN storage tests could not launch
+their Python subprocess (`WinError 206`); 97 passed and 117 expected skips.
+The 32,695-character script expands beyond Windows' 32,767-character command
+limit. This is a shared test launcher defect, not a storage assertion failure.
+
+1. **Reproduce and repair (Complete):** Two long-Unicode-script regressions
+   fail at a simulated Windows command-length boundary around the real process.
+   Send UTF-8 script bytes through stdin, retaining raw diagnostic bytes and
+   parsing only the prefixed JSON result. Private environment/cwd, timeout and
+   nonzero/single-result assertions are unchanged. Add diagnostic-withholding
+   coverage. All 43 selected helper/VN SQLite tests pass; no runtime code changes.
+2. **Shared callers and review (Complete):** All 16 helper, 34 VN SQLite and 46
+   other storage/bootstrap/VN caller tests pass (96 distinct tests). Ruff, syntax,
+   hooks, diff and shard coverage pass. Test-scope Bandit retains the same four
+   existing non-assert warnings and no new findings beyond expected pytest
+   assertions. Independent review is clear after 14 real subprocess probes of
+   base/current transport, Unicode, cp1252 and nonzero/missing/duplicate results;
+   reviewer closed. Native Windows and PostgreSQL remain hosted prerequisites.
+   ADR not needed for this test-only transport repair; all authority is unchanged.
+3. **Publication and CI (In Progress):** Recheck no concurrent branch writer or
+   auto-merge owner, normal commit and protected exact-d8 lease push only after
+   review/verification. Fresh required PR statuses and applicable exact-head full
+   CI remain mandatory. Preserve failed run evidence; no merge or policy waiver.
+
 ## Stage 1: Provider Safety and Worker Reliability
 **Goal:** Fix findings 6, 7, 10, 11, 12, 15, and 19.
 **Success Criteria:** Streamed responses stop at a byte limit; XML/ICS are bounded before parsing; synchronous provider calls run off the event loop; API and worker reuse scoped credential resolution; a deleted account or failed scan does not stop later polling; diagnostics contain safe context and stack locations without secrets.
