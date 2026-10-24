@@ -10,42 +10,31 @@ from tldw_Server_API.app.core.Storage.storage_interface import StorageBackend
 __all__ = ["StorageBackend", "FileSystemStorage", "get_storage_backend"]
 
 
-_storage_backend_instance: StorageBackend | None = None
+_storage_backend_instance: FileSystemStorage | None = None
 
 
 def get_storage_backend() -> StorageBackend:
-    """
-    Get the configured storage backend instance.
+    """Resolve the current profile's durable blob root, retaining explicit overrides."""
+    import os
+    from pathlib import Path
 
-    Returns a singleton instance of the configured storage backend.
-    Currently defaults to FileSystemStorage.
-    """
+    from tldw_Server_API.app.core.config import settings
+    from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
+
     global _storage_backend_instance
 
-    if _storage_backend_instance is None:
-        from pathlib import Path
+    storage_type = getattr(settings, "storage_backend", "filesystem")
+    if storage_type != "filesystem":
+        raise ValueError(f"Unknown storage backend: {storage_type}")
 
-        from tldw_Server_API.app.core.config import settings
-
-        # Get storage configuration
-        storage_type = getattr(settings, 'storage_backend', 'filesystem')
-
-        if storage_type == 'filesystem':
-            # Default base path for file storage
-            base_path = getattr(
-                settings,
-                'file_storage_path',
-                Path(__file__).parent.parent.parent.parent.parent / "Databases" / "user_files"
-            )
-            if isinstance(base_path, str):
-                base_path = Path(base_path)
-
-            _storage_backend_instance = FileSystemStorage(base_path=base_path)
-        else:
-            # Future: Add S3 or other backends here
-            raise ValueError(f"Unknown storage backend: {storage_type}")
-
-    return _storage_backend_instance
+    configured = os.getenv("FILE_STORAGE_PATH", "").strip() or getattr(settings, "file_storage_path", None)
+    root = Path(configured) if configured else DatabasePaths.get_user_db_base_dir() / "user_files"
+    root = root.expanduser().resolve()
+    backend = _storage_backend_instance
+    if backend is None or backend.base_path != root:
+        backend = FileSystemStorage(base_path=root)
+        _storage_backend_instance = backend
+    return backend
 
 
 def reset_storage_backend() -> None:

@@ -50,6 +50,29 @@ Storage defines shared storage abstractions and local filesystem helpers used by
   `check_storage_quota()` with the user/org/team context and projected byte
   delta.
 
+### Persistent Root And Upgrades
+
+The factory defaults to `DatabasePaths.get_user_db_base_dir() / "user_files"`,
+under the configured `USER_DB_BASE_DIR`. Set that database root to persistent
+storage outside a replaceable installation. `FILE_STORAGE_PATH` takes precedence
+over an explicit `settings.file_storage_path`; otherwise the profile default is
+used. Backend reuse follows the resolved root, so a profile change cannot retain
+the first profile's backend. Relative keys remain `<owner>/media/<id>/<filename>`.
+
+Older versions defaulted to `<installation>/Databases/user_files`. Before replacing
+that installation, stop its writers and back up both its MediaFiles metadata and
+blob tree. Confirm which deployment owns that tree: independent profiles may have
+reused numeric IDs there. For an unambiguously owned tree, either set
+`FILE_STORAGE_PATH` to its preserved absolute root, or copy the complete verified
+tree to the new profile's `user_files` root without changing relative keys. Verify
+file counts, hashes and authenticated downloads before retiring the old copy.
+If ownership is mixed or uncertain, keep the source intact and reconcile against
+each profile's file records first. There is no automatic legacy-root fallback,
+copy or deletion. A path change cannot recover an already-missing blob.
+
+The optional orphan cleanup service has its own root configuration; this factory
+change does not redirect or enable that deletion service.
+
 ### State And Operations
 
 - Filesystem storage state and generated-file DB metadata can drift if callers
