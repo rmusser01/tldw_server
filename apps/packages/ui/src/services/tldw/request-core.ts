@@ -955,20 +955,6 @@ const performTldwRequest = async (
     if (csrfToken) h["X-CSRF-Token"] = csrfToken;
   }
 
-  if (
-    !recipeSnapshot &&
-    noAuth &&
-    isUnsafeMethod(method) &&
-    ((!isAbsolute && transport?.kind === "same-origin") ||
-      samePageOriginAbsoluteUrl)
-  ) {
-    for (const key of Object.keys(h)) {
-      if (key.toLowerCase() === "x-csrf-token") delete h[key];
-    }
-    const csrfToken = readBrowserCookie("csrf_token");
-    if (csrfToken) h["X-CSRF-Token"] = csrfToken;
-  }
-
   const controller = new AbortController();
   let retryController: AbortController | null = null;
   const timeoutMs = deriveRequestTimeout(

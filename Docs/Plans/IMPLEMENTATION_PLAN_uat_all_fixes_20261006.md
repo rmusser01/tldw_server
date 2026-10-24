@@ -7,7 +7,7 @@ ADR required: no. Restore existing migration and retry contracts; retain ADR-003
 
 ## Current UAT tracking index — 2026-10-23
 
-**X01 remains active; X02 is untouched. 33/43 selected acceptances are historical, 10 families remain open.** The fixes are now being reconciled on latest verified dev `bd9b4e0ac3f65f3b4fcc4796842288e5a451b3a3` in the separate managed `uat-latest-dev-20261023` checkout. Prior frozen-source results do not qualify the combined candidate. The original523 checkout/runtime/session/data/keys remain protected. Current integration/qualification is tracked in [the latest-dev plan](IMPLEMENTATION_PLAN_uat_latest_dev_rebase_20261023.md); heartbeat remains PAUSED. All historical outcomes below retain their stated scope.
+**X01 remains active; X02 is untouched. 33/43 selected acceptances are historical, 10 families remain open.** The reviewed fixes are now committed locally as `04f73263923e2f3d371ffbe9d5a97f73a2ab31e0` on latest verified dev `bd9b4e0ac3f65f3b4fcc4796842288e5a451b3a3` in the separate managed `uat-latest-dev-20261023` checkout. Prior frozen-source results do not qualify the combined candidate. The original523 checkout/runtime/session/data/keys remain protected. Current integration/qualification is tracked in [the latest-dev plan](IMPLEMENTATION_PLAN_uat_latest_dev_rebase_20261023.md); heartbeat remains PAUSED. All historical outcomes below retain their stated scope.
 
 The43 IDs below are existing workflow families in [the release catalog](../../apps/tldw-frontend/scripts/live-tier-uat/release-catalog-data.mjs), with426 planned variants. C01 through C12 selected acceptances are closed;10 families remain open. Selected acceptance does not close broader release gates or convert historical failed runs into passing runs.
 

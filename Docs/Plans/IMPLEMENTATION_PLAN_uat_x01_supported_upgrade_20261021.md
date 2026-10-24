@@ -1,6 +1,6 @@
 # X01 — supported upgrade without data loss
 
-Associated task: TASK-13260.278.18.83.45. Frozen candidate 523ef323e9f56bc31559f6c5b8e506c27e599dcb plus unpublished WIP; not latest dev. C12 closed; selected acceptance remains 33/43, 10 open. X01 is the sole active family.
+Associated task: TASK-13260.278.18.83.45. Current candidate 04f73263923e2f3d371ffbe9d5a97f73a2ab31e0 on verified dev bd9b4e0ac3f65f3b4fcc4796842288e5a451b3a3. The original 523ef323 source/runtime is preserved separately; its earlier results below are historical. C12 closed; selected acceptance remains 33/43, 10 open. X01 is the sole active family; X02 is untouched.
 
 ## Scope and controls
 
@@ -997,3 +997,13 @@ Both users passed API writes/provider/saved-turn checks and both browser reload/
 Latest changed0132 run remains failed: Admin/Alice/Bob API/oldrecords/newwrites/providerpass; AliceUIold/reload/newsavedChat/Logoutpass; retiringnotification401 browserbodyreceipt incomplete and stickyfailure.62.320case63.62pytest64.722outer;graceful2.212s/allcounters0/receipt_failedfalse;source/archive/config/originalownerspreserved,cleanupErrors0. Source supports nonOK SSE→terminal401→unsubscribe/abort, but does not retrospectively prove this failure. Next prospective control must retain exactretiring401 plus explicitPlaywright/CDP cancellation category and complete server finalbody/return/taskdone, strict200/writes/activeauth rules and zero pendingwork. No frontendfix or modelreplay merelydiagnostic justified.
 
 User-authorized cleanup completed: ten superseded installedcandidate roots41327files839162311bytesremoved after exactmetadata,import-path and protectedowner guards. Initial primarycwdmetadata refusal removednothing; actualAPIlaunchcontext confirmed editableWT. CurrentMediaidentitysite, genuinehistoricalreleases, currentbuild/session/WIPpreserved. Failed0132threefixture roots87entriesremoved after processrelease. PackagerACTIVE nowcurrentMedia; no new package/build/runtime/Git action. X01remainsopen33/43accepted10open;X02untouched.
+
+## Latest-dev validation — 2026-10-23
+
+Rebase/source qualification and independent final review are complete; normal local commit04f7326392 is unpublished. Current private installed site is /private/tmp/tldw-x01-latest-dev-20261023/site; current isolated frontend is NEW default.next buildnaXUk1FRiQ0MLFiz-np_d, rewriting to18908. Original API50010/49993, frontend50863/50855 and Chrome54716/54710 remain protected. Prior lifecycle owners/artifacts below are historical, not current bindings. Full latest-dev X01 live acceptance remains open.
+
+First no-Send single-user invocation stopped before acquisition because completed disposable historical profiles/archives no longer exist. No old files were recovered. Fresh genuine v0.1.32 linked SQLite preparation completed with3accounts/2owners/10databaseFiles, actual old backup/separate restore/current migration and retained account/content comparisons. Live qualification is in progress. The historical version identifies the source installation, not the target being validated.
+
+## Latest-dev login repair — component checks
+
+Actual browser diagnostic caught ReferenceError:isAbsolute is not defined before login dispatch. The shared request executor contained an obsolete duplicate CSRF block referring to variables now owned by resolveTldwRequestPlan. Existing absolute same-page regression reproduced1failed/12excluded/1.167s. Delete only duplicate14lines; preserve samePageOriginRequest CSRF/auth/origin/recipe protections. Connected6modules86passed in each configured client (12.826s UI/12.380s WebUI). Changed module has0diagnostics under both actual configured TypeScript programs; no fullprojectTS claim. Configured lint0errors/6identical inheritedany warnings/no ignored. TS-only Bandit N/A; functional Python operators0findings0errors. Final review/normalcommit/build/live validation pending. Python installed bytes remain unchanged, so no redundant wheel/install. Separate private frontend shutdown27.786s exceeded15s and remains unqualified. Original session/runtime/source/archive/config preserved.
