@@ -23,7 +23,7 @@ Priority order (highest leverage first, per the review):
 7. Split store monoliths (store/workspace.ts 4,065 lines; connection.tsx dynamic-import workaround for the god client) — largely resolved by (1).
 8. Asset work: subset 2.4MB TTF fonts to WOFF2 (both shells), slim `_locales` (11MB domain JSONs), narrow pdf.worker web_accessible_resources match.
 9. ResearchWorkspace ChatPane virtualization (PlaygroundChat already virtualized via VirtualChatTimeline); extract composer draft into a leaf component (R6); merge ResearchWorkspace dual 5s pollers.
-10. Decide fate of packages/voice-assistant-sdk (zero importers) — needs maintainer decision (roadmap?).
+10. RESOLVED 2026-10-19: packages/voice-assistant-sdk deleted (14 tracked files, zero importers verified across apps/ config/source/Dockerfile; workspace entry removed from apps/package.json).
 11. Split tiny URL predicates from the heavy parse functions in `parser/{twitter,amazon,wiki}.ts` so consumers needn't duplicate host-regex guards around lazy imports (from the TASK-13511 implementation).
 12. Add a force-bypass for the 60s `getProvidersStatus` TTL cache after provider-settings saves.
 13. Fix the `@tldw/ui` package `exports` map subpaths — bun-run extension unit tests cannot resolve `@tldw/ui/...` imports today (pre-existing; 3 resolveApiPath test failures).
