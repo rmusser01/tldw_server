@@ -34,10 +34,9 @@ def _postgres_policy_exists(db: Any, conn: Any, table: str, policy: str) -> bool
         return False
 
 
-def _ensure_postgres_rls(db: Any, conn: Any) -> None:
-    """Ensure row-level security policies exist for shared content tables."""
+def postgres_policy_sets(backend: Any) -> dict[str, list[tuple[str, str]]]:
+    """Return the canonical shared-content predicates for setup and validation."""
 
-    backend = db.backend
     ident = backend.escape_identifier
 
     # These tables hold domain output metadata, not lifecycle. No admin/team
@@ -110,7 +109,7 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
         "AND owned_media.system_content_hash IS NOT NULL))"
     )
 
-    policy_sets = {
+    return {
         "media": [
             ("media_visibility_access", media_access_predicate),
         ],
@@ -130,6 +129,14 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
             ("owned_clone_pending_keyword_access", pending_keyword_predicate),
         ],
     }
+
+
+
+def _ensure_postgres_rls(db: Any, conn: Any) -> None:
+    """Ensure row-level security policies exist for shared content tables."""
+    backend = db.backend
+    ident = backend.escape_identifier
+    policy_sets = postgres_policy_sets(backend)
 
     old_media_policies = [
         "media_scope_admin",
@@ -231,7 +238,16 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
 
     for policy_name, predicate in policy_sets["sync_log"]:
         try:
-            if not db._postgres_policy_exists(conn, "sync_log", policy_name):
+            if db._postgres_policy_exists(conn, "sync_log", policy_name):
+                backend.execute(
+                    f"""
+                    ALTER POLICY {backend.escape_identifier(policy_name)} ON {ident("sync_log")}
+                    USING ({predicate})
+                    WITH CHECK ({predicate})
+                    """,
+                    connection=conn,
+                )
+            else:
                 backend.execute(
                     f"""
                     CREATE POLICY {backend.escape_identifier(policy_name)} ON {ident('sync_log')}
@@ -242,7 +258,7 @@ def _ensure_postgres_rls(db: Any, conn: Any) -> None:
                     connection=conn,
                 )
         except BackendDatabaseError as exc:
-            logger.warning(f"Skipping creation of sync_log policy '{policy_name}': {exc}")
+            logger.warning(f"Skipping setup of sync_log policy '{policy_name}': {exc}")
 
 
 __all__ = [

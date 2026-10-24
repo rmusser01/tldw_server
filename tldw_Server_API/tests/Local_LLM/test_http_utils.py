@@ -125,7 +125,7 @@ async def test_wait_for_http_ready_accepts_200(monkeypatch):
     """Test that 200 OK is accepted as ready."""
     call_count = {"n": 0}
 
-    async def mock_afetch(method, url, client):
+    async def mock_afetch(method, url, client, *, configured_endpoint):
         call_count["n"] += 1
         req = httpx.Request(method, url)
         return httpx.Response(200, request=req)
@@ -144,7 +144,7 @@ async def test_wait_for_http_ready_rejects_404_by_default(monkeypatch):
     """Test that 404 is NOT accepted as ready by default (stricter check)."""
     call_count = {"n": 0}
 
-    async def mock_afetch(method, url, client):
+    async def mock_afetch(method, url, client, *, configured_endpoint):
         call_count["n"] += 1
         req = httpx.Request(method, url)
         return httpx.Response(404, request=req)
@@ -162,7 +162,7 @@ async def test_wait_for_http_ready_legacy_accepts_404(monkeypatch):
     """Test that legacy mode (accept_any_non_5xx=True) accepts 404."""
     call_count = {"n": 0}
 
-    async def mock_afetch(method, url, client):
+    async def mock_afetch(method, url, client, *, configured_endpoint):
         call_count["n"] += 1
         req = httpx.Request(method, url)
         return httpx.Response(404, request=req)
@@ -181,7 +181,7 @@ async def test_wait_for_http_ready_legacy_accepts_404(monkeypatch):
 async def test_wait_for_http_ready_rejects_5xx(monkeypatch):
     """Test that 5xx errors are not accepted in any mode."""
 
-    async def mock_afetch(method, url, client):
+    async def mock_afetch(method, url, client, *, configured_endpoint):
         req = httpx.Request(method, url)
         return httpx.Response(503, request=req)
 
@@ -204,3 +204,51 @@ async def test_request_json_rejects_non_httpx_client():
     """request_json should enforce httpx.AsyncClient inputs."""
     with pytest.raises(TypeError, match="httpx.AsyncClient"):
         await request_json(_FakeClient(), "GET", "http://x/y", retries=1, backoff=0)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("origin", "redirect", "denied", "ready", "expected_calls"),
+    [
+        ("http://127.0.0.1:18908", None, "", True, ["http://127.0.0.1:18908/health"]),
+        ("http://192.168.1.4:18908", None, "", True, ["http://192.168.1.4:18908/health"]),
+        ("http://127.0.0.1:18908", "http://127.0.0.1:18909/health", "", False, ["http://127.0.0.1:18908/health"]),
+        ("http://169.254.169.254:18908", None, "", False, []),
+        ("http://127.0.0.1:18908", None, "127.0.0.1", False, []),
+    ],
+)
+async def test_managed_readiness_keeps_exact_configured_origin(
+    monkeypatch, origin, redirect, denied, ready, expected_calls
+):
+    """Exercise real production egress; substitute only the HTTP transport."""
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.exceptions import EgressPolicyError
+    from tldw_Server_API.app.core.Local_LLM import http_utils
+
+    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
+    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
+    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("TESTING", raising=False)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWED_PORTS", "80,443")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_DENYLIST", denied)
+    monkeypatch.setenv("EGRESS_DENYLIST", "")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_ALLOWLIST", "")
+    monkeypatch.setenv("EGRESS_ALLOWLIST", "")
+    monkeypatch.setenv("WORKFLOWS_EGRESS_PROFILE", "permissive")
+    seen = []
+
+    def handle(request):
+        seen.append(str(request.url))
+        return httpx.Response(302, headers={"location": redirect}) if redirect else httpx.Response(200)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handle), trust_env=False)
+    monkeypatch.setattr(http_utils, "create_async_client", lambda **_kwargs: client)
+    # The origin must stay blocked for unrelated callers, including after readiness.
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handle), trust_env=False) as ordinary:
+        with pytest.raises(EgressPolicyError):
+            await http_client.afetch(method="GET", url=origin + "/health", client=ordinary)
+    result = await http_utils.wait_for_http_ready(origin, paths=("/health",), timeout_total=0.05, interval=0.05)
+    assert result is ready  # nosec B101 -- configured readiness cannot bypass denial.
+    assert seen == expected_calls  # nosec B101 -- no redirected or forbidden request reaches I/O.

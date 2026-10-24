@@ -1,6 +1,6 @@
-import React from "react"
-import { useTranslation } from "react-i18next"
-import { Button, Empty, Tag, Tooltip, Collapse } from "antd"
+import React from "react";
+import { useTranslation } from "react-i18next";
+import { Button, Empty, Tag, Tooltip, Collapse } from "antd";
 import {
   X,
   Wrench,
@@ -13,113 +13,129 @@ import {
   CheckCircle,
   AlertTriangle,
   XCircle,
-} from "lucide-react"
-import { useACPSessionsStore } from "@/store/acp-sessions"
-import { TOOL_TIERS, UI_CONFIG } from "@/services/acp/constants"
-import type { ACPPermissionTier } from "@/services/acp/types"
+} from "lucide-react";
+import { useACPSessionsStore } from "@/store/acp-sessions";
+import { TOOL_TIERS, UI_CONFIG } from "@/services/acp/constants";
+import type { ACPPermissionTier } from "@/services/acp/types";
 
 interface ACPToolsPanelProps {
-  onHide?: () => void
+  onHide?: () => void;
 }
 
 export const ACPToolsPanel: React.FC<ACPToolsPanelProps> = ({ onHide }) => {
-  const { t } = useTranslation(["playground", "option", "common"])
+  const { t } = useTranslation(["playground", "option", "common"]);
 
   // Store
   const activeSession = useACPSessionsStore((s) =>
-    s.activeSessionId ? s.getSession(s.activeSessionId) : undefined
-  )
+    s.activeSessionId ? s.getSession(s.activeSessionId) : undefined,
+  );
 
-  const capabilities = activeSession?.capabilities as {
-    fs?: { readTextFile?: boolean; writeTextFile?: boolean }
-    terminal?: boolean
-    tools?: string[]
-  } | undefined
+  const capabilities = activeSession?.capabilities as
+    | {
+        fs?: { readTextFile?: boolean; writeTextFile?: boolean };
+        terminal?: boolean;
+        tools?: string[];
+      }
+    | undefined;
 
-  // Group tools by category
+  const reportedTools = capabilities?.tools;
+
+  // Agent reports describe support; session policy still determines access.
   const groupedTools = React.useMemo(() => {
-    const tools = capabilities?.tools || Object.keys(TOOL_TIERS)
+    const tools = Array.isArray(reportedTools)
+      ? reportedTools.filter(
+          (tool): tool is string => typeof tool === "string" && tool.length > 0,
+        )
+      : [];
     const groups: Record<string, string[]> = {
       filesystem: [],
       search: [],
       git: [],
       execution: [],
       other: [],
-    }
+    };
 
     for (const tool of tools) {
-      const toolLower = tool.toLowerCase()
+      const toolLower = tool.toLowerCase();
       if (toolLower.startsWith("fs.") || toolLower.includes("file")) {
-        groups.filesystem.push(tool)
-      } else if (toolLower.startsWith("search.") || toolLower.includes("grep") || toolLower.includes("glob")) {
-        groups.search.push(tool)
+        groups.filesystem.push(tool);
+      } else if (
+        toolLower.startsWith("search.") ||
+        toolLower.includes("grep") ||
+        toolLower.includes("glob")
+      ) {
+        groups.search.push(tool);
       } else if (toolLower.startsWith("git.")) {
-        groups.git.push(tool)
-      } else if (toolLower.startsWith("exec.") || toolLower.includes("terminal") || toolLower.includes("bash")) {
-        groups.execution.push(tool)
+        groups.git.push(tool);
+      } else if (
+        toolLower.startsWith("exec.") ||
+        toolLower.includes("terminal") ||
+        toolLower.includes("bash")
+      ) {
+        groups.execution.push(tool);
       } else {
-        groups.other.push(tool)
+        groups.other.push(tool);
       }
     }
 
-    return groups
-  }, [capabilities?.tools])
+    return groups;
+  }, [reportedTools]);
 
   const getTierColor = (tier: ACPPermissionTier) => {
     switch (tier) {
       case "auto":
-        return "success"
+        return "success";
       case "batch":
-        return "warning"
+        return "warning";
       case "individual":
-        return "error"
+        return "error";
       default:
-        return "default"
+        return "default";
     }
-  }
+  };
 
   const getTierIcon = (tier: ACPPermissionTier) => {
     switch (tier) {
       case "auto":
-        return <CheckCircle className="h-3 w-3" />
+        return <CheckCircle className="h-3 w-3" />;
       case "batch":
-        return <AlertTriangle className="h-3 w-3" />
+        return <AlertTriangle className="h-3 w-3" />;
       case "individual":
-        return <XCircle className="h-3 w-3" />
+        return <XCircle className="h-3 w-3" />;
       default:
-        return null
+        return null;
     }
-  }
+  };
 
   const getGroupIcon = (group: string) => {
     switch (group) {
       case "filesystem":
-        return <FolderOpen className="h-4 w-4" />
+        return <FolderOpen className="h-4 w-4" />;
       case "search":
-        return <Search className="h-4 w-4" />
+        return <Search className="h-4 w-4" />;
       case "git":
-        return <GitBranch className="h-4 w-4" />
+        return <GitBranch className="h-4 w-4" />;
       case "execution":
-        return <Terminal className="h-4 w-4" />
+        return <Terminal className="h-4 w-4" />;
       default:
-        return <Wrench className="h-4 w-4" />
+        return <Wrench className="h-4 w-4" />;
     }
-  }
+  };
 
   const getGroupLabel = (group: string) => {
     switch (group) {
       case "filesystem":
-        return t("playground:acp.toolGroups.filesystem", "File System")
+        return t("playground:acp.toolGroups.filesystem", "File System");
       case "search":
-        return t("playground:acp.toolGroups.search", "Search")
+        return t("playground:acp.toolGroups.search", "Search");
       case "git":
-        return t("playground:acp.toolGroups.git", "Git")
+        return t("playground:acp.toolGroups.git", "Git");
       case "execution":
-        return t("playground:acp.toolGroups.execution", "Execution")
+        return t("playground:acp.toolGroups.execution", "Execution");
       default:
-        return t("playground:acp.toolGroups.other", "Other")
+        return t("playground:acp.toolGroups.other", "Other");
     }
-  }
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -145,7 +161,10 @@ export const ACPToolsPanel: React.FC<ACPToolsPanelProps> = ({ onHide }) => {
         {!activeSession ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description={t("playground:acp.selectSession", "Select a session to view capabilities")}
+            description={t(
+              "playground:acp.selectSession",
+              "Select a session to view capabilities",
+            )}
             className="py-8"
           />
         ) : (
@@ -153,47 +172,66 @@ export const ACPToolsPanel: React.FC<ACPToolsPanelProps> = ({ onHide }) => {
             {/* Capabilities summary */}
             <div className="rounded-lg bg-surface2 p-3">
               <div className="mb-2 text-xs font-medium text-text-muted uppercase">
-                {t("playground:acp.capabilities", "Capabilities")}
+                {t("playground:acp.reportedSupport", "Agent-reported support")}
               </div>
               <div className="flex flex-wrap gap-2">
                 <CapabilityBadge
                   icon={<FileText className="h-3 w-3" />}
                   label={t("playground:acp.fsRead", "Read Files")}
-                  enabled={capabilities?.fs?.readTextFile !== false}
+                  enabled={capabilities?.fs?.readTextFile}
                 />
                 <CapabilityBadge
                   icon={<FileText className="h-3 w-3" />}
                   label={t("playground:acp.fsWrite", "Write Files")}
-                  enabled={capabilities?.fs?.writeTextFile !== false}
+                  enabled={capabilities?.fs?.writeTextFile}
                 />
                 <CapabilityBadge
                   icon={<Terminal className="h-3 w-3" />}
                   label={t("playground:acp.terminal", "Terminal")}
-                  enabled={capabilities?.terminal !== false}
+                  enabled={capabilities?.terminal}
                 />
               </div>
             </div>
 
-            {/* Permission tiers legend */}
+            <p className="text-xs text-text-muted">
+              {t(
+                "playground:acp.supportNotAuthorization",
+                "Agent support is not authorization. The active session policy and permission requests determine access.",
+              )}
+            </p>
+
+            {/* Default tier reference, not a resolved session policy. */}
             <div className="rounded-lg bg-surface2 p-3">
               <div className="mb-2 text-xs font-medium text-text-muted uppercase">
-                {t("playground:acp.permissionTiers", "Permission Tiers")}
+                {t(
+                  "playground:acp.defaultPermissionTiers",
+                  "Default permission tiers",
+                )}
               </div>
               <div className="space-y-2">
                 <TierLegendItem
                   tier="auto"
                   label={UI_CONFIG.TIER_LABELS.auto}
-                  description={UI_CONFIG.TIER_DESCRIPTIONS.auto}
+                  description={t(
+                    "playground:acp.defaultTierDescription.auto",
+                    "Read-only tools use this default classification. Session policy may still deny access or require approval.",
+                  )}
                 />
                 <TierLegendItem
                   tier="batch"
                   label={UI_CONFIG.TIER_LABELS.batch}
-                  description={UI_CONFIG.TIER_DESCRIPTIONS.batch}
+                  description={t(
+                    "playground:acp.defaultTierDescription.batch",
+                    "This default classification groups tools for review. The current permission prompt determines whether batch approval is available.",
+                  )}
                 />
                 <TierLegendItem
                   tier="individual"
                   label={UI_CONFIG.TIER_LABELS.individual}
-                  description={UI_CONFIG.TIER_DESCRIPTIONS.individual}
+                  description={t(
+                    "playground:acp.defaultTierDescription.individual",
+                    "This default classification calls for individual review. Session policy determines current access.",
+                  )}
                 />
               </div>
             </div>
@@ -201,8 +239,23 @@ export const ACPToolsPanel: React.FC<ACPToolsPanelProps> = ({ onHide }) => {
             {/* Tools by group */}
             <div>
               <div className="mb-2 text-xs font-medium text-text-muted uppercase">
-                {t("playground:acp.availableTools", "Available Tools")}
+                {t("playground:acp.reportedTools", "Reported tools")}
               </div>
+              {Object.values(groupedTools).every(
+                (tools) => tools.length === 0,
+              ) && (
+                <p className="text-sm text-text-muted">
+                  {Array.isArray(reportedTools)
+                    ? t(
+                        "playground:acp.noReportedTools",
+                        "The agent reported no tools.",
+                      )
+                    : t(
+                        "playground:acp.toolListNotReported",
+                        "The agent has not reported a tool list.",
+                      )}
+                </p>
+              )}
               <Collapse
                 ghost
                 defaultActiveKey={["filesystem"]}
@@ -214,25 +267,50 @@ export const ACPToolsPanel: React.FC<ACPToolsPanelProps> = ({ onHide }) => {
                       <div className="flex items-center gap-2">
                         {getGroupIcon(group)}
                         <span>{getGroupLabel(group)}</span>
-                        <span className="text-xs text-text-muted">({tools.length})</span>
+                        <span className="text-xs text-text-muted">
+                          ({tools.length})
+                        </span>
                       </div>
                     ),
                     children: (
                       <div className="space-y-1">
                         {tools.map((tool) => {
-                          const tier = (TOOL_TIERS[tool] || "batch") as ACPPermissionTier
+                          const tier = Object.prototype.hasOwnProperty.call(
+                            TOOL_TIERS,
+                            tool,
+                          )
+                            ? (TOOL_TIERS[tool] as ACPPermissionTier)
+                            : undefined;
                           return (
                             <div
                               key={tool}
                               className="flex items-center justify-between rounded px-2 py-1 hover:bg-surface2"
                             >
                               <span className="text-sm text-text">{tool}</span>
-                              <Tag color={getTierColor(tier)} className="flex items-center gap-1">
-                                {getTierIcon(tier)}
-                                <span className="text-xs">{tier}</span>
+                              <Tag
+                                color={tier ? getTierColor(tier) : "default"}
+                                className="flex items-center gap-1"
+                              >
+                                {tier && getTierIcon(tier)}
+                                <span className="text-xs">
+                                  {tier ? (
+                                    <>
+                                      {t(
+                                        "playground:acp.defaultTier",
+                                        "Default tier",
+                                      )}
+                                      : {tier}
+                                    </>
+                                  ) : (
+                                    t(
+                                      "playground:acp.tierNotReported",
+                                      "Tier not reported",
+                                    )
+                                  )}
+                                </span>
                               </Tag>
                             </div>
-                          )
+                          );
                         })}
                       </div>
                     ),
@@ -243,65 +321,84 @@ export const ACPToolsPanel: React.FC<ACPToolsPanelProps> = ({ onHide }) => {
         )}
       </div>
     </div>
-  )
-}
+  );
+};
 
 interface CapabilityBadgeProps {
-  icon: React.ReactNode
-  label: string
-  enabled: boolean
+  icon: React.ReactNode;
+  label: string;
+  enabled: boolean | undefined;
 }
 
-const CapabilityBadge: React.FC<CapabilityBadgeProps> = ({ icon, label, enabled }) => (
-  <div
-    className={`flex items-center gap-1.5 rounded-full px-2 py-1 text-xs ${
-      enabled
-        ? "bg-success/10 text-success"
-        : "bg-text-muted/10 text-text-muted"
-    }`}
-  >
-    {icon}
-    <span>{label}</span>
-    {enabled ? (
-      <CheckCircle className="h-3 w-3" />
-    ) : (
-      <XCircle className="h-3 w-3" />
-    )}
-  </div>
-)
+const CapabilityBadge: React.FC<CapabilityBadgeProps> = ({
+  icon,
+  label,
+  enabled,
+}) => {
+  const { t } = useTranslation(["playground"]);
+  const status =
+    enabled === true
+      ? t("playground:acp.supported", "Supported")
+      : enabled === false
+        ? t("playground:acp.unsupported", "Unsupported")
+        : t("playground:acp.notReported", "Not reported");
+  return (
+    <div
+      className={`flex items-center gap-1.5 rounded-full px-2 py-1 text-xs ${
+        enabled === true
+          ? "bg-success/10 text-success"
+          : "bg-text-muted/10 text-text-muted"
+      }`}
+    >
+      {icon}
+      <span>
+        {label}: {status}
+      </span>
+      {enabled === true ? (
+        <CheckCircle className="h-3 w-3" />
+      ) : enabled === false ? (
+        <XCircle className="h-3 w-3" />
+      ) : null}
+    </div>
+  );
+};
 
 interface TierLegendItemProps {
-  tier: ACPPermissionTier
-  label: string
-  description: string
+  tier: ACPPermissionTier;
+  label: string;
+  description: string;
 }
 
-const TierLegendItem: React.FC<TierLegendItemProps> = ({ tier, label, description }) => {
+const TierLegendItem: React.FC<TierLegendItemProps> = ({
+  tier,
+  label,
+  description,
+}) => {
   const getColor = () => {
     switch (tier) {
       case "auto":
-        return "text-success"
+        return "text-success";
       case "batch":
-        return "text-warning"
+        return "text-warning";
       case "individual":
-        return "text-error"
+        return "text-error";
       default:
-        return "text-text-muted"
+        return "text-text-muted";
     }
-  }
+  };
 
   const getIcon = () => {
     switch (tier) {
       case "auto":
-        return <CheckCircle className="h-4 w-4" />
+        return <CheckCircle className="h-4 w-4" />;
       case "batch":
-        return <AlertTriangle className="h-4 w-4" />
+        return <AlertTriangle className="h-4 w-4" />;
       case "individual":
-        return <Shield className="h-4 w-4" />
+        return <Shield className="h-4 w-4" />;
       default:
-        return null
+        return null;
     }
-  }
+  };
 
   return (
     <div className="flex items-start gap-2">
@@ -311,5 +408,5 @@ const TierLegendItem: React.FC<TierLegendItemProps> = ({ tier, label, descriptio
         <div className="text-xs text-text-muted">{description}</div>
       </div>
     </div>
-  )
-}
+  );
+};

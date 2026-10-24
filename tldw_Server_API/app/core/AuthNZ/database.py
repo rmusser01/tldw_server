@@ -37,6 +37,11 @@ from tldw_Server_API.app.core.AuthNZ.exceptions import (
 from tldw_Server_API.app.core.AuthNZ.migrations import ensure_authnz_tables
 from tldw_Server_API.app.core.AuthNZ.postgres_profile_version_schema import (
     ensure_postgres_profile_version_on_connection,
+    validate_postgres_profile_version_on_connection,
+)
+from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
+    POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
+    validate_postgres_auth_runtime,
 )
 from tldw_Server_API.app.core.AuthNZ.profile_candidate_schema import (
     repair_postgres_profile_candidate_timestamps,
@@ -1115,6 +1120,12 @@ class DatabasePool:
                         )
                         """
                     )
+
+                    if not await conn.fetchval(POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL):
+                        await validate_postgres_auth_runtime(conn)
+                        await validate_postgres_profile_version_on_connection(conn)
+                        await validate_postgres_profile_candidate_schema(conn)
+                        return
 
                     if schema_available:
                         logger.info("Ensuring PostgreSQL schema...")

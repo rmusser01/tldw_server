@@ -884,6 +884,84 @@ def test_current_postgres_v61_rejects_progress_acl_and_owner_drift(
         backend.get_pool().close_all()
 
 
+def test_current_postgres_reopen_accepts_inherited_progress_owner_authority(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    """A normal database owner inherits pg_database_owner rather than its exact role OID."""
+    backend, db = _open_db(pg_database_config, owner="960040")
+    reopened_backend = None
+    reopened = None
+    try:
+        with backend.transaction() as conn:
+            authority = backend.execute(
+                "SELECT c.relowner=current_user::regrole AS exact_owner, "
+                "pg_has_role(current_user,c.relowner,'USAGE') AS owner_authority, "
+                "has_table_privilege(current_user,'db_schema_version','UPDATE') AS writable_version "
+                "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                "WHERE n.nspname=current_schema() AND c.relname='chacha_schema_migration_progress'",
+                connection=conn,
+            ).rows
+        assert authority == [{"exact_owner": False, "owner_authority": True, "writable_version": True}]  # nosec B101 -- real fixture must reproduce distinct inherited ownership.
+        reopened_backend = DatabaseBackendFactory.create_backend(pg_database_config)
+        reopened = CharactersRAGDB(":memory:", client_id="960041", backend=reopened_backend)
+        note = reopened.add_note("Inherited owner reopen", "The second owner can retain new work.")
+        assert reopened.get_note_by_id(note)["content"] == "The second owner can retain new work."  # nosec B101 -- public constructor and write/read acceptance.
+    finally:
+        if reopened is not None:
+            reopened.close_all_connections()
+        if reopened_backend is not None:
+            reopened_backend.get_pool().close_all()
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
+
+def test_current_postgres_ordinary_runtime_still_rejects_writable_migration_version(
+    pg_database_config: DatabaseConfig,
+) -> None:
+    backend, db = _open_db(pg_database_config, owner="960042")
+    ident = backend.escape_identifier
+    role = f"v61_runtime_authority_{uuid4().hex[:8]}"
+    created = False
+    tables = ("notes", "moodboards", "moodboard_notes", "note_studio_documents", "db_schema_version")
+    try:
+        with backend.transaction() as conn:
+            backend.execute(f"CREATE ROLE {ident(role)} NOLOGIN NOSUPERUSER NOBYPASSRLS", connection=conn)  # nosec B608 -- identifier escaped by actual PostgreSQL backend.
+            created = True
+            backend.execute(f"GRANT USAGE ON SCHEMA public TO {ident(role)}", connection=conn)  # nosec B608 -- same disposable fixture role.
+            for table in tables:
+                backend.execute(f"GRANT SELECT ON {ident(table)} TO {ident(role)}", connection=conn)  # nosec B608 -- fixed table inventory and backend-escaped role.
+        for writable in (True, False):
+            with backend.transaction() as conn:
+                statement = (
+                    "GRANT UPDATE ON db_schema_version TO " if writable else "REVOKE UPDATE ON db_schema_version FROM "
+                )
+                backend.execute(statement + ident(role), connection=conn)
+            with backend.transaction() as conn:
+                backend.execute(f"SET LOCAL ROLE {ident(role)}", connection=conn)  # nosec B608 -- actual nonowner role, transaction-local only.
+                authority = backend.execute(
+                    "SELECT pg_has_role(current_user,c.relowner,'USAGE') AS owner_authority, "
+                    "has_table_privilege(current_user,'db_schema_version','UPDATE') AS writable_version, "
+                    "has_table_privilege(current_user,c.oid,'SELECT') AS journal_read "
+                    "FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
+                    "WHERE n.nspname=current_schema() AND c.relname='chacha_schema_migration_progress'",
+                    connection=conn,
+                ).rows
+                assert authority == [{"owner_authority": False, "writable_version": writable, "journal_read": False}]  # nosec B101 -- real nonowner privileges and private-journal denial.
+                if writable:
+                    with pytest.raises(SchemaError, match="runtime migration-version authority is unsafe"):
+                        db._verify_notes_moodboard_studio_schema_postgres(conn, runtime=True)
+                else:
+                    db._verify_notes_moodboard_studio_schema_postgres(conn, runtime=True)
+    finally:
+        if created:
+            with backend.transaction() as conn:
+                for table in tables:
+                    backend.execute(f"REVOKE ALL ON {ident(table)} FROM {ident(role)}", connection=conn)  # nosec B608 -- fixed inventory, exact escaped disposable role.
+                backend.execute(f"REVOKE USAGE ON SCHEMA public FROM {ident(role)}", connection=conn)  # nosec B608 -- exact fixture grant cleanup.
+                backend.execute(f"DROP ROLE {ident(role)}", connection=conn)  # nosec B608 -- exact disposable role only.
+        db.close_all_connections()
+        backend.get_pool().close_all()
+
 def test_current_postgres_v61_requires_product_owner_to_equal_schema_owner(
     pg_database_config: DatabaseConfig,
 ) -> None:

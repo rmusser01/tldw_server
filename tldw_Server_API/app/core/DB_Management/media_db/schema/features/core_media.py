@@ -336,7 +336,9 @@ def apply_sqlite_core_media_schema(
         raise DatabaseError(f"Unexpected error applying schema V1: {exc}") from exc
 
 
-def ensure_postgres_sync_log_contract(db: SupportsPostgresCoreMediaSchema, conn: Any) -> None:
+def ensure_postgres_sync_log_contract(
+    db: SupportsPostgresCoreMediaSchema, conn: Any, *, validate_only: bool = False
+) -> None:
     """Preserve either application-owned sync identity while ensuring Media's contract.
 
     ChaCha may create this shared table first. Normalize only its known older
@@ -374,6 +376,12 @@ def ensure_postgres_sync_log_contract(db: SupportsPostgresCoreMediaSchema, conn:
     definition = checks[0]["definition"]
     if definition not in {known_old, known_current}:
         raise SchemaError("Unsupported sync_log operation constraint")
+
+    if validate_only and (
+        any(name not in columns for name in ("org_id", "team_id"))
+        or definition != known_current or not columns["payload"]["nullable"]
+    ):
+        raise SchemaError("PostgreSQL sync_log requires schema-owner migration")
 
     for name in ("org_id", "team_id"):
         if name not in columns:
@@ -457,6 +465,72 @@ def ensure_postgres_keyword_identity(db: Any, conn: Any) -> None:
     )
     for name, definition in _KEYWORD_LOOKUP_INDEXES.items():
         backend.execute(f"CREATE INDEX IF NOT EXISTS {name} {definition}", connection=conn)
+_POSTGRES_MEDIA_IDENTITY_INDEXES = {
+    "ux_media_owner_url": "CREATE UNIQUE INDEX ux_media_owner_url ON public.media USING btree "
+    "(COALESCE(owner_user_id::text,client_id,''::text),url)",
+    "ux_media_clone_url": "CREATE UNIQUE INDEX ux_media_clone_url ON public.media USING btree "
+    "(url) WHERE url LIKE 'tldw-clone://workspace/%'::text",
+}
+
+
+def ensure_postgres_media_owner_identity(db: Any, conn: Any, *, validate_only: bool = False) -> None:
+    """Migrate source identity atomically, or verify it without runtime DDL."""
+    from sqlglot import exp, parse_one
+    from sqlglot.errors import ParseError
+
+    backend = db.backend
+    if not validate_only:
+        backend.execute("LOCK TABLE public.media IN SHARE ROW EXCLUSIVE MODE", connection=conn)
+        for definition in _POSTGRES_MEDIA_IDENTITY_INDEXES.values():
+            backend.execute(
+                definition.replace("CREATE UNIQUE INDEX ", "CREATE UNIQUE INDEX IF NOT EXISTS ", 1), connection=conn
+            )
+        # Dependency failures abort the owner's transaction; never cascade into user data.
+        backend.execute("ALTER TABLE public.media DROP CONSTRAINT IF EXISTS media_url_key", connection=conn)
+    rows = backend.execute(
+        """
+        SELECT relation.relname AS name,indexes.indisunique,
+               indexes.indisvalid AND indexes.indisready AND indexes.indimmediate AS ready,
+               pg_get_indexdef(indexes.indexrelid) AS definition
+        FROM pg_index AS indexes JOIN pg_class AS relation ON relation.oid=indexes.indexrelid
+        WHERE indexes.indrelid='public.media'::regclass
+    """,
+        connection=conn,
+    ).rows
+    by_name = {row["name"]: row for row in rows}
+
+    def canonical(definition: str) -> exp.Expression:
+        def undecorate(node: exp.Expression) -> exp.Expression:
+            if isinstance(node, exp.Paren):
+                return node.this.transform(undecorate, copy=False)
+            return node
+
+        return parse_one(definition, read="postgres").transform(undecorate)
+
+    for row in rows:
+        if row["indisunique"] is not True or row["name"] in _POSTGRES_MEDIA_IDENTITY_INDEXES:
+            continue
+        try:
+            keys = canonical(row["definition"]).this.args["params"].args["columns"]
+            restricts_url = any(column.name.lower() == "url" for key in keys for column in key.find_all(exp.Column))
+        except (ParseError, AttributeError, KeyError, TypeError, ValueError) as error:
+            raise SchemaError("PostgreSQL source uniqueness requires schema-owner inspection") from error
+        if restricts_url:
+            raise SchemaError("PostgreSQL source URL identity requires schema-owner migration")
+
+    for name, definition in _POSTGRES_MEDIA_IDENTITY_INDEXES.items():
+        row = by_name.get(name)
+        try:
+            valid = (
+                row is not None
+                and row["ready"] is True
+                and row["indisunique"] is True
+                and canonical(row["definition"]) == canonical(definition)
+            )
+        except (ParseError, TypeError, ValueError):
+            valid = False
+        if not valid:
+            raise SchemaError("PostgreSQL source identity indexes require schema-owner migration")
 
 
 def apply_postgres_core_media_schema(

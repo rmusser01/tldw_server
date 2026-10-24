@@ -98,22 +98,74 @@ async def init_auth_services() -> object:
     return db_pool
 
 
+async def _validate_pg_serving_schema(db_pool: object) -> bool:
+    """Admit a nonowner only after required schema and backfill checks succeed."""
+    from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
+        ensure_authnz_lockout_tables_pg,
+        ensure_authnz_token_blacklist_pg,
+        ensure_resource_daily_ledger_pg,
+    )
+    from tldw_Server_API.app.core.AuthNZ.postgres_runtime_schema import (
+        POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL,
+        validate_postgres_org_stt_runtime,
+        validate_postgres_startup_core,
+        validate_postgres_startup_timestamps,
+    )
+    from tldw_Server_API.app.core.DB_Management.backends.pg_sharing_schema import postgres_sharing_schema_issues
+
+    readiness_error = "AUTHNZ_CORE_SCHEMA_NOT_READY"
+    try:
+        async with db_pool.transaction() as conn:
+            if await conn.fetchval(POSTGRES_AUTH_MIGRATION_AUTHORITY_SQL):
+                return False
+            for validator, failure_reason in (
+                (validate_postgres_startup_timestamps, "AUTHNZ_USER_TIMESTAMPS_NOT_READY"),
+                (validate_postgres_startup_core, "AUTHNZ_CORE_SCHEMA_NOT_READY"),
+                (validate_postgres_org_stt_runtime, "AUTHNZ_PG_STT_SCHEMA_NOT_READY"),
+            ):
+                readiness_error = failure_reason
+                await validator(conn)
+        # This validator acquires its own connection; release ours even for a one-slot pool.
+        readiness_error = "AUTHNZ_PG_SHARING_SCHEMA_NOT_READY"
+        if await postgres_sharing_schema_issues(db_pool):
+            raise AuthStartupError(readiness_error)
+        readiness_error = "AUTHNZ_PG_LOCKOUT_SCHEMA_NOT_READY"
+        if not await ensure_authnz_lockout_tables_pg(db_pool):
+            raise AuthStartupError(readiness_error)
+        readiness_error = "AUTHNZ_PG_TOKEN_BLACKLIST_NOT_READY"
+        if not await ensure_authnz_token_blacklist_pg(db_pool):
+            raise AuthStartupError(readiness_error)
+        readiness_error = "AUTHNZ_PG_DAILY_LEDGER_NOT_READY"
+        if not await ensure_resource_daily_ledger_pg(db_pool):
+            raise AuthStartupError(readiness_error)
+    except _STARTUP_GUARD_EXCEPTIONS:
+        raise AuthStartupError(readiness_error) from None
+    logger.info("App Startup: Validated required PG serving schema; optional owner migrations were not run")
+    return True
+
+
 async def _ensure_pg_extras(db_pool: object) -> None:
     """Ensure additive PostgreSQL-only AuthNZ tables when a PG pool is active."""
     try:
         if not getattr(db_pool, "pool", None):
             return
+        if await _validate_pg_serving_schema(db_pool):
+            return
 
         from tldw_Server_API.app.core.AuthNZ.pg_migrations_extra import (
             PGUsageSchemaError,
+            ensure_admin_monitoring_tables_pg,
             ensure_admin_webhook_canonical_tables_pg,
             ensure_api_keys_tables_pg,
             ensure_authnz_core_tables_pg,
+            ensure_authnz_lockout_tables_pg,
+            ensure_authnz_token_blacklist_pg,
             ensure_generated_files_table_pg,
             ensure_llm_provider_overrides_pg,
             ensure_notification_permissions_pg,
             ensure_org_stt_settings_pg,
             ensure_privilege_snapshots_table_pg,
+            ensure_resource_daily_ledger_pg,
             ensure_sharing_tables_pg,
             ensure_storage_quota_overrides_backfill_pg,
             ensure_tool_catalogs_tables_pg,
@@ -134,9 +186,29 @@ async def _ensure_pg_extras(db_pool: object) -> None:
                 "AUTHNZ_CORE_SCHEMA_NOT_READY",
             ),
             (
+                "AuthNZ lockout tables",
+                ensure_authnz_lockout_tables_pg,
+                "AUTHNZ_PG_LOCKOUT_SCHEMA_NOT_READY",
+            ),
+            (
+                "AuthNZ token blacklist",
+                ensure_authnz_token_blacklist_pg,
+                "AUTHNZ_PG_TOKEN_BLACKLIST_NOT_READY",
+            ),
+            (
+                "resource daily ledger",
+                ensure_resource_daily_ledger_pg,
+                "AUTHNZ_PG_DAILY_LEDGER_NOT_READY",
+            ),
+            (
                 "org STT settings",
                 ensure_org_stt_settings_pg,
                 "AUTHNZ_PG_STT_SCHEMA_NOT_READY",
+            ),
+            (
+                "admin monitoring tables",
+                ensure_admin_monitoring_tables_pg,
+                "AUTHNZ_PG_MONITORING_SCHEMA_NOT_READY",
             ),
             ("storage quota overrides backfill", ensure_storage_quota_overrides_backfill_pg, None),
             (

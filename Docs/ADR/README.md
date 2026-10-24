@@ -119,4 +119,6 @@ Small bug fixes, local implementation details, product copy, temporary experimen
 | [ADR-095](095-coordinated-chroma-sdk-storage-lifetimes.md) | Proposed | Coordinate validation and complete canonical Chroma SDK lifetimes in shared storage sessions; fail closed on unsupported or incomplete existing storage. |
 
 
+| [ADR-082](082-postgresql-media-source-owner-identity.md) | Proposed | Scope shared PostgreSQL Media source identity by owner while preserving reserved clone URL recovery guarantees. |
+
 The original backfill inventory is [the 2026-06-03 decision inventory](inventory/2026-06-03-decision-inventory.md). See the [2026-09-25 reconciliation](inventory/2026-09-25-decision-inventory-reconciliation.md) for current dispositions of its unresolved rows.
