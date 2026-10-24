@@ -27,6 +27,11 @@ import {
   MediaReadAlongAudioCacheEntry,
   SearchTokenRow
 } from "./types"
+// Static by design: the v17 upgrade handler (below) runs inside the
+// version-change transaction and uses buildSearchTokenRows synchronously
+// from this import. search-tokenizer has no runtime dependencies, so this
+// cannot create a module cycle.
+import { buildSearchTokenRows } from "./search-tokenizer"
 
 export class PageAssistDexieDB extends Dexie {
   forkOperations!: Table<ForkOperation>;
@@ -414,10 +419,13 @@ export class PageAssistDexieDB extends Dexie {
     // Additive-only: no existing table's spec changes. Fresh installs pick the
     // declaration up directly; existing databases get a one-time backfill so
     // content search keeps finding messages written before this version.
+    // The tokenizer is imported statically: the upgrade runs inside the
+    // version-change transaction, which must not await non-Dexie promises
+    // (a dynamic import of an unfetched lazy chunk could auto-commit the
+    // transaction before it starts).
     this.version(17).stores({
       searchTokens: '&[token+history_id], token'
     }).upgrade(async tx => {
-      const { buildSearchTokenRows } = await import("./search-tokenizer");
       const rows: Array<{ token: string; history_id: string }> = [];
       const pairs = new Set<string>();
       await tx.table('messages').each(message => {
