@@ -1,6 +1,25 @@
 import React from "react"
 
 /**
+ * Split a query into the terms to highlight: each word, except that text in
+ * double quotes stays together as one phrase (whitespace inside collapses).
+ */
+export function parseHighlightTerms(query: string): string[] {
+  const terms: string[] = []
+  for (const match of query.matchAll(/"([^"]*)"|(\S+)/g)) {
+    const term = (match[1] ?? match[2] ?? "").replace(/"/g, "").trim().replace(/\s+/g, " ")
+    if (term) terms.push(term)
+  }
+  return terms
+}
+
+/** Highlight `phrase` as a whole rather than word by word. */
+export function toPhraseHighlightQuery(phrase: string): string {
+  const cleaned = phrase.replace(/"/g, " ").trim().replace(/\s+/g, " ")
+  return cleaned ? `"${cleaned}"` : ""
+}
+
+/**
  * Highlights all occurrences of a search query in the given text.
  * Returns a React node with matched text wrapped in <mark> elements.
  *
@@ -26,19 +45,22 @@ export function highlightText(
     highlightClassName = "bg-warn/20 rounded px-0.5"
   } = options
 
-  // Escape special regex characters in the query for use in the split regex,
-  // but keep the raw terms for comparison so metacharacters still match literally.
-  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  const rawTerms = query.split(/\s+/).filter(Boolean)
-
-  // Split query on whitespace to highlight multiple terms
-  const terms = escapedQuery.split(/\s+/).filter(Boolean)
-  if (terms.length === 0 || rawTerms.length === 0) {
+  // Words match one by one; a "quoted phrase" matches as a whole (CS-11).
+  const terms = parseHighlightTerms(query)
+  if (terms.length === 0) {
     return text
   }
 
-  // Create a regex pattern that matches any of the terms
-  const pattern = terms.join("|")
+  // Longer terms first, so a phrase wins over the words inside it.
+  const pattern = [...terms]
+    .sort((a, b) => b.length - a.length)
+    .map((term) =>
+      term
+        .split(" ")
+        .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+        .join("\\s+")
+    )
+    .join("|")
   const flags = caseSensitive ? "g" : "gi"
   const regex = new RegExp(`(${pattern})`, flags)
 
@@ -49,15 +71,17 @@ export function highlightText(
     return text
   }
 
+  const normalize = (value: string) => {
+    const collapsed = value.replace(/\s+/g, " ")
+    return caseSensitive ? collapsed : collapsed.toLowerCase()
+  }
+  const normalizedTerms = new Set(terms.map(normalize))
+
   return (
     <>
       {parts.map((part, index) => {
         // Check if this part matches any of the search terms
-        const isMatch = rawTerms.some((rawTerm) =>
-          caseSensitive
-            ? part === rawTerm
-            : part.toLowerCase() === rawTerm.toLowerCase()
-        )
+        const isMatch = normalizedTerms.has(normalize(part))
 
         if (isMatch) {
           return (

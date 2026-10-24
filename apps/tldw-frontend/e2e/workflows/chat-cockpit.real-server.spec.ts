@@ -498,6 +498,11 @@ const buildConfiguredChatModelSelection = (payload: any, metadata: unknown): Rea
   };
 };
 
+// The composition preview names the model as "model (Provider)" (CC-06); the
+// raw provider:model route is shown only in the runtime inspector.
+const compositionScopeText = (modelKey: string): string =>
+  `Scope: ${modelKey.slice(modelKey.indexOf(':') + 1)} (`;
+
 const getConfiguredChatModelSelection = async (
   request: APIRequestContext
 ): Promise<RealChatModelSelection> => {
@@ -958,6 +963,16 @@ const ensureDesktopCockpitRailsVisible = async (page: Page) => {
   await restoreDesktopCockpitRail(page, 'right');
 };
 
+// The raw provider:model route sits under a collapsed Details disclosure (CC-06).
+const openRuntimeRouteDetails = async (runtimeInspector: Locator) => {
+  const details = runtimeInspector.locator('details').filter({ hasText: 'Provider route' });
+  await expect(details).toHaveCount(1);
+  if (!(await details.evaluate((element) => (element as HTMLDetailsElement).open))) {
+    await details.locator('summary').click();
+  }
+  await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
+};
+
 const assertRuntimeProviderSummary = async (runtimeInspector: Locator) => {
   const runtimeState = runtimeInspector.getByRole('region', { name: 'Runtime state' });
   await expect(runtimeState.getByRole('heading', { name: 'Chat settings' })).toBeVisible();
@@ -1261,18 +1276,18 @@ const selectConfiguredCockpitModel = async (
   await ensureComposerOptionsVisible(page);
   await page.getByTestId('model-selector').first().click();
 
+  // CC-06: the scope is a two-way "Ready to use | All models" control.
   const scopeToggle = page.getByTestId('model-list-scope-toggle');
   await expect(scopeToggle).toBeVisible();
-  await expect(scopeToggle).toHaveText(/Search all models/);
-  await expect(page.getByText('Usable configured models')).toBeVisible();
+  const readyToUse = scopeToggle.getByRole('radio', { name: 'Ready to use' });
+  const allModels = scopeToggle.getByRole('radio', { name: 'All models' });
+  await expect(readyToUse).toBeChecked();
 
-  await scopeToggle.click();
-  await expect(scopeToggle).toHaveText(/Configured/);
-  await expect(page.getByText('All known models')).toBeVisible();
+  await scopeToggle.getByText('All models', { exact: true }).click();
+  await expect(allModels).toBeChecked();
 
-  await scopeToggle.click();
-  await expect(scopeToggle).toHaveText(/Search all models/);
-  await expect(page.getByText('Usable configured models')).toBeVisible();
+  await scopeToggle.getByText('Ready to use', { exact: true }).click();
+  await expect(readyToUse).toBeChecked();
 
   await page.getByLabel('Search models').fill(selection.model);
 
@@ -1905,7 +1920,7 @@ test.describe('/chat cockpit real-server parity', () => {
     const modeSummary = page.getByTestId('playground-cockpit-mode-summary');
     await expect(modeSummary).toHaveText('Context and chat settings visible.');
     await expect(getDesktopCompositionPreview(page)).toContainText(
-      `Scope: ${chatModelSelection.key}`
+      compositionScopeText(chatModelSelection.key)
     );
 
     await page
@@ -2223,7 +2238,7 @@ test.describe('/chat cockpit real-server parity', () => {
       const compositionPreview = getDesktopCompositionPreview(page);
       await expect(compositionPreview).toBeVisible();
       await expect(compositionPreview).toContainText(promptName);
-      await expect(compositionPreview).toContainText(/Scope: [^:]+:.+/);
+      await expect(compositionPreview).toContainText(/Scope: [^()]+ \([^()]+\)/);
       await expect(compositionPreview).toContainText(
         /MCP tools|MCP unavailable|MCP tools managed from composer/
       );
@@ -2243,7 +2258,7 @@ test.describe('/chat cockpit real-server parity', () => {
       const modelSettingsTrigger = runtimeInspector.locator(
         '[data-cockpit-model-settings-trigger]'
       );
-      await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
+      await openRuntimeRouteDetails(runtimeInspector);
       const modelSettingsOpenDetail = page.evaluate(
         () =>
           new Promise<{ settingsScope?: string | null }>((resolve) => {
@@ -2882,7 +2897,7 @@ test.describe('/chat cockpit real-server parity', () => {
       const contextRail = getDesktopContextRail(page);
       const compositionPreview = getDesktopCompositionPreview(page);
       await expect(compositionPreview).toContainText(characterName);
-      await expect(compositionPreview).toContainText(/Scope: [^:]+:.+/);
+      await expect(compositionPreview).toContainText(/Scope: [^()]+ \([^()]+\)/);
       const assistantContextSource = contextRail
         .getByRole('list', { name: 'Context sources' })
         .getByRole('listitem')
@@ -3025,7 +3040,7 @@ test.describe('/chat cockpit real-server parity', () => {
       const contextRail = getDesktopContextRail(page);
       const compositionPreview = getDesktopCompositionPreview(page);
       await expect(compositionPreview).toContainText(String(selectedPersona.name));
-      await expect(compositionPreview).toContainText(/Scope: [^:]+:.+/);
+      await expect(compositionPreview).toContainText(/Scope: [^()]+ \([^()]+\)/);
       const personaContextSource = contextRail
         .getByRole('list', { name: 'Context sources' })
         .getByRole('listitem')
@@ -3253,9 +3268,9 @@ test.describe('/chat cockpit real-server parity', () => {
     const runtimeInspector = getDesktopRuntimeInspector(page);
     const compositionPreview = getDesktopCompositionPreview(page);
 
-    await expect(compositionPreview).toContainText(`Scope: ${modelKey}`);
+    await expect(compositionPreview).toContainText(compositionScopeText(modelKey));
     expect(modelKey).toBe(chatModelSelection.key);
-    await expect(runtimeInspector.getByText('Provider route')).toBeVisible();
+    await openRuntimeRouteDetails(runtimeInspector);
     await expect(runtimeInspector.getByText(modelKey, { exact: true })).toBeVisible();
 
     const prompt = `Cockpit model provider proof ${Date.now()}: answer in one short sentence.`;

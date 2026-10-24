@@ -72,6 +72,8 @@ export function ChatSidebar({
   onConversationSelected
 }: ChatSidebarProps) {
   const { t } = useTranslation(["common", "sidepanel", "option", "settings"])
+  // Lets the collapse toggles point at the sidebar they control (AX-15).
+  const sidebarId = React.useId()
   const navigate = useNavigate()
   const location = useLocation()
   const [searchQuery, setSearchQuery] = useState("")
@@ -332,6 +334,7 @@ export function ChatSidebar({
   if (collapsed) {
     return (
       <div
+        id={sidebarId}
         data-testid="chat-sidebar"
       data-chat-sidebar
         className={cn(
@@ -345,6 +348,8 @@ export function ChatSidebar({
         >
           <button
             aria-label={t("common:chatSidebar.expand", "Expand sidebar")}
+            aria-expanded={false}
+            aria-controls={sidebarId}
             data-testid="chat-sidebar-toggle"
             onClick={onToggleCollapse}
             className={cn(
@@ -446,6 +451,7 @@ export function ChatSidebar({
   // Expanded view
   return (
     <div
+      id={sidebarId}
       data-testid="chat-sidebar"
         data-chat-sidebar
       className={cn(
@@ -507,6 +513,8 @@ export function ChatSidebar({
           >
             <button
               aria-label={t("common:chatSidebar.collapse", "Collapse sidebar")}
+              aria-expanded={true}
+              aria-controls={sidebarId}
               data-testid="chat-sidebar-toggle"
               onClick={onToggleCollapse}
               className={cn(
@@ -619,6 +627,10 @@ export function ChatSidebar({
                   readOnly={temporaryChat}
                   onConversationSelected={onConversationSelected}
                   onVisibleChatsChange={setVisibleServerChats}
+                  onClearSearch={() => {
+                    setSearchQuery("")
+                    searchInput.current?.focus()
+                  }}
                 />
                 </section>
               )}

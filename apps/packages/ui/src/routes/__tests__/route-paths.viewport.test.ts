@@ -16,4 +16,10 @@ describe("viewport constrained routes", () => {
     expect(VIEWPORT_CONSTRAINED_PATHS).toContain(RESEARCH_WORKSPACE_PATH)
     expect(VIEWPORT_CONSTRAINED_PATHS).not.toContain("/workspace-playground")
   })
+
+  it("frames the notes route to the viewport like chat and media (NO-01)", () => {
+    // Without this the layout gives /notes a 135vh scrolling document, so the
+    // app header scrolls away and an empty band sits under the panels.
+    expect(VIEWPORT_CONSTRAINED_PATHS).toContain("/notes")
+  })
 })

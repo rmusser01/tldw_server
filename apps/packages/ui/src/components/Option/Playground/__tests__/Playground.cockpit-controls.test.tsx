@@ -801,12 +801,13 @@ describe("Playground cockpit controls", () => {
       });
       expect(within(compositionPreview).getByText("Inline system prompt selected")).toBeInTheDocument();
       expect(within(compositionPreview).getByText("Mira Vale")).toBeInTheDocument();
+      // The model reads "model (Provider)", not the raw route (CC-06).
       expect(
-        within(compositionPreview).getAllByText("openai:gpt-4.1-mini").length,
+        within(compositionPreview).getAllByText("gpt-4.1-mini (OpenAI)").length,
       ).toBeGreaterThan(0);
       expect(within(compositionPreview).getAllByText("MCP tools").length).toBeGreaterThan(0);
       expect(
-        within(compositionPreview).getByText("Scope: openai:gpt-4.1-mini"),
+        within(compositionPreview).getByText("Scope: gpt-4.1-mini (OpenAI)"),
       ).toBeInTheDocument();
       expect(within(contextRail).getByText("Context selected")).toBeInTheDocument();
       expect(within(contextRail).getByText("1 file")).toBeInTheDocument();
@@ -888,12 +889,13 @@ describe("Playground cockpit controls", () => {
       );
       expect(within(runtimeInspector).getByText("Streaming")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("Provider")).toBeInTheDocument();
-      expect(within(runtimeInspector).getByText("openai")).toBeInTheDocument();
+      expect(within(runtimeInspector).getByText("OpenAI")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("Model")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("gpt-4.1-mini")).toBeInTheDocument();
+      // The raw route stays available under Details (CC-06).
       expect(
-        within(runtimeInspector).getByText("Route openai:gpt-4.1-mini"),
-      ).toBeInTheDocument();
+        within(runtimeInspector).getByText("openai:gpt-4.1-mini").closest("details"),
+      ).not.toBeNull();
       expect(within(runtimeInspector).getByText("Temperature")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("0.7")).toBeInTheDocument();
       expect(
@@ -1620,7 +1622,7 @@ describe("Playground cockpit controls", () => {
     );
   });
 
-  it("disables cockpit regenerate when a saved conversation has selected history", async () => {
+  it("disables cockpit regenerate when a saved conversation's reply cannot be regenerated", async () => {
     messageOptionState.value.streaming = false;
     messageOptionState.value.temporaryChat = false;
     const selection = renderHook(() => useHistorySelection());
@@ -1642,7 +1644,8 @@ describe("Playground cockpit controls", () => {
     expect(
       within(inspector).getByRole("button", { name: "Regenerate last response" }),
     ).toBeDisabled();
-    expect(within(inspector).getByText(/selected history/i)).toBeInTheDocument();
+    // CM-01: only a saved reply the server cannot regenerate disables it, with a plain reason.
+    expect(within(inspector).getByText(/can't be regenerated here.*New Branch/i)).toBeInTheDocument();
     expect(messageOptionState.value.regenerateLastMessage).not.toHaveBeenCalled();
   });
 

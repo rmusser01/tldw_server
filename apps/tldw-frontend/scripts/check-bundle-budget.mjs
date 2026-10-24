@@ -30,7 +30,12 @@ import path from "node:path"
 // were briefly split out, but the app awaited all of them before rendering, so
 // the bytes still transferred on first load and only the measurement moved.
 // Loading them per route would take this budget down again.
-const SHARED_BUDGET_BYTES = 600 * 1024
+//
+// Raised from 600 KB to 604 KB (2026-10-22, #3298): the /notes + /chat UX
+// remediation (#3101) added ~2.4 KB gzip of English strings for its fixes, and
+// dev already sat at ~599 KB. Per-route locale loading (above) is the way to
+// bring it back down.
+const SHARED_BUDGET_BYTES = 604 * 1024
 
 // A route should be mostly shell plus its own code. A route far above the shell
 // is carrying something that belongs in an async chunk.

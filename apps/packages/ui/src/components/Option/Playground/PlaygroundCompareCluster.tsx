@@ -509,10 +509,10 @@ export const PlaygroundCompareCluster = ({
         onSwipePrev={() => handleVariantSwipe(userMessage.id, "prev")}
         onSwipeNext={() => handleVariantSwipe(userMessage.id, "next")}
         messageSteeringMode={messageSteeringMode}
-        onMessageSteeringModeChange={setMessageSteeringMode}
+        onMessageSteeringModeChange={characterIdentityEnabled ? setMessageSteeringMode : undefined}
         messageSteeringForceNarrate={messageSteeringForceNarrate}
-        onMessageSteeringForceNarrateChange={setMessageSteeringForceNarrate}
-        onClearMessageSteering={clearMessageSteering}
+        onMessageSteeringForceNarrateChange={characterIdentityEnabled ? setMessageSteeringForceNarrate : undefined}
+        onClearMessageSteering={characterIdentityEnabled ? clearMessageSteering : undefined}
       />
       <div className="ml-10 space-y-2 border-l border-dashed border-border pl-4">
         <div className="mb-1 flex items-center justify-between text-[11px] text-text-muted">
@@ -1073,10 +1073,10 @@ export const PlaygroundCompareCluster = ({
                 onSwipePrev={() => handleVariantSwipe(message.id, "prev")}
                 onSwipeNext={() => handleVariantSwipe(message.id, "next")}
                 messageSteeringMode={messageSteeringMode}
-                onMessageSteeringModeChange={setMessageSteeringMode}
+                onMessageSteeringModeChange={characterIdentityEnabled ? setMessageSteeringMode : undefined}
                 messageSteeringForceNarrate={messageSteeringForceNarrate}
-                onMessageSteeringForceNarrateChange={setMessageSteeringForceNarrate}
-                onClearMessageSteering={clearMessageSteering}
+                onMessageSteeringForceNarrateChange={characterIdentityEnabled ? setMessageSteeringForceNarrate : undefined}
+                onClearMessageSteering={characterIdentityEnabled ? clearMessageSteering : undefined}
               />
 
               {threadPreviewItems.length > 1 ? (

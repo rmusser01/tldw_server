@@ -229,6 +229,44 @@ describe("NotesManagerPage stage 3 toolbar and metrics", () => {
   })
 
   it.each([
+    ["Ctrl", { ctrlKey: true }],
+    ["Cmd", { metaKey: true }]
+  ])(
+    "bolds and italicizes the selection with %s+B and +I, as the shortcut sheet says (XP-07)",
+    async (_label, modifier) => {
+      renderPage()
+      const textarea = screen.getByPlaceholderText(
+        "Write your note here... (Markdown supported)"
+      ) as HTMLTextAreaElement
+      fireEvent.change(textarea, { target: { value: "hello world" } })
+      textarea.focus()
+      textarea.setSelectionRange(0, 5)
+
+      expect(fireEvent.keyDown(textarea, { key: "b", ...modifier })).toBe(false)
+      await waitFor(() => expect(textarea.value).toBe("**hello** world"))
+
+      const start = textarea.value.indexOf("world")
+      textarea.setSelectionRange(start, start + 5)
+      expect(fireEvent.keyDown(textarea, { key: "i", ...modifier })).toBe(false)
+      await waitFor(() => expect(textarea.value).toBe("**hello** *world*"))
+    }
+  )
+
+  it("leaves Ctrl+Shift+B and Alt+B to other shortcuts", () => {
+    renderPage()
+    const textarea = screen.getByPlaceholderText(
+      "Write your note here... (Markdown supported)"
+    ) as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: "hello" } })
+    textarea.setSelectionRange(0, 5)
+    expect(
+      fireEvent.keyDown(textarea, { key: "B", ctrlKey: true, shiftKey: true })
+    ).toBe(true)
+    expect(fireEvent.keyDown(textarea, { key: "b", altKey: true })).toBe(true)
+    expect(textarea.value).toBe("hello")
+  })
+
+  it.each([
     ["numbered", "1. first\n2. second"],
     ["checklist", "- [ ] first\n- [ ] second"]
   ])(

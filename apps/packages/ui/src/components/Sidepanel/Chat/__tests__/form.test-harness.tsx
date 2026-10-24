@@ -313,12 +313,24 @@ vi.mock("@/services/tldw/server-capabilities", async (importOriginal) => ({
   },
 }));
 
+const readyCatalog = [
+  {
+    id: "ready-model",
+    name: "tldw:ready-model",
+    model: "tldw:ready-model",
+    provider: "openai",
+  },
+];
+
 export const mountReady = async ({
   model = "tldw:ready-model",
   mode = "casual",
+  catalog = readyCatalog,
 }: {
   model?: string | null;
   mode?: UiMode;
+  /** The server's chat models. The side panel picks one when none is chosen (XS-02). */
+  catalog?: typeof readyCatalog;
 } = {}) => {
   ready.account = "alice";
   ready.submissions.length = 0;
@@ -326,14 +338,7 @@ export const mountReady = async ({
   ready.setImage = null;
   ready.embedding.mockReset().mockResolvedValue("embedding-model");
   ready.simpleSearch.mockReset().mockResolvedValue(false);
-  ready.models.mockReset().mockResolvedValue([
-    {
-      id: "ready-model",
-      name: "tldw:ready-model",
-      model: "tldw:ready-model",
-      provider: "openai",
-    },
-  ]);
+  ready.models.mockReset().mockResolvedValue(catalog);
   offline.capabilities.length = 0;
   const originalLocalStorage = storageSnapshot(localStorage);
   const originalSessionStorage = storageSnapshot(sessionStorage);

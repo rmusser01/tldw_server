@@ -5,6 +5,7 @@ import { PlaygroundEmpty } from "../PlaygroundEmpty";
 
 const openHelpModal = vi.fn();
 const navigate = vi.fn();
+const flags = vi.hoisted(() => ({ compareEnabled: true }));
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -24,6 +25,7 @@ vi.mock("@/context/demo-mode", () => ({
 
 vi.mock("@/hooks/useConnectionState", () => ({
   useIsConnected: () => true,
+  useConnectionState: () => ({ phase: "connected", isConnected: true }),
 }));
 
 vi.mock("@/store/tutorials", () => ({
@@ -34,9 +36,42 @@ vi.mock("react-router-dom", () => ({
   useNavigate: () => navigate,
 }));
 
+vi.mock("@/hooks/useFeatureFlags", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/hooks/useFeatureFlags")>();
+  return {
+    ...actual,
+    useFeatureFlag: (flag: string) =>
+      flag === actual.FEATURE_FLAGS.COMPARE_MODE
+        ? ([flags.compareEnabled, vi.fn(), true] as const)
+        : actual.useFeatureFlag(flag as never),
+  };
+});
+
 describe("PlaygroundEmpty", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    flags.compareEnabled = true;
+  });
+
+  // CM-05 (#3101), owner decision D4: compare stays hidden until verified.
+  it("leaves the compare starter out of the mode deck while compare is off", () => {
+    flags.compareEnabled = false;
+    render(<PlaygroundEmpty />);
+
+    const shell = screen.getByTestId("playground-empty-shell");
+    fireEvent.click(
+      within(shell).getByRole("button", { name: "Explore chat modes" }),
+    );
+
+    expect(
+      within(shell).getByRole("button", { name: /General chat/i }),
+    ).toBeInTheDocument();
+    expect(
+      within(shell).queryByRole("button", {
+        name: /Compare AI models side-by-side/i,
+      }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders one unified onboarding shell", () => {

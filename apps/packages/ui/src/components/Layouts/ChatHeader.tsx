@@ -145,7 +145,8 @@ export function ChatHeader({
       : resolvedPersistenceKind === "serverUnconfirmed"
         ? "border-warn/50 bg-warn/10 text-text"
       : resolvedPersistenceKind === "temporary" ||
-          resolvedPersistenceKind === "serverFailed"
+          resolvedPersistenceKind === "serverFailed" ||
+          resolvedPersistenceKind === "serverNotLoaded"
         ? "border-warn/50 bg-warn/10 text-text"
         : "border-border bg-surface2 text-text-muted"
   const canEditTitle =
@@ -275,6 +276,7 @@ export function ChatHeader({
                 type="button"
                 onClick={onToggleSidebar}
                 aria-label={sidebarLabel}
+                aria-expanded={!sidebarCollapsed}
                 data-testid="chat-header-sidebar-toggle"
                 className={`shrink-0 rounded-md p-2 text-text-muted hover:bg-surface2 hover:text-text ${focusRingClasses}`}
                 title={sidebarLabel}

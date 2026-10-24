@@ -43,7 +43,9 @@ vi.mock("@/components/Common/AssistantSelect", () => ({
 }))
 
 vi.mock("@/components/Layouts/ConnectionStatus", () => ({
-  ConnectionStatus: () => <div data-testid="connection-status" />
+  ConnectionStatus: ({ showLabel = true }: { showLabel?: boolean }) => (
+    <div data-testid="connection-status" data-show-label={String(showLabel)} />
+  )
 }))
 
 vi.mock("@/components/Common/Button", () => ({
@@ -61,11 +63,27 @@ vi.mock("@/components/Common/Button", () => ({
 }))
 
 vi.mock("../playground-features", () => ({
-  ParameterPresets: () => <div data-testid="parameter-presets" />,
+  ParameterPresets: ({
+    compact,
+    showLabel
+  }: {
+    compact?: boolean
+    showLabel?: boolean
+  }) => (
+    <div
+      data-testid="parameter-presets"
+      data-compact={String(Boolean(compact))}
+      data-show-label={String(Boolean(showLabel))}
+    />
+  ),
   ParameterPresetsDropdown: () => (
     <div data-testid="parameter-presets-dropdown" />
   ),
-  SystemPromptTemplatesButton: () => <button type="button">Templates</button>,
+  SystemPromptTemplatesButton: ({ size }: { size?: string }) => (
+    <button type="button" data-size={size ?? "default"}>
+      Templates
+    </button>
+  ),
   SystemPromptTemplatesModal: () => null,
   SessionCostEstimation: () => <div data-testid="session-cost" />
 }))
@@ -480,6 +498,45 @@ describe("ComposerToolbar web search", () => {
     expect(
       screen.getByTestId("composer-formatting-guide-toggle")
     ).toBeInTheDocument()
+  })
+
+  // CC-09 (#3101): Advanced controls showed four bare preset icons and a
+  // connection dot that read as an on/off switch.
+  it("labels the Pro generation-style presets instead of showing bare icons", () => {
+    render(<ComposerToolbar {...createProps({ isProMode: true })} />)
+    fireEvent.click(screen.getByRole("button", { name: "Advanced controls" }))
+
+    const presets = screen.getByTestId("parameter-presets")
+    expect(presets).toHaveAttribute("data-compact", "false")
+    expect(presets).toHaveAttribute("data-show-label", "true")
+  })
+
+  it("sizes System prompts like the other Pro advanced controls", () => {
+    render(<ComposerToolbar {...createProps({ isProMode: true })} />)
+    fireEvent.click(screen.getByRole("button", { name: "Advanced controls" }))
+
+    expect(screen.getByRole("button", { name: "Templates" })).toHaveAttribute(
+      "data-size",
+      "compact"
+    )
+  })
+
+  it("never shows the server status as an unlabeled dot in the Pro or mobile toolbar", () => {
+    const { unmount } = render(
+      <ComposerToolbar {...createProps({ isProMode: true })} />
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Advanced controls" }))
+    for (const status of screen.queryAllByTestId("connection-status")) {
+      expect(status).toHaveAttribute("data-show-label", "true")
+    }
+    unmount()
+
+    render(
+      <ComposerToolbar {...createProps({ isMobile: true, isProMode: true })} />
+    )
+    for (const status of screen.queryAllByTestId("connection-status")) {
+      expect(status).toHaveAttribute("data-show-label", "true")
+    }
   })
 
   it("only exposes pro advanced aria-controls when the controlled group is mounted", () => {

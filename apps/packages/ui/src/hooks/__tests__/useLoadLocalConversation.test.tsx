@@ -289,7 +289,8 @@ describe("accepted LocalChatList selections", () => {
         await pending.promise.catch(() => undefined)
       })
       if (outcome === "current") {
-        expect(io.selection?.getCurrent()).toMatchObject({ status: "ready" })
+        // The selection settles after the read resolves; a slow runner can still see "idle" here.
+        await waitFor(() => expect(io.selection?.getCurrent()).toMatchObject({ status: "ready" }))
         await waitFor(() => expect(onSelectChat).toHaveBeenCalledWith("owned"))
         expect(state.historyId).toBe("owned")
         expect(state.prompt).toBe("Saved prompt")

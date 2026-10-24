@@ -15,6 +15,11 @@ import {
 } from "lucide-react";
 import type { ChatModelUsabilityStatus } from "@/utils/chat-model-availability";
 import {
+  formatChatModelLabel,
+  formatChatProviderName,
+  getChatModelLabelParts,
+} from "@/utils/chat-model-label";
+import {
   formatCockpitMessageCount,
   useCockpitMessageCount,
 } from "./playground-cockpit-state";
@@ -154,9 +159,21 @@ export const PlaygroundRuntimeInspector = ({
       : displayProvider && displayModel
         ? `${displayProvider}:${displayModel}`
         : selectedModel || null);
+  // Plain names (CC-06): "OpenAI" and "gpt-4.1-mini", never "openai" or
+  // "tldw:gpt-4.1-mini". The raw provider:model route stays under Details.
+  const providerName = displayProvider
+    ? formatChatProviderName(displayProvider)
+    : "";
+  const modelName = displayModel
+    ? getChatModelLabelParts({ modelId: displayModel }).modelName
+    : "";
   const emptyAssistantRouteLabel =
     typeof emptyAssistantResponseRouteLabel === "string"
-      ? emptyAssistantResponseRouteLabel.trim() || null
+      ? emptyAssistantResponseRouteLabel.trim()
+        ? formatChatModelLabel({
+            modelId: emptyAssistantResponseRouteLabel.trim(),
+          })
+        : null
       : null;
   const emptyAssistantResponseSummary = emptyAssistantRouteLabel
     ? t(
@@ -318,30 +335,35 @@ export const PlaygroundRuntimeInspector = ({
         <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] gap-x-2 gap-y-1 text-xs text-text-muted">
           <dt>{t("cockpit.provider", "Provider")}</dt>
           <dd className="truncate text-text">
-            {displayProvider ||
+            {providerName ||
               t("cockpit.noProviderSelected", "No provider selected")}
           </dd>
           <dt>{t("cockpit.model", "Model")}</dt>
           <dd className="truncate text-text">
-            {displayModel || t("cockpit.noModelSelected", "No model selected")}
+            {modelName || t("cockpit.noModelSelected", "No model selected")}
           </dd>
         </dl>
         {routeLabel ? (
           <div className={`mt-2 ${cockpitRailStyles.compactInset}`}>
-            <p className="text-[10px] font-semibold uppercase text-text-muted">
-              {t("cockpit.providerRoute", "Provider route")}
-            </p>
-            <p className="mt-0.5 truncate text-xs font-medium text-text">
-              {routeLabel}
-            </p>
-            <p className="sr-only">
-              {t("cockpit.route", `Route ${routeLabel}`, {
-                route: routeLabel,
-              })}
-            </p>
             {modelUsabilityDetail ? (
               <p className={cockpitRailStyles.muted}>{modelUsabilityDetail}</p>
             ) : null}
+            <details className="text-xs">
+              <summary className="cursor-pointer text-[10px] font-semibold uppercase text-text-muted">
+                {t("cockpit.routeDetails", "Details")}
+              </summary>
+              <p className="mt-1 text-[10px] font-semibold uppercase text-text-muted">
+                {t("cockpit.providerRoute", "Provider route")}
+              </p>
+              <p className="mt-0.5 truncate text-xs font-medium text-text">
+                {routeLabel}
+              </p>
+              <p className="sr-only">
+                {t("cockpit.route", `Route ${routeLabel}`, {
+                  route: routeLabel,
+                })}
+              </p>
+            </details>
           </div>
         ) : null}
       </PlaygroundRailSection>

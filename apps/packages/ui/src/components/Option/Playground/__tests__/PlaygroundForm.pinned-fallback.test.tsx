@@ -710,7 +710,8 @@ vi.mock("@/utils/onboarding-ingestion-telemetry", () => ({
   trackOnboardingChatSubmitSuccess: vi.fn(async () => undefined)
 }))
 
-vi.mock("@/utils/resolve-api-provider", () => ({
+vi.mock("@/utils/resolve-api-provider", async () => ({
+  ...await vi.importActual<typeof import("@/utils/resolve-api-provider")>("@/utils/resolve-api-provider"),
   resolveApiProviderForModel: vi.fn(async () => "custom")
 }))
 
@@ -892,7 +893,7 @@ describe("PlaygroundForm pinned fallback", () => {
 
     expect(textarea).toHaveAttribute(
       "placeholder",
-      "Type a message... (/ commands, @ mentions)"
+      "Type a message... (/ for commands)"
     )
     expect(
       screen.getByTestId("playground-composer-disconnected-notice")
