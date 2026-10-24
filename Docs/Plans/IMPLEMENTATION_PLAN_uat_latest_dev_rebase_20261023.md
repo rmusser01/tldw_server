@@ -21,13 +21,13 @@ Ruling: normal Git stash in the new checkout is functional rebase state, not a p
 **Goal**: Preserve upstream behavior and every still-needed UAT repair.
 **Success Criteria**: Keep current NotesSQLite84/PostgreSQL89 migration chain, active-borrower pool ownership, native-chat quota schema102, Notes semantic schema103 and admin indexes101 and strict stored-settings errors; combine X01 authority/progress/read-only admission. Resolve ADR collision. Satisfy exact current dependencies including pytest<9.1; affected causal/connected tests, compile/lint/scoped baseline-current Bandit and independent review pass. Normal hooks, no bypass.
 **Tests**: Genuinely changed and conflict-affected suites in both configured clients, official isolated PostgreSQL/restricted roles and relevant SQLite controls. Canonical API generation only on qualified combined source where affected.
-**Status**: In Progress
+**Status**: Complete
 
 ## Stage3: Finish X01 and continue sequential UAT
 **Goal**: Actual installed combined candidate passes X01 modes and recovery before X02.
 **Success Criteria**: Version-source checkpoints oldest justified plusv0.1.43/v0.1.46; all required SQLite/PostgreSQL single/multi upgrade, backup/separate restore, preserved old data/accounts/Jobs, new writes, real provider, UI/reload, malformed/recovery and complete lifecycle/handback checks. Prior accepted UX remains; screenshot for changed UX. Dispose completed functional bulk/operators promptly. Update officialtask/X01/masterindex accurately, then move one workflow at a time.
 **Tests**: Reviewed actual drivers with current source/package/build binding, no model replay merely for operator diagnosis. Explicit limitations retained; no latestdev readiness or completion claim from old artifacts.
-**Status**: Not Started
+**Status**: In Progress
 
 ## 2026-10-23 integration checkpoint
 
@@ -48,3 +48,15 @@ Remaining AuthNZ66passed, Media/runtime/RLS92passed, Collections/WorldBook/UserD
 113Python compile; Ruff71baseline66current/no new, ESLint17files320baseline318current/no new/no ignored. Bandit1169baseline1163current before one narrowly explained changed-assert annotation; AST unchanged, target final42inherited/0new/0errors, combined1162current/0new/0errors. Operator filename/path-scope errors corrected without treating initial incomplete outputs as qualification. Canonical normal export/types22.730s/2140paths3316schemas; committed fingerprint/pathunion byte-identicalHEAD. Fresh remote dev remains exactbd9b4e0ac3.
 
 Existing packaging operator now uses current declared3816package/data inputs rather than old3775inventory; previous site remains byte-protected.9operator guards/staticsecurity0/0/Ruffclear and independent preparation reviewCLEAR. Actual fresh private wheel/install in progress; no new API/frontend/browser startup yet. X01 soleactive; Stage2 still needs final staged review/normalhooks/commit, Stage3 actual installed/runtime qualification remains open.
+
+## Source freeze and isolated artifacts
+
+Normal local04f73263923e2f3d371ffbe9d5a97f73a2ab31e0 contains139reviewedpaths10431insertions497deletions onbd9. Committed patch equals staged SHA25628202e2eb30bacc18451f7ef93fde3b30e523ddd2d543213de0b4142062d831a exactly; tracked clean at postcommit, unpublished. Normal139filehooks passed3.397s; wizard-only formatter hooks correctly skipped unrelated scope.
+
+Private installed current3816file artifact qualified9.150s/3roots/337dependencyNodes722edges/cleanup0. Normal isolated NEW frontend compile qualified135.275s/7731sourcebytes unchanged/compiled77s/token-sync and593.4KB budgetpass; buildnaXUk1FRiQ0MLFiz-np_d, all5rewrites18908. Inherited TypeScript build skip disclosed, no fullTS claim. Originalowners/source/env/session unchanged. No private API/frontend/browser startup or liveUAT acceptance yet. Stage2Complete, Stage3InProgress. Futurecandidate drivers need new site/env/build bindings and prospective strict retirement metadata; noSend diagnosis before mode reruns. Dispose completed dormant OLD build roots only after full no-active-binding/source/ownership/link guards.
+
+## Latest-dev login repair — component checks
+
+Actual browser diagnostic caught ReferenceError:isAbsolute is not defined before login dispatch. The shared request executor contained an obsolete duplicate CSRF block referring to variables now owned by resolveTldwRequestPlan. Existing absolute same-page regression reproduced1failed/12excluded/1.167s. Delete only duplicate14lines; preserve samePageOriginRequest CSRF/auth/origin/recipe protections. Connected6modules86passed in each configured client (12.826s UI/12.380s WebUI). Changed module has0diagnostics under both actual configured TypeScript programs; no fullprojectTS claim. Configured lint0errors/6identical inheritedany warnings/no ignored. TS-only Bandit N/A; functional Python operators0findings0errors. Final review/normalcommit/build/live validation pending. Python installed bytes remain unchanged, so no redundant wheel/install. Separate private frontend shutdown27.786s exceeded15s and remains unqualified. Original session/runtime/source/archive/config preserved.
+
+Latest live dev advanced during validation to4e7be41029b18881e55aa4260dfcb83baf92c45c. Current bd9-based results retain exact scope. Preserve reviewed login repair locally, review incoming delta, rebase to4e and qualify genuinely affected source before the next build. Stage1/2 will be reopened for this new delta; Stage3/X01 remains active. Original runtime remains preserved.
