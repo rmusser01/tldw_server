@@ -261,7 +261,7 @@ def test_folder_link_tombstone_suppresses_effective_membership_without_deleting_
         ).fetchone()[0] == (1 if provenance in {"source", "mixed"} else 0)
 
 
-@pytest.mark.timeout(2, method="signal", func_only=True)
+@pytest.mark.timeout(2, func_only=True)
 def test_folder_hierarchy_rejects_preexisting_descendant_cycle_before_mutation(
     db: CharactersRAGDB,
 ) -> None:
