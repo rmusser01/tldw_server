@@ -10,7 +10,7 @@
 
 ## Global constraints
 
-- Current GET frontend sourcef286a3b3cb on reviewed dev22c9/buildfGDxU2Zf7SJMROKg0qgUg; targeted history boundaries passed. API package source6abd503df1/storage-root3817files is the last native-tested Python; the locally qualified canonical-preset repair awaits private package refresh and cache/generation/isolation validation. Refresh dev before later publication, not after every step.
+- Current GET frontend sourcef286a3b3cb on reviewed dev22c9/buildfGDxU2Zf7SJMROKg0qgUg; targeted history boundaries passed. API package sourcee830669e8f/preset3817files passed SQLite real RAG/cache isolation; plain Chat saved3messages before a failed receipt. The nullable receipt repair is locally qualified and awaits final review/package refresh/live validation. Refresh dev before later publication, not after every step.
 - Preserve original API50010/49993, frontend50863/50855, Chrome54716/54710, five saved messages, exact draft/URL and full canonical objects. No original runtime cycle.
 - Keep the original default Chrome context/tab untouched. X02 uses one owned temporary main context; create a second owned context only for the independent concurrent-account check, then close both owned contexts. Two tabs within the main context share storage and are not independent identities. The owned main context also bounds its disposable network pool.
 -600s per workflow/run/build,120s startup/child,180s inference,300s pytest case,15s operation/graceful cleanup; no force or assertion weakening. Reassess after three failures; latest human authorization covers necessary diagnostics/retries without another approval question.
@@ -747,3 +747,56 @@ corrected; an initial test-only nonexistent-public-HyDE assumption was corrected
 without a product/schema change. Actual/staged review and normal hooks/commit
 precede private wheel refresh and affected native cache/generation/isolation.
 No native acceptance or X02 closure yet; protected original session untouched.
+
+
+### Preset package and real SQLite RAG qualified; Chat receipt unknown
+
+Local e830669e8f committed reviewed5paths353+/12-; exact full-index patch56249bytes
+SHA256286298d72c3858cdb43437ccea2b74b49234c78c29e2726f6d6c1a486f274ec4.
+Fresh private preset package verified3817files/3roots/337nodes/722edges,7.380s.
+Changed-source SQLite native30.999outer passed all four RAG checkpoints before
+Alice complete-v2 failed HTTP/deadline guard. Bob cold retrieval, real generated
+private answer with cache hit, Alice same query without Bob nonce, then retained
+Bob cache after Alice all passed. Their exact safe response projections were not
+retained, so claim only those enforced checkpoints. No SQLite RAG replay needed.
+Alice Chat receipt/status unknown; isolation-chat intent retained, no save or
+Chat acceptance. API graceful2.178/actualall0/complete/cleanupempty/current3sessions
+closed/owners preserved. Next read-only supported Chat/messages reconciliation
+precedes any legitimate retry; add safe completed-response status/shape metadata
+to prevent another lost diagnosis. No old log/body/cache/proof recovery.
+X02 stays active; PostgreSQL generated isolation and remaining browser variants
+remain open, X03 untouched.
+
+
+### Saved Chat reconciliation and response-contract hypothesis
+
+Read-only reconciliation PASS13.839outer:3messages/1matching question, no character
+or persona; uncertain mutation intent retained and no resend. API graceful2.252/
+actualall0/complete/current sessionsclosed/owners preserved. Endpoint constructs
+completion response after saving with optional conversation.character_id, while
+shared response model currently requires int. Establish this exact response
+failure with normal endpoint/schema regressions before changing code. Minimal
+design aligns ordinary completion receipt with existing nullable Chat identity;
+protected Resume's integer/identity admission remains unchanged. Review all
+response callers, canonical generated artifacts and protected/ordinary clients.
+No invented sentinel ID or repeat of already-saved question. ADR not required:
+response representation repair, existing relationship/authority unchanged.
+
+
+### Nullable ordinary completion receipt qualified
+
+Causal2endpoint failures both reached correct provider/persistence then HTTP500.
+Required character_id now permits null, matching existing optional Chat identity;
+no sentinel, history change or protected Resume relaxation. Full connected check
+37passed654warnings/40.06pytest44.159outer/natural0, including protected generation/
+replay/concurrent-writer controls. All15old test definitions AST-identical.
+Baseline canonical export matches committed contract; normal shared generation
+and full JSON comparison prove only integer→integer|null for that response field.
+Required list/allother values and three owned descriptions unchanged;2140paths/
+3316schemas/final drift+pathcheckPASS41.374s. Fingerprint generated, path union
+unchanged; active normal rich types generated with existing installed tools.
+Compile2/Ruff0/Bandit72identical inherited test signatures0errors0new; production0.
+Same-config Black: schema clean, test inherited whole-file flag unchanged, added
+block formatted without AST changes. Final reviews/hooks/commit/package refresh
+precede native receipt qualification. Existing saved3messages remain retained;
+no blind resend. X02 remains active beforeX03.
