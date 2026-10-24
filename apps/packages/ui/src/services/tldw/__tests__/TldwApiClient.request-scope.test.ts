@@ -141,26 +141,17 @@ describe("TldwApiClient captured request scope", () => {
   it("prefers the canonical trailing-slash character collection route in both client implementations", async () => {
     mocks.bgRequest.mockResolvedValue([])
 
-    const baseClient = new TldwApiClientBase()
-    vi.spyOn(baseClient, "resolveApiPath").mockImplementation(async (_key, paths) => {
-      if (!paths[0]?.startsWith("/")) throw new Error("Expected a relative API path fixture")
-      return `/${paths[0].slice(1)}` as const
-    })
-    await TldwApiClientBase.prototype.listCharacters.call(baseClient, { limit: 5 })
-
-    expect(mocks.bgRequest.mock.calls[0]?.[0]).toMatchObject({
-      path: "/api/v1/characters/?limit=5",
-      method: "GET"
-    })
-
-    const domainClient = new TldwApiClientBase()
+    // Stage 3 (TASK-13526) deleted the shadowed base copy — the domain
+    // mixin is the only implementation, so the former base-vs-domain parity
+    // check reduces to asserting the live one.
+    const domainClient = new TldwApiClient()
     vi.spyOn(domainClient, "resolveApiPath").mockImplementation(async (_key, paths) => {
       if (!paths[0]?.startsWith("/")) throw new Error("Expected a relative API path fixture")
       return `/${paths[0].slice(1)}` as const
     })
-    await characterMethods.listCharacters.call(domainClient, { limit: 5 })
+    await domainClient.listCharacters({ limit: 5 })
 
-    expect(mocks.bgRequest.mock.calls[1]?.[0]).toMatchObject({
+    expect(mocks.bgRequest.mock.calls[0]?.[0]).toMatchObject({
       path: "/api/v1/characters/?limit=5",
       method: "GET"
     })
@@ -169,9 +160,9 @@ describe("TldwApiClient captured request scope", () => {
   it("keeps the ordinary association read filtered and requests disabled links only when asked", async () => {
     mocks.bgRequest.mockResolvedValue([])
 
-    const baseClient = new TldwApiClientBase()
-    await TldwApiClientBase.prototype.listCharacterWorldBooks.call(baseClient, 7)
-    await TldwApiClientBase.prototype.listCharacterWorldBooks.call(baseClient, 7, true)
+    const client = new TldwApiClient()
+    await client.listCharacterWorldBooks(7)
+    await client.listCharacterWorldBooks(7, true)
 
     expect(mocks.bgRequest.mock.calls[0]?.[0]).toMatchObject({
       path: "/api/v1/characters/7/world-books",
@@ -356,7 +347,7 @@ describe("TldwApiClient captured request scope", () => {
     expect(init.body).not.toHaveProperty("requestScope")
   })
 
-  it("preserves structured scope errors in the exported base RAG method", async () => {
+  it("preserves structured scope errors in the live RAG method", async () => {
     const scopeError = Object.assign(new Error("scope changed"), {
       status: 412,
       details: {
@@ -364,7 +355,9 @@ describe("TldwApiClient captured request scope", () => {
       }
     })
     mocks.bgRequest.mockRejectedValueOnce(scopeError)
-    const client = new TldwApiClientBase()
+    // Stage 3 (TASK-13526): the shadowed base copy is deleted; the chat-rag
+    // mixin is the live implementation (pinned by the ownership guard).
+    const client = new TldwApiClient()
 
     await expect(client.ragSearch("what changed?", {
       requestScope
@@ -430,11 +423,13 @@ describe("TldwApiClient captured request scope", () => {
     })
   })
 
-  it.each(["public", "base", "domain"])("keeps %s greeting seed options out of JSON while retaining captured account, workspace and cancellation", async (implementation) => {
+  it.each(["public", "domain"])("keeps %s greeting seed options out of JSON while retaining captured account, workspace and cancellation", async (implementation) => {
     mocks.bgRequest.mockResolvedValueOnce({id: "greeting-chat", title: "Opening"})
     const signal = new AbortController().signal
     const body = {character_id: 42, provider: "openai", model: "configured-model", temperature: 0, top_p: 0}
-    const client = implementation === "public" ? new TldwApiClient() : new TldwApiClientBase()
+    // Stage 3 (TASK-13526): the shadowed base copy is deleted; the mixin
+    // needs its composed instance for sibling-helper `this` calls.
+    const client = new TldwApiClient()
     const options = {requestScope, signal, scope: {type: "workspace" as const, workspaceId: "owned-workspace"},
       seedFirstMessage: true, greetingStrategy: "alternate_index" as const, alternateIndex: 0}
     if (implementation === "domain") await chatRagMethods.createChat.call(client, body, options)
@@ -662,8 +657,8 @@ it.each(["getMessage", "editMessage"])("native %s refuses pre-aborted owner requ
   await expect(pending).rejects.toMatchObject({ name: "AbortError" })
   expect(mocks.bgRequest).not.toHaveBeenCalled()
 })
-it.each([[true, false], [false, false], [true, true], [false, true]])("preserves native greeting seed query and captured scope (enabled=%s, base=%s)", async (enabled, base) => {
-  const client = base ? new TldwApiClientBase() : new TldwApiClient()
+it.each([[true], [false]])("preserves native greeting seed query and captured scope (enabled=%s)", async (enabled) => {
+  const client = new TldwApiClient()
   const signal = new AbortController().signal
   mocks.bgRequest.mockReset()
   mocks.bgRequest.mockResolvedValueOnce({ id: "seeded-chat" })
