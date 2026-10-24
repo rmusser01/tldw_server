@@ -1,3 +1,4 @@
+import type { ChatMessageView } from "@/services/settings/ui-settings"
 import type { ForkResultV1 } from "@/types/history-selection"
 import { useHistorySelectionContext } from "@/hooks/chat/useHistorySelection"
 import React from "react"
@@ -27,6 +28,7 @@ type CompareBlock = {
 }
 
 type PlaygroundCompareClusterProps = {
+  messageView?: ChatMessageView
   block: CompareBlock
   blockIndex: number
   messages: any[]
@@ -169,6 +171,7 @@ const PerModelMiniComposer: React.FC<{
 }
 
 export const PlaygroundCompareCluster = ({
+  messageView,
   block,
   blockIndex,
   messages,
@@ -418,6 +421,7 @@ export const PlaygroundCompareCluster = ({
   return (
     <div className="w-full max-w-5xl md:px-4 mb-4 space-y-2">
       <PlaygroundMessage
+        messageView={messageView}
         isBot={userMessage.isBot}
         message={userMessage.message}
         name={userMessage.name}
@@ -968,6 +972,7 @@ export const PlaygroundCompareCluster = ({
                 </div>
               ) : null}
               <PlaygroundMessage
+        messageView={messageView}
                 isBot={message.isBot}
                 message={message.message}
                 name={message.name}

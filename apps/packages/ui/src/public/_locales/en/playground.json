@@ -4594,5 +4594,51 @@
   },
   "composer_advancedPreferenceUnavailable": {
     "message": "Display preference unavailable. Advanced controls still work for this visit."
+  },
+  "messageViews": {
+    "label": "Message view",
+    "transcript": "Transcript",
+    "transcriptHelp": "For reading and everyday chat",
+    "conversation": "Conversation",
+    "conversationHelp": "For roleplay and character chat",
+    "research": "Research",
+    "researchHelp": "For sources and detailed review",
+    "preferenceHelp": "Choose a reading layout for this device.",
+    "sourcesCount": "{{count}} sources",
+    "sourcesCount_one": "{{count}} source",
+    "sourcesCount_other": "{{count}} sources"
+  },
+  "messageViews_label": {
+    "message": "Message view"
+  },
+  "messageViews_transcript": {
+    "message": "Transcript"
+  },
+  "messageViews_transcriptHelp": {
+    "message": "For reading and everyday chat"
+  },
+  "messageViews_conversation": {
+    "message": "Conversation"
+  },
+  "messageViews_conversationHelp": {
+    "message": "For roleplay and character chat"
+  },
+  "messageViews_research": {
+    "message": "Research"
+  },
+  "messageViews_researchHelp": {
+    "message": "For sources and detailed review"
+  },
+  "messageViews_preferenceHelp": {
+    "message": "Choose a reading layout for this device."
+  },
+  "messageViews_sourcesCount": {
+    "message": "{{count}} sources"
+  },
+  "messageViews_sourcesCount_one": {
+    "message": "{{count}} source"
+  },
+  "messageViews_sourcesCount_other": {
+    "message": "{{count}} sources"
   }
 }

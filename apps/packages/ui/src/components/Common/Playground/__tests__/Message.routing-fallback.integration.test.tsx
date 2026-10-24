@@ -6,6 +6,7 @@ import { PlaygroundMessage } from "../Message"
 import { mapServerChatMessagesToPlaygroundMessages } from "@/hooks/chat/useServerChatLoader"
 import { tldwClient } from "@/services/tldw/TldwApiClient"
 
+const uiModeState = vi.hoisted(() => ({ mode: "pro" }))
 const knowledgeCapabilities = vi.hoisted(() => ({ enabled: false, actions: vi.fn() }))
 const storageOverrides = vi.hoisted(() => new Map<string, unknown>())
 const detectCharacterMoodMock = vi.hoisted(() =>
@@ -212,7 +213,7 @@ vi.mock("@/services/tldw/TldwApiClient", () => ({
 
 vi.mock("@/store/ui-mode", () => ({
   useUiModeStore: (selector: (state: { mode: string }) => unknown) =>
-    selector({ mode: "pro" })
+    selector(uiModeState)
 }))
 
 vi.mock("@/store/option", () => ({
@@ -331,6 +332,7 @@ const baseProps: React.ComponentProps<typeof PlaygroundMessage> = {
 
 describe("PlaygroundMessage routing fallback integration", () => {
   beforeEach(() => {
+    uiModeState.mode = "pro"
     knowledgeCapabilities.enabled = false
     knowledgeCapabilities.actions.mockClear()
     storageOverrides.clear()
@@ -348,6 +350,25 @@ describe("PlaygroundMessage routing fallback integration", () => {
       confidence: 0.5,
       topic: null
     })
+  })
+
+  it("shows available usage in Research without replacing the message on view change", () => {
+    uiModeState.mode = "standard"
+    const props = { ...baseProps, generationInfo: { usage: { prompt_tokens: 20, completion_tokens: 10 } } }
+    const { rerender } = render(<PlaygroundMessage {...props} messageView="research" />)
+    const row = screen.getByTestId("chat-message")
+    expect(screen.getByText(/20 prompt/)).toHaveTextContent("30 tokens")
+    rerender(<PlaygroundMessage {...props} messageView="transcript" />)
+    expect(screen.queryByText(/20 prompt/)).toBeNull()
+    expect(screen.getByTestId("chat-message")).toBe(row)
+  })
+
+  it.each(["transcript", "research"] as const)("preserves the saved user avatar in %s with portraits and bubbles disabled", (messageView) => {
+    storageOverrides.set("chatShowCharacterPortraits", false)
+    storageOverrides.set("userChatBubble", false)
+    storageOverrides.set("chatUserPersonaImage", "https://assets.test/persona.png")
+    render(<PlaygroundMessage {...baseProps} isBot={false} role="user" name="You" messageView={messageView} />)
+    expect(screen.getByAltText("You")).toHaveAttribute("src", "https://assets.test/persona.png")
   })
 
   it("renders fallback routing audit metadata when generation info includes routing details", () => {

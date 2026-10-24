@@ -107,6 +107,17 @@ export const CHAT_WINDOW_OPACITY_SETTING = defineSetting(
   (value) => coerceOpacityPercent(value, 35)
 )
 
+export const CHAT_MESSAGE_VIEWS = ["transcript", "conversation", "research"] as const
+export type ChatMessageView = (typeof CHAT_MESSAGE_VIEWS)[number]
+
+export const CHAT_MESSAGE_VIEW_SETTING = defineSetting(
+  "chatMessageView",
+  "transcript" as ChatMessageView,
+  value => CHAT_MESSAGE_VIEWS.includes(value as ChatMessageView)
+    ? value as ChatMessageView
+    : "transcript"
+)
+
 export const CHAT_MESSAGE_OPACITY_SETTING = defineSetting(
   "chatMessageOpacity",
   60,

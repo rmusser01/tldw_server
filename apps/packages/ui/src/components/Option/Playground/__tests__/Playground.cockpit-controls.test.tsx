@@ -335,7 +335,7 @@ vi.mock("@/components/Common/Settings/LlamaCppAdvancedControls", () => ({
 }));
 
 vi.mock("@/components/Option/Playground/PlaygroundChat", () => ({
-  PlaygroundChat: () => <div data-testid="playground-chat" />,
+  PlaygroundChat: ({ messageView }: { messageView?: string }) => <div data-testid="playground-chat" data-message-view={messageView} />,
 }));
 
 vi.mock("@/components/Layouts/Layout", () => ({
@@ -424,6 +424,7 @@ vi.mock("@/services/settings/ui-settings", () => ({
   CHAT_BACKGROUND_IMAGE_SETTING: "chatBackgroundImage",
   CHAT_WINDOW_OPACITY_SETTING: "chatWindowOpacity",
   CHAT_MESSAGE_OPACITY_SETTING: "chatMessageOpacity",
+  CHAT_MESSAGE_VIEW_SETTING: "chatMessageView",
   CHAT_CHARACTER_IMAGE_OPACITY_SETTING: "chatCharacterImageOpacity",
   resolveOpacityAlpha: (value: unknown, fallback = 35) =>
     typeof value === "number" && Number.isFinite(value)
@@ -481,11 +482,20 @@ vi.mock("@/store/artifacts", () => ({
 
 vi.mock("@/hooks/useSetting", () => ({
   useSetting: (setting: string) => {
+    const [value, setValue] = React.useState(storageState.values.get("chatMessageView") ?? "transcript");
+    if (setting === "chatMessageView") return [value, (next: unknown) => { storageState.values.set(setting, next); setValue(next); }];
     if (setting === "chatWindowOpacity") return [35];
     if (setting === "chatMessageOpacity") return [60];
     if (setting === "chatCharacterImageOpacity") return [100];
     return [""];
   },
+}));
+vi.mock("@/components/Common/Playground/MessageViewSelect", () => ({
+  MessageViewSelect: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
+    <select aria-label="Message view" value={value} onChange={event => onChange(event.target.value)}>
+      <option value="transcript">Transcript</option><option value="conversation">Conversation</option><option value="research">Research</option>
+    </select>
+  )
 }));
 
 vi.mock("@plasmohq/storage/hook", () => ({
@@ -1902,4 +1912,18 @@ describe("Playground cockpit controls", () => {
     expect(screen.getByRole("textbox", { name: "Mobile message" })).toBe(draft);
     expect(draft).toHaveValue("Retained message");
   });
+  it("changes the saved message view while retaining the chat and composer", () => {
+    renderPlayground();
+    const form = screen.getByTestId("playground-form");
+    const replaced = messageOptionState.value.setMessages.mock.calls.length;
+    const select = screen.getByRole("combobox", { name: "Message view" });
+    expect(select).toHaveValue("transcript");
+    fireEvent.change(select, { target: { value: "research" } });
+    expect(storageState.values.get("chatMessageView")).toBe("research");
+    expect(select).toHaveValue("research");
+    expect(screen.getByTestId("playground-form")).toBe(form);
+    expect(messageOptionState.value.setMessages).toHaveBeenCalledTimes(replaced);
+  });
+
+
 });
