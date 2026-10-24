@@ -9,6 +9,7 @@ import secrets
 import sqlite3
 import time
 import uuid as _uuid
+from collections.abc import Iterator
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
@@ -2319,6 +2320,24 @@ class JobManager:
             cls._RLS_OWNER_USER_ID.set(owner_user_id if (owner_user_id or "").strip() else None)
         except _JOB_NONCRITICAL_EXCEPTIONS:
             pass
+
+    @classmethod
+    @contextlib.contextmanager
+    def scoped_rls_context(
+        cls, *, is_admin: bool, domain_allowlist: str | None, owner_user_id: str | None
+    ) -> Iterator[None]:
+        """Restore the caller's tenant context even when a request is cancelled."""
+        domain = domain_allowlist if (domain_allowlist or "").strip() else None
+        owner = owner_user_id if (owner_user_id or "").strip() else None
+        admin_token = cls._RLS_IS_ADMIN.set(bool(is_admin))
+        domain_token = cls._RLS_DOMAIN_ALLOWLIST.set(domain)
+        owner_token = cls._RLS_OWNER_USER_ID.set(owner)
+        try:
+            yield
+        finally:
+            cls._RLS_OWNER_USER_ID.reset(owner_token)
+            cls._RLS_DOMAIN_ALLOWLIST.reset(domain_token)
+            cls._RLS_IS_ADMIN.reset(admin_token)
 
     @classmethod
     def clear_rls_context(cls) -> None:
