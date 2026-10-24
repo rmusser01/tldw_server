@@ -7,9 +7,9 @@ ADR required: no. Restore existing migration and retry contracts; retain ADR-003
 
 ## Current UAT tracking index — 2026-10-24
 
-**X01 remains accepted at its recorded scopes. X02 is the sole active workflow.** The unpublished isolated branch is based on commit d1a620062df2997fcb994a3342ff8b0b65272175 and frozen dev17141ff73c3caee7998d93a290598d6c3ab4ec0c, including PR3309's composer redesign. All18 rebased commits retain their intent; incoming qualification and current frontend9U are recorded in the active X02 plan. Both SQLite/PostgreSQL real helper-flight account switches passed. SQLite's static content assertions and targeted normal-navigation/reload/Logout continuation are recorded by explicit composition; the failed whole run remains failed. PostgreSQL static setup exposed a Jobs outbox scope defect, now causally repaired and locally tested; installed-package validation is pending. PR3310 and PR3311 remain source-reviewed open references, not integrated qualification. Original523 source/runtime/Chat/draft/data/keys remain protected. Selected acceptance remains34/43, with nine families open. Heartbeat remains paused.
+**X01 and X02 are accepted at their recorded selected scopes. X03 is next and not yet started.** The unpublished isolated branch is at e388823fe23e89fb82fb58dc04e788db7f6944f2 on frozen dev17141ff73c3caee7998d93a290598d6c3ab4ec0c, including PR3309. All18 rebased commits retain their intent. Current redesigned Chat checks, actual helper cancellation, PostgreSQL static/file checks and guarded X02 cleanup are complete by the composition below. The handoff read shows PR3310 newly merged in devc90e57e3824a77102939e5b4017c5c0973a00c64 and PR3311 open at newer fad63f80edfae36ae5422eaef8054560fc11bf31. These new heads are not integrated or qualified here; latest-dev integration and affected validation precede X03. Original source/runtime/Chat/draft/data/keys remain protected. Selected acceptance is35/43; eight families remain open. Heartbeat remains paused.
 
-The43 IDs below are existing workflow families in [the release catalog](../../apps/tldw-frontend/scripts/live-tier-uat/release-catalog-data.mjs), with426 planned variants. C01 through C12 and X01 selected acceptances are closed; nine families remain open. Selected acceptance does not close broader release gates or convert historical failed runs into passing runs.
+The43 IDs below are existing workflow families in [the release catalog](../../apps/tldw-frontend/scripts/live-tier-uat/release-catalog-data.mjs), with426 planned variants. C01 through C12, X01 and X02 selected acceptances are closed; eight families remain open. Selected acceptance does not close broader release gates or convert historical failed runs into passing runs.
 
 - [TASK-13260](../../backlog/tasks/task-13260%20-%20Run-fresh-single-user-and-multi-user-UAT-across-core-workflow-loops.md): existing overall single-user/multi-user UAT, In Progress.
 - [TASK-13260.281](../../backlog/tasks/task-13260.281%20-%20Correct-root-causes-from-resumed-release-UAT-before-continuing.md): existing resumed-UAT root-cause work, In Progress.
@@ -53,7 +53,7 @@ The43 IDs below are existing workflow families in [the release catalog](../../ap
 | C11 | MCP discovery and scoped execution | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit native/component/mode composition; controlled transport, scope/recovery, credentials/logs/exports, corrected UI contrast, exact original handback and cleanup independently reviewed. Failed outcomes and mode/cancellation/API-L limits retained. [Closure](#c11-mcp-discovery-and-scoped-execution-selected-closure). |
 | C12 | Workflow scheduled/monitored result | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by reviewed core4/recovery7 and four-mode composition; repaired timezone, Retry/dependency, provider policy and PostgreSQL timestamp contracts. Exact original handback and owned cleanup passed. [Closure](#c12-workflow-scheduled-and-monitored-result-selected-closure). |
 | X01 | Upgrade without data loss | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit twelve-mode/current22c composition and recovery; original session preserved and disposable payloads removed. [Closure scope](#x01-supported-upgrade-selected-closure). |
-| X02 | Account/browser isolation | In Progress — fresh SQLite/PostgreSQL multi-user reciprocal/API/browser fixtures; [plan](IMPLEMENTATION_PLAN_uat_x02_account_browser_isolation_20261023.md). |
+| X02 | Account/browser isolation | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit ten-variant SQLite/PostgreSQL composition, current redesigned Chat checks, original preservation and guarded cleanup. [Closure](#x02-account-and-browser-isolation-selected-closure). |
 | X03 | Usability, accessibility and responsive UI | Open |
 | X04 | Extension capture and sidepanel continuity | Open |
 | S01 | Quiz and study assistance | Open |
@@ -1735,3 +1735,45 @@ venv dependency assets were admitted only through their installed RECORD
 metadata. Shared BASE/.venv, current22c package/build/environment, user models,
 original data/runtime/session and restoration dependency closure were preserved.
 Both completed owned X01 plans were removed; their task history remains.
+
+
+## X02 account and browser isolation selected closure
+
+**Selected FUNCTIONAL + HUMAN UX ACCEPTED;35/43 families accepted, eight open.** Human X02 UX is accepted. This is explicit composition across the recorded source and artifact versions, rather than a claim that one run executed every variant.
+
+| Catalog variant | SQLite multi-user | PostgreSQL multi-user |
+|---|---|---|
+| Reciprocal resources | Own read/write positives and reciprocal Note/Chat/card/draft/Job denials; per-user Media identity and exact original bytes | Six owned resource families, reciprocal valid-ID denials and foreign mutations denied; final asset-only check requires both foreign-file 404s with exact own bytes before/after |
+| Same-browser account switch | Recorded login/logout/old-tab controls, exact Back/history finish, and current normal-navigation/static continuation | Recorded 14 visible controls plus exact history finish; current static browser run passes both handoffs, Prompt suggestions, notifications and clean Bob re-entry |
+| Private retrieval | Real Bob cold/cache positives, Alice same-query candidate/citation/answer exclusion and saved usable Chat | Corresponding real generated RAG/cache and saved Chat isolation |
+| Share and revoke | Organization grant allows its declared read; forbidden rename and immediate same-session revocation deny access | Same real grant/read/forbidden mutation/revoke controls |
+| Admin operational scope | Authorized operational metadata positive with ordinary-user denials | Same; Admin never substitutes for either ordinary-user direction |
+| Switch during fetch/generation | Real helper stream interrupted by Logout; independent browser cancellation receipts; Bob helper empty | Same real helper-flight cancellation and clean account re-entry |
+| Old tabs | Held documents, old-tab state clearing, reload and exact Back/history composition | Same; current held Chat/notification documents reach login |
+| Same-name resources | Actual owner IDs/canaries and normal Media handoff/Prompt suggestions remain distinct | Distinct global Media IDs, owner controls and current handoff/picker positives |
+| Export isolation | Owned Note/card/Chat bodies plus legitimate original reupload and separate fresh-process exact-byte GET; foreign exclusions | Owned exports and foreign exclusions; separate final reciprocal original-file check |
+| Background Job isolation | Durable owned content/result positives and reciprocal Job denials | Actual worker/SDK completion under restricted role, reciprocal Job denials and current owned completion notifications |
+
+### Source and execution composition
+
+- Current local repair is e388823fe23e89fb82fb58dc04e788db7f6944f2 on frozen dev17141ff73c3caee7998d93a290598d6c3ab4ec0c, with all18 rebased commits retained. Normal hooks and the independently reviewed outbox patch match exactly. PR3309 is included; the then-reviewed PR3310 c0cd and PR3311 8d369 heads were reference-only. At closeout, PR3310 is newly merged as devc90 and PR3311 has advanced to fad63; those new heads are not integrated or qualified by this closure.
+- Earlier API, export, history and generated RAG/cache/Chat results retain their recorded dev22c/artifact scopes. Incoming source checks and the current redesigned build's affected checks compose with those results. This is not a release-wide replay.
+- Current frontend9Uple2O8HVh_i7zqXSUtk and private API package3817files/3roots/337dependencyNodes/722edges are qualified. The API-only outbox refresh took7.062s with no downloads; no frontend rebuild was needed.
+- Current read-drain finish passed32.936s. SQLite helper-flight passed33.642s; PostgreSQL helper-flight passed40.803s. Both observed typed answer content before real Logout and independent cancelled transport receipts, then empty Bob state. No natural EOF/DONE credit was substituted for cancellation.
+- SQLite static content assertions were reached in the failed43.542s whole run. Its separate normal Media navigation/reload/Logout continuation passed29.770s. The original whole run remains failed.
+- Current PostgreSQL static/browser phase passed45.744s: both owner handoffs/suggestions/actual Job notifications, held-document retirement, unsent helper clearing, clean Bob re-entry and real reload. All11 selected ASGI tasks completed; fresh pending/server/queued counters were integer zero; the frontend had only LISTEN before closure. Its outer wrapper failed only because an asset receipt was absent; the browser phase retains its scoped pass.
+- The separate asset-only PostgreSQL finish passed25.467s, native exit0 and zero parse errors. Exact structured Alice/Bob records require int404 and boolTrue owned-byte preservation. No browser, provider, worker or notification controls were replayed.
+- Causal repairs cover profile-owned file storage, PostgreSQL request/worker scope, RAG explicit-setting precedence, empty-answer persistence, helper account scope, document-lifetime cancellation and Jobs outbox context restoration. The outbox repair passed four causal tests, two SQLite event/filter checks and two explicit-disabled-outbox worker controls; compile/Ruff/security passed. Its production Black flag is identical to baseline.
+
+### Limits retained
+
+One prospectively registered old-loader reload stream remains UNKNOWN with completionEvidence=false, matching the independent synthetic calibration. It is not an endpoint-success or EOF receipt; fresh actual server-task/zero-work/socket proof precedes context closure. Other requests and auth writes keep strict completion gates.
+
+PostgreSQL uses the official isolated schema-owning NOSUPERUSER/NOBYPASSRLS role, not a DML-only role. Single-user reciprocal-account cells are N/A. Historical failed and unqualified runs remain failed/unqualified in the official task. Missing old fixture blobs were not recovered: later normal uploads and fresh reads qualify only their stated recovery. No model/service workaround, assertion weakening, original runtime cycle, publication or merge occurred.
+
+The protected original source, running owners, profile/data/keys, URL, five messages, draft and canonical objects remain preserved. Broader release qualification, the eight remaining workflow families and any future integrated open redesign PRs remain open.
+
+
+### X02 cleanup and handoff
+
+Guarded disposal removed two released private profiles, two superseded API packages,25 completed operators plus the accepted screenshot, and two untracked transient repository files:176,771,875 bytes. Current outbox package/frontend9U, dependencies, original22c package and complete original restoration closure remain. Fresh protected-owner and original-control byte checks passed; no original service, browser or data action occurred. Detailed failed outcomes remain in the official task. X03 remains next, without replaying X02.

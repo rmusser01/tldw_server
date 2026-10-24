@@ -1,10 +1,10 @@
 # UAT fixes on latest dev — 2026-10-23
 
-Task: TASK-13260.278.18.83.45. Human explicitly authorizes rebase, necessary repairs/setup/retries and sequential completion of all43 workflows. X01 selected acceptance is complete by recorded composition;34accepted,9open. X02 is next. Prior frozen qualification alone does not qualify this new candidate.
+Task: TASK-13260.278.18.83.45. Human explicitly authorizes rebase, necessary repairs/setup/retries and sequential completion of all43 workflows. X01 and X02 selected acceptances are complete by recorded composition;35accepted,8open. X03 is next, after actual incoming dev review/integration and affected qualification. Prior frozen qualification alone does not qualify this new candidate.
 
 ## Constraints and rulings
 
-Preserve current runtime/source/profile/data/keys/build/Chrome and complete unpublished fixes. Work in the separately managed uat-latest-dev-20261023 checkout. Original523 plus765tracked/345new source-doc-test files; exclude every .next build, model/data/cache/runtime lock/secret. Latest verified dev22c9eac5cb9eb59cea3b9aea0448ee4da0965ebc; final X01 remote readback matches. Refresh before any later publication. PR3084 is merged/immutable. No GitHub queue/push/merge action in this integration unit. Existing startup120s/generation180s/workflow600s/case300s/operation and gracefulcleanup15s remain. No force or weakened acceptance. Heartbeat stays paused.
+Preserve current runtime/source/profile/data/keys/build/Chrome and complete unpublished fixes. Work in the separately managed uat-latest-dev-20261023 checkout. Original523 plus765tracked/345new source-doc-test files; exclude every .next build, model/data/cache/runtime lock/secret. X02 is accepted at frozen dev17141/e388823/frontend9U. The fresh closeout handoff read is devc90e57e3824a77102939e5b4017c5c0973a00c64, not yet integrated; the earlier final X01 readback at22c9 remains historical. Refresh before any later publication. PR3084 is merged/immutable. No GitHub queue/push/merge action in this integration unit. Existing startup120s/generation180s/workflow600s/case300s/operation and gracefulcleanup15s remain. No force or weakened acceptance. Heartbeat stays paused.
 
 ADR required:no for integration; preserve upstream decisions and their actual statuses. Proposed Media identity069 collided with existing upstream069 frontend API contract; it is now Proposed082. Exact duplicate regeneration/recovery records map to upstream077/079; their Proposed statuses remain unchanged.
 
@@ -24,7 +24,7 @@ Ruling: normal Git stash in the new checkout is functional rebase state, not a p
 **Status**: Complete
 
 ## Stage3: Finish X01 and continue sequential UAT
-**Goal**: Actual installed combined candidate passes X01 modes and recovery before X02.
+**Goal**: Preserve recorded X01/X02 acceptance, integrate and qualify actual incoming dev changes, then continue X03 and the remaining workflows sequentially.
 **Success Criteria**: Version-source checkpoints oldest justified plusv0.1.43/v0.1.46; all required SQLite/PostgreSQL single/multi upgrade, backup/separate restore, preserved old data/accounts/Jobs, new writes, real provider, UI/reload, malformed/recovery and complete lifecycle/handback checks. Prior accepted UX remains; screenshot for changed UX. Dispose completed functional bulk/operators promptly. Update officialtask/X01/masterindex accurately, then move one workflow at a time.
 **Tests**: Reviewed actual drivers with current source/package/build binding, no model replay merely for operator diagnosis. Explicit limitations retained; no latestdev readiness or completion claim from old artifacts.
 **Status**: In Progress
@@ -93,3 +93,8 @@ X01 SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by reviewed twelve-cell4e/current22c
 ## 2026-10-24 current Chat redesign integration
 
 User explicitly identified the complete redesign PRs3309/3310/3311. Fetched dev17141 includes3309 calm composer and3313 message views;3310/3311 remain open future references. All18 existing UAT commits rebased conflict-free from22c9; every range-diff entry identical. Notes stash2ba4a30 retained/restored. Current-source incoming/backend/frontend qualifications and minimal test-fixture repairs are recorded in the active X02 plan. Original running checkout/session remains preserved. Fresh API3817-file package qualified; current private frontend and X02 live drain/in-flight checks still required. X01 stays closed by its selected composition; no full43-case requalification or release-wide completion claim.
+
+
+## 2026-10-24 X02 closeout and next dev integration
+
+X02 selected functional and human UX acceptance is complete by the [retained master closure](IMPLEMENTATION_PLAN_uat_all_fixes_20261006.md#x02-account-and-browser-isolation-selected-closure):35/43 accepted, eight open. Its own completed plan and released payloads/operators are removed; detailed failed outcomes remain in the official task. The earlier active-plan and pending-X02 notes are historical. X02 qualifies e388823/dev17141/frontend9U by explicit composition. New handoff devc90 contains merged PR3310 head0ae8; open PR3311 advanced to fad63/basec90. Neither is covered by the earlier reference-only c0cd/8d369 reviews or current candidate. Actual source review, preserved-fix rebase and genuinely affected checks precede X03; Stage3 remains In Progress. Original source/runtime/session and all retained limits remain protected.
