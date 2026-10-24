@@ -803,7 +803,9 @@ async def run_media_ingest_jobs_worker(
     logger.info("Starting Media Ingest Jobs worker (queue={})", queue_name)
     watcher = asyncio.create_task(_watch_stop())
     try:
-        await sdk.run(handler=_handler, cancel_check=_cancel_check, progress_cb=_progress_cb)
+        # The trusted dispatcher crosses Job owners; content work still uses each persisted owner.
+        with JobManager.scoped_rls_context(is_admin=True, domain_allowlist=_MEDIA_DOMAIN, owner_user_id=None):
+            await sdk.run(handler=_handler, cancel_check=_cancel_check, progress_cb=_progress_cb)
     finally:
         with contextlib.suppress(Exception):
             watcher.cancel()
