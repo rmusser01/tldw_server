@@ -25,6 +25,7 @@ from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
 )
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.app.main import app as fastapi_app
+from tldw_Server_API.tests._plugins.postgres import _drop_restricted_role
 
 pytestmark = pytest.mark.integration
 
@@ -70,12 +71,12 @@ def restricted_media_store(request, tmp_path):
         db.close_connection()
         if backend is not None:
             backend.get_pool().close_all()
-        if role is not None:
-            with admin.transaction() as conn:
-                conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
-                conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
-        if admin is not None:
-            admin.get_pool().close_all()
+        try:
+            if role is not None:
+                _drop_restricted_role(admin, role)
+        finally:
+            if admin is not None:
+                admin.get_pool().close_all()
 
 
 @pytest.mark.parametrize("id_kind", ["integer", "uuid"])

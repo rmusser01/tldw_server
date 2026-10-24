@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from ..tts_exceptions import TTSGenerationError, TTSProviderInitializationError, TTSValidationError
-from ..utils import hold_tts_engine
+from ..utils import hold_tts_engine, tts_model_load_lock
 from .base import AudioFormat, TTSCapabilities, TTSRequest, TTSResponse, VoiceInfo
 
 if TYPE_CHECKING:
@@ -24,7 +24,6 @@ class Qwen3MlxRuntime:
         self._load_model = None
         self._model = None
         self._model_id: str | None = None
-        self._model_lock = asyncio.Lock()
 
     async def initialize(self) -> bool:
         if platform.system() != "Darwin" or platform.machine().lower() != "arm64":
@@ -131,7 +130,7 @@ class Qwen3MlxRuntime:
                 "mlx-audio backend was not initialized",
                 provider=self.adapter.PROVIDER_KEY,
             )
-        async with hold_tts_engine(self._model_lock) as run:
+        async with hold_tts_engine(tts_model_load_lock(self.adapter.provider_key, f"mlx:{backend_model_id}")) as run:
             if self._model is None or self._model_id != backend_model_id:
                 self._model = await run(self._load_model, backend_model_id)
                 self._model_id = backend_model_id

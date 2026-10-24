@@ -1,7 +1,7 @@
 ---
 id: TASK-13889
 title: Web content ingest discards scraped pages when its LLM extraction is refused
-status: To Do
+status: Done
 labels:
 - quotas
 - media
@@ -16,26 +16,28 @@ labels:
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 An over-quota user's /media/ingest-web-content request with perform_analysis and no api_name gets the 402 before any page is fetched, or keeps its pages without LLM extraction, with a test
-- [ ] #2 Usage_Quotas.md says which
+- [x] #1 An over-quota user's /media/ingest-web-content request with perform_analysis and no api_name gets the 402 before any page is fetched, or keeps its pages without LLM extraction, with a test
+- [x] #2 Usage_Quotas.md says which
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+RED: 2 failed, 80 passed (test_web_summary_service_prompt.py, individual and sitemap no-provider params). GREEN: 106 passed with the sanitization file. Decision 1 = A: 402 before any fetch whenever perform_analysis is on. Usage_Quotas.md and the usage accounting design row updated. Bandit -ll clean. No ADR needed. Not covered: a user going over quota mid-request.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Boundary quota check runs whenever perform_analysis is on.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

@@ -13,7 +13,7 @@ from loguru import logger
 from ..streaming_audio_writer import AudioNormalizer, StreamingAudioWriter
 from ..tts_exceptions import TTSGenerationError, TTSProviderInitializationError, TTSProviderNotConfiguredError
 from ..tts_validation import validate_tts_request
-from ..utils import hold_tts_engine, parse_bool
+from ..utils import hold_tts_engine, parse_bool, tts_model_load_lock
 from ..vendors.kittentts_compat import (
     DEFAULT_REPO_ID,
     DEFAULT_VOICE_ALIASES,
@@ -70,7 +70,6 @@ class KittenTTSAdapter(TTSAdapter):
         self._runtime: Optional[KittenRuntime] = None
         self._runtime_assets = None
         self._runtime_load_failed = False
-        self._runtime_lock = asyncio.Lock()
         self._voice_infos = self._build_voice_infos()
 
     def _build_voice_infos(self) -> list[VoiceInfo]:
@@ -91,7 +90,7 @@ class KittenTTSAdapter(TTSAdapter):
         return normalize_repo_id(request_model or self.model_name or DEFAULT_REPO_ID)
 
     async def _load_runtime_for_model(self, model_name: str) -> KittenRuntime:
-        async with hold_tts_engine(self._runtime_lock) as run:
+        async with hold_tts_engine(tts_model_load_lock(self.provider_key, model_name)) as run:
             active_repo = getattr(self._runtime_assets, "repo_id", None)
             if self._runtime is not None and active_repo == model_name:
                 self._runtime_load_failed = False

@@ -873,6 +873,47 @@ def test_sync_postgres_sequences_positive_scalar_uses_max_id_branch() -> None:
 
 
 @pytest.mark.unit
+def test_sync_postgres_sequences_raises_a_failing_table() -> None:
+    """Media keeps raising a table's error; only ChaCha skips it (TASK-13901)."""
+    from tldw_Server_API.app.core.DB_Management.media_db.schema import (
+        postgres_sequence_maintenance as postgres_sequence_maintenance_module,
+    )
+
+    conn = SimpleNamespace(transaction=lambda **_kwargs: nullcontext())
+    queries: list[str] = []
+
+    class FakeBackend:
+        @staticmethod
+        def escape_identifier(value: str) -> str:
+            return f'"{value}"'
+
+        def execute(
+            self,
+            query: str,
+            params: tuple[object, ...] | None = None,
+            *,
+            connection: object,
+        ) -> SimpleNamespace:
+            queries.append(query.strip())
+            if len(queries) == 1:
+                return SimpleNamespace(
+                    rows=[
+                        {"sequence_schema": "public", "sequence_name": f"{table}_id_seq", "table_name": table, "column_name": "id"}
+                        for table in ("keywords", "media")
+                    ]
+                )
+            if query.startswith("SELECT last_value"):
+                return SimpleNamespace(rows=[{"last_value": 1, "is_called": False}])
+            if query.startswith("SELECT COALESCE(MAX"):
+                raise BackendDatabaseError("PostgreSQL query execution failed")
+            return SimpleNamespace()
+
+    with pytest.raises(BackendDatabaseError):
+        postgres_sequence_maintenance_module.sync_postgres_sequences(SimpleNamespace(backend=FakeBackend()), conn)
+    assert not any("media_id_seq" in query for query in queries)
+
+
+@pytest.mark.unit
 def test_run_postgres_migrate_to_v17_invokes_claims_helpers_in_order() -> None:
     from tldw_Server_API.app.core.DB_Management.media_db.schema.migration_bodies import (
         postgres_claims as postgres_claims_module,

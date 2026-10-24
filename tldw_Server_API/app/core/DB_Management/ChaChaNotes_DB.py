@@ -28207,7 +28207,9 @@ ALTER TABLE messages ALTER COLUMN content DROP NOT NULL;
             sync_owned_postgres_sequences,
         )
 
-        sync_owned_postgres_sequences(self, conn, self._POSTGRES_SEQUENCE_TABLES)
+        sync_owned_postgres_sequences(
+            self, conn, self._POSTGRES_SEQUENCE_TABLES, continue_on_error=True
+        )
 
     # --- Internal Helpers ---
     def _get_current_utc_timestamp_iso(self) -> str:
