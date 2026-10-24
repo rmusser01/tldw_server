@@ -532,6 +532,11 @@ const launchChatSurface = async (
 }
 
 const openPromptActions = async (page: Page, scope: Page | Locator = page) => {
+  const tools = page.getByTestId("composer-options-toggle")
+  if (await tools.count()) {
+    await expect(tools).toBeEnabled()
+    if (await tools.getAttribute("aria-expanded") !== "true") await tools.click()
+  }
   const trigger = scope.getByRole("button", { name: "Improve prompt" })
   await expect(trigger).toBeVisible({ timeout: 20_000 })
   await trigger.click()
@@ -1286,7 +1291,7 @@ test.describe("Packaged extension prompt improvement parity", () => {
         review.actions.getByRole("button", { name: /Review changes/ })
       )
       await expectFullWidthDrawer("Prompt improvement")
-      await page.keyboard.press("Escape")
+      await page.getByRole("textbox", { name: "Improved prompt candidate" }).press("Escape")
       await expect(
         page.getByRole("dialog", { name: "Prompt improvement" })
       ).not.toBeVisible()
