@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import { Button, Dropdown, Tooltip, Typography } from 'antd'
+import { Button, Dropdown, Tooltip, Typography, theme } from 'antd'
 import type { MenuProps } from 'antd'
 import { useTranslation } from 'react-i18next'
 import { useMobile } from '@/hooks/useMediaQuery'
@@ -109,6 +109,7 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
   studioBadgeLabel = null,
 }) => {
   const { t } = useTranslation(['option', 'common'])
+  const { token } = theme.useToken()
   const isMobileViewport = useMobile()
   const toolbarButtonSize: 'small' | 'large' = isMobileViewport ? 'large' : 'small'
   const touchTargetClass = isMobileViewport ? 'min-h-[44px]' : undefined
@@ -428,7 +429,11 @@ const NotesEditorHeader: React.FC<NotesEditorHeaderProps> = ({
     <div className="flex flex-col gap-3 border-b border-border bg-surface px-4 py-3 md:flex-row md:flex-wrap md:items-center md:justify-between">
       <div className="flex min-w-0 flex-col gap-0.5 md:flex-1 md:basis-64">
         <div className="flex flex-wrap items-center gap-2">
-          <Typography.Title level={5} className="!mb-0 max-w-full truncate !text-text">
+          <Typography.Title
+            level={2}
+            className="!mb-0 max-w-full truncate !text-text"
+            style={{ fontSize: token.fontSizeHeading5, lineHeight: token.lineHeightHeading5 }}
+          >
             {displayTitle}
           </Typography.Title>
           {studioBadgeLabel ? (
