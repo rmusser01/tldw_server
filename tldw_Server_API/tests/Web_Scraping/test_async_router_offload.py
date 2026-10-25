@@ -154,6 +154,7 @@ async def test_article_cancellation_discards_late_router_result(
     finished = threading.Event()
     release = threading.Event()
     plan = _scrape_plan()
+    loop = asyncio.get_running_loop()
 
     class SlowRouter:
         @staticmethod
@@ -165,6 +166,8 @@ async def test_article_cancellation_discards_late_router_result(
 
         def resolve(self, _url: str) -> SimpleNamespace:
             started.set()
+            # Cancel in the router phase, not during the preceding config offload.
+            loop.call_soon_threadsafe(task.cancel)
             release.wait(1.0)
             finished.set()
             return plan
@@ -178,7 +181,6 @@ async def test_article_cancellation_discards_late_router_result(
     monkeypatch.setattr(canonical_article, "ScraperRouter", SlowRouter)
     monkeypatch.setattr(canonical_article, "_build_default_dependencies", lambda _cookies: dependencies)
     task = asyncio.create_task(harness.article.scrape_article(URL))
-    cancel_handle = asyncio.get_running_loop().call_later(0.02, task.cancel)
 
     try:
         with pytest.raises(asyncio.CancelledError):
@@ -190,7 +192,6 @@ async def test_article_cancellation_discards_late_router_result(
         assert await asyncio.to_thread(finished.wait, 1.0)
         harness.evaluate_target.assert_not_awaited()
     finally:
-        cancel_handle.cancel()
         release.set()
         if started.is_set() and not finished.is_set():
             await asyncio.to_thread(finished.wait, 1.0)

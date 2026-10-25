@@ -248,7 +248,18 @@ class FileSystemStorage(StorageBackend):
             True if the file was deleted, False if it didn't exist
         """
         full_path = self.base_path / path
-        self._validate_path(full_path)
+        try:
+            self._validate_path(full_path)
+        except StorageError:
+            # Windows can resolve a concurrently unlinked leaf to an NTFS tombstone.
+            try:
+                self._validate_path(full_path.parent)
+                full_path.lstat()
+            except FileNotFoundError:
+                return False
+            except (StorageError, OSError, ValueError):
+                pass
+            raise
 
         if not full_path.exists():
             logger.debug(f"File already deleted or not found: {path}")

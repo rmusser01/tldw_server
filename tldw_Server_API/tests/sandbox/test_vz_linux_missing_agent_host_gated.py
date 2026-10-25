@@ -102,7 +102,7 @@ def test_startup_proof_requires_bounded_json(tmp_path: Path, raw: str | None) ->
 
 @pytest.mark.unit
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX proof files")
-@pytest.mark.timeout(2, method="signal")
+@pytest.mark.timeout(2)
 def test_startup_proof_rejects_fifo_without_blocking(tmp_path: Path) -> None:
     """Do not block on a FIFO substituted for the proof file."""
     path = tmp_path / "proof.json"
