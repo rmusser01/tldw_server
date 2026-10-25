@@ -265,6 +265,8 @@ describe("accepted LocalChatList selections", () => {
     io.readMessages.mockReturnValueOnce(pending.promise)
     const { state, unmount: unmountUnusedHook } = setup()
     unmountUnusedHook()
+    const destinationModelPreference = deferred<boolean>()
+    if (outcome === "current") io.readModelPreference.mockReturnValueOnce(destinationModelPreference.promise)
     const onSelectChat = vi.fn()
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const owned = { id: "owned", title: "Owned local chat", createdAt: 1, is_rag: false,
@@ -289,7 +291,11 @@ describe("accepted LocalChatList selections", () => {
         await pending.promise.catch(() => undefined)
       })
       if (outcome === "current") {
-        expect(io.selection?.getCurrent()).toMatchObject({ status: "ready" })
+        await waitFor(() => expect(io.readModelPreference).toHaveBeenCalled())
+        expect(io.selection?.getCurrent()).not.toMatchObject({ status: "ready" })
+        expect(onSelectChat).not.toHaveBeenCalled()
+        act(() => destinationModelPreference.resolve(true))
+        await waitFor(() => expect(io.selection?.getCurrent()).toMatchObject({ status: "ready" }))
         await waitFor(() => expect(onSelectChat).toHaveBeenCalledWith("owned"))
         expect(state.historyId).toBe("owned")
         expect(state.prompt).toBe("Saved prompt")

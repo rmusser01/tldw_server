@@ -32,4 +32,13 @@ Implemented on `codex/chat-history-sidebar-calm` from the recorded dev base. Sea
 
 Evidence is preserved in `.impeccable/review/sidebar/`; browser results are in `/private/tmp/chat-sidebar-browser-final-20261025.log`. The ordinary-extension documentation comparison preserves the incumbent global design files. ADR-049 remains authoritative; no new architecture rule is introduced.
 
-Limits: browser data was synthetic. Live backend/providers, microphone hardware, full repository tests, hosted CI and the CI Turbopack profile were not checked. Bandit scanned no Python code in this TypeScript scope and provides no TypeScript security clearance. No dependency or workflow change is included.
+Limits: browser data was synthetic. Live backend/providers, microphone hardware and full repository tests were not checked locally. The webpack wrapper does not certify the CI Turbopack profile; hosted qualification is tracked below. Bandit scanned no Python code in this TypeScript scope and provides no TypeScript security clearance. No dependency or workflow change is included.
+
+
+## Publication and CI qualification
+
+The requester approved the final preview and requested continuation. [PR #3316](https://github.com/rmusser01/tldw_server/pull/3316) records their verbatim rationale: improving the sidebar UX and lowering users' active cognitive load.
+
+The first hosted frontend shard exposed a timing assumption in the existing local-history selection test: a completed preview read precedes model, prompt, file and H1 preparation. A held model-preparation promise reproduced the same idle-versus-ready assertion failure. The repaired test waits for the original ready condition and additionally verifies no premature ready state or callback. All current/failed/unmounted, history and prompt assertions remain; production loading and ownership code is unchanged. The focused 26 cases and deterministic eight-suite context (108 cases) pass, with independent review complete. Local context replay needed temporary React alignment; it was removed before committing. Normal TypeScript and the touched test's lint passed.
+
+Hosted qualification must use the new PR head. The first head's separate advisory Notes creation case failed before issuing a Notes POST (45 passed, one failed); the unsaved editor screenshot/trace is preserved, but its cause and relationship to the sidebar are unproven. Notes implementation and E2E files are unchanged. No CI retry, test weakening or workflow policy change was made.
