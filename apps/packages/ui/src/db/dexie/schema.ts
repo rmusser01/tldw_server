@@ -441,6 +441,18 @@ export class PageAssistDexieDB extends Dexie {
         await tx.table('searchTokens').bulkPut(rows.slice(index, index + 5000));
       }
     });
+
+    // Version 18: metadata/pagination compound indexes (WP-26/WP-27 /
+    // TASK-13523). `[history_id+createdAt]` lets history-metadata reads run
+    // as index-only counts plus an O(log n) newest-message lookup instead of
+    // materializing each history's messages; `[createdAt+id]` gives the
+    // sidebar's keyset pagination an exact range cursor (no offset scan, no
+    // stateful fast-forward predicate, tie-safe). Additive-only: pure index
+    // additions, no data rewrite, empty upgrade.
+    this.version(18).stores({
+      messages: 'id, history_id, name, role, content, createdAt, messageType, modelName, clusterId, modelId, parent_message_id, [history_id+createdAt]',
+      chatHistories: 'id, title, is_rag, message_source, is_pinned, createdAt, doc_id, last_used_prompt, model_id, root_id, parent_conversation_id, server_chat_id, [createdAt+id]'
+    });
   }
 }
 
