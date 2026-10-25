@@ -157,13 +157,8 @@ export const ensureLanguageLoaded = async (lng: string): Promise<void> => {
 
   // Dynamic imports for non-English languages
   try {
-    const modules = await Promise.all(
-      NAMESPACES.map((namespace) =>
-        import(`@tldw/ui/assets/locale/${normalized}/${namespace}.json`).catch(
-          () => null
-        )
-      )
-    )
+    const { loadLanguageResources } = await import("./i18n-language-resources")
+    const modules = await loadLanguageResources(normalized, NAMESPACES)
 
     modules.forEach((mod, idx) => {
       if (mod) {
