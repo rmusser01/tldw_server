@@ -22,9 +22,9 @@ const PAGE_ASSIST_SCHEMA: Record<string, string> = {
     "[profile_id+client_session_id+owner_key+conversation_id], owner_key, conversation_id",
   historyProjections: "[owner_key+conversation_id+projection_id], owner_key, conversation_id",
   chatHistories:
-    "id, title, is_rag, message_source, is_pinned, createdAt, doc_id, last_used_prompt, model_id, root_id, parent_conversation_id, server_chat_id",
+    "id, title, is_rag, message_source, is_pinned, createdAt, doc_id, last_used_prompt, model_id, root_id, parent_conversation_id, server_chat_id, [createdAt+id]",
   messages:
-    "id, history_id, name, role, content, createdAt, messageType, modelName, clusterId, modelId, parent_message_id",
+    "id, history_id, name, role, content, createdAt, messageType, modelName, clusterId, modelId, parent_message_id, [history_id+createdAt]",
   prompts:
     "id, title, content, is_system, createdBy, createdAt, deletedAt, serverId, studioProjectId, syncStatus, sourceSystem, usageCount, lastUsedAt",
   webshares: "id, title, url, api_url, share_id, createdAt",

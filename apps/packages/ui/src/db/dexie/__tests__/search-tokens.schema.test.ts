@@ -71,11 +71,6 @@ describe("search tokenization", () => {
 })
 
 describe("schema version 17 (fresh install declaration)", () => {
-  it("declares version 17 as the newest version", () => {
-    const { versionCalls } = constructCapturing()
-    expect(Math.max(...versionCalls)).toBe(17)
-  })
-
   it("adds only the additive searchTokens table", () => {
     const { records } = constructCapturing()
     const version17 = records[17]
@@ -83,6 +78,31 @@ describe("schema version 17 (fresh install declaration)", () => {
     // Additive-only: no pre-existing table's spec may change.
     expect(Object.keys(version17!.stores ?? {})).toEqual(["searchTokens"])
     expect(version17!.stores!.searchTokens).toBe("&[token+history_id], token")
+  })
+})
+
+describe("schema version 18 (fresh install declaration, WP-26/WP-27)", () => {
+  it("declares version 18 as the newest version", () => {
+    const { versionCalls } = constructCapturing()
+    expect(Math.max(...versionCalls)).toBe(18)
+  })
+
+  it("extends only messages and chatHistories with additive compound indexes and no upgrade rewrite", () => {
+    const { records } = constructCapturing()
+    const version18 = records[18]
+    expect(version18).toBeDefined()
+    // Pure index additions: no upgrade handler runs for v18 (no data rewrite;
+    // the lazy-metadata ruling forbids schema-wide upgrade rewrites).
+    expect(version18!.upgrade).toBeUndefined()
+    expect(Object.keys(version18!.stores ?? {}).sort()).toEqual(["chatHistories", "messages"])
+    // Every previously indexed keyPath stays, and exactly one compound index
+    // is appended per table.
+    expect(version18!.stores!.messages).toBe(
+      "id, history_id, name, role, content, createdAt, messageType, modelName, clusterId, modelId, parent_message_id, [history_id+createdAt]"
+    )
+    expect(version18!.stores!.chatHistories).toBe(
+      "id, title, is_rag, message_source, is_pinned, createdAt, doc_id, last_used_prompt, model_id, root_id, parent_conversation_id, server_chat_id, [createdAt+id]"
+    )
   })
 })
 
