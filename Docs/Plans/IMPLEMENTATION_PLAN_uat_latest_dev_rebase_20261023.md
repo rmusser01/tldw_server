@@ -1,6 +1,6 @@
 # UAT fixes on latest dev — 2026-10-23
 
-Task: TASK-13260.278.18.83.45. Human explicitly authorizes rebase, necessary repairs/setup/retries and sequential completion of all43 workflows. X01 and X02 selected acceptances are complete by recorded composition;35accepted,8open. X03 is active on deva412/HEAD4290b01, including all three merged redesign PRs. Header/theme/Notes component qualification is complete; the prior sgPs build is stale and live repaired-build confirmation remains open. Prior frozen qualification alone does not qualify this new candidate.
+Task: TASK-13260.278.18.83.45. Human authorizes rebase, necessary repairs/setup/retries and sequential completion of all43 workflows. X01 through X03 selected acceptances are complete by recorded composition;36accepted,7open. Current product7c10e74 on frozen deva412 includes all three merged Chat redesign PRs, qualified frontend eSscMqvjgbFlezbusZlXw and the final exact-state accessibility baseline correction. Human X03 UX is accepted; current private cleanup and original preservation passed. Continue X04 next. Broader release gates remain open.
 
 ## Constraints and rulings
 
@@ -102,7 +102,7 @@ X02 selected functional and human UX acceptance is complete by the [retained mas
 
 ## 2026-10-24 rails integration entry
 
-X02 closeout is committed at6e8f769b673c8f928b3ef292446c24fcbfe740e4. The new [X03 plan](IMPLEMENTATION_PLAN_uat_x03_accessibility_responsive_20261024.md) starts with exact incoming review/rebase/affected qualification. Current devc90 and reference3311fad objects are available; no rebase yet. New rails increment and full current header reference source assessments are clear within their stated scopes. Preserve all21 existing local commits and original runtime; use a separate exact backup plus functional notes stash. No publication or unchanged-suite replay.
+X02 closeout is committed at6e8f769b673c8f928b3ef292446c24fcbfe740e4. The new [X03 closure](IMPLEMENTATION_PLAN_uat_all_fixes_20261006.md#x03-usability-accessibility-and-responsive-selected-closure) starts with exact incoming review/rebase/affected qualification. Current devc90 and reference3311fad objects are available; no rebase yet. New rails increment and full current header reference source assessments are clear within their stated scopes. Preserve all21 existing local commits and original runtime; use a separate exact backup plus functional notes stash. No publication or unchanged-suite replay.
 
 
 ## 2026-10-24 merged rails qualification
