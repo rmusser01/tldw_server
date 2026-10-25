@@ -367,6 +367,28 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
     })
   })
 
+  it("preserves the expanded desktop sidebar after a mobile round trip", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const page = () => <QueryClientProvider client={client}><NotesManagerPage /></QueryClientProvider>
+    const { rerender } = render(page())
+    expect(screen.getByTestId("notes-list-region")).not.toHaveAttribute("inert")
+
+    setViewportWidth(375)
+    rerender(page())
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-mobile-open-list-button")).toBeInTheDocument()
+      expect(screen.getByTestId("notes-list-region")).toHaveAttribute("inert")
+    })
+
+    setViewportWidth(1024)
+    rerender(page())
+    await waitFor(() => {
+      expect(screen.getByTestId("notes-desktop-sidebar-toggle")).toHaveAttribute("aria-label", "Collapse notes sidebar")
+      expect(screen.getByTestId("notes-list-region")).not.toHaveAttribute("inert")
+      expect(screen.getByTestId("notes-list-region")).not.toHaveAttribute("aria-hidden")
+    })
+  })
+
   it("restores desktop sidebar collapse state after returning from mobile", async () => {
     const { rerender } = renderPage()
     const listRegion = screen.getByTestId("notes-list-region")

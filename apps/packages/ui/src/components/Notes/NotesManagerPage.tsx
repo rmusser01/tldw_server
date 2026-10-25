@@ -260,6 +260,7 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   const [shortcutHelpOpen, setShortcutHelpOpen] = React.useState(false)
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false)
   const desktopSidebarCollapsedRef = React.useRef(false)
+  const wasMobileViewportRef = React.useRef(isMobileViewport)
   const [conversationLabelById, setConversationLabelById] = React.useState<Record<string, string>>({})
   const conversationLabelByIdRef = React.useRef<Record<string, string>>({})
   conversationLabelByIdRef.current = conversationLabelById
@@ -2619,7 +2620,10 @@ const NotesManagerPage: React.FC<NotesManagerPageProps> = ({ sourceNoteId = null
   }, [list.data, ed, isOnline, list.listMode, pendingNoteId, sourceNoteId])
 
   React.useEffect(() => {
-    if (!isMobileViewport) desktopSidebarCollapsedRef.current = sidebarCollapsed
+    if (!isMobileViewport && !wasMobileViewportRef.current) {
+      desktopSidebarCollapsedRef.current = sidebarCollapsed
+    }
+    wasMobileViewportRef.current = isMobileViewport
   }, [isMobileViewport, sidebarCollapsed])
 
   React.useEffect(() => {
