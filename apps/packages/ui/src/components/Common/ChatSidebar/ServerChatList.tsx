@@ -1721,8 +1721,8 @@ export function ServerChatList({
       ) : (
         <>
           {pagedPinnedChats.length > 0 && (
-            <div className="flex flex-col gap-2">
-              <div className="px-2 text-[11px] font-medium text-text-subtle uppercase tracking-wide">
+            <div className="mx-2 flex flex-col gap-0.5">
+              <div className="px-2 py-1 text-xs font-semibold text-text-muted">
                 {t("common:pinned", { defaultValue: "Pinned" })}
               </div>
               {pagedPinnedChats.map((chat) => (
@@ -1760,7 +1760,7 @@ export function ServerChatList({
           {pagedUnpinnedChats.length > 0 && (
             <div
               className={cn(
-                "flex flex-col gap-2",
+                "mx-2 flex flex-col gap-0.5",
                 pagedPinnedChats.length > 0 && "mt-3"
               )}>
               {pagedUnpinnedChats.map((chat) => (
