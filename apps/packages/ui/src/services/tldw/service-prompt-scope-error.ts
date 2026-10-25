@@ -235,7 +235,7 @@ export const isServicePromptRequestPath = (
   if (requestMethod === "PATCH" && /^\/api\/v1\/flashcards\/decks\/[1-9][0-9]*$/.test(pathname)) return true
   if (requestMethod === "GET") {
     return (
-      pathname === "/api/v1/flashcards/decks" || /^\/api\/v1\/media\/[0-9]+$/.test(pathname) || pathname === "/api/v1/monitoring/alerts" ||
+      ["/api/v1/flashcards/decks", "/api/v1/flashcards/review/next", "/api/v1/flashcards/templates"].includes(pathname) || /^\/api\/v1\/media\/[0-9]+$/.test(pathname) || pathname === "/api/v1/monitoring/alerts" ||
       pathname === "/api/v1/scheduled-tasks" ||
       pathname === "/api/v1/scheduled-tasks/results" ||
       pathname === "/api/v1/notifications" ||

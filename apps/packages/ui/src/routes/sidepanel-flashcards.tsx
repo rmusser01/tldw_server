@@ -1,4 +1,6 @@
 import React from "react"
+import type { ServicePromptSnapshot } from "@/services/service-prompts"
+import { loadFlashcardsTransferSnapshot } from "@/services/tldw/flashcards-generate-transfer"
 import { useTranslation } from "react-i18next"
 import {
   BookOpenCheck,
@@ -72,7 +74,86 @@ export const readSelectedTextFromPage = () => {
 }
 
 export default function SidepanelFlashcards() {
+  const [revision, setRevision] = React.useState(0)
+  const [scope, setScope] = React.useState<ServicePromptSnapshot | null>(null)
+  const [failed, setFailed] = React.useState(false)
+  React.useEffect(() => {
+    const controller = new AbortController()
+    let mounted = true
+    let invalidated = false
+    let snapshot: ServicePromptSnapshot | undefined
+    const invalidate = () => {
+      if (!mounted || invalidated) return
+      invalidated = true
+      controller.abort()
+      setScope(null)
+      setFailed(false)
+      setRevision((value) => value + 1)
+    }
+    void loadFlashcardsTransferSnapshot(controller.signal, invalidate)
+      .then((value) => {
+        if (
+          !mounted ||
+          controller.signal.aborted ||
+          value.scopeSignal.aborted
+        ) {
+          value.release()
+          return
+        }
+        snapshot = value
+        setScope(value)
+      })
+      .catch(() => {
+        if (mounted && !controller.signal.aborted) setFailed(true)
+      })
+    return () => {
+      mounted = false
+      controller.abort()
+      snapshot?.release()
+    }
+  }, [revision])
+  return (
+    <SidepanelFlashcardsBody
+      key={revision}
+      scope={scope}
+      accountPending={!failed}
+      retryAccount={() => {
+        setScope(null)
+        setFailed(false)
+        setRevision((value) => value + 1)
+      }}
+    />
+  )
+}
+
+function SidepanelFlashcardsBody({
+  scope,
+  accountPending,
+  retryAccount
+}: {
+  scope: ServicePromptSnapshot | null
+  accountPending: boolean
+  retryAccount: () => void
+}) {
   const transferFlashcards = useFlashcardsGenerateTransfer()
+  const currentScope = React.useRef(scope)
+  currentScope.current = scope
+  const mounted = React.useRef(true)
+  React.useEffect(() => {
+    mounted.current = true
+    return () => { mounted.current = false }
+  }, [])
+  const isCurrent = React.useCallback(
+    (owner: ServicePromptSnapshot | null): owner is ServicePromptSnapshot =>
+      Boolean(
+        owner &&
+          mounted.current &&
+          currentScope.current === owner &&
+          !owner.scopeSignal.aborted &&
+          !owner.scopeInvalidatedSignal.aborted
+      ),
+    []
+  )
   const { t } = useTranslation()
   const draftIdRef = React.useRef(0)
   const [captureError, setCaptureError] = React.useState<string | null>(null)
@@ -104,7 +185,7 @@ export default function SidepanelFlashcards() {
   const savingDraftIdsRef = React.useRef<Set<string>>(new Set())
   const [selectedDeckId, setSelectedDeckId] = React.useState<number | null>(null)
   const flashcardsAvailability = useFlashcardsEnabled()
-  const decksQuery = useDecksQuery()
+  const decksQuery = useDecksQuery({ scope })
   const createFlashcardMutation = useCreateFlashcardMutation()
   const generateFlashcardsMutation = useGenerateFlashcardsMutation()
   const reviewFlashcardMutation = useReviewFlashcardMutation()
@@ -125,8 +206,9 @@ export default function SidepanelFlashcards() {
     !decksLoading &&
     !decksLoadFailed &&
     decks.length === 0
-  const hasDeck = selectedDeckId != null && hasSelectableDecks
+  const hasDeck = isCurrent(scope) && selectedDeckId != null && hasSelectableDecks
   const reviewQuery = useReviewQuery(selectedDeckId, {
+    scope,
     enabled: reviewOpen && hasDeck,
     refetchOnWindowFocus: false
   })
@@ -263,53 +345,66 @@ export default function SidepanelFlashcards() {
     [captureMessages]
   )
 
-  const readActivePageSelection = React.useCallback(async (): Promise<CapturedPageSelection> => {
-    if (!browser.tabs?.query || !browser.scripting?.executeScript) {
-      throw new Error(captureMessages.unavailable)
-    }
+  const readActivePageSelection = React.useCallback(
+    async (owner: ServicePromptSnapshot): Promise<CapturedPageSelection> => {
+      const assertCurrent = () => {
+        if (!isCurrent(owner))
+          throw new DOMException("The capture account changed.", "AbortError")
+      }
+      assertCurrent()
+      if (!browser.tabs?.query || !browser.scripting?.executeScript) {
+        throw new Error(captureMessages.unavailable)
+      }
 
-    const activeTabs = await browser.tabs.query({
-      active: true,
-      currentWindow: true
-    })
-    const activeTab = activeTabs[0]
-    const tabId = activeTab?.id
-    if (typeof tabId !== "number") {
-      throw new Error(captureMessages.activeTabUnavailable)
-    }
+      const activeTabs = await browser.tabs.query({
+        active: true,
+        currentWindow: true
+      })
+      assertCurrent()
+      const activeTab = activeTabs[0]
+      const tabId = activeTab?.id
+      if (typeof tabId !== "number") {
+        throw new Error(captureMessages.activeTabUnavailable)
+      }
 
-    if (activeTab.url && isRestrictedClipperPage(activeTab.url)) {
-      throw new Error(captureMessages.restrictedPage)
-    }
+      if (activeTab.url && isRestrictedClipperPage(activeTab.url)) {
+        throw new Error(captureMessages.restrictedPage)
+      }
 
-    const results = await browser.scripting.executeScript({
-      target: { tabId },
-      func: readSelectedTextFromPage
-    })
-    const selectedText = String(results?.[0]?.result ?? "")
-    if (!selectedText.trim()) {
-      throw new Error(captureMessages.noSelection)
-    }
+      const results = await browser.scripting.executeScript({
+        target: { tabId },
+        func: readSelectedTextFromPage
+      })
+      assertCurrent()
+      const selectedText = String(results?.[0]?.result ?? "")
+      if (!selectedText.trim()) {
+        throw new Error(captureMessages.noSelection)
+      }
 
-    const sourceId = activeTab.url || String(tabId)
-    const sourceTitle = activeTab.title || activeTab.url || undefined
-    return {
-      selectedText,
-      sourceId,
-      sourceTitle,
-      draftFront:
-        activeTab.title ||
-        activeTab.url ||
-        t("sidepanel:flashcards.defaultFront", "Page selection")
-    }
-  }, [captureMessages, t])
+      const sourceId = activeTab.url || String(tabId)
+      const sourceTitle = activeTab.title || activeTab.url || undefined
+      return {
+        selectedText,
+        sourceId,
+        sourceTitle,
+        draftFront:
+          activeTab.title ||
+          activeTab.url ||
+          t("sidepanel:flashcards.defaultFront", "Page selection")
+      }
+    },
+    [captureMessages, isCurrent, t]
+  )
 
   const handleCapturePageSelection = React.useCallback(async () => {
+    const owner = scope
+    if (!isCurrent(owner)) return
     setCaptureError(null)
     setSaveStatus(null)
     setCaptureLoading(true)
     try {
-      const captured = await readActivePageSelection()
+      const captured = await readActivePageSelection(owner)
+      if (!isCurrent(owner)) return
 
       draftIdRef.current += 1
       const nextDraft: CaptureDraft = {
@@ -321,36 +416,53 @@ export default function SidepanelFlashcards() {
       }
       setDrafts((current) => [...current, nextDraft])
     } catch (error) {
+      if (!isCurrent(owner)) return
       setCaptureError(formatCaptureErrorMessage(error))
     } finally {
-      setCaptureLoading(false)
+      if (isCurrent(owner)) {
+        setCaptureLoading(false)
+      }
     }
-  }, [formatCaptureErrorMessage, readActivePageSelection])
+  }, [formatCaptureErrorMessage, readActivePageSelection, isCurrent, scope])
 
   const handleGenerateFromSelection = React.useCallback(async () => {
+    const owner = scope
+    if (!isCurrent(owner)) return
     if (generationInFlightRef.current) return
     generationInFlightRef.current = true
     setCaptureError(null)
     setSaveStatus(null)
     setGenerateHandoffLoading(true)
     try {
-      await transferFlashcards(async () => {
-        const captured = await readActivePageSelection()
-        return {
-          text: captured.selectedText,
-          sourceType: "manual",
-          sourceId: captured.sourceId,
-          sourceTitle: captured.sourceTitle
-        }
-      }, { newTab: true })
+      await transferFlashcards(
+        async () => {
+          const captured = await readActivePageSelection(owner)
+          if (!isCurrent(owner))
+            throw new DOMException("The capture account changed.", "AbortError")
+          return {
+            text: captured.selectedText,
+            sourceType: "manual",
+            sourceId: captured.sourceId,
+            sourceTitle: captured.sourceTitle
+          }
+        },
+        { newTab: true }
+      )
     } catch (error) {
+      if (!isCurrent(owner)) return
       if (error instanceof Error && error.name === "AbortError") return
-      setCaptureError(error instanceof Error ? error.message : "The transfer could not be opened. Keep the source open and try again.")
+      setCaptureError(
+        error instanceof Error
+          ? error.message
+          : "The transfer could not be opened. Keep the source open and try again."
+      )
     } finally {
-      generationInFlightRef.current = false
-      setGenerateHandoffLoading(false)
+      if (isCurrent(owner)) {
+        generationInFlightRef.current = false
+        setGenerateHandoffLoading(false)
+      }
     }
-  }, [transferFlashcards, readActivePageSelection])
+  }, [transferFlashcards, readActivePageSelection, isCurrent, scope])
 
   const buildGeneratedDrafts = React.useCallback(
     (
@@ -498,19 +610,27 @@ export default function SidepanelFlashcards() {
   )
 
   const handleGenerateDraftCards = React.useCallback(async () => {
+    const owner = scope
+    if (!isCurrent(owner)) return
     if (generationInFlightRef.current) return
     generationInFlightRef.current = true
     setCaptureError(null)
     setSaveStatus(null)
     setDraftGenerateLoading(true)
     try {
-      const captured = await readActivePageSelection()
+      const captured = await readActivePageSelection(owner)
+      if (!isCurrent(owner)) return
       const result = await generateFlashcardsMutation.mutateAsync({
         text: captured.selectedText,
         numCards: SIDE_PANEL_GENERATE_CARD_COUNT,
         cardType: "basic",
-        difficulty: "mixed"
+        difficulty: "mixed",
+        requestOptions: {
+          requestScope: owner.requestScope,
+          signal: owner.scopeSignal
+        }
       })
+      if (!isCurrent(owner)) return
       const generatedDrafts = buildGeneratedDrafts(
         normalizeGeneratedCards(result?.flashcards),
         captured
@@ -530,10 +650,13 @@ export default function SidepanelFlashcards() {
         message: formatGeneratedDraftsSuccess(generatedDrafts.length)
       })
     } catch (error) {
+      if (!isCurrent(owner)) return
       setCaptureError(formatGenerateDraftErrorMessage(error))
     } finally {
-      generationInFlightRef.current = false
-      setDraftGenerateLoading(false)
+      if (isCurrent(owner)) {
+        generationInFlightRef.current = false
+        setDraftGenerateLoading(false)
+      }
     }
   }, [
     buildGeneratedDrafts,
@@ -541,7 +664,9 @@ export default function SidepanelFlashcards() {
     formatGeneratedDraftsSuccess,
     generateFlashcardsMutation,
     readActivePageSelection,
-    t
+    t,
+    isCurrent,
+    scope
   ])
 
   const getDeckName = React.useCallback(
@@ -560,7 +685,7 @@ export default function SidepanelFlashcards() {
 
   const buildSavePayload = React.useCallback(
     (draft: CaptureDraft): FlashcardCreate | null => {
-      if (selectedDeckId == null) return null
+      if (!isCurrent(scope) || selectedDeckId == null) return null
 
       const front = draft.front.trim()
       const back = draft.back.trim()
@@ -580,7 +705,7 @@ export default function SidepanelFlashcards() {
         source_ref_id: draft.sourceId
       }
     },
-    [selectedDeckId]
+    [selectedDeckId, isCurrent, scope]
   )
 
   const handleUpdateDraft = React.useCallback(
@@ -606,6 +731,7 @@ export default function SidepanelFlashcards() {
   }, [])
 
   const handleToggleReview = React.useCallback(() => {
+    if (!isCurrent(scope)) return
     setCaptureError(null)
     setSaveStatus(null)
     setReviewAnswerRevealed(false)
@@ -615,17 +741,20 @@ export default function SidepanelFlashcards() {
       setSidepanelReviewedCount(0)
     }
     setReviewOpen((current) => !current)
-  }, [reviewOpen])
+  }, [reviewOpen, isCurrent, scope])
 
   const handleRevealReviewAnswer = React.useCallback(() => {
+    if (!isCurrent(scope)) return
     setCaptureError(null)
     setSaveStatus(null)
     setReviewAnswerRevealed(true)
     reviewAnswerStartRef.current = Date.now()
-  }, [])
+  }, [isCurrent, scope])
 
   const handleSubmitSidepanelReview = React.useCallback(
     async (rating: number) => {
+      const owner = scope
+      if (!isCurrent(owner)) return
       if (
         !reviewCardUuid ||
         isReviewSubmitting ||
@@ -645,9 +774,11 @@ export default function SidepanelFlashcards() {
         await submitReviewFlashcard({
           cardUuid: reviewCardUuid,
           rating,
-          answerTimeMs
+          answerTimeMs,
+          options: { requestScope: owner.requestScope, signal: owner.scopeSignal }
         })
       } catch (error) {
+        if (!isCurrent(owner)) return
         console.error("Failed to submit sidepanel flashcard review:", {
           cardUuid: reviewCardUuid,
           rating,
@@ -662,9 +793,12 @@ export default function SidepanelFlashcards() {
         })
         return
       } finally {
-        reviewSubmitInFlightRef.current = false
+        if (isCurrent(owner)) {
+          reviewSubmitInFlightRef.current = false
+        }
       }
 
+      if (!isCurrent(owner)) return
       const nextReviewedCount = sidepanelReviewedCount + 1
       setSidepanelReviewedCount(nextReviewedCount)
       setSubmittedReviewUuid(reviewCardUuid)
@@ -682,15 +816,20 @@ export default function SidepanelFlashcards() {
       sidepanelReviewedCount,
       submitReviewFlashcard,
       submittedReviewUuid,
-      t
+      t,
+      isCurrent,
+      scope
     ]
   )
 
   const handleRetryLoadReviewCard = React.useCallback(async () => {
+    const owner = scope
+    if (!isCurrent(owner)) return
     setCaptureError(null)
     setSaveStatus(null)
     try {
       const result = await refetchReviewCard()
+      if (!isCurrent(owner)) return
       if (result.error) {
         throw result.error
       }
@@ -699,6 +838,7 @@ export default function SidepanelFlashcards() {
         setSubmittedReviewUuid(null)
       }
     } catch (error) {
+      if (!isCurrent(owner)) return
       console.error("Failed to retry sidepanel flashcard review load:", {
         cardUuid: submittedReviewUuid,
         error
@@ -711,7 +851,7 @@ export default function SidepanelFlashcards() {
         )
       })
     }
-  }, [refetchReviewCard, submittedReviewUuid, t])
+  }, [refetchReviewCard, submittedReviewUuid, t, isCurrent, scope])
 
   const handleCloseTemplateDraft = React.useCallback(() => {
     setTemplateDraftId(null)
@@ -724,6 +864,7 @@ export default function SidepanelFlashcards() {
         "deck_id" | "tags" | "model_type" | "front" | "back" | "notes" | "extra"
       >
     ) => {
+      if (!isCurrent(scope)) return
       setSaveStatus(null)
       setDrafts((current) =>
         current.map((draft) => {
@@ -743,11 +884,13 @@ export default function SidepanelFlashcards() {
       )
       setTemplateDraftId(null)
     },
-    [templateDraftId]
+    [templateDraftId, isCurrent, scope]
   )
 
   const handleSaveDraft = React.useCallback(
     async (draftId: string) => {
+      const owner = scope
+      if (!isCurrent(owner)) return
       if (!hasDeck || savingDraftIdsRef.current.size > 0) return
 
       const draft = drafts.find((candidate) => candidate.id === draftId)
@@ -759,7 +902,14 @@ export default function SidepanelFlashcards() {
       setSaveStatus(null)
       setActiveSavingDraftIds([draftId])
       try {
-        await createFlashcardMutation.mutateAsync(payload)
+        await createFlashcardMutation.mutateAsync({
+          ...payload,
+          requestOptions: {
+            requestScope: owner.requestScope,
+            signal: owner.scopeSignal
+          }
+        })
+        if (!isCurrent(owner)) return
         setSaveStatus({
           type: "success",
           message: t("sidepanel:flashcards.saveSuccess", {
@@ -771,6 +921,7 @@ export default function SidepanelFlashcards() {
           current.filter((candidate) => candidate.id !== draftId)
         )
       } catch {
+        if (!isCurrent(owner)) return
         setSaveStatus({
           type: "error",
           message: t(
@@ -779,7 +930,9 @@ export default function SidepanelFlashcards() {
           )
         })
       } finally {
-        setActiveSavingDraftIds([])
+        if (isCurrent(owner)) {
+          setActiveSavingDraftIds([])
+        }
       }
     },
     [
@@ -789,11 +942,15 @@ export default function SidepanelFlashcards() {
       getDeckName,
       hasDeck,
       setActiveSavingDraftIds,
-      t
+      t,
+      isCurrent,
+      scope
     ]
   )
 
   const handleSaveAllDrafts = React.useCallback(async () => {
+    const owner = scope
+    if (!isCurrent(owner)) return
     if (!hasDeck || savingDraftIdsRef.current.size > 0) return
 
     const savedDraftIds = new Set<string>()
@@ -806,13 +963,22 @@ export default function SidepanelFlashcards() {
       setActiveSavingDraftIds(validDrafts.map((draft) => draft.id))
 
       for (const draft of validDrafts) {
+        if (!isCurrent(owner)) return
         const payload = buildSavePayload(draft)
         if (!payload) continue
 
         try {
-          await createFlashcardMutation.mutateAsync(payload)
+          await createFlashcardMutation.mutateAsync({
+            ...payload,
+            requestOptions: {
+              requestScope: owner.requestScope,
+              signal: owner.scopeSignal
+            }
+          })
+          if (!isCurrent(owner)) return
           savedDraftIds.add(draft.id)
         } catch {
+          if (!isCurrent(owner)) return
           // Keep saving the queue so users get a precise partial-success state.
         }
       }
@@ -845,6 +1011,7 @@ export default function SidepanelFlashcards() {
         })
       }
     } catch {
+      if (!isCurrent(owner)) return
       setSaveStatus({
         type: "error",
         message: t(
@@ -853,7 +1020,9 @@ export default function SidepanelFlashcards() {
         )
       })
     } finally {
-      setActiveSavingDraftIds([])
+      if (isCurrent(owner)) {
+        setActiveSavingDraftIds([])
+      }
     }
   }, [
     buildSavePayload,
@@ -864,7 +1033,9 @@ export default function SidepanelFlashcards() {
     getDeckName,
     hasDeck,
     setActiveSavingDraftIds,
-    t
+    t,
+    isCurrent,
+    scope
   ])
 
   const isSaving = createFlashcardMutation.isPending || savingDraftIds.size > 0
@@ -898,6 +1069,18 @@ export default function SidepanelFlashcards() {
           </Text>
         </div>
       </div>
+      {!isCurrent(scope) && (
+        <div role="status">
+          <Text>
+            {accountPending
+              ? t("sidepanel:connectionBanner.connecting", "Connecting to your tldw server...")
+              : t("sidepanel:connectionBanner.disconnectedBody", "Open Settings to configure your server connection.")}
+          </Text>
+          {!accountPending && (
+            <Button onClick={retryAccount}>{t("common:retry", "Retry")}</Button>
+          )}
+        </div>
+      )}
       <div className="flex w-full flex-col gap-2">
         <Button
           type="primary"
@@ -909,7 +1092,7 @@ export default function SidepanelFlashcards() {
         </Button>
         <Button
           block
-          disabled={isSaving || isGenerating}
+          disabled={!isCurrent(scope) || isSaving || isGenerating}
           icon={<BookOpenCheck className="size-4" aria-hidden="true" />}
           onClick={handleToggleReview}
         >
@@ -920,7 +1103,7 @@ export default function SidepanelFlashcards() {
         <Button
           block
           loading={captureLoading}
-          disabled={isSaving || isGenerating}
+          disabled={!isCurrent(scope) || isSaving || isGenerating}
           icon={<MessageSquareText className="size-4" aria-hidden="true" />}
           onClick={handleCapturePageSelection}
         >
@@ -932,7 +1115,7 @@ export default function SidepanelFlashcards() {
         <Button
           block
           loading={draftGenerateLoading}
-          disabled={isSaving || captureLoading || generateHandoffLoading}
+          disabled={!isCurrent(scope) || isSaving || captureLoading || generateHandoffLoading}
           icon={<WandSparkles className="size-4" aria-hidden="true" />}
           onClick={() => void handleGenerateDraftCards()}
         >
@@ -944,7 +1127,7 @@ export default function SidepanelFlashcards() {
         <Button
           block
           loading={generateHandoffLoading}
-          disabled={isSaving || captureLoading || draftGenerateLoading}
+          disabled={!isCurrent(scope) || isSaving || captureLoading || draftGenerateLoading}
           icon={<Sparkles className="size-4" aria-hidden="true" />}
           onClick={() => void handleGenerateFromSelection()}
         >
@@ -1291,6 +1474,7 @@ export default function SidepanelFlashcards() {
       ) : null}
       {templateTargetDraft ? (
         <FlashcardTemplateValueModal
+          scope={scope}
           open
           onClose={handleCloseTemplateDraft}
           onApply={handleApplyTemplateDraft}
