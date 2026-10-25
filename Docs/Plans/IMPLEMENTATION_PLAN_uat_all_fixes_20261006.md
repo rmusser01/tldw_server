@@ -55,7 +55,7 @@ The43 IDs below are existing workflow families in [the release catalog](../../ap
 | X01 | Upgrade without data loss | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit twelve-mode/current22c composition and recovery; original session preserved and disposable payloads removed. [Closure scope](#x01-supported-upgrade-selected-closure). |
 | X02 | Account/browser isolation | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit ten-variant SQLite/PostgreSQL composition, current redesigned Chat checks, original preservation and guarded cleanup. [Closure](#x02-account-and-browser-isolation-selected-closure). |
 | X03 | Usability, accessibility and responsive UI | SELECTED FUNCTIONAL + HUMAN UX ACCEPTED by explicit native/component/locale/ratchet composition; original session preserved and completed staging removed. [Closure](#x03-usability-accessibility-and-responsive-selected-closure). |
-| X04 | Extension capture and sidepanel continuity | Open |
+| X04 | Extension capture and sidepanel continuity | In Progress — current candidate packaging and native11-variant validation. [Plan](IMPLEMENTATION_PLAN_uat_x04_extension_capture_continuity_20261025.md). |
 | S01 | Quiz and study assistance | Open |
 | S02 | Chatbooks and portable backup | Open |
 | S03 | Artifact editors | Open |
