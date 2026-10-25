@@ -27,7 +27,29 @@ vi.mock("../schema", () => ({ db: { prompts: {
         return rows
       }
     })
-  })
+  }),
+  // WP-25: the trash queries read the numeric-deletedAt index range instead
+  // of scanning the whole table; mirror the range semantics here.
+  where: (key: string) => {
+    const trashQuery = (test: (row: any) => boolean) => ({
+      filter: (next: (row: any) => boolean) => trashQuery(row => test(row) && next(row)),
+      toArray: async () => [...state.rows.values()].filter(test),
+      reverse: () => ({
+        sortBy: async () => {
+          const rows = [...state.rows.values()].filter(test)
+          if (state.switchAfterRead) state.owner = bob
+          return rows
+        }
+      })
+    })
+    return {
+      above: (value: unknown) => trashQuery(row => row[key] > value),
+      between: (lower: unknown, upper: unknown, includeLower = true, includeUpper = false) =>
+        trashQuery(row =>
+          (includeLower ? row[key] >= lower : row[key] > lower) &&
+          (includeUpper ? row[key] <= upper : row[key] < upper))
+    }
+  }
 } } }))
 vi.mock("../..", () => ({
   getPromptByIdFB: async (id: string) => state.mirrors.get(id),
