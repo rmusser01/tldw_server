@@ -2621,6 +2621,12 @@ async def test_cancelled_continuation_drains_real_adapter_before_classify_mark_a
     async def mark_used(_provider: str) -> None:
         await runtime.mark_used(handle)
 
+    # Keep config I/O outside the cancellation-readiness deadline.
+    guardrail_config = chat_service.load_prompt_cost_guardrail_config()
+    monkeypatch.setattr(
+        chat_service, "load_prompt_cost_guardrail_config", lambda: guardrail_config
+    )
+
     resolved_fields = await resolved_request_fields_async(
         "openai",
         api_key="cancelled-continuation-key",

@@ -202,7 +202,7 @@ def test_protocol_proof_enforces_byte_boundary(tmp_path: Path, size: int) -> Non
 
 @pytest.mark.unit
 @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX proof files (host coverage tracked in #1442)")
-@pytest.mark.timeout(2, method="signal")
+@pytest.mark.timeout(2)
 def test_protocol_proof_rejects_fifo_without_blocking(tmp_path: Path) -> None:
     """A guest-created FIFO must never wait for a writer during proof capture."""
     path = tmp_path / "proof.json"
@@ -213,7 +213,7 @@ def test_protocol_proof_rejects_fifo_without_blocking(tmp_path: Path) -> None:
 
 @pytest.mark.unit
 @pytest.mark.skipif(os.name != "posix", reason="POSIX proof files (host coverage tracked in #1442)")
-@pytest.mark.timeout(2, method="signal")
+@pytest.mark.timeout(2)
 @pytest.mark.parametrize("target_kind", ["regular", "missing", "fifo"])
 def test_protocol_proof_rejects_symlink(tmp_path: Path, target_kind: str) -> None:
     """Reject links to otherwise valid proof, absent files, and blocking FIFOs."""

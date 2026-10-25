@@ -1763,8 +1763,7 @@ async def test_page_scopes_share_one_non_additive_cleanup_grace(
     assert all(page.close_calls == 1 for context in launcher.browser.contexts for page in context.pages)
 
 
-@pytest.mark.asyncio
-async def test_analyzer_time_does_not_consume_shared_cleanup_budget(
+def test_analyzer_time_does_not_consume_shared_cleanup_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     adapter = _adapter_module()
@@ -1772,6 +1771,7 @@ async def test_analyzer_time_does_not_consume_shared_cleanup_budget(
     grace_s = 0.03
     analyzer_delay_s = 0.05
     monkeypatch.setattr(adapter, "_BROWSER_CLEANUP_GRACE_S", grace_s)
+    clock = FakeClock(1000.0)
 
     class SlowClosePage(FakeBrowserPage):
         async def close(self) -> None:
@@ -1779,7 +1779,8 @@ async def test_analyzer_time_does_not_consume_shared_cleanup_budget(
             self.events.append("close:page")
             self.close_started.set()
             try:
-                await asyncio.sleep(0.005)
+                clock.advance(0.005)
+                await asyncio.sleep(0)
             except asyncio.CancelledError:
                 self.close_cancellations += 1
                 raise
@@ -1798,23 +1799,35 @@ async def test_analyzer_time_does_not_consume_shared_cleanup_budget(
         launcher=launcher,
     )
 
-    started_at = asyncio.get_running_loop().time()
-    async with probe.open_page(BrowserProbeOptions()):
-        pass
-    analyzer_started_at = asyncio.get_running_loop().time()
-    await asyncio.sleep(analyzer_delay_s)
-    analyzer_elapsed_s = asyncio.get_running_loop().time() - analyzer_started_at
-    async with probe.open_page(BrowserProbeOptions()):
-        pass
-    elapsed_s = asyncio.get_running_loop().time() - started_at
-    await controls.close(grace_s=grace_s)
+    async def exercise() -> None:
+        started_at = loop.time()
+        async with probe.open_page(BrowserProbeOptions()):
+            pass
+        analyzer_started_at = loop.time()
+        clock.advance(analyzer_delay_s)
+        await asyncio.sleep(0)
+        analyzer_elapsed_s = loop.time() - analyzer_started_at
+        async with probe.open_page(BrowserProbeOptions()):
+            pass
+        elapsed_s = loop.time() - started_at
+        await controls.close(grace_s=grace_s)
 
-    pages = [page for context in launcher.browser.contexts for page in context.pages]
-    assert [page.close_calls for page in pages] == [1, 1]
-    assert [page.close_cancellations for page in pages] == [0, 0]
-    assert [page.results.get("close_complete") for page in pages] == [True, True]
-    assert [page.force_close_calls for page in pages] == [0, 0]
-    assert elapsed_s - analyzer_elapsed_s < grace_s
+        pages = [page for context in launcher.browser.contexts for page in context.pages]
+        assert [page.close_calls for page in pages] == [1, 1]
+        assert [page.close_cancellations for page in pages] == [0, 0]
+        assert [page.results.get("close_complete") for page in pages] == [True, True]
+        assert [page.force_close_calls for page in pages] == [0, 0]
+        assert elapsed_s - analyzer_elapsed_s < grace_s
+        assert controls._cleanup_grace_remaining_s == pytest.approx(0.02)
+
+    # Model phase work, not host timer granularity, on an isolated loop.
+    loop = asyncio.new_event_loop()
+    monkeypatch.setattr(loop, "time", clock)
+    monkeypatch.setattr(loop, "_clock_resolution", 0.0)
+    try:
+        loop.run_until_complete(exercise())
+    finally:
+        loop.close()
 
 
 @pytest.mark.asyncio

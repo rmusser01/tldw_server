@@ -320,6 +320,100 @@ class TestFileSystemStorageExistsAndDelete:
 
         asyncio.run(_test())
 
+    @pytest.mark.unit
+    def test_delete_tolerates_file_removed_during_resolution(self, storage_backend, tmp_path, monkeypatch):
+        """A concurrently unlinked leaf can resolve to a native deleted-file tombstone."""
+        from tldw_Server_API.app.core.Storage import filesystem_storage
+
+        async def _test():
+            path = await storage_backend.store("user1", 1, "file.pdf", b"data")
+            full_path = storage_backend.base_path / path
+            tombstone = tmp_path / "deleted-file-tombstone"
+            tombstone.write_bytes(b"untouched")
+            resolve = type(full_path).resolve
+
+            def resolve_during_delete(candidate, *, strict=False):
+                if candidate == full_path:
+                    full_path.unlink()
+                    return tombstone
+                return resolve(candidate, strict=strict)
+
+            monkeypatch.setattr(type(full_path), "resolve", resolve_during_delete)
+            monkeypatch.setattr(filesystem_storage.aiofiles.os, "remove", lambda *_: pytest.fail("absent delete must not perform I/O"))
+            assert await storage_backend.delete(path) is False
+            assert not full_path.exists()
+            assert tombstone.read_bytes() == b"untouched"
+
+        asyncio.run(_test())
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("exists", [False, True])
+    def test_delete_rejects_outside_parent_even_when_leaf_is_absent(self, storage_backend, tmp_path, exists):
+        """Idempotent absence must not turn an outside storage path into an accepted one."""
+        outside = tmp_path / "outside.pdf"
+        if exists:
+            outside.write_bytes(b"untouched")
+        with pytest.raises(StorageError) as original_error:
+            storage_backend._validate_path(outside)
+        with pytest.raises(StorageError, match="escapes base directory") as delete_error:
+            asyncio.run(storage_backend.delete(str(outside)))
+        assert delete_error.value.path == original_error.value.path
+        assert str(delete_error.value) == str(original_error.value)
+        assert delete_error.value.args == original_error.value.args
+        if exists:
+            assert outside.read_bytes() == b"untouched"
+
+    @pytest.mark.unit
+    @pytest.mark.parametrize("leaf_kind", ["file", "dangling_symlink"])
+    def test_delete_rejects_uncontained_resolution_when_leaf_is_present(self, storage_backend, tmp_path, monkeypatch, leaf_kind):
+        """A failed exists check must not excuse an existing leaf or dangling symlink."""
+        full_path = storage_backend.base_path / "file.pdf"
+        outside = tmp_path / "outside.pdf"
+        if leaf_kind == "file":
+            full_path.write_bytes(b"untouched")
+        else:
+            try:
+                full_path.symlink_to(outside)
+            except (OSError, NotImplementedError):
+                pytest.skip("filesystem does not support file symlinks")
+        resolve = type(full_path).resolve
+
+        def resolve_outside(candidate, *, strict=False):
+            return outside if candidate == full_path else resolve(candidate, strict=strict)
+
+        monkeypatch.setattr(type(full_path), "resolve", resolve_outside)
+        with pytest.raises(StorageError, match="escapes base directory"):
+            asyncio.run(storage_backend.delete("file.pdf"))
+        assert full_path.lstat()
+        if leaf_kind == "file":
+            assert full_path.read_bytes() == b"untouched"
+
+    @pytest.mark.unit
+    def test_delete_preserves_validation_failure_when_absence_cannot_be_proven(self, storage_backend, tmp_path, monkeypatch):
+        """A permission failure is not evidence that an uncontained leaf disappeared."""
+        full_path = storage_backend.base_path / "file.pdf"
+        resolve = type(full_path).resolve
+        lstat = type(full_path).lstat
+
+        def resolve_outside(candidate, *, strict=False):
+            return tmp_path / "outside.pdf" if candidate == full_path else resolve(candidate, strict=strict)
+
+        def denied_lstat(candidate, *args, **kwargs):
+            if candidate == full_path:
+                raise PermissionError("lookup denied")
+            return lstat(candidate, *args, **kwargs)
+
+        monkeypatch.setattr(type(full_path), "resolve", resolve_outside)
+        monkeypatch.setattr(type(full_path), "lstat", denied_lstat)
+        with pytest.raises(StorageError, match="escapes base directory"):
+            asyncio.run(storage_backend.delete("file.pdf"))
+
+    @pytest.mark.unit
+    def test_delete_preserves_invalid_leaf_validation_error(self, storage_backend):
+        """Malformed names must keep their storage validation error, not an lstat error."""
+        with pytest.raises(StorageError, match="Invalid path"):
+            asyncio.run(storage_backend.delete("invalid\x00.pdf"))
+
 
 class TestFileSystemStorageSizeAndChecksum:
     """File size and checksum tests."""
