@@ -609,7 +609,7 @@ describe("history-first sidebar navigation", () => {
     expect(screen.getByTestId("folder-chat-list").closest(".pointer-events-none")).toBeNull();
   });
 
-  it("keeps all custom shortcuts in their saved order below history in one scroller", async () => {
+  it("keeps all custom shortcuts below history in one scroller with search fixed above", async () => {
     io.values.set("tldw:sidebar:shortcutSelection", [
       "quick-ingest",
       "kanban-playground",
@@ -626,7 +626,8 @@ describe("history-first sidebar navigation", () => {
       "chat-sidebar-shortcut-kanban-playground",
       "chat-sidebar-shortcut-chat",
     ]);
-    const scroller = findInput().closest(".overflow-y-auto");
+    const scroller = recentToggle().closest(".overflow-y-auto");
+    expect(scroller).not.toContainElement(findInput());
     expect(scroller).toContainElement(recentToggle());
     expect(scroller).toContainElement(shortcuts[0]);
     expect(scroller).not.toContainElement(

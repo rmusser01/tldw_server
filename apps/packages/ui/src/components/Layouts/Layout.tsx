@@ -438,23 +438,8 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
           {/* Mobile Drawer for ChatSidebar when the persistent sidebar is enabled */}
           {shellSidebarEnabled && showChatSidebar && isMobile && (
             <Drawer
-              title={
-                <div className="flex items-center justify-between">
-                  <span>{mobileSidebarTitle}</span>
-                  <IconButton
-                    onClick={() => setSidebarOpen(false)}
-                    ariaLabel={
-                      t("common:close", { defaultValue: "Close" }) as string
-                    }
-                    title={
-                      t("common:close", { defaultValue: "Close" }) as string
-                    }
-                    className="h-10 w-10 sm:h-7 sm:w-7 sm:min-h-0 sm:min-w-0"
-                  >
-                    <XIcon className="h-5 w-5 text-text-muted" />
-                  </IconButton>
-                </div>
-              }
+              title={mobileSidebarTitle}
+              styles={{ header: { display: "none" }, body: { padding: 0, overflow: "hidden" } }}
               placement="left"
               closeIcon={null}
               onClose={() => setSidebarOpen(false)}
@@ -462,6 +447,7 @@ const OptionLayoutInner: React.FC<OptionLayoutProps> = ({
               forceRender={quickChatOpen}
             >
               <ChatSidebar
+                className="!h-full !w-full"
                 collapsed={false}
                 openResetKey={chatSidebarOpenResetKey}
                 onToggleCollapse={() => setSidebarOpen(false)}
