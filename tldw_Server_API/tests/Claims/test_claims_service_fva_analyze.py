@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
@@ -116,3 +117,53 @@ async def test_a_refused_verification_raises_and_records_no_usage(monkeypatch):
             mode="llm",
         )
     recorder.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "expected_provider", "expected_model"),
+    [
+        ("llamacpp", None, "llamacpp", None),
+        ("llamacpp", "local-explicit", "llamacpp", "local-explicit"),
+        (None, None, "openai", "standalone-claims-model"),
+        (None, "explicit-claims-model", "openai", "explicit-claims-model"),
+    ],
+)
+def test_x04_fva_provider_default_preserves_standalone_claims_defaults(
+    monkeypatch, provider, model, expected_provider, expected_model
+):
+    from tldw_Server_API.app.core.config import settings
+
+    monkeypatch.setitem(settings, "CLAIMS_LLM_PROVIDER", "openai")
+    monkeypatch.setitem(settings, "CLAIMS_LLM_MODEL", "standalone-claims-model")
+    dispatches = []
+
+    def provider_io(**kwargs):
+        dispatches.append((kwargs["api_endpoint"], kwargs["model"]))
+        return {"choices": [{"message": {"content": "supported"}}]}
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", provider_io)
+    result = claims_service._fva_claims_analyze_call(provider, "source", "verify", None, None, model_override=model)
+    assert result == "supported"  # nosec B101 # Pytest behavioral oracle; not a runtime guard.
+    assert dispatches == [(expected_provider, expected_model)]  # nosec B101 # Pytest behavioral oracle; not a runtime guard.
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        LLMQuotaExceededError(category="llm_tokens_month", current=0, limit=0, message="Refused", retry_after=60),
+        asyncio.CancelledError(),
+    ],
+)
+def test_x04_bound_verifier_preserves_quota_and_cancellation_identity(monkeypatch, failure):
+    from tldw_Server_API.app.core.Claims_Extraction import artifact_verification
+
+    def refused_io(**_kwargs):
+        raise failure
+
+    monkeypatch.setattr("tldw_Server_API.app.core.Chat.chat_service.perform_chat_api_call", refused_io)
+    bound = artifact_verification._bound_verification_analyze_fn(
+        artifact_verification._default_analyze_fn, verification_provider="llamacpp", verification_model=None
+    )
+    with pytest.raises(type(failure)) as caught:
+        bound("openai", "source", "verify", None, None, model_override="unrelated-model")
+    assert caught.value is failure  # nosec B101 # Pytest behavioral oracle; not a runtime guard.

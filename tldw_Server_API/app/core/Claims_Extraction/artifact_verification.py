@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
+from tldw_Server_API.app.core.LLM_Calls.gateway import _resolve_chat_provider_name
 from tldw_Server_API.app.core.Claims_Extraction.analyze_types import ClaimsAnalyzeCallable
 from tldw_Server_API.app.core.Claims_Extraction.claims_engine import (
     Claim,
@@ -185,7 +186,7 @@ def _bound_verification_analyze_fn(
             recursive_summarization=recursive_summarization,
             chunked_summarization=chunked_summarization,
             chunk_options=chunk_options,
-            model_override=verification_model or model_override,
+            model_override=verification_model if verification_provider else (verification_model or model_override),
             response_format=response_format,
             **kwargs,
         )
@@ -311,7 +312,13 @@ async def verify_generated_artifact_against_sources(
     configured_verification_provider = request_verification_provider or config_verification_provider
     configured_verification_model = request_verification_model or config_verification_model
     effective_verification_provider = configured_verification_provider or generation_provider
-    effective_verification_model = configured_verification_model or generation_model
+    effective_verification_model = configured_verification_model
+    if effective_verification_model is None and (
+        configured_verification_provider is None
+        or _resolve_chat_provider_name(effective_verification_provider)
+        == _resolve_chat_provider_name(generation_provider)
+    ):
+        effective_verification_model = generation_model
     verification_source = (
         "request"
         if request_verification_provider or request_verification_model

@@ -62,6 +62,7 @@ from tldw_Server_API.app.core.Claims_Extraction.runtime_config import (
     resolve_claims_alignment_config,
     resolve_claims_context_window_chars,
     resolve_claims_extraction_passes,
+    resolve_claims_llm_config,
     resolve_claims_prompt_validation_config,
 )
 from tldw_Server_API.app.core.config import settings
@@ -583,8 +584,11 @@ def _fva_claims_analyze_call(
         logger.warning(f"FVA analyze call unavailable: {exc}")
         return ""
 
-    provider = str(api_endpoint or settings.get("CLAIMS_LLM_PROVIDER", "openai")).strip() or "openai"
-    model = str(model_override or settings.get("CLAIMS_LLM_MODEL", "gpt-4o-mini")).strip() or "gpt-4o-mini"
+    provider = str(api_endpoint or "").strip()
+    model = str(model_override or "").strip() or None
+    if not provider:
+        provider, default_model, _ = resolve_claims_llm_config(settings)
+        model = model or default_model
     try:
         temperature = float(temp if temp is not None else settings.get("CLAIMS_LLM_TEMPERATURE", 0.3))
     except _CLAIMS_NONCRITICAL_EXCEPTIONS:
