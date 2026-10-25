@@ -27,6 +27,7 @@ import { normalizeGeneratedCards } from "@/components/Flashcards/tabs/ImportExpo
 import { normalizeFlashcardTemplateFields } from "@/components/Flashcards/utils/template-helpers"
 import type { FlashcardCreate } from "@/services/flashcards"
 import { useFlashcardsGenerateTransfer } from "@/hooks/useFlashcardsGenerateTransfer"
+import { isRestrictedClipperPage } from "@/services/web-clipper/content-extract"
 
 const { Text, Title } = Typography
 const { TextArea } = Input
@@ -233,6 +234,10 @@ export default function SidepanelFlashcards() {
       "sidepanel:flashcards.activeTabUnavailable",
       "Open a page tab before capturing page selection."
     ),
+    restrictedPage: t(
+      "sidepanel:flashcards.restrictedPage",
+      "This browser page blocks selection capture. Open a regular web page and select text, or paste text into Create & Import."
+    ),
     noSelection: t(
       "sidepanel:flashcards.noPageSelection",
       "Select text on the page first."
@@ -250,6 +255,7 @@ export default function SidepanelFlashcards() {
       const validationMessages = [
         captureMessages.unavailable,
         captureMessages.activeTabUnavailable,
+        captureMessages.restrictedPage,
         captureMessages.noSelection
       ]
       return validationMessages.includes(message) ? message : captureMessages.failed
@@ -270,6 +276,10 @@ export default function SidepanelFlashcards() {
     const tabId = activeTab?.id
     if (typeof tabId !== "number") {
       throw new Error(captureMessages.activeTabUnavailable)
+    }
+
+    if (activeTab.url && isRestrictedClipperPage(activeTab.url)) {
+      throw new Error(captureMessages.restrictedPage)
     }
 
     const results = await browser.scripting.executeScript({
@@ -371,6 +381,7 @@ export default function SidepanelFlashcards() {
       const validationMessages = [
         captureMessages.unavailable,
         captureMessages.activeTabUnavailable,
+        captureMessages.restrictedPage,
         captureMessages.noSelection
       ]
       if (validationMessages.includes(message)) return message

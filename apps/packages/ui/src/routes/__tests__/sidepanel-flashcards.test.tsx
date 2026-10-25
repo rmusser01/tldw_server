@@ -1426,6 +1426,31 @@ describe("sidepanel flashcards route", { timeout: 60_000 }, () => {
     )
   })
 
+  it.each([
+    "Capture page selection",
+    "Generate draft cards",
+    "Generate from selection"
+  ])("explains a restricted page before %s while preserving queued work", async (action) => {
+    const user = userEvent.setup()
+    render(<SidepanelFlashcards />)
+    await user.click(screen.getByRole("button", { name: "Capture page selection" }))
+    browserMocks.executeScript.mockClear()
+    browserMocks.tabsQuery.mockResolvedValueOnce([
+      { id: 42, title: "Version", url: "chrome://version" }
+    ])
+
+    await user.click(screen.getByRole("button", { name: action }))
+
+    expect(await screen.findByText(
+      "This browser page blocks selection capture. Open a regular web page and select text, or paste text into Create & Import."
+    )).toBeInTheDocument()
+    expect(screen.getByLabelText("Back")).toHaveValue("Key concept from the active page")
+    expect(browserMocks.executeScript).not.toHaveBeenCalled()
+    expect(flashcardMocks.generateFlashcardsMutateAsync).not.toHaveBeenCalled()
+    expect(flashcardMocks.createFlashcardMutateAsync).not.toHaveBeenCalled()
+    expect(browserMocks.tabsCreate).not.toHaveBeenCalled()
+  })
+
   it("uses capture wording when no active page tab is available", async () => {
     browserMocks.tabsQuery.mockResolvedValueOnce([])
     const user = userEvent.setup()
