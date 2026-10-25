@@ -1,7 +1,7 @@
 import { browser } from "wxt/browser"
 
 // BFCache retains the document, so navigation must retire its unfinished reads.
-let documentLifetime = typeof window !== "undefined" && /^https?:$/.test(window.location.protocol)
+let documentLifetime = typeof window !== "undefined" && /^https?:$/.test(window.location?.protocol ?? "")
   ? new AbortController()
   : undefined
 if (documentLifetime) {
