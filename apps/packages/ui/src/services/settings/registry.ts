@@ -34,8 +34,8 @@ export type SettingDef<T> = {
 const storageCache = new Map<StorageOptions["area"] | undefined, ReturnType<typeof createSafeStorage>>()
 
 // WP-20: per-context cache of normalized setting values. Reads hit the cache
-// instead of re-issuing chrome.storage reads + localStorage mirror writes on
-// every get. The cache is invalidated by `chrome.storage.onChanged`, so writes
+// instead of re-issuing storage reads + localStorage mirror writes on
+// every get. The selected store's watcher invalidates the cache, so writes
 // from OTHER contexts (options page vs sidepanel) are picked up on the next
 // read-through miss.
 const valueCache = new Map<string, unknown>()
@@ -46,30 +46,25 @@ const valueCache = new Map<string, unknown>()
 const mirrorCache = new Map<string, string | null>()
 
 const settingCacheKey = (setting: SettingDef<unknown>): string =>
-  `${setting.area ?? "local"}::${setting.key}`
+  `${getStorageForSetting(setting).area}::${setting.key}`
 
-let storageChangeListenerBound = false
-const ensureStorageChangeListener = (): void => {
-  if (storageChangeListenerBound) return
-  storageChangeListenerBound = true
+const observedSettings = new Set<string>()
+const ensureStorageChangeListener = (setting: SettingDef<unknown>): boolean => {
+  const key = settingCacheKey(setting)
+  if (observedSettings.has(key)) return true
   try {
-    const globalApi = globalThis as {
-      chrome?: { storage?: { onChanged?: { addListener?: (listener: (changes: Record<string, unknown>, areaName: string) => void) => void } } }
-      browser?: { storage?: { onChanged?: { addListener?: (listener: (changes: Record<string, unknown>, areaName: string) => void) => void } } }
-    }
-    const onChanged =
-      globalApi.chrome?.storage?.onChanged ??
-      globalApi.browser?.storage?.onChanged
-    if (typeof onChanged?.addListener !== "function") return
-    onChanged.addListener((changes, areaName) => {
-      for (const key of Object.keys(changes || {})) {
-        valueCache.delete(`${areaName}::${key}`)
-      }
+    const watched: unknown = getStorageForSetting(setting).watch({
+      [setting.key]: () => valueCache.delete(key)
     })
+    if (watched === true || typeof watched === "function") {
+      observedSettings.add(key)
+      return true
+    }
   } catch {
-    // Non-extension contexts have no storage.onChanged; the cache simply
-    // lives for this page's lifetime.
+    // Without a watcher, read through storage rather than cache stale values.
   }
+  valueCache.delete(key)
+  return false
 }
 
 export const getStorageForSetting = (setting: SettingDef<unknown>) => {
@@ -194,9 +189,9 @@ export const getSetting = async <T,>(
   options?: { throwOnError?: boolean; isCurrent?: () => boolean }
 ): Promise<T> => {
   try {
-    ensureStorageChangeListener()
+    const observed = ensureStorageChangeListener(setting)
     const cacheKey = settingCacheKey(setting as unknown as SettingDef<unknown>)
-    if (valueCache.has(cacheKey)) {
+    if (observed && valueCache.has(cacheKey)) {
       // Invariant: cached values are SHARED references, not copies (copying
       // per read would defeat the cache). Consumers must treat getSetting
       // results as read-only and never mutate object/array values in place —
@@ -210,7 +205,7 @@ export const getSetting = async <T,>(
     // An old read must not migrate or mirror over a newer explicit choice.
     if (options?.isCurrent?.() === false) return setting.defaultValue
     let normalized: T
-    let cacheable = true
+    let cacheable = observed
     if (isUnset(raw)) {
       const legacy = readLocalStorageValue(setting)
       if (!isUnset(legacy)) {
@@ -242,16 +237,18 @@ export const getSetting = async <T,>(
 }
 
 export const setSetting = async <T>(setting: SettingDef<T>, value: T) => {
-  ensureStorageChangeListener()
+  const observed = ensureStorageChangeListener(setting)
   const storage = getStorageForSetting(setting)
   const normalized = normalizeSettingValue(setting, value)
   await storage.set(setting.key, normalized)
-  valueCache.set(settingCacheKey(setting as unknown as SettingDef<unknown>), normalized)
+  if (observed) {
+    valueCache.set(settingCacheKey(setting as unknown as SettingDef<unknown>), normalized)
+  }
   writeLocalStorageValue(setting, normalized)
 }
 
 export const clearSetting = async (setting: SettingDef<unknown>) => {
-  ensureStorageChangeListener()
+  ensureStorageChangeListener(setting)
   const storage = getStorageForSetting(setting)
   await storage.remove(setting.key)
   valueCache.delete(settingCacheKey(setting))
@@ -262,9 +259,9 @@ export const clearSetting = async (setting: SettingDef<unknown>) => {
 /**
  * Test-only seam: drop the module-level value/mirror caches. Suites that seed
  * storage directly (bypassing `setSetting`) or that swap the storage mock have
- * no `storage.onChanged` invalidation path in jsdom, so a cached value from an
+ * no storage watcher invalidation path in jsdom, so a cached value from an
  * earlier test would be served across the reset. Production never needs this:
- * the cache is invalidated by `storage.onChanged`, `setSetting` and
+ * the cache is invalidated by the selected store's watcher, `setSetting` and
  * `clearSetting`.
  */
 export const __clearSettingCachesForTests = (): void => {

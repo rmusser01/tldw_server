@@ -18,11 +18,13 @@ vi.mock("@/utils/safe-storage", () => ({
     get: async (key: string) =>
       options?.area === "session" ? mocks.sessionStorage.get(key) : undefined,
     set: vi.fn(async () => undefined),
-    remove: vi.fn(async () => undefined)
+    remove: vi.fn(async () => undefined),
+    watch: vi.fn()
   })
 }))
 
-vi.mock("@/services/action", () => ({
+vi.mock("@/services/action", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/services/action")>(),
   getInitialConfig: (...args: unknown[]) => mocks.getInitialConfig(...args)
 }))
 
