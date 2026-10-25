@@ -422,7 +422,7 @@ export function ResultsList({
                 <p className="text-text-muted text-sm mb-2">
                   {t('mediaPage.noMatchingResults', 'No results match your filters')}
                 </p>
-                <p className="text-xs text-text-subtle mb-3">
+                <p className="text-xs text-text-muted mb-3">
                   {t('mediaPage.noMatchingResultsHint', 'Try broadening your query or removing filters.')}
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-2">
@@ -446,10 +446,10 @@ export function ResultsList({
             ) : !hasSearchQuery && !tutorialDismissed && onOpenQuickIngest ? (
               <div data-testid="first-ingest-tutorial" className="px-4 py-8 flex flex-col items-center gap-3">
                 <Upload className="w-8 h-8 text-primary" />
-                <h3 className="text-base font-semibold text-text">
+                <h2 className="text-base font-semibold text-text">
                   {t('mediaPage.ftuxTitle', 'Get started — ingest your first content')}
-                </h3>
-                <p className="text-xs text-text-subtle max-w-sm">
+                </h2>
+                <p className="text-xs text-text-muted max-w-sm">
                   {t('mediaPage.ftuxHint', 'Paste a YouTube URL, or use Quick Ingest to upload PDFs, audio, EPUB, and more.')}
                 </p>
                 <div className="flex items-center gap-2 w-full max-w-sm">
@@ -477,7 +477,7 @@ export function ResultsList({
                 <p className="text-text-muted text-sm mb-2">
                   {t('mediaPage.noResults', 'No results found')}
                 </p>
-                <p className="text-xs text-text-subtle mb-3">
+                <p className="text-xs text-text-muted mb-3">
                   {t('mediaPage.noResultsHint', 'Try broader terms, or ingest new content to search.')}
                 </p>
                 <div className="flex flex-wrap items-center justify-center gap-2">
