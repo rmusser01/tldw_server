@@ -198,6 +198,34 @@ describe("NotesManagerPage stage 23 responsive mobile layout", () => {
     })
   })
 
+  it.each([375, 1024])("removes the hidden sidebar from keyboard and screen-reader navigation at %ipx and restores it when opened", async (width) => {
+    setViewportWidth(width)
+    renderPage()
+    const sidebar = screen.getByTestId("notes-list-region")
+    if (width >= 768) {
+      fireEvent.click(screen.getByTestId("notes-desktop-sidebar-toggle"))
+    }
+    await waitFor(() => {
+      expect(sidebar).toHaveAttribute("inert")
+      expect(sidebar).toHaveAttribute("aria-hidden", "true")
+    })
+
+    fireEvent.click(screen.getByRole("link", { name: "Skip to notes list" }))
+    await waitFor(() => {
+      expect(sidebar).not.toHaveAttribute("inert")
+      expect(sidebar).not.toHaveAttribute("aria-hidden")
+      expect(sidebar).toHaveFocus()
+    })
+
+    fireEvent.click(screen.getByTestId(
+      width < 768 ? "notes-mobile-sidebar-backdrop" : "notes-desktop-sidebar-toggle"
+    ))
+    await waitFor(() => {
+      expect(sidebar).toHaveAttribute("inert")
+      expect(sidebar).toHaveAttribute("aria-hidden", "true")
+    })
+  })
+
   it("uses mobile single-panel mode below 768 and desktop split mode at 768+", async () => {
     const { rerender } = renderPage()
 
