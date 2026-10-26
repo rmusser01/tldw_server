@@ -305,7 +305,7 @@ def test_a_seeded_aliased_from_import_fails(tmp_path: Path) -> None:
         ("from requests import sessions as s\ns.session()\n", "requests.sessions.session"),
         ("def f():\n    import requests\n    return requests.post('u')\n", "requests.post"),
         ("from httpx import *\nstream('GET', 'u')\n", "httpx.stream"),
-        # A reference is a use too: ace_step.py and standalone_html_provider.py build clients this way.
+        # A reference is a use too: a stored class (a client_factory default, an alias) builds clients later.
         ("import httpx\nclient_factory = httpx.AsyncClient\n", "httpx.AsyncClient"),
         # aiohttp and urllib.request bypass the same egress policy.
         ("from aiohttp import ClientSession as S\nS()\n", "aiohttp.ClientSession"),

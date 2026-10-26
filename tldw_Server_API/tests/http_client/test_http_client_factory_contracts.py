@@ -103,15 +103,28 @@ async def test_create_aiohttp_session_carries_default_headers_pins_and_tls_floor
 
 
 @pytest.mark.asyncio
-async def test_create_aiohttp_session_defaults_match_the_shared_session(monkeypatch):
+@pytest.mark.parametrize("which", ["owned", "shared"])
+async def test_default_aiohttp_sessions_carry_headers_pins_tls_floor_and_timeouts(monkeypatch, which):
+    """Both the caller-owned default session and afetch's shared one, property by property."""
+    import ssl
+
+    monkeypatch.setenv("HTTP_CERT_PINS", "audio.example.test=AbCd")
+    monkeypatch.setenv("HTTP_DEFAULT_USER_AGENT", "tldw-test-agent")
+    monkeypatch.setattr(hc, "ENFORCE_TLS_MIN", True)
+    monkeypatch.setattr(hc, "TLS_MIN_VERSION", "1.3")
     monkeypatch.setattr(hc, "_AIOHTTP_SESSION_CACHE", {})
-    owned = hc.create_aiohttp_session()
-    shared = hc._get_aiohttp_session()
+    session = hc.create_aiohttp_session() if which == "owned" else hc._get_aiohttp_session()
     try:
-        assert owned is not shared
-        assert owned.timeout == shared.timeout
-        assert owned.trust_env is shared.trust_env is hc.DEFAULT_TRUST_ENV
-        assert dict(owned.headers) == dict(shared.headers)
+        assert session.headers["User-Agent"] == "tldw-test-agent"
+        assert hc._get_client_cert_pins(session) == {"audio.example.test": {"abcd"}}
+        assert isinstance(session.connector, aiohttp.TCPConnector)
+        assert session.connector._ssl.minimum_version == ssl.TLSVersion.TLSv1_3
+        assert session.timeout == aiohttp.ClientTimeout(
+            total=None,
+            connect=hc.DEFAULT_CONNECT_TIMEOUT,
+            sock_connect=hc.DEFAULT_CONNECT_TIMEOUT,
+            sock_read=hc.DEFAULT_READ_TIMEOUT,
+        )
+        assert session.trust_env is hc.DEFAULT_TRUST_ENV
     finally:
-        await owned.close()
-        await shared.close()
+        await session.close()
