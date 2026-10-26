@@ -12,6 +12,7 @@ and this project adheres to Some kind of Versioning
 
 ### Changed
 
+- **Admin webhooks, `github_create_issue` and GitHub repository sync follow the general egress policy:** ports other than 80, 443 and 8080 are refused unless `WORKFLOWS_EGRESS_ALLOWED_PORTS` lists them, so an admin-webhook receiver on a port such as :8443 or :5678 needs it set. Under `ENVIRONMENT=production` (or `APP_ENV`/`ENV`) the strict profile denies every host not in `EGRESS_ALLOWLIST` or `WORKFLOWS_EGRESS_ALLOWLIST`, so production deployments without an allowlist must add the receiver hosts and `api.github.com` (TASK-13950.11).
 
 ### Fixed
 
