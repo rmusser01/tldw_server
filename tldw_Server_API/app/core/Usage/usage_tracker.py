@@ -261,6 +261,7 @@ def compute_costs(
     cache_write_1h_input_tokens: int = 0,
     speed: str | None = None,
     inference_geo: str | None = None,
+    service_tier: str | None = None,
 ) -> tuple[float, float, float, bool]:
     """
     Compute (prompt_cost, completion_cost, total_cost, estimated)
@@ -272,11 +273,15 @@ def compute_costs(
     ``speed="fast"`` and ``inference_geo="us"`` (Anthropic; US-only on Claude
     4.6 and later models only) multiply every
     category by 2 and 1.1.
+    ``service_tier`` is the tier the provider reports: an entry's
+    ``service_tiers`` rates for it apply (OpenAI), Anthropic's ``batch`` halves
+    every category, and any other tier costs the standard rates.
     """
     catalog = get_pricing_catalog()
     prompt_total = max(0, int(prompt_tokens or 0))
+    tier = (service_tier or "").strip().lower()
     # The whole prompt, cache tokens included (ADR-075), picks a long-prompt price tier.
-    rates, est = catalog.get_rate_details(provider, model, prompt_tokens=prompt_total)
+    rates, est = catalog.get_rate_details(provider, model, prompt_tokens=prompt_total, service_tier=tier)
     in_per_1k = rates["prompt"]
     out_per_1k = rates["completion"]
     completion_total = max(0, int(completion_tokens or 0))
@@ -388,6 +393,7 @@ async def log_llm_usage(
             cache_write_1h_input_tokens=normalized_usage.cache_write_1h_input_tokens,
             speed=normalized_usage.speed,
             inference_geo=normalized_usage.inference_geo,
+            service_tier=normalized_usage.service_tier,
         )
         if estimated is None:
             estimated = est_flag or normalized_usage.estimate_source != "provider_usage"

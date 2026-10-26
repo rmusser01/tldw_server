@@ -72,6 +72,8 @@ class NormalizedLLMUsage:
     # Anthropic request options billed above list price (lowercased; empty when not reported).
     speed: str = ""
     inference_geo: str = ""
+    # The service tier the provider reports the call ran on (lowercased; empty when not reported).
+    service_tier: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -140,6 +142,8 @@ def normalize_llm_usage(
     cache_write_1h_input_tokens = 0
     speed = ""
     inference_geo = ""
+    # Anthropic reports it in the usage block; OpenAI beside it (usage_with_service_tier folds it in).
+    service_tier = _usage_str(usage_mapping, "service_tier")
 
     if "anthropic" in provider_key:
         speed = _usage_str(usage_mapping, "speed")
@@ -208,7 +212,23 @@ def normalize_llm_usage(
         cache_write_1h_input_tokens=cache_write_1h_input_tokens,
         speed=speed,
         inference_geo=inference_geo,
+        service_tier=service_tier,
     )
+
+
+def usage_with_service_tier(response: Any) -> Any:
+    """``response["usage"]``, with the response's top-level ``service_tier`` added when the block lacks one.
+
+    OpenAI reports the tier a call ran on beside the usage block; Anthropic reports it inside. The result is a copy,
+    so the response a caller passes on is unchanged; without a tier to add it is the usage block itself.
+    """
+    if not isinstance(response, Mapping):
+        return None
+    usage = response.get("usage")
+    tier = response.get("service_tier")
+    if isinstance(usage, Mapping) and isinstance(tier, str) and tier.strip() and "service_tier" not in usage:
+        return {**usage, "service_tier": tier}
+    return usage
 
 
 def _first_int(*values: Any) -> int:
@@ -399,4 +419,4 @@ def _bound_raw_usage_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     return bounded
 
 
-__all__ = ["NormalizedLLMUsage", "normalize_llm_usage"]
+__all__ = ["NormalizedLLMUsage", "normalize_llm_usage", "usage_with_service_tier"]

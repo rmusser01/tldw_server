@@ -220,7 +220,7 @@ from tldw_Server_API.app.core.testing import (
 )
 from tldw_Server_API.app.core.Usage.llm_call_context import llm_call_context
 from tldw_Server_API.app.core.Usage.llm_quota_gate import check_llm_call_async, check_llm_call_sync
-from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage
+from tldw_Server_API.app.core.Usage.llm_usage_normalizer import normalize_llm_usage, usage_with_service_tier
 from tldw_Server_API.app.core.Usage.pricing_catalog import (
     get_pricing_catalog,
     list_provider_models,
@@ -6915,7 +6915,7 @@ async def _execute_non_stream_call_impl(
         """Record token and durable usage for one validated dict response."""
 
         choices = response.get("choices")
-        usage = response.get("usage")
+        usage = usage_with_service_tier(response)  # OpenAI reports service_tier beside usage
         if usage:
             try:
                 normalized_usage = normalize_llm_usage(
