@@ -1871,10 +1871,12 @@ class ChatbookService:
                     """
                     SELECT 1
                     FROM information_schema.columns
-                    WHERE table_name = ? AND column_name = ?
+                    WHERE table_schema = current_schema()
+                      AND table_name = ? AND column_name = ?
                     """,
                     (table_name, column_name),
                 )
+                return bool(self._fetch_results(cursor))
             else:
                 cursor = self.db.execute_query(
                     f"PRAGMA table_info({table_name})"  # nosec B608 - table name is allowlisted above.
@@ -8222,12 +8224,28 @@ class ChatbookService:
                 job.progress_percentage = 100
                 job.processed_items = job.total_items
             self.db.execute_query("""
-                INSERT OR REPLACE INTO export_jobs (
+                INSERT INTO export_jobs (
                     job_id, user_id, status, chatbook_name, output_path,
                     created_at, started_at, completed_at, error_message,
                     progress_percentage, total_items, processed_items,
                     file_size_bytes, download_url, expires_at, metadata
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    status = excluded.status,
+                    chatbook_name = excluded.chatbook_name,
+                    output_path = excluded.output_path,
+                    created_at = excluded.created_at,
+                    started_at = excluded.started_at,
+                    completed_at = excluded.completed_at,
+                    error_message = excluded.error_message,
+                    progress_percentage = excluded.progress_percentage,
+                    total_items = excluded.total_items,
+                    processed_items = excluded.processed_items,
+                    file_size_bytes = excluded.file_size_bytes,
+                    download_url = excluded.download_url,
+                    expires_at = excluded.expires_at,
+                    metadata = excluded.metadata
             """, (
                 job.job_id, job.user_id, job.status.value, job.chatbook_name,
                 job.output_path,
@@ -8398,13 +8416,30 @@ class ChatbookService:
                 job.progress_percentage = 100
                 job.processed_items = job.total_items
             self.db.execute_query("""
-                INSERT OR REPLACE INTO import_jobs (
+                INSERT INTO import_jobs (
                     job_id, user_id, status, chatbook_path,
                     created_at, started_at, completed_at, error_message,
                     progress_percentage, total_items, processed_items,
                     successful_items, failed_items, skipped_items,
                     conflicts, warnings, metadata
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    user_id = excluded.user_id,
+                    status = excluded.status,
+                    chatbook_path = excluded.chatbook_path,
+                    created_at = excluded.created_at,
+                    started_at = excluded.started_at,
+                    completed_at = excluded.completed_at,
+                    error_message = excluded.error_message,
+                    progress_percentage = excluded.progress_percentage,
+                    total_items = excluded.total_items,
+                    processed_items = excluded.processed_items,
+                    successful_items = excluded.successful_items,
+                    failed_items = excluded.failed_items,
+                    skipped_items = excluded.skipped_items,
+                    conflicts = excluded.conflicts,
+                    warnings = excluded.warnings,
+                    metadata = excluded.metadata
             """, (
                 job.job_id, job.user_id, job.status.value, job.chatbook_path,
                 self._serialize_job_timestamp(job.created_at),
