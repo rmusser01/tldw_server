@@ -253,12 +253,17 @@ def test_postgres_transaction_tolerates_pool_release_failure(
 @pytest.mark.integration
 @pytest.mark.postgres
 @pytest.mark.parametrize("fault", ["known", "known_group", "unexpected", "mixed_group"])
-def test_postgres_get_connection_preserves_scope_exception_policy(
+def test_postgres_get_connection_scope_failure_discards_the_connection(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     pg_restricted_backend: DatabaseBackend,
     fault: str,
 ) -> None:
+    """Every scope fault raises unchanged and the unscoped connection is dropped.
+
+    Tenant GUCs are session-scoped, so a connection that could not be re-scoped
+    may still carry another account's identity (TASK-13950.3).
+    """
     if fault.endswith("group") and sys.version_info < (3, 12):
         pytest.skip("contextlib.suppress supports exception groups on Python 3.12+")
 
@@ -266,7 +271,6 @@ def test_postgres_get_connection_preserves_scope_exception_policy(
         pass
 
     db = MediaDatabase(tmp_path / "postgres-scope.db", client_id="1", backend=pg_restricted_backend)
-    original_apply = db.backend.apply_scope
     scoped: list[object] = []
     known_error = RuntimeError("scope callback fault")
     unexpected_error = UnexpectedScopeError("unexpected scope fault")
@@ -278,35 +282,21 @@ def test_postgres_get_connection_preserves_scope_exception_policy(
     elif fault == "mixed_group":
         scope_error = builtins.ExceptionGroup("scope", [known_error, unexpected_error])
 
-    def fail_after_scope(connection: object = None) -> None:
-        original_apply(connection)
+    def fail_scope(connection: object) -> None:
         scoped.append(connection)
         raise scope_error
 
     try:
+        cached = db.get_connection()
         with monkeypatch.context() as patch:
-            patch.setattr(db.backend, "apply_scope", fail_after_scope)
-            for _ in range(2):
-                if fault == "unexpected":
-                    with pytest.raises(UnexpectedScopeError) as raised:
-                        db.get_connection()
-                    assert raised.value is unexpected_error
-                elif fault.endswith("group"):
-                    with pytest.raises(builtins.ExceptionGroup) as grouped_raised:
-                        db.get_connection()
-                    assert grouped_raised.value is scope_error
-                    expected_leaves = (known_error, unexpected_error) if fault == "mixed_group" else (known_error,)
-                    assert grouped_raised.value.exceptions == expected_leaves
-                    assert all(
-                        actual is expected for actual, expected in zip(grouped_raised.value.exceptions, expected_leaves)
-                    )
-                else:
-                    assert db.get_connection() is db._get_persistent_conn()
-            cached = db._get_persistent_conn()
-            assert cached is not None
-            assert scoped == [cached, cached]
-        db.close_connection()
+            patch.setattr(db.backend, "_apply_scope_settings", fail_scope)
+            with pytest.raises(type(scope_error)) as raised:
+                db.get_connection()
+        assert raised.value is scope_error
+        assert scoped == [cached]
+        assert cached.closed
         assert db._get_persistent_conn() is None
+        db.close_connection()
         assert db._get_tx_depth() == 0
         assert db._get_txn_conn() is None
         with db.transaction() as reused:
