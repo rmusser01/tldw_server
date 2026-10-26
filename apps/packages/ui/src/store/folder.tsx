@@ -248,6 +248,63 @@ const createThrottledLocalStorage = (delay = 1000): StateStorage => {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Server cache diffing (WP-30 / TASK-13523)
+// ─────────────────────────────────────────────────────────────────────────────
+
+type IdRow = { id: number; last_modified?: string | null }
+
+type CacheDiff<T> = { changed: T[]; vanished: boolean }
+
+/**
+ * Diffs id-keyed rows by `last_modified`. Rows missing `last_modified` (either
+ * side) are always treated as dirty so they are safely re-upserted.
+ */
+function diffRowsById<T extends IdRow>(local: T[], remote: T[]): CacheDiff<T> {
+  const localById = new Map(local.map((row) => [row.id, row] as const))
+  const remoteIds = new Set(remote.map((row) => row.id))
+  const changed = remote.filter(
+    (row) => row.last_modified == null || localById.get(row.id)?.last_modified !== row.last_modified
+  )
+  const vanished = local.some((row) => !remoteIds.has(row.id))
+  return { changed, vanished }
+}
+
+/**
+ * Diffs composite-keyed link rows. A link is fully described by its key, so
+ * only membership matters: keys present on both sides are byte-identical.
+ */
+function diffRowsByKey<T>(local: T[], remote: T[], keyOf: (row: T) => string): CacheDiff<T> {
+  const localKeys = new Set(local.map(keyOf))
+  const remoteKeys = new Set(remote.map(keyOf))
+  const changed = remote.filter((row) => !localKeys.has(keyOf(row)))
+  const vanished = local.some((row) => !remoteKeys.has(keyOf(row)))
+  return { changed, vanished }
+}
+
+/**
+ * Applies one table's diff. Deletion-diffing row-wise is deliberately UNSAFE
+ * here: the store puts a locally-created row into Dexie right after the
+ * server acknowledges it, and nothing marks that row as a recent local
+ * creation — an id that is locally present but remotely absent is as likely
+ * to be a just-acknowledged creation racing a stale list as a server-side
+ * deletion. So when rows vanished, the table falls back to the legacy
+ * clear-and-rewrite (identical deletion semantics to the pre-diff code) and
+ * only otherwise upserts changed rows.
+ */
+async function applyCacheDiff<T>(
+  table: { clear(): Promise<void>; bulkPut(rows: T[]): Promise<void> },
+  diff: CacheDiff<T>,
+  all: T[]
+): Promise<void> {
+  if (diff.vanished) {
+    await table.clear()
+    if (all.length > 0) await table.bulkPut(all)
+    return
+  }
+  if (diff.changed.length > 0) await table.bulkPut(diff.changed)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Store
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -435,29 +492,95 @@ export const useFolderStore = createWithEqualityFn<FolderState>()(
           const folderKeywordLinks = folderKeywordLinksRes.data || []
           const conversationKeywordLinks = conversationKeywordLinksRes.data || []
 
-          // Cache to Dexie (atomic)
-          if (!operation) await db.transaction(
-            "rw",
-            db.folders,
-            db.keywords,
-            db.folderKeywordLinks,
-            db.conversationKeywordLinks,
-            async () => {
-              await Promise.all([
-                db.folders.clear(),
-                db.keywords.clear(),
-                db.folderKeywordLinks.clear(),
-                db.conversationKeywordLinks.clear()
+          // Cache to Dexie (WP-30): diff by last_modified so an unchanged
+          // refresh issues zero bulk writes; per-table fallbacks and the
+          // unresolvable-diff full rewrite keep the legacy semantics (see
+          // applyCacheDiff for why vanished rows rewrite instead of delete).
+          if (!operation) {
+            try {
+              const [
+                localFolders,
+                localKeywords,
+                localFolderKeywordLinks,
+                localConversationKeywordLinks
+              ] = await Promise.all([
+                db.folders.toArray(),
+                db.keywords.toArray(),
+                db.folderKeywordLinks.toArray(),
+                db.conversationKeywordLinks.toArray()
               ])
 
-              await Promise.all([
-                db.folders.bulkPut(folders),
-                db.keywords.bulkPut(keywords),
-                db.folderKeywordLinks.bulkPut(folderKeywordLinks),
-                db.conversationKeywordLinks.bulkPut(conversationKeywordLinks)
-              ])
+              const folderPlan = diffRowsById(localFolders, folders)
+              const keywordPlan = diffRowsById(localKeywords, keywords)
+              const folderLinkPlan = diffRowsByKey(
+                localFolderKeywordLinks,
+                folderKeywordLinks,
+                (link) => `${link.folder_id}::${link.keyword_id}`
+              )
+              const conversationLinkPlan = diffRowsByKey(
+                localConversationKeywordLinks,
+                conversationKeywordLinks,
+                (link) => `${link.conversation_id}::${link.keyword_id}`
+              )
+              const hasWrites =
+                folderPlan.vanished ||
+                folderPlan.changed.length > 0 ||
+                keywordPlan.vanished ||
+                keywordPlan.changed.length > 0 ||
+                folderLinkPlan.vanished ||
+                folderLinkPlan.changed.length > 0 ||
+                conversationLinkPlan.vanished ||
+                conversationLinkPlan.changed.length > 0
+
+              if (hasWrites) {
+                await db.transaction(
+                  "rw",
+                  db.folders,
+                  db.keywords,
+                  db.folderKeywordLinks,
+                  db.conversationKeywordLinks,
+                  async () => {
+                    await Promise.all([
+                      applyCacheDiff(db.folders, folderPlan, folders),
+                      applyCacheDiff(db.keywords, keywordPlan, keywords),
+                      applyCacheDiff(db.folderKeywordLinks, folderLinkPlan, folderKeywordLinks),
+                      applyCacheDiff(
+                        db.conversationKeywordLinks,
+                        conversationLinkPlan,
+                        conversationKeywordLinks
+                      )
+                    ])
+                  }
+                )
+              }
+            } catch (cacheError) {
+              // Diff unresolvable (e.g. local read failed): fall back to the
+              // legacy full rewrite so the cache still converges.
+              console.error("Folder cache diff failed; falling back to full rewrite:", cacheError)
+              await db.transaction(
+                "rw",
+                db.folders,
+                db.keywords,
+                db.folderKeywordLinks,
+                db.conversationKeywordLinks,
+                async () => {
+                  await Promise.all([
+                    db.folders.clear(),
+                    db.keywords.clear(),
+                    db.folderKeywordLinks.clear(),
+                    db.conversationKeywordLinks.clear()
+                  ])
+
+                  await Promise.all([
+                    db.folders.bulkPut(folders),
+                    db.keywords.bulkPut(keywords),
+                    db.folderKeywordLinks.bulkPut(folderKeywordLinks),
+                    db.conversationKeywordLinks.bulkPut(conversationKeywordLinks)
+                  ])
+                }
+              )
             }
-          )
+          }
 
           if (!canPublish()) return
           set({
