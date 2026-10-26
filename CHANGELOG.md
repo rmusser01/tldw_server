@@ -15,7 +15,7 @@ and this project adheres to Some kind of Versioning
 
 ### Fixed
 
-- **Workflows `podcast_rss_publish` SSRF:** the remote seed-feed fetch now goes through `core.http_client`, so the egress policy (including private and link-local addresses) is enforced on the URL and every redirect hop, and the body is capped at 20 MiB. A refused URL returns `remote_seed_blocked_egress` (TASK-13950.11).
+- **Workflows `podcast_rss_publish` SSRF:** the remote seed-feed fetch now goes through `core.http_client`, so the egress policy (including private and link-local addresses) is enforced on the URL and every redirect hop, and the body is capped at 20 MiB. A refused URL returns `remote_seed_blocked_egress`, and a non-XML seed body returns `invalid_feed_xml` instead of raising. The 15 s remote-seed timeout now bounds the whole download, not each socket operation (TASK-13950.11).
 
 ### Removed
 

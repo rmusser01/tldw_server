@@ -301,6 +301,8 @@ async def run_podcast_rss_publish_adapter(config: dict[str, Any], context: dict[
             return {"error": "invalid_remote_seed_url", "published": False}
         except EgressPolicyError:
             return {"error": "remote_seed_blocked_egress", "published": False}
+        except ET.ParseError:
+            return {"error": "invalid_feed_xml", "published": False}
         except (NetworkError, RetryExhaustedError, TimeoutError, OSError, ValueError):
             return {"error": "remote_seed_fetch_failed", "published": False}
         if seeded is None:

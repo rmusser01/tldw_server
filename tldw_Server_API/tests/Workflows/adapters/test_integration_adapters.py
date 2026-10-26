@@ -2563,6 +2563,26 @@ async def test_podcast_rss_seed_non_2xx_is_fetch_failure(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_podcast_rss_seed_non_xml_body_is_invalid_feed_xml(monkeypatch, tmp_path):
+    """A public seed that answers with non-XML returns invalid_feed_xml instead of raising."""
+    monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
+
+    def handler(request):
+        import httpx
+
+        return httpx.Response(200, request=request, stream=httpx.ByteStream(b"<html>not a feed"))
+
+    client = _route_seed_fetch_through_mock_transport(monkeypatch, handler)
+    try:
+        result = await _publish_with_seed(tmp_path, _PUBLIC_SEED_URL)
+    finally:
+        await client.aclose()
+
+    assert result == {"error": "invalid_feed_xml", "published": False}
+    assert not (tmp_path / "feeds" / "podcast.xml").exists()
+
+
+@pytest.mark.asyncio
 async def test_podcast_rss_seed_public_feed_still_parses(monkeypatch, tmp_path):
     """A valid public seed feed is fetched through http_client and merged as before."""
     monkeypatch.setenv("WORKFLOWS_FILE_BASE_DIR", str(tmp_path))
