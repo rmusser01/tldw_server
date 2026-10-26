@@ -173,7 +173,9 @@ def test_matching_expected_owner_retains_resource_owner_and_tenant_refusal(workf
     assert context.db.get_run(context.runs[foreign]).status == "queued"  # nosec B101
 
 
-def test_workflow_socket_keeps_its_custom_auth_with_http_assertion_present(workflow_accounts):
+def test_workflow_socket_authenticates_by_token_and_ignores_the_http_expected_user_header(workflow_accounts):
+    """The WebSocket resolves bob from his AuthNZ token; the HTTP-only expected-user
+    assertion (here naming alice) is not applied to it."""
     context = workflow_accounts
     headers = {**context.accounts["bob"]["headers"], "X-TLDW-Expected-User-ID": str(context.accounts["alice"]["id"])}
     with context.client.websocket_connect(f"{ROOT}/ws?run_id={context.runs['bob']}", headers=headers) as socket:
