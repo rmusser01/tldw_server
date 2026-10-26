@@ -35,6 +35,12 @@ Failures and fixes:
     baseline with a "reason"; the bump is reviewed in the PR (see _ceilings.py).
   * stale entry (the function is gone, or now at or under THRESHOLD lines): delete it, or
     run ``python -m tldw_Server_API.tests.lint.test_function_size_ratchet --tighten``.
+  * Moving, renaming or hoisting a frozen function re-keys it, and so does following the
+    handler fix ("move the logic into a core/service function") without first shrinking the
+    logic below THRESHOLD. The old entry goes stale and the new key has no ceiling: delete
+    the old entry and add the new one with reason ``moved from <old key> (<PR>)``, filled in.
+  * A nested function's lines count toward its parent too, so growing a nested function
+    fails both its own entry and its parent's; bump both.
 Shrinking needs no edit: the numbers are ceilings. ``--tighten`` lowers them;
 ``--write-baseline`` records everything as measured (keeping reasons).
 """
@@ -45,6 +51,7 @@ import ast
 import subprocess
 import warnings
 from collections.abc import Iterator
+from functools import cache
 from pathlib import Path
 
 import pytest
@@ -67,6 +74,10 @@ FUNCTIONS = _ceilings.Ratchet(
     command=COMMAND,
     fix=f"Split it until it is at or under the ceiling (new functions: at or under {THRESHOLD} lines).",
     stale=f"The function is gone or now at or under {THRESHOLD} lines.",
+    new=(
+        "Moved or renamed an existing function? Delete its old entry and add this one with reason "
+        '"moved from <old key> (<PR>)", filled in.'
+    ),
 )
 HANDLERS = FUNCTIONS._replace(
     fix="Route handler: move the logic into a core/service function the handler calls.",
@@ -117,8 +128,12 @@ def _is_route_decorator(decorator: ast.expr) -> bool:
     )
 
 
+@cache
 def measure(repo_root: Path = REPO_ROOT) -> tuple[dict[str, dict[str, int]], frozenset[str]]:
-    """(every function over THRESHOLD lines -> {"lines", "params"}, the key of every route handler)."""
+    """(every function over THRESHOLD lines -> {"lines", "params"}, the key of every route handler).
+
+    Cached per root, like the parse it reads; callers must not mutate the result.
+    """
     functions: dict[str, dict[str, int]] = {}
     handlers: set[str] = set()
     for path, tree in parse_tree(repo_root / "tldw_Server_API" / "app").items():
@@ -172,6 +187,9 @@ def test_a_301_line_function_without_a_ceiling_fails(tmp_path: Path) -> None:
 
     assert functions == {"tldw_Server_API.app.core.big:over": {"lines": 301, "params": 2}}
     assert len(problems) == 1 and problems[0].startswith("tldw_Server_API.app.core.big:over: lines 301"), problems
+    assert 'Moved or renamed an existing function? Delete its old entry and add this one with reason "moved from' in (
+        problems[0]
+    )
 
 
 def test_one_line_or_parameter_over_the_ceiling_fails_and_shrinking_passes(tmp_path: Path) -> None:
@@ -287,7 +305,26 @@ def test_a_raised_ceiling_needs_a_new_reason(tmp_path: Path) -> None:
     assert problems({"m:bumped": {"lines": 401, "params": 2, "reason": "TASK-2 fix"}}) == []
     assert problems({"m:new": {"lines": 301, "params": 0, "reason": None}})  # a new entry is a raise
     assert problems({"m:new": {"lines": 301, "params": 0, "reason": "TASK-3"}}) == []
+    # The failure messages hand out templates; pasting one unfilled is no reason.
+    assert problems({"m:quiet": {"lines": 401, "params": 2, "reason": _ceilings.REASON_PLACEHOLDER}})
+    assert problems({"m:new": {"lines": 301, "params": 0, "reason": "moved from <old key> (<PR>)"}})
+    assert problems({"m:new": {"lines": 301, "params": 0, "reason": "moved from m:old (#3340)"}}) == []
     assert _ceilings.unreasoned_raises(ratchet, {"m:new": {"lines": 301, "params": 0, "reason": None}}, None) == []
+
+
+def test_a_bump_may_not_reserve_headroom(tmp_path: Path) -> None:
+    ratchet = _ratchet(tmp_path, {})
+    base: _ceilings.Baseline = {"m:f": {"lines": 400, "params": 2, "reason": None}}
+    bumped = {"m:f": {"lines": 450, "params": 2, "reason": "TASK-1 fix"}}
+
+    def problems(lines: int) -> list[str]:
+        return _ceilings.unreasoned_raises(ratchet, bumped, base, {"m:f": {"lines": lines, "params": 2}})
+
+    assert problems(450) == []
+    (headroom,) = problems(410)
+    assert headroom.startswith("m:f: raises lines to 450, above the code's 410") and '"lines": 410' in headroom
+    # An unraised ceiling above the code is just a ceiling: shrinking needs no edit.
+    assert _ceilings.unreasoned_raises(ratchet, base, base, {"m:f": {"lines": 350, "params": 1}}) == []
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -381,7 +418,7 @@ def test_route_handlers_stay_under_their_ceilings() -> None:
 
 
 def test_raised_function_ceilings_carry_a_new_reason() -> None:
-    problems = _ceilings.reasonless_bumps(FUNCTIONS)
+    problems = _ceilings.reasonless_bumps(FUNCTIONS, measure()[0])
     assert not problems, "\n".join(problems)
 
 
