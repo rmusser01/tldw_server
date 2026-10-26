@@ -915,6 +915,81 @@ def test_persona_tool_execution_denied_when_api_key_scope_missing(monkeypatch):
     assert fake_server.calls == []
 
 
+def test_a_read_only_key_stays_denied_write_tools_while_revalidation_is_in_flight(monkeypatch):
+    """The watchdog re-verifies the caller in its own task while a plan's tools run. Until that
+    verdict is in, the last verified scopes must stand: clearing them first would read as "not a
+    scoped key" and let a read-only key through a write-scoped tool (TASK-13950.7 review)."""
+    import threading
+
+    from tldw_Server_API.app.core.AuthNZ import websocket_principal
+    from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
+
+    class _FakeServer:
+        def __init__(self):
+            self.initialized = True
+            self.calls = []
+
+        async def initialize(self):
+            self.initialized = True
+
+        async def handle_http_request(self, request, user_id=None, metadata=None):
+            self.calls.append(request)
+            return SimpleNamespace(error=None, result={"ok": True})
+
+    armed, in_flight, release = threading.Event(), threading.Event(), threading.Event()
+
+    async def _http_verifier(request):  # a read-only scoped key; held once armed
+        if armed.is_set():
+            in_flight.set()
+            while not release.is_set():
+                await asyncio.sleep(0.005)
+        request.state._api_key_scope = "read"
+        return AuthPrincipal(kind="api_key", user_id=1, api_key_id=3, token_type="api_key")
+
+    send_json = persona_ep.WebSocketStream.send_json
+
+    async def _send_json(self, payload):
+        if payload.get("event") == "tool_call":  # the step is about to be scope-checked
+            armed.set()
+            deadline = time.monotonic() + 5
+            while not in_flight.is_set() and time.monotonic() < deadline:
+                await asyncio.sleep(0.005)
+        await send_json(self, payload)
+
+    fake_server = _FakeServer()
+    monkeypatch.setattr(persona_ep, "_resolve_authenticated_user_id", _ORIGINAL_RESOLVE_AUTHENTICATED_USER_ID)
+    monkeypatch.setattr(websocket_principal, "get_auth_principal", _http_verifier)
+    monkeypatch.setattr(persona_ep.WebSocketStream, "send_json", _send_json)
+    monkeypatch.setattr(persona_ep, "get_mcp_server", lambda: fake_server)
+    monkeypatch.setattr(persona_ep, "_get_persona_ws_auth_revalidate_interval_s", lambda: 0.01)
+
+    try:
+        with TestClient(fastapi_app) as c:
+            with c.websocket_connect("/api/v1/persona/stream", headers={"X-API-KEY": "read-only-key"}) as ws:
+                _ = json.loads(ws.receive_text())
+                session_id = "sess_scope_during_revalidation"
+                ws.send_text(json.dumps({"type": "user_message", "session_id": session_id, "text": "https://example.com"}))
+                plan = _recv_until(ws, lambda d: d.get("event") == "tool_plan")
+                ws.send_text(
+                    json.dumps(
+                        {
+                            "type": "confirm_plan",
+                            "session_id": session_id,
+                            "plan_id": plan["plan_id"],
+                            "approved_steps": [int(plan["steps"][0]["idx"])],
+                        }
+                    )
+                )
+                result = _recv_until(ws, lambda d: d.get("event") == "tool_result")
+                assert in_flight.is_set(), "the watchdog's revalidation must be in flight at the scope check"
+                assert result.get("reason_code") == "API_KEY_SCOPE_MISSING", result
+                release.set()
+    finally:
+        release.set()
+
+    assert fake_server.calls == []
+
+
 def test_persona_stream_closes_on_auth_revocation_before_confirm_plan(monkeypatch):
     from tldw_Server_API.app.api.v1.endpoints import persona as persona_ep
 

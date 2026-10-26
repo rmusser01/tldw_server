@@ -3568,13 +3568,18 @@ async def _resolve_authenticated_user_id(ws: WebSocket) -> tuple[str | None, boo
     API key only, its scopes in ``ws.state.persona_api_key_scopes`` for per-tool checks. The
     deprecated ``?token=`` / ``?api_key=`` channel stays readable for persona-stream.ts, which falls
     back to it for a credential that is not subprotocol-safe (TASK-13950.61).
+
+    The state changes only once the verdict is in: the watchdog re-verifies in its own task while
+    tools run, and a cleared scope list would read as "not a scoped key" and allow every tool.
     """
-    ws.state.persona_auth_method, ws.state.persona_api_key_scopes = "", None
     try:
         principal = await resolve_ws_principal_or_deprecated_query(ws, required_scope="read")
     except WebSocketException as exc:
+        # Fail closed until the socket closes: forward no credential and deny every scoped tool.
+        ws.state.persona_auth_method, ws.state.persona_api_key_scopes = "", []
         return None, exc.reason != "authentication_required", False
     if principal.user_id is None:  # a service token has no user to own persona state
+        ws.state.persona_auth_method, ws.state.persona_api_key_scopes = "", []
         return None, True, False
     ws.state.persona_auth_method = principal.token_type or ""
     ws.state.persona_api_key_scopes = getattr(ws.state, "ws_api_key_scopes", None)

@@ -75,7 +75,8 @@ async def test_missing_and_refused_credentials_are_told_apart(monkeypatch: pytes
     assert await persona_ep._resolve_authenticated_user_id(_socket([])) == (None, False, False)
     refused = _socket([(b"authorization", b"Bearer revoked")])
     assert await persona_ep._resolve_authenticated_user_id(refused) == (None, True, False)
-    assert refused.state.persona_auth_method == ""
+    # Until the socket closes: no credential to forward, and an empty scope list denies scoped tools.
+    assert (refused.state.persona_auth_method, refused.state.persona_api_key_scopes) == ("", [])
 
 
 @pytest.mark.parametrize("credentials_supplied", [False, True])
