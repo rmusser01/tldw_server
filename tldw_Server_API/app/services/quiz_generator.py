@@ -1284,7 +1284,14 @@ def _validate_strict_provenance(questions: Sequence[dict[str, Any]], selected_so
 
 def _build_source_contract(selected_sources: Sequence[dict[str, str]]) -> str:
     source_refs = ", ".join(f"{s['source_type']}:{s['source_id']}" for s in selected_sources)
-    return f"- Allowed sources for source_citations.source_type/source_id: {source_refs}"
+    identities = [
+        {"source_type": source["source_type"], "source_id": source["source_id"]} for source in selected_sources
+    ]
+    return (
+        f"- Allowed sources for source_citations.source_type/source_id: {source_refs}"
+        "\n- Copy each citation's source_type and source_id exactly from an allowed JSON object; do not use labels or placeholders."
+        f"\n- Allowed citation identities (JSON): {json.dumps(identities, ensure_ascii=False)}"
+    )
 
 
 def _truncate_quiz_evidence(text: str, limit: int = 120) -> str:
