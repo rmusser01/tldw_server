@@ -220,6 +220,23 @@ class ChatbookJobLimits:
     concurrent_jobs: float | None = None
 
 
+def record_failed_import_result(job: ImportJob, result: Any) -> None:
+    """Retain public partial-restore evidence without persisting private account payloads."""
+    if not isinstance(result, dict) or job.status == ImportStatus.CANCELLED:
+        return
+    for key in ("total_items", "processed_items", "successful_items", "failed_items", "skipped_items"):
+        value = result.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            setattr(job, key, value)
+    warnings = result.get("warnings")
+    if isinstance(warnings, list):
+        job.warnings = list(job.warnings or []) + [row for row in warnings if row not in (job.warnings or [])]
+    job.metadata = {
+        **(job.metadata if isinstance(job.metadata, dict) else {}),
+        **{key: result[key] for key in ("imported_items", "inventory_summary", "skipped_non_restorable") if key in result},
+    }
+
+
 class ChatbookService:
     """Service for creating and importing chatbooks with user isolation."""
 
@@ -3492,6 +3509,11 @@ class ChatbookService:
             sync_result = {
                 "imported_items": imported_items,
                 "warnings": list(import_status.warnings or []),
+                "total_items": import_status.total_items,
+                "processed_items": import_status.processed_items,
+                "successful_items": import_status.successful_items,
+                "failed_items": import_status.failed_items,
+                "skipped_items": import_status.skipped_items,
             }
             if inventory_summary:
                 sync_result["inventory_summary"] = inventory_summary
@@ -3500,6 +3522,11 @@ class ChatbookService:
             if account_restore_payload:
                 sync_result[_ACCOUNT_RESTORE_PAYLOAD_KEY] = account_restore_payload
 
+            if import_status.failed_items > 0:
+                return False, (
+                    f"Import incomplete: {import_status.failed_items}/{import_status.total_items} items failed; "
+                    f"{import_status.successful_items} imported, {import_status.skipped_items} skipped"
+                ), sync_result
             if import_status.successful_items > 0:
                 message = f"Successfully imported {import_status.successful_items}/{import_status.total_items} items"
                 if import_status.skipped_items > 0:
@@ -3654,10 +3681,10 @@ class ChatbookService:
                 result,
             )
 
+            latest = self._get_import_job(job.job_id)
+            if latest and latest.status == ImportStatus.CANCELLED:
+                return
             if success:
-                latest = self._get_import_job(job.job_id)
-                if latest and latest.status == ImportStatus.CANCELLED:
-                    return
                 job.status = ImportStatus.COMPLETED
                 if isinstance(result, dict):
                     imported_items = result.get("imported_items") if isinstance(result.get("imported_items"), dict) else {}
@@ -3688,6 +3715,7 @@ class ChatbookService:
                     job.total_items = 0
                     job.processed_items = 0
             else:
+                record_failed_import_result(job, result)
                 job.status = ImportStatus.FAILED
                 job.error_message = message
 
@@ -7737,13 +7765,16 @@ class ChatbookService:
                     wb_data = json.load(f)
 
                 # Handle import with conflict resolution
-                wb_name = wb_data.get('name', 'Unnamed')
+                wb_details = wb_data.get('world_book')
+                if not isinstance(wb_details, dict):
+                    wb_details = wb_data
+                wb_name = wb_details.get('name', 'Unnamed')
                 if prefix_imported:
                     wb_name = f"[Imported] {wb_name}"
                     wb_data['name'] = wb_name
 
                 # Check for existing world book
-                existing = wb_service.get_world_book_by_name(wb_name)
+                existing = wb_service.get_world_book(name=wb_name)
                 if existing and conflict_resolution == ConflictResolution.SKIP:
                     status.skipped_items += 1
                     continue
@@ -7751,7 +7782,9 @@ class ChatbookService:
                     wb_name = self._generate_unique_name(wb_name, "world_book")
                     wb_data['name'] = wb_name
 
-                # Import world book
+                # The service prefers the nested legacy shape when it is present.
+                wb_details['name'] = wb_name
+                wb_data['name'] = wb_name
                 success = wb_service.import_world_book(wb_data)
 
                 if success:

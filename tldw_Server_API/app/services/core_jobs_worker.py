@@ -16,7 +16,7 @@ from tldw_Server_API.app.core.Chatbooks.chatbook_models import (
     ImportStatus,
     coerce_chatbook_export_version,
 )
-from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService
+from tldw_Server_API.app.core.Chatbooks.chatbook_service import ChatbookService, record_failed_import_result
 from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import chacha_operation
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.db_path_utils import DatabasePaths
@@ -346,6 +346,7 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                             except _CORE_JOBS_WORKER_NONCRITICAL_EXCEPTIONS:
                                 logger.debug("metrics increment failed for renew_task_cancel_failed")
             elif action == "import":
+                result = None
                 file_ref = payload.get("file_token") or payload.get("file_path")
                 _renew_task = None
                 try:
@@ -471,7 +472,8 @@ async def run_chatbooks_core_jobs_worker(stop_event: asyncio.Event | None = None
                             svc._save_import_job(ij)
                         jm.complete_job(int(job["id"]), worker_id=worker_id, lease_id=str(lease_id), completion_token=str(lease_id))
                     else:
-                        if ij:
+                        if ij and ij.status != ImportStatus.CANCELLED:
+                            record_failed_import_result(ij, result)
                             ij.status = ImportStatus.FAILED
                             ij.completed_at = datetime.now(timezone.utc)
                             ij.error_message = msg
