@@ -900,6 +900,7 @@ class TransportAdapter(Protocol):
         params: dict[str, Any] | None = None,
         json: Any | None = None,
         data: Any | None = None,
+        content: str | bytes | None = None,
         files: Any | None = None,
         timeout: Any | None = None,
         allow_redirects: bool = True,
@@ -1008,6 +1009,7 @@ class HttpxAdapter:
         params: dict[str, Any] | None = None,
         json: Any | None = None,
         data: Any | None = None,
+        content: str | bytes | None = None,
         files: Any | None = None,
         timeout: float | httpx.Timeout | None = None,
         allow_redirects: bool = True,
@@ -1028,6 +1030,7 @@ class HttpxAdapter:
             params=params,
             json=json,
             data=data,
+            content=content,
             files=files,
             timeout=timeout,
             allow_redirects=allow_redirects,
@@ -1151,6 +1154,7 @@ class AiohttpAdapter:
         params: dict[str, Any] | None = None,
         json: Any | None = None,
         data: Any | None = None,
+        content: str | bytes | None = None,
         files: Any | None = None,
         timeout: Any | None = None,
         allow_redirects: bool = True,
@@ -1171,6 +1175,7 @@ class AiohttpAdapter:
             params=params,
             json=json,
             data=data,
+            content=content,
             files=files,
             timeout=timeout,
             allow_redirects=allow_redirects,
@@ -2852,6 +2857,7 @@ async def _httpx_arequest_io(
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     data: Any | None = None,
+    content: str | bytes | None = None,
     files: Any | None = None,
     timeout: float | httpx.Timeout | None = None,
     follow_redirects: bool = False,
@@ -2860,6 +2866,8 @@ async def _httpx_arequest_io(
     max_response_bytes: int | None = None,
 ) -> httpx.Response:
     method_upper = str(method).upper()
+    # Only sent when set, so client stubs that predate ``content`` keep working.
+    body_kwargs: dict[str, Any] = {"content": content} if content is not None else {}
     transport_url, headers, sni_hostname = _prepare_pinned_transport_target(
         url,
         headers,
@@ -2875,6 +2883,7 @@ async def _httpx_arequest_io(
             "params": params,
             "json": json,
             "data": data,
+            **body_kwargs,
             "files": files,
             "timeout": timeout,
             "follow_redirects": follow_redirects,
@@ -2923,6 +2932,7 @@ async def _httpx_arequest_io(
             params=params,
             json=json,
             data=data,
+            **body_kwargs,
             files=files,
             timeout=timeout,
             follow_redirects=follow_redirects,
@@ -2940,6 +2950,7 @@ async def _httpx_arequest_io(
             params=params,
             json=json,
             data=data,
+            **body_kwargs,
             files=files,
             timeout=timeout,
             follow_redirects=follow_redirects,
@@ -2963,6 +2974,7 @@ async def _httpx_arequest_io(
         "params": params,
         "json": json,
         "data": data,
+        **body_kwargs,
         "files": files,
         "timeout": timeout,
         "follow_redirects": follow_redirects,
@@ -2980,6 +2992,7 @@ async def _aiohttp_request_io(
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     data: Any | None = None,
+    content: str | bytes | None = None,
     files: Any | None = None,
     timeout: Any | None = None,
     proxies: str | dict[str, str] | None = None,
@@ -3022,6 +3035,8 @@ async def _aiohttp_request_io(
             req_kwargs["json"] = json
         if data is not None:
             req_kwargs["data"] = data
+        if content is not None:
+            req_kwargs["data"] = content
     async with session.request(str(method).upper(), url, **req_kwargs) as resp:
         if max_response_bytes is None:
             body = await resp.read()
@@ -3293,6 +3308,7 @@ async def _afetch_httpx(
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     data: Any | None = None,
+    content: str | bytes | None = None,
     files: Any | None = None,
     timeout: float | httpx.Timeout | None = None,
     allow_redirects: bool = True,
@@ -3393,6 +3409,7 @@ async def _afetch_httpx(
                 params=params,
                 json=json,
                 data=data,
+                content=content,
                 files=files,
                 timeout=timeout,
                 follow_redirects=False,
@@ -3519,6 +3536,7 @@ async def _afetch_httpx(
                                         params=params,
                                         json=json,
                                         data=data,
+                                        content=content,
                                         files=files,
                                         timeout=_head_fb_to,
                                         follow_redirects=False,
@@ -3713,6 +3731,7 @@ async def _afetch_aiohttp(
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     data: Any | None = None,
+    content: str | bytes | None = None,
     files: Any | None = None,
     timeout: Any | None = None,
     allow_redirects: bool = True,
@@ -3813,6 +3832,7 @@ async def _afetch_aiohttp(
                 params=params,
                 json=json,
                 data=data,
+                content=content,
                 files=files,
                 timeout=timeout,
                 proxies=proxies,
@@ -4089,6 +4109,7 @@ async def afetch(
     params: dict[str, Any] | None = None,
     json: Any | None = None,
     data: Any | None = None,
+    content: str | bytes | None = None,
     files: Any | None = None,
     timeout: Any | None = None,
     allow_redirects: bool = True,
@@ -4101,7 +4122,13 @@ async def afetch(
     transport: str | None = None,
     max_response_bytes: int | None = None,
 ) -> Any:
-    """Issue one async request, optionally bounding the decoded success body."""
+    """Issue one async request, optionally bounding the decoded success body.
+
+    ``content`` sends a raw str/bytes body as is (httpx's ``content=``); it cannot be
+    combined with ``data``, ``json`` or ``files``.
+    """
+    if content is not None and (data is not None or json is not None or files is not None):
+        raise ValueError("afetch: content cannot be combined with data, json or files")
     if client is not None:
         adapter_name = "aiohttp" if _is_aiohttp_client(client) else "httpx"
         if (
@@ -4123,6 +4150,7 @@ async def afetch(
         params=params,
         json=json,
         data=data,
+        content=content,
         files=files,
         timeout=timeout,
         allow_redirects=allow_redirects,
