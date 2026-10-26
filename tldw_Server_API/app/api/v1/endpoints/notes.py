@@ -258,6 +258,7 @@ from tldw_Server_API.app.core.Sync.v2.server_origin_batch import (
 )
 from tldw_Server_API.app.core.Sync.v2.service import SyncV2Service
 from tldw_Server_API.app.core.Utils.base64url import verify_signed_token
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 from tldw_Server_API.app.core.Writing.note_title import TitleGenOptions, generate_note_title
 
 #
@@ -1618,7 +1619,7 @@ def _normalize_import_keywords(raw_keywords: Any) -> list[str]:
     deduped: list[str] = []
     seen: set[str] = set()
     for token in tokens:
-        key = token.lower()
+        key = normalize_keyword_identity(token)
         if key in seen:
             continue
         seen.add(key)
@@ -1885,7 +1886,7 @@ def _sync_note_keywords(db: CharactersRAGDB, note_id: str, keywords: list[str]) 
         text = _normalize_keyword_text(kw)
         if not text:
             continue
-        key = text.lower()
+        key = normalize_keyword_identity(text)
         if key in desired:
             continue
         desired[key] = text
@@ -1901,7 +1902,7 @@ def _sync_note_keywords(db: CharactersRAGDB, note_id: str, keywords: list[str]) 
         text = _keyword_text_from_row(row)
         if not text:
             continue
-        existing_by_key[text.lower()] = row
+        existing_by_key[normalize_keyword_identity(text)] = row
 
     desired_keys = set(desired.keys())
     failed_keywords: list[str] = []
@@ -1991,7 +1992,7 @@ def _normalize_keyword_tokens(tokens: Optional[list[str]]) -> list[str]:
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Keyword tokens must be {_NOTES_KEYWORD_TOKEN_MAX_LENGTH} characters or fewer.",
             )
-        key = text.lower()
+        key = normalize_keyword_identity(text)
         if key in seen:
             continue
         if len(out) >= _NOTES_KEYWORD_TOKEN_MAX_COUNT:
@@ -2000,7 +2001,7 @@ def _normalize_keyword_tokens(tokens: Optional[list[str]]) -> list[str]:
                 detail=f"Too many keyword tokens; maximum is {_NOTES_KEYWORD_TOKEN_MAX_COUNT}.",
             )
         seen.add(key)
-        out.append(key)
+        out.append(text)
     return out
 
 
@@ -2034,7 +2035,7 @@ def _sync_collection_keywords(
         text = _normalize_keyword_text(kw)
         if not text:
             continue
-        key = text.lower()
+        key = normalize_keyword_identity(text)
         if key not in desired:
             desired[key] = text
 
@@ -2049,7 +2050,7 @@ def _sync_collection_keywords(
         text = _keyword_text_from_row(row)
         if not text:
             continue
-        existing_by_key[text.lower()] = row
+        existing_by_key[normalize_keyword_identity(text)] = row
 
     desired_keys = set(desired.keys())
     failed_keywords: list[str] = []

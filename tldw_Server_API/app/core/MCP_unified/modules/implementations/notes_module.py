@@ -26,6 +26,7 @@ from ....Notes.organization_capture import (
 )
 from ....Notes_Tasks import NotesTaskService, TaskActor
 from ....Notes_Tasks.service import TaskStoreScope, resolve_task_compatibility_scope
+from ....Utils.keyword_identity import normalize_keyword_identity
 from ...persona_scope import assert_identifier_in_scope, get_explicit_scope_ids, merge_requested_ids_with_scope
 from ..base import BaseModule, create_tool_definition
 from ..disk_space import get_free_disk_space_gb
@@ -2059,9 +2060,9 @@ class NotesModule(BaseModule):
                     source="mcp-notes",
                 )
             elif norm_tags:
-                existing = {t.lower() for t in self._tags_for_note(db, note_id)}
+                existing = {normalize_keyword_identity(t) for t in self._tags_for_note(db, note_id)}
                 for tag in norm_tags:
-                    if tag in existing:
+                    if normalize_keyword_identity(tag) in existing:
                         continue
                     kid = self._ensure_keyword(db, tag)
                     if kid is not None:
@@ -2082,8 +2083,10 @@ class NotesModule(BaseModule):
             norm_tags = self._normalize_tags(tags)
             coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
             if coordinator is not None:
-                removed = set(norm_tags)
-                desired = [tag for tag in self._tags_for_note(db, note_id) if tag not in removed]
+                removed = {normalize_keyword_identity(tag) for tag in norm_tags}
+                desired = [
+                    tag for tag in self._tags_for_note(db, note_id) if normalize_keyword_identity(tag) not in removed
+                ]
                 replace_keywords(
                     coordinator,
                     subject_type="note",
@@ -2109,28 +2112,32 @@ class NotesModule(BaseModule):
         try:
             if not db.get_note_by_id(note_id):
                 raise ValueError(f"Note not found: {note_id}")
-            desired = set(self._normalize_tags(tags))
+            desired = {normalize_keyword_identity(tag): tag for tag in self._normalize_tags(tags)}
             coordinator = active_coordinator(db, user_id=getattr(context, "user_id", None))
             if coordinator is not None:
                 replace_keywords(
                     coordinator,
                     subject_type="note",
                     subject_id=note_id,
-                    keywords=sorted(desired),
+                    keywords=sorted(desired.values()),
                     source="mcp-notes",
                 )
                 return {"note_id": note_id, "tags": self._tags_for_note(db, note_id), "success": True}
             existing_rows = db.get_keywords_for_note(note_id)
-            existing = {str(r.get("keyword")).lower(): int(r.get("id")) for r in existing_rows if r.get("keyword") is not None}
+            existing = {
+                normalize_keyword_identity(str(r.get("keyword"))): int(r.get("id"))
+                for r in existing_rows
+                if r.get("keyword") is not None
+            }
 
             # Remove tags not desired
-            for tag, kid in existing.items():
-                if tag not in desired:
+            for identity, kid in existing.items():
+                if identity not in desired:
                     db.unlink_note_from_keyword(note_id, int(kid))
 
             # Add missing tags
-            for tag in desired:
-                if tag in existing:
+            for identity, tag in desired.items():
+                if identity in existing:
                     continue
                 kid = self._ensure_keyword(db, tag)
                 if kid is not None:
@@ -2216,14 +2223,15 @@ class NotesModule(BaseModule):
         for t in tags or []:
             if not isinstance(t, str):
                 continue
-            norm = t.strip().lower()
+            norm = t.strip()
             if not norm:
                 continue
             if len(norm) > 64:
                 raise ValueError("each tag must be <= 64 chars")
-            if norm in seen:
+            identity = normalize_keyword_identity(norm)
+            if identity in seen:
                 continue
-            seen.add(norm)
+            seen.add(identity)
             out.append(norm)
             if len(out) > 50:
                 raise ValueError("tags must contain <= 50 items")
@@ -2248,4 +2256,4 @@ class NotesModule(BaseModule):
 
     def _tags_for_note(self, db: CharactersRAGDB, note_id: str) -> list[str]:
         rows = db.get_keywords_for_note(note_id)
-        return [str(r.get("keyword")).lower() for r in rows if r.get("keyword") is not None]
+        return [str(r.get("keyword")) for r in rows if r.get("keyword") is not None]

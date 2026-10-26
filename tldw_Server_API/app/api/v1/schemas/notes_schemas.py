@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Notes.wikilinks import (
     is_single_wikilink,
 )
 from tldw_Server_API.app.core.Sync.v2.notes_provenance_contract import validate_notes_provenance_payload
+from tldw_Server_API.app.core.Utils.keyword_identity import normalize_keyword_identity
 
 from .notes_studio import NoteStudioDocumentSummaryResponse
 
@@ -45,6 +46,17 @@ def _split_keywords(value: Any) -> list[str] | None:
     if isinstance(value, list):
         return [p.strip() for p in value if isinstance(p, str)]
     raise ValueError("Keywords must be a list of strings or a comma-separated string.")
+
+
+def _dedupe_keywords(parts: list[str] | None) -> list[str] | None:
+    """Drop empties and keyword-identity duplicates, keeping the first-seen casing."""
+    if parts is None:
+        return None
+    unique: dict[str, str] = {}
+    for part in parts:
+        if part:
+            unique.setdefault(normalize_keyword_identity(part), part)
+    return list(unique.values()) or None
 
 
 def _normalize_folder_paths(value: Any) -> list[str] | None:
@@ -161,22 +173,7 @@ class NoteCreate(NoteBase, NoteProvenanceWrite):
 
     @property
     def normalized_keywords(self) -> list[str] | None:
-        parts = _split_keywords(getattr(self, 'keywords', None))
-        if parts is None:
-            return None
-        # Remove empties and deduplicate while preserving order
-        seen = set()
-        result: list[str] = []
-        for p in parts:
-            if not p:
-                continue
-            # Dedup case-insensitive
-            key = p.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append(p)
-        return result or None
+        return _dedupe_keywords(_split_keywords(getattr(self, 'keywords', None)))
 
     @property
     def normalized_folder_paths(self) -> list[str] | None:
@@ -230,20 +227,7 @@ class NoteUpdate(NoteProvenanceWrite):
 
     @property
     def normalized_keywords(self) -> list[str] | None:
-        parts = _split_keywords(getattr(self, 'keywords', None))
-        if parts is None:
-            return None
-        seen = set()
-        result: list[str] = []
-        for p in parts:
-            if not p:
-                continue
-            key = p.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append(p)
-        return result or None
+        return _dedupe_keywords(_split_keywords(getattr(self, 'keywords', None)))
 
     @property
     def normalized_folder_paths(self) -> list[str] | None:
@@ -410,20 +394,7 @@ class KeywordCollectionCreate(KeywordCollectionBase):
 
     @property
     def normalized_keywords(self) -> list[str] | None:
-        parts = _split_keywords(getattr(self, 'keywords', None))
-        if parts is None:
-            return None
-        seen = set()
-        result: list[str] = []
-        for p in parts:
-            if not p:
-                continue
-            key = p.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append(p)
-        return result or None
+        return _dedupe_keywords(_split_keywords(getattr(self, 'keywords', None)))
 
 
 class KeywordCollectionUpdate(BaseModel):
@@ -453,20 +424,7 @@ class KeywordCollectionUpdate(BaseModel):
 
     @property
     def normalized_keywords(self) -> list[str] | None:
-        parts = _split_keywords(getattr(self, 'keywords', None))
-        if parts is None:
-            return None
-        seen = set()
-        result: list[str] = []
-        for p in parts:
-            if not p:
-                continue
-            key = p.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            result.append(p)
-        return result or None
+        return _dedupe_keywords(_split_keywords(getattr(self, 'keywords', None)))
 
 
 class KeywordCollectionResponse(BaseModel):
