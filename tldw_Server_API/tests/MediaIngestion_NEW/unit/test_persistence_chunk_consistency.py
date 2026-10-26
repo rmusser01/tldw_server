@@ -739,7 +739,7 @@ async def test_persist_primary_av_item_keeps_first_seen_casing_of_extracted_keyw
     monkeypatch.setattr(ingestion_persistence, "_enforce_chunk_consistency_after_persist", _noop)
     monkeypatch.setattr(ingestion_persistence, "persist_claims_if_applicable", _noop)
     db_path = str(tmp_path / "keywords.db")
-    process_result = {
+    process_result: dict[str, Any] = {
         "status": "Success",
         "input_ref": "talk.mp3",
         "processing_source": "talk.mp3",

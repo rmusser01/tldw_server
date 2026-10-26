@@ -885,7 +885,7 @@ def test_soft_delete_keyword_postgres_uses_backend_helpers() -> None:
     assert db.soft_delete_keyword("Science") is True
 
     db._fetchall_with_connection.assert_called_once()  # type: ignore[attr-defined]
-    lookup = db._fetchall_with_connection.call_args.args[1]  # type: ignore[attr-defined]
+    lookup = db._fetchall_with_connection.call_args.args[1]
     assert "LOWER(keyword) IN" in lookup and "deleted = FALSE" in lookup
     update_call = db._execute_with_connection.call_args_list[0]  # type: ignore[attr-defined]
     assert "UPDATE Keywords" in update_call.args[1]

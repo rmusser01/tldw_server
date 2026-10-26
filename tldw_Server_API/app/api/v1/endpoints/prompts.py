@@ -12,7 +12,7 @@ import re
 import traceback
 from collections.abc import Mapping
 from dataclasses import asdict
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, cast
 
 #
 # 3rd-party imports
@@ -210,7 +210,7 @@ def _inline_local_openapi_refs(schema: dict[str, Any]) -> dict[str, Any]:
                 return expand({**referenced, **siblings})
         return {key: expand(item) for key, item in value.items()}
 
-    return expand(schema)
+    return cast(dict[str, Any], expand(schema))
 
 
 def _extract_template_variables(template: str) -> list[str]:
@@ -385,8 +385,8 @@ def _get_single_user_api_key() -> Optional[str]:
     except _PROMPTS_LOOKUP_EXCEPTIONS:
         key = None
     if key:
-        return key
-    return settings.get("SINGLE_USER_API_KEY")
+        return cast(Optional[str], key)
+    return cast(Optional[str], settings.get("SINGLE_USER_API_KEY"))
 
 
 async def _resolve_prompts_auth_user(
@@ -606,7 +606,7 @@ def _prompt_improvement_error_response(
         except (TypeError, ValueError):
             retry_after_seconds = None
     error = schemas.PromptImproveErrorResponse(
-        code=public_code,
+        code=cast(schemas.PromptImproveErrorCode, public_code),
         message=_PROMPT_IMPROVEMENT_ERROR_MESSAGES[public_code],
         retryable=should_retry,
         retry_after_seconds=retry_after_seconds,
