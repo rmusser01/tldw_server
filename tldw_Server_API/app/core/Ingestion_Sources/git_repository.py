@@ -38,6 +38,18 @@ _DEFAULT_LOCAL_FILE_MAX_BYTES = 50 * 1024 * 1024
 _DEFAULT_GIT_LS_FILES_TIMEOUT_SECONDS = 30
 
 
+class GitHubAPIError(ValueError):
+    """A GitHub API request failed or was refused by the egress policy.
+
+    A ValueError, the error contract the ingestion worker handles. ``status_code`` is the
+    HTTP status, or None when no response came back (transport failure or egress refusal).
+    """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 def _positive_int_from_env(env_name: str, default: int) -> int:
     raw_value = os.getenv(env_name)
     if raw_value is None or raw_value.strip() == "":
@@ -365,8 +377,8 @@ def _github_api_get_json(
     """GET one GitHub API JSON document through core.http_client.
 
     Every hop, redirects included, must be an https://api.github.com URL and pass the
-    egress policy (checked and IP-pinned by ``stream_response``). Failures are raised as
-    ValueError, the error contract the ingestion worker handles.
+    egress policy (checked and IP-pinned by ``stream_response``). Request failures are
+    raised as GitHubAPIError, a ValueError.
     """
     headers = {
         "Accept": accept,
@@ -387,7 +399,10 @@ def _github_api_get_json(
                     url = urljoin(url, location)
                     continue
                 if response.status_code // 100 != 2:
-                    raise ValueError(f"GitHub API request failed with HTTP {response.status_code}")
+                    raise GitHubAPIError(
+                        f"GitHub API request failed with HTTP {response.status_code}",
+                        status_code=response.status_code,
+                    )
                 if max_response_bytes is None:
                     payload_bytes = response.read()
                 else:
@@ -402,7 +417,7 @@ def _github_api_get_json(
                         chunks.append(chunk)
                     payload_bytes = b"".join(chunks)
         except (EgressPolicyError, httpx.HTTPError) as exc:
-            raise ValueError(f"GitHub API request failed: {exc}") from exc
+            raise GitHubAPIError(f"GitHub API request failed: {exc}") from exc
         return json.loads(payload_bytes.decode("utf-8"))
     raise ValueError("GitHub API request redirected too many times")
 

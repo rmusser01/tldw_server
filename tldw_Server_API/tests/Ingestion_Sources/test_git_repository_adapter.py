@@ -541,3 +541,27 @@ def test_remote_github_blob_fetch_failure_is_recorded_not_raised(monkeypatch, fa
     assert set(failures) == {"alpha.md"}
     expected = "HTTP 404" if failure == "http_404" else "connection refused"
     assert expected in failures["alpha.md"]["error"]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("failure", "status_code"), [("http_429", 429), ("connect_error", None)])
+def test_github_api_failures_carry_their_http_status(monkeypatch, failure, status_code):
+    """GitHubAPIError is a ValueError (the worker's contract) that keeps the status for callers."""
+    import httpx
+
+    import tldw_Server_API.app.core.Ingestion_Sources.git_repository as git_repository
+
+    def handler(request):
+        if failure == "connect_error":
+            raise httpx.ConnectError("connection refused", request=request)
+        return httpx.Response(429, json={"message": "rate limited"})
+
+    client = _route_github_api_through_mock_transport(monkeypatch, handler)
+    try:
+        with pytest.raises(git_repository.GitHubAPIError) as raised:
+            git_repository._github_api_get_json(_REPO_API_URL, access_token=None)
+    finally:
+        client.close()
+
+    assert raised.value.status_code == status_code
+    assert isinstance(raised.value, ValueError)

@@ -33,6 +33,7 @@ def test_git_repository_snapshot_live_github_api_round_trip():
     _require_external()
 
     from tldw_Server_API.app.core.Ingestion_Sources.git_repository import (
+        GitHubAPIError,
         build_git_repository_snapshot_with_failures,
         validate_git_repository_source,
     )
@@ -70,13 +71,11 @@ def test_git_repository_snapshot_live_github_api_round_trip():
             sink_type="notes",
             access_token=access_token,
         )
-    except ValueError as exc:
-        # The adapter raises ValueError for every GitHub API failure (TASK-13950.11).
-        message = str(exc)
-        if any(f"with HTTP {code}" in message for code in (403, 429, 500, 502, 503, 504)):
-            pytest.skip(f"GitHub API unavailable or rate limited: {message}")
-        if message.startswith("GitHub API request failed: "):
-            pytest.skip(f"GitHub API unreachable in this environment: {message}")
+    except GitHubAPIError as exc:
+        if exc.status_code in {403, 429, 500, 502, 503, 504}:
+            pytest.skip(f"GitHub API unavailable or rate limited: HTTP {exc.status_code}")
+        if exc.status_code is None:
+            pytest.skip(f"GitHub API unreachable in this environment: {exc}")
         raise
 
     assert failures == {}  # nosec B101
