@@ -12,11 +12,6 @@ const MODEL_SEARCH_INPUT = 'input:not([type="radio"]):not([type="checkbox"])'
 
 type ChatModelSelectorDropdownProps = {
   apiModelLabel: string
-  /**
-   * The selected model's name and provider. When given, the chip shows the
-   * model first and the provider second, truncating the provider before the
-   * model name (CC-06).
-   */
   connectionStatusLabel: string
   /** The server cannot take a send (offline, unconfigured); always a warning. */
   connectionStatusWarning?: boolean
@@ -140,6 +135,19 @@ export const ChatModelSelectorDropdown = React.memo(
       readinessWarning
     const switchTarget = readinessShown ? modelReadiness?.switchTarget ?? null : null
     const [switchAnnouncement, setSwitchAnnouncement] = React.useState("")
+    // The aria-label replaces the chip's content (and the Tooltip overrides
+    // aria-describedby), so the name carries the status: the model, the
+    // status word when the explanation does not already say it, then the
+    // explanation.
+    const statusReported =
+      readinessShown || (statusWarning && statusTitle === apiModelLabel)
+    const chipAccessibleName = [
+      apiModelLabel,
+      statusReported ? statusLabel : null,
+      statusTitle
+    ]
+      .filter((part, index, parts): part is string => Boolean(part) && parts.indexOf(part) === index)
+      .join(". ")
     // The switch button unmounts once the new model is selected, so focus
     // moves to the chip and the change is announced (CC-01).
     const handleSwitchToTarget = React.useCallback(() => {
@@ -297,7 +305,7 @@ export const ChatModelSelectorDropdown = React.memo(
               if (modelDropdownOpen) event.preventDefault()
             }}
             title={modelDropdownOpen ? undefined : statusTitle}
-            aria-label={statusTitle === apiModelLabel ? apiModelLabel : `${apiModelLabel}. ${statusTitle}`}
+            aria-label={chipAccessibleName}
             aria-haspopup="menu"
             aria-expanded={modelDropdownOpen}
             data-testid="model-selector"
@@ -331,7 +339,7 @@ export const ChatModelSelectorDropdown = React.memo(
           type="button"
           data-testid="model-readiness-switch"
           onClick={handleSwitchToTarget}
-          className="inline-flex min-h-[44px] min-w-0 max-w-full items-center rounded-full border border-border bg-surface px-2 text-[11px] text-text hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+          className="inline-flex min-h-[44px] min-w-0 max-w-full items-center rounded-lg border border-border px-2 text-xs text-text hover:bg-surface2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
         >
           <span className="truncate">{switchTarget.label}</span>
         </button>

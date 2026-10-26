@@ -71,10 +71,9 @@ describe("ParameterPresets guard", () => {
   })
 
   // CC-09 (#3101): the Pro advanced row showed four unlabeled icons.
-  it("shows a visible Generation style label and option names when asked", () => {
-    render(React.createElement(ParameterPresets, { showLabel: true }))
+  it("names the group and shows each option's name when not compact", () => {
+    render(React.createElement(ParameterPresets))
 
-    expect(screen.getByText("Generation style")).toBeVisible()
     const group = screen.getByRole("radiogroup", { name: "Generation style" })
     for (const name of ["Creative", "Balanced", "Precise", "Custom"]) {
       const label = within(group).getByText(name)

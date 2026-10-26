@@ -4715,9 +4715,6 @@
   "composer_shortcutHintCommands": {
     "message": "/ commands"
   },
-  "composer_advancedPreferenceUnavailable": {
-    "message": "Display preference unavailable. Advanced controls still work for this visit."
-  },
   "messageViews": {
     "label": "Message view",
     "transcript": "Transcript",

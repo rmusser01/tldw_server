@@ -71,7 +71,7 @@ describe("ServerChatRow compact layout (CS-08)", () => {
     expect(within(meta).queryByText(state)).toBeNull()
   })
 
-  it("puts the state, last update and topic on one line under the title", () => {
+  it("groups the state, last update and topic in one row under the title", () => {
     renderRow(createChat({ topic_label: "Field trials" }))
 
     const meta = screen.getByTestId("server-chat-row-meta")

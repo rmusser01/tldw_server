@@ -3215,8 +3215,13 @@ test.describe('/chat cockpit real-server parity', () => {
     await assertRuntimeProviderSummary(runtimeInspector);
     const modelRoute = runtimeInspector.getByRole('region', { name: 'Model route', exact: true });
     const routeValues = modelRoute.locator('dl').first().locator('dd');
-    // Plain names (CC-06): the provider's display name, never a raw key or route.
-    await expect(routeValues.nth(0)).not.toHaveText(/:/);
+    // Plain names (CC-06): the provider's display name ("Custom OpenAI API"
+    // for custom-openai-api), never a raw key, route or the empty fallback.
+    const compactName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+    await expect(routeValues.nth(0)).not.toHaveText(/:|No provider selected/);
+    expect(compactName((await routeValues.nth(0).textContent()) ?? '')).toContain(
+      compactName(normalizeCockpitProviderKey(chatModelSelection.provider))
+    );
     await expect(routeValues.nth(1)).toHaveText(chatModelSelection.model);
     await expect(modelRoute.getByRole('button', { name: 'Open model settings' })).toHaveAttribute('title', modelKey);
 

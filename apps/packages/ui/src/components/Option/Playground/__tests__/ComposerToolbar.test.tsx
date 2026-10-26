@@ -403,12 +403,20 @@ describe("calm composer", () => {
     expect(screen.queryByRole("button", { name: "Web search" })).toBeNull();
   });
 
-  // CC-09: the Pro presets read as named styles, not four bare icons.
+  // CC-09: the Pro presets read as named styles, not four bare icons; on a
+  // phone they stay compact (named for assistive tech) so Tools fits.
   it("names the Pro generation-style presets inside Tools", () => {
-    render(<ToolbarHarness isProMode optionsExpanded />);
+    const { unmount } = render(<ToolbarHarness isProMode optionsExpanded />);
     expect(screen.getByTestId("parameter-presets")).toHaveAttribute(
       "data-compact",
       "false",
+    );
+    unmount();
+
+    render(<ToolbarHarness isProMode isMobile optionsExpanded />);
+    expect(screen.getByTestId("parameter-presets")).toHaveAttribute(
+      "data-compact",
+      "true",
     );
   });
 

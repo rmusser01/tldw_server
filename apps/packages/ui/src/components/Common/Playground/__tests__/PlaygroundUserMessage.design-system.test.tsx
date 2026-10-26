@@ -214,4 +214,13 @@ describe.each([
       "prose", "max-w-none", "dark:prose-invert", "break-words", width, shape
     )
   })
+
+  // The Casual 75% cap is for bubbles; aligned views and edit forms span the row.
+  it("caps only a read-only bubble at 75%", () => {
+    const { container: reading } = renderUserMessage({ messageView, editMode: false })
+    const capped = shape === "rounded-3xl"
+    expect(reading.querySelector(".message-bubble")?.className.includes("sm:max-w-[75%]")).toBe(capped)
+    const { container: editing } = renderUserMessage({ messageView, editMode: true })
+    expect(editing.querySelector(".message-bubble")?.className).not.toContain("sm:max-w-[75%]")
+  })
 })

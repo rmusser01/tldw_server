@@ -47,7 +47,6 @@ export type UseModelSelectorParams = {
   loadCatalogModels?: () => Promise<ModelSelectorDescriptor[]>
 }
 
-
 export function useModelSelector({
   composerModels,
   selectedModel,
@@ -210,7 +209,6 @@ export function useModelSelector({
       ? `${modelSummaryLabel} (${resolvedProviderName})`
       : modelSummaryLabel
   }, [modelSummaryLabel, resolvedProviderName, selectedModel, t])
-
 
   const modelSelectorWarning = !selectedSelection.key || !selectedSelection.provider
 

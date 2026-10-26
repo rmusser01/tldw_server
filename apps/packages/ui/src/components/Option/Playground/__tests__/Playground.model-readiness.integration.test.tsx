@@ -40,6 +40,8 @@ const twoProviderServer = (ollamaHealth?: Record<string, unknown>) =>
   })
 
 const modelStatus = () => screen.getByTestId("model-selector-status")
+/** The status as people perceive it: in the chip's accessible name. */
+const modelChip = () => screen.getByTestId("model-selector")
 
 /** Send a message whose completion fails; the composer keeps the draft. */
 const sendFailingTurn = async (view: PlaygroundView, text: string) => {
@@ -73,10 +75,10 @@ describe("Playground model readiness chip (CC-01, #3111)", { timeout: 90_000 }, 
     // Without evidence the chip names only the server connection (the
     // harness reports no knowledge service, so that reads "Degraded").
     await waitFor(
-      () => expect(modelStatus()).toHaveTextContent(/Server connected|Degraded/),
+      () => expect(modelChip()).toHaveAccessibleName(/Server connected|Degraded/),
       HARNESS_WAIT
     )
-    expect(modelStatus()).not.toHaveTextContent(/Healthy|Working/)
+    expect(modelChip()).not.toHaveAccessibleName(/Healthy|Working/)
     expect(modelStatus()).not.toHaveAttribute("data-model-readiness")
   })
 
@@ -95,7 +97,7 @@ describe("Playground model readiness chip (CC-01, #3111)", { timeout: 90_000 }, 
 
     await sendFailingTurn(view, "Is anyone there?")
 
-    await waitFor(() => expect(modelStatus()).toHaveTextContent("Unreachable"), HARNESS_WAIT)
+    await waitFor(() => expect(modelChip()).toHaveAccessibleName(/Unreachable/), HARNESS_WAIT)
     const switchButton = await screen.findByRole(
       "button",
       { name: `Switch to ${FAKE_MODEL} (Custom OpenAI API)` },
@@ -108,7 +110,7 @@ describe("Playground model readiness chip (CC-01, #3111)", { timeout: 90_000 }, 
     const requests = server.completionRequests()
     expect(requests.at(-1)?.body).toMatchObject({ model: FAKE_MODEL })
     expect(String(requests.at(-1)?.body?.api_provider)).toMatch(/custom[-_]openai[-_]api/)
-    await waitFor(() => expect(modelStatus()).toHaveTextContent("Working"), HARNESS_WAIT)
+    await waitFor(() => expect(modelChip()).toHaveAccessibleName(/Working/), HARNESS_WAIT)
     expect(screen.queryByTestId("model-readiness-switch")).toBeNull()
   })
 
@@ -121,7 +123,7 @@ describe("Playground model readiness chip (CC-01, #3111)", { timeout: 90_000 }, 
     })
     await renderPlayground({ server, persistedModel: `ollama:${OLLAMA_MODEL}` })
 
-    await waitFor(() => expect(modelStatus()).toHaveTextContent("Unreachable"), HARNESS_WAIT)
+    await waitFor(() => expect(modelChip()).toHaveAccessibleName(/Unreachable/), HARNESS_WAIT)
     expect(
       screen.getByRole("button", { name: `Switch to ${FAKE_MODEL} (Custom OpenAI API)` })
     ).toBeInTheDocument()

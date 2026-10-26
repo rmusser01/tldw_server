@@ -52,7 +52,6 @@ describe("model chip connection status", () => {
     })
 
     const chip = screen.getByTestId("model-selector")
-    expect(chip).toHaveTextContent("Degraded")
     expect(chip).toHaveClass("bg-warn/10")
     expect(chip).toHaveAccessibleName("gpt-4o (OpenAI). Degraded")
   })
@@ -65,7 +64,7 @@ describe("model chip connection status", () => {
     })
 
     const chip = screen.getByTestId("model-selector")
-    expect(chip).toHaveTextContent("Working")
+    expect(chip).toHaveAccessibleName("gpt-4o (OpenAI). Working. gpt-4o (OpenAI) answered")
     expect(chip).not.toHaveClass("bg-warn/10")
   })
 
@@ -77,7 +76,6 @@ describe("model chip connection status", () => {
     })
 
     const chip = screen.getByTestId("model-selector")
-    expect(chip).toHaveTextContent("Connecting…")
     expect(chip).not.toHaveClass("bg-warn/10")
     expect(chip).toHaveAccessibleName("gpt-4o (OpenAI). Connecting…")
   })
@@ -90,7 +88,7 @@ describe("model chip connection status", () => {
     })
 
     const chip = screen.getByTestId("model-selector")
-    expect(chip).toHaveTextContent("Offline")
+    expect(chip).toHaveAccessibleName(/Offline/)
     expect(chip).toHaveClass("bg-warn/10")
   })
 })

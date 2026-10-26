@@ -902,7 +902,7 @@ describe("Playground cockpit controls", () => {
       expect(within(runtimeInspector).getByText("OpenAI")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("Model")).toBeInTheDocument();
       expect(within(runtimeInspector).getByText("gpt-4.1-mini")).toBeInTheDocument();
-      // The raw route stays available under Details (CC-06).
+      // The raw route stays available to screen readers (CC-06).
       expect(
         within(runtimeInspector).getByText("Route openai:gpt-4.1-mini"),
       ).toBeInTheDocument();

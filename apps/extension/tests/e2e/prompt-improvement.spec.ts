@@ -2188,8 +2188,15 @@ test.describe("Packaged extension prompt improvement parity", () => {
       await waitForDrawersClosed(page, feedback)
       await page.setViewportSize({ width: 360, height: 240 })
       // The pinned dock takes at most 60% of the panel and scrolls on its own;
-      // bring its toolbar into view the way a user would.
-      await sendCluster.evaluate((cluster) => cluster.scrollIntoView({ block: "end" }))
+      // bring its toolbar into view the way a user would, then give the
+      // feedback a frame to reposition (as scrollDraftNearViewportTop does).
+      await sendCluster.evaluate(
+        (cluster) =>
+          new Promise<void>((resolve) => {
+            cluster.scrollIntoView({ block: "end" })
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+          })
+      )
       await expectVisibleComposerControlsRemainUsable(page, feedback)
       await expectLayoutNeutralFeedback(
         page,

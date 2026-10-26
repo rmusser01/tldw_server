@@ -52,6 +52,7 @@ describe("chat width cross-surface guard", () => {
     )
     // The user bubble's width classes come from userBubbleWidthClass()
     // (turn-presentation.ts), so count the inset across both modules.
+    expect(userMessageSource).toContain("max-w-[calc(100%-1.75rem)]")
     expect(userMessageSource).toContain("userBubbleWidthClass(")
     const userBubbleInsetMatches = (
       userMessageSource + turnPresentationSource

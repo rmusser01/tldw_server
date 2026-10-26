@@ -93,8 +93,6 @@ const formatPresetSettingEntries = (settings: Partial<ChatModelSettings>) =>
 
 type Props = {
   compact?: boolean;
-  /** Show a visible "Generation style" label beside the options (CC-09). */
-  showLabel?: boolean;
   onChange?: (preset: PresetKey) => void;
   className?: string;
 };
@@ -133,7 +131,6 @@ export const getPresetByKey = (key: PresetKey): ParameterPreset | undefined =>
 
 export const ParameterPresets: React.FC<Props> = ({
   compact = false,
-  showLabel = false,
   onChange,
   className,
 }) => {
@@ -205,18 +202,9 @@ export const ParameterPresets: React.FC<Props> = ({
   const groupLabel = t("playground:presets.generationStyle", "Generation style");
 
   return (
-    <div
-      className={
-        showLabel
-          ? `flex flex-wrap items-center gap-2 ${className ?? ""}`.trim()
-          : className
-      }
-    >
-      {showLabel ? (
-        <span className="text-xs font-medium text-text-muted">{groupLabel}</span>
-      ) : null}
+    <div className={className}>
       <Segmented
-        aria-label={compact || showLabel ? groupLabel : undefined}
+        aria-label={groupLabel}
         options={options}
         value={currentPreset}
         onChange={handlePresetChange}

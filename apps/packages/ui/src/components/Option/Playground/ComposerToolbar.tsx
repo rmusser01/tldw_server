@@ -785,7 +785,7 @@ export const ComposerToolbar = React.memo(function ComposerToolbar(
                 >
                   {t("playground:presets.generationStyle", "Generation style")}
                 </button>
-                {isProMode && <ParameterPresets />}
+                {isProMode && <ParameterPresets compact={isMobile} />}
                 {compareControl}
               </div>
               <div className="flex flex-wrap items-center gap-1">

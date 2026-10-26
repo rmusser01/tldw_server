@@ -365,12 +365,12 @@ redesign already covers were dropped.
 
 | Area | Re-fitted | Superseded by the redesign |
 | --- | --- | --- |
-| Composer | The footer hint names '@' mentions only in the extension with tab mentions on (CC-11, `composer-shortcut-hint.ts`). Pro presets inside Tools show their names (CC-09). | Our placeholder ("/ for commands") gives way to "Write a message…". The switch-like connection dot and the System prompts button are gone from the toolbar. |
-| Model chip | Readiness still drives the chip's warning tint, tooltip, accessible name and the "Switch to …" button. | The visible status pill (the status is now screen-reader text), the 11px text (now 12px) and the model/provider split (one "model (Provider)" label). |
+| Composer | The footer hint names '@' mentions only in the extension with tab mentions on (CC-11, `composer-shortcut-hint.ts`). Pro presets inside Tools show their names on wider screens and stay compact on phones; the group is always named "Generation style" (CC-09). | Our placeholder ("/ for commands") gives way to "Write a message…". The switch-like connection dot and the System prompts button are gone from the toolbar, so the presets' `showLabel` mode and the button's `size` prop were removed. |
+| Model chip | Readiness still drives the chip's warning tint, tooltip and the "Switch to …" button (restyled to dev's chip). The chip's accessible name carries the status: the aria-label replaces the button's content and antd's Tooltip overrides `aria-describedby`, so the hidden status span alone was never announced. | The visible status pill, the 11px text (now 12px) and the model/provider split (one "model (Provider)" label). |
 | Runtime rail | Model & settings shows plain provider and model names (CC-06). | The route "Details" disclosure: the raw route is now the Model settings button's title and screen-reader text. |
-| Messages | The 75% Casual bubble width applies to the Conversation view's read-only bubble. TableBlock renders the `<table>` itself (AX-10), so Markdown no longer wraps it a second time (the two fixes together nested tables). | |
+| Messages | The 75% Casual bubble width applies to read-only user bubbles: the Conversation view and surfaces without a message view (the side panel). Transcript and Research cards and edit forms span the row. The user-turn tint stays in every view. TableBlock renders the `<table>` itself (AX-10), so Markdown no longer wraps it a second time (the two fixes together nested tables). | |
 | Header | The new sidebar toggle reports `aria-expanded`. "Not loaded" keeps its warning tone. | |
-| History | Recency groups (Today, Yesterday, …) use dev's heading style. A topic that repeats the title stays hidden (CS-08). | Rows no longer drop the "Server" line, actions stay visible, and pin/unpin lives in the row menu (#3316). |
+| History | Recency groups (Today, This week, Older) use dev's heading style. A topic that repeats the title stays hidden (CS-08). | Rows no longer drop the "Server" line, actions stay visible, and pin/unpin lives in the row menu (#3316). |
 
 Tests that described the replaced layout were updated: the chip's warning tint
 is `bg-warn/10`; slash-command and model-identity tests check the new footer
@@ -379,6 +379,20 @@ hint and treat screen-reader route text as off screen. antd gives every id
 `aria-labelledby` pointed at another component; the slash-command test now
 matches the dialog by its title text.
 
-Runs on the merge: frontend typecheck clean; 394 chat, sidebar, layout and
-message test files (after the updates above); WebUI-owned Vitest 2,463 passed;
-backend tests this branch adds or changes 193 passed, 1 skipped.
+The merge was reviewed in two slices (superpowers code-reviewer); both found
+no critical issue. Fixed from the review: the presets group name, the chip's
+accessible status, the switch button's style, a weakened provider assertion in
+the real-server cockpit spec, dev's inset check in the width guard, a duplicate
+public locale key, and 11 keys this PR adds to `common.json` that the extension
+mirror lacked (the English mirror now also carries a few dev keys it was
+missing). The short-panel extension test now waits two frames after scrolling,
+as the other short-viewport tests do.
+
+Runs on the merge: frontend typecheck clean; full shared-UI Vitest 31,512
+passed (one Node-24-only Blob failure that also fails on dev, CI uses Node 20);
+WebUI-owned Vitest 2,463 passed; extension prompt-improvement spec 22 of 23
+(the real-server smoke needs a live server); backend tests this branch adds or
+changes 193 passed, 1 skipped.
+
+Follow-up: `ComposerStyleSettings.tsx` still advertises "@ mentions" in the web
+app (CC-11).
