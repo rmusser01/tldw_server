@@ -16,10 +16,10 @@ import json
 import os
 import sqlite3
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
-from collections.abc import Callable
 from typing import Any, Optional, Union
 
 import numpy as np
@@ -35,9 +35,8 @@ from tldw_Server_API.app.core.DB_Management.sqlite_policy import configure_sqlit
 from tldw_Server_API.app.core.Evaluations.identity import canonical_evaluations_user_scope
 from tldw_Server_API.app.core.Evaluations.scoring import normalize_judge_score
 from tldw_Server_API.app.core.exceptions import LLMQuotaExceededError
-from tldw_Server_API.app.core.testing import is_production_like_env
 from tldw_Server_API.app.core.LLM_Calls.Summarization_General_Lib import analyze
-
+from tldw_Server_API.app.core.testing import is_production_like_env
 
 # Evaluations SQLite connections wait this long for a lock before failing.
 _SQLITE_BUSY_TIMEOUT_MS = 10_000

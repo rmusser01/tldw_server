@@ -26,7 +26,6 @@ from typing import TYPE_CHECKING, Any, Literal, Optional
 from loguru import logger
 
 from tldw_Server_API.app.core.AuthNZ.byok_runtime import ByokResolutionError
-from tldw_Server_API.app.core.testing import is_production_like_env
 from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatAPIError,
     ChatAuthenticationError,
@@ -52,6 +51,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories.media_search_r
     append_sqlite_media_visibility,
 )
 from tldw_Server_API.app.core.RAG.exceptions import RAGDatabaseError
+from tldw_Server_API.app.core.testing import is_production_like_env
 
 from .hyde import (
     _embedding_model_from_config,
