@@ -24,7 +24,6 @@ import re
 from pathlib import Path
 
 import pytest
-import yaml
 
 from tldw_Server_API.app.core.testing import GUARDED_TEST_SEAM_KEYS, GUARDED_TEST_SEAM_PREFIXES
 
@@ -32,15 +31,8 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 APP_ROOT = REPO_ROOT / "tldw_Server_API" / "app"
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "backend-required.yml"
 THIS_FILE = "tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py"
 GUARD_FILE = "tldw_Server_API/app/core/testing.py"
-# The guard and refusal tests this task adds; the required gate must keep running them.
-GUARD_TESTS = (
-    "tldw_Server_API/tests/Services/test_startup_test_runtime_guard.py",
-    "tldw_Server_API/tests/AuthNZ/unit/test_runtime_environment.py",
-    "tldw_Server_API/tests/AuthNZ/unit/test_test_mode_runtime_guard.py",
-)
 _TEST_NAME = re.compile(r"[A-Z0-9_]*TEST[A-Z0-9_]*")
 # TEST as its own word (TEST_MODE, IN_TESTS, PYTEST_X); otherwise it is inside a word (LATEST).
 _SEAM_SHAPED = re.compile(r"(?:^|_)(?:PY)?TEST(?:S|ING)?(?:_|$)")
@@ -321,29 +313,6 @@ def test_scan_finds_seeded_files(tmp_path: Path) -> None:
         f"app/main.py: ALLOWLIST pair for PYTEST_CURRENT_TEST is stale (no longer read there). "
         f"Remove it from ALLOWLIST in {THIS_FILE}.",
     ]
-
-
-def test_backend_required_runs_this_ratchet() -> None:
-    steps = [
-        step
-        for job in yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"].values()
-        for step in job.get("steps", [])
-        if step.get("name") == "Enforce CI contracts and code ratchets"
-    ]
-    assert len(steps) == 1
-    assert THIS_FILE in steps[0]["run"]
-
-
-def test_backend_required_runs_the_guard_tests() -> None:
-    """AC#7: the startup guard and the AuthNZ refusals run in the required gate."""
-    steps = [
-        step
-        for job in yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"].values()
-        for step in job.get("steps", [])
-        if step.get("name") == "Enforce CI contracts and code ratchets"
-    ]
-    assert len(steps) == 1
-    assert [path for path in GUARD_TESTS if path not in steps[0]["run"]] == []
 
 
 if __name__ == "__main__":

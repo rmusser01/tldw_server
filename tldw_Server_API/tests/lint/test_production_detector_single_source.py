@@ -22,7 +22,6 @@ import ast
 from pathlib import Path
 
 import pytest
-import yaml
 
 from tldw_Server_API.app.core.testing import PRODUCTION_ENV_KEYS
 
@@ -30,7 +29,6 @@ pytestmark = pytest.mark.unit
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 APP_ROOT = REPO_ROOT / "tldw_Server_API" / "app"
-WORKFLOW = REPO_ROOT / ".github" / "workflows" / "backend-required.yml"
 THIS_FILE = "tldw_Server_API/tests/lint/test_production_detector_single_source.py"
 SOURCE = "tldw_Server_API/app/core/testing.py"
 _KEYS = frozenset(PRODUCTION_ENV_KEYS)
@@ -209,17 +207,6 @@ def test_scan_finds_seeded_files_through_the_pre_filter(tmp_path: Path) -> None:
         "tldw_Server_API/app/core/new_detector.py: reads APP_ENV",
         "tldw_Server_API/app/core/telemetry.py: reads TLDW_ENV",
     ]
-
-
-def test_backend_required_runs_this_ratchet() -> None:
-    steps = [
-        step
-        for job in yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"].values()
-        for step in job.get("steps", [])
-        if step.get("name") == "Enforce CI contracts and code ratchets"
-    ]
-    assert len(steps) == 1
-    assert THIS_FILE in steps[0]["run"]
 
 
 if __name__ == "__main__":

@@ -1391,6 +1391,74 @@ def test_backend_required_enforces_isolation_ratchets():
         assert suite in gate["run"]  # nosec B101 - regression assertion
 
 
+# TASK-13950.6: the production-detector and test-seam ratchets and the startup-guard /
+# AuthNZ-refusal tests. The contract lives here, not in the files it guards, so dropping a
+# file from the step cannot also drop its own assertion.
+TEST_SEAM_GATE_SUITES = (
+    "tldw_Server_API/tests/lint/test_production_detector_single_source.py",
+    "tldw_Server_API/tests/lint/test_test_seam_env_reads_guarded.py",
+    "tldw_Server_API/tests/Services/test_startup_test_runtime_guard.py",
+    "tldw_Server_API/tests/AuthNZ/unit/test_runtime_environment.py",
+    "tldw_Server_API/tests/AuthNZ/unit/test_test_mode_runtime_guard.py",
+)
+
+
+def _step_run_tokens(run: str) -> set[str]:
+    """Whitespace tokens of a step's shell script, with comments and line continuations removed."""
+    tokens: set[str] = set()
+    for line in run.splitlines():
+        tokens.update(line.split("#", 1)[0].replace("\\", " ").split())
+    return tokens
+
+
+def _test_seam_gate_problems(workflow: dict[str, Any]) -> list[str]:
+    steps = workflow["jobs"]["backend-required"]["steps"]
+    gates = [step for step in steps if step.get("name") == "Enforce CI contracts and code ratchets"]
+    if len(gates) != 1:
+        return [f"expected one 'Enforce CI contracts and code ratchets' step, found {len(gates)}"]
+    problems = ["step is continue-on-error"] if gates[0].get("continue-on-error", False) else []
+    tokens = _step_run_tokens(gates[0].get("run", ""))
+    return problems + [f"step does not run {suite}" for suite in TEST_SEAM_GATE_SUITES if suite not in tokens]
+
+
+@pytest.mark.unit
+def test_backend_required_runs_the_test_seam_ratchets_and_guard_tests():
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    assert _test_seam_gate_problems(workflow) == []  # nosec B101 - regression assertion
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("suite", TEST_SEAM_GATE_SUITES)
+@pytest.mark.parametrize("mutation", ["dropped", "commented-out"])
+def test_test_seam_gate_contract_fails_when_a_suite_leaves_the_step(suite: str, mutation: str):
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    gate = next(
+        step
+        for step in workflow["jobs"]["backend-required"]["steps"]
+        if step.get("name") == "Enforce CI contracts and code ratchets"
+    )
+    lines = gate["run"].splitlines()
+    if mutation == "dropped":
+        gate["run"] = "\n".join(line for line in lines if suite not in line)
+    else:
+        gate["run"] = "\n".join(line.replace(suite, f"# {suite}") for line in lines)
+
+    assert _test_seam_gate_problems(workflow) == [f"step does not run {suite}"]  # nosec B101
+
+
+@pytest.mark.unit
+def test_test_seam_gate_contract_fails_when_the_step_is_continue_on_error():
+    workflow = yaml.safe_load((REPO_ROOT / ".github/workflows/backend-required.yml").read_text())
+    gate = next(
+        step
+        for step in workflow["jobs"]["backend-required"]["steps"]
+        if step.get("name") == "Enforce CI contracts and code ratchets"
+    )
+    gate["continue-on-error"] = True
+
+    assert _test_seam_gate_problems(workflow) == ["step is continue-on-error"]  # nosec B101
+
+
 def _without_await_license(
     workflows: dict[str, tuple[dict[str, Any], str]], *, drop_job: bool
 ) -> dict[str, tuple[dict[str, Any], str]]:
