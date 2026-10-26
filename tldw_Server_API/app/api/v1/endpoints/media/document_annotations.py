@@ -346,7 +346,8 @@ async def sync_annotations(
     useful for offline-first scenarios where changes are queued locally.
 
     If client_ids are provided, the response includes a mapping from
-    client IDs to server-generated IDs.
+    client IDs to server-generated IDs. The sync is idempotent on client_id:
+    resending a batch returns the stored annotations instead of duplicating them.
     """
     user_id = str(getattr(current_user, "id", current_user))
     logger.debug(
@@ -366,15 +367,15 @@ async def sync_annotations(
         )
 
     annotation_rows: list[dict[str, Any]] = []
-    id_mapping: dict = {}
+    client_ids = body.client_ids or []
 
     try:
         for i, annotation in enumerate(body.annotations):
-            annotation_id = _generate_annotation_id()
             now = _now_iso()
             annotation_rows.append(
                 {
-                    "id": annotation_id,
+                    "id": _generate_annotation_id(),
+                    "client_id": client_ids[i] if i < len(client_ids) else None,
                     "location": annotation.location,
                     "text": annotation.text,
                     "color": annotation.color.value,
@@ -386,8 +387,6 @@ async def sync_annotations(
                     "updated_at": now,
                 }
             )
-            if body.client_ids and i < len(body.client_ids):
-                id_mapping[body.client_ids[i]] = annotation_id
 
         repo = DocumentWorkspaceRepository.from_media_db(db)
         synced_rows = repo.sync_annotations(
@@ -404,6 +403,7 @@ async def sync_annotations(
         ) from e
 
     synced_annotations = [_row_to_response(dict(row), media_id) for row in synced_rows]
+    id_mapping = {row["client_id"]: row["id"] for row in map(dict, synced_rows) if row.get("client_id")}
 
     return AnnotationSyncResponse(
         media_id=media_id,
