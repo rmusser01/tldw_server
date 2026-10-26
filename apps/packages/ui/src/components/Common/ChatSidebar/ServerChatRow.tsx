@@ -334,7 +334,7 @@ export const ServerChatRow = React.memo((props: ServerChatRowAllProps) => {
             <button
               type="button"
               onClick={(event) => event.stopPropagation()}
-              className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--color-focus)] h-9 w-9 sm:min-w-0 sm:min-h-0"
+              className="rounded p-1 text-text-subtle hover:bg-surface2 hover:text-text focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus h-9 w-9 sm:min-w-0 sm:min-h-0"
               aria-label={`${t("option:header.moreActions", {
                 defaultValue: "More actions"
               })}: ${chat.title}`}

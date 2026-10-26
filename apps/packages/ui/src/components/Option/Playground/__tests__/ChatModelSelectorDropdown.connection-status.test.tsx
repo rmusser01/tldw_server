@@ -53,7 +53,7 @@ describe("model chip connection status", () => {
 
     const chip = screen.getByTestId("model-selector")
     expect(chip).toHaveTextContent("Degraded")
-    expect(chip).toHaveClass("border-warn/50")
+    expect(chip).toHaveClass("bg-warn/10")
     expect(chip).toHaveAccessibleName("gpt-4o (OpenAI). Degraded")
   })
 
@@ -66,7 +66,7 @@ describe("model chip connection status", () => {
 
     const chip = screen.getByTestId("model-selector")
     expect(chip).toHaveTextContent("Working")
-    expect(chip).not.toHaveClass("border-warn/50")
+    expect(chip).not.toHaveClass("bg-warn/10")
   })
 
   it("shows Connecting… in the neutral style while the first check runs (CC-03)", () => {
@@ -78,7 +78,7 @@ describe("model chip connection status", () => {
 
     const chip = screen.getByTestId("model-selector")
     expect(chip).toHaveTextContent("Connecting…")
-    expect(chip).not.toHaveClass("border-warn/50")
+    expect(chip).not.toHaveClass("bg-warn/10")
     expect(chip).toHaveAccessibleName("gpt-4o (OpenAI). Connecting…")
   })
 
@@ -91,6 +91,6 @@ describe("model chip connection status", () => {
 
     const chip = screen.getByTestId("model-selector")
     expect(chip).toHaveTextContent("Offline")
-    expect(chip).toHaveClass("border-warn/50")
+    expect(chip).toHaveClass("bg-warn/10")
   })
 })

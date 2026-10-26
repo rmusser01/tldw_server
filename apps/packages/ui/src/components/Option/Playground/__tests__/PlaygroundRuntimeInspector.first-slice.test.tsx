@@ -64,19 +64,23 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     expect(screen.getByText("Route openai:gpt-4.1-mini")).toBeInTheDocument();
   });
 
-  it("CC-06: names the provider and model plainly and keeps the raw route in Details", () => {
+  it("CC-06: names the provider and model plainly and keeps the raw route off screen", () => {
     renderInspector({
       selectedProvider: "custom-openai-api",
       selectedModel: "mock-gpt-4o",
       providerRouteLabel: "custom-openai-api:mock-gpt-4o",
     });
 
-    expect(screen.getByText("Custom OpenAI API")).toBeInTheDocument();
-    expect(screen.getByText("mock-gpt-4o")).toBeInTheDocument();
-    const rawRoute = screen.getByText("custom-openai-api:mock-gpt-4o");
-    expect(rawRoute.closest("details")).not.toBeNull();
-    expect(rawRoute).not.toBeVisible();
-    expect(screen.getByText("Details")).toBeInTheDocument();
+    const modelRoute = screen.getByRole("region", { name: "Model route" });
+    const values = within(modelRoute).getAllByRole("definition");
+    expect(values.map((value) => value.textContent)).toEqual([
+      "Custom OpenAI API",
+      "mock-gpt-4o",
+    ]);
+    expect(
+      within(modelRoute).getByRole("button", { name: "Open model settings" }),
+    ).toHaveAttribute("title", "custom-openai-api:mock-gpt-4o");
+    expect(within(modelRoute).getByText("Route custom-openai-api:mock-gpt-4o")).toHaveClass("sr-only");
   });
 
   it("keeps cockpit rail sections in runtime configuration order", () => {

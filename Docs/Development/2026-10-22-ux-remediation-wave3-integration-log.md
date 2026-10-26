@@ -354,3 +354,31 @@ checked against the code. Each fix below has a test that failed first.
   - Build NS-04 previews.
 - **Review document:** XP-10's recommendation ("Alt+digit never types text") is
   wrong for macOS and should be corrected.
+
+## 8. Merge with the chat redesign (2026-10-25)
+
+While this PR waited, `/chat` was redesigned on dev: composer #3309, rails
+#3310, header #3311, message views #3313 and history sidebar #3316. Merge
+`234d6cc947` brings dev `39093fc827` in (19 conflicting files). Dev's design
+wins. Wave 3 fixes that still apply were re-fitted onto it; the ones the
+redesign already covers were dropped.
+
+| Area | Re-fitted | Superseded by the redesign |
+| --- | --- | --- |
+| Composer | The footer hint names '@' mentions only in the extension with tab mentions on (CC-11, `composer-shortcut-hint.ts`). Pro presets inside Tools show their names (CC-09). | Our placeholder ("/ for commands") gives way to "Write a message…". The switch-like connection dot and the System prompts button are gone from the toolbar. |
+| Model chip | Readiness still drives the chip's warning tint, tooltip, accessible name and the "Switch to …" button. | The visible status pill (the status is now screen-reader text), the 11px text (now 12px) and the model/provider split (one "model (Provider)" label). |
+| Runtime rail | Model & settings shows plain provider and model names (CC-06). | The route "Details" disclosure: the raw route is now the Model settings button's title and screen-reader text. |
+| Messages | The 75% Casual bubble width applies to the Conversation view's read-only bubble. TableBlock renders the `<table>` itself (AX-10), so Markdown no longer wraps it a second time (the two fixes together nested tables). | |
+| Header | The new sidebar toggle reports `aria-expanded`. "Not loaded" keeps its warning tone. | |
+| History | Recency groups (Today, Yesterday, …) use dev's heading style. A topic that repeats the title stays hidden (CS-08). | Rows no longer drop the "Server" line, actions stay visible, and pin/unpin lives in the row menu (#3316). |
+
+Tests that described the replaced layout were updated: the chip's warning tint
+is `bg-warn/10`; slash-command and model-identity tests check the new footer
+hint and treat screen-reader route text as off screen. antd gives every id
+`"test-id"` under `NODE_ENV=test`, so after the merge the settings dialog's
+`aria-labelledby` pointed at another component; the slash-command test now
+matches the dialog by its title text.
+
+Runs on the merge: frontend typecheck clean; 394 chat, sidebar, layout and
+message test files (after the updates above); WebUI-owned Vitest 2,463 passed;
+backend tests this branch adds or changes 193 passed, 1 skipped.

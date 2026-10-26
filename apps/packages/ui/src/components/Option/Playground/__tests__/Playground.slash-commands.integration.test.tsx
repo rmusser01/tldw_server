@@ -19,8 +19,12 @@ import { beforeEach, describe, expect, it } from "vitest"
 import { useStoreMessageOption } from "@/store/option"
 
 const MODEL_SETTINGS_TITLE = "Current Chat Model Settings"
+// antd ids are all "test-id" under NODE_ENV=test, so a dialog's
+// aria-labelledby can resolve to another component; match its title text.
 const modelSettingsDialog = () =>
-  screen.queryByRole("dialog", { name: MODEL_SETTINGS_TITLE })
+  screen
+    .queryAllByRole("dialog")
+    .find((dialog) => dialog.textContent?.includes(MODEL_SETTINGS_TITLE)) ?? null
 
 const typeOneKeyAtATime = async (
   view: Awaited<ReturnType<typeof renderPlayground>>,
@@ -84,10 +88,9 @@ describe("Playground slash commands", { timeout: 60_000 }, () => {
     const server = createFakeTldwServer()
     const view = await renderPlayground({ server })
 
-    expect(view.composer).toHaveAttribute(
-      "placeholder",
-      "Type a message... (/ for commands)"
-    )
+    expect(view.composer.getAttribute("placeholder")).not.toContain("@")
+    expect(screen.getByText("/ commands")).toBeInTheDocument()
+    expect(screen.queryByText(/@ mentions/)).toBeNull()
   })
 
   it("does not open model settings while '/model' is typed, only when the command is chosen", async () => {

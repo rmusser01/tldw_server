@@ -13,9 +13,10 @@ vi.mock("@/components/Common/ProviderIcon", () => ({
 }))
 
 // AX-07 (#3124): the model chip and its provider status badge rendered at 10px
-// and 9px. Status text must be at least 11px to stay readable.
+// and 9px. Visible chip text must be at least 11px to stay readable; the
+// status is now screen-reader text inside the chip.
 describe("Chat model selector text size", () => {
-  it("renders the model chip and its status badge at 11px or larger", () => {
+  it("renders the model chip at 11px or larger", () => {
     render(
       <ConfigProvider theme={{ token: { motion: false } }}>
         <ChatModelSelectorDropdown
@@ -32,11 +33,9 @@ describe("Chat model selector text size", () => {
     )
 
     const chip = screen.getByTestId("model-selector")
-    const badge = screen.getByTitle("Status")
-    for (const element of [chip, badge]) {
-      expect(element.className).not.toMatch(/\btext-\[(?:[0-9]|10)px\]/)
-      expect(element).toHaveClass("text-[11px]")
-    }
+    expect(chip.className).not.toMatch(/\btext-\[(?:[0-9]|10)px\]/)
+    expect(chip).toHaveClass("text-xs")
+    expect(screen.getByTestId("model-selector-status")).toHaveClass("sr-only")
   })
 
   it("renders the one-click model switch at 11px with a visible focus ring", () => {

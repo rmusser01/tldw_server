@@ -29,13 +29,14 @@ const openModelPicker = async (view: Awaited<ReturnType<typeof renderPlayground>
   return await screen.findByRole("menu", {}, HARNESS_WAIT)
 }
 
-/** Text showing a raw provider:model id anywhere but a closed Details disclosure. */
-const rawModelKeysOutsideDetails = () => {
+/** Text showing a raw provider:model id on screen. */
+const rawModelKeysOnScreen = () => {
   const found: string[] = []
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const text = node.textContent ?? ""
-    if (RAW_MODEL_KEY.test(text) && !node.parentElement?.closest("details:not([open])")) {
+    // Off-screen route text (screen-reader only, or a closed disclosure) is allowed.
+    if (RAW_MODEL_KEY.test(text) && !node.parentElement?.closest("details:not([open]), .sr-only")) {
       found.push(text)
     }
   }
@@ -90,7 +91,7 @@ describe("Playground model identity (CC-06, #3111)", { timeout: 90_000 }, () => 
       HARNESS_WAIT
     )
 
-    expect(rawModelKeysOutsideDetails()).toEqual([])
+    expect(rawModelKeysOnScreen()).toEqual([])
     expect(screen.getAllByText(FAKE_MODEL, { exact: true }).length).toBeGreaterThan(0)
 
     resume.resolve()

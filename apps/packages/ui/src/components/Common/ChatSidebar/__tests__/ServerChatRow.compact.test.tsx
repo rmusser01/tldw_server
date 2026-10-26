@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 /**
- * CS-08 (#3101, G07): history rows are compact and easy to scan. The title
- * sits on line one; the state, last update and topic share line two. Rows
- * no longer all say "Server", states read in words with a coloured dot, and
+ * CS-08 (#3101, G07): history rows are easy to scan. The state, last update
+ * and topic share one line under the title (the row layout itself is the
+ * calm sidebar design, #3316). States read in words with a coloured dot, and
  * a topic that repeats the title is not shown twice.
  */
 import React from "react"
@@ -58,12 +58,6 @@ const renderRow = (chat: ServerChatHistoryItem) =>
   )
 
 describe("ServerChatRow compact layout (CS-08)", () => {
-  it("does not label every row of the Server list 'Server'", () => {
-    renderRow(createChat())
-
-    expect(screen.queryByText("Server")).toBeNull()
-  })
-
   it.each([
     ["in-progress", "In progress"],
     ["resolved", "Resolved"],
@@ -95,6 +89,6 @@ describe("ServerChatRow compact layout (CS-08)", () => {
   it("still marks a forked chat", () => {
     renderRow(createChat({ parent_conversation_id: "parent-1234567890" }))
 
-    expect(screen.getByLabelText("Forked chat")).toBeInTheDocument()
+    expect(screen.getByText("Forked chat")).toBeInTheDocument()
   })
 })
