@@ -3702,7 +3702,6 @@ async def persist_primary_av_item(
         combined_keywords.extend(
             k.strip() for k in extracted_keywords if k and isinstance(k, str) and k.strip()
         )
-    # First-seen display casing wins; case variants collapse to one (TASK-13950.5).
     final_keywords_list = sorted(dedupe_keywords(combined_keywords), key=normalize_keyword_identity)
 
     # Use original input ref for default title to match previous endpoint behavior.
@@ -5749,7 +5748,6 @@ async def persist_doc_item_and_children(
     except _PERSISTENCE_NONCRITICAL_EXCEPTIONS:
         pass
 
-    # First-seen display casing wins; case variants collapse to one (TASK-13950.5).
     final_keywords_list = sorted(dedupe_keywords(combined_keywords), key=normalize_keyword_identity)
     try:
         final_result["keywords"] = final_keywords_list
