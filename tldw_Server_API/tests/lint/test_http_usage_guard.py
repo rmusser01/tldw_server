@@ -94,10 +94,6 @@ ALLOWLIST: dict[str, str] = {
         "migrate: the unplanned vLLM branch posts with a raw httpx.Client; the planned branch beside "
         "it already uses create_client + fetch(configured_endpoint=...)."
     ),
-    "tldw_Server_API/app/core/MCP_unified/modules/implementations/web_fetch_module.py": (
-        "migrate: fetches user-supplied URLs. It re-checks the web outbound policy on every redirect "
-        "hop but connects through a raw httpx.AsyncClient that honours env proxies; use astream_bytes."
-    ),
     "tldw_Server_API/app/core/TTS/adapters/audio_cpp_client.py": (
         "migrate: audiocpp_server client. Loopback by default, but allow_remote_base_url sends to any "
         "host through a raw httpx.AsyncClient with no egress policy; use create_async_client/afetch."
