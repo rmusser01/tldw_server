@@ -46,6 +46,8 @@ import {
   type SidebarServerChatFilterValue
 } from "@/services/settings/ui-settings"
 import { ServerChatRow } from "./ServerChatRow"
+import { CHAT_RECENCY_GROUP_LABELS, groupChatsByRecency } from "./chat-history-groups"
+import { showMovedToTrashNotice } from "./server-chat-trash-notice"
 import { removeLocalCopyOfServerChat } from "@/components/Sidepanel/Chat/tab-conversation-actions"
 
 const BulkFolderPickerModal = React.lazy(
@@ -66,6 +68,8 @@ interface ServerChatListProps {
   readOnly?: boolean
   onConversationSelected?: () => void
   onVisibleChatsChange?: (receipt: VisibleServerChats | null) => void
+  /** Clears the sidebar search; offered when a search finds nothing (CS-10). */
+  onClearSearch?: () => void
 }
 
 type ServerHistoryAction = {
@@ -90,7 +94,8 @@ export function ServerChatList({
   selectionMode: selectionModeProp,
   readOnly = false,
   onConversationSelected,
-  onVisibleChatsChange
+  onVisibleChatsChange,
+  onClearSearch
 }: ServerChatListProps) {
   const { t } = useTranslation([
     "common",
@@ -897,6 +902,46 @@ export function ServerChatList({
     ]
   )
 
+  // Undo right after Move to Trash restores the chat with the account that
+  // trashed it, even though its row has already left the visible list.
+  const undoMoveToTrash = React.useCallback(
+    async (
+      chat: ServerChatHistoryItem,
+      action: ServerHistoryAction,
+      wasPinned: boolean
+    ) => {
+      try {
+        await tldwClient.restoreChat(chat.id, {
+          requestScope: action.requestScope,
+          scope: { type: "global" }
+        })
+        if (wasPinned)
+          setPinnedChatIds((prev) =>
+            (prev || []).includes(chat.id) ? prev || [] : [...(prev || []), chat.id]
+          )
+        queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
+        message.success(
+          t("common:chatRestored", {
+            defaultValue: "Chat restored."
+          })
+        )
+      } catch (err) {
+        console.error("[ServerChatList] Failed to undo move to trash", {
+          error: err,
+          chatId: chat.id
+        })
+        message.error(
+          resolveChatMutationErrorMessage(
+            err,
+            "common:restoreChatError",
+            "Failed to restore chat."
+          )
+        )
+      }
+    },
+    [queryClient, resolveChatMutationErrorMessage, setPinnedChatIds, t]
+  )
+
   const handleMoveChatToTrash = React.useCallback(
     async (chat: ServerChatHistoryItem) => {
       const action = captureAction([chat.id])
@@ -914,12 +959,22 @@ export function ServerChatList({
       try {
         await deleteServerChat(chat, action)
         if (!action.isCurrent()) return
+        const wasPinned = (pinnedChatIds || []).includes(chat.id)
         setPinnedChatIds((prev) => (prev || []).filter((id) => id !== chat.id))
         queryClient.invalidateQueries({ queryKey: ["serverChatHistory"] })
         setOpenMenuFor(null)
         if (serverChatId === chat.id) {
           clearChat()
         }
+        showMovedToTrashNotice({
+          t,
+          onUndo: () => {
+            void undoMoveToTrash(chat, action, wasPinned)
+          },
+          onViewTrash: () => {
+            void setChatTypeFilter("trash")
+          }
+        })
       } catch (err) {
         if (!action.isCurrent()) return
         console.error("[ServerChatList] Failed to delete chat", {
@@ -940,10 +995,14 @@ export function ServerChatList({
       clearChat,
       deleteServerChat,
       confirmDanger,
+      pinnedChatIds,
       queryClient,
       resolveChatMutationErrorMessage,
       serverChatId,
-      setPinnedChatIds
+      setChatTypeFilter,
+      setPinnedChatIds,
+      t,
+      undoMoveToTrash
     ]
   )
 
@@ -1007,6 +1066,11 @@ export function ServerChatList({
         if (serverChatId === chat.id) {
           clearChat()
         }
+        message.success(
+          t("common:chatSidebar.permanentlyDeleted", {
+            defaultValue: "Chat permanently deleted."
+          })
+        )
       } catch (err) {
         if (!action.isCurrent()) return
         console.error("[ServerChatList] Failed to permanently delete chat", {
@@ -1405,6 +1469,35 @@ export function ServerChatList({
       )}
     </div>
   )
+  // Today / This week / Older, newest first (CS-08).
+  const pagedUnpinnedRecencyGroups = groupChatsByRecency(pagedUnpinnedChats)
+  const renderServerChatRow = (chat: ServerChatHistoryItem) => (
+    <ServerChatRow
+      key={chat.id}
+      chat={chat}
+      showReference={pagedChats.some(
+        (other) => other.id !== chat.id && other.title === chat.title
+      )}
+      isTrashView={isTrashView}
+      isPinned={pinnedChatSet.has(chat.id)}
+      isActive={serverChatId === chat.id}
+      readOnly={readOnly || !freshResults}
+      disabled={!freshResults}
+      openMenuFor={openMenuFor}
+      setOpenMenuFor={setOpenMenuFor}
+      onSelectChat={handleRowClick}
+      onTogglePinned={togglePinned}
+      onOpenSettings={handleOpenSettings}
+      onRenameChat={handleRenameChat}
+      onCreateTable={handleCreateTable}
+      onEditTopic={handleEditTopic}
+      onDeleteChat={isTrashView ? handleHardDeleteChat : handleMoveChatToTrash}
+      onRestoreChat={handleRestoreChat}
+      onUpdateState={handleUpdateState}
+      {...selectionPropsForChat(chat.id)}
+      t={t}
+    />
+  )
   if (!ownerReady)
     return (
       <div
@@ -1484,8 +1577,9 @@ export function ServerChatList({
         {filterControl}
         <p role="status">
           {hasSearchQuery
-            ? t("common:chatSidebar.discovery.noServerMatches", {
-                defaultValue: "No matching chats on this Server page."
+            ? t("common:chatSidebar.noSearchMatches", {
+                defaultValue: "No chats match “{{query}}”",
+                query: searchQuery.trim()
               })
             : isTrashView
               ? t("common:chatSidebar.trashEmpty", {
@@ -1502,6 +1596,14 @@ export function ServerChatList({
                 "Some Server results were excluded because they belong to a different chat scope."
             })}
           </p>
+        )}
+        {hasSearchQuery && onClearSearch && (
+          <button
+            type="button"
+            onClick={onClearSearch}
+            className="mt-2 rounded-md border border-border px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-focus">
+            {t("common:chatSidebar.clearSearch", { defaultValue: "Clear search" })}
+          </button>
         )}
         {(currentPageSafe > 1 || canLoadNextPage) && recoveryActions()}
       </div>
@@ -1725,76 +1827,27 @@ export function ServerChatList({
               <div className="px-2 py-1 text-xs font-semibold text-text-muted">
                 {t("common:pinned", { defaultValue: "Pinned" })}
               </div>
-              {pagedPinnedChats.map((chat) => (
-                <ServerChatRow
-                  key={chat.id}
-                  chat={chat}
-                  showReference={pagedChats.some(
-                    (other) =>
-                      other.id !== chat.id && other.title === chat.title
-                  )}
-                  isTrashView={isTrashView}
-                  isPinned={pinnedChatSet.has(chat.id)}
-                  isActive={serverChatId === chat.id}
-                  readOnly={readOnly || !freshResults}
-                  disabled={!freshResults}
-                  openMenuFor={openMenuFor}
-                  setOpenMenuFor={setOpenMenuFor}
-                  onSelectChat={handleRowClick}
-                  onTogglePinned={togglePinned}
-                  onOpenSettings={handleOpenSettings}
-                  onRenameChat={handleRenameChat}
-                  onCreateTable={handleCreateTable}
-                  onEditTopic={handleEditTopic}
-                  onDeleteChat={
-                    isTrashView ? handleHardDeleteChat : handleMoveChatToTrash
-                  }
-                  onRestoreChat={handleRestoreChat}
-                  onUpdateState={handleUpdateState}
-                  {...selectionPropsForChat(chat.id)}
-                  t={t}
-                />
-              ))}
+              {pagedPinnedChats.map(renderServerChatRow)}
             </div>
           )}
-          {pagedUnpinnedChats.length > 0 && (
+          {pagedUnpinnedRecencyGroups.map(({ group, chats }, index) => (
             <div
+              key={group}
               className={cn(
                 "mx-2 flex flex-col gap-0.5",
-                pagedPinnedChats.length > 0 && "mt-3"
+                (pagedPinnedChats.length > 0 || index > 0) && "mt-3"
               )}>
-              {pagedUnpinnedChats.map((chat) => (
-                <ServerChatRow
-                  key={chat.id}
-                  chat={chat}
-                  showReference={pagedChats.some(
-                    (other) =>
-                      other.id !== chat.id && other.title === chat.title
-                  )}
-                  isTrashView={isTrashView}
-                  isPinned={pinnedChatSet.has(chat.id)}
-                  isActive={serverChatId === chat.id}
-                  readOnly={readOnly || !freshResults}
-                  disabled={!freshResults}
-                  openMenuFor={openMenuFor}
-                  setOpenMenuFor={setOpenMenuFor}
-                  onSelectChat={handleRowClick}
-                  onTogglePinned={togglePinned}
-                  onOpenSettings={handleOpenSettings}
-                  onRenameChat={handleRenameChat}
-                  onCreateTable={handleCreateTable}
-                  onEditTopic={handleEditTopic}
-                  onDeleteChat={
-                    isTrashView ? handleHardDeleteChat : handleMoveChatToTrash
-                  }
-                  onRestoreChat={handleRestoreChat}
-                  onUpdateState={handleUpdateState}
-                  {...selectionPropsForChat(chat.id)}
-                  t={t}
-                />
-              ))}
+              <div
+                data-testid="server-chat-recency-group"
+                className="px-2 py-1 text-xs font-semibold text-text-muted">
+                {t(
+                  CHAT_RECENCY_GROUP_LABELS[group].key,
+                  CHAT_RECENCY_GROUP_LABELS[group].defaultLabel
+                )}
+              </div>
+              {chats.map(renderServerChatRow)}
             </div>
-          )}
+          ))}
           {hasMultiplePages && (
             <div className="mt-3 border-t border-border px-2 pt-3">
               <div className="mb-2 text-xs text-text-subtle">

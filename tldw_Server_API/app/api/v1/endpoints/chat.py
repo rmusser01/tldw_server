@@ -4758,9 +4758,14 @@ async def create_chat_completion(
                     reference = ({key: history_admission[key] for key in ("version", "owner_key", "conversation_id",
                         "input_message_id", "input_message_revision", "selection_digest")}
                         if history_admission is not None else None)
+                    continue_prefix = continuation_runtime.get("history_continue_prefix")
                     async def completion_save_message(db, cid, payload, use_transaction=False):
                         if payload.get("role") == "system":
                             return None
+                        if continue_prefix is not None and payload.get("role") == "assistant":
+                            # Continue saves the original reply plus its continuation as one sibling reply.
+                            from tldw_Server_API.app.core.Chat.history_continuation import merge_continued_reply
+                            payload = merge_continued_reply(payload, continue_prefix)
                         prepared = await prepare_native_history_message(payload, cid, _process_content_for_db_sync)
                         prepared["extra_metadata"].update(assistant_generation_extra(payload))
                         prepared["id"] = str(uuid.uuid4())

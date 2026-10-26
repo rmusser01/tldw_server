@@ -16,6 +16,7 @@ import { QuickChatGuidesPanel } from "./QuickChatGuidesPanel"
 import { buildQuickChatPopoutState } from "./popout-state"
 import { useLocation, useNavigate } from "react-router-dom"
 import { useStartTutorial } from "@/hooks/useStartTutorial"
+import { smoothScrollBehavior } from "@/utils/reduced-motion"
 
 const EMPTY_POP_OUT_TOOLTIP_STYLES = {
   root: { maxWidth: "200px" }
@@ -70,7 +71,7 @@ export const QuickChatHelperModal: React.FC<Props> = ({ open, onClose, getTutori
     if (!messagesEndRef.current || messages.length === 0) {
       return
     }
-    messagesEndRef.current.scrollIntoView({ behavior: "smooth" })
+    messagesEndRef.current.scrollIntoView({ behavior: smoothScrollBehavior() })
   }, [messages, isStreaming])
 
   const handlePopOut = useCallback(() => {

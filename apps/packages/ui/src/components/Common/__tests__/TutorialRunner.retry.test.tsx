@@ -69,7 +69,8 @@ vi.mock("react-joyride", () => {
     },
     EVENTS: {
       STEP_AFTER: "step:after",
-      TARGET_NOT_FOUND: "target:not_found"
+      TARGET_NOT_FOUND: "target:not_found",
+      TOOLTIP: "tooltip"
     },
     ACTIONS: {
       NEXT: "next",
@@ -195,31 +196,51 @@ describe("TutorialRunner retry behavior", () => {
     expect(tutorialState.endTutorial).toHaveBeenCalledTimes(1)
   })
 
-  it("retries missing targets before skipping to next step", () => {
+  it("polls a missing target without remounting, then skips to the next step", () => {
     render(<TutorialRunner />)
     const callback = latestJoyrideProps.callback as (data: any) => void
 
-    for (let attempt = 0; attempt < 4; attempt += 1) {
-      callback({
-        status: "running",
-        index: 0,
-        type: "target:not_found",
-        action: "next"
-      })
-      vi.advanceTimersByTime(350)
-    }
-
-    // Retries keep re-attempting the current step index.
-    expect(tutorialState.setStepIndex).toHaveBeenCalledWith(0, tutorialState.activeRun)
-
-    // After retry budget is exhausted, the runner skips to the next step.
     callback({
       status: "running",
       index: 0,
       type: "target:not_found",
       action: "next"
     })
+    // Joyride reports a missing target once; repeated reports must not stack
+    // extra retry chains.
+    callback({
+      status: "running",
+      index: 0,
+      type: "target:not_found",
+      action: "next"
+    })
+
+    act(() => vi.advanceTimersByTime(350 * 3))
+    // Still polling: no step change yet (NO-N1).
+    expect(tutorialState.setStepIndex).not.toHaveBeenCalled()
+
+    // After the retry budget is exhausted, the runner skips to the next step.
+    act(() => vi.advanceTimersByTime(350))
+    expect(tutorialState.setStepIndex).toHaveBeenCalledTimes(1)
     expect(tutorialState.setStepIndex).toHaveBeenCalledWith(1, tutorialState.activeRun)
+  })
+
+  it("records completion when the last target never mounts after the user saw the tour", () => {
+    render(<TutorialRunner />)
+    const callback = latestJoyrideProps.callback as (data: any) => void
+    callback({ status: "running", index: 0, type: "tooltip", action: "update" })
+    callback({
+      status: "running",
+      index: 1,
+      type: "target:not_found",
+      action: "next"
+    })
+    act(() => vi.advanceTimersByTime(350 * 4))
+    expect(tutorialState.markComplete).toHaveBeenCalledWith(
+      "test-tutorial",
+      tutorialState.activeRun
+    )
+    expect(tutorialState.endTutorial).toHaveBeenCalledTimes(1)
   })
 
   it("ends tutorial without completion when last step keeps missing", () => {

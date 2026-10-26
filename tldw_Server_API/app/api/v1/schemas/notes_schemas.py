@@ -623,9 +623,15 @@ NoteListSortOrder = Literal["asc", "desc"]
 
 
 class NotesListResponse(BaseModel):
-    notes: list[NoteResponse]
+    notes: list[NoteResponse] | None = Field(
+        default=None,
+        description="Deprecated copy of `items`; null when the request passes legacy_aliases=false",
+    )
     items: list[NoteResponse]
-    results: list[NoteResponse]
+    results: list[NoteResponse] | None = Field(
+        default=None,
+        description="Deprecated copy of `items`; null when the request passes legacy_aliases=false",
+    )
     count: int
     limit: int
     offset: int
