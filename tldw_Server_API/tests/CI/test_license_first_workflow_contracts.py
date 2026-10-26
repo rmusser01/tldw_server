@@ -1422,6 +1422,9 @@ def test_backend_required_runs_the_websocket_auth_guards():
         "tldw_Server_API/tests/AuthNZ/test_websocket_route_auth_matrix.py",
     ):
         assert suite in words, suite  # nosec B101 - regression assertion
+    # Plugin autoload is off in this step, so the matrix is time-bounded only if it loads
+    # pytest_timeout itself (pyproject sets the limit).
+    assert "pytest_timeout" in words  # nosec B101 - regression assertion
 
 
 def _without_await_license(

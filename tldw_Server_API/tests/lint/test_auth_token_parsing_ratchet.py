@@ -12,16 +12,18 @@ Counted, AST-derived so docstrings and comments never count:
 - ``_looks_like_jwt``: function definitions with exactly that name, anywhere under
   tldw_Server_API/app. The goal is one.
 - Hand-parsed bearer headers, in tldw_Server_API/app/api/v1/endpoints only:
-  ``x.startswith("Bearer ")`` with any casing or trailing space, and ``==``/``!=``
+  ``x.startswith("Bearer ")`` (also inside a tuple of prefixes) and
+  ``x.removeprefix("Bearer ")``, with any casing or trailing space, and ``==``/``!=``
   between a ``.lower()``/``.casefold()`` call and ``"bearer"``. Comparisons against a
   plain name or attribute (``req.auth_type == "bearer"``) are configuration, not
   parsing, and are not counted.
 
 Entries are keyed by module and must match exactly: a module above its count fails, and
-so does one below it, so a migration lowers the entry in the same PR. The baselines are
-never raised in place (SEED_TOTALS catches that). A count may rise only through a BUMPS
-entry, reviewed in its PR, that gives the reason and its task or PR -- for example a
-security fix inside a module that cannot migrate yet. Seed or re-count with:
+so does one below it, so a migration lowers the entry, and SEED_TOTALS with it, in the
+same PR. Each baseline must total exactly its SEED_TOTALS entry, so freed headroom
+cannot be spent on a new module. A count may rise only through a BUMPS entry, reviewed
+in its PR, that gives the reason and its task or PR -- for example a security fix inside
+a module that cannot migrate yet. Seed or re-count with:
 
     python tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py
 """
@@ -64,7 +66,8 @@ BEARER_PARSE_BASELINE: dict[str, int] = {
     "tldw_Server_API/app/api/v1/endpoints/watchlists.py": 1,
 }
 
-# Totals when the baselines were seeded. They may fall below these, never rise above.
+# Each baseline's exact total. A migration lowers its entry and this number together; any
+# other change to a baseline's total is headroom being reused, and fails.
 SEED_TOTALS: dict[str, int] = {"LOOKS_LIKE_JWT_BASELINE": 7, "BEARER_PARSE_BASELINE": 13}
 
 # The only way to raise a count: (baseline name, module) -> (allowed count, reason). The
@@ -75,7 +78,9 @@ _THIS_FILE = "tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py"
 _FIX = (
     "Resolve WebSocket callers with core/AuthNZ/websocket_principal.resolve_ws_principal "
     "and HTTP callers with the AuthNZ dependencies instead of parsing tokens by hand. If a "
-    f"copy is unavoidable, add a BUMPS entry with the reason and its task or PR in {_THIS_FILE}."
+    f"copy is unavoidable, add a BUMPS entry with the reason and its task or PR in {_THIS_FILE}. "
+    "If you are building an outbound Authorization header rather than parsing an inbound one, "
+    "add a BUMPS entry citing the PR."
 )
 _REASON = re.compile(r"(TASK-\d+|#\d+)")
 
@@ -109,11 +114,13 @@ def count_bearer_parses(tree: ast.AST) -> int:
         if (
             isinstance(node, ast.Call)
             and isinstance(node.func, ast.Attribute)
-            and node.func.attr == "startswith"
+            and node.func.attr in {"startswith", "removeprefix"}
             and node.args
-            and _is_bearer(node.args[0])
         ):
-            found += 1
+            prefix = node.args[0]
+            prefixes = prefix.elts if isinstance(prefix, ast.Tuple) else [prefix]
+            if any(map(_is_bearer, prefixes)):
+                found += 1
         elif isinstance(node, ast.Compare) and all(isinstance(op, (ast.Eq, ast.NotEq)) for op in node.ops):
             operands = [node.left, *node.comparators]
             if any(map(_is_bearer, operands)) and any(map(_is_case_fold, operands)):
@@ -159,6 +166,16 @@ def bump_problems(
     return problems
 
 
+def seed_problems(baselines: dict[str, dict[str, int]], seed_totals: dict[str, int]) -> list[str]:
+    """Describe every baseline whose total is not exactly its SEED_TOTALS entry."""
+    return [
+        f"{name} totals {sum(baseline.values())}, SEED_TOTALS says {seed_totals[name]}. A migration lowers "
+        f"both together; a new or raised entry needs a BUMPS entry instead ({_THIS_FILE})."
+        for name, baseline in baselines.items()
+        if sum(baseline.values()) != seed_totals[name]
+    ]
+
+
 def ratchet_violations(what: str, counts: dict[str, int], baseline: dict[str, int]) -> list[str]:
     """Describe every module whose count differs from its baseline entry."""
     problems: list[str] = []
@@ -169,7 +186,7 @@ def ratchet_violations(what: str, counts: dict[str, int], baseline: dict[str, in
         elif now < seeded:
             problems.append(
                 f"{module}: {now} {what}, baseline {seeded}. Migrated one? Lower its entry (or "
-                f"its bump) in {_THIS_FILE} so the ratchet stays tight."
+                f"its bump), and SEED_TOTALS with it, in {_THIS_FILE} so the ratchet stays tight."
             )
     return problems
 
@@ -190,10 +207,22 @@ def test_hand_parsed_bearer_headers_only_decrease() -> None:
 
 
 def test_baselines_are_raised_only_through_bumps() -> None:
-    raised = [name for name, baseline in BASELINES.items() if sum(baseline.values()) > SEED_TOTALS[name]]
-    assert not raised, f"{raised} raised in place: restore the entry and add a BUMPS entry in {_THIS_FILE}."
-    problems = bump_problems(BUMPS, BASELINES)
+    problems = seed_problems(BASELINES, SEED_TOTALS) + bump_problems(BUMPS, BASELINES)
     assert not problems, "\n".join(problems)
+
+
+def test_freed_headroom_cannot_admit_a_new_module() -> None:
+    """Self-test: a migration that lowers one count may not add another module unbumped."""
+    lowered, seeded = next(iter(BEARER_PARSE_BASELINE.items()))
+    swapped = {**BEARER_PARSE_BASELINE, lowered: seeded - 1, "tldw_Server_API/app/api/v1/endpoints/new.py": 1}
+    migrated_seed = {**SEED_TOTALS, "BEARER_PARSE_BASELINE": SEED_TOTALS["BEARER_PARSE_BASELINE"] - 1}
+
+    # SEED_TOTALS lowered for the migration, as the rule says: the new module shows.
+    assert seed_problems({"BEARER_PARSE_BASELINE": swapped}, migrated_seed)
+    # A plain migration that forgets SEED_TOTALS fails too, so headroom never sits unused.
+    assert seed_problems({"BEARER_PARSE_BASELINE": {**BEARER_PARSE_BASELINE, lowered: seeded - 1}}, SEED_TOTALS)
+    # The honest migration passes.
+    assert not seed_problems({"BEARER_PARSE_BASELINE": {**BEARER_PARSE_BASELINE, lowered: seeded - 1}}, migrated_seed)
 
 
 def test_a_bump_with_a_reason_admits_growth_and_one_without_fails() -> None:
@@ -206,7 +235,9 @@ def test_a_bump_with_a_reason_admits_growth_and_one_without_fails() -> None:
     assert ratchet_violations("x", counts, allowed("BEARER_PARSE_BASELINE", BEARER_PARSE_BASELINE, good)) == []
     assert bump_problems(good, BASELINES) == []
     assert len(bump_problems(bad, BASELINES)) == 1
-    assert ratchet_violations("x", counts, BEARER_PARSE_BASELINE)[0].endswith(f"in {_THIS_FILE}.")
+    assert f"BUMPS entry with the reason and its task or PR in {_THIS_FILE}" in (
+        ratchet_violations("x", counts, BEARER_PARSE_BASELINE)[0]
+    )
 
 
 def test_the_ratchet_rejects_a_new_copy() -> None:
@@ -219,6 +250,8 @@ def test_the_ratchet_rejects_a_new_copy() -> None:
         "    if header.lower().startswith('bearer '):\n"
         "        return header[7:]\n"
         "    scheme, _, value = header.partition(' ')\n"
+        "    if header.startswith(('Token ', 'BEARER ')):\n"
+        "        return header.removeprefix('Bearer').strip()\n"
         "    return value if scheme.casefold() == 'Bearer' else None\n"
     )
 
@@ -230,7 +263,7 @@ def test_the_ratchet_rejects_a_new_copy() -> None:
     )
 
     assert len(jwt_problems) == 1 and jwt_problems[0].startswith(module), jwt_problems
-    assert bearer_problems == [f"{module}: 2 x, baseline 0. {_FIX}"], bearer_problems
+    assert bearer_problems == [f"{module}: 4 x, baseline 0. {_FIX}"], bearer_problems
 
 
 def test_the_ratchet_asks_for_a_lower_seed_after_a_migration() -> None:
