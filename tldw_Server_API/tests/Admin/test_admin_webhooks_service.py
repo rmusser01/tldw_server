@@ -566,15 +566,15 @@ async def test_deliver_rechecks_egress_on_every_attempt(
 
     The refusal row must not keep the first attempt's status and body.
     """
-    requests, replies, log = http_route
+    sent, replies, log = http_route
     replies.append((500, {}, b"boom"))
-    _resolve_hostnames(monkeypatch, lambda _host: ["10.0.0.5"] if requests else ["93.184.216.34"])
+    _resolve_hostnames(monkeypatch, lambda _host: ["10.0.0.5"] if sent else ["93.184.216.34"])
 
     with patch("tldw_Server_API.app.services.admin_webhooks_service.asyncio.sleep", new=AsyncMock()) as sleep:
         await svc.deliver(_hook("http://hooks.example.com/hook", retry_count=3), "test.event", {"key": "value"})
 
-    assert len(requests) == 1
-    assert requests[0].headers["Host"] == "hooks.example.com"
+    assert len(sent) == 1
+    assert sent[0].headers["Host"] == "hooks.example.com"
     # One backoff before attempt 2, then the refusal stops the loop.
     assert [call.args[0] for call in sleep.await_args_list] == [2]
     logged = log.await_args.kwargs

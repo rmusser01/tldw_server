@@ -1254,25 +1254,25 @@ async def test_github_create_issue_adapter_with_template(monkeypatch):
 @pytest.mark.asyncio
 async def test_github_create_issue_refuses_egress_denied_api_host(monkeypatch):
     """The operator egress denylist now applies: a denied api.github.com is never contacted."""
-    requests: list[Any] = []
+    sent: list[Any] = []
     monkeypatch.setenv("EGRESS_DENYLIST", "api.github.com")
 
-    result = await _create_issue(monkeypatch, requests.append)
+    result = await _create_issue(monkeypatch, sent.append)
 
     assert result == {"error": "github_api_blocked_egress", "issue_url": None, "created": False}
-    assert requests == []
+    assert sent == []
 
 
 @pytest.mark.asyncio
 async def test_github_create_issue_refuses_api_host_resolving_to_metadata(monkeypatch):
     """If api.github.com resolves to link-local metadata, the token and body are not sent."""
-    requests: list[Any] = []
+    sent: list[Any] = []
     _resolve_api_github_com_to(monkeypatch, "169.254.169.254")
 
-    result = await _create_issue(monkeypatch, requests.append)
+    result = await _create_issue(monkeypatch, sent.append)
 
     assert result == {"error": "github_api_blocked_egress", "issue_url": None, "created": False}
-    assert requests == []
+    assert sent == []
 
 
 @pytest.mark.asyncio
