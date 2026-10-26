@@ -56,8 +56,6 @@ data_table_rows
 data_table_sources
 data_tables
 datasets
-deck_shares
-decks
 deleted_jobs
 deleted_sources
 document_annotations
@@ -88,12 +86,6 @@ federated_managed_grants
 feed_websub_subscriptions
 feedback
 file_artifacts
-flashcard_assets
-flashcard_citations
-flashcard_review_sessions
-flashcard_reviews
-flashcard_templates
-flashcards
 generated_files
 governance_gaps
 governance_policies
@@ -255,8 +247,6 @@ slides_generation_receipts
 sources
 study_assistant_messages
 study_assistant_threads
-study_pack_cards
-study_packs
 suggestion_generation_links
 suggestion_snapshots
 sync_blob_objects
