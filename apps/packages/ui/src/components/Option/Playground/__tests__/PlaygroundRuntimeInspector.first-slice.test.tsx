@@ -58,10 +58,29 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
     renderInspector();
 
     expect(screen.getByText("Provider")).toBeInTheDocument();
-    expect(screen.getByText("openai")).toBeInTheDocument();
+    expect(screen.getByText("OpenAI")).toBeInTheDocument();
     expect(screen.getByText("Model")).toBeInTheDocument();
     expect(screen.getByText("gpt-4.1-mini")).toBeInTheDocument();
     expect(screen.getByText("Route openai:gpt-4.1-mini")).toBeInTheDocument();
+  });
+
+  it("CC-06: names the provider and model plainly and keeps the raw route off screen", () => {
+    renderInspector({
+      selectedProvider: "custom-openai-api",
+      selectedModel: "mock-gpt-4o",
+      providerRouteLabel: "custom-openai-api:mock-gpt-4o",
+    });
+
+    const modelRoute = screen.getByRole("region", { name: "Model route" });
+    const values = within(modelRoute).getAllByRole("definition");
+    expect(values.map((value) => value.textContent)).toEqual([
+      "Custom OpenAI API",
+      "mock-gpt-4o",
+    ]);
+    expect(
+      within(modelRoute).getByRole("button", { name: "Open model settings" }),
+    ).toHaveAttribute("title", "custom-openai-api:mock-gpt-4o");
+    expect(within(modelRoute).getByText("Route custom-openai-api:mock-gpt-4o")).toHaveClass("sr-only");
   });
 
   it("keeps cockpit rail sections in runtime configuration order", () => {
@@ -209,7 +228,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
       providerRouteLabel: null,
     });
 
-    expect(screen.getByText("anthropic")).toBeInTheDocument();
+    expect(screen.getByText("Anthropic")).toBeInTheDocument();
     expect(screen.getByText("claude-sonnet-4")).toBeInTheDocument();
     expect(
       screen.getByText("Route anthropic:claude-sonnet-4"),
@@ -372,7 +391,7 @@ describe("PlaygroundRuntimeInspector first-slice controls", () => {
       name: "Empty assistant response",
     });
     expect(status).toHaveTextContent(
-      "openai:gpt-4.1-mini returned no response text.",
+      "gpt-4.1-mini (OpenAI) returned no response text.",
     );
     expect(status).toHaveTextContent(
       "Regenerate this turn, or choose a different model if this provider keeps returning empty output.",

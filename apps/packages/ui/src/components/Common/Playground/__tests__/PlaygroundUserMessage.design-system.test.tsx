@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react"
 import { fireEvent, render, screen } from "@testing-library/react"
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { PlaygroundUserMessageBubble } from "../PlaygroundUserMessage"
 
@@ -52,9 +52,11 @@ vi.mock("@/utils/chat-style", () => ({
   buildChatTextClass: () => ""
 }))
 
+const uiMode = vi.hoisted(() => ({ value: "standard" }))
+
 vi.mock("@/store/ui-mode", () => ({
   useUiModeStore: (selector: (state: { mode: string }) => unknown) =>
-    selector({ mode: "standard" })
+    selector({ mode: uiMode.value })
 }))
 
 vi.mock("@/store/option", () => ({
@@ -146,6 +148,37 @@ describe("Playground user message design-system badges", () => {
   })
 })
 
+// CM-10 (#3101): user turns must read apart from replies, not as a second
+// card of the same colour and width.
+describe("Playground user message turn styling", () => {
+  afterEach(() => {
+    uiMode.value = "standard"
+  })
+
+  const bubble = () =>
+    screen.getByText("Review this research plan.").closest(".message-bubble") as HTMLElement
+
+  it("tints the user bubble with the primary colour", () => {
+    renderUserMessage({ messageId: "message-4" })
+
+    expect(bubble().style.backgroundImage).toContain("--color-primary")
+  })
+
+  it("caps the user bubble at three quarters of the row in casual mode", () => {
+    uiMode.value = "casual"
+    renderUserMessage({ messageId: "message-5" })
+
+    expect(bubble().className).toMatch(/(^|\s)sm:max-w-\[75%\](\s|$)/)
+  })
+
+  it("keeps the wider bubble in Pro mode", () => {
+    uiMode.value = "pro"
+    renderUserMessage({ messageId: "message-6" })
+
+    expect(bubble().className).not.toContain("max-w-[75%]")
+  })
+})
+
 it("retains the question and names an unavailable attachment after image failure", () => {
   renderUserMessage({ images: ["http://chat.test/missing.png"], messageId: "missing-attachment" })
   fireEvent.error(screen.getByRole("img", { name: "Uploaded Image" }))
@@ -180,5 +213,14 @@ describe.each([
     expect(container.querySelector(".message-bubble")).toHaveClass(
       "prose", "max-w-none", "dark:prose-invert", "break-words", width, shape
     )
+  })
+
+  // The Casual 75% cap is for bubbles; aligned views and edit forms span the row.
+  it("caps only a read-only bubble at 75%", () => {
+    const { container: reading } = renderUserMessage({ messageView, editMode: false })
+    const capped = shape === "rounded-3xl"
+    expect(reading.querySelector(".message-bubble")?.className.includes("sm:max-w-[75%]")).toBe(capped)
+    const { container: editing } = renderUserMessage({ messageView, editMode: true })
+    expect(editing.querySelector(".message-bubble")?.className).not.toContain("sm:max-w-[75%]")
   })
 })

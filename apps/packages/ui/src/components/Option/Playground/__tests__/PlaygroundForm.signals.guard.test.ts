@@ -32,7 +32,9 @@ describe("PlaygroundForm signal surface guard", () => {
 
     const toolbarSource = fs.readFileSync(path.resolve(__dirname, "../ComposerToolbar.tsx"), "utf8")
     expect(formSource).toContain("playground:composer.calmPlaceholder")
-    expect(toolbarSource).toContain("/ commands · @ mentions")
+    // '@' mentions are named only where they work (CC-11).
+    expect(formSource).toContain("mentionsAvailable={composerMentionsAvailable(tabMentionsEnabled)}")
+    expect(toolbarSource).toContain("composerShortcutHint(t, mentionsAvailable)")
     expect(formSource).toContain("Changed since last send:")
     expect(formSource).toContain("playground:composer.providerDegraded")
     expect(formSource).toContain("playground:composer.presetChanged")

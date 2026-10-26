@@ -5,6 +5,7 @@ import { isSavedRoleplayConversation } from "@/hooks/chat/roleplay-resume-source
 import { useExplicitStopFocus } from "@/hooks/useExplicitStopFocus"
 import { useChatHistoryFreshness } from "@/hooks/chat/useChatHistoryFreshness";
 import { useChatSettingsRecord } from "@/hooks/chat/useChatSettingsRecord";
+import { savedReplyActionAvailability, savedReplyRegenerateUnavailableReason } from "@/hooks/chat/saved-reply-actions";
 import { resolveModelSelectorSelection } from "@/hooks/playground/modelSelectorUtils";
 import { HistorySelectionProvider, useHistorySelectionContext, parseHistorySelectionHandoff } from "@/hooks/chat/useHistorySelection";
 import { captureChatDraftLoad, captureChatDraftSource } from "@/hooks/chat/chat-draft-transition";
@@ -80,11 +81,12 @@ import {
   useStoreChatModelSettings,
 } from "@/store/model";
 import { hasCurrentServerChatSelection, usePlaygroundSessionStore } from "@/store/playground-session";
+import { useServerChatRouteSync } from "@/hooks/chat/useServerChatRouteSync";
 import { getDesignSystemState } from "@/design-system";
 import { useSmartScroll } from "@/hooks/useSmartScroll";
+import { ScrollToLatestButton } from "@/components/Common/ScrollToLatestButton";
 import { useComposerDockHeight } from "@/hooks/useComposerDockHeight";
 import {
-  ChevronDown,
   Keyboard,
   Maximize2,
   Minimize2,
@@ -143,7 +145,11 @@ import {
 import {
   collectThreadSearchMatches,
   getWrappedMatchIndex,
+  revealThreadSearchMark,
+  threadSearchHighlightQuery,
 } from "./playground-thread-search";
+import { focusComposer } from "@/hooks/useComposerFocus";
+import { formatShortcut, getPlatformModifier } from "@/hooks/useKeyboardShortcuts";
 import {
   RESEARCH_RETURN_RUN_ID_PARAM,
   SETTINGS_HISTORY_ID_PARAM,
@@ -161,6 +167,7 @@ import {
 } from "./mobile-composer-layout";
 import { buildPersonaGardenRoute } from "@/utils/persona-garden-route";
 import { scheduleFocusFirstVisibleElement } from "@/utils/focus-return";
+import { smoothScrollBehavior } from "@/utils/reduced-motion";
 import {
   CHARACTER_CHAT_MODE_INTENT_EVENT,
   CHAT_ROUTE_REPLACEMENT_EVENT,
@@ -179,6 +186,7 @@ import type { Character } from "@/types/character";
 import { useKeepInterruptedHistoryTurns } from "@/hooks/chat/useKeepInterruptedHistoryTurns";
 import { getAssistantSelectionMode } from "@/types/assistant-selection";
 import { isEditableTarget } from "@/utils/editable-target"
+import { useFocusReturn } from "./hooks/useFocusReturn";
 
 const readSidepanelChatWebUiHandoffFromLocation = () => {
   if (typeof window === "undefined") return null;
@@ -464,6 +472,8 @@ const PlaygroundContent = () => {
   const isMobileViewport = useMobile();
   const isDesktopViewport = useDesktop();
   const location = useLocation();
+  // The address names the open saved chat: /chat?chat=<id> (XP-05).
+  useServerChatRouteSync();
   const [retiredRouteLocation, setRetiredRouteLocation] = React.useState<string | null>(null);
   const retiredRouteLocationRef = React.useRef<string | null>(null);
   const routeLocationKey = [location.pathname, location.search, location.hash, location.key].join(
@@ -689,15 +699,28 @@ const PlaygroundContent = () => {
     },
     [],
   );
-  const { containerRef, isAutoScrollToBottom, autoScrollToBottom, pauseAutoScroll } =
-    useSmartScroll(messages, streaming, 120, {
-      bottomOffsetPx: composerBottomOffsetPx,
-    });
+  const {
+    containerRef,
+    isAutoScrollToBottom,
+    autoScrollToBottom,
+    pauseAutoScroll,
+    hasUnseenMessages,
+  } = useSmartScroll(messages, streaming, 120, {
+    bottomOffsetPx: composerBottomOffsetPx,
+  });
 
   const [dropState, setDropState] = React.useState<
     "idle" | "dragging" | "error"
   >("idle");
   const [threadSearchOpen, setThreadSearchOpen] = React.useState(false);
+  const {
+    rememberFocus: rememberThreadSearchOpener,
+    restoreFocus: restoreThreadSearchOpener,
+  } = useFocusReturn(focusComposer);
+  const closeThreadSearch = React.useCallback(() => {
+    setThreadSearchOpen(false);
+    restoreThreadSearchOpener();
+  }, [restoreThreadSearchOpener]);
   const [threadSearchQuery, setThreadSearchQuery] = React.useState("");
   const [debouncedSearchQuery, setDebouncedSearchQuery] = React.useState("");
   const [threadSearchActiveIndex, setThreadSearchActiveIndex] =
@@ -2145,7 +2168,7 @@ const PlaygroundContent = () => {
         `[data-message-id="${messageId}"], [data-server-message-id="${messageId}"]`,
       );
       if (!target) return false;
-      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : "smooth" });
+      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : smoothScrollBehavior() });
       return true;
     },
     [containerRef, findMessageIndex, historySelection, messages.length, pauseAutoScroll],
@@ -2162,7 +2185,7 @@ const PlaygroundContent = () => {
         `[data-testid="chat-message"][data-index="${index}"]`,
       );
       if (!target) return false;
-      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : "smooth" });
+      target.scrollIntoView({ block: "center", behavior: messages.length > 100 ? "auto" : smoothScrollBehavior() });
       return true;
     },
     [containerRef, historySelection, messages.length, pauseAutoScroll],
@@ -2375,6 +2398,19 @@ const PlaygroundContent = () => {
     });
   }, [artifactsOpen]);
 
+  // Opening remembers where the user was so closing can hand focus back
+  // (AX-09); re-opening from the search field keeps the original opener.
+  const openThreadSearch = React.useCallback(() => {
+    if (document.activeElement !== threadSearchInputRef.current) {
+      rememberThreadSearchOpener();
+    }
+    setThreadSearchOpen(true);
+    requestAnimationFrame(() => {
+      threadSearchInputRef.current?.focus();
+      threadSearchInputRef.current?.select();
+    });
+  }, [rememberThreadSearchOpener]);
+
   React.useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -2387,20 +2423,18 @@ const PlaygroundContent = () => {
         event.key.toLowerCase() === "f"
       ) {
         event.preventDefault();
-        setThreadSearchOpen(true);
-        requestAnimationFrame(() => {
-          threadSearchInputRef.current?.focus();
-          threadSearchInputRef.current?.select();
-        });
+        openThreadSearch();
         return;
       }
       if (threadSearchOpen && event.key === "Escape") {
         event.preventDefault();
-        setThreadSearchOpen(false);
+        closeThreadSearch();
         return;
       }
 
-      const action = resolvePlaygroundShortcutAction(event);
+      const action = resolvePlaygroundShortcutAction(event, {
+        compareAvailable: compareFeatureEnabled,
+      });
       if (!action) return;
       if (editableTarget) return;
       event.preventDefault();
@@ -2434,7 +2468,10 @@ const PlaygroundContent = () => {
     activeArtifact,
     artifactsOpen,
     closeArtifacts,
+    compareFeatureEnabled,
+    closeThreadSearch,
     markArtifactsRead,
+    openThreadSearch,
     setArtifactsOpen,
     threadSearchOpen,
   ]);
@@ -2460,6 +2497,18 @@ const PlaygroundContent = () => {
     };
   }, []);
 
+  const scrollToThreadSearchMatch = React.useCallback(
+    async (messageIndex: number) => {
+      if (!(await scrollToMessageIndex(messageIndex))) return;
+      revealThreadSearchMark(
+        containerRef.current,
+        messageIndex,
+        messages.length > 100 ? "auto" : smoothScrollBehavior(),
+      );
+    },
+    [containerRef, messages.length, scrollToMessageIndex],
+  );
+
   React.useEffect(() => {
     if (!threadSearchOpen) return;
     if (threadSearchMatches.length === 0) {
@@ -2472,12 +2521,12 @@ const PlaygroundContent = () => {
       const messageIndex = threadSearchMatches[bounded];
       if (typeof messageIndex === "number") {
         requestAnimationFrame(() => {
-          scrollToMessageIndex(messageIndex);
+          void scrollToThreadSearchMatch(messageIndex);
         });
       }
       return bounded;
     });
-  }, [scrollToMessageIndex, threadSearchMatches, threadSearchOpen]);
+  }, [scrollToThreadSearchMatch, threadSearchMatches, threadSearchOpen]);
 
   const stepThreadSearchMatch = React.useCallback(
     (direction: 1 | -1) => {
@@ -2491,13 +2540,13 @@ const PlaygroundContent = () => {
         const messageIndex = threadSearchMatches[next];
         if (typeof messageIndex === "number") {
           requestAnimationFrame(() => {
-            scrollToMessageIndex(messageIndex);
+            void scrollToThreadSearchMatch(messageIndex);
           });
         }
         return next;
       });
     },
-    [scrollToMessageIndex, threadSearchMatches],
+    [scrollToThreadSearchMatch, threadSearchMatches],
   );
 
   const contextFileCount = Array.isArray(contextFiles)
@@ -2688,21 +2737,14 @@ const PlaygroundContent = () => {
     }
     return null;
   }, [messages]);
-  const regenerateSelectionState = historySelection.getCurrent();
-  const selectedRows = regenerateSelectionState.capture?.status === "captured"
-    ? regenerateSelectionState.capture.rows : [];
-  const selectedAnswer = selectedRows.at(-1);
-  const selectedQuestion = selectedRows.at(-2);
-  const selectedHistoryCanRegenerate =
-    regenerateSelectionState.status === "ready" &&
-    selectedAnswer?.role === "assistant" &&
-    selectedQuestion?.role === "user" &&
-    (regenerateSelectionState.view?.interpretation.kind === "legacy_linear_v1" ||
-      selectedAnswer.parent_id === selectedQuestion.id);
-  const selectedHistoryBlocksRegeneration =
-    regenerateSelectionState.status !== "idle" &&
-    !(temporaryChat && !regenerateSelectionState.owner) &&
-    !selectedHistoryCanRegenerate;
+  // CM-01: a saved chat can regenerate its saved reply through the server;
+  // only a reply the server cannot regenerate disables the rail control.
+  const savedReplyRegenerateBlock = savedReplyActionAvailability({
+    historySelection,
+    messages,
+    temporaryChat,
+  }).regenerate;
+  const selectedHistoryBlocksRegeneration = savedReplyRegenerateBlock !== null;
   const canRegenerateLastResponse =
     Boolean(latestAssistantMessage) && !selectedHistoryBlocksRegeneration;
   const emptyAssistantResponse = React.useMemo(() => {
@@ -3613,11 +3655,9 @@ const PlaygroundContent = () => {
       onRegenerate={() => regenerateLastMessage()}
       regenerateUnavailableReason={
         selectedHistoryBlocksRegeneration && latestAssistantMessage
-          ? toText(
-              t(
-                "playground:cockpit.regenerateUnavailableSelectedHistory",
-                "Regeneration is unavailable for selected history.",
-              ),
+          ? savedReplyRegenerateUnavailableReason(
+              savedReplyRegenerateBlock,
+              (key, fallback) => toText(t(key, fallback)),
             )
           : null
       }
@@ -3828,6 +3868,21 @@ const PlaygroundContent = () => {
                   </button>
                   <button
                     type="button"
+                    data-testid="playground-thread-search-trigger"
+                    onClick={threadSearchOpen ? closeThreadSearch : openThreadSearch}
+                    aria-label={t("playground:search.open", "Search this conversation") as string}
+                    aria-expanded={threadSearchOpen}
+                    title={
+                      t("playground:search.openWithShortcut", "Search this conversation ({{shortcut}})", {
+                        shortcut: formatShortcut({ key: "f", modifiers: [getPlatformModifier()] }),
+                      } as any) as string
+                    }
+                    className="inline-flex min-h-[26px] min-w-[26px] items-center justify-center rounded-full border border-border bg-surface2 px-1.5 py-0.5 text-text hover:bg-surface sm:px-2"
+                  >
+                    <Search className="h-3 w-3" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
                     data-testid="playground-shortcuts-help-trigger"
                     onClick={() => window.dispatchEvent(new CustomEvent("tldw:open-shortcuts-modal"))}
                     aria-label={t("common:shortcuts.showKeyboardShortcuts", "Show keyboard shortcuts")}
@@ -4002,7 +4057,7 @@ const PlaygroundContent = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setThreadSearchOpen(false)}
+                    onClick={closeThreadSearch}
                     title={t("common:close", "Close") as string}
                     className="inline-flex items-center rounded border border-border bg-surface px-2 py-0.5 text-[10px] font-medium text-text hover:bg-surface2"
                   >
@@ -4053,7 +4108,7 @@ const PlaygroundContent = () => {
                     scrollParentRef={containerRef}
                     navigationRef={chatTimelineRef}
                     showStarterDeck={showStarterDeck}
-                    searchQuery={threadSearchQuery.trim()}
+                    searchQuery={threadSearchHighlightQuery(threadSearchOpen, threadSearchQuery)}
                     matchedMessageIndices={threadSearchMatchSet}
                     activeSearchMessageIndex={threadSearchActiveMessageIndex}
                     onAttachResearchContext={handleAttachResearchContext}
@@ -4094,28 +4149,13 @@ const PlaygroundContent = () => {
                   </span>
                 </div>
               ) : null}
-              {!isAutoScrollToBottom && (
-                <div className="pointer-events-none absolute -top-12 left-0 right-0 flex justify-center">
-                  <button
-                    onClick={() => autoScrollToBottom()}
-                    aria-label={t(
-                      "playground:composer.scrollToLatest",
-                      "Scroll to latest messages",
-                    )}
-                    title={
-                      t(
-                        "playground:composer.scrollToLatest",
-                        "Scroll to latest messages",
-                      ) as string
-                    }
-                    className="pointer-events-auto rounded-full border border-border bg-surface p-2.5 text-text-subtle shadow-md transition-all duration-200 animate-in fade-in zoom-in-95 hover:bg-surface2 focus:outline-none focus-visible:ring-2 focus-visible:ring-focus"
-                  >
-                    <ChevronDown
-                      className="size-4 text-text-subtle"
-                      aria-hidden="true"
-                    />
-                  </button>
-                </div>
+              {!isAutoScrollToBottom && messages.length > 0 && (
+                <ScrollToLatestButton
+                  onClick={() => autoScrollToBottom()}
+                  replyInProgress={streaming}
+                  hasUnseenMessages={hasUnseenMessages}
+                  className="absolute -top-12 right-4"
+                />
               )}
               <div className="min-h-0 overflow-y-auto overscroll-contain">
                 <PlaygroundForm

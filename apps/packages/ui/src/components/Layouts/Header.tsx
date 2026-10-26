@@ -63,14 +63,16 @@ export const Header: React.FC<Props> = ({
   )
   const hostedMode = isHostedTldwDeployment()
   const { mode: themeMode, toggleDarkMode } = useDarkMode()
-  const { clearChat, historyId, temporaryChat, setTemporaryChat, serverChatId, effectiveAssistantState } =
+  const { clearChat, historyId, temporaryChat, setTemporaryChat, serverChatId, serverChatLoadState, messages, effectiveAssistantState } =
     useMessageOption()
   // The session badge reports acknowledged persistence, not connectivity (CS-03).
   const serverChatSaveStatus = useServerChatSaveStatus(serverChatId)
   const persistenceKind = resolveChatPersistenceKind({
     temporaryChat,
     serverChatId,
-    serverSaveStatus: serverChatSaveStatus
+    serverSaveStatus: serverChatSaveStatus,
+    // A chat that failed to open must not read "Saved" (CS-06).
+    serverChatNotLoaded: serverChatLoadState === "failed" && !messages?.length
   })
   const [selectedCharacter, setSelectedCharacter] = useSelectedCharacter<Character | null>(
     null
