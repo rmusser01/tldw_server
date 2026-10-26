@@ -16,7 +16,9 @@ Credentials, in order:
 - With neither, the single-user session cookie, behind its trusted-Origin check
   (``websocket_session_auth``), since cookies are sent cross-site.
 
-Query-string tokens are not read: they end up in access logs (TASK-12113).
+Query-string tokens are not read: they end up in access logs (TASK-12113). A route that must
+keep a deprecated channel for shipped clients reads it itself and hands the credential to
+``verify_ws_credential``, so it is verified exactly as the header it stands for.
 First-message-frame auth arrives with the audio slice of TASK-13950.7, with its consumer.
 """
 
@@ -51,6 +53,16 @@ def auth_subprotocol(websocket: WebSocket) -> str | None:
     return _BEARER_SUBPROTOCOL if _subprotocol_token(websocket) else None
 
 
+def has_ws_credential(websocket: WebSocket) -> bool:
+    """Whether the handshake presents a credential ``resolve_ws_principal`` reads.
+
+    That is ``Authorization``, ``X-API-KEY`` or the bearer subprotocol; the cookie is ambient
+    and does not count.
+    """
+    headers = websocket.headers
+    return bool(_subprotocol_token(websocket)) or "authorization" in headers or "x-api-key" in headers
+
+
 async def resolve_ws_principal(
     websocket: WebSocket,
     *,
@@ -71,11 +83,10 @@ async def resolve_ws_principal(
             are valid but not allowed, the cookie check's own code, or 1011 when the
             credential store failed. Uncaught, Starlette closes the socket with it.
     """
-    headers = list(websocket.scope.get("headers") or [])
     token = _subprotocol_token(websocket)
     if token and "authorization" not in websocket.headers:
-        headers.append((b"authorization", f"Bearer {token}".encode("latin-1")))
-    elif not token and "authorization" not in websocket.headers and "x-api-key" not in websocket.headers:
+        return await verify_ws_credential(websocket, token=token, required_scope=required_scope)
+    if not has_ws_credential(websocket):
         if await resolve_single_user_cookie_websocket(websocket) is not None:
             cookie_principal: AuthPrincipal = websocket.state.auth_principal
             return cookie_principal
@@ -83,7 +94,36 @@ async def resolve_ws_principal(
         if cookie_code is not None:
             raise WebSocketException(code=cookie_code, reason="cookie_auth_rejected")
         raise WebSocketException(code=WS_UNAUTHENTICATED, reason="authentication_required")
+    return await _verify(websocket, list(websocket.scope.get("headers") or []), required_scope)
 
+
+async def verify_ws_credential(
+    websocket: WebSocket,
+    *,
+    token: str | None = None,
+    api_key: str | None = None,
+    required_scope: str | None = None,
+) -> AuthPrincipal:
+    """Verify a credential found elsewhere in the handshake as ``Authorization: Bearer`` or
+    ``X-API-KEY``, on the same path as ``resolve_ws_principal``.
+
+    For a route's deprecated channel; call it only when ``has_ws_credential`` is False, so no
+    header credential competes. Raises ``WebSocketException`` as ``resolve_ws_principal`` does.
+    """
+    headers = list(websocket.scope.get("headers") or [])
+    try:
+        if token:
+            headers.append((b"authorization", f"Bearer {token}".encode("latin-1")))
+        if api_key:
+            headers.append((b"x-api-key", api_key.encode("latin-1")))
+    except UnicodeEncodeError:  # no header could carry it, so no such credential exists
+        raise WebSocketException(code=WS_UNAUTHENTICATED, reason="invalid_token") from None
+    return await _verify(websocket, headers, required_scope)
+
+
+async def _verify(
+    websocket: WebSocket, headers: list[tuple[bytes, bytes]], required_scope: str | None
+) -> AuthPrincipal:
     request = Request({**websocket.scope, "type": "http", "method": "GET", "headers": headers, "state": {}})
     try:
         principal = await get_auth_principal(request)
