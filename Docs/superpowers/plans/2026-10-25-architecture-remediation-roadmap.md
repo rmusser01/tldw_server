@@ -352,6 +352,8 @@ These eleven tasks have no dependencies on each other and can run in parallel. E
 | `.62` egress gaps | #3335, #3336 | Per-tenant lists on redirect hops, uncapped feed reads, test resolver hook |
 | `.63` packages/ui frozen hook violations | #3332 | rules-of-hooks fixes, inline-config bypass, `as never` casts, contributor doc |
 | `.64` ratchet contract helpers | #3331-#3337 | One run-text parser, visible `--tighten`, macOS shard memory, guard docs |
+| `.65` setup route behind a same-host proxy | #3347 reviews | Bare `proxy_pass` or spoofed `X-Forwarded-For` looks local; pre-setup SSRF with the private opt-in |
+| `.66` stale Collections FTS on memoized instances | #3342 merge review | `_fts_supports_direct_delete` never refreshed; updates leave old text indexed |
 
 Execution order note: Phase 0 ran 0.1, 0.4, 0.2, 0.5, 0.3, 0.6, 0.7, 0.10, 0.8, 0.11, 0.9. `.11` and `.9` follow `.8` because they reuse `tests/lint/_ast_cache.py`, which `.8` creates.
 
