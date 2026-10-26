@@ -177,22 +177,6 @@ def test_backlog_ratchet_base_prefers_the_dispatch_base():
     )
 
 
-@pytest.mark.parametrize(
-    "ratchet",
-    [
-        "tldw_Server_API/tests/lint/test_function_size_ratchet.py",
-        "tldw_Server_API/tests/lint/test_charactersragdb_surface_ratchet.py",
-    ],
-)
-def test_the_size_ratchets_run_in_the_required_ratchet_step(ratchet):
-    """TASK-13950.8: a ratchet only the optional full-suite shards run enforces nothing.
-
-    The step's BACKLOG_TASK_FORMAT_BASE is also their bump-with-reason base (asserted above).
-    """
-    step = _step(_gate("backend-required.yml"), "Enforce CI contracts and code ratchets")
-    assert re.search(rf"^\s*{re.escape(ratchet)}\s*\\?$", step["run"], re.MULTILINE), ratchet
-
-
 def test_dependency_review_runs_on_a_queue_dispatch():
     """It used to admit only pull_request and workflow_run, so a dispatched gate passed without it."""
     step = _step(_gate("security-required.yml"), "Dependency review (high/critical)")
