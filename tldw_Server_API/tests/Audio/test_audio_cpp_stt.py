@@ -2803,9 +2803,12 @@ def test_audio_cpp_registry_reset_clears_discovery_cache(
 async def test_audio_cpp_aiohttp_client_carries_http_client_defaults(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import aiohttp
+
     monkeypatch.setenv("HTTP_CERT_PINS", "audio.example.test=AbCd")
     monkeypatch.setenv("HTTP_DEFAULT_USER_AGENT", "tldw-test-agent")
     session = audio_cpp._create_audio_cpp_client(transport="aiohttp", timeout_seconds=17.25)
+    assert isinstance(session, aiohttp.ClientSession)
     try:
         assert session.headers["User-Agent"] == "tldw-test-agent"
         assert session._tldw_cert_pinning == {"audio.example.test": {"abcd"}}
@@ -2850,7 +2853,7 @@ async def test_audio_cpp_configured_loopback_server_through_the_real_helpers(
         "create_async_client",
         lambda **kwargs: create_async_client(transport=httpx.MockTransport(handler), **kwargs),
     )
-    request = _audio_cpp_request_kwargs(tmp_path, transport="httpx")
+    request: dict[str, Any] = _audio_cpp_request_kwargs(tmp_path, transport="httpx")
 
     if outcome == "redirect":
         with pytest.raises(STTTranscriptionError):
