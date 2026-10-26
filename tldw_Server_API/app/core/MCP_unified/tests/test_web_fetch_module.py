@@ -50,7 +50,7 @@ class _FakeClient:
         return self.response
 
 
-def _module(client: _FakeClient, *, rate_limiter: Any | None = None) -> WebFetchModule:
+def _module(client: wfm.WebFetchHttpClient, *, rate_limiter: Any | None = None) -> WebFetchModule:
     return WebFetchModule(ModuleConfig(name="WebFetch"), client=client, rate_limiter=rate_limiter)
 
 

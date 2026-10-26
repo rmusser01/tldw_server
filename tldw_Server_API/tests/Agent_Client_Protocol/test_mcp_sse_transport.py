@@ -90,7 +90,7 @@ class _MCPSSEServer:
             )
         body = json.loads(request.content)
         if "id" in body:
-            result = {"tools": self._tools} if body["method"] == "tools/list" else {"capabilities": {}}
+            result: dict = {"tools": self._tools} if body["method"] == "tools/list" else {"capabilities": {}}
             message = json.dumps({"jsonrpc": "2.0", "id": body["id"], "result": result}, indent=1)
             data = "data: " + message.replace("\n", "\ndata: ")
             self._replies.put_nowait(f"event: message\n{data}\n\n".encode())
