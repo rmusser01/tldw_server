@@ -12,7 +12,7 @@ and this project adheres to Some kind of Versioning
 
 ### Changed
 
-- Deprecated: ACP and Prompt Studio WebSockets (`/api/v1/acp/multiplex`, `/api/v1/acp/sessions/{id}/stream`, `/api/v1/acp/sessions/{id}/ssh`, `/api/v1/prompt-studio/ws`, `/api/v1/prompt-studio/ws/{project_id}`): credentials in the `?token=` / `?api_key=` query and in the `x-api-key, <key>` subprotocol still work but log a deprecation warning; send `Authorization: Bearer`, `X-API-KEY`, or the `bearer, <token or key>` subprotocol instead. These routes now authenticate through the core WebSocket resolver, so revocation, API-key scope and single-user rules match HTTP (TASK-13950.7).
+- Deprecated: ACP and Prompt Studio WebSockets (`/api/v1/acp/multiplex`, `/api/v1/acp/sessions/{id}/stream`, `/api/v1/acp/sessions/{id}/ssh`, `/api/v1/prompt-studio/ws`, `/api/v1/prompt-studio/ws/{project_id}`): credentials in the `?token=` / `?api_key=` query and in the `x-api-key, <key>` subprotocol still work but log a deprecation warning; send `Authorization: Bearer`, `X-API-KEY`, or the `bearer, <token or key>` subprotocol instead. These routes now authenticate through the core WebSocket resolver, so revocation, API-key scope and single-user rules match HTTP, which narrows two things ACP did on its own: the `API_KEY` environment variable is no longer accepted as a second single-user key next to a different `SINGLE_USER_API_KEY` (it still applies when `SINGLE_USER_API_KEY` is unset), and a `?token=&api_key=` pair is resolved as HTTP resolves both headers, the JWT first and the API key only when the JWT is refused with 401. An API key without the route's scope now closes with 4403 instead of 4401, and the ACP clients no longer retry 4403 (TASK-13950.7).
 
 ### Fixed
 
