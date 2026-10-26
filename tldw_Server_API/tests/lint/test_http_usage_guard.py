@@ -285,8 +285,10 @@ def test_outbound_http_goes_through_core_http_client() -> None:
 # keyword ``configured_endpoint=<expr>``, and on a ``"configured_endpoint"`` dict-literal key or
 # subscript store, outside SCOPE_ALLOWLIST. Only a *parameter* of an enclosing function passed on under
 # its own name (``configured_endpoint=configured_endpoint``) is plumbing and exempt; a local variable of
-# that name is a source. A dict built elsewhere and ``**``-splatted is seen only where its literal key or
-# key store is. Other scope carriers (``required_endpoint_scope=``, ``TrustedProviderEndpoint(scope=...)``,
+# that name is a source, and so is any rebind of the parameter to something other than ``None``. A dict
+# built elsewhere and ``**``-splatted is seen only where its literal key, key store or
+# ``setdefault("configured_endpoint", ...)`` is. Known limits: dict comprehensions and ``dict([...])``
+# pairs that spell the key are not seen. Other scope carriers (``required_endpoint_scope=``, ``TrustedProviderEndpoint(scope=...)``,
 # ``provider_credential_runtime``) are gated through the allowlisted adapters they feed.
 # Group A's MCP transports (sse.py, streamable_http.py) join this set when that branch merges.
 SCOPE_ALLOWLIST: dict[str, str] = {
@@ -310,8 +312,9 @@ SCOPE_ALLOWLIST: dict[str, str] = {
     ),
     "tldw_Server_API/app/api/v1/endpoints/setup.py": (
         "POST /first-run/providers/validate scopes the request payload's base_url so a local provider can be "
-        "probed. Reachable only before setup completes, from a loopback client without proxy headers, or from "
-        "an admin when remote setup is explicitly enabled (require_local_setup_access); 409 afterwards. "
+        "probed. require_local_setup_access admits only a loopback client with a local Host header and any "
+        "proxy client-IP headers resolving to loopback, or an admin when remote setup is explicitly enabled. "
+        "Reachable only while needs_setup is true and the first-run state is non-terminal (409 afterwards). "
         "No ordinary authenticated user can reach it."
     ),
     "tldw_Server_API/app/core/Ingestion_Media_Processing/OCR/backends/llamacpp_ocr.py": (
@@ -337,6 +340,10 @@ def _parameter_names(node: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda) 
     return names
 
 
+def _is_none(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and node.value is None
+
+
 class _ScopeVisitor(ast.NodeVisitor):
     """Collect lines that set a configured_endpoint scope; a parameter passed on by name is plumbing."""
 
@@ -344,6 +351,7 @@ class _ScopeVisitor(ast.NodeVisitor):
         self.params: list[set[str]] = []
         self.lines: list[int] = []
         self.plumbing: set[int] = set()  # id() of subscript targets assigned a parameter
+        self.narrowing: set[int] = set()  # id() of Name targets assigned the literal None
 
     def _is_parameter(self, value: ast.AST) -> bool:
         return isinstance(value, ast.Name) and value.id == _SCOPE_KEY and any(_SCOPE_KEY in p for p in self.params)
@@ -357,6 +365,26 @@ class _ScopeVisitor(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call) -> None:
         self.lines += [node.lineno for kw in node.keywords if kw.arg == _SCOPE_KEY and not self._is_parameter(kw.value)]
+        func = node.func
+        if (
+            isinstance(func, ast.Attribute)
+            and func.attr == "setdefault"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and node.args[0].value == _SCOPE_KEY
+            and not (len(node.args) > 1 and self._is_parameter(node.args[1]))
+        ):
+            self.lines.append(node.lineno)
+        self.generic_visit(node)
+
+    def visit_Name(self, node: ast.Name) -> None:
+        # Any rebind of the name, even of a parameter, is a possible new source; `= None` only narrows.
+        if node.id == _SCOPE_KEY and isinstance(node.ctx, ast.Store) and id(node) not in self.narrowing:
+            self.lines.append(node.lineno)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        if node.name == _SCOPE_KEY:
+            self.lines.append(node.lineno)
         self.generic_visit(node)
 
     def visit_Dict(self, node: ast.Dict) -> None:
@@ -368,6 +396,13 @@ class _ScopeVisitor(ast.NodeVisitor):
     def visit_Assign(self, node: ast.Assign) -> None:
         if self._is_parameter(node.value):
             self.plumbing |= {id(t) for t in node.targets if isinstance(t, ast.Subscript)}
+        if _is_none(node.value):
+            self.narrowing |= {id(t) for t in node.targets}
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if node.value is not None and _is_none(node.value):
+            self.narrowing.add(id(node.target))
         self.generic_visit(node)
 
     def visit_Subscript(self, node: ast.Subscript) -> None:
@@ -384,8 +419,9 @@ class _ScopeVisitor(ast.NodeVisitor):
 def scope_uses(tree: ast.Module) -> list[str]:
     """Lines that set a scope: ``configured_endpoint=<expr>``, a ``"configured_endpoint"`` dict key or store.
 
-    Exempt only a parameter of an enclosing function passed on under its own name. A local or module
-    variable of that name is a scope source and counts.
+    Exempt only a parameter of an enclosing function passed on under its own name and never rebound to
+    anything but None. A local or module variable of that name, or a rebind of the parameter (assignment,
+    walrus, for/with/except target, comprehension), is a scope source and counts.
     """
     visitor = _ScopeVisitor()
     visitor.visit(tree)
@@ -642,8 +678,34 @@ def test_stale_and_reasonless_scope_entries_fail(tmp_path: Path) -> None:
         "def f(other):\n    g(**{'configured_endpoint': Scope.from_url(other)})\n",
         "def f(other):\n    kw = dict(configured_endpoint=Scope.from_url(other))\n    g(**kw)\n",
         "def f(other):\n    kw = {}\n    kw['configured_endpoint'] = Scope.from_url(other)\n    g(**kw)\n",
+        "def f(other):\n    kw = {}\n    kw.setdefault('configured_endpoint', Scope.from_url(other))\n    g(**kw)\n",
+        "def f(configured_endpoint=None):\n    configured_endpoint = Scope.from_url(u)\n    g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    if configured_endpoint is None:\n        configured_endpoint = Scope.from_url(u)\n    g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    if (configured_endpoint := Scope.from_url(u)):\n        g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    for configured_endpoint in scopes:\n        g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    with open_scope() as configured_endpoint:\n        g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    configured_endpoint: object = Scope.from_url(u)\n    g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    configured_endpoint += 1\n    g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    def inner(u):\n        configured_endpoint = Scope.from_url(u)\n        g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None):\n    scopes = [configured_endpoint for configured_endpoint in many]\n",
     ],
-    ids=["local-variable", "module-variable", "dict-literal-key", "dict-call", "subscript-store"],
+    ids=[
+        "local-variable",
+        "module-variable",
+        "dict-literal-key",
+        "dict-call",
+        "subscript-store",
+        "setdefault",
+        "shadowed-parameter",
+        "fallback-rebind",
+        "walrus",
+        "for-target",
+        "with-target",
+        "annassign",
+        "augassign",
+        "closure-local-shadow",
+        "comprehension-target",
+    ],
 )
 def test_scope_carriers_other_than_a_parameter_pass_through_fail(tmp_path: Path, source: str) -> None:
     root = _seed(tmp_path, {"core/carrier.py": source})
@@ -661,8 +723,9 @@ def test_scope_carriers_other_than_a_parameter_pass_through_fail(tmp_path: Path,
         "async def f(configured_endpoint=None):\n    kw = {'configured_endpoint': configured_endpoint}\n    await g(**kw)\n",
         "def f(configured_endpoint=None):\n    kw = {}\n    kw['configured_endpoint'] = configured_endpoint\n    g(**kw)\n",
         "class C:\n    def m(self, configured_endpoint=None):\n        return lambda: g(configured_endpoint=configured_endpoint)\n",
+        "def f(configured_endpoint=None, strict=False):\n    if strict:\n        configured_endpoint = None\n    g(configured_endpoint=configured_endpoint)\n",
     ],
-    ids=["default", "kwonly", "posonly", "closure", "dict-of-param", "store-of-param", "lambda-closure"],
+    ids=["default", "kwonly", "posonly", "closure", "dict-of-param", "store-of-param", "lambda-closure", "narrow-to-none"],
 )
 def test_a_real_parameter_pass_through_is_not_a_scope_source(tmp_path: Path, source: str) -> None:
     assert scope_scan(_seed(tmp_path, {"core/plumbing.py": source})) == {}
