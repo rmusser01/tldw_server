@@ -296,6 +296,9 @@ jobs:
             tldw_Server_API/tests/lint/test_first_party_source_pinning.py \
             tldw_Server_API/tests/CI/test_backlog_task_format_ratchet.py \
             tools/backlog-py/tests
+          # TASK-13950.7: WebSocket auth guards. Their own run: the auth matrix reloads the app module.
+          pytest -q --disable-warnings -p pytest_asyncio.plugin \
+            tldw_Server_API/tests/lint/test_auth_token_parsing_ratchet.py
 
       - name: Backend unit smoke
         if: needs.changes.outputs.backend_changed == 'true'
