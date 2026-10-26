@@ -13,6 +13,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.repositories.keywords_repos
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.noncritical import (
     MEDIA_NONCRITICAL_EXCEPTIONS,
 )
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords, normalize_keyword_identity
 
 _MEDIA_NONCRITICAL_EXCEPTIONS: tuple[type[BaseException], ...] = MEDIA_NONCRITICAL_EXCEPTIONS
 
@@ -26,24 +27,23 @@ def fetch_media_for_keywords(
     keywords: list[str],
     include_trash: bool = False,
 ) -> dict[str, list[dict[str, Any]]]:
+    """Group active media by requested keyword, keyed by ``normalize_keyword_identity``.
+
+    Each keyword resolves through ``KeywordsRepository.find``, so a request in any
+    case (including ß/SS and accented capitals) finds the stored keyword.
+    """
     if not isinstance(keywords, list):
         raise TypeError("Input 'keywords' must be a list of strings.")  # noqa: TRY003
 
-    if not keywords:
-        logger.debug("fetch_media_for_keywords called with an empty list of keywords.")
+    requested = dedupe_keywords(keywords)
+    if not requested:
+        logger.debug("fetch_media_for_keywords: no valid keywords after stripping.")
         return {}
 
-    potential_keywords = [keyword.strip().lower() for keyword in keywords if keyword and keyword.strip()]
-    if not potential_keywords:
-        logger.debug("fetch_media_for_keywords: no valid keywords after initial cleaning and stripping.")
-        return {}
+    results_by_keyword: dict[str, list[dict[str, Any]]] = {
+        normalize_keyword_identity(keyword): [] for keyword in requested
+    }
 
-    unique_clean_keywords = sorted(set(potential_keywords))
-    if not unique_clean_keywords:
-        logger.debug("fetch_media_for_keywords: no unique valid keywords remain.")
-        return {}
-
-    placeholders = ",".join("?" * len(unique_clean_keywords))
     media_conditions = ["m.deleted = ?", "m.system_operation_id IS NULL"]
     media_params: list[Any] = [False]
     if not include_trash:
@@ -58,70 +58,46 @@ def fetch_media_for_keywords(
         "m.author AS media_author"
     )
 
-    order_expr = self._keyword_order_expression("k.keyword")
-    query = """
-        SELECT
-            k.keyword AS keyword_text,
-            {media_fields}
-        FROM Keywords k
-        JOIN MediaKeywords mk ON k.id = mk.keyword_id
-        JOIN Media m ON mk.media_id = m.id
-        WHERE {media_where_clause}
-          AND k.keyword IN ({placeholders})
-          AND k.deleted = ?
-        ORDER BY {order_expr}, m.last_modified DESC, m.id DESC
-    """.format_map(locals())  # nosec B608
-
-    params = tuple(media_params + unique_clean_keywords + [False])
-
-    logger.debug(
-        "Executing fetch_media_for_keywords query for keywords: {}, include_trash: {}",
-        unique_clean_keywords,
-        include_trash,
-    )
-
-    results_by_keyword: dict[str, list[dict[str, Any]]] = {keyword: [] for keyword in unique_clean_keywords}
-
     try:
         conn = self.get_connection()
-        rows = self._fetchall_with_connection(conn, query, params)
+        repository = KeywordsRepository.from_legacy_db(self)
+        identity_by_id: dict[int, str] = {}
+        for keyword in requested:
+            row = repository.find(conn, keyword, include_deleted=False)
+            if row:
+                identity_by_id[int(row["id"])] = normalize_keyword_identity(keyword)
+        if not identity_by_id:
+            return results_by_keyword
 
-        for row in rows:
-            db_keyword = row["keyword_text"]
-            media_item = {
-                "id": row["media_id"],
-                "uuid": row["media_uuid"],
-                "title": row["media_title"],
-                "type": row["media_type"],
-                "url": row["media_url"],
-                "content_hash": row["media_content_hash"],
-                "last_modified": row["media_last_modified"],
-                "ingestion_date": row["media_ingestion_date"],
-                "author": row["media_author"],
-            }
+        placeholders = ",".join("?" * len(identity_by_id))
+        order_expr = self._keyword_order_expression("k.keyword")
+        query = """
+            SELECT
+                k.id AS keyword_id,
+                {media_fields}
+            FROM Keywords k
+            JOIN MediaKeywords mk ON k.id = mk.keyword_id
+            JOIN Media m ON mk.media_id = m.id
+            WHERE {media_where_clause}
+              AND k.id IN ({placeholders})
+            ORDER BY {order_expr}, m.last_modified DESC, m.id DESC
+        """.format_map(locals())  # nosec B608
+        params = tuple(media_params + list(identity_by_id))
 
-            if db_keyword in results_by_keyword:
-                results_by_keyword[db_keyword].append(media_item)
-            else:
-                logger.error(
-                    "Data consistency alert in fetch_media_for_keywords: "
-                    "Keyword '{}' from DB results was not in the expected set of "
-                    "unique_clean_keywords: {}. This may indicate a mismatch in case "
-                    "handling or normalization.",
-                    db_keyword,
-                    unique_clean_keywords,
-                )
-                results_by_keyword[db_keyword] = [media_item]
-
-        num_keywords_with_media = len([keyword for keyword, media_items in results_by_keyword.items() if media_items])
-        total_media_items_found = sum(len(media_items) for media_items in results_by_keyword.values())
-        logger.info(
-            "Fetched media for keywords. Queried unique keywords: {}. Keywords with media found: {}. "
-            "Total media items grouped: {}",
-            len(unique_clean_keywords),
-            num_keywords_with_media,
-            total_media_items_found,
-        )
+        for row in self._fetchall_with_connection(conn, query, params):
+            results_by_keyword[identity_by_id[int(row["keyword_id"])]].append(
+                {
+                    "id": row["media_id"],
+                    "uuid": row["media_uuid"],
+                    "title": row["media_title"],
+                    "type": row["media_type"],
+                    "url": row["media_url"],
+                    "content_hash": row["media_content_hash"],
+                    "last_modified": row["media_last_modified"],
+                    "ingestion_date": row["media_ingestion_date"],
+                    "author": row["media_author"],
+                }
+            )
     except _MEDIA_NONCRITICAL_EXCEPTIONS as exc:
         logger.error(
             "Unexpected error fetching media for keywords from DB {}: {}",

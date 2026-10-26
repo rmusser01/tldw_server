@@ -239,10 +239,16 @@ def test_ensure_postgres_post_core_structures_runs_followup_ensures(monkeypatch)
         "ensure_postgres_sync_log_contract",
         lambda value, connection: calls.append(("sync_contract", value, connection)),
     )
+    monkeypatch.setattr(
+        postgres_helpers_module,
+        "ensure_postgres_keyword_identity",
+        lambda value, connection: calls.append(("keyword_identity", value, connection)),
+    )
     postgres_helpers_module.ensure_postgres_post_core_structures(db, conn)
 
     assert calls == [
         ("sync_contract", db, conn),
+        ("keyword_identity", db, conn),
         ("collections", conn),
         ("tts_history", conn),
         ("audio_presets", conn),

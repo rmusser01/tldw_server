@@ -10,6 +10,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.schema.document_workspace_s
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.core_media import (
     apply_postgres_core_media_schema,
+    ensure_postgres_keyword_identity,
     ensure_postgres_sync_log_contract,
 )
 from tldw_Server_API.app.core.DB_Management.media_db.schema.features.fts import (
@@ -104,6 +105,7 @@ def ensure_postgres_post_core_structures(
     """Ensure non-core PostgreSQL schema structures after base bootstrap or migration."""
 
     ensure_postgres_sync_log_contract(db, conn)
+    ensure_postgres_keyword_identity(db, conn)
     db._ensure_postgres_collections_tables(conn)
     db._ensure_postgres_tts_history(conn)
     db._ensure_postgres_audio_presets(conn)

@@ -394,6 +394,60 @@ def ensure_postgres_sync_log_contract(db: SupportsPostgresCoreMediaSchema, conn:
     db._sync_entity_column = identifier
 
 
+_KEYWORD_IDENTITY_INDEX = "idx_keywords_keyword_identity"
+
+
+def ensure_postgres_keyword_identity(db: Any, conn: Any) -> None:
+    """Give Postgres Media keywords SQLite's case-insensitive uniqueness (TASK-13950.5).
+
+    The Postgres conversion strips ``keyword UNIQUE COLLATE NOCASE`` to an exact-case
+    unique, so Postgres gets a unique ``LOWER(keyword)`` index over active rows. Case
+    variants that already coexist are merged first, as ChaCha's ``merge_keywords``
+    does: the earliest active row survives with its casing, the others' MediaKeywords
+    links move to it without duplicates, and they are soft-deleted (version + 1,
+    ``merge_parent_uuid`` = survivor uuid). Like every schema migration, this writes
+    no sync_log rows (sync_log is FORCE RLS-scoped per user). The index gates it, so it
+    runs once; the table lock serializes concurrent bootstraps.
+    """
+    backend = db.backend
+    exists = backend.execute(
+        "SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = %s",
+        (_KEYWORD_IDENTITY_INDEX,),
+        connection=conn,
+    )
+    if exists.rows:
+        return
+    backend.execute("LOCK TABLE keywords IN SHARE ROW EXCLUSIVE MODE", connection=conn)
+    merges = backend.execute(
+        "SELECT id, survivor_id, survivor_uuid FROM ("
+        " SELECT id, FIRST_VALUE(id) OVER w AS survivor_id, FIRST_VALUE(uuid) OVER w AS survivor_uuid"
+        " FROM keywords WHERE deleted = FALSE"
+        " WINDOW w AS (PARTITION BY LOWER(keyword) ORDER BY id)"
+        ") ranked WHERE id <> survivor_id ORDER BY id",
+        connection=conn,
+    ).rows
+    for merge in merges:
+        backend.execute(
+            "INSERT INTO mediakeywords (media_id, keyword_id) "
+            "SELECT media_id, %s FROM mediakeywords WHERE keyword_id = %s ON CONFLICT DO NOTHING",
+            (merge["survivor_id"], merge["id"]),
+            connection=conn,
+        )
+        backend.execute("DELETE FROM mediakeywords WHERE keyword_id = %s", (merge["id"],), connection=conn)
+        backend.execute(
+            "UPDATE keywords SET deleted = TRUE, version = version + 1, last_modified = CURRENT_TIMESTAMP, "
+            "merge_parent_uuid = %s, keyword_fts_tsv = NULL WHERE id = %s",
+            (merge["survivor_uuid"], merge["id"]),
+            connection=conn,
+        )
+    if merges:
+        logger.info("Merged {} case-variant Media keyword rows into their earliest variant", len(merges))
+    backend.execute(
+        f"CREATE UNIQUE INDEX IF NOT EXISTS {_KEYWORD_IDENTITY_INDEX} ON keywords (LOWER(keyword)) WHERE deleted = FALSE",
+        connection=conn,
+    )
+
+
 def apply_postgres_core_media_schema(
     db: SupportsPostgresCoreMediaSchema,
     conn: Any,

@@ -12,6 +12,7 @@ and this project adheres to Some kind of Versioning
 
 ### Changed
 
+- **Media keywords are case-insensitive and keep their display casing.** "Foo" and "foo" are one keyword, stored with the first-seen casing (Media no longer lowercases keywords on write), and lookups also fold ß/SS, accented capitals and NFC forms. On PostgreSQL, Media DB startup merges existing case-variant keyword rows into the earliest one (links move to it; the others are soft-deleted with `merge_parent_uuid` set) and then enforces a unique `LOWER(keyword)` index (TASK-13950.5).
 
 ### Fixed
 

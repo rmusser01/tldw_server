@@ -1015,6 +1015,38 @@ def test_operation_owned_clone_confirmation_promotes_pending_keywords(
     assert media_db.get_media_by_id(created.media_id) is not None
 
 
+@pytest.mark.unit
+def test_operation_owned_clone_promotion_reuses_display_cased_keywords(
+    media_db: MediaDatabase,
+) -> None:
+    """Pending clone keywords are lowercase; promotion finds stored display casing (TASK-13950.5)."""
+    db: Any = media_db  # the clone methods are typed on MediaDbLike
+    _seed_media(
+        media_db,
+        title="Display-cased keyword owner",
+        content="display keyword owner content",
+        chunk_text="display keyword owner chunk",
+        transcript_text="display keyword owner transcript",
+        keywords=["Research", "Éclair"],
+    )
+    snapshot = _operation_snapshot(keywords=("research", "éclair"))
+    expected_hash = media_db_api.hash_media_clone_snapshot(snapshot)
+    created = db.insert_operation_owned_clone_media(
+        snapshot=snapshot,
+        operation_id="clone-operation-display-casing",
+        source_identity="workspace-source-display-casing",
+        expected_content_hash=expected_hash,
+    )
+
+    assert db.confirm_operation_owned_clone_media(
+        operation_id="clone-operation-display-casing",
+        source_identity="workspace-source-display-casing",
+        expected_content_hash=expected_hash,
+    ) == 1
+    assert media_db.fetch_all_keywords() == ["Research", "Éclair"]
+    assert media_db_api.fetch_keywords_for_media(db, created.media_id) == ["Research", "Éclair"]
+
+
 @pytest.mark.integration
 def test_sqlite_v26_migration_releases_real_v25_keyword_graph_and_replays(
     tmp_path: Path,
@@ -2091,7 +2123,7 @@ def test_media_clone_snapshot_materializes_only_active_keywords_and_children(
 
     snapshot = media_db.read_media_clone_snapshots([media_id])[media_id]
 
-    assert snapshot.media["keywords"] == ("alpha", "zulu")
+    assert snapshot.media["keywords"] == ("alpha", "Zulu")
     assert [row["chunk_text"] for row in snapshot.chunks] == ["active chunk"]
     assert [row["transcription"] for row in snapshot.transcripts] == [
         "active transcript"

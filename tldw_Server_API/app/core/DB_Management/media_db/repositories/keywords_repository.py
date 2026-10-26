@@ -14,6 +14,7 @@ from tldw_Server_API.app.core.DB_Management.media_db.errors import (
 )
 from tldw_Server_API.app.core.DB_Management.media_db.runtime.validation import MediaDbLike
 from tldw_Server_API.app.core.Ingestion_Media_Processing.logging_safety import exception_type_for_log
+from tldw_Server_API.app.core.Utils.keyword_identity import dedupe_keywords, normalize_keyword_identity
 
 
 class KeywordsRepository:
@@ -43,22 +44,57 @@ class KeywordsRepository:
             logger.error("Keyword lookup failed (error_type={})", exception_type_for_log(exc))
             raise DatabaseError(f"Failed fetch keywords {media_id}") from exc  # noqa: TRY003
 
+    def find(self, conn: Any, keyword: str, *, include_deleted: bool = True) -> dict[str, Any] | None:
+        """Return the keyword row whose ``normalize_keyword_identity`` matches ``keyword``.
+
+        Active rows win over soft-deleted ones, then the earliest row. SQLite's
+        ``COLLATE NOCASE`` column and Postgres ``LOWER()`` find ASCII case variants, but
+        neither folds ß/SS, NFC forms or (SQLite) accented capitals, so a SQL miss
+        compares helper identities in Python (TASK-13950.5).
+        """
+        db = self.session
+        text = keyword.strip()
+        # Legacy DB-likes without backend_type are SQLite (see api._supports_keyword_delete_repository).
+        postgres = getattr(db, "backend_type", None) == BackendType.POSTGRESQL
+        match = "LOWER(keyword) = LOWER(?)" if postgres else "keyword = ?"
+        active = "" if include_deleted else " AND deleted = ?"
+        params: tuple[Any, ...] = (text,) if include_deleted else (text, False)
+        select = "SELECT id, uuid, keyword, deleted, version FROM Keywords"
+        row: dict[str, Any] | None = db._fetchone_with_connection(
+            conn,
+            f"{select} WHERE {match}{active} ORDER BY deleted, id LIMIT 1",  # nosec B608
+            params,
+        )
+        if row:
+            return row
+        # ponytail: O(keywords) scan per miss; add a stored identity column if that gets slow.
+        identity = normalize_keyword_identity(text)
+        rows = db._fetchall_with_connection(conn, f"{select} ORDER BY deleted, id")  # nosec B608
+        return next(
+            (
+                r
+                for r in rows
+                if (include_deleted or not r["deleted"]) and normalize_keyword_identity(r["keyword"]) == identity
+            ),
+            None,
+        )
+
     def add(self, keyword: str, conn: Any | None = None) -> tuple[int | None, str | None]:
+        """Return the keyword matching ``keyword``'s identity, restoring or creating it.
+
+        A new keyword keeps the caller's display casing; an existing one keeps its own.
+        """
         if not keyword or not keyword.strip():
             raise InputError("Keyword cannot be empty.")  # noqa: TRY003
 
         db = self.session
-        keyword = keyword.strip().lower()
+        keyword = keyword.strip()
         current_time = db._get_current_utc_timestamp_str()
         client_id = db.client_id
 
         try:
             if conn is not None:
-                existing = db._fetchone_with_connection(
-                    conn,
-                    "SELECT id, uuid, deleted, version FROM Keywords WHERE keyword = ?",
-                    (keyword,),
-                )
+                existing = self.find(conn, keyword)
 
                 if existing:
                     kw_id = existing["id"]
@@ -82,7 +118,7 @@ class KeywordsRepository:
                             (kw_id,),
                         ) or {}
                         db._log_sync_event(conn, "Keywords", kw_uuid, "update", new_version, payload_data)
-                        db._update_fts_keyword(conn, kw_id, keyword)
+                        db._update_fts_keyword(conn, kw_id, existing["keyword"])
                         return kw_id, kw_uuid
 
                     logger.debug("Keyword '{}' already active.", keyword)
@@ -140,7 +176,7 @@ class KeywordsRepository:
         conn: Any | None = None,
     ) -> bool:
         db = self.session
-        valid_keywords = sorted({k.strip().lower() for k in keywords if k and k.strip()})
+        valid_keywords = dedupe_keywords(keywords)
         if conn is None:
             with db.transaction() as tx_conn:
                 return self.replace_keywords(media_id, keywords, conn=tx_conn)
@@ -246,17 +282,12 @@ class KeywordsRepository:
             raise InputError("Keyword cannot be empty.")  # noqa: TRY003
 
         db = self.session
-        keyword = keyword.strip().lower()
         current_time = db._get_current_utc_timestamp_str()
         client_id = db.client_id
 
         try:
             with db.transaction() as conn:
-                keyword_info = db._fetchone_with_connection(
-                    conn,
-                    "SELECT id, uuid, version FROM Keywords WHERE keyword = ? AND deleted = 0",
-                    (keyword,),
-                )
+                keyword_info = self.find(conn, keyword, include_deleted=False)
                 if not keyword_info:
                     logger.warning("Keyword deletion skipped: keyword unavailable")
                     return False
