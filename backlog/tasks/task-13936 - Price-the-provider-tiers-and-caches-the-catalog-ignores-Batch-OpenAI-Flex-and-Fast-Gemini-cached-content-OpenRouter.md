@@ -2,7 +2,7 @@
 id: TASK-13936
 title: 'Price the provider tiers and caches the catalog ignores: Batch, OpenAI Flex
   and Fast, Gemini cached content, OpenRouter'
-status: To Do
+status: In Progress
 labels:
 - quotas
 - backend
@@ -27,6 +27,7 @@ Follow-up 5 of Docs/superpowers/plans/2026-10-23-pricing.md, filed at the owner'
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+Plan: Docs/superpowers/plans/2026-10-26-pricing-tiers.md (owner-approved). ADR assessment: no new ADR; ADR-075 governs prompt_tokens including cache tokens, ADR-059 the backlog tool.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
