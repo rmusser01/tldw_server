@@ -811,7 +811,7 @@ jobs:
       # Full ESLint rule set on packages/ui (which has no eslint of its own) plus the three
       # hook rules; pre-existing errors are frozen in eslint-suppressions.packages-ui.json.
       # This step and the import-cycle ratchet below are TASK-13950.10's; backend-required's
-      # contract tests fail if either stops running.
+      # test_license_first_workflow_contracts.py fails if either stops running.
       # node, not bun: ESLint's parallel lint workers need worker_threads SHARE_ENV (about
       # 4x faster here), which Bun lacks.
       - name: Run shared UI lint and hook enforcement
