@@ -804,15 +804,15 @@ def main(argv: list[str] | None = None) -> int:
     records = scan()
     ratcheted = [r for r in records if rule(package_of(r.module), r.target)]
     upward = [r for r in records if layer_of(package_of(r.module)) < layer_of(r.target)]
-    entries = {(r.module, r.target) for r in upward}
+    upward_entries = {(r.module, r.target) for r in upward}
     module_level = {(r.module, r.target) for r in upward if not r.function_level}
     print(
         f"ratcheted now: {len(measured)} pairs, {len(ratcheted)} statements "
         f"({sum(r.guarded for r in ratcheted)} under try/except ImportError) "
         f"from {len({r.module for r in ratcheted})} modules\n"
         f"upward (module -> package) entries: {len(module_level)} module-level from "
-        f"{len({m for m, _ in module_level})} modules, {len(entries)} with function-level from "
-        f"{len({m for m, _ in entries})} modules\n"
+        f"{len({m for m, _ in module_level})} modules, {len(upward_entries)} with function-level from "
+        f"{len({m for m, _ in upward_entries})} modules\n"
         f"largest package SCC: {package_scc_sizes()}"
     )
     return 0
