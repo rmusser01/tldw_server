@@ -122,10 +122,6 @@ ALLOWLIST: dict[str, str] = {
         "migrate: fetches a workflow-supplied source_feed_url with urllib urlopen: scheme check only, "
         "no egress policy, redirects followed, body unbounded. Use fetch with a byte cap."
     ),
-    "tldw_Server_API/app/core/Ingestion_Sources/git_repository.py": (
-        "migrate: GitHub API sync via urllib urlopen. Only the first URL is pinned to api.github.com; "
-        "urlopen follows redirects and honours env proxies. Use fetch/fetch_json."
-    ),
     "tldw_Server_API/app/core/Ingestion_Media_Processing/Audio/Audio_Transcription_AudioCpp.py": (
         "migrate: builds a raw aiohttp.ClientSession via _http_client.aiohttp (a reach-through the "
         "first guard missed). Every request still goes through afetch(configured_endpoint=..., "

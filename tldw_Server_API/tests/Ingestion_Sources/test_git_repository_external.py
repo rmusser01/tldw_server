@@ -8,8 +8,6 @@ metadata -> tree -> blob fetch path without requiring private credentials.
 from __future__ import annotations
 
 import os
-import socket
-from urllib.error import HTTPError, URLError
 
 import pytest
 
@@ -72,12 +70,14 @@ def test_git_repository_snapshot_live_github_api_round_trip():
             sink_type="notes",
             access_token=access_token,
         )
-    except HTTPError as exc:
-        if exc.code in {403, 429, 500, 502, 503, 504}:
-            pytest.skip(f"GitHub API unavailable or rate limited: HTTP {exc.code}")
+    except ValueError as exc:
+        # The adapter raises ValueError for every GitHub API failure (TASK-13950.11).
+        message = str(exc)
+        if any(f"with HTTP {code}" in message for code in (403, 429, 500, 502, 503, 504)):
+            pytest.skip(f"GitHub API unavailable or rate limited: {message}")
+        if message.startswith("GitHub API request failed: "):
+            pytest.skip(f"GitHub API unreachable in this environment: {message}")
         raise
-    except (TimeoutError, URLError, OSError, socket.timeout) as exc:
-        pytest.skip(f"GitHub API unreachable in this environment: {exc}")
 
     assert failures == {}  # nosec B101
     assert expected_path in items  # nosec B101

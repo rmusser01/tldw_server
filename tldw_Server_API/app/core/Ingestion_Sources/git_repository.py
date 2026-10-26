@@ -9,9 +9,12 @@ import subprocess  # nosec B404
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
-from urllib.parse import quote, urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import quote, urljoin, urlparse
 
+import httpx
+
+from tldw_Server_API.app.core.exceptions import EgressPolicyError
+from tldw_Server_API.app.core.http_client import stream_response
 from tldw_Server_API.app.core.Ingestion_Media_Processing.path_utils import (
     open_safe_local_path,
     resolve_safe_local_path,
@@ -25,6 +28,8 @@ GIT_REPOSITORY_MODES: frozenset[str] = frozenset({"local_repo", "remote_github_r
 GIT_NOTES_SUPPORTED_SUFFIXES: frozenset[str] = frozenset({".markdown", ".md", ".txt"})
 _GITHUB_API_BASE = "https://api.github.com"
 _GITHUB_API_READ_CHUNK_BYTES = 64 * 1024
+_GITHUB_API_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+_GITHUB_API_MAX_REDIRECTS = 10  # urllib's limit, which this sync used before
 _MAX_GITHUB_BLOB_BYTES = 5 * 1024 * 1024
 _GITHUB_BLOB_RESPONSE_OVERHEAD_BYTES = 64 * 1024
 _LOCAL_FILE_MAX_BYTES_ENV = "INGESTION_SOURCES_LOCAL_FILE_MAX_BYTES"
@@ -350,16 +355,6 @@ def _validate_github_api_url(url: str) -> str:
     return url
 
 
-def _github_request(url: str, *, access_token: str | None, accept: str) -> Request:
-    headers = {
-        "Accept": accept,
-        "User-Agent": "tldw-server-ingestion-sources",
-    }
-    if access_token:
-        headers["Authorization"] = f"Bearer {access_token}"
-    return Request(_validate_github_api_url(url), headers=headers)
-
-
 def _github_api_get_json(
     url: str,
     *,
@@ -367,28 +362,49 @@ def _github_api_get_json(
     accept: str = "application/vnd.github+json",
     max_response_bytes: int | None = None,
 ) -> dict[str, Any]:
-    with urlopen(  # nosec B310
-        _github_request(url, access_token=access_token, accept=accept),
-        timeout=30,
-    ) as response:
-        if max_response_bytes is None:
-            payload_bytes = response.read()
-        else:
-            chunks: list[bytes] = []
-            total_read = 0
-            while True:
-                chunk = response.read(_GITHUB_API_READ_CHUNK_BYTES)
-                if not chunk:
-                    break
-                total_read += len(chunk)
-                if total_read > max_response_bytes:
-                    raise ValueError(
-                        f"GitHub API response exceeded size limit of {max_response_bytes} bytes"
-                    )
-                chunks.append(chunk)
-            payload_bytes = b"".join(chunks)
-        payload = payload_bytes.decode("utf-8")
-    return json.loads(payload)
+    """GET one GitHub API JSON document through core.http_client.
+
+    Every hop, redirects included, must be an https://api.github.com URL and pass the
+    egress policy (checked and IP-pinned by ``stream_response``). Failures are raised as
+    ValueError, the error contract the ingestion worker handles.
+    """
+    headers = {
+        "Accept": accept,
+        "User-Agent": "tldw-server-ingestion-sources",
+    }
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+    for _hop in range(_GITHUB_API_MAX_REDIRECTS + 1):
+        try:
+            with stream_response(
+                method="GET",
+                url=_validate_github_api_url(url),
+                headers=headers,
+                timeout=30,
+            ) as response:
+                location = response.headers.get("location")
+                if response.status_code in _GITHUB_API_REDIRECT_STATUSES and location:
+                    url = urljoin(url, location)
+                    continue
+                if response.status_code // 100 != 2:
+                    raise ValueError(f"GitHub API request failed with HTTP {response.status_code}")
+                if max_response_bytes is None:
+                    payload_bytes = response.read()
+                else:
+                    chunks: list[bytes] = []
+                    total_read = 0
+                    for chunk in response.iter_bytes(_GITHUB_API_READ_CHUNK_BYTES):
+                        total_read += len(chunk)
+                        if total_read > max_response_bytes:
+                            raise ValueError(
+                                f"GitHub API response exceeded size limit of {max_response_bytes} bytes"
+                            )
+                        chunks.append(chunk)
+                    payload_bytes = b"".join(chunks)
+        except (EgressPolicyError, httpx.HTTPError) as exc:
+            raise ValueError(f"GitHub API request failed: {exc}") from exc
+        return json.loads(payload_bytes.decode("utf-8"))
+    raise ValueError("GitHub API request redirected too many times")
 
 
 def _github_repository_ref(

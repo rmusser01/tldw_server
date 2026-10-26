@@ -322,3 +322,222 @@ def test_git_ls_files_timeout_is_reported_as_value_error(tmp_path, monkeypatch):
             root_subpath=None,
             respect_gitignore=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Remote GitHub sync through core.http_client (TASK-13950.11)
+# ---------------------------------------------------------------------------
+
+_REPO_API_URL = "https://api.github.com/repos/example/project"
+_TREE_URL = "https://api.github.com/repos/example/project/git/trees/main?recursive=1"
+_BLOB_URL = "https://api.github.com/repos/example/project/git/blobs/sha-alpha"
+_ALPHA_TREE = {
+    "tree": [{"path": "notes/alpha.md", "type": "blob", "url": _BLOB_URL, "size": 14, "sha": "sha-alpha"}]
+}
+_ALPHA_BLOB = {"content": base64.b64encode(b"# Alpha\n\nBody\n").decode("ascii"), "encoding": "base64"}
+
+
+def _route_github_api_through_mock_transport(monkeypatch, handler):
+    """Send every GitHub API GET through the real ``stream_response`` over a MockTransport.
+
+    Egress checks run for real; sockets and DNS are blocked, so a urlopen or raw-client
+    fetch fails loudly instead of reaching the network.
+    """
+    import socket
+
+    import httpx
+
+    import tldw_Server_API.app.core.Ingestion_Sources.git_repository as git_repository
+    from tldw_Server_API.app.core import http_client
+
+    def _no_real_network(*_args, **_kwargs):
+        raise AssertionError("git_repository GitHub sync bypassed core.http_client")
+
+    monkeypatch.setattr(socket, "create_connection", _no_real_network)
+    monkeypatch.setattr(socket.socket, "connect", _no_real_network)
+    monkeypatch.setattr(socket, "getaddrinfo", _no_real_network)
+    monkeypatch.setenv("WORKFLOWS_EGRESS_BLOCK_PRIVATE", "true")
+    client = http_client.create_client(transport=httpx.MockTransport(handler))
+
+    def _stream_via_mock(**kwargs):
+        return http_client.stream_response(client=client, **kwargs)
+
+    monkeypatch.setattr(git_repository, "stream_response", _stream_via_mock, raising=False)
+    return client
+
+
+def _sync_remote(monkeypatch, handler):
+    import tldw_Server_API.app.core.Ingestion_Sources.git_repository as git_repository
+
+    client = _route_github_api_through_mock_transport(monkeypatch, handler)
+    try:
+        return git_repository.build_git_repository_snapshot_with_failures(
+            {"mode": "remote_github_repo", "repo_url": "https://github.com/example/project", "root_subpath": "notes"},
+            sink_type="notes",
+            access_token="token-123",
+        )
+    finally:
+        client.close()
+
+
+def _serve(routes, seen):
+    """MockTransport handler: record each request, answer from ``routes`` (url -> response)."""
+
+    def handler(request):
+        seen.append(request)
+        return routes[str(request.url)]
+
+    return handler
+
+
+@pytest.mark.unit
+def test_remote_github_sync_fetches_through_http_client(monkeypatch):
+    """The repo, tree and blob GETs carry the same headers and timeout as before."""
+    import httpx
+
+    seen: list[httpx.Request] = []
+    routes = {
+        _REPO_API_URL: httpx.Response(200, json={"default_branch": "main"}),
+        _TREE_URL: httpx.Response(200, json=_ALPHA_TREE),
+        _BLOB_URL: httpx.Response(200, json=_ALPHA_BLOB),
+    }
+
+    items, failures = _sync_remote(monkeypatch, _serve(routes, seen))
+
+    assert failures == {}
+    assert items["alpha.md"]["text"] == "# Alpha\n\nBody\n"
+    assert items["alpha.md"]["raw_metadata"]["repo_blob_sha"] == "sha-alpha"
+    assert [str(r.url) for r in seen] == [_REPO_API_URL, _TREE_URL, _BLOB_URL]
+    for request in seen:
+        assert request.headers["Authorization"] == "Bearer token-123"
+        assert request.headers["Accept"] == "application/vnd.github+json"
+        assert request.headers["User-Agent"] == "tldw-server-ingestion-sources"
+        assert request.extensions["timeout"] == {"connect": 30.0, "read": 30.0, "write": 30.0, "pool": 30.0}
+
+
+@pytest.mark.unit
+def test_remote_github_sync_follows_a_redirect_within_api_github_com(monkeypatch):
+    """A renamed repository's 301 to api.github.com/repositories/<id> is still followed."""
+    import httpx
+
+    moved = "https://api.github.com/repositories/42"
+    seen: list[httpx.Request] = []
+    routes = {
+        _REPO_API_URL: httpx.Response(301, headers={"Location": moved}),
+        moved: httpx.Response(200, json={"default_branch": "main"}),
+        _TREE_URL: httpx.Response(200, json={"tree": []}),
+    }
+
+    items, failures = _sync_remote(monkeypatch, _serve(routes, seen))
+
+    assert (items, failures) == ({}, {})
+    assert [str(r.url) for r in seen] == [_REPO_API_URL, moved, _TREE_URL]
+    assert seen[1].headers["Authorization"] == "Bearer token-123"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "location",
+    ["http://169.254.169.254/latest/meta-data/", "http://127.0.0.1:8080/", "https://example.com/collect"],
+)
+def test_remote_github_sync_refuses_a_redirect_off_api_github_com(monkeypatch, location):
+    """A redirect to metadata, loopback or any other host is refused before it is requested."""
+    import httpx
+
+    seen: list[httpx.Request] = []
+    routes = {_REPO_API_URL: httpx.Response(302, headers={"Location": location})}
+
+    with pytest.raises(ValueError, match="GitHub API HTTPS URLs"):
+        _sync_remote(monkeypatch, _serve(routes, seen))
+
+    assert [str(r.url) for r in seen] == [_REPO_API_URL]
+
+
+@pytest.mark.unit
+def test_remote_github_sync_refuses_an_egress_denied_api_host(monkeypatch):
+    """The operator egress denylist now applies to the GitHub API host."""
+    import httpx
+
+    seen: list[httpx.Request] = []
+    monkeypatch.setenv("EGRESS_DENYLIST", "api.github.com")
+
+    with pytest.raises(ValueError, match="denylist"):
+        _sync_remote(monkeypatch, _serve({}, seen))
+
+    assert seen == []
+
+
+@pytest.mark.unit
+def test_remote_github_sync_refuses_api_host_resolving_to_metadata(monkeypatch):
+    """If api.github.com resolves to link-local metadata, the token is never sent."""
+    import httpx
+
+    from tldw_Server_API.app.core import http_client
+    from tldw_Server_API.app.core.Security import egress
+
+    # Outside pytest the egress check resolves hostnames; make it do so here.
+    monkeypatch.setattr(http_client, "is_explicit_pytest_runtime", lambda: False)
+    monkeypatch.setattr(http_client, "env_flag_enabled", lambda _name: False)
+    monkeypatch.setattr(http_client, "is_test_mode", lambda: False)
+    monkeypatch.setattr(egress, "_resolve_host_ips", lambda _host, **_kwargs: ["169.254.169.254"])
+    seen: list[httpx.Request] = []
+
+    with pytest.raises(ValueError, match="private or reserved"):
+        _sync_remote(monkeypatch, _serve({}, seen))
+
+    assert seen == []
+
+
+@pytest.mark.unit
+def test_remote_github_blob_read_stops_at_the_size_cap(monkeypatch):
+    """An oversized blob body is refused while streaming, not after reading it all."""
+    import httpx
+
+    chunks = [b"x" * 16384] * 20
+    yielded: list[int] = []
+
+    class _CountingStream(httpx.SyncByteStream):
+        def __iter__(self):
+            for chunk in chunks:
+                yielded.append(len(chunk))
+                yield chunk
+
+    seen: list[httpx.Request] = []
+    routes = {
+        _REPO_API_URL: httpx.Response(200, json={"default_branch": "main"}),
+        _TREE_URL: httpx.Response(200, json=_ALPHA_TREE),
+        _BLOB_URL: httpx.Response(200, stream=_CountingStream()),
+    }
+
+    items, failures = _sync_remote(monkeypatch, _serve(routes, seen))
+
+    assert items == {}
+    assert "exceeded size limit" in failures["alpha.md"]["error"]
+    assert len(yielded) < len(chunks)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("failure", ["http_404", "connect_error"])
+def test_remote_github_blob_fetch_failure_is_recorded_not_raised(monkeypatch, failure):
+    """A failed blob GET becomes a failed item; the worker's error contract (ValueError) holds."""
+    import httpx
+
+    seen: list[httpx.Request] = []
+
+    def handler(request):
+        seen.append(request)
+        url = str(request.url)
+        if url == _REPO_API_URL:
+            return httpx.Response(200, json={"default_branch": "main"})
+        if url == _TREE_URL:
+            return httpx.Response(200, json=_ALPHA_TREE)
+        if failure == "connect_error":
+            raise httpx.ConnectError("connection refused", request=request)
+        return httpx.Response(404, json={"message": "Not Found"})
+
+    items, failures = _sync_remote(monkeypatch, handler)
+
+    assert items == {}
+    assert set(failures) == {"alpha.md"}
+    expected = "HTTP 404" if failure == "http_404" else "connection refused"
+    assert expected in failures["alpha.md"]["error"]
