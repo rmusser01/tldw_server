@@ -1,7 +1,7 @@
 ---
 id: TASK-13890
 title: Connectors webhook GET and POST share one OpenAPI operationId
-status: To Do
+status: Done
 labels:
 - backend
 - tests
@@ -15,26 +15,28 @@ connectors.py declares /providers/{provider}/webhook with api_route(methods=["GE
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 The connectors webhook's GET and POST have distinct operationIds (separate routes or explicit operation_id), with a test
-- [ ] #2 test_openapi_operation_ids_are_present_and_unique passes after test_output_summaries_return_a_quota_refusal_as_402 in one process
+- [x] #1 The connectors webhook's GET and POST have distinct operationIds (separate routes or explicit operation_id), with a test
+- [x] #2 test_openapi_operation_ids_are_present_and_unique passes after test_output_summaries_return_a_quota_refusal_as_402 in one process
 <!-- AC:END -->
 
 ## Implementation Notes
 
 <!-- SECTION:IMPLEMENTATION_NOTES:BEGIN -->
+RED: new test 1 failed. GREEN: webhooks file, openapi contracts and watchlists 402 test 86 passed; route auth ratchet 13 passed after hand-editing the baseline (GET,POST entry became GET and POST entries). Drift check matches, no api-types diff. No frontend use of provider_webhook_callback. Bandit -ll clean. Docs: none needed.
 <!-- SECTION:IMPLEMENTATION_NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Webhook registered as stacked get and post routes; operationIds end _get and _post.
 <!-- SECTION:FINAL_SUMMARY:END -->
 
 ## Definition of Done
 <!-- DOD:BEGIN -->
-- [ ] #1 Acceptance criteria completed
-- [ ] #2 Tests or verification recorded
-- [ ] #3 Documentation updated when relevant
-- [ ] #4 Bandit run for touched code when applicable or document non-code/environment skip
-- [ ] #5 Final summary added
-- [ ] #6 Known skips or blockers documented
+- [x] #1 Acceptance criteria completed
+- [x] #2 Tests or verification recorded
+- [x] #3 Documentation updated when relevant
+- [x] #4 Bandit run for touched code when applicable or document non-code/environment skip
+- [x] #5 Final summary added
+- [x] #6 Known skips or blockers documented
 <!-- DOD:END -->

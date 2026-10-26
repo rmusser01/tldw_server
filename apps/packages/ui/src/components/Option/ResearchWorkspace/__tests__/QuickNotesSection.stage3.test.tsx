@@ -87,6 +87,9 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/store/workspace", () => ({
   hasResearchWorkspaceMigrationTombstone: () => false,
+  // The save flow drains the coalescing persist writer before the
+  // accepted-identity read-back; this partial mock only needs the no-op.
+  flushWorkspacePersistence: async () => {},
   useWorkspaceStore: Object.assign(
     (selector: (state: typeof workspaceStoreState) => unknown) =>
       selector(workspaceStoreState),

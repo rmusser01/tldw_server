@@ -570,6 +570,7 @@ export function Markdown({
             return <img src={resolvedSrc} alt={alt || ""} loading="lazy" referrerPolicy="no-referrer" className="my-2 max-w-full rounded-md border border-border" />
           },
           table({ children }) {
+            // TableBlock renders the <table> itself (AX-10).
             return <TableBlock>{children}</TableBlock>
           },
           p({ children, className, ...props }) {

@@ -37,6 +37,7 @@ from tldw_Server_API.app.core.exceptions import (
 from tldw_Server_API.app.core.http_client import RetryPolicy as _RetryPolicy
 from tldw_Server_API.app.core.http_client import fetch as _http_fetch
 from tldw_Server_API.app.core.Image_Generation.listing import list_image_models_for_catalog
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.extra_body_compat_catalog import (
     get_model_extra_body_compat,
     get_provider_extra_body_compat,
@@ -177,7 +178,7 @@ MODEL_METADATA: dict[str, dict[str, dict[str, Any]]] = {
         },
     },
     "anthropic": {
-        "claude-sonnet-4.5": {
+        "claude-sonnet-4-5": {
             "context_window": 200_000,
             "max_output_tokens": 64_000,
             "capabilities": {
@@ -195,7 +196,7 @@ MODEL_METADATA: dict[str, dict[str, dict[str, Any]]] = {
             "source_url": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
             "last_verified": None
         },
-        "claude-haiku-4.5": {
+        "claude-haiku-4-5": {
             "context_window": 200_000,
             "max_output_tokens": 64_000,
             "capabilities": {
@@ -213,7 +214,7 @@ MODEL_METADATA: dict[str, dict[str, dict[str, Any]]] = {
             "source_url": "https://docs.anthropic.com/en/docs/about-claude/models/overview",
             "last_verified": None
         },
-        "claude-opus-4.1": {
+        "claude-opus-4-1": {
             "context_window": 200_000,
             "max_output_tokens": 32_000,
             "capabilities": {
@@ -933,7 +934,9 @@ def get_model_metadata(provider: str, model: str) -> dict[str, Any]:
     """Get metadata for a given provider/model with safe fallbacks."""
     provider = (provider or "").lower()
     model = model or ""
-    md = MODEL_METADATA.get(provider, {}).get(model)
+    # The table is keyed by API IDs; a saved dotted Anthropic name (claude-sonnet-4.5) finds its dashed entry.
+    lookup = canonical_anthropic_model_id(model) if provider == "anthropic" else model
+    md = MODEL_METADATA.get(provider, {}).get(lookup)
     base = _default_model_metadata(provider, model)
     if md is None:
         return merge_routing_metadata(base, provider=provider, model=model)

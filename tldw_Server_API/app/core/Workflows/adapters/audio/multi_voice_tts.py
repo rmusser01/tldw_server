@@ -6,9 +6,9 @@ EBU R128 normalization for podcast/briefing-style audio output.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import shutil
+import subprocess
 import tempfile
 import uuid
 from pathlib import Path
@@ -28,6 +28,7 @@ from tldw_Server_API.app.core.Workflows.adapters._common import (
 )
 from tldw_Server_API.app.core.Workflows.adapters._registry import registry
 from tldw_Server_API.app.core.Workflows.adapters.audio._config import MultiVoiceTTSConfig
+from tldw_Server_API.app.core.Workflows.subprocess_utils import run_checked_async
 
 _MULTI_TTS_NONCRITICAL_EXCEPTIONS = (
     AttributeError,
@@ -36,6 +37,7 @@ _MULTI_TTS_NONCRITICAL_EXCEPTIONS = (
     OSError,
     RuntimeError,
     TimeoutError,
+    subprocess.TimeoutExpired,
     TypeError,
     UnicodeDecodeError,
     ValueError,
@@ -61,18 +63,7 @@ async def _generate_silence(duration_seconds: float, output_path: Path, fmt: str
         str(output_path),
     ]
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            await asyncio.wait_for(proc.communicate(), timeout=30)
-        except asyncio.TimeoutError:
-            proc.kill()
-            with contextlib.suppress(Exception):
-                await proc.communicate()
-            return False
+        proc = await run_checked_async(cmd, timeout=30, check=False)
         return proc.returncode == 0
     except _MULTI_TTS_NONCRITICAL_EXCEPTIONS:
         return False
@@ -150,18 +141,7 @@ async def _convert_wav_to_format(wav_path: Path, output_path: Path, fmt: str) ->
         str(output_path),
     ]
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            await asyncio.wait_for(proc.communicate(), timeout=120)
-        except asyncio.TimeoutError:
-            proc.kill()
-            with contextlib.suppress(Exception):
-                await proc.communicate()
-            return False
+        proc = await run_checked_async(cmd, timeout=120, check=False)
         return proc.returncode == 0 and output_path.exists()
     except _MULTI_TTS_NONCRITICAL_EXCEPTIONS:
         return False
@@ -189,18 +169,7 @@ async def _synthesize_section_with_system_tts(text: str, fmt: str, speed: float,
         synth_path = output_path.with_suffix(".system.aiff")
         cmd = [str(say_path), "-o", str(synth_path), "-r", str(words_per_minute), spoken_text]
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            await asyncio.wait_for(proc.communicate(), timeout=120)
-        except asyncio.TimeoutError:
-            proc.kill()
-            with contextlib.suppress(Exception):
-                await proc.communicate()
-            return 0
+        proc = await run_checked_async(cmd, timeout=120, check=False)
         if proc.returncode != 0 or not synth_path.exists():
             return 0
         if not await _convert_wav_to_format(synth_path, output_path, fmt):
@@ -264,18 +233,7 @@ async def _concat_files(file_paths: list[Path], output_path: Path, fmt: str = "m
     ]
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            await asyncio.wait_for(proc.communicate(), timeout=600)
-        except asyncio.TimeoutError:
-            proc.kill()
-            with contextlib.suppress(Exception):
-                await proc.communicate()
-            return False
+        proc = await run_checked_async(cmd, timeout=600, check=False)
         return proc.returncode == 0
     except _MULTI_TTS_NONCRITICAL_EXCEPTIONS:
         return False
@@ -301,18 +259,7 @@ async def _normalize_audio(input_path: Path, output_path: Path, target_lufs: flo
         str(output_path),
     ]
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            await asyncio.wait_for(proc.communicate(), timeout=120)
-        except asyncio.TimeoutError:
-            proc.kill()
-            with contextlib.suppress(Exception):
-                await proc.communicate()
-            return False
+        proc = await run_checked_async(cmd, timeout=120, check=False)
         return proc.returncode == 0
     except _MULTI_TTS_NONCRITICAL_EXCEPTIONS:
         return False
@@ -395,21 +342,10 @@ async def _probe_duration_seconds(path: Path) -> float | None:
         str(path),
     ]
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
-        except asyncio.TimeoutError:
-            proc.kill()
-            with contextlib.suppress(Exception):
-                await proc.communicate()
-            return None
+        proc = await run_checked_async(cmd, timeout=30, check=False)
         if proc.returncode != 0:
             return None
-        text = (stdout or b"").decode("utf-8", errors="ignore").strip()
+        text = (proc.stdout or b"").decode("utf-8", errors="ignore").strip()
         if not text:
             return None
         parsed = float(text)
@@ -485,18 +421,7 @@ async def _mix_background_track(
         str(output_path),
     ]
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        try:
-            await asyncio.wait_for(proc.communicate(), timeout=180)
-        except asyncio.TimeoutError:
-            proc.kill()
-            with contextlib.suppress(Exception):
-                await proc.communicate()
-            return False
+        proc = await run_checked_async(cmd, timeout=180, check=False)
         return proc.returncode == 0 and output_path.exists()
     except _MULTI_TTS_NONCRITICAL_EXCEPTIONS:
         return False

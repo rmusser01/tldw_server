@@ -11,6 +11,7 @@ from typing import Any
 from loguru import logger
 
 from tldw_Server_API.app.api.v1.API_Deps.ChaCha_Notes_DB_Deps import get_chacha_db_for_user_id
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.VisualIdentity_DB import VisualIdentityRepository
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
@@ -35,6 +36,7 @@ def _close_worker_database(db: Any) -> None:
         db.close_connection()
 
 
+@owns_chacha_checkouts
 async def handle_visual_identity_import_zip_job(
     job: dict[str, Any],
     *,

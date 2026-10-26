@@ -27,7 +27,7 @@ from ..tts_exceptions import (
     TTSValidationError,
 )
 from ..tts_validation import validate_tts_request
-from ..utils import hold_tts_engine, parse_bool
+from ..utils import hold_tts_engine, parse_bool, tts_model_load_lock
 
 #
 # Local Imports
@@ -155,15 +155,17 @@ class PocketTTSOnnxAdapter(TTSAdapter):
         PocketTTSOnnx = self._load_engine_class()
 
         try:
-            engine = await asyncio.to_thread(
-                PocketTTSOnnx,
-                models_dir=str(self.models_dir),
-                tokenizer_path=str(self.tokenizer_path),
-                precision=self.precision,
-                device=self.device,
-                temperature=self.temperature,
-                lsd_steps=self.lsd_steps,
-            )
+            load_lock = tts_model_load_lock(self.provider_key, f"{self.models_dir}:{self.precision}")
+            async with hold_tts_engine(load_lock) as run:
+                engine = await run(
+                    PocketTTSOnnx,
+                    models_dir=str(self.models_dir),
+                    tokenizer_path=str(self.tokenizer_path),
+                    precision=self.precision,
+                    device=self.device,
+                    temperature=self.temperature,
+                    lsd_steps=self.lsd_steps,
+                )
         except Exception as exc:
             raise TTSProviderInitializationError(
                 "Failed to initialize PocketTTS ONNX engine",

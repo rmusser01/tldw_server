@@ -1462,6 +1462,7 @@ jobs:
           - name: llm-adapters-chat-errors-extra
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_google_mistral.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_local_provider_status.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_midstream_error_all.py
           - name: llm-adapters-orchestrator-core
             paths: >-
@@ -1691,6 +1692,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_egress_policy.py
               tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
               tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_notes_step_continued_after_its_creator_postgres.py
               tldw_Server_API/tests/Workflows/test_workflows_db*.py
               tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
               tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py
@@ -3153,6 +3155,7 @@ jobs:
           - name: llm-adapters-chat-errors-extra
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_google_mistral.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_local_provider_status.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_midstream_error_all.py
           - name: llm-adapters-orchestrator-core
             paths: >-
@@ -3380,6 +3383,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_egress_policy.py
               tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
               tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_notes_step_continued_after_its_creator_postgres.py
               tldw_Server_API/tests/Workflows/test_workflows_db*.py
               tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
               tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py
@@ -4680,6 +4684,7 @@ jobs:
           - name: llm-adapters-chat-errors-extra
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_google_mistral.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_local_provider_status.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_midstream_error_all.py
           - name: llm-adapters-orchestrator-core
             paths: >-
@@ -4907,6 +4912,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_egress_policy.py
               tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
               tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_notes_step_continued_after_its_creator_postgres.py
               tldw_Server_API/tests/Workflows/test_workflows_db*.py
               tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
               tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py
@@ -6117,6 +6123,7 @@ jobs:
           - name: llm-adapters-chat-errors-extra
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_google_mistral.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_local_provider_status.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_midstream_error_all.py
           - name: llm-adapters-orchestrator-core
             paths: >-
@@ -6344,6 +6351,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_egress_policy.py
               tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
               tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_notes_step_continued_after_its_creator_postgres.py
               tldw_Server_API/tests/Workflows/test_workflows_db*.py
               tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
               tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py
@@ -7545,6 +7553,7 @@ jobs:
           - name: llm-adapters-chat-errors-extra
             paths: >-
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_error_sse_google_mistral.py
+              tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_local_provider_status.py
               tldw_Server_API/tests/LLM_Adapters/integration/test_adapters_chat_endpoint_midstream_error_all.py
           - name: llm-adapters-orchestrator-core
             paths: >-
@@ -7772,6 +7781,7 @@ jobs:
               tldw_Server_API/tests/Workflows/test_egress_policy.py
               tldw_Server_API/tests/Workflows/test_mcp_tool_*.py
               tldw_Server_API/tests/Workflows/test_media_ingest_*.py
+              tldw_Server_API/tests/Workflows/test_notes_step_continued_after_its_creator_postgres.py
               tldw_Server_API/tests/Workflows/test_workflows_db*.py
               tldw_Server_API/tests/Workflows/test_workflows_pg_*.py
               tldw_Server_API/tests/Workflows/test_workflows_postgres_*.py

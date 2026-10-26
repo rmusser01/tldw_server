@@ -1,6 +1,6 @@
 import { ProviderIcons } from "@/components/Common/ProviderIcon"
 import { Dropdown, Input, Select, Tooltip } from "antd"
-import { ArrowRight, HelpCircle } from "lucide-react"
+import { ArrowRight, ChevronDown, HelpCircle } from "lucide-react"
 import React from "react"
 import { useTranslation } from "react-i18next"
 import { Link } from "react-router-dom"
@@ -17,7 +17,6 @@ type ChatModelSelectorDropdownProps = {
    * model first and the provider second, truncating the provider before the
    * model name (CC-06).
    */
-  modelLabelParts?: { modelName: string; providerName: string } | null
   connectionStatusLabel: string
   /** The server cannot take a send (offline, unconfigured); always a warning. */
   connectionStatusWarning?: boolean
@@ -54,7 +53,6 @@ type ChatModelSelectorDropdownProps = {
 export const ChatModelSelectorDropdown = React.memo(
   function ChatModelSelectorDropdown({
     apiModelLabel,
-    modelLabelParts = null,
     catalogControls,
     connectionStatusLabel,
     connectionStatusWarning = false,
@@ -303,54 +301,28 @@ export const ChatModelSelectorDropdown = React.memo(
             aria-haspopup="menu"
             aria-expanded={modelDropdownOpen}
             data-testid="model-selector"
-            className={`inline-flex min-h-[44px] min-w-0 max-w-full cursor-pointer items-center gap-1 rounded-full border px-2 text-[11px] transition-colors ${
+            className={`inline-flex min-h-[44px] min-w-0 max-w-full cursor-pointer items-center gap-2 rounded-lg border border-transparent px-2 text-xs transition-colors ${
               statusWarning
-                ? "border-warn/50 bg-warn/10 text-text hover:bg-warn/20"
-                : "border-border bg-surface hover:bg-surface-hover"
+                ? "bg-warn/10 text-text hover:bg-warn/20"
+                : "bg-transparent text-text hover:bg-surface2"
             }`}
           >
             <ProviderIcons
               provider={resolvedProviderKey}
               className={`h-3 w-3 ${
-                statusWarning ? "text-warn" : "text-text-subtle"
+                statusWarning ? "text-text" : "text-text-subtle"
               }`}
             />
-            {modelLabelParts?.modelName ? (
-              <>
-                <span
-                  data-testid="model-selector-model-name"
-                  className="min-w-0 max-w-[160px] truncate font-medium sm:max-w-[260px]"
-                >
-                  {modelLabelParts.modelName}
-                </span>
-                {modelLabelParts.providerName ? (
-                  <span
-                    data-testid="model-selector-provider-name"
-                    className="min-w-0 max-w-[96px] shrink-[4] truncate text-text-muted"
-                  >
-                    {modelLabelParts.providerName}
-                  </span>
-                ) : null}
-              </>
-            ) : (
-              <span className="max-w-[120px] truncate">{apiModelLabel}</span>
-            )}
+            <span className="min-w-0 max-w-[180px] truncate">{apiModelLabel}</span>
             <span
               data-testid="model-selector-status"
               data-model-readiness={readinessShown ? modelReadiness?.state : undefined}
-              className={`min-w-0 truncate rounded-full px-1.5 py-0.5 text-[11px] ${
-                statusWarning
-                  ? "bg-warn/10 text-text"
-                  : "bg-success/10 text-text"
-              }`}
-              title={
-                (readinessShown
-                  ? t("playground:composer.modelReadiness.tooltip", "Model status")
-                  : t("playground:composer.statusTooltip", "Status")) as string
-              }
+              className="sr-only"
+              title={t("common:status", "Status") as string}
             >
               {statusLabel}
             </span>
+            <ChevronDown className="h-3 w-3 shrink-0" aria-hidden="true" />
           </button>
         </Tooltip>
       </Dropdown>

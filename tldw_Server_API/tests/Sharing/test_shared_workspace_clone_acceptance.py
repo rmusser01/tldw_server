@@ -16,6 +16,7 @@ from tldw_Server_API.app.api.v1.API_Deps import auth_deps
 from tldw_Server_API.app.api.v1.endpoints import sharing
 from tldw_Server_API.app.core.AuthNZ.principal_model import AuthPrincipal
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.ChaChaNotes_DB import CharactersRAGDB
 from tldw_Server_API.app.core.DB_Management.media_db.repositories.clone_snapshot_repository import (
     OperationOwnedMediaPublicationState,
@@ -233,6 +234,7 @@ def clone_harness(request, monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setattr(sharing, "_audit_log_best_effort", _audit)
     monkeypatch.setattr(sharing, "_get_audit_service", lambda: object())
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(sharing.router, prefix="/api/v1")
     app.dependency_overrides[auth_deps.get_auth_principal] = _principal
     app.dependency_overrides[sharing.get_request_user] = _user

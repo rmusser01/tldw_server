@@ -369,7 +369,6 @@ export const SharedWorkspaceChatPane: React.FC<
         </div>
         <ChatModelSelectorDropdown
           apiModelLabel={modelSelector.apiModelLabel}
-          modelLabelParts={modelSelector.modelLabelParts}
           connectionStatusLabel={t(
             "sharedWorkspace.modelConfigured",
             "Configured"

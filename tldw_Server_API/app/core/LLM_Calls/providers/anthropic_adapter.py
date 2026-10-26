@@ -6,6 +6,7 @@ import os
 from collections.abc import AsyncIterator, Iterable
 from typing import Any
 
+from tldw_Server_API.app.core.LLM_Calls.anthropic_model_ids import canonical_anthropic_model_id
 from tldw_Server_API.app.core.LLM_Calls.cache_intents import (
     apply_billing_prompt_cache_intent,
     attach_cache_intent_metadata,
@@ -255,7 +256,8 @@ class AnthropicAdapter(ChatProvider):
                 messages.append({"role": role, "content": parts})
 
         payload = {
-            "model": request.get("model"),
+            # Anthropic accepts only its documented IDs; a saved dotted name (claude-sonnet-4.5) is sent dashed.
+            "model": canonical_anthropic_model_id(request.get("model")) if request.get("model") else request.get("model"),
             "messages": messages,
             "max_tokens": request.get("max_tokens") or 1024,
         }
@@ -378,6 +380,9 @@ class AnthropicAdapter(ChatProvider):
                 for key in ("cache_creation_input_tokens", "cache_read_input_tokens")
                 if isinstance(usage.get(key), int)
             }
+            # Billing facts the cost uses: the 5-minute / 1-hour split of the writes (TASK-13878), fast mode and
+            # US-only inference (TASK-13885). Not token counts, so not part of prompt_tokens.
+            breakdown = {key: usage[key] for key in ("cache_creation", "speed", "inference_geo") if usage.get(key)}
             prompt_tokens = usage.get("input_tokens")
             if cache:
                 prompt_tokens = (prompt_tokens or 0) + sum(cache.values())
@@ -386,6 +391,7 @@ class AnthropicAdapter(ChatProvider):
                 "completion_tokens": usage.get("output_tokens"),
                 "total_tokens": (prompt_tokens or 0) + (usage.get("output_tokens") or 0),
                 **cache,
+                **breakdown,
             }
         shaped["provider_response"] = data
         return shaped

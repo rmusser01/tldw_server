@@ -47,12 +47,6 @@ export type UseModelSelectorParams = {
   loadCatalogModels?: () => Promise<ModelSelectorDescriptor[]>
 }
 
-export type ModelLabelParts = {
-  /** The model's nickname or id. */
-  modelName: string
-  /** The provider's display name, or "" until a provider is resolved. */
-  providerName: string
-}
 
 export function useModelSelector({
   composerModels,
@@ -217,13 +211,6 @@ export function useModelSelector({
       : modelSummaryLabel
   }, [modelSummaryLabel, resolvedProviderName, selectedModel, t])
 
-  const modelLabelParts = React.useMemo<ModelLabelParts | null>(
-    () =>
-      selectedModel
-        ? { modelName: modelSummaryLabel, providerName: resolvedProviderName }
-        : null,
-    [modelSummaryLabel, resolvedProviderName, selectedModel]
-  )
 
   const modelSelectorWarning = !selectedSelection.key || !selectedSelection.provider
 
@@ -781,7 +768,6 @@ export function useModelSelector({
     providerLabel,
     modelSummaryLabel,
     apiModelLabel,
-    modelLabelParts,
     modelSelectorWarning,
     favoriteModels,
     favoriteModelsIsLoading: favoriteModelsMeta.isLoading,

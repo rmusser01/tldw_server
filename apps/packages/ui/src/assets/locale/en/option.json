@@ -243,7 +243,9 @@
     "modeRepo2txt": "Repo2Txt",
     "showPages": "Show pages",
     "hidePages": "Hide pages",
-    "pageNavigator": "Pages"
+    "pageNavigator": "Pages",
+    "browsePages": "Browse pages",
+    "closePageLauncher": "Close page launcher"
   },
   "skills": {
     "activeModeFilter": "Mode: {{value}}",

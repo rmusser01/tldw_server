@@ -15,6 +15,7 @@ from tldw_Server_API.app.api.v1.API_Deps.auth_deps import check_rate_limit
 from tldw_Server_API.app.api.v1.API_Deps.DB_Deps import get_media_db_for_user
 from tldw_Server_API.app.core.AuthNZ.User_DB_Handling import User, get_request_user
 from tldw_Server_API.app.core.DB_Management.backends.factory import DatabaseBackendFactory
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import ChaChaOperationMiddleware
 from tldw_Server_API.app.core.DB_Management.media_db.api import search_media
 from tldw_Server_API.app.core.DB_Management.media_db.native_class import MediaDatabase
 from tldw_Server_API.app.core.DB_Management.scope_context import scoped_context
@@ -24,6 +25,7 @@ from tldw_Server_API.app.core.RAG.rag_service.database_retrievers import (
 )
 from tldw_Server_API.app.core.RAG.rag_service.unified_pipeline import unified_rag_pipeline
 from tldw_Server_API.app.main import app as fastapi_app
+from tldw_Server_API.tests._plugins.postgres import _drop_restricted_role
 
 pytestmark = pytest.mark.integration
 
@@ -69,12 +71,12 @@ def restricted_media_store(request, tmp_path):
         db.close_connection()
         if backend is not None:
             backend.get_pool().close_all()
-        if role is not None:
-            with admin.transaction() as conn:
-                conn.execute(sql.SQL("DROP OWNED BY {}").format(sql.Identifier(role)))
-                conn.execute(sql.SQL("DROP ROLE {}").format(sql.Identifier(role)))
-        if admin is not None:
-            admin.get_pool().close_all()
+        try:
+            if role is not None:
+                _drop_restricted_role(admin, role)
+        finally:
+            if admin is not None:
+                admin.get_pool().close_all()
 
 
 @pytest.mark.parametrize("id_kind", ["integer", "uuid"])
@@ -290,6 +292,7 @@ def authenticated_media_client(restricted_media_store, monkeypatch):
         )
     assert get_scope() is None
     app = FastAPI()
+    app.add_middleware(ChaChaOperationMiddleware)
     app.include_router(item.router, prefix="/media")
     app.include_router(rag_unified.router)
 

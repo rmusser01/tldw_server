@@ -7027,5 +7027,11 @@
   },
   "notesSearch_shortcutListReturnDescription": {
     "message": "Return to the notes list."
+  },
+  "header_browsePages": {
+    "message": "Browse pages"
+  },
+  "header_closePageLauncher": {
+    "message": "Close page launcher"
   }
 }

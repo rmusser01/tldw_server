@@ -19,6 +19,7 @@ from tldw_Server_API.app.core.Chat.Chat_Deps import (
     ChatProviderError,
     ChatRateLimitError,
 )
+from tldw_Server_API.app.core.DB_Management.chacha.operation_scope import owns_chacha_checkouts
 from tldw_Server_API.app.core.DB_Management.ManuscriptDB import ManuscriptDBHelper
 from tldw_Server_API.app.core.Jobs.manager import JobManager
 from tldw_Server_API.app.core.Jobs.worker_sdk import WorkerConfig, WorkerSDK
@@ -47,6 +48,7 @@ _FORBIDDEN_PAYLOAD_KEYS = frozenset(
 )
 
 
+@owns_chacha_checkouts
 async def handle_writing_annotation_review_job(
     job: dict[str, Any],
     *,

@@ -160,6 +160,6 @@ if (hostedMode) {
     )
 
     await page.goto("/chat", { waitUntil: "domcontentloaded" })
-    await expect(page.getByPlaceholder(/type a message/i).first()).toBeVisible()
+    await expect(page.getByTestId("chat-input").first()).toBeVisible()
   })
 }

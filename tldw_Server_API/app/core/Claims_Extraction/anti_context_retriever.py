@@ -52,7 +52,7 @@ class AntiContextConfig:
 
     max_queries: int = 3
     max_docs_per_query: int = 5
-    min_relevance_score: float = 0.3
+    min_relevance_score: float = 0.3  # the retriever's min_score: trims each query's weakest full-text matches
     exclude_original_doc_ids: bool = True
     use_negation_templates: bool = True
     use_contrary_templates: bool = True
@@ -183,8 +183,11 @@ class AntiContextRetriever:
                     )
                     continue
 
-            # Filter by minimum score
-            docs = [d for d in docs if d.score >= self.config.min_relevance_score]
+            # No score filter here. min_relevance_score goes to the retriever as min_score, which drops each query's
+            # weakest full-text matches before hybrid fusion (scores are min-max normalised per query, so the best
+            # match always passes). A fused (RRF) score is at most 1/61, so a floor on it dropped every document.
+            # ponytail: no absolute relevance floor on either half; the adjudicator's stance check decides, and a
+            # NEUTRAL document does not count. A similarity floor per vector store is the upgrade.
 
             # Filter already-seen documents
             new_docs = [d for d in docs if d.id not in seen_doc_ids]

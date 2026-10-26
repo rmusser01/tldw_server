@@ -1,10 +1,12 @@
 import React from "react"
-import { fireEvent, render, screen } from "@testing-library/react"
+import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
+import userEvent from "@testing-library/user-event"
 import type { TFunction } from "i18next"
 import { ChatHeader } from "../ChatHeader"
 
-vi.mock("antd", () => ({
+vi.mock("antd", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("antd")>()),
   Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   Input: ({ value, onChange, onPressEnter, ...rest }: any) => (
     <input
@@ -26,7 +28,10 @@ vi.mock("~/assets/icon.png", () => ({
 
 vi.mock("../HeaderShortcuts", () => ({
   HeaderShortcuts: ({ expanded }: { expanded: boolean }) => (
-    <div data-testid="header-shortcuts" data-expanded={expanded ? "true" : "false"} />
+    <div
+      data-testid="header-shortcuts"
+      data-expanded={expanded ? "true" : "false"}
+    />
   )
 }))
 
@@ -42,7 +47,9 @@ const t = ((
   }, base)
 }) as unknown as TFunction
 
-const createProps = (overrides: Partial<React.ComponentProps<typeof ChatHeader>> = {}) => ({
+const createProps = (
+  overrides: Partial<React.ComponentProps<typeof ChatHeader>> = {}
+) => ({
   t,
   temporaryChat: false,
   historyId: "history-1",
@@ -76,7 +83,7 @@ describe("ChatHeader shortcut toggle", () => {
 
   it("shows signpost button with 'Show pages' when collapsed and requests expand", () => {
     const props = createProps({ shortcutsExpanded: false })
-    render(<ChatHeader {...props} />)
+    render(<ChatHeader {...props} showChatTitle={false} />)
 
     const toggleButton = screen.getByRole("button", { name: "Show pages" })
     expect(toggleButton).toHaveAttribute("aria-expanded", "false")
@@ -108,7 +115,7 @@ describe("ChatHeader shortcut toggle", () => {
 
   it("shows signpost button with 'Hide pages' when expanded and requests collapse", () => {
     const props = createProps({ shortcutsExpanded: true })
-    render(<ChatHeader {...props} />)
+    render(<ChatHeader {...props} showChatTitle={false} />)
 
     const toggleButton = screen.getByRole("button", { name: "Hide pages" })
     expect(toggleButton).toHaveAttribute("aria-expanded", "true")
@@ -123,10 +130,12 @@ describe("ChatHeader shortcut toggle", () => {
 
   it("shows a Companion Home button immediately before the signpost shortcut toggle", () => {
     const props = createProps()
-    render(<ChatHeader {...props} />)
+    render(<ChatHeader {...props} showChatTitle={false} />)
 
     const homeButton = screen.getByRole("button", { name: "Companion Home" })
-    const signpostButton = screen.getByRole("button", { name: "Show pages" })
+    const signpostButton = screen.getByRole("button", {
+      name: "Show pages"
+    })
     const headerBrand = homeButton.closest(".flex.items-center.gap-2.text-text")
     const headerButtons: HTMLElement[] = Array.from(
       headerBrand?.querySelectorAll("button") ?? []
@@ -143,28 +152,22 @@ describe("ChatHeader shortcut toggle", () => {
     expect(props.onOpenCompanionHome).toHaveBeenCalledTimes(1)
   })
 
-  it("applies focus-visible ring classes to key header controls", () => {
-    const props = createProps()
-    render(<ChatHeader {...props} />)
+  it("keeps the conversation title below the route heading", () => {
+    render(<ChatHeader {...createProps()} />)
+    expect(screen.getByRole("heading", { name: "Chat title", level: 2 })).toBeVisible()
+  })
 
-    const controls = [
-      screen.getByRole("button", { name: "Collapse sidebar" }),
-      screen.getByRole("button", { name: "Companion Home" }),
-      screen.getByRole("button", { name: "Show pages" }),
-      screen.getByRole("button", { name: "Search commands - Open command palette" }),
-      screen.getByRole("button", { name: "New saved chat" }),
-      screen.getByRole("button", { name: "Temporary chat (on this device)" }),
-      screen.getByRole("button", { name: "Character chat" }),
-      screen.getByRole("button", { name: "Open settings" }),
-      screen.getByRole("button", { name: "Switch to light theme" }),
-      screen.getByRole("button", { name: "Show keyboard shortcuts" })
-    ]
-
-    for (const control of controls) {
-      expect(control.className).toContain("focus-visible:ring-2")
-      expect(control.className).toContain("focus-visible:ring-focus")
-      expect(control.className).toContain("focus-visible:ring-offset-2")
-      expect(control.className).toContain("focus-visible:ring-offset-bg")
+  it("keeps visible focus rings on primary conversation controls", () => {
+    render(<ChatHeader {...createProps()} />)
+    for (const name of [
+      "Collapse sidebar",
+      "Search commands - Open command palette",
+      "New saved chat",
+      "More actions"
+    ]) {
+      expect(screen.getByRole("button", { name }).className).toContain(
+        "focus-visible:ring-2"
+      )
     }
   })
 
@@ -184,31 +187,14 @@ describe("ChatHeader shortcut toggle", () => {
     expect(props.onOpenCommandPalette).toHaveBeenCalledTimes(1)
   })
 
-  it("shows a theme toggle control and triggers toggle callback", () => {
+  it("offers the theme toggle through More and preserves the existing action", async () => {
     const props = createProps({ themeMode: "light" })
     render(<ChatHeader {...props} />)
-
-    const toggleButton = screen.getByRole("button", {
-      name: "Switch to dark theme"
-    })
-    fireEvent.click(toggleButton)
-
-    expect(props.onToggleTheme).toHaveBeenCalledTimes(1)
-  })
-
-  it("routes chat mode actions to the dedicated callbacks", () => {
-    const props = createProps()
-    render(<ChatHeader {...props} />)
-
-    fireEvent.click(screen.getByRole("button", { name: "New saved chat" }))
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }))
     fireEvent.click(
-      screen.getByRole("button", { name: "Temporary chat (on this device)" })
+      await screen.findByRole("menuitem", { name: "Switch to dark theme" })
     )
-    fireEvent.click(screen.getByRole("button", { name: "Character chat" }))
-
-    expect(props.onStartSavedChat).toHaveBeenCalledTimes(1)
-    expect(props.onStartTemporaryChat).toHaveBeenCalledTimes(1)
-    expect(props.onStartCharacterChat).toHaveBeenCalledTimes(1)
+    expect(props.onToggleTheme).toHaveBeenCalledTimes(1)
   })
 
   it("hides chat session actions when callbacks are omitted", () => {
@@ -231,39 +217,6 @@ describe("ChatHeader shortcut toggle", () => {
     expect(
       screen.queryByRole("button", { name: "Character chat" })
     ).not.toBeInTheDocument()
-  })
-
-  it("hides temporary and character quick actions below the small breakpoint", () => {
-    const props = createProps()
-    render(<ChatHeader {...props} />)
-
-    expect(
-      screen.getByRole("button", { name: "Temporary chat (on this device)" }).className
-    ).toContain("hidden")
-    expect(
-      screen.getByRole("button", { name: "Temporary chat (on this device)" }).className
-    ).toContain("sm:inline-flex")
-    expect(screen.getByRole("button", { name: "Character chat" }).className).toContain(
-      "hidden"
-    )
-    expect(screen.getByRole("button", { name: "Character chat" }).className).toContain(
-      "sm:inline-flex"
-    )
-  })
-
-  it("allows the chat header control row to wrap on narrow screens", () => {
-    const props = createProps()
-    render(<ChatHeader {...props} />)
-
-    const headerRow = screen
-      .getByRole("button", { name: "New saved chat" })
-      .closest("header > div")
-    const actionsRow = screen
-      .getByRole("button", { name: "New saved chat" })
-      .parentElement
-
-    expect(headerRow?.className).toContain("flex-wrap")
-    expect(actionsRow?.className).toContain("flex-wrap")
   })
 
   it("shows mode badges for temporary and active character", () => {
@@ -349,7 +302,9 @@ describe("ChatHeader shortcut toggle", () => {
     "does not claim the server while the server write is %s",
     (persistenceKind, label) => {
       render(
-        <ChatHeader {...createProps({ temporaryChat: false, persistenceKind })} />
+        <ChatHeader
+          {...createProps({ temporaryChat: false, persistenceKind })}
+        />
       )
 
       expect(
@@ -419,14 +374,109 @@ describe("ChatHeader shortcut toggle", () => {
   })
 })
 
+describe("calm conversation header", () => {
+  it("hands overlays a persistent focus-return target when launched from More", async () => {
+    const user = userEvent.setup()
+    let returnTarget: Element | null = null
+    const props = createProps({
+      onToggleShortcuts: () => {
+        returnTarget = document.activeElement
+      }
+    })
+    render(<ChatHeader {...props} />)
+    const more = screen.getByRole("button", { name: "More actions" })
+    await user.click(more)
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Browse pages" })
+    )
+    expect(returnTarget).toBe(more)
+  })
+
+  it("leads with the conversation title as a heading beside persistence state", () => {
+    render(<ChatHeader {...createProps()} />)
+    expect(screen.getByRole("heading", { name: "Chat title" })).toBeVisible()
+    expect(
+      screen.getByTestId("chat-header-persistence-badge")
+    ).toHaveTextContent("Saved on this device")
+  })
+
+  it("reveals secondary utilities through More and runs the existing settings action", async () => {
+    const props = createProps()
+    render(<ChatHeader {...props} />)
+    expect(screen.queryByRole("menuitem", { name: "Open settings" })).toBeNull()
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Open settings" })
+    )
+    expect(props.onOpenSettings).toHaveBeenCalledTimes(1)
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "More actions" })
+      ).toHaveAttribute("aria-expanded", "false")
+    )
+  })
+
+  it("keeps saved chat direct while temporary and character entry remain available in More", async () => {
+    const props = createProps()
+    render(<ChatHeader {...props} />)
+    fireEvent.click(screen.getByRole("button", { name: "New saved chat" }))
+    expect(props.onStartSavedChat).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+    fireEvent.click(
+      await screen.findByRole("menuitem", {
+        name: "Temporary chat (on this device)"
+      })
+    )
+    expect(props.onStartTemporaryChat).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }))
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Character chat" })
+    )
+    expect(props.onStartCharacterChat).toHaveBeenCalledTimes(1)
+  })
+
+  it("returns keyboard focus to More when the menu is dismissed with Escape", async () => {
+    const user = userEvent.setup()
+    render(<ChatHeader {...createProps()} />)
+    const more = screen.getByRole("button", { name: "More actions" })
+    await user.click(more)
+    await screen.findByRole("menu")
+    await user.keyboard("{Escape}")
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "More actions" })
+      ).toHaveAttribute("aria-expanded", "false")
+    )
+    await waitFor(() => expect(more).toHaveFocus())
+  })
+
+  it("retains the existing app navigation outside the chat route", () => {
+    render(
+      <ChatHeader
+        {...createProps({ showChatTitle: false, showSessionModeBadge: false })}
+      />
+    )
+    expect(screen.getByText("tldw Assistant")).toBeVisible()
+    expect(screen.getByRole("button", { name: "Companion Home" })).toBeVisible()
+    expect(screen.getByRole("button", { name: "Open settings" })).toBeVisible()
+  })
+})
 
 it("labels history eligibility without claiming an acknowledged save", () => {
-  render(<ChatHeader {...createProps({ historyId: null, temporaryChat: false })} />)
-  expect(screen.getByText("History on")).toHaveAttribute("title", "New messages can be stored in chat history.")
+  render(
+    <ChatHeader {...createProps({ historyId: null, temporaryChat: false })} />
+  )
+  expect(screen.getByText("History on")).toHaveAttribute(
+    "title",
+    "New messages can be stored in chat history."
+  )
   expect(screen.queryByText("Saved")).not.toBeInTheDocument()
 })
 
 it("explains Temporary history without promising removal of retained local drafts", () => {
   render(<ChatHeader {...createProps({ temporaryChat: true })} />)
-  expect(screen.getByText("Temporary")).toHaveAttribute("title", "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device.")
+  expect(screen.getByText("Temporary")).toHaveAttribute(
+    "title",
+    "Temporary messages can remain on this device across reloads until you close or clear the chat. They are not added to server history. Draft text may remain on this device."
+  )
 })

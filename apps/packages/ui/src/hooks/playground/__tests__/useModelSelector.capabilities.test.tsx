@@ -278,7 +278,6 @@ describe("useModelSelector capability rendering", () => {
     )
 
     expect(result.current.apiModelLabel).toBe("gemma3:1b")
-    expect(result.current.modelLabelParts).toEqual({ modelName: "gemma3:1b", providerName: "" })
   })
 
   it("CC-06: names the provider on promoted rows, where no provider group heading does", () => {

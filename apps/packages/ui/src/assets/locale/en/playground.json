@@ -1,6 +1,7 @@
 {
   "header": {
-    "newTemporaryChat": "Temporary chat (on this device)"
+    "newTemporaryChat": "Temporary chat (on this device)",
+    "shareShort": "Share"
   },
   "mediaHandoff": {
     "conflictLabel": "Media handoff conflict",
@@ -752,8 +753,6 @@
     "previewCurrent": "Current",
     "previewAfterApplying": "After applying",
     "sceneDetails": "Scene details",
-    "placeholderWithMentions": "Type a message... (/ commands, @ mentions)",
-    "placeholderCommands": "Type a message... (/ for commands)",
     "connectingNotice": "Connecting to your tldw server…",
     "providerStatusConnecting": "Connecting…",
     "connectionPendingSend": "Still connecting to your tldw server. Your draft has not been sent.",
@@ -775,7 +774,15 @@
       "providerWorkingTitle": "Its provider answered recently.",
       "providerUnreachableTitle": "Its provider has been failing. Choose another model.",
       "tooltip": "Model status"
-    }
+    },
+    "shortcutHintCommands": "/ commands",
+    "shortcutHint": "/ commands · @ mentions",
+    "toolsLabel": "Tools",
+    "instructionsAndPeople": "Prompts & people",
+    "toolsPanel": "Composer tools",
+    "calmPlaceholder": "Write a message…",
+    "responseAndTools": "Response & tools",
+    "toolsPreferenceUnavailable": "Display preference unavailable. Tools still work for this visit."
   },
   "tour": {
     "modelTitle": "Choose a Model",
@@ -1193,7 +1200,7 @@
     "hideRuntimeRail": "Hide runtime rail",
     "showRuntimeRail": "Show runtime rail",
     "context": "Context",
-    "runtime": "Chat settings",
+    "runtime": "Runtime",
     "focus": "Focus",
     "cockpit": "Cockpit",
     "collapseRailSection": "Collapse {{title}}",
@@ -1296,7 +1303,7 @@
     "regenerateUnavailableStreaming": "Wait for the current turn to finish before regenerating.",
     "regenerateUnavailableNoAssistant": "Regenerate becomes available after an assistant response.",
     "degradedChatAvailable": "Chat remains available.",
-    "reviewModelChatSettings": "Review Model & Chat settings",
+    "reviewModelChatSettings": "Review Model & Runtime",
     "reviewModelSettings": "Review model settings",
     "reviewSettings": "Review settings",
     "modelRoute": "Model route",
@@ -1336,15 +1343,27 @@
     "messageCount_one": "{{count}} message",
     "messageCount": "{{count}} messages",
     "collapseContextSidechannel": "Hide context",
-    "collapseRuntimeSidechannel": "Hide chat settings",
+    "collapseRuntimeSidechannel": "Hide runtime",
     "restoreContextSidechannel": "Show context",
-    "restoreRuntimeSidechannel": "Show chat settings",
+    "restoreRuntimeSidechannel": "Show runtime",
     "contextRailTab": "Context",
-    "runtimeRailTab": "Chat settings",
-    "contextRailHiddenSummary": "Context hidden. Chat settings visible.",
-    "runtimeRailHiddenSummary": "Chat settings hidden. Context visible.",
-    "cockpitRailsVisibleSummary": "Context and chat settings visible.",
-    "routeDetails": "Details"
+    "runtimeRailTab": "Runtime",
+    "contextRailHiddenSummary": "Context hidden. Runtime visible.",
+    "runtimeRailHiddenSummary": "Runtime hidden. Context visible.",
+    "cockpitRailsVisibleSummary": "Context and runtime visible.",
+    "instructions": "Instructions",
+    "sources": "Sources",
+    "noSourcesAttached": "No sources attached.",
+    "addSources": "Add sources",
+    "conversation": "Conversation",
+    "requestPreview": "Request preview",
+    "currentRun": "Current run",
+    "modelAndSettings": "Model & settings",
+    "defaultSettings": "Default settings",
+    "stopShort": "Stop",
+    "regenerateShort": "Regenerate",
+    "closeContextPanel": "Close Context panel",
+    "closeRuntimePanel": "Close Runtime panel"
   },
   "historySelection": {
     "retainedOutcomes": "Retained outcomes",
@@ -1749,5 +1768,23 @@
   "savedReplyActions": {
     "loading": "This saved chat is still loading. Try again in a moment.",
     "regenerateUnavailable": "This saved reply can't be regenerated here. Use New Branch to try again from this point."
+  },
+  "messageViews": {
+    "label": "Message view",
+    "transcript": "Transcript",
+    "transcriptHelp": "For reading and everyday chat",
+    "conversation": "Conversation",
+    "conversationHelp": "For roleplay and character chat",
+    "research": "Research",
+    "researchHelp": "For sources and detailed review",
+    "preferenceHelp": "Choose a reading layout for this device.",
+    "sourcesCount": "{{count}} sources",
+    "sourcesCount_one": "{{count}} source",
+    "sourcesCount_other": "{{count}} sources"
+  },
+  "regions": {
+    "viewToolbar": "Conversation view",
+    "noArtifactsYet": "No artifacts yet",
+    "artifactsShort": "Artifacts"
   }
 }

@@ -23,7 +23,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QuickNotesSection } from "../StudioPane/QuickNotesSection";
-import { useWorkspaceStore, buildWorkspaceSnapshot } from "@/store/workspace";
+import { useWorkspaceStore, buildWorkspaceSnapshot, flushWorkspacePersistence } from "@/store/workspace";
 import userEvent from "@testing-library/user-event"
 import type { WorkspaceNote } from "@/types/workspace"
 import { knowledgeNoteHead, readKnowledgeNoteProvenance, retainKnowledgeNoteProvenance } from "@/utils/knowledge-note-provenance"
@@ -899,6 +899,12 @@ it.each(["base-path", "org", "auth-source"])(
 
 it("refuses dispatch if the operation record succeeds but the real Workspace pointer persistence fails", async () => {
   useWorkspaceStore.setState({ currentNote: { ...draft(), id: undefined } });
+  // The coalescing persist writer defers the setup write above; drain it so
+  // the captured baseline envelope reflects the id-less draft BEFORE the
+  // quota spy goes up (otherwise the spy swallows the setup write too).
+  await act(async () => {
+    await flushWorkspacePersistence();
+  });
   const originalEnvelope = localStorage.getItem(WORKSPACE_STORAGE_KEY);
   const prototype = Object.getPrototypeOf(localStorage) as Storage;
   const write = prototype.setItem;

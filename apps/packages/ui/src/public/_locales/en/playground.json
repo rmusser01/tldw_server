@@ -2811,7 +2811,7 @@
     "message": "Context"
   },
   "cockpit_runtime": {
-    "message": "Chat settings"
+    "message": "Runtime"
   },
   "cockpit_focus": {
     "message": "Focus"
@@ -3012,7 +3012,7 @@
     "message": "Chat remains available."
   },
   "cockpit_reviewModelChatSettings": {
-    "message": "Review Model & Chat settings"
+    "message": "Review Model & Runtime"
   },
   "cockpit_reviewSettings": {
     "message": "Review settings"
@@ -4509,28 +4509,28 @@
     "message": "Hide context"
   },
   "cockpit_collapseRuntimeSidechannel": {
-    "message": "Hide chat settings"
+    "message": "Hide runtime"
   },
   "cockpit_restoreContextSidechannel": {
     "message": "Show context"
   },
   "cockpit_restoreRuntimeSidechannel": {
-    "message": "Show chat settings"
+    "message": "Show runtime"
   },
   "cockpit_contextRailTab": {
     "message": "Context"
   },
   "cockpit_runtimeRailTab": {
-    "message": "Chat settings"
+    "message": "Runtime"
   },
   "cockpit_contextRailHiddenSummary": {
-    "message": "Context hidden. Chat settings visible."
+    "message": "Context hidden. Runtime visible."
   },
   "cockpit_runtimeRailHiddenSummary": {
-    "message": "Chat settings hidden. Context visible."
+    "message": "Runtime hidden. Context visible."
   },
   "cockpit_cockpitRailsVisibleSummary": {
-    "message": "Context and chat settings visible."
+    "message": "Context and runtime visible."
   },
   "characterRail_characterSessions": {
     "message": "Character sessions"
@@ -4594,12 +4594,6 @@
   },
   "characterRail_pageLabel": {
     "message": "Page"
-  },
-  "composer_placeholderWithMentions": {
-    "message": "Type a message... (/ commands, @ mentions)"
-  },
-  "composer_placeholderCommands": {
-    "message": "Type a message... (/ for commands)"
   },
   "composer_connectingNotice": {
     "message": "Connecting to your tldw server…"
@@ -4718,7 +4712,128 @@
   "composer_modelReadiness_tooltip": {
     "message": "Model status"
   },
-  "cockpit_routeDetails": {
-    "message": "Details"
+  "composer_shortcutHintCommands": {
+    "message": "/ commands"
+  },
+  "composer_advancedPreferenceUnavailable": {
+    "message": "Display preference unavailable. Advanced controls still work for this visit."
+  },
+  "messageViews": {
+    "label": "Message view",
+    "transcript": "Transcript",
+    "transcriptHelp": "For reading and everyday chat",
+    "conversation": "Conversation",
+    "conversationHelp": "For roleplay and character chat",
+    "research": "Research",
+    "researchHelp": "For sources and detailed review",
+    "preferenceHelp": "Choose a reading layout for this device.",
+    "sourcesCount": "{{count}} sources",
+    "sourcesCount_one": "{{count}} source",
+    "sourcesCount_other": "{{count}} sources"
+  },
+  "messageViews_label": {
+    "message": "Message view"
+  },
+  "messageViews_transcript": {
+    "message": "Transcript"
+  },
+  "messageViews_transcriptHelp": {
+    "message": "For reading and everyday chat"
+  },
+  "messageViews_conversation": {
+    "message": "Conversation"
+  },
+  "messageViews_conversationHelp": {
+    "message": "For roleplay and character chat"
+  },
+  "messageViews_research": {
+    "message": "Research"
+  },
+  "messageViews_researchHelp": {
+    "message": "For sources and detailed review"
+  },
+  "messageViews_preferenceHelp": {
+    "message": "Choose a reading layout for this device."
+  },
+  "messageViews_sourcesCount": {
+    "message": "{{count}} sources"
+  },
+  "messageViews_sourcesCount_one": {
+    "message": "{{count}} source"
+  },
+  "messageViews_sourcesCount_other": {
+    "message": "{{count}} sources"
+  },
+  "composer_calmPlaceholder": {
+    "message": "Write a message…"
+  },
+  "composer_instructionsAndPeople": {
+    "message": "Prompts & people"
+  },
+  "composer_responseAndTools": {
+    "message": "Response & tools"
+  },
+  "composer_toolsPanel": {
+    "message": "Composer tools"
+  },
+  "composer_toolsLabel": {
+    "message": "Tools"
+  },
+  "composer_shortcutHint": {
+    "message": "/ commands · @ mentions"
+  },
+  "composer_toolsPreferenceUnavailable": {
+    "message": "Display preference unavailable. Tools still work for this visit."
+  },
+  "cockpit_instructions": {
+    "message": "Instructions"
+  },
+  "cockpit_sources": {
+    "message": "Sources"
+  },
+  "cockpit_noSourcesAttached": {
+    "message": "No sources attached."
+  },
+  "cockpit_addSources": {
+    "message": "Add sources"
+  },
+  "cockpit_conversation": {
+    "message": "Conversation"
+  },
+  "cockpit_requestPreview": {
+    "message": "Request preview"
+  },
+  "cockpit_currentRun": {
+    "message": "Current run"
+  },
+  "cockpit_modelAndSettings": {
+    "message": "Model & settings"
+  },
+  "cockpit_defaultSettings": {
+    "message": "Default settings"
+  },
+  "cockpit_stopShort": {
+    "message": "Stop"
+  },
+  "cockpit_regenerateShort": {
+    "message": "Regenerate"
+  },
+  "cockpit_closeContextPanel": {
+    "message": "Close Context panel"
+  },
+  "cockpit_closeRuntimePanel": {
+    "message": "Close Runtime panel"
+  },
+  "header_shareShort": {
+    "message": "Share"
+  },
+  "regions_viewToolbar": {
+    "message": "Conversation view"
+  },
+  "regions_noArtifactsYet": {
+    "message": "No artifacts yet"
+  },
+  "regions_artifactsShort": {
+    "message": "Artifacts"
   }
 }

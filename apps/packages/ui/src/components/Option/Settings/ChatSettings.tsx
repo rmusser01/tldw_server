@@ -1,3 +1,4 @@
+import { MessageViewSelect } from "@/components/Common/Playground/MessageViewSelect"
 import { useCallback, useMemo, useRef, type ChangeEvent } from "react"
 import { Input, Select, Switch, Tooltip } from "antd"
 import { useStorage } from "@plasmohq/storage/hook"
@@ -24,6 +25,7 @@ import {
   CHAT_BACKGROUND_IMAGE_SETTING,
   CHAT_CHARACTER_IMAGE_OPACITY_SETTING,
   CHAT_MESSAGE_OPACITY_SETTING,
+  CHAT_MESSAGE_VIEW_SETTING,
   CHAT_WINDOW_OPACITY_SETTING
 } from "@/services/settings/ui-settings"
 import { RotateCcw, Upload } from "lucide-react"
@@ -44,6 +46,7 @@ import { ComposerStyleSettings } from "@/components/Chat/composer/settings/Compo
 const SELECT_CLASSNAME = "w-[200px]"
 const OPACITY_RANGE_CLASSNAME = "w-40 accent-primary"
 export const ChatSettings = () => {
+  const [messageView, setMessageView] = useSetting(CHAT_MESSAGE_VIEW_SETTING)
   const { t } = useTranslation("settings")
   const notification = useAntdNotification()
   const [chatBackgroundImage, setChatBackgroundImage] = useSetting(
@@ -1367,6 +1370,13 @@ export const ChatSettings = () => {
         </p>
         <div className="border-b border-border mt-3" />
       </div>
+
+      <SettingRow
+        label={t("playground:messageViews.label", "Message view")}
+        description={t("playground:messageViews.preferenceHelp", "Choose a reading layout for this device.")}
+        {...getResetProps(messageView, CHAT_MESSAGE_VIEW_SETTING.defaultValue, setMessageView)}
+        control={<MessageViewSelect value={messageView} onChange={setMessageView} />}
+      />
 
       <SettingRow
         label={t(

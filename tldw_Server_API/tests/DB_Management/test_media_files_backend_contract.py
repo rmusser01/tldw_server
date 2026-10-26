@@ -25,7 +25,9 @@ def media_db(request):
     backend = None
     if request.param == "postgresql":
         backend = DatabaseBackendFactory.create_backend(request.getfixturevalue("pg_database_config"))
-    db = MediaDatabase(":memory:", client_id="1", backend=backend)
+    # A file DB gives each connection its own view; :memory: shares one connection.
+    db_path = str(request.getfixturevalue("tmp_path") / "media.db") if request.param == "sqlite-file" else ":memory:"
+    db = MediaDatabase(db_path, client_id="1", backend=backend)
     try:
         yield db
     finally:
@@ -129,6 +131,37 @@ def test_database_query_failure_is_not_reported_as_missing_file(media_db, monkey
     def fail_query(*_args, **_kwargs):
         raise DatabaseError("controlled query failure")
 
-    monkeypatch.setattr(media_db, "_fetchall_with_connection", fail_query)
+    monkeypatch.setattr(media_db, "execute_query", fail_query)
     with pytest.raises(DatabaseError, match="controlled query failure"):
         repo.get_for_media(1)
+
+
+def test_lookup_leaves_no_postgres_session_in_a_transaction(pg_database_config):
+    """A lookup outside a transaction must not pin a connection idle in one (TASK-13900)."""
+    backend = DatabaseBackendFactory.create_backend(pg_database_config)
+    db = MediaDatabase(":memory:", client_id="1", backend=backend)
+    try:
+        media_id = add_media(db)
+        repo = MediaFilesRepository(db)
+        repo.insert(media_id, "original", "original.txt")
+        db.close_connection()
+        assert repo.get_for_media(media_id)["storage_path"] == "original.txt"
+        idle = backend.execute(
+            "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'idle in transaction'"
+        ).scalar
+        assert idle == 0
+    finally:
+        db.close_connection()
+        backend.get_pool().close_all()
+
+
+@pytest.mark.parametrize("media_db", ["sqlite", "sqlite-file", "postgresql"], indirect=True)
+def test_lookup_inside_a_transaction_reads_its_uncommitted_row(media_db):
+    media_id = add_media(media_db)
+    repo = MediaFilesRepository(media_db)
+    with pytest.raises(RuntimeError, match="rollback requested"):
+        with media_db.transaction():
+            pending_uuid = repo.insert(media_id, "original", "pending.txt")
+            assert repo.get_for_media(media_id)["uuid"] == pending_uuid
+            raise RuntimeError("rollback requested")
+    assert repo.get_for_media(media_id) is None

@@ -38,7 +38,9 @@ vi.mock("@/hooks/useSetting", () => ({
     const setting = args[0] as { key?: string }
     return setting?.key === "tldw:sidebar:recentCollapsed"
       ? [value, setValue]
-      : result
+      : setting?.key === "tldw:sidebar:activeTab"
+        ? [value, (next: string) => { result[1](next); setValue(next) }, result[2]]
+        : result
   }
 }))
 
@@ -144,6 +146,23 @@ describe("ChatSidebar lazy history loading", () => {
         "model-catalog": false
       }
     })
+  })
+
+  it.each(["server", "folders"])("opens Folders with history collapsed from saved %s view", async (savedView) => {
+    activeTab.value = savedView
+    render(<MemoryRouter><ChatSidebar collapsed={false} /></MemoryRouter>)
+    const history = screen.getByRole("button", { name: /Recent conversations/i })
+    expect(history).toHaveAttribute("aria-expanded", "false")
+    const folders = screen.getByRole("radio", { name: "Folders", exact: true })
+    expect(folders.closest("label")).toBeVisible()
+    fireEvent.click(folders)
+    await waitFor(() => expect(folders).toBeChecked())
+    expect(history).toHaveAttribute("aria-expanded", "true")
+    const [, saveTab] = useSettingMock.mock.results.find((result, index) =>
+      useSettingMock.mock.calls[index][0]?.key === "tldw:sidebar:activeTab"
+    )!.value
+    if (savedView !== "folders") expect(saveTab).toHaveBeenCalledWith("folders")
+    expect(useServerChatHistoryMock).toHaveBeenLastCalledWith("", expect.objectContaining({ enabled: false }))
   })
 
   it("keeps server history overview disabled while recent conversations are collapsed", async () => {

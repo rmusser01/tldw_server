@@ -46,8 +46,9 @@ describe("chat width cross-surface guard", () => {
       "prose max-w-none dark:prose-invert whitespace-pre-line"
     )
     expect(userMessageSource).toContain("max-w-5xl")
+    expect(userMessageSource).toContain("rounded-3xl")
     expect(userMessageSource).toContain(
-      "rounded-3xl prose max-w-none dark:prose-invert break-words"
+      "prose max-w-none dark:prose-invert break-words"
     )
     // The user bubble's width classes come from userBubbleWidthClass()
     // (turn-presentation.ts), so count the inset across both modules.

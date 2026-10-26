@@ -97,7 +97,7 @@ export const ComposerTextarea = React.memo(function ComposerTextarea({
         : "44px"
 
   return (
-    <div className="relative rounded-2xl border border-border/70 bg-surface/80 px-1 py-1.5 transition focus-within:border-focus/60 focus-within:ring-2 focus-within:ring-focus/30">
+    <div className="relative min-w-0 px-1 pb-2 pt-1">
       <SlashCommandMenu
         open={showSlashMenu}
         commands={slashCommands}

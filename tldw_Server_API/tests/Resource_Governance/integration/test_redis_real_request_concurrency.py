@@ -5,6 +5,7 @@ import redis.asyncio as aioredis
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
 from redis.exceptions import OutOfMemoryError, ReadOnlyError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 
 from tldw_Server_API.app.core.Resource_Governance import RedisResourceGovernor, RGRequest
 
@@ -116,6 +117,47 @@ async def test_a_lost_window_estimate_script_reloads_after_one_failure(real_redi
         return decision.retry_after
 
     assert [await reset_estimate(), await reset_estimate()] == [60, 30]
+
+
+def _reply_lost(run):
+    """Run the script on Redis, then lose its reply, as a redis-py socket timeout or a connection reset does."""
+
+    async def _command(*args, **kwargs):
+        await run(*args, **kwargs)
+        raise RedisTimeoutError("Timeout reading from socket")
+
+    return _command
+
+
+async def test_a_lost_lease_script_reply_does_not_count_its_own_lease(real_redis, rg_unique_ns, monkeypatch) -> None:
+    """The lease script takes the lease, then its reply is lost: the user's only slot is still this request's (TASK-13892)."""
+    monkeypatch.delenv("RG_TEST_PURGE_LEASES_BEFORE_RESERVE")
+    gov = RedisResourceGovernor(policy_loader=_NoJobsBlock(), ns=rg_unique_ns)
+    if not await gov._is_real_redis():
+        pytest.skip("Redis client is not real; using in-memory stub")
+    client = await gov._client_get()
+    monkeypatch.setattr(client, "evalsha", _reply_lost(client.evalsha))
+    key = gov._keys.lease("limits.test_concurrent", "jobs", "user", "42")
+
+    decision, handle = await gov.reserve(_lease())
+    held = await client.zcard(key)
+    await gov.release(handle)
+
+    assert (decision.allowed, held, await client.zcard(key)) == (True, 1, 0)
+
+
+async def test_a_lost_rate_script_reply_charges_the_request_once(real_redis, rg_unique_ns, monkeypatch) -> None:
+    """The multi-key rate script charges the window, then its reply is lost: the window holds one charge, not two (TASK-13892)."""
+    gov = RedisResourceGovernor(policy_loader=_Policy("fallback_memory", requests={"rpm": 5}), ns=rg_unique_ns)
+    if not await gov._is_real_redis():
+        pytest.skip("Redis client is not real; using in-memory stub")
+    client = await gov._client_get()
+    monkeypatch.setattr(client, "evalsha", _reply_lost(client.evalsha))
+    req = RGRequest(entity="user:42", categories={"requests": {"units": 1}}, tags={"policy_id": "rate.test"})
+
+    decision, _ = await gov.reserve(req)
+
+    assert (decision.allowed, await client.zcard(gov._keys.win("rate.test", "requests", "user", "42"))) == (True, 1)
 
 
 def _rejecting(error: Exception):

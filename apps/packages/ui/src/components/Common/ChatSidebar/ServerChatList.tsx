@@ -1823,8 +1823,8 @@ export function ServerChatList({
       ) : (
         <>
           {pagedPinnedChats.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <div className="px-2 text-[11px] font-medium text-text-subtle uppercase tracking-wide">
+            <div className="mx-2 flex flex-col gap-0.5">
+              <div className="px-2 py-1 text-xs font-semibold text-text-muted">
                 {t("common:pinned", { defaultValue: "Pinned" })}
               </div>
               {pagedPinnedChats.map(renderServerChatRow)}
@@ -1834,12 +1834,12 @@ export function ServerChatList({
             <div
               key={group}
               className={cn(
-                "flex flex-col gap-1.5",
+                "mx-2 flex flex-col gap-0.5",
                 (pagedPinnedChats.length > 0 || index > 0) && "mt-3"
               )}>
               <div
                 data-testid="server-chat-recency-group"
-                className="px-2 text-[11px] font-medium text-text-subtle uppercase tracking-wide">
+                className="px-2 py-1 text-xs font-semibold text-text-muted">
                 {t(
                   CHAT_RECENCY_GROUP_LABELS[group].key,
                   CHAT_RECENCY_GROUP_LABELS[group].defaultLabel

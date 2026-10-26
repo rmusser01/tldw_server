@@ -28,10 +28,11 @@ const mount = async () => {
 const openConfirmation = async (row: HTMLElement) => {
   await act(async () => { fireEvent.click(within(row).getByRole("button", { name: /Restore$/ })) })
   return await waitFor(() => {
-    const button = screen.getAllByRole("button", { name: /Restore$/ }).find((candidate) => candidate.closest(".ant-popover"))
-    expect(button).toBeVisible()
-    const popover = button!.closest(".ant-popover")
+    // Scope style-heavy role queries to the popup while it prepares.
+    const confirmation = screen.getByText("Restore this backup? This will overwrite current data.")
+    const popover = confirmation.closest(".ant-popover")
     if (!(popover instanceof HTMLElement)) throw new Error("Missing restore confirmation")
+    expect(within(popover).getByRole("button", { name: /Restore$/ })).toBeVisible()
     return popover
   }, { timeout: 3000 })
 }
@@ -66,7 +67,12 @@ describe("Backup restore contract", () => {
   }, 30000)
 
   it("shows artifact, dataset and user overwrite context and cancellation never posts", async () => {
+    const otherBackups = Array.from({ length: 9 }, (_, index) => ({
+      ...BACKUP, id: `other-${index}.db`, dataset: "media", user_id: index + 2
+    }))
+    mocks.request.mockResolvedValueOnce({ items: [backup, ...otherBackups], total: 10 })
     const row = await mount()
+    expect(within(row.closest("tbody")!).getByText(otherBackups[8].id, { selector: "code" })).toBeVisible()
     const popover = await openConfirmation(row)
     expect(within(popover).getByText(/This will overwrite current data/)).toBeVisible()
     expect(within(popover).getByText(BACKUP.id, { selector: "code" })).toBeVisible()

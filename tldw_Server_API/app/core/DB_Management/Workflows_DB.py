@@ -13,7 +13,7 @@ import os
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -251,6 +251,13 @@ CREATE INDEX IF NOT EXISTS idx_workflow_research_wait_lookup ON workflow_researc
 
 def _utcnow_iso() -> str:
     return datetime.utcnow().replace(tzinfo=timezone.utc).isoformat()
+
+
+def _json_default(value: Any) -> str:
+    """Store a date or datetime as ISO text: PostgreSQL rows carry them where SQLite rows carry text."""
+    if isinstance(value, date):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value).__name__} is not JSON serializable")
 
 
 def _workflows_idempotency_ttl_hours() -> int:
@@ -2117,7 +2124,7 @@ class WorkflowsDatabase:
         params = (
             status,
             status_reason,
-            json.dumps(outputs) if outputs is not None else None,
+            json.dumps(outputs, default=_json_default) if outputs is not None else None,
             error,
             started_at,
             ended_at,
@@ -2510,7 +2517,7 @@ class WorkflowsDatabase:
         params = (
             status,
             _utcnow_iso(),
-            json.dumps(outputs or {}),
+            json.dumps(outputs or {}, default=_json_default),
             error,
             step_run_id,
         )

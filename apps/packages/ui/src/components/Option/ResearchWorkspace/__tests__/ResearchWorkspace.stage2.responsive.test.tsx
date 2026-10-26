@@ -933,14 +933,22 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
       "/research-workspace?source_workspace_id=workspace-1&source_artifact_id=gap-artifact&source_artifact_template=corpus_gap_finder&source_artifact_title=Corpus%20Gap%20Finder&research_run_id=research-run-7"
     )
 
-    render(<ResearchWorkspace />)
+    const { rerender } = render(<ResearchWorkspace />)
 
     fireEvent.click(screen.getByRole("button", { name: /import bundle/i }))
 
     await waitFor(() => {
       expect(mockGetResearchBundle).toHaveBeenCalledWith("research-run-7")
     })
+    expect(
+      screen.getByRole("button", { name: "Importing", exact: true })
+    ).toBeDisabled()
+
     testState.workspaceId = "workspace-2"
+    rerender(<ResearchWorkspace />)
+    expect(
+      screen.queryByTestId("workspace-deep-research-return-handoff")
+    ).not.toBeInTheDocument()
 
     await act(async () => {
       resolveBundle(createCompletedDeepResearchBundle())
@@ -949,8 +957,8 @@ describe("ResearchWorkspace Stage 2 drawer responsiveness", () => {
 
     expect(testState.addArtifact).not.toHaveBeenCalled()
     expect(
-      screen.getByTestId("workspace-deep-research-return-handoff")
-    ).not.toHaveTextContent("Bundle imported")
+      screen.queryByTestId("workspace-deep-research-return-handoff")
+    ).not.toBeInTheDocument()
   })
 
   it("cancels a bundle import after the Research Workspace unmounts", async () => {
