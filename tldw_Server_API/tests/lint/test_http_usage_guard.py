@@ -114,10 +114,6 @@ ALLOWLIST: dict[str, str] = {
         "migrate: creates GitHub issues via POST https://api.github.com with a raw httpx.AsyncClient "
         "that honours env proxies; use apost/afetch."
     ),
-    "tldw_Server_API/app/services/admin_webhooks_service.py": (
-        "migrate: delivers admin webhooks to registered URLs through a raw httpx.AsyncClient "
-        "(_default_async_client_factory) with no egress check per attempt; use afetch."
-    ),
     "tldw_Server_API/app/core/Audio_Studio/providers/ace_step.py": (
         "migrate: defaults client_factory to httpx.AsyncClient (a reference the regex guard missed). "
         "It checks its own origin allowlist, not the egress policy; default to create_async_client."

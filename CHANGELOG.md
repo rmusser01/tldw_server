@@ -15,6 +15,7 @@ and this project adheres to Some kind of Versioning
 
 ### Fixed
 
+- **Admin webhook delivery SSRF:** `AdminWebhooksService.deliver` (incident `notify-webhooks`) now sends through `core.http_client.afetch`, so every attempt checks the egress policy (loopback, private and link-local addresses, operator allow/deny lists) and pins the resolved IP, and env proxies are ignored. A refused URL is logged as a failed delivery with no retries. Signing, headers, backoff, timeouts and the no-redirect rule are unchanged (TASK-13950.11).
 
 ### Removed
 
