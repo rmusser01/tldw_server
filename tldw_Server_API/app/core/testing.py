@@ -9,6 +9,7 @@ here for the existing importers of ``is_truthy``.
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -43,6 +44,18 @@ GUARDED_TEST_SEAM_KEYS = _TEST_FLAG_KEYS + (
     "JOBS_TEST_NOW_EPOCH",  # freezes the Jobs lease clock
 )
 GUARDED_TEST_SEAM_PREFIXES = ("RG_TEST_",)
+# Seams whose consumers use the raw value (a key, a URL, a path, an epoch), so any
+# non-empty value arms them: JOBS_TEST_NOW_EPOCH=0 still freezes the clock. The
+# other seams are switches, unarmed only by an explicit falsy value.
+_VALUE_TEST_SEAM_KEYS = frozenset(
+    {
+        "SINGLE_USER_TEST_API_KEY",
+        "E2E_TEST_BASE_URL",
+        "JWT_SECRET_TEST_KEY",
+        "EVALUATIONS_TEST_DB_PATH",
+        "JOBS_TEST_NOW_EPOCH",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -130,6 +143,12 @@ def _active_test_mode_flags() -> list[str]:
     return active
 
 
+def _seam_armed(key: str, value: str) -> bool:
+    if key in _VALUE_TEST_SEAM_KEYS:
+        return bool(value)
+    return parse_bool(value, default=True)  # a switch: unrecognised values count as on
+
+
 def armed_test_seams(environ: Mapping[str, str] | None = None) -> list[str]:
     """Guarded test seams that are set and not explicitly switched off (fail closed)."""
     env = os.environ if environ is None else environ
@@ -137,7 +156,7 @@ def armed_test_seams(environ: Mapping[str, str] | None = None) -> list[str]:
         key
         for key, value in env.items()
         if (key in GUARDED_TEST_SEAM_KEYS or key.startswith(GUARDED_TEST_SEAM_PREFIXES))
-        and parse_bool(value, default=True)
+        and _seam_armed(key, value)
     )
 
 
@@ -146,13 +165,17 @@ def validate_test_runtime_flags() -> None:
 
     - In a production-like runtime (:func:`runtime_environment`), any armed seam in
       GUARDED_TEST_SEAM_KEYS / GUARDED_TEST_SEAM_PREFIXES raises, even when
-      PYTEST_CURRENT_TEST is set.
+      PYTEST_CURRENT_TEST is set. So does PYTEST_CURRENT_TEST itself when pytest is
+      not loaded: a spoofed marker would switch off the is_explicit_pytest_runtime()
+      checks (the SSRF hostname check among them).
     - Elsewhere, TEST_MODE, TESTING and TLDW_TEST_MODE still require an explicit
       pytest runtime; the other seams stay usable by e2e servers started outside pytest.
     """
     runtime = runtime_environment()
     if runtime.is_production:
         armed = armed_test_seams()
+        if is_explicit_pytest_runtime() and "pytest" not in sys.modules:
+            armed.append("PYTEST_CURRENT_TEST (set, but pytest is not loaded)")
         if armed:
             raise RuntimeError(
                 "Unsafe startup configuration: test seams are armed in a production-like runtime "

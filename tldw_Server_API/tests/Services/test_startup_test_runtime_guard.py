@@ -5,7 +5,6 @@ import sys
 
 import pytest
 
-
 pytestmark = pytest.mark.unit
 
 
@@ -170,13 +169,86 @@ def test_guard_refuses_test_fallback_keys_for_every_production_marker(
         validate_test_runtime_flags()
 
 
+# Value seams are armed by any non-empty value; switch seams only by a non-falsy one.
+_VALUE_SEAMS = (
+    "SINGLE_USER_TEST_API_KEY",
+    "E2E_TEST_BASE_URL",
+    "JWT_SECRET_TEST_KEY",
+    "EVALUATIONS_TEST_DB_PATH",
+    "JOBS_TEST_NOW_EPOCH",
+)
+_SWITCH_SEAMS = sorted(set(_GUARDED_SEAMS) - set(_VALUE_SEAMS))
+
+
 @pytest.mark.parametrize("value", ["0", "false", ""])
-def test_guard_ignores_a_seam_switched_off_in_production(no_seams: pytest.MonkeyPatch, value: str) -> None:
+@pytest.mark.parametrize("seam", _SWITCH_SEAMS)
+def test_guard_ignores_a_switch_seam_switched_off_in_production(
+    no_seams: pytest.MonkeyPatch, seam: str, value: str
+) -> None:
     from tldw_Server_API.app.core.testing import validate_test_runtime_flags
 
     no_seams.setenv("APP_ENV", "production")
-    no_seams.setenv("TLDW_ALLOW_TEST_FALLBACK_KEYS", value)
-    no_seams.setenv("MINIMAL_TEST_APP", value)
+    no_seams.setenv(seam, value)
+
+    validate_test_runtime_flags()
+
+
+@pytest.mark.parametrize("value", ["0", "false", "none"])
+@pytest.mark.parametrize("seam", _VALUE_SEAMS)
+def test_guard_refuses_a_value_seam_with_any_non_empty_value_in_production(
+    no_seams: pytest.MonkeyPatch, seam: str, value: str
+) -> None:
+    """JOBS_TEST_NOW_EPOCH=0 freezes the clock; EVALUATIONS_TEST_DB_PATH=none is a path."""
+    from tldw_Server_API.app.core.testing import validate_test_runtime_flags
+
+    no_seams.setenv("APP_ENV", "production")
+    no_seams.setenv(seam, value)
+
+    with pytest.raises(RuntimeError, match=f"production-like runtime.*{seam}"):
+        validate_test_runtime_flags()
+
+
+@pytest.mark.parametrize("seam", _VALUE_SEAMS)
+def test_guard_ignores_an_empty_value_seam_in_production(no_seams: pytest.MonkeyPatch, seam: str) -> None:
+    from tldw_Server_API.app.core.testing import validate_test_runtime_flags
+
+    no_seams.setenv("APP_ENV", "production")
+    no_seams.setenv(seam, "")
+
+    validate_test_runtime_flags()
+
+
+def test_guard_refuses_a_spoofed_pytest_marker_in_production(no_seams: pytest.MonkeyPatch) -> None:
+    """PYTEST_CURRENT_TEST without pytest loaded would switch off is_explicit_pytest_runtime() checks."""
+    import sys
+
+    from tldw_Server_API.app.core.testing import validate_test_runtime_flags
+
+    no_seams.setenv("tldw_production", "true")
+    no_seams.setenv("PYTEST_CURRENT_TEST", "spoofed")
+    no_seams.delitem(sys.modules, "pytest")
+
+    with pytest.raises(RuntimeError, match="PYTEST_CURRENT_TEST \\(set, but pytest is not loaded\\)"):
+        validate_test_runtime_flags()
+
+
+def test_guard_accepts_the_marker_when_pytest_is_loaded_in_production(no_seams: pytest.MonkeyPatch) -> None:
+    from tldw_Server_API.app.core.testing import validate_test_runtime_flags
+
+    no_seams.setenv("tldw_production", "true")
+    no_seams.setenv("PYTEST_CURRENT_TEST", "tests::startup_guard")
+
+    validate_test_runtime_flags()
+
+
+def test_spoofed_marker_outside_production_is_left_to_the_test_mode_rule(no_seams: pytest.MonkeyPatch) -> None:
+    """admin-ui's real-backend e2e sets PYTEST_CURRENT_TEST outside pytest; that is not production."""
+    import sys
+
+    from tldw_Server_API.app.core.testing import validate_test_runtime_flags
+
+    no_seams.setenv("PYTEST_CURRENT_TEST", "admin-ui-real-backend-e2e")
+    no_seams.delitem(sys.modules, "pytest")
 
     validate_test_runtime_flags()
 
