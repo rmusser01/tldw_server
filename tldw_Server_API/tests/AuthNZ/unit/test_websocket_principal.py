@@ -169,3 +169,40 @@ async def test_verify_ws_credential_replaces_a_proxy_authorization_header(monkey
 
     assert principal.user_id == 7
     assert seen == ["Bearer a.b.c"]
+
+
+@pytest.mark.parametrize("signed_url", [True, False])
+@pytest.mark.asyncio
+async def test_a_signed_url_token_hides_the_cookie_only_when_the_route_says_it_is_not_a_credential(
+    monkeypatch: pytest.MonkeyPatch, signed_url: bool
+) -> None:
+    """Sandbox's signed log-stream URL carries its HMAC in ``?token=``. That is no credential, so
+    it must not stop the single-user cookie; any other ``?token=`` still does."""
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+
+    from tldw_Server_API.app.core.AuthNZ import websocket_session_auth
+    from tldw_Server_API.app.core.AuthNZ.single_user_session import SingleUserSessionIdentity
+
+    settings = SimpleNamespace(AUTH_MODE="single_user", SINGLE_USER_SESSION_COOKIE_NAME="tldw_session")
+    identity = SingleUserSessionIdentity(
+        session_id=9, user_id=1, expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
+    )
+    monkeypatch.setattr(websocket_session_auth, "get_settings", lambda: settings)
+    monkeypatch.setattr(websocket_session_auth, "trusted_webui_origins", lambda: {"http://testserver"})
+    monkeypatch.setattr(websocket_session_auth, "validate_single_user_session", AsyncMock(return_value=identity))
+    monkeypatch.setattr(
+        websocket_session_auth,
+        "get_single_user_instance",
+        lambda: SimpleNamespace(username="single-user", email=None, roles=[], role="user", permissions=[], is_admin=False),
+    )
+    websocket = _websocket([(b"cookie", b"tldw_session=s"), (b"origin", b"http://testserver")])
+    websocket.scope["query_string"] = b"token=0123abcd&exp=4102444800"
+
+    if signed_url:
+        principal = await websocket_principal.resolve_ws_principal(websocket, ignore_signed_url_token=True)
+        assert principal.user_id == 1
+    else:
+        with pytest.raises(WebSocketException) as refused:
+            await websocket_principal.resolve_ws_principal(websocket)
+        assert refused.value.code == 4401
