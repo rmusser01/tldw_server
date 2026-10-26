@@ -6,6 +6,7 @@ import { ConnectionPhase } from "@/types/connection";
 import { EmptySidePanel } from "../empty";
 
 const connectionStateMock = vi.hoisted(() => ({
+  checkOnce: vi.fn(),
   state: {
     phase: "unconfigured",
     isConnected: false,
@@ -45,6 +46,7 @@ vi.mock("antd", () => ({
 vi.mock("@/hooks/useConnectionState", () => ({
   useConnectionState: () => connectionStateMock.state,
   useConnectionUxState: () => connectionStateMock.uxState,
+  useConnectionActions: () => ({ checkOnce: connectionStateMock.checkOnce }),
 }));
 
 describe("EmptySidePanel", () => {
@@ -143,6 +145,40 @@ describe("EmptySidePanel", () => {
     expect(
       screen.getByRole("button", { name: "Review settings" }),
     ).toBeInTheDocument();
+  });
+
+  it("offers Retry now and Diagnostics when the server cannot be reached (XS-11)", async () => {
+    const { browser } = await import("wxt/browser");
+    connectionStateMock.checkOnce.mockClear();
+    vi.mocked(browser.tabs.create).mockClear();
+    connectionStateMock.state = {
+      phase: "error",
+      isConnected: false,
+      serverUrl: "http://localhost:8000",
+    };
+    connectionStateMock.uxState = {
+      uxState: "error_unreachable",
+      mode: "normal",
+      configStep: "health",
+      hasCompletedFirstRun: true,
+    };
+
+    renderPanel();
+
+    expect(screen.getByText(/Retrying automatically/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry now" }));
+    expect(connectionStateMock.checkOnce).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Open diagnostics" }));
+    expect(browser.tabs.create).toHaveBeenCalledWith({
+      url: "chrome-extension://test/options.html#/settings/health",
+    });
+  });
+
+  it("does not claim to retry while setup is unfinished (XS-11)", () => {
+    renderPanel();
+    expect(screen.queryByText(/Retrying automatically/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry now" })).not.toBeInTheDocument();
   });
 
   it("shows the post-onboarding connection copy when first run is complete", () => {

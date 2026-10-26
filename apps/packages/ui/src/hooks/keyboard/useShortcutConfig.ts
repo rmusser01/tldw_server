@@ -176,10 +176,28 @@ export const useShortcutConfig = () => {
   }
 }
 
+const detectMacPlatform = () =>
+  typeof navigator !== "undefined" &&
+  /Mac|iPod|iPhone|iPad/.test(navigator.platform)
+
 /**
- * Utility function to format shortcut for display
+ * Utility function to format shortcut for display.
+ * macOS shows the key symbols users see on the keyboard (⌥5, not "Alt + 5").
  */
-export const formatShortcut = (shortcut: KeyboardShortcut): string => {
+export const formatShortcut = (
+  shortcut: KeyboardShortcut,
+  options: { mac?: boolean } = {}
+): string => {
+  if (options.mac ?? detectMacPlatform()) {
+    const symbols =
+      (shortcut.ctrlKey ? "⌃" : "") +
+      (shortcut.altKey ? "⌥" : "") +
+      (shortcut.shiftKey ? "⇧" : "") +
+      (shortcut.metaKey ? "⌘" : "")
+    const key = shortcut.key.length === 1 ? shortcut.key.toUpperCase() : shortcut.key
+    return `${symbols}${key}`
+  }
+
   const parts: string[] = []
 
   if (shortcut.ctrlKey) parts.push('Ctrl')

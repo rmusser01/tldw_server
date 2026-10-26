@@ -2371,7 +2371,7 @@ describe("Playground cockpit shell", () => {
         name: "Empty assistant response",
       }),
     ).toHaveTextContent(
-      "openai:gpt-4.1-mini returned no response text.",
+      "gpt-4.1-mini (OpenAI) returned no response text.",
     );
 
     fireEvent.click(

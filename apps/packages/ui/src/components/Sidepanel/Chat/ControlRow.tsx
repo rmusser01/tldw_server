@@ -103,6 +103,8 @@ interface ControlRowProps {
   onOpenChatInWebUi?: (
     overrides?: SidepanelChatWebUiHandoffOverrides
   ) => Promise<boolean | void> | boolean | void
+  /** Lets the form open this row's model picker when a Send is blocked by the model (XS-02). */
+  modelPickerRef?: React.Ref<ModelSelectHandle>
 }
 
 const ControlRowBase: React.FC<ControlRowProps> = ({
@@ -138,7 +140,8 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   onImageUpload,
   onToggleRag,
   isConnected,
-  onOpenChatInWebUi
+  onOpenChatInWebUi,
+  modelPickerRef
 }) => {
   const { t } = useTranslation(["sidepanel", "playground", "common"])
   const [selectedAssistant, setSelectedAssistant] = useSelectedAssistant(null)
@@ -330,6 +333,11 @@ const ControlRowBase: React.FC<ControlRowProps> = ({
   const openSidepanelModelSelector = React.useCallback(() => {
     modelSelectRef.current?.openAndFocus()
   }, [])
+  React.useImperativeHandle(
+    modelPickerRef,
+    () => ({ openAndFocus: openSidepanelModelSelector }),
+    [openSidepanelModelSelector]
+  )
 
   React.useEffect(() => {
     setActiveChatModelSettingsScope(selectedModelSettingsScope)

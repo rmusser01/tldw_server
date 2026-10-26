@@ -201,7 +201,9 @@ test.describe('Prompts -> Chat journey', () => {
         await chat.waitForReady();
         await expect.poll(async () => (await chat.getMessages())
           .map(({ role, content }) => ({ role, content }))).toEqual(visiblePair);
-        await expect(page).toHaveURL(/\/chat$/);
+        // The handoff is consumed; a saved chat may now carry its own address (XP-05).
+        await expect(page).toHaveURL(/\/chat(?:\?chat=[^&#]+)?$/);
+        await expect(page).not.toHaveURL(/historySelection=/);
         await page.reload({ waitUntil: 'domcontentloaded' });
         await waitForConnection(page);
         await chat.waitForReady();

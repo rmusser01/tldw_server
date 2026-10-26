@@ -1266,10 +1266,10 @@
     "message": "Showing {{start}}-{{end}} of {{total}}"
   },
   "notesSearch_expandSidebar": {
-    "message": "Expand sidebar"
+    "message": "Expand notes sidebar"
   },
   "notesSearch_collapseSidebar": {
-    "message": "Collapse sidebar"
+    "message": "Collapse notes sidebar"
   },
   "notesSearch_titlePlaceholder": {
     "message": "Title"
@@ -5267,18 +5267,6 @@
   "repo2txt_status_fetchingFiles": {
     "message": "Fetching files ({{completed}}/{{total}})..."
   },
-  "repo2txt_cancel": {
-    "message": "Cancel"
-  },
-  "repo2txt_status_cancelled": {
-    "message": "Cancelled. No output was generated."
-  },
-  "repo2txt_status_generatedBounded": {
-    "message": "Generated {{count}} files; {{bytes}} UTF-8 output bytes ({{tokenCount}} tokens)."
-  },
-  "repo2txt_selectionPolicy": {
-    "message": "Only checked files are exported. Search filters this list only; .gitignore is not applied. UTF-8 text only: 1 MiB per file, 10 MiB selected text/ZIP, 5,000 entries. Binary files and symbolic links are rejected."
-  },
   "repo2txt_status_generated": {
     "message": "Generated output for {{count}} files ({{tokenCount}} tokens)."
   },
@@ -6443,6 +6431,126 @@
   "assistant_trackedModelsLoading": {
     "message": "Loading models before tracked chat selection. Wait for discovery to finish, or retry in the model picker."
   },
+  "notesSearch_controlsMoreBelow": {
+    "message": "More filters below"
+  },
+  "notesSearch_editorDraftHint": {
+    "message": "Start typing to create a note. Ctrl/Cmd+S saves it to your server. Type [[ to link another note."
+  },
+  "notesSearch_moodboardCreateAction": {
+    "message": "New collection"
+  },
+  "notesSearch_moodboardChoosePrompt": {
+    "message": "Choose a collection above to see its notes."
+  },
+  "notesSearch_moodboardFirstPrompt": {
+    "message": "A collection is a group of notes you pick by hand. Create one, then add notes to it."
+  },
+  "notesSearch_moodboardEmptyHowToAdd": {
+    "message": "Open a note from the List view, then come back here and choose Add open note."
+  },
+  "notesSearch_moodboardAddOpenNote": {
+    "message": "Add open note"
+  },
+  "notesSearch_moodboardAddOpenNoteNeedsNote": {
+    "message": "Open a note first"
+  },
+  "notesSearch_moodboardAddOpenNoteAlreadyIn": {
+    "message": "The open note is already in this collection"
+  },
+  "notesSearch_moodboardAddOpenNoteSuccess": {
+    "message": "Added to \"{{name}}\""
+  },
+  "notesSearch_moodboardAddOpenNoteError": {
+    "message": "Could not add the note to this collection"
+  },
+  "notesSearch_taskChipLabel": {
+    "message": "Tasks {{done}}/{{total}}"
+  },
+  "notesSearch_taskChipTooltip": {
+    "message": "Open the list to check off tasks. Changes update the note text and your task list."
+  },
+  "notesSearch_closeMobileSidebar": {
+    "message": "Close notes list"
+  },
+  "notesSearch_listRowKeyboardHint": {
+    "message": "Press Enter to open. Use the arrow keys to move between notes, X to select, and P to pin."
+  },
+  "notesSearch_tagFilterNoMatch": {
+    "message": "No tag named \"{{query}}\""
+  },
+  "notesSearch_tagFilterNoTags": {
+    "message": "No tags yet"
+  },
+  "notesSearch_headerLoading": {
+    "message": "Loading…"
+  },
+  "notesSearch_loadErrorUnreachable": {
+    "message": "Could not reach the notes server."
+  },
+  "notesSearch_loadErrorDetails": {
+    "message": "Details"
+  },
+  "notesSearch_serverUnavailableTitle": {
+    "message": "Notes server unavailable"
+  },
+  "notesSearch_serverUnavailableDescription": {
+    "message": "You can keep writing. Your edits are kept on this device and saved when the server is back."
+  },
+  "notesSearch_moveToTrashConfirmTitle": {
+    "message": "Move to Trash?"
+  },
+  "notesSearch_moveToTrashConfirmOk": {
+    "message": "Move to Trash"
+  },
+  "notesSearch_moveToTrashConfirmNamed": {
+    "message": "Move \"{{title}}\" to Trash? You can restore it from Trash."
+  },
+  "notesSearch_moveToTrashConfirmUnnamed": {
+    "message": "Move this note to Trash? You can restore it from Trash."
+  },
+  "notesSearch_moveToTrashLinkedOne": {
+    "message": "This note is linked from 1 other note. That link will not work while the note is in Trash."
+  },
+  "notesSearch_moveToTrashLinkedMany": {
+    "message": "This note is linked from {{count}} other notes. Those links will not work while the note is in Trash."
+  },
+  "notesSearch_trashHeaderLabel": {
+    "message": "Trash"
+  },
+  "notesSearch_trashGuidanceTitle": {
+    "message": "Trash"
+  },
+  "notesSearch_trashGuidanceDescription": {
+    "message": "Deleted notes wait here. Choose Restore next to a note to put it back with your notes."
+  },
+  "notesSearch_trashGuidanceShowList": {
+    "message": "Show Trash"
+  },
+  "notesSearch_trashGuidanceBack": {
+    "message": "Back to notes"
+  },
+  "notesSearch_assistKeywordsSource": {
+    "message": "Based on word frequency in this note. Tags you already use are ticked; tick any others you want to add."
+  },
+  "notesSearch_shortcutFocusSearchDescription": {
+    "message": "Focus the search input."
+  },
+  "notesSearch_shortcutCommandPaletteDescription": {
+    "message": "Open the command palette."
+  },
+  "repo2txt_cancel": {
+    "message": "Cancel"
+  },
+  "repo2txt_status_cancelled": {
+    "message": "Cancelled. No output was generated."
+  },
+  "repo2txt_status_generatedBounded": {
+    "message": "Generated {{count}} files; {{bytes}} UTF-8 output bytes ({{tokenCount}} tokens)."
+  },
+  "repo2txt_selectionPolicy": {
+    "message": "Only checked files are exported. Search filters this list only; .gitignore is not applied. UTF-8 text only: 1 MiB per file, 10 MiB selected text/ZIP, 5,000 entries. Binary files and symbolic links are rejected."
+  },
   "dictionariesList_stepAssignTitle": {
     "message": "Assign to chats"
   },
@@ -6886,6 +6994,39 @@
   },
   "notesSearch_graphSemanticVersionUnavailable": {
     "message": "Unavailable"
+  },
+  "notesSearch_tagMatchLabel": {
+    "message": "Show notes with"
+  },
+  "notesSearch_tagMatchAll": {
+    "message": "All these tags"
+  },
+  "notesSearch_tagMatchAny": {
+    "message": "Any of these tags"
+  },
+  "notesSearch_resultsRegionLabel": {
+    "message": "Notes results"
+  },
+  "notesSearch_shortcutGroupList": {
+    "message": "Notes list"
+  },
+  "notesSearch_shortcutListMoveDescription": {
+    "message": "Move between notes in the list."
+  },
+  "notesSearch_shortcutListOpenDescription": {
+    "message": "Open the focused note."
+  },
+  "notesSearch_shortcutListSelectDescription": {
+    "message": "Select or clear the focused note."
+  },
+  "notesSearch_shortcutListPinDescription": {
+    "message": "Pin or unpin the focused note."
+  },
+  "notesSearch_shortcutListAdjacentDescription": {
+    "message": "Open the previous or next note."
+  },
+  "notesSearch_shortcutListReturnDescription": {
+    "message": "Return to the notes list."
   },
   "header_browsePages": {
     "message": "Browse pages"

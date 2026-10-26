@@ -534,7 +534,8 @@ describe("Playground cockpit accessibility", () => {
     expect(status).toHaveAttribute("aria-live", "polite");
     expect(status).toHaveAttribute("aria-atomic", "false");
     expect(status).toHaveTextContent("Streaming");
-    expect(status).toHaveTextContent("anthropic:claude-sonnet-4");
+    expect(status).toHaveTextContent("claude-sonnet-4 (Anthropic)");
+    expect(status).not.toHaveTextContent("anthropic:claude-sonnet-4");
     expect(status).toHaveTextContent("2 messages");
     expect(status).not.toHaveTextContent("Focus");
     expect(status).not.toHaveTextContent("Context active");
@@ -556,10 +557,11 @@ describe("Playground cockpit accessibility", () => {
       />,
     );
 
-    const toggle = screen.getByTestId("model-list-scope-toggle");
-    expect(toggle).toHaveAttribute("aria-pressed", "false");
-    expect(toggle).toHaveTextContent("Search all models");
-    fireEvent.click(toggle);
+    // CC-06: a labelled two-way control that always shows both choices.
+    expect(screen.getByRole("radio", { name: "Ready to use" })).toBeChecked();
+    const allModels = screen.getByRole("radio", { name: "All models" });
+    expect(allModels).not.toBeChecked();
+    fireEvent.click(allModels);
     expect(setModelListScope).toHaveBeenCalledWith("catalog");
 
     const configuredSearch = screen.getByLabelText("Search models");
@@ -577,13 +579,10 @@ describe("Playground cockpit accessibility", () => {
       />,
     );
 
-    expect(screen.getByTestId("model-list-scope-toggle")).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(screen.getByRole("radio", { name: "All models" })).toBeChecked();
     expect(screen.getByLabelText("Search models")).toHaveAttribute(
       "placeholder",
-      "Search all known models",
+      "Search all models",
     );
   });
 

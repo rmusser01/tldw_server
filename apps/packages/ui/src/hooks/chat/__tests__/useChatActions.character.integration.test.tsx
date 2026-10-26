@@ -21,6 +21,7 @@ import { db } from "@/db/dexie/schema"
 import type { HistoryInfo, Message as SavedMessage } from "@/db/dexie/types"
 import { reconcileServerChatMirror, serverChatMirrorOwnerKey } from "@/db/dexie/server-chat-mirror"
 import { usePlaygroundSessionStore } from "@/store/playground-session"
+import { getChatModelSendOutcome, resetChatModelSendOutcomes } from "@/utils/chat-model-readiness"
 
 vi.mock("@/db/dexie/schema", () => {
   const table = () => ({
@@ -1236,6 +1237,46 @@ describe("useChatActions character integration", () => {
     expect(result.current.messages.at(-1)?.message).toBe("Recovered answer")
     expect(createChatMock).not.toHaveBeenCalled()
     expect(addChatMessageMock.mock.calls.filter(([, body]) => (body as { role?: string }).role === "user")).toHaveLength(1)
+  })
+
+  it("CC-01: a Character turn that gets a 502 marks its model Unreachable, and a reply marks it Working", async () => {
+    actualAuthority.enabled = true
+    realErrorPersistence.enabled = true
+    resetChatModelSendOutcomes()
+    await i18n.init({ lng: "en", resources: {} })
+    await configureActualAuthority()
+    const actualProxy = await vi.importActual<typeof import("@/services/background-proxy")>("@/services/background-proxy")
+    bgStreamMock.mockImplementation(actualProxy.bgStream)
+    streamCharacterChatCompletionMock.mockImplementation(chatRagMethods.streamCharacterChatCompletion)
+    let localId = 0
+    vi.mocked(generateID).mockImplementation(() => `readiness-${++localId}`)
+    const requests: Array<Record<string, unknown>> = []
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: RequestInit) => {
+      requests.push(JSON.parse(String(init.body)))
+      if (requests.length === 1) return new Response(JSON.stringify({ detail: { error_code: "provider_unavailable", message: "The chat service provider is currently unavailable." } }), { status: 502, headers: { "content-type": "application/json" } })
+      return new Response(new ReadableStream({ start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Back online"}}]}\n\ndata: [DONE]\n\n'))
+        controller.close()
+      } }), { status: 200, headers: { "content-type": "text/event-stream" } })
+    }))
+    const { result } = renderHook(() => {
+      const [messages, setMessages] = React.useState<Message[]>([{ id: "greeting", name: "Assistant", isBot: true, message: "Welcome", role: "assistant", messageType: "character:greeting", serverMessageId: "greeting-server", sources: [] }])
+      const [history, setHistory] = React.useState<ChatHistory>([{ role: "assistant", content: "Welcome", messageType: "character:greeting" }])
+      const actions = useChatActions({ ...createHookOptions(), messages, setMessages, history, setHistory } as unknown as Parameters<typeof useChatActions>[0])
+      return { ...actions, messages, history }
+    })
+
+    await act(async () => { await result.current.onSubmit({ message: "Anyone there?", image: "" }) })
+    expect(requests).toHaveLength(1)
+    const { provider, model } = requests[0] as { provider: string; model: string }
+    expect(model).toBeTruthy()
+    expect(getChatModelSendOutcome(provider, model)).toBe("unreachable")
+
+    await act(async () => { await result.current.regenerateLastMessage() })
+    expect(requests).toHaveLength(2)
+    expect(result.current.messages.at(-1)?.message).toBe("Back online")
+    expect(getChatModelSendOutcome(provider, model)).toBe("working")
+    resetChatModelSendOutcomes()
   })
 
   it("retries failed complete-v2 in its original conversation with the greeting and user receipts intact", async () => {

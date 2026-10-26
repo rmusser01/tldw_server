@@ -194,6 +194,7 @@ import { isFireFoxPrivateMode } from "@/utils/is-private-mode";
 import { handleChatInputKeyDown } from "@/utils/key-down";
 import { dispatchOpenAssistantSelect } from "@/utils/assistant-select-events";
 import { resolveStartupSelectedModel } from "@/utils/model-startup-selection";
+import { useComposerModelReadiness } from "./hooks/useComposerModelReadiness";
 import { trackOnboardingChatSubmitSuccess } from "@/utils/onboarding-ingestion-telemetry";
 import type { ChatModelUsability } from "@/utils/chat-model-availability";
 import { getProviderDisplayName } from "@/utils/provider-registry";
@@ -229,6 +230,9 @@ import { useFocusShortcuts } from "~/hooks/keyboard";
 import { isFreshChatSelectionPending } from "~/hooks/chat/fresh-chat-selection";
 import { useMessageOption } from "~/hooks/useMessageOption";
 import { useTabMentions } from "~/hooks/useTabMentions";
+import { composerMentionsAvailable } from "./composer-shortcut-hint";
+import { isAwaitingFirstConnectionCheck, notifySendNeedsConnection } from "./composer-connection";
+import { hasSendableDraft } from "./composer-draft-content";
 import { useWebUI } from "~/store/webui";
 
 import { AttachedResearchContextChip } from "./AttachedResearchContextChip";
@@ -898,6 +902,7 @@ export const PlaygroundForm = ({
     shouldEnableOptionalResource(state, "audio-health"),
   );
   const isConnectionReady = isConnected && phase === ConnectionPhase.CONNECTED;
+  const connectionPending = isAwaitingFirstConnectionCheck(connectionState);
   const needsConnectionSetup = ["unconfigured", "configuring_url", "configuring_auth"].includes(connectionUxState);
   const { capabilities, loading: capsLoading } = useServerCapabilities();
   const {
@@ -1484,6 +1489,7 @@ export const PlaygroundForm = ({
     modelsError: composerModelsFailed,
     onRetryModels: () => { void retryComposerModels() },
   });
+  const composerModelReadiness = useComposerModelReadiness({ composerModels, selectedModel, selectedModelMeta, providerKey: resolvedProviderKey, onSelectModel: setSelectedModel });
   const cancelModelSelectorFocus = React.useCallback(() => {
     if (modelSelectorFocusFrameRef.current == null) return;
     window.cancelAnimationFrame(modelSelectorFocusFrameRef.current);
@@ -2439,6 +2445,7 @@ export const PlaygroundForm = ({
   }, [selectedCharacter?.name, t]);
   const connectionStatusLabel = React.useMemo(() => {
     if (!isConnectionReady) {
+      if (connectionPending) return t("playground:composer.providerStatusConnecting", "Connecting\u2026");
       return t("playground:composer.providerStatusOffline", "Offline");
     }
     if (connectionUxState === "connected_degraded") {
@@ -2448,7 +2455,7 @@ export const PlaygroundForm = ({
       );
     }
     return t("playground:composer.serverStatusConnected", "Server connected");
-  }, [connectionUxState, isConnectionReady, t]);
+  }, [connectionPending, connectionUxState, isConnectionReady, t]);
   const isSessionDegraded = React.useMemo(
     () => !isConnectionReady || connectionUxState === "connected_degraded",
     [connectionUxState, isConnectionReady],
@@ -3467,14 +3474,15 @@ export const PlaygroundForm = ({
       apiModelLabel={apiModelLabel}
       catalogControls={modelCatalogControls}
       connectionStatusLabel={connectionStatusLabel}
-      connectionStatusWarning={
-        !isConnectionReady || connectionUxState === "connected_degraded"
-      }
+      connectionStatusWarning={!isConnectionReady && !connectionPending}
+      connectionStatusPending={connectionPending}
+      connectionDegraded={connectionUxState === "connected_degraded"}
       modelUsabilityLabel={characterChatModelUsabilityLabel ?? undefined}
       modelUsabilityTitle={characterChatModelUsabilityTitle ?? undefined}
       modelUsabilityWarning={Boolean(
         characterChatModelUsability && !characterChatModelUsability.canSend
       )}
+      modelReadiness={composerModelReadiness}
       modelDropdownMenuItems={modelDropdownMenuItems}
       modelDropdownOpen={modelDropdownOpen}
       modelSearchQuery={modelSearchQuery}
@@ -5116,6 +5124,7 @@ export const PlaygroundForm = ({
     navigate("/settings");
   }, [navigate]);
 
+  const composerDraftSendable = hasSendableDraft({ message: form.values.message, image: form.values.image, attachmentCount: selectedDocuments.length + uploadedFiles.length, hasImportedContext: Boolean(importedSidepanelContext), pinnedResultCount: fileRetrievalEnabled ? 0 : ragPinnedResults.length });
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!isFirefoxTarget) {
       if (e.key === "Process" || e.key === "229") return;
@@ -5168,7 +5177,10 @@ export const PlaygroundForm = ({
     }
 
     if (!isConnectionReady) {
-      if (handleChatInputKeyDown({ e, sendWhenEnter, typing, isSending: false })) e.preventDefault();
+      if (handleChatInputKeyDown({ e, sendWhenEnter, typing, isSending: false })) {
+        e.preventDefault();
+        if (composerDraftSendable) notifySendNeedsConnection(notificationApi, t, connectionPending);
+      }
       return;
     }
 
@@ -6072,6 +6084,8 @@ export const PlaygroundForm = ({
       onSubmitForm={handleComposerSend}
       characterChatSendBlocker={characterChatSendBlocker}
       submitDisabledReason={personaSubmitDisabledReason ?? modelCatalogSubmitDisabledReason}
+      hasDraftContent={composerDraftSendable}
+      connectionPending={connectionPending}
       sendMenuOpen={sendMenuOpen}
       onSendMenuChange={handleSendMenuChange}
       t={t}
@@ -7221,6 +7235,7 @@ export const PlaygroundForm = ({
                               currentChatModelSettings.jsonMode,
                             )}
                             isConnectionReady={isConnectionReady}
+                            connectionPending={connectionPending}
                             showDisconnectedNotice={!(needsConnectionSetup && connectionSetupInTimeline)}
                             connectionUxState={connectionUxState}
                             isProMode={isProMode}
@@ -7276,6 +7291,7 @@ export const PlaygroundForm = ({
                                 isProMode={isProMode}
                                 isMobile={isMobileViewport}
                                 isConnectionReady={isConnectionReady}
+                                mentionsAvailable={composerMentionsAvailable(tabMentionsEnabled)}
                                 isSending={isSending}
                                 optionsExpanded={composerOptionsExpanded}
                                 optionsLoading={composerOptionsLoading}

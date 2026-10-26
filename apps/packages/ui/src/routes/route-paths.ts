@@ -41,6 +41,9 @@ export const VIEWPORT_CONSTRAINED_PATHS = [
   RESEARCH_WORKSPACE_PATH,
   "/media",
   "/media-multi",
+  // Notes is a fixed-height app frame: list and editor scroll inside their
+  // panes, so the app header never scrolls away (NO-01).
+  "/notes",
 ] as const
 
 export const LOREBOOK_DEBUG_FOCUS = "lorebook-debug"

@@ -14,6 +14,7 @@ import {
   Settings2
 } from "lucide-react"
 import { Button as TldwButton } from "@/components/Common/Button"
+import { COMPOSER_TOOLBAR_TOKENS } from "@/components/Chat/composer/composer-toolbar-tokens"
 import type { KnowledgeTab } from "@/components/Knowledge"
 
 // ---------------------------------------------------------------------------
@@ -197,6 +198,10 @@ export interface PlaygroundSendControlProps {
   onSubmitForm: () => void
   submitDisabledReason?: string | null
   characterChatSendBlocker?: PlaygroundSendBlocker | null
+  /** False while there is nothing to send; Send is dimmed then (CC-07). */
+  hasDraftContent?: boolean
+  /** The first server check is still running and nothing has failed yet (CC-03). */
+  connectionPending?: boolean
 
   // Send menu
   sendMenuOpen: boolean
@@ -227,6 +232,8 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       onSubmitForm,
       characterChatSendBlocker,
       submitDisabledReason,
+      hasDraftContent = true,
+      connectionPending = false,
       sendMenuOpen,
       onSendMenuChange,
       t
@@ -256,7 +263,9 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
       : activeCharacterSendBlocker
         ? characterChatSendBlocker.title
         : !isConnectionReady
-          ? (t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.") as string)
+          ? (connectionPending
+              ? t("playground:composer.connectionPendingSend", "Still connecting to your tldw server. Your draft has not been sent.")
+              : t("playground:composer.connectionRequired", "Connect to your tldw server before sending. Your draft has not been queued.")) as string
         : isPreparingDocuments
           ? (t(
               "playground:documentProcessing.preparingForSend",
@@ -298,6 +307,22 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
           ) as string)
     const compactMobileBlockerAction =
       isMobileViewport && activeCharacterSendBlocker
+    const primaryDisabled =
+      Boolean(submitDisabledReason) ||
+      compareNeedsMoreModels ||
+      isPreparingDocuments ||
+      isHistorySelectionPending ||
+      (!isConnectionReady && !activeCharacterSendBlocker) ||
+      (activeCharacterSendBlocker && characterChatSendBlocker.disabled === true)
+    // Quiet (but keep) the plain Send action while the draft is empty: a
+    // default button rather than a faded primary one, so its label keeps its
+    // contrast. A disabled button already has its own muted style.
+    const draftEmpty =
+      !hasDraftContent &&
+      !primaryDisabled &&
+      !activeCharacterSendBlocker &&
+      !shouldQueuePrimaryAction
+    const controlSize = isMobileViewport ? "large" : "middle"
     const handlePrimaryButtonClick =
       activeCharacterSendBlocker || shouldQueuePrimaryAction
         ? () => {
@@ -318,25 +343,17 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
           }`}
         >
           <Button
-            size={
-              isMobileViewport
-                ? "large"
-                : isProMode
-                  ? "middle"
-                  : "small"
-            }
+            type={draftEmpty ? "default" : "primary"}
+            size={controlSize}
             htmlType={
               activeCharacterSendBlocker || shouldQueuePrimaryAction
                 ? "button"
                 : "submit"
             }
             onClick={handlePrimaryButtonClick}
-            disabled={Boolean(submitDisabledReason) || compareNeedsMoreModels || isPreparingDocuments || isHistorySelectionPending || (!isConnectionReady && !activeCharacterSendBlocker) || (activeCharacterSendBlocker && characterChatSendBlocker.disabled === true)}
-            className={
-              isMobileViewport
-                ? "min-h-[44px] min-w-[44px]"
-                : undefined
-            }
+            disabled={primaryDisabled}
+            className={isMobileViewport ? "min-h-[44px] min-w-[44px]" : undefined}
+            data-draft-empty={draftEmpty ? "true" : undefined}
             title={submitDisabledReason ?? primaryActionTitle}
             aria-label={primaryActionAriaLabel}
           >
@@ -367,13 +384,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
                 </svg>
               ) : null}
               {!compactMobileBlockerAction ? (
-                <span
-                  className={
-                    isProMode
-                      ? ""
-                      : "text-[11px] font-semibold uppercase tracking-[0.12em]"
-                  }
-                >
+                <span className={COMPOSER_TOOLBAR_TOKENS.label}>
                   {primaryActionLabel}
                 </span>
               ) : null}
@@ -403,13 +414,7 @@ export const PlaygroundSendControl: React.FC<PlaygroundSendControlProps> =
             }}
           >
             <Button
-              size={
-                isMobileViewport
-                  ? "large"
-                  : isProMode
-                    ? "middle"
-                    : "small"
-              }
+              size={controlSize}
               disabled={compareNeedsMoreModels || isPreparingDocuments}
               className={
                 isMobileViewport
